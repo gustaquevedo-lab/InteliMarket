@@ -1,17 +1,77 @@
 """Sales service"""
 
-from sqlalchemy import select, update, text
+import logging
+import base64
+import os
+import re
+import unicodedata
+from sqlalchemy import select, update, func, cast, Integer, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime, timezone, date, timedelta
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 import uuid
+import hashlib
+import json
 
-from api.src.sales.models import Sale, SaleItem
-from api.src.caja.models import CashRegister, CashSession
-from api.src.sales.schemas import SaleCreate, SaleUpdate, SaleAddPayment, CashSessionCreate, CashSessionClose
+TZ_ASUNCION = ZoneInfo("America/Asuncion")
+
+from api.src.sales.models import Sale, SaleItem, SalePayment
+from api.src.auth.models import User
+from api.src.caja.models import CashSession, CashRegister
+from api.src.sales.schemas import SaleCreate, SaleUpdate, SaleAddPayment
 from api.src.inventory.models import Stock, StockLot, InventoryMovement
-from api.src.customers.models import Customer
 from api.src.products.models import Product
+from api.src.fiscal import service as fiscal_service
+
+logger = logging.getLogger(__name__)
+
+_CACHED_LOGO_BYTES: bytes | None = None
+
+
+def get_escpos_logo_bytes(max_width_px: int = 384) -> bytes:
+    """Genera la trama monocroma ESC/POS (GS v 0) del logo oficial para tickets térmicos de 80mm."""
+    global _CACHED_LOGO_BYTES
+    if _CACHED_LOGO_BYTES is not None:
+        return _CACHED_LOGO_BYTES
+
+    candidate_paths = [
+        "/home/intellihouse/intelimarket/ui-web/public/logo_extra.png",
+        "/home/intellihouse/intelimarket/ui-web-dist/logo_extra.png",
+        os.path.join(os.path.dirname(__file__), "../../../ui-web/public/logo_extra.png"),
+        os.path.join(os.path.dirname(__file__), "../../../ui-web-dist/logo_extra.png"),
+    ]
+    logo_file = next((p for p in candidate_paths if os.path.exists(p)), None)
+    if not logo_file:
+        _CACHED_LOGO_BYTES = b""
+        return b""
+
+    try:
+        from PIL import Image
+        im = Image.open(logo_file).convert("RGBA")
+        scale = min(1.0, max_width_px / im.width)
+        w = max(1, round(im.width * scale))
+        h = max(1, round(im.height * scale))
+        w_bytes = (w + 7) // 8
+        canvas_w = w_bytes * 8
+
+        bg = Image.new("RGB", (canvas_w, h), (255, 255, 255))
+        bg.paste(im, (0, 0), im)
+        gray = bg.convert("L")
+        mono = gray.point(lambda p: 255 if p < 160 else 0, "1")
+        bits = mono.tobytes()
+
+        xl = w_bytes & 0xFF
+        xh = (w_bytes >> 8) & 0xFF
+        yl = h & 0xFF
+        yh = (h >> 8) & 0xFF
+        _CACHED_LOGO_BYTES = b"\x1dv0\x00" + bytes([xl, xh, yl, yh]) + bits
+        return _CACHED_LOGO_BYTES
+    except Exception as e:
+        logger.warning("No se pudo generar bitmap ESC/POS del logo: %s", e)
+        _CACHED_LOGO_BYTES = b""
+        return b""
+
 
 
 def calculate_taxes(item: dict) -> dict:
@@ -22,54 +82,239 @@ def calculate_taxes(item: dict) -> dict:
 
     subtotal_bruto = precio * cantidad
     descuento_monto = subtotal_bruto * (descuento_pct / Decimal("100"))
-    base = subtotal_bruto - descuento_monto
+    # El precio de venta en Paraguay ya viene con el IVA incluido (precio de
+    # gondola/vidriera) -- esta funcion trataba precio_unitario como una
+    # base SIN IVA y le sumaba el impuesto encima, inflando ~9-10% el total
+    # de CADA venta por sobre lo que el cliente realmente pagaba (el modal
+    # de cobro ya cobraba el monto correcto -- era el total grabado en la
+    # base, la liquidacion de IVA y lo que iria a SIFEN lo que quedaba mal).
+    # Ahora el IVA se EXTRAE del precio ya incluido, no se agrega de nuevo.
+    total = (subtotal_bruto - descuento_monto).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
 
     if iva_tasa == Decimal("0"):
         iva_monto = Decimal("0")
-        total = base
+        base = total
     else:
-        iva_monto = (base * iva_tasa / Decimal("100")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
-        total = base + iva_monto
+        base = (total / (Decimal("1") + iva_tasa / Decimal("100"))).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+        iva_monto = total - base
 
     return {
         "subtotal_bruto": subtotal_bruto.quantize(Decimal("1")),
         "descuento_monto": descuento_monto.quantize(Decimal("1")),
         "iva_monto": iva_monto,
-        "total": total.quantize(Decimal("1")),
-        "base": base.quantize(Decimal("1")),
+        "total": total,
+        "base": base,
     }
 
 
 async def generate_sale_number(db: AsyncSession, company_id: str, branch_id: str | None) -> str:
     date_part = datetime.now(timezone.utc).strftime("%Y%m%d")
-    branch_code = branch_id[:3].upper() if branch_id else "000"
-    prefix = f"{date_part}-{branch_code}-"
-
-    # Antes tomaba la ULTIMA venta de la empresa por created_at (sin importar
-    # su formato) y le parseaba el numero con int() — rompia con
-    # ValueError apenas la venta mas reciente era algo con otro formato (ej.
-    # una nota de credito "NC287876", sin guiones). Ahora busca especificamente
-    # dentro del mismo prefijo fecha+sucursal, que es lo unico que hay que
-    # incrementar, y nunca puede toparse con un numero de otro formato.
     result = await db.execute(
         select(Sale)
-        .where(Sale.company_id == company_id, Sale.numero.like(f"{prefix}%"))
-        .order_by(Sale.numero.desc())
+        .where(Sale.company_id == company_id)
+        .order_by(Sale.created_at.desc())
         .limit(1)
     )
     last = result.scalar_one_or_none()
-    if last:
-        try:
-            seq = int(last.numero[len(prefix):]) + 1
-        except ValueError:
-            seq = 1
-    else:
-        seq = 1
-    return f"{prefix}{seq:06d}"
+    seq = int(last.numero.split("-")[-1]) + 1 if last else 1
+    branch_code = branch_id[:3].upper() if branch_id else "000"
+    return f"{date_part}-{branch_code}-{seq:06d}"
+
+
+async def generate_internal_sale_number(db: AsyncSession, company_id: str) -> str:
+    """Correlativo interno propio de la venta, independiente del numero de
+    factura fiscal -- se guarda en numero_interno y se genera SIEMPRE, tenga
+    o no la empresa timbrado configurado. Mismo esquema que el legacy
+    (campo CD_VENDA de ven_venda, confirmado contra datos reales): un
+    entero simple, sin fecha ni sucursal, que sube de a uno por venta de
+    toda la empresa -- nunca se reinicia."""
+    result = await db.execute(
+        select(func.max(cast(Sale.numero_interno, Integer)))
+        .where(Sale.company_id == company_id, Sale.numero_interno.isnot(None))
+    )
+    last = result.scalar_one_or_none()
+    return str((last or 0) + 1)
+
+
+async def resolve_sale_number(db: AsyncSession, data: SaleCreate) -> str:
+    """Fuente única de verdad para numeración fiscal y puntos de emisión.
+    Resuelve el punto de emisión estricto según la terminal física asignada (pos_terminal_assignments)
+    o la caja de la sesión (CashSession -> CashRegister -> POS-XXX).
+    Nunca adivina ni utiliza puntos de otras cajas."""
+    config = await fiscal_service.get_fiscal_config(db, str(data.company_id))
+    if not config:
+        return await generate_sale_number(db, str(data.company_id), str(data.branch_id) if data.branch_id else None)
+
+    punto: str | None = None
+
+    # 1. Si el frontend mandó punto_emision explícito (ej: "001-013" o "013"), extraer los 3 dígitos
+    if data.punto_emision:
+        raw = str(data.punto_emision).strip()
+        digits = "".join(c for c in raw if c.isdigit())
+        if digits:
+            punto = digits[-3:].zfill(3)
+
+    # 2. Si no vino o vino genérico, resolver por la sesión activa de caja (CashSession -> CashRegister)
+    if not punto and data.session_id:
+        sess_res = await db.execute(
+            select(CashSession.register_id).where(CashSession.id == data.session_id)
+        )
+        reg_id = sess_res.scalar_one_or_none()
+        if reg_id:
+            reg_res = await db.execute(
+                select(CashRegister.codigo, CashRegister.nombre).where(CashRegister.id == reg_id)
+            )
+            reg = reg_res.first()
+            if reg:
+                reg_cod, reg_nom = reg[0] or "", reg[1] or ""
+                # A partir del código de caja: "POS-013" -> "013"
+                digits = "".join(c for c in reg_cod if c.isdigit())
+                if digits:
+                    punto = digits[-3:].zfill(3)
+                if not punto and reg_nom:
+                    from api.src.pos_terminals.models import PosTerminalAssignment
+                    asn_res = await db.execute(
+                        select(PosTerminalAssignment.punto_emision).where(
+                            PosTerminalAssignment.caja_nombre.ilike(f"%{reg_nom}%"),
+                            PosTerminalAssignment.activo == True,
+                        ).limit(1)
+                    )
+                    asn_pe = asn_res.scalar_one_or_none()
+                    if asn_pe:
+                        punto = str(asn_pe).strip().zfill(3)
+
+    # 3. Fallback de emergencia a la configuración fiscal general solo si no hay caja ni sesión
+    punto_emision = punto or config.punto_emision or "001"
+    return await fiscal_service.reserve_fiscal_invoice_number(db, str(data.company_id), punto_emision, "factura")
 
 
 async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
-    numero = await generate_sale_number(db, str(data.company_id), str(data.branch_id) if data.branch_id else None)
+    # ── PROTECCIÓN DE IDEMPOTENCIA DETERMINÍSTICA CLIENTE-SERVIDOR ──
+    # Si el cliente (POS online u offline sync) provee un UUID determinístico:
+    if data.id:
+        existing_res = await db.execute(select(Sale).where(Sale.id == data.id))
+        existing_sale = existing_res.scalar_one_or_none()
+        if existing_sale:
+            logger.info("Venta idempotente ya registrada previamente: id=%s, numero=%s", existing_sale.id, existing_sale.numero)
+            existing_sale._is_existing = True
+            updated = False
+            if data.recibo_html and not existing_sale.recibo_html:
+                existing_sale.recibo_html = data.recibo_html
+                updated = True
+            if data.recibo_escpos_b64 and not existing_sale.recibo_escpos_b64:
+                existing_sale.recibo_escpos_b64 = data.recibo_escpos_b64
+                updated = True
+            if updated:
+                await db.commit()
+                await db.refresh(existing_sale)
+            return existing_sale
+
+    # ── PROTECCIÓN DE IDEMPOTENCIA POR PAYLOAD Y VENTANA TEMPORAL (ANTI-DUPLICADOS POR LATENCIA/REINTENTO) ──
+    # Si el cliente no mandó ID determinístico o reintentó por lentitud de red/timeout/sincronización:
+    # 1. Previene que se consuman números de factura/ticket fiscales repetidos.
+    # 2. Previene que se descuente stock de productos múltiples veces.
+    # 3. Previene comprobantes fantasmas en el arqueo y punteo de caja.
+    if data.items:
+        exp_subtotal = Decimal("0")
+        exp_descuento = Decimal("0")
+        for it in data.items:
+            t = calculate_taxes(it.model_dump())
+            exp_subtotal += t["subtotal_bruto"]
+            exp_descuento += t["descuento_monto"]
+        expected_sale_total = exp_subtotal - exp_descuento
+
+        has_electronic_payment = any(
+            (p.forma_pago or "").upper().replace("_", " ") in (
+                "TARJETA DEBITO", "TARJETA CREDITO",
+                "BANCARD", "DINELCO", "QR", "BANCARD QR", "PIX", "PLUG PAY PIX", "TRANSFERENCIA", "CHEQUE"
+            )
+            for p in (data.payments or [])
+        )
+
+        if has_electronic_payment:
+            dedup_window_seconds = 300  # 5 min para cobros con tarjeta/QR/PIX
+        elif len(data.items) >= 3:
+            dedup_window_seconds = 120  # 2 min para carritos de 3+ items
+        elif len(data.items) >= 2:
+            dedup_window_seconds = 60   # 1 min para carritos de 2 items
+        else:
+            dedup_window_seconds = 15   # 15s para 1 item en efectivo (doble clic)
+
+        incoming_items_tuples = sorted([
+            (str(it.product_id), float(it.cantidad), float(it.precio_unitario))
+            for it in data.items
+        ])
+        items_sig = hashlib.sha256(json.dumps(incoming_items_tuples).encode()).hexdigest()[:16]
+        lock_scope = str(data.session_id or data.user_id or data.punto_emision or data.company_id)
+        lock_key = f"sale_dedup:{lock_scope}:{items_sig}"
+
+        try:
+            await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": lock_key})
+        except Exception as lock_err:
+            logger.warning("No se pudo adquirir pg_advisory_xact_lock para deduplicacion de venta: %s", lock_err)
+
+        time_cutoff = datetime.now(timezone.utc) - timedelta(seconds=dedup_window_seconds)
+        cand_stmt = (
+            select(Sale)
+            .where(
+                Sale.company_id == data.company_id,
+                Sale.estado != "cancelado",
+                Sale.created_at >= time_cutoff,
+                Sale.total == expected_sale_total,
+            )
+        )
+        if data.session_id:
+            cand_stmt = cand_stmt.where(
+                or_(
+                    Sale.session_id == data.session_id,
+                    Sale.user_id == data.user_id if data.user_id else False
+                )
+            )
+        elif data.user_id:
+            cand_stmt = cand_stmt.where(Sale.user_id == data.user_id)
+
+        candidates = (await db.execute(cand_stmt.order_by(Sale.created_at.desc()))).scalars().all()
+        for cand in candidates:
+            c_items_res = await db.execute(select(SaleItem).where(SaleItem.sale_id == cand.id))
+            c_items = c_items_res.scalars().all()
+            if len(c_items) != len(data.items):
+                continue
+            c_tuples = sorted([
+                (str(ci.product_id), float(ci.cantidad), float(ci.precio_unitario))
+                for ci in c_items
+            ])
+            if c_tuples != incoming_items_tuples:
+                continue
+
+            if data.payments:
+                c_pays_res = await db.execute(select(SalePayment).where(SalePayment.sale_id == cand.id))
+                c_pays = c_pays_res.scalars().all()
+                if c_pays:
+                    c_pay_methods = sorted([(p.forma_pago.upper().replace("_", " "), float(p.monto)) for p in c_pays])
+                    inc_pay_methods = sorted([(p.forma_pago.upper().replace("_", " "), float(p.monto)) for p in data.payments])
+                    if c_pay_methods != inc_pay_methods:
+                        continue
+
+            logger.warning(
+                "IDEMPOTENCIA ANTI-DUPLICADOS: Venta idéntica prevenida en sesión %s (total=%s, items=%d). "
+                "Retornando venta original ya confirmada: %s (id=%s)",
+                cand.session_id, cand.total, len(data.items), cand.numero, cand.id
+            )
+            cand._is_existing = True
+            updated = False
+            if data.recibo_html and not cand.recibo_html:
+                cand.recibo_html = data.recibo_html
+                updated = True
+            if data.recibo_escpos_b64 and not cand.recibo_escpos_b64:
+                cand.recibo_escpos_b64 = data.recibo_escpos_b64
+                updated = True
+            if updated:
+                await db.commit()
+                await db.refresh(cand)
+            return cand
+
+    numero = await resolve_sale_number(db, data)
+    numero_interno = await generate_internal_sale_number(db, str(data.company_id))
 
     subtotal = Decimal("0")
     descuento_total = Decimal("0")
@@ -79,27 +324,208 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
     iva_10 = Decimal("0")
     iva_5 = Decimal("0")
 
+    # ── PROTECCIÓN ANTI-HUÉRFANAS Y CAJERA NÓMADA: RESOLUCIÓN INTELIGENTE DE SESIÓN ──
+    # Prioridad 1: Si tenemos data.user_id, buscar la sesión ACTIVA ("abierta" o "pausada") del cajero autenticado.
+    # Esto garantiza que cualquier cajera pueda sentarse a operar en cualquier terminal física
+    # manteniendo su gaveta y sesión única de jornada sin interferencias.
+    effective_session_id = None
+    active_user_sess = None
+
+    # Detectar la caja física correspondiente al punto de emisión del comprobante (ej: 015 -> Caja 5)
+    punto_emision_code = None
+    if numero and "-" in numero:
+        parts = numero.split("-")
+        if len(parts) >= 2:
+            punto_emision_code = parts[1]  # ej: "015"
+
+    reg_id = None
+    if punto_emision_code:
+        clean_num = punto_emision_code.lstrip("0")
+        reg_res = await db.execute(
+            select(CashRegister.id)
+            .where(
+                CashRegister.activo == True,
+                or_(
+                    CashRegister.codigo.ilike(f"%{punto_emision_code}%"),
+                    CashRegister.nombre.ilike(f"%Caja {clean_num}%") if clean_num else False,
+                )
+            )
+            .limit(1)
+        )
+        reg_id = reg_res.scalar_one_or_none()
+
+    if data.user_id:
+        u_sess_stmt = (
+            select(CashSession)
+            .where(
+                CashSession.user_id == data.user_id,
+                CashSession.estado.in_(["abierta", "pausada"])
+            )
+            .order_by(CashSession.fecha_apertura.desc())
+            .limit(1)
+        )
+        u_sess_res = await db.execute(u_sess_stmt)
+        active_user_sess = u_sess_res.scalar_one_or_none()
+
+    if active_user_sess:
+        # Validar si la sesión activa pertenece a una jornada anterior (America/Asuncion)
+        ap_dt = active_user_sess.fecha_apertura
+        if ap_dt.tzinfo is None:
+            ap_dt = ap_dt.replace(tzinfo=timezone.utc)
+        ap_local = ap_dt.astimezone(TZ_ASUNCION)
+        hoy_local = datetime.now(TZ_ASUNCION).date()
+
+        if ap_local.date() < hoy_local:
+            # La sesión pertenece a un día calendario anterior -> cerrarla y forzar nueva para hoy
+            s_cnt = (await db.execute(select(func.count(Sale.id)).where(Sale.session_id == active_user_sess.id))).scalar() or 0
+            if s_cnt == 0:
+                active_user_sess.estado = "sin_movimiento"
+                active_user_sess.fecha_cierre = active_user_sess.fecha_apertura
+                active_user_sess.observaciones = (active_user_sess.observaciones or "") + " [Cierre automático: jornada anterior sin ventas]"
+            else:
+                active_user_sess.estado = "cerrada"
+                active_user_sess.fecha_cierre = datetime.now(timezone.utc)
+                active_user_sess.observaciones = (active_user_sess.observaciones or "") + " [Cierre automático por cambio de jornada]"
+            await db.flush()
+            active_user_sess = None
+            effective_session_id = None
+        else:
+            effective_session_id = active_user_sess.id
+            # Si estaba pausada, se reactiva automáticamente al registrar venta
+            if active_user_sess.estado == "pausada":
+                active_user_sess.estado = "abierta"
+            # Si la cajera rotó a otra terminal física, sincronizar register_id
+            if reg_id and active_user_sess.register_id != reg_id:
+                active_user_sess.register_id = reg_id
+    elif data.session_id:
+        # Si no se encontró por user_id, verificar si la sesión enviada existe y está activa
+        sess_check = await db.execute(
+            select(CashSession)
+            .where(CashSession.id == data.session_id)
+        )
+        sess_row = sess_check.scalar_one_or_none()
+        if sess_row and sess_row.estado in ("abierta", "pausada"):
+            # Si se especificó user_id pero la sesión pertenece a otro usuario, NO contaminar
+            if data.user_id and sess_row.user_id != data.user_id:
+                effective_session_id = None
+            else:
+                ap_dt = sess_row.fecha_apertura
+                if ap_dt.tzinfo is None:
+                    ap_dt = ap_dt.replace(tzinfo=timezone.utc)
+                ap_local = ap_dt.astimezone(TZ_ASUNCION)
+                hoy_local = datetime.now(TZ_ASUNCION).date()
+
+                if ap_local.date() < hoy_local:
+                    s_cnt = (await db.execute(select(func.count(Sale.id)).where(Sale.session_id == sess_row.id))).scalar() or 0
+                    if s_cnt == 0:
+                        sess_row.estado = "sin_movimiento"
+                        sess_row.fecha_cierre = sess_row.fecha_apertura
+                        sess_row.observaciones = (sess_row.observaciones or "") + " [Cierre automático: jornada anterior sin ventas]"
+                    else:
+                        sess_row.estado = "cerrada"
+                        sess_row.fecha_cierre = datetime.now(timezone.utc)
+                        sess_row.observaciones = (sess_row.observaciones or "") + " [Cierre automático por cambio de jornada]"
+                    await db.flush()
+                    effective_session_id = None
+                else:
+                    effective_session_id = sess_row.id
+                    if sess_row.estado == "pausada":
+                        sess_row.estado = "abierta"
+                    if reg_id and sess_row.register_id != reg_id:
+                        sess_row.register_id = reg_id
+
+    # Si aún no tiene sesión y tenemos user_id, auto-abrir la sesión de jornada para el cajero
+    if not effective_session_id and data.user_id:
+        if not reg_id:
+            reg_res = await db.execute(
+                select(CashRegister.id)
+                .where(CashRegister.activo == True)
+                .order_by(CashRegister.nombre.asc())
+                .limit(1)
+            )
+            reg_id = reg_res.scalar_one_or_none()
+
+        if reg_id:
+            u_res = await db.execute(select(User).where(User.id == data.user_id))
+            user_obj = u_res.scalar_one_or_none()
+            user_rol = (user_obj.rol if user_obj else "").lower()
+            u_nombre = user_obj.nombre if user_obj else "Cajero"
+            is_supervisora = (
+                user_rol in ["supervisor", "admin", "administrador"]
+                or any(s in (u_nombre or "").lower() for s in ["supervisor", "zunilda", "maristela", "admin"])
+            )
+            if is_supervisora:
+                m_pyg = Decimal("0")
+                m_brl = Decimal("0.00")
+                m_usd = Decimal("0.00")
+            else:
+                m_pyg = Decimal("500000")
+                m_brl = Decimal("300.00")
+                m_usd = Decimal("0.00")
+
+            auto_sess = CashSession(
+                register_id=reg_id,
+                user_id=data.user_id,
+                cajero_nombre=u_nombre,
+                monto_apertura=m_pyg,
+                monto_apertura_usd=m_usd,
+                monto_apertura_brl=m_brl,
+                estado="abierta",
+                observaciones=f"Apertura automática de turno nómada al emitir comprobante {numero}.",
+            )
+            db.add(auto_sess)
+            await db.flush()
+            effective_session_id = auto_sess.id
+
+    # ── Validación de cordura previa para productos pesables (> 300 KG requiere autorización) ──
+    for item_data in data.items:
+        if item_data.cantidad > Decimal("300"):
+            prod_stmt = select(Product).where(Product.id == item_data.product_id)
+            prod_res = await db.execute(prod_stmt)
+            prod_row = prod_res.scalar_one_or_none()
+            if prod_row and (
+                (prod_row.unidad_medida or "").upper() in ("KG", "KILO", "KILOS")
+                or (prod_row.tipo_venta or "").lower() == "peso"
+            ):
+                if not getattr(data, "override_gran_volumen", False):
+                    raise ValueError(
+                        f"Cantidad inusualmente alta ({item_data.cantidad} KG) para '{prod_row.nombre}'. "
+                        "Pesajes superiores a 300 KG requieren confirmación explícita de supervisor/gerente."
+                    )
+
+    is_credito = (
+        (data.condicion or "").lower() == "credito"
+        or any(p.forma_pago in ("EXTRA_CLUB", "CREDITO") for p in (data.payments or []))
+    )
+
     sale = Sale(
+        id=data.id or uuid.uuid4(),
         company_id=data.company_id,
         branch_id=data.branch_id,
         customer_id=data.customer_id,
         emission_point_id=data.emission_point_id,
         numero=numero,
+        numero_interno=numero_interno,
         tipo_comprobante=data.tipo_comprobante,
-        condicion=data.condicion,
+        condicion="credito" if is_credito else (data.condicion or "contado"),
         moneda=data.moneda,
         tipo_cambio=data.tipo_cambio,
         estado="confirmado",
-        # subtotal/total son NOT NULL sin default en la tabla — sin este placeholder,
-        # el flush de abajo (necesario para tener sale.id antes de crear los items)
-        # rompe con NotNullViolationError antes de calcular los valores reales.
-        subtotal=Decimal("0"),
-        total=Decimal("0"),
         observaciones=data.observaciones,
         user_id=data.user_id,
+        session_id=effective_session_id,
+        recibo_html=data.recibo_html,
+        recibo_escpos_b64=data.recibo_escpos_b64,
+        monto_donacion=data.monto_donacion or Decimal("0"),
+        donacion_campana=data.donacion_campana,
+        donacion_ong=data.donacion_ong,
     )
     db.add(sale)
-    await db.flush()
+    # Ojo: NO se hace flush aca todavia -- subtotal/total (NOT NULL, sin
+    # default) recien se calculan despues del loop de items. El id se
+    # pre-genera en Python (en vez de esperar el server_default+flush) para
+    # que los SaleItem de abajo puedan referenciar sale.id sin forzar un
+    # INSERT prematuro de sales con subtotal/total todavia en NULL.
 
     for item_data in data.items:
         taxes = calculate_taxes(item_data.model_dump())
@@ -139,37 +565,132 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
     sale.base_exenta = base_exenta
     sale.iva_10 = iva_10
     sale.iva_5 = iva_5
-    sale.total = subtotal + iva_10 + iva_5
+    sale.total = subtotal - descuento_total
     sale.saldo = sale.total
 
-    if data.condicion == "credito" and data.customer_id:
-        from api.src.credit_accounts.service import process_purchase, CreditAuthorizationRequired
+    # ── Desglose real de medios de pago -- antes este array se armaba en el
+    # frontend pero SaleCreate no tenia el campo, asi que Pydantic lo
+    # descartaba en silencio: ninguna venta en vivo (a diferencia de las
+    # sincronizadas del legado) dejaba un solo SalePayment guardado. Sin
+    # esto no hay forma real de saber que medios de pago se usaron en una
+    # venta, ni de calcular el efectivo acumulado para la alerta de retiro.
+    now = datetime.now(timezone.utc)
+    for p in data.payments:
+        db.add(SalePayment(
+            company_id=data.company_id,
+            sale_id=sale.id,
+            forma_pago=p.forma_pago,
+            monto=p.monto,
+            moneda=p.moneda,
+            fecha=now,
+        ))
+
+    # ── Registro de Micro-Donación / Redondeo Solidario (Amor y Esperanza) ──
+    if data.monto_donacion and data.monto_donacion > Decimal("0"):
+        from api.src.donaciones.models import DonationRecord
+        from api.src.donaciones.service import get_or_create_default_campaign
+        try:
+            camp = await get_or_create_default_campaign(db, str(data.company_id))
+            user_name = None
+            if data.user_id:
+                u_res = await db.execute(select(User.nombre).where(User.id == data.user_id))
+                user_name = u_res.scalar_one_or_none()
+
+            db.add(DonationRecord(
+                company_id=data.company_id,
+                branch_id=data.branch_id,
+                sale_id=sale.id,
+                session_id=data.session_id,
+                user_id=data.user_id,
+                cajero_nombre=user_name or "Cajero",
+                campana_id=camp.id,
+                monto_pyg=data.monto_donacion,
+                monto_total_venta_pyg=sale.total,
+                numero_comprobante=sale.numero,
+                tipo_origen="redondeo_vuelto",
+                estado="recaudado",
+            ))
+        except Exception as don_err:
+            # Fallback seguro: no bloquear la venta si falla el log de donación
+            print(f"[DONACIONES] Advertencia registrando donacion: {don_err}")
+
+    if is_credito:
+        if not data.customer_id:
+            raise ValueError("No se puede registrar una venta a crédito o Extra Club sin un cliente identificado.")
+        from api.src.credit_accounts.service import get_credit_check, create_approval_request, process_purchase
+        from api.src.credit_accounts.models import CreditAccount
+
+        # ── Pago mixto: solo la porcion EXTRA_CLUB / CREDITO va a credito real -- antes
+        # esto siempre usaba sale.total entero, asi que una venta mitad
+        # efectivo mitad Extra Club le habria descontado el TOTAL de la
+        # linea de credito, no solo la parte que realmente se pidio fiado.
+        monto_credito = sum(
+            (p.monto for p in data.payments if p.forma_pago in ("EXTRA_CLUB", "CREDITO")), Decimal("0")
+        ) or sale.total
+
+        check = await get_credit_check(db, str(data.company_id), str(data.customer_id), monto_credito)
+
+        if check.get("no_account"):
+            raise ValueError("El cliente no posee una cuenta de crédito o Extra Club activa.")
+        if check.get("inactive"):
+            raise ValueError("La cuenta de crédito del cliente se encuentra inactiva.")
+
+        # ── REGLA GENERAL INMUTABLE E INELUDIBLE: SIN DISPONIBLE NO SE PUEDE FACTURAR A CRÉDITO ──
+        # Si el cliente no tiene saldo disponible suficiente para cubrir la compra,
+        # la venta se rechaza terminantemente. No se permite bajo ningún concepto ni autorización.
+        if not check.get("ok"):
+            disp = check.get("saldo_disponible", Decimal("0"))
+            lim = check.get("limite_credito", Decimal("0"))
+            motivo_mora = f" (en mora por {check.get('dias_mora', 0)} días)" if check.get("en_mora") else ""
+            raise ValueError(
+                f"Línea de crédito insuficiente{motivo_mora}: el cliente dispone de {disp:,.0f} Gs. de {lim:,.0f} Gs. "
+                f"Monto a crédito solicitado: {monto_credito:,.0f} Gs. "
+                f"Regla ineludible: no se puede facturar a crédito sin saldo disponible. Cobre con otro medio de pago."
+            )
+
         credit_result = await process_purchase(
             db,
             str(data.company_id),
             str(data.customer_id),
-            sale.total,
+            monto_credito,
             sale.id,
-            authorization_id=str(data.credit_authorization_id) if data.credit_authorization_id else None,
+            bypass_limit=False,
         )
         if "error" in credit_result:
-            raise ValueError(f"Credit account error: {credit_result['error']}")
-        if credit_result.get("requiere_autorizacion"):
-            raise CreditAuthorizationRequired(credit_result)
+            raise ValueError(f"Error en cuenta de crédito: {credit_result['error']}")
+        sale.estado = "confirmado"
+        # El resto de la venta (efectivo/tarjeta/qr) ya esta cubierto por lo
+        # que llego en data.payments -- pero esos montos pueden venir en
+        # BRL/USD sin convertir (el POS solo manda el monto crudo en esa
+        # moneda), asi que sumarlos tal cual junto al monto en credito
+        # (siempre PYG) daria un total_pagado mal calculado. El frontend ya
+        # exige que el pago cubra el total completo antes de habilitar el
+        # boton de cobro, asi que la porcion no-credito en PYG es
+        # simplemente el resto del total -- no hace falta re-sumar
+        # monedas mezcladas aca.
+        sale.total_pagado = sale.total
+        sale.saldo = Decimal("0")
 
-        # Antes esto marcaba la venta como pagada al 100% en el momento de
-        # crearse (total_pagado=total, saldo=0) — una venta a credito recien
-        # nacida no esta pagada, y create_accounts_receivable_for_sale nunca
-        # se llamaba, asi que no quedaba ningun documento de cuenta por cobrar
-        # para cobrar despues (ver plan "Cuentas por Cobrar + Credito + Cheques").
-        sale.estado = "pendiente"
-        dias_plazo = credit_result.get("dias_plazo") or 30
         from api.src.accounts_receivable.service import create_accounts_receivable_for_sale
         await create_accounts_receivable_for_sale(
-            db, str(data.company_id), str(data.customer_id), str(sale.id),
-            sale.total, numero, fecha_vencimiento=date.today() + timedelta(days=int(dias_plazo)),
+            db, str(data.company_id), str(data.customer_id), str(sale.id), monto_credito, sale.numero,
+            fecha_emision=sale.created_at,
         )
 
+    await _deduct_stock_for_sale(db, sale, data)
+    puntos_ganados = await _award_loyalty_points(db, sale, data)
+    await _redeem_customer_offers(db, sale, data)
+
+    await db.flush()
+    await db.refresh(sale)
+    # Atributo transitorio (no es columna) para que el router pueda mostrar
+    # los puntos recien ganados en la respuesta -- antes se calculaban pero
+    # se perdian, asi que la cajera nunca se enteraba de que se sumaron.
+    sale.puntos_ganados = puntos_ganados
+    return sale
+
+
+async def _deduct_stock_for_sale(db: AsyncSession, sale: Sale, data: SaleCreate) -> None:
     for item_data in data.items:
         qty_to_deduct = int(item_data.cantidad)
         warehouse_id = None
@@ -219,7 +740,16 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
                 remaining -= deduct
 
             if remaining > 0:
-                pass
+                # Los lotes (FIFO) no alcanzaron para cubrir toda la cantidad
+                # vendida -- el costo promedio de esta venta va a estar
+                # subestimado (actual_cost solo cuenta lo que si se encontro
+                # en lotes). Antes esto se perdia en silencio; ahora queda
+                # en el log para poder auditar el costo real despues.
+                logger.warning(
+                    "Venta %s: stock_lots insuficiente para product_id=%s -- "
+                    "faltaron %s unidades sin lote de origen (costo promedio subestimado)",
+                    sale.id, item_data.product_id, remaining,
+                )
 
             avg_cost = (actual_cost / Decimal(str(qty_to_deduct))).quantize(Decimal("1")) if qty_to_deduct > 0 else Decimal("0")
 
@@ -237,28 +767,664 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             )
             db.add(movement)
 
-    # Ninguna funcion de este archivo hacia commit — solo flush() — asi que
-    # nada de esto quedaba guardado de verdad al cerrarse la sesion al final
-    # del request (confirmado en vivo: una venta de prueba devolvia 201 con
-    # un id real pero no aparecia en la base). El unico commit que existia
-    # era uno prematuro dentro de process_purchase(), que de rebote guardaba
-    # la venta+items en ventas a credito pero nunca el descuento de stock
-    # (ver credit_accounts/service.py). Ahora se commitea todo junto, una vez,
-    # al final, cuando la venta ya esta completa.
-    await db.commit()
+
+async def _award_loyalty_points(db: AsyncSession, sale: Sale, data: SaleCreate) -> int:
+    if not data.customer_id:
+        return 0
+    from api.src.customers.models import Customer
+    cust = await db.get(Customer, data.customer_id)
+    if not cust or not cust.extra_club_numero or not cust.extra_club_numero.strip():
+        # REGLA ESTRICTA: Solo quien es socio de Extra Club (con número de socio válido) acumula puntos.
+        return 0
+    from api.src.loyalty import service as loyalty_service
+    from api.src.loyalty.schemas import PointsCreate
+    config = await loyalty_service.get_or_create_config(db, str(data.company_id))
+    if config.activo and config.crear_en_venta:
+        divisor = config.puntos_por_guarani if config.puntos_por_guarani > 0 else 1000
+        base_puntos = int(sale.total // divisor)
+        if base_puntos > 0:
+            # Multiplicador dinámico de campaña promocional
+            factor = 1.0
+            campana_desc = ""
+            if getattr(config, "promocion_activa", False):
+                mult_promo = float(getattr(config, "multiplicador_promocional", 1.0) or 1.0)
+                if mult_promo > 1.0:
+                    factor *= mult_promo
+                    p_name = getattr(config, "promocion_nombre", "") or "Promo ExtraClub"
+                    campana_desc = f" [{p_name} x{mult_promo:g}]"
+            
+            puntos = int(base_puntos * factor)
+            if puntos > 0:
+                await loyalty_service.earn_points(
+                    db,
+                    PointsCreate(
+                        company_id=data.company_id,
+                        customer_id=data.customer_id,
+                        tipo="ganado",
+                        puntos=puntos,
+                        referencia_tipo="sale",
+                        referencia_id=str(sale.id),
+                        descripcion=f"Compra {sale.numero} - {puntos} pts (Base: {base_puntos} pts @ Gs. {divisor:,}{campana_desc})",
+                    ),
+                    config=config,
+                )
+                return puntos
+    return 0
+
+
+async def _redeem_customer_offers(db: AsyncSession, sale: Sale, data: SaleCreate) -> None:
+    """Marca como usadas las ofertas personalizadas del cliente para los productos adquiridos en la venta."""
+    if not data.customer_id:
+        return
+    from api.src.marketing.models import CustomerOffer
+
+    product_ids = [item.product_id for item in data.items if item.product_id]
+    if not product_ids:
+        return
+
+    now = datetime.now(timezone.utc)
+    stmt = (
+        select(CustomerOffer)
+        .where(
+            CustomerOffer.company_id == data.company_id,
+            CustomerOffer.customer_id == data.customer_id,
+            CustomerOffer.product_id.in_(product_ids),
+            CustomerOffer.usado == False,
+            or_(CustomerOffer.valido_hasta.is_(None), CustomerOffer.valido_hasta >= now),
+        )
+    )
+    res = await db.execute(stmt)
+    offers = res.scalars().all()
+    for off in offers:
+        off.usado = True
+        off.usado_at = now
+        logger.info(f"Oferta personalizada {off.id} redimida en venta {sale.numero} para cliente {data.customer_id}")
+
+
+async def finalize_approved_credit_sale(db: AsyncSession, request) -> Sale:
+    """Llamado desde credit_accounts.service.approve_credit_request cuando
+    Supervisor Y Gerente ya aprobaron la excepcion de limite. Recien aca se
+    descuenta el credito, se confirma la venta, se descuenta stock (diferido
+    desde create_sale) y se genera la fila de AR."""
+    from api.src.credit_accounts.service import process_purchase
+    from api.src.accounts_receivable.service import create_accounts_receivable_for_sale
+    from api.src.sales.schemas import SaleCreate
+
+    sale = await get_sale(db, str(request.sale_id))
+    if not sale:
+        raise ValueError("Venta no encontrada")
+
+    credit_result = await process_purchase(
+        db, str(request.company_id), str(request.customer_id), sale.total, sale.id,
+        bypass_limit=True,
+    )
+    if "error" in credit_result:
+        raise ValueError(f"Credit account error: {credit_result['error']}")
+
+    sale.estado = "confirmado"
+    sale.total_pagado = sale.total
+    sale.saldo = Decimal("0")
+    await db.flush()
+
+    await create_accounts_receivable_for_sale(
+        db, str(sale.company_id), str(sale.customer_id), str(sale.id), sale.total, sale.numero,
+        fecha_emision=sale.created_at,
+    )
+
+    items = await get_sale_items(db, str(sale.id))
+    deduct_data = SaleCreate(
+        company_id=sale.company_id, branch_id=sale.branch_id, customer_id=sale.customer_id,
+        emission_point_id=sale.emission_point_id, tipo_comprobante=sale.tipo_comprobante,
+        condicion=sale.condicion, moneda=sale.moneda, tipo_cambio=sale.tipo_cambio,
+        user_id=sale.user_id, items=[
+            {
+                "product_id": i["product_id"], "variant_id": i.get("variant_id"),
+                "descripcion": i["descripcion"], "cantidad": i["cantidad"],
+                "precio_unitario": i["precio_unitario"], "descuento_pct": i["descuento_pct"],
+                "iva_tasa": i["iva_tasa"], "costo_unitario": i.get("costo_unitario") or 0,
+            }
+            for i in items
+        ],
+    )
+    await _deduct_stock_for_sale(db, sale, deduct_data)
+    puntos_ganados = await _award_loyalty_points(db, sale, deduct_data)
+
+    await db.flush()
     await db.refresh(sale)
+    sale.puntos_ganados = puntos_ganados
     return sale
 
 
 async def get_sale(db: AsyncSession, sale_id: str) -> Sale | None:
+    from api.src.customers.models import Customer
+    from api.src.caja.models import CashSession, CashRegister
+    from api.src.auth.models import User
+    result = await db.execute(
+        select(Sale, Customer, SalePayment, CashSession, CashRegister, User)
+        .outerjoin(Customer, Customer.id == Sale.customer_id)
+        .outerjoin(SalePayment, SalePayment.sale_id == Sale.id)
+        .outerjoin(CashSession, CashSession.id == Sale.session_id)
+        .outerjoin(CashRegister, CashRegister.id == CashSession.register_id)
+        .outerjoin(User, User.id == Sale.user_id)
+        .where(Sale.id == uuid.UUID(sale_id))
+    )
+    row = result.first()
+    if not row:
+        return None
+    sale, cust, payment, cs, cr, u = row
+    fp = payment.forma_pago if payment else ("EXTRA_CLUB" if sale.condicion == "credito" else "EFECTIVO")
+    c_name = cust.razon_social or cust.nombre_fantasia if cust else "Consumidor Final"
+    c_doc = cust.ruc or cust.ci or cust.telefono if cust else None
+    c_ec = cust.extra_club_numero if cust else None
+    c_cajero = (cs.cajero_nombre if cs and cs.cajero_nombre else (u.nombre if u and u.nombre else None))
+    c_caja = cr.nombre if cr else None
+    setattr(sale, "forma_pago", fp)
+    setattr(sale, "customer_nombre", c_name)
+    setattr(sale, "customer_doc", c_doc)
+    setattr(sale, "customer_extra_club", c_ec)
+    setattr(sale, "cajero_nombre", c_cajero)
+    setattr(sale, "caja_nombre", c_caja)
+    return sale
+
+
+async def attach_escpos_ticket(db: AsyncSession, sale_id: str, recibo_escpos_b64: str) -> bool:
+    result = await db.execute(
+        update(Sale).where(Sale.id == uuid.UUID(sale_id)).values(recibo_escpos_b64=recibo_escpos_b64)
+    )
+    await db.commit()
+    return result.rowcount > 0
+
+
+async def reopen_sale_customer(
+    db: AsyncSession, sale_id: str, customer_id: str | None,
+    autorizado_por_id: str, autorizado_por_nombre: str,
+) -> Sale | None:
+    """Agrega o modifica la identificacion del cliente a una venta ya cerrada
+    (sea que haya salido como Consumidor Final o a otro cliente por error).
+    No reabre el cobro ni toca montos/items, solo el vinculo al cliente --
+    siempre requiere autorizacion de supervisor."""
+    from api.src.customers.models import Customer
     result = await db.execute(select(Sale).where(Sale.id == uuid.UUID(sale_id)))
     sale = result.scalar_one_or_none()
-    if sale and sale.customer_id:
-        cust_result = await db.execute(select(Customer).where(Customer.id == sale.customer_id))
-        sale.customer = cust_result.scalar_one_or_none()
-    elif sale:
-        sale.customer = None
+    if not sale:
+        return None
+
+    if sale.fecha:
+        sale_date = sale.fecha
+        if sale_date.tzinfo is None:
+            sale_date = sale_date.replace(tzinfo=timezone.utc)
+        horas_pasadas = (datetime.now(timezone.utc) - sale_date).total_seconds() / 3600.0
+        if horas_pasadas > 48.0:
+            raise ValueError(
+                f"No se puede cambiar el titular: la factura fue emitida hace {int(horas_pasadas)} horas. "
+                f"La política permite modificar titular únicamente hasta 48 horas posteriores a la compra."
+            )
+
+    cust = None
+    if not customer_id or customer_id in ("default", "00000000-0000-0000-0000-000000000000"):
+        sale.customer_id = None
+        c_name = "Consumidor Final"
+        c_doc = ""
+        c_ec = None
+    else:
+        cust_res = await db.execute(select(Customer).where(Customer.id == uuid.UUID(customer_id)))
+        cust = cust_res.scalar_one_or_none()
+        sale.customer_id = uuid.UUID(customer_id)
+        c_name = (cust.razon_social or cust.nombre_fantasia) if cust else str(customer_id)
+        c_doc = (cust.ruc or cust.ci or cust.telefono) if cust else ""
+        c_ec = cust.extra_club_numero if cust else None
+
+    nota = f"[{datetime.now(timezone.utc).isoformat()}] Identificacion modificada por {autorizado_por_nombre} | Cliente: {c_name} (Doc: {c_doc or 'Sin Doc'})"
+    sale.observaciones = f"{sale.observaciones}\n{nota}" if sale.observaciones else nota
+
+    # Preservar el ticket térmico ESC/POS original intacto (logo bitmap, fuentes, márgenes, items, cortes)
+    # y únicamente parchar las líneas de identificación del cliente.
+    patched = False
+    clean_name = unicodedata.normalize("NFKD", c_name).encode("ascii", "ignore").decode("ascii")[:32].strip()
+    clean_doc = unicodedata.normalize("NFKD", c_doc).encode("ascii", "ignore").decode("ascii")[:20].strip()
+
+    if sale.recibo_escpos_b64:
+        try:
+            raw_bytes = base64.b64decode(sale.recibo_escpos_b64)
+            # Decodificar latin-1 para preservar 1-a-1 los bytes binarios de ESC/POS (como el logo GS v 0)
+            raw_text = raw_bytes.decode("latin-1")
+
+            if re.search(r'(?i)Cliente\s*:\s*[^\r\n]+', raw_text):
+                raw_text = re.sub(r'(?i)(Cliente\s*:\s*)[^\r\n]+', rf'\g<1>{clean_name}', raw_text)
+                if re.search(r'(?i)RUC(?:\s*/\s*CI)?\s*:\s*[^\r\n]+', raw_text):
+                    raw_text = re.sub(r'(?i)(RUC(?:\s*/\s*CI)?\s*:\s*)[^\r\n]+', rf'\g<1>{clean_doc}', raw_text)
+                else:
+                    raw_text = re.sub(r'((?i)Cliente\s*:\s*[^\r\n]+\n)', rf'\1RUC/CI: {clean_doc}\n', raw_text)
+
+                # Manejar empresa vinculada si existe
+                if cust and getattr(cust, "empresa_vinculada_nombre", None):
+                    emp = cust.empresa_vinculada_nombre.strip()
+                    if getattr(cust, "empresa_vinculada_ruc", None):
+                        emp += f" ({cust.empresa_vinculada_ruc})"
+                    emp_clean = unicodedata.normalize("NFKD", emp).encode("ascii", "ignore").decode("ascii")[:32]
+                    if re.search(r'(?i)Empresa\s*:\s*[^\r\n]+', raw_text):
+                        raw_text = re.sub(r'(?i)(Empresa\s*:\s*)[^\r\n]+', rf'\g<1>{emp_clean}', raw_text)
+                    else:
+                        raw_text = re.sub(r'((?i)RUC(?:\s*/\s*CI)?\s*:\s*[^\r\n]+\n)', rf'\1Empresa: {emp_clean}\n', raw_text)
+
+                sale.recibo_escpos_b64 = base64.b64encode(raw_text.encode("latin-1")).decode("ascii")
+                patched = True
+        except Exception as e:
+            logger.warning("Error parchando recibo_escpos_b64 de venta %s: %s", sale.id, e)
+
+    # Parchar también el HTML si está guardado
+    if sale.recibo_html:
+        try:
+            h = sale.recibo_html
+            h = re.sub(r'(?i)(<strong>\s*CLIENTE\s*:\s*</strong>\s*)[^<]+', rf'\g<1>{c_name}', h)
+            h = re.sub(r'(?i)(<strong>\s*RUC\s*(?:/\s*CI)?\s*:\s*</strong>\s*)[^<]+', rf'\g<1>{c_doc}', h)
+            sale.recibo_html = h
+        except Exception as e:
+            logger.warning("Error parchando recibo_html de venta %s: %s", sale.id, e)
+
+    # Si no existía recibo previo (ventas históricas muy viejas), generar fallback completo
+    if not patched and not sale.recibo_escpos_b64:
+        ticket_text, ticket_b64 = await build_sale_receipt_escpos(db, sale.id, cust_override=cust)
+        if ticket_b64:
+            sale.recibo_escpos_b64 = ticket_b64
+            if not sale.recibo_html:
+                sale.recibo_html = ticket_text
+
+    await db.commit()
+    await db.refresh(sale)
+
+    setattr(sale, "customer_nombre", c_name)
+    setattr(sale, "customer_doc", c_doc)
+    setattr(sale, "customer_extra_club", c_ec)
+
+    pm_res = await db.execute(select(SalePayment).where(SalePayment.sale_id == sale.id))
+    payment = pm_res.scalars().first()
+    fp = payment.forma_pago if payment else ("EXTRA_CLUB" if sale.condicion == "credito" else "EFECTIVO")
+    setattr(sale, "forma_pago", fp)
+
     return sale
+
+
+async def build_sale_receipt_escpos(
+    db: AsyncSession,
+    sale_id: uuid.UUID,
+    nueva_forma_pago: str | None = None,
+    cust_override = None,
+    voucher: str | None = None,
+) -> tuple[str, str]:
+    """Genera el texto plano y el payload binario base64 ESC/POS de un ticket de venta.
+    Refleja fielmente la condición, forma de pago, cliente/socio y talón de pagaré si es Extra Club.
+    """
+    import base64
+    from api.src.customers.models import Customer
+    from api.src.products.models import Product
+    from api.src.caja.models import CashSession
+
+    s_res = await db.execute(select(Sale).where(Sale.id == sale_id))
+    sale = s_res.scalar_one_or_none()
+    if not sale:
+        return "", ""
+
+    cust = cust_override
+    if not cust and sale.customer_id:
+        c_res = await db.execute(select(Customer).where(Customer.id == sale.customer_id))
+        cust = c_res.scalar_one_or_none()
+
+    cajero_nombre = "Cajero"
+    if sale.session_id:
+        cs_res = await db.execute(select(CashSession).where(CashSession.id == sale.session_id))
+        cs = cs_res.scalar_one_or_none()
+        if cs and cs.cajero_nombre:
+            cajero_nombre = cs.cajero_nombre
+
+    # Items
+    items_res = await db.execute(
+        select(SaleItem, Product)
+        .outerjoin(Product, Product.id == SaleItem.product_id)
+        .where(SaleItem.sale_id == sale.id)
+        .order_by(SaleItem.id.asc())
+    )
+    items_data = items_res.all()
+
+    # Pagos
+    pm_res = await db.execute(select(SalePayment).where(SalePayment.sale_id == sale.id))
+    payments = list(pm_res.scalars().all())
+
+    W = 42
+    def pad_two_col(left, right, width=W):
+        l = str(left)
+        r = str(right)
+        spaces = max(1, width - len(l) - len(r))
+        return l + (" " * spaces) + r
+
+    def dashes(width=W):
+        return "-" * width
+
+    def fmt_gs(val):
+        return f"{int(round(float(val or 0))):,}".replace(",", ".")
+
+    forma_pago_efectiva = (nueva_forma_pago or (payments[0].forma_pago if payments else "EFECTIVO")).upper()
+    is_credito = (
+        (sale.condicion or "").lower() == "credito"
+        or forma_pago_efectiva in ("EXTRA_CLUB", "CREDITO")
+        or any(p.forma_pago in ("EXTRA_CLUB", "CREDITO") for p in payments)
+    )
+    tipo_doc = "FACTURA CREDITO" if is_credito else "FACTURA CONTADO"
+
+    lines = []
+    lines.append("EXTRA PARAGUAY".center(W))
+    lines.append("SUPERMERCADO MAYORISTA".center(W))
+    lines.append("GRUPO SANTA TERESA E.A.S.".center(W))
+    lines.append("RUC: 80150377-9".center(W))
+    lines.append("Alejo Garcia esquina Carlos Antonio Lopez".center(W))
+    lines.append("Pedro Juan Caballero".center(W))
+    lines.append("+595992052200".center(W))
+    lines.append('"Ahorro de verdad!"'.center(W))
+    lines.append("Timbrado No: 18545636 - Valido hasta: 31/12/2026".center(W))
+    lines.append(dashes())
+    lines.append(f"{tipo_doc} No: {sale.numero or ''}")
+    if sale.numero_interno:
+        lines.append(f"No Venta: {sale.numero_interno}")
+    fecha_str = sale.fecha.strftime("%d/%m/%Y %H:%M:%S") if sale.fecha else datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    lines.append(f"Fecha/Hora: {fecha_str}")
+    lines.append(f"Condicion: {'CREDITO' if is_credito else 'CONTADO'}")
+    lines.append(f"Cajero: {cajero_nombre}")
+
+    cliente_nombre = "CONSUMIDOR FINAL"
+    cliente_doc = "44444401-7"
+    empresa_vinculada = ""
+    if cust:
+        cliente_nombre = cust.razon_social or cust.nombre_fantasia or "CONSUMIDOR FINAL"
+        cliente_doc = cust.ci or cust.ruc or "-"
+        if cust.empresa_vinculada_nombre:
+            empresa_vinculada = cust.empresa_vinculada_nombre.strip()
+            if cust.empresa_vinculada_ruc:
+                empresa_vinculada += f" ({cust.empresa_vinculada_ruc})"
+
+    lines.append(f"Cliente: {cliente_nombre[:32]}")
+    lines.append(f"RUC/CI: {cliente_doc}")
+    if empresa_vinculada:
+        lines.append(f"Empresa: {empresa_vinculada[:32]}")
+    lines.append(dashes())
+    lines.append(pad_two_col("DESCRIPCION / DETALLE", "TOTAL (GS)"))
+    lines.append(dashes())
+
+    for row in items_data:
+        si = row[0]
+        prod = row[1]
+        p_name = prod.nombre if prod and prod.nombre else (si.descripcion or "PRODUCTO")
+        p_code = prod.codigo_barra if prod and prod.codigo_barra else (prod.sku if prod else "")
+        cant = float(si.cantidad or 0)
+        pu = float(si.precio_unitario or 0)
+        tot = float(si.total or 0)
+        cant_str = f"{cant:.3f} KG" if cant % 1 != 0 else f"{int(cant)} UN"
+        cod_str = f" [{p_code}]" if p_code else ""
+        lines.append(p_name[:W])
+        lines.append(pad_two_col(f"  {cant_str} x {fmt_gs(pu)}{cod_str}", fmt_gs(tot)))
+
+    lines.append(dashes())
+    lines.append(pad_two_col("TOTAL A PAGAR:", f"GS. {fmt_gs(sale.total)}"))
+    if sale.descuento_total and float(sale.descuento_total) > 0:
+        lines.append(pad_two_col("AHORRO TOTAL PROMOS:", f"-GS. {fmt_gs(sale.descuento_total)}"))
+
+    lines.append(dashes())
+    lines.append("Medios de Pago Utilizados:")
+    if nueva_forma_pago:
+        v_tag = f" ({voucher.strip()})" if voucher else ""
+        lines.append(pad_two_col(f"  {nueva_forma_pago.upper()}{v_tag}:", f"GS. {fmt_gs(sale.total)}"))
+    elif payments:
+        for p in payments:
+            fp = p.forma_pago or "EFECTIVO"
+            ref_tag = f" ({p.referencia.strip()})" if getattr(p, "referencia", None) else ""
+            m = float(p.monto or 0)
+            if p.moneda == "BRL":
+                m_str = f"R$ {m:.2f}"
+            elif p.moneda == "USD":
+                m_str = f"US$ {m:.2f}"
+            else:
+                m_str = f"GS. {fmt_gs(m)}"
+            lines.append(pad_two_col(f"  {fp}{ref_tag}:", m_str))
+    else:
+        fp = "EXTRA_CLUB" if is_credito else "EFECTIVO"
+        lines.append(pad_two_col(f"  {fp}:", f"GS. {fmt_gs(sale.total)}"))
+
+    lines.append(dashes())
+    lines.append("LIQUIDACION DEL IVA (Ley 6380/19):")
+    b10 = float(sale.base_gravada_10 or 0)
+    i10 = float(sale.iva_10 or 0)
+    b5 = float(sale.base_gravada_5 or 0)
+    i5 = float(sale.iva_5 or 0)
+    ex = float(sale.base_exenta or 0)
+    lines.append(pad_two_col(f"Grav.10%: {fmt_gs(b10)}", f"IVA: {fmt_gs(i10)}"))
+    lines.append(pad_two_col(f"Grav.5%: {fmt_gs(b5)}", f"IVA: {fmt_gs(i5)}"))
+    lines.append(pad_two_col("Exentas:", fmt_gs(ex)))
+
+    if is_credito:
+        lines.append(dashes())
+        lines.append(f"Cliente: {cliente_nombre.upper()[:32]}")
+        lines.append(f"C.I./RUC: {cliente_doc}")
+        if empresa_vinculada:
+            lines.append(f"Empresa: {empresa_vinculada[:32]}")
+        lines.append("")
+        lines.append("")
+        lines.append("----------------------------".center(W))
+        lines.append("Firma del cliente".center(W))
+        lines.append("Factura a credito Extra Club".center(W))
+        lines.append("Documento con valor para cobro".center(W))
+
+    lines.append(dashes())
+    lines.append("Muchas gracias por su preferencia!".center(W))
+    lines.append("")
+    lines.append("")
+
+    ticket_text = "\n".join(lines)
+
+    # Binario ESC/POS
+    ESC = b"\x1b"
+    GS = b"\x1d"
+    b_stream = bytearray()
+    b_stream.extend(ESC + b"@")
+    b_stream.extend(GS + b"L\x00\x00")  # Margen izquierdo (0 puntos)
+    b_stream.extend(ESC + b"3\x22")     # Interlineado (34 puntos)
+    b_stream.extend(ESC + b"a\x01")     # Centrado cabecera
+
+    logo_bytes = get_escpos_logo_bytes()
+    if logo_bytes:
+        b_stream.extend(logo_bytes + b"\n")
+
+    b_stream.extend(ESC + b"a\x00")     # Alineación izquierda
+    b_stream.extend(ESC + b"t\x00")
+    for l in lines:
+        if any(w in l for w in ["EXTRA SUPERMERCADO", "TOTAL", "FACTURA", "Firma", "GRACIAS"]):
+            b_stream.extend(ESC + b"E\x01")
+            b_stream.extend(l.encode("latin1", errors="replace") + b"\n")
+            b_stream.extend(ESC + b"E\x00")
+        else:
+            b_stream.extend(l.encode("latin1", errors="replace") + b"\n")
+    b_stream.extend(b"\n\n\n\n\n\n")
+    b_stream.extend(GS + b"V\x01")
+
+    b64 = base64.b64encode(b_stream).decode("ascii")
+    return ticket_text, b64
+
+
+async def reopen_sale_payment(
+    db: AsyncSession,
+    sale_id: str,
+    nueva_forma_pago: str,
+    motivo: str,
+    autorizado_por_id: str,
+    autorizado_por_nombre: str,
+    customer_id: str | None = None,
+    voucher: str | None = None,
+    lote: str | None = None,
+    tarjeta_marca: str | None = None,
+    terminal_ip: str | None = None,
+    moneda: str | None = "PYG",
+    monto_moneda: Decimal | None = None,
+) -> Sale | None:
+    """Cambia la forma de pago de una venta ya cerrada y opcionalmente vincula al socio cliente.
+
+    Esta es una operación de alto riesgo contable:
+    - Solo debe ejecutarse en ventas del turno activo o autorizadas por supervisor.
+    - Requiere autorización de supervisor y motivo descriptivo.
+    - Deja trazabilidad completa en `observaciones` (no borra el dato anterior).
+    - Actualiza `customer_id` (si se provee), `condicion` y los registros en `sale_payments`.
+    - Regenera fielmente el ticket térmico ESC/POS con el nuevo medio, voucher y cliente.
+    - Si la caja del cajero ya está cerrada, reajusta automáticamente `cash_counts.diferencia`.
+    - Actualiza la línea de crédito (`credito_usado`) del socio.
+    """
+    from .schemas import FORMAS_PAGO_VALIDAS
+    if nueva_forma_pago.upper() not in FORMAS_PAGO_VALIDAS:
+        raise ValueError(f"Forma de pago inválida: {nueva_forma_pago}. Valores permitidos: {FORMAS_PAGO_VALIDAS}")
+
+    result = await db.execute(select(Sale).where(Sale.id == uuid.UUID(sale_id)))
+    sale = result.scalar_one_or_none()
+    if not sale:
+        return None
+
+    # ── Blindaje contable: Solo se puede cambiar medio de pago en sesión activa ──
+    if not sale.session_id:
+        raise ValueError("No se puede cambiar el medio de pago: la venta no tiene sesión de caja asociada.")
+    from api.src.caja.models import CashSession
+    sess_res = await db.execute(select(CashSession).where(CashSession.id == sale.session_id))
+    session_obj = sess_res.scalar_one_or_none()
+    if not session_obj or session_obj.estado != "abierta":
+        raise ValueError(
+            "El medio de pago solo puede modificarse durante la sesión activa y abierta de la caja. "
+            "El turno de esta venta ya fue cerrado o no está activo."
+        )
+
+    # Obtener forma de pago anterior desde sale_payments
+    pm_res = await db.execute(select(SalePayment).where(SalePayment.sale_id == sale.id))
+    existing_payments = list(pm_res.scalars().all())
+    forma_pago_anterior = existing_payments[0].forma_pago if existing_payments else (
+        "EXTRA_CLUB" if sale.condicion == "credito" else "EFECTIVO"
+    )
+
+    socio_nombre = ""
+    cust_obj = None
+    if customer_id:
+        sale.customer_id = uuid.UUID(customer_id)
+        from api.src.customers.models import Customer
+        cust_res = await db.execute(select(Customer).where(Customer.id == uuid.UUID(customer_id)))
+        cust_obj = cust_res.scalar_one_or_none()
+        if cust_obj:
+            socio_nombre = cust_obj.razon_social or cust_obj.nombre_fantasia or ""
+
+    if nueva_forma_pago.upper() in ("EXTRA_CLUB", "CREDITO"):
+        sale.condicion = "credito"
+    else:
+        sale.condicion = "contado"
+
+    # Actualizar o insertar en sale_payments
+    values_to_update: dict[str, Any] = {
+        "forma_pago": nueva_forma_pago.upper(),
+        "moneda": moneda or "PYG",
+    }
+    if voucher:
+        values_to_update["referencia"] = voucher.strip()
+
+    if existing_payments:
+        await db.execute(
+            update(SalePayment)
+            .where(SalePayment.sale_id == sale.id)
+            .values(**values_to_update)
+        )
+    else:
+        db.add(SalePayment(
+            company_id=sale.company_id,
+            sale_id=sale.id,
+            forma_pago=nueva_forma_pago.upper(),
+            monto=sale.total,
+            moneda=moneda or "PYG",
+            referencia=voucher.strip() if voucher else None,
+            fecha=sale.fecha or datetime.now(timezone.utc),
+        ))
+
+    # Actualizar crédito del socio si corresponde
+    if cust_obj:
+        if nueva_forma_pago.upper() in ("EXTRA_CLUB", "CREDITO") and forma_pago_anterior not in ("EXTRA_CLUB", "CREDITO"):
+            cust_obj.credito_usado = (cust_obj.credito_usado or Decimal("0")) + (sale.total or Decimal("0"))
+        elif forma_pago_anterior in ("EXTRA_CLUB", "CREDITO") and nueva_forma_pago.upper() not in ("EXTRA_CLUB", "CREDITO"):
+            cust_obj.credito_usado = max(Decimal("0"), (cust_obj.credito_usado or Decimal("0")) - (sale.total or Decimal("0")))
+
+    # Reconciliar o ajustar CashCount si la sesión ya fue cerrada
+    if sale.session_id:
+        from api.src.caja.models import CashCount
+        cc_res = await db.execute(
+            select(CashCount)
+            .where(CashCount.session_id == sale.session_id)
+            .order_by(CashCount.created_at.desc())
+        )
+        cc = cc_res.scalars().first()
+        if cc:
+            monto_cambio = Decimal(str(sale.total or 0))
+            if forma_pago_anterior == "EFECTIVO" and nueva_forma_pago.upper() != "EFECTIVO":
+                cc.diferencia = (cc.diferencia or Decimal("0")) + monto_cambio
+            elif forma_pago_anterior != "EFECTIVO" and nueva_forma_pago.upper() == "EFECTIVO":
+                cc.diferencia = (cc.diferencia or Decimal("0")) - monto_cambio
+
+    ts = datetime.now(timezone.utc).isoformat()
+    socio_txt = f" | Socio: {socio_nombre} (ID: {customer_id})" if customer_id else ""
+    voucher_txt = f" | Voucher: {voucher.strip()}" if voucher else ""
+    lote_txt = f" (Lote: {lote.strip()})" if lote else ""
+    tarjeta_txt = f" | Tarjeta: {tarjeta_marca.strip()}" if tarjeta_marca else ""
+    terminal_txt = f" | Terminal: {terminal_ip.strip()}" if terminal_ip else ""
+    moneda_txt = f" | Moneda: {moneda} {monto_moneda}" if moneda and moneda != "PYG" and monto_moneda else ""
+    nota_auditoria = (
+        f"[{ts}] ⚠️ CAMBIO DE FORMA DE PAGO — Autorizado por: {autorizado_por_nombre} "
+        f"(ID: {autorizado_por_id}) | "
+        f"Anterior: {forma_pago_anterior} → Nueva: {nueva_forma_pago.upper()}"
+        f"{voucher_txt}{lote_txt}{tarjeta_txt}{terminal_txt}{moneda_txt}{socio_txt} | "
+        f"Motivo: {motivo.strip()}"
+    )
+    sale.observaciones = (
+        f"{sale.observaciones}\n{nota_auditoria}"
+        if sale.observaciones
+        else nota_auditoria
+    )
+
+    # Regenerar el ticket térmico oficial ESC/POS fielmente con la nueva condición,
+    # medios de pago, voucher, socio y talón de pagaré si es Extra Club.
+    try:
+        ticket_text, ticket_b64 = await build_sale_receipt_escpos(db, sale.id, nueva_forma_pago.upper(), cust_obj, voucher=voucher)
+        if ticket_b64:
+            sale.recibo_escpos_b64 = ticket_b64
+            sale.recibo_html = ticket_text
+    except Exception as e:
+        logger.warning("Error reconstruyendo recibo_escpos_b64 en reopen_sale_payment: %s", e)
+        # Fallback a parchado regex sobre el ticket existente si falló la reconstrucción
+        if sale.recibo_escpos_b64:
+            try:
+                raw_bytes = base64.b64decode(sale.recibo_escpos_b64)
+                raw_text = raw_bytes.decode("latin-1")
+
+                nueva_cond = "CREDITO" if nueva_forma_pago.upper() in ("EXTRA_CLUB", "CREDITO") else "CONTADO"
+                tipo_doc = "FACTURA CREDITO" if nueva_cond == "CREDITO" else "FACTURA CONTADO"
+                raw_text = re.sub(r'(?i)(FACTURA\s+(?:CONTADO|CREDITO))', tipo_doc, raw_text)
+                raw_text = re.sub(r'(?i)(Condicion\s*:\s*)[^\r\n]+', rf'\g<1>{nueva_cond}', raw_text)
+
+                if socio_nombre:
+                    clean_socio = unicodedata.normalize("NFKD", socio_nombre).encode("ascii", "ignore").decode("ascii")[:32].strip()
+                    raw_text = re.sub(r'(?i)(Cliente\s*:\s*)[^\r\n]+', rf'\g<1>{clean_socio}', raw_text)
+                    if cust_obj:
+                        socio_doc = (cust_obj.ruc or cust_obj.ci or "").strip()
+                        if socio_doc:
+                            clean_doc = unicodedata.normalize("NFKD", socio_doc).encode("ascii", "ignore").decode("ascii")[:20].strip()
+                            raw_text = re.sub(r'(?i)(RUC(?:\s*/\s*CI)?\s*:\s*)[^\r\n]+', rf'\g<1>{clean_doc}', raw_text)
+
+                sale.recibo_escpos_b64 = base64.b64encode(raw_text.encode("latin-1")).decode("ascii")
+            except Exception as e2:
+                logger.warning("Error en fallback regex de recibo_escpos_b64: %s", e2)
+
+    await db.commit()
+    await db.refresh(sale)
+    setattr(sale, "forma_pago", nueva_forma_pago.upper())
+    if socio_nombre:
+        setattr(sale, "customer_nombre", socio_nombre)
+    return sale
+
 
 
 async def list_sales(
@@ -266,51 +1432,126 @@ async def list_sales(
     company_id: str,
     customer_id: str | None = None,
     estado: str | None = None,
-    fecha_desde: datetime | None = None,
-    numero: str | None = None,
-    branch_id: str | None = None,
+    fecha_desde: datetime | str | None = None,
+    fecha_hasta: datetime | str | None = None,
+    user_id: str | None = None,
+    session_id: str | None = None,
+    search: str | None = None,
+    punto_emision: str | None = None,
+    condicion: str | None = None,
+    tipo_comprobante: str | None = None,
+    all_dates: bool = False,
     limit: int = 50,
     offset: int = 0,
 ) -> list[Sale]:
-    query = select(Sale).where(Sale.company_id == company_id)
-    if branch_id:
-        try:
-            query = query.where(Sale.branch_id == uuid.UUID(branch_id))
-        except (ValueError, TypeError):
-            pass
+    from api.src.customers.models import Customer
+    from api.src.caja.models import CashSession, CashRegister
+    from api.src.auth.models import User
+    from zoneinfo import ZoneInfo
+    asuncion_tz = ZoneInfo("America/Asuncion")
+
+    query = (
+        select(Sale, Customer, CashSession, CashRegister, User)
+        .outerjoin(Customer, Customer.id == Sale.customer_id)
+        .outerjoin(CashSession, CashSession.id == Sale.session_id)
+        .outerjoin(CashRegister, CashRegister.id == CashSession.register_id)
+        .outerjoin(User, User.id == Sale.user_id)
+        .where(Sale.company_id == company_id)
+    )
     if customer_id:
         query = query.where(Sale.customer_id == customer_id)
     if estado:
         query = query.where(Sale.estado == estado)
-    if fecha_desde:
-        query = query.where(Sale.fecha >= fecha_desde)
-    if fecha_hasta:
-        query = query.where(Sale.fecha <= fecha_hasta)
-    if numero:
-        # sin esto, buscar una factura puntual entre 1,96M implicaria
-        # cargar todo el listado sin filtro — el frontend de Devoluciones
-        # necesitaba justo esto para no tener que listar todas las ventas.
-        query = query.where(Sale.numero.ilike(f"%{numero}%"))
+    if user_id:
+        query = query.where(Sale.user_id == user_id)
+    if session_id:
+        query = query.where(Sale.session_id == session_id)
+    if punto_emision and punto_emision != "todos":
+        query = query.where(Sale.numero.like(f"{punto_emision}%"))
+    if condicion and condicion != "todas":
+        if condicion == "credito":
+            query = query.where(Sale.condicion.in_(["credito", "credito_extra_club"]))
+        else:
+            query = query.where(Sale.condicion == condicion)
+    if tipo_comprobante and tipo_comprobante != "todos":
+        query = query.where(Sale.tipo_comprobante == tipo_comprobante)
+
+    # Búsqueda directa en Base de Datos (Número comprobante, RUC/CI, CDC, Cliente o Cajero)
+    if search and search.strip():
+        s_term = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                Sale.numero.ilike(s_term),
+                Sale.numero_interno.ilike(s_term),
+                Sale.cdc.ilike(s_term),
+                Customer.razon_social.ilike(s_term),
+                Customer.nombre_fantasia.ilike(s_term),
+                Customer.ruc.ilike(s_term),
+                Customer.ci.ilike(s_term),
+                Customer.telefono.ilike(s_term),
+                User.nombre.ilike(s_term),
+                CashSession.cajero_nombre.ilike(s_term),
+            )
+        )
+
+    # Filtro de fechas respetando la zona horaria del negocio America/Asuncion
+    if not all_dates:
+        if fecha_desde:
+            try:
+                if isinstance(fecha_desde, str):
+                    fd_dt = datetime.strptime(fecha_desde[:10], "%Y-%m-%d").replace(tzinfo=asuncion_tz)
+                else:
+                    fd_dt = fecha_desde
+                query = query.where(Sale.fecha >= fd_dt)
+            except Exception:
+                pass
+        if fecha_hasta:
+            try:
+                if isinstance(fecha_hasta, str):
+                    fh_dt = datetime.strptime(fecha_hasta[:10], "%Y-%m-%d").replace(
+                        hour=23, minute=59, second=59, microsecond=999999, tzinfo=asuncion_tz
+                    )
+                else:
+                    fh_dt = fecha_hasta
+                query = query.where(Sale.fecha <= fh_dt)
+            except Exception:
+                pass
+
     query = query.order_by(Sale.fecha.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
-    sales = list(result.scalars().all())
+    rows = result.all()
+    if not rows:
+        return []
 
-    # No hay relacion ORM customer<->sale (customer_id es un UUID suelto, sin
-    # FK mapeada) — sin esto, SaleResponse.customer siempre queda None y el
-    # frontend cae al fallback "Consumidor Final" para TODAS las ventas, aunque
-    # el customer_id real este cargado (verificado: 99.998% de las ventas de
-    # Casa Gonzalito tienen cliente real asignado).
-    customer_ids = {s.customer_id for s in sales if s.customer_id}
-    if customer_ids:
-        cust_result = await db.execute(select(Customer).where(Customer.id.in_(customer_ids)))
-        customers_by_id = {c.id: c for c in cust_result.scalars().all()}
-        for s in sales:
-            s.customer = customers_by_id.get(s.customer_id) if s.customer_id else None
-    else:
-        for s in sales:
-            s.customer = None
+    sale_ids = [s.id for s, _, _, _, _ in rows]
+    payments_res = await db.execute(
+        select(SalePayment).where(SalePayment.sale_id.in_(sale_ids))
+    )
+    payments_by_sale: dict[uuid.UUID, str] = {}
+    for p in payments_res.scalars().all():
+        if p.sale_id not in payments_by_sale:
+            payments_by_sale[p.sale_id] = p.forma_pago
 
-    return sales
+    sales_list = []
+    for sale, cust, cs, cr, u in rows:
+        fp = payments_by_sale.get(
+            sale.id,
+            "EXTRA_CLUB" if sale.condicion == "credito" else "EFECTIVO"
+        )
+        c_name = cust.razon_social or cust.nombre_fantasia if cust else "Consumidor Final"
+        c_doc = cust.ruc or cust.ci or cust.telefono if cust else None
+        c_ec = cust.extra_club_numero if cust else None
+        c_cajero = (cs.cajero_nombre if cs and cs.cajero_nombre else (u.nombre if u and u.nombre else None))
+        c_caja = cr.nombre if cr else None
+        setattr(sale, "forma_pago", fp)
+        setattr(sale, "customer_nombre", c_name)
+        setattr(sale, "customer_doc", c_doc)
+        setattr(sale, "customer_extra_club", c_ec)
+        setattr(sale, "cajero_nombre", c_cajero)
+        setattr(sale, "caja_nombre", c_caja)
+        sales_list.append(sale)
+
+    return sales_list
 
 
 async def get_sales_today(db: AsyncSession, company_id: str) -> dict:
@@ -334,60 +1575,6 @@ async def get_sales_today(db: AsyncSession, company_id: str) -> dict:
     }
 
 
-async def create_cash_session(db: AsyncSession, data: CashSessionCreate) -> CashSession:
-    d = data.model_dump() if hasattr(data, "model_dump") else dict(data)
-    reg_id = d.get("register_id") or d.get("cash_register_id") or d.get("caja_id")
-    if not reg_id:
-        first_reg = (await db.execute(select(CashRegister).where(CashRegister.activo == True).limit(1))).scalar_one_or_none()
-        reg_id = first_reg.id if first_reg else uuid.uuid4()
-
-    user_id = d.get("user_id")
-    if not user_id:
-        user_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
-    elif isinstance(user_id, str):
-        user_id = uuid.UUID(user_id)
-
-    if isinstance(reg_id, str):
-        reg_id = uuid.UUID(reg_id)
-
-    existing = (await db.execute(
-        select(CashSession).where(CashSession.register_id == reg_id, CashSession.estado == "abierta").limit(1)
-    )).scalar_one_or_none()
-    if existing:
-        return existing
-
-    session_obj = CashSession(
-        register_id=reg_id,
-        user_id=user_id,
-        monto_apertura=Decimal(str(d.get("monto_apertura", 0))),
-        estado="abierta"
-    )
-    db.add(session_obj)
-    await db.commit()
-    await db.refresh(session_obj)
-    return session_obj
-
-
-async def close_cash_session(db: AsyncSession, session_id: str, data: CashSessionClose) -> CashSession | None:
-    result = await db.execute(select(CashSession).where(CashSession.id == uuid.UUID(session_id)))
-    session_obj = result.scalar_one_or_none()
-    if not session_obj or session_obj.estado != "abierta":
-        return None
-
-    sales_result = await db.execute(
-        select(Sale).where(Sale.branch_id == session_obj.cash_register_id)
-    )
-
-    session_obj.fecha_cierre = datetime.now(timezone.utc)
-    session_obj.monto_cierre_real = data.monto_cierre_real
-    session_obj.observaciones_cierre = data.observaciones
-    session_obj.estado = "cerrada"
-
-    await db.commit()
-    await db.refresh(session_obj)
-    return session_obj
-
-
 async def cancel_sale(db: AsyncSession, sale_id: str) -> Sale | None:
     sale = await get_sale(db, sale_id)
     if not sale:
@@ -397,6 +1584,75 @@ async def cancel_sale(db: AsyncSession, sale_id: str) -> Sale | None:
 
     sale.estado = "cancelado"
     sale.updated_at = datetime.now(timezone.utc)
+    # Antes solo se restauraba stock -- la cuenta por cobrar quedaba
+    # "pendiente" para siempre (podia bloquear credito futuro por mora de
+    # una venta que ya no existe), el credito reservado nunca se liberaba
+    # (el limite del cliente se iba comiendo con cada cancelacion aunque no
+    # deba nada), los puntos de fidelidad ganados quedaban en su saldo, y
+    # total_pagado/saldo se quedaban con el valor de una venta que ya no
+    # esta vigente.
+    sale.total_pagado = Decimal("0")
+    sale.saldo = Decimal("0")
+
+    if sale.condicion == "credito" and sale.customer_id:
+        from api.src.credit_accounts.models import CreditAccount, CreditMovement
+        compra_result = await db.execute(
+            select(CreditMovement)
+            .where(
+                CreditMovement.referencia_type == "sale",
+                CreditMovement.referencia_id == sale.id,
+                CreditMovement.tipo == "compra",
+            )
+            .order_by(CreditMovement.created_at.desc())
+            .limit(1)
+        )
+        compra_mov = compra_result.scalar_one_or_none()
+        if compra_mov:
+            account_result = await db.execute(select(CreditAccount).where(CreditAccount.id == compra_mov.credit_account_id))
+            account = account_result.scalar_one_or_none()
+            if account:
+                monto = compra_mov.monto
+                saldo_anterior = account.saldo_utilizado
+                account.saldo_utilizado = max(Decimal("0"), account.saldo_utilizado - monto)
+                account.saldo_disponible += monto
+                db.add(CreditMovement(
+                    company_id=account.company_id,
+                    credit_account_id=account.id,
+                    customer_id=account.customer_id,
+                    tipo="devolucion",
+                    monto=monto,
+                    saldo_anterior=saldo_anterior,
+                    saldo_nuevo=account.saldo_utilizado,
+                    referencia_type="sale",
+                    referencia_id=sale.id,
+                    observaciones=f"Venta {sale.numero} cancelada -- libera credito reservado",
+                ))
+
+        await db.execute(
+            text("""
+                UPDATE accounts_receivable
+                SET estado = 'cancelado', saldo_pendiente = 0
+                WHERE sale_id = :sale_id AND estado = 'pendiente'
+            """),
+            {"sale_id": str(sale.id)},
+        )
+
+    from api.src.loyalty.models import LoyaltyPoints
+    puntos_result = await db.execute(
+        select(func.coalesce(func.sum(LoyaltyPoints.puntos), 0))
+        .where(LoyaltyPoints.referencia_tipo == "sale", LoyaltyPoints.referencia_id == str(sale.id), LoyaltyPoints.tipo == "ganado")
+    )
+    puntos_otorgados = puntos_result.scalar() or 0
+    if puntos_otorgados and sale.customer_id:
+        db.add(LoyaltyPoints(
+            company_id=sale.company_id,
+            customer_id=sale.customer_id,
+            tipo="ajustado",
+            puntos=-int(puntos_otorgados),
+            referencia_tipo="sale",
+            referencia_id=str(sale.id),
+            descripcion=f"Reverso por cancelacion de venta {sale.numero}",
+        ))
 
     items_result = await db.execute(select(SaleItem).where(SaleItem.sale_id == sale.id))
     for item in items_result.scalars().all():
@@ -425,37 +1681,78 @@ async def cancel_sale(db: AsyncSession, sale_id: str) -> Sale | None:
                 lot.cantidad += remaining
                 remaining = 0
 
-    await db.commit()
+            db.add(InventoryMovement(
+                company_id=sale.company_id,
+                product_id=item.product_id,
+                warehouse_id=stock.warehouse_id,
+                tipo="entrada_cancelacion_venta",
+                cantidad=qty,
+                referencia_type="sale",
+                referencia_id=sale.id,
+                motivo=f"Cancelacion de venta {sale.numero}",
+            ))
+
+    await db.flush()
     await db.refresh(sale)
     return sale
 
 
 async def get_sale_items(db: AsyncSession, sale_id: str) -> list[dict]:
-    result = await db.execute(select(SaleItem).where(SaleItem.sale_id == uuid.UUID(sale_id)))
-    items = result.scalars().all()
+    from api.src.returns.models import Return, ReturnItem
+    from api.src.products.models import Product
 
-    # Igual que con el cliente de la venta: no hay relacion ORM SaleItem->Product,
-    # y "descripcion" quedo vacia en los items migrados/sincronizados desde el
-    # legacy (nunca se cargo un texto libre, solo product_id) — sin esto el
-    # modal de detalle no tenia forma de mostrar que producto era cada linea.
-    product_ids = {i.product_id for i in items if i.product_id}
-    products_by_id = {}
-    if product_ids:
-        prod_result = await db.execute(select(Product).where(Product.id.in_(product_ids)))
-        products_by_id = {p.id: p for p in prod_result.scalars().all()}
+    result = await db.execute(
+        select(SaleItem, Product)
+        .outerjoin(Product, SaleItem.product_id == Product.id)
+        .where(SaleItem.sale_id == uuid.UUID(sale_id))
+        .order_by(SaleItem.created_at.asc())
+    )
+    rows = result.all()
+
+    # Cuanto de cada item ya tiene una devolucion pendiente o aprobada --
+    # sin esto la pantalla de devolucion en caja no tiene forma de saber
+    # que parte de un item ya fue devuelta antes, y deja devolver de nuevo
+    # lo mismo.
+    devueltos_result = await db.execute(
+        select(ReturnItem.sale_item_id, func.coalesce(func.sum(ReturnItem.cantidad), 0))
+        .join(Return, Return.id == ReturnItem.return_id)
+        .where(Return.sale_id == uuid.UUID(sale_id), Return.estado.in_(["pendiente", "aprobado"]))
+        .group_by(ReturnItem.sale_item_id)
+    )
+    devueltos = {str(sid): float(qty) for sid, qty in devueltos_result.all() if sid is not None}
+
+    # Búsqueda complementaria de código de barras para productos que no lo tengan directo
+    product_ids_without_bc = [p.id for _, p in rows if p and not p.codigo_barra]
+    pack_bc_map = {}
+    if product_ids_without_bc:
+        from api.src.pack_barcodes.models import ProductPackBarcode
+        try:
+            pb_res = await db.execute(
+                select(ProductPackBarcode.product_id, ProductPackBarcode.codigo_barra)
+                .where(
+                    ProductPackBarcode.product_id.in_(product_ids_without_bc),
+                    ProductPackBarcode.activo == True,
+                )
+                .order_by(ProductPackBarcode.created_at.asc())
+            )
+            for pid, bc in pb_res.all():
+                if pid not in pack_bc_map and bc:
+                    pack_bc_map[pid] = bc
+        except Exception:
+            pass
 
     return [
         {
             "id": str(i.id),
             "sale_id": str(i.sale_id),
             "product_id": str(i.product_id),
-            "descripcion": i.descripcion,
-            "product": {
-                "id": str(i.product_id),
-                "nombre": products_by_id[i.product_id].nombre,
-                "sku": products_by_id[i.product_id].sku,
-            } if i.product_id in products_by_id else None,
+            "descripcion": i.descripcion or (p.nombre if p else None) or "Producto",
+            "product_name": p.nombre if p else (i.descripcion or "Producto"),
+            "product_sku": p.sku if p else None,
+            "codigo_barra": (p.codigo_barra or pack_bc_map.get(p.id)) if p else None,
             "cantidad": float(i.cantidad),
+            "cantidad_devuelta": devueltos.get(str(i.id), 0.0),
+            "cantidad_disponible": max(0.0, float(i.cantidad) - devueltos.get(str(i.id), 0.0)),
             "precio_unitario": int(i.precio_unitario),
             "descuento_pct": float(i.descuento_pct),
             "descuento_monto": int(i.descuento_monto),
@@ -465,7 +1762,7 @@ async def get_sale_items(db: AsyncSession, sale_id: str) -> list[dict]:
             "costo_unitario": int(i.costo_unitario) if i.costo_unitario else None,
             "created_at": i.created_at,
         }
-        for i in items
+        for i, p in rows
     ]
 
 
@@ -506,11 +1803,11 @@ async def update_sale(db: AsyncSession, sale_id: str, data: SaleUpdate) -> Sale 
         sale.subtotal = subtotal; sale.descuento_total = descuento_total
         sale.base_gravada_10 = base_gravada_10; sale.base_gravada_5 = base_gravada_5
         sale.base_exenta = base_exenta; sale.iva_10 = iva_10; sale.iva_5 = iva_5
-        sale.total = subtotal + iva_10 + iva_5
+        sale.total = subtotal - descuento_total
         sale.saldo = sale.total - (sale.total_pagado or 0)
 
     sale.updated_at = datetime.now(timezone.utc)
-    await db.commit()
+    await db.flush()
     await db.refresh(sale)
     return sale
 
@@ -522,13 +1819,14 @@ async def add_payment(db: AsyncSession, sale_id: str, data: SaleAddPayment) -> d
     if sale.estado in ("cancelado", "devuelto"):
         return {"error": "Venta cancelada o devuelta"}
 
-    from api.src.payments.models import Payment, PaymentMethod
+    from api.src.payments.models import Payment
     from api.src.payments.schemas import PaymentCreate
 
-    payment_method = None
-    if data.payment_method_id:
-        pm_result = await db.execute(select(PaymentMethod).where(PaymentMethod.id == data.payment_method_id))
-        payment_method = pm_result.scalar_one_or_none()
+    # sale.total y sale.total_pagado siempre estan en PYG (moneda base de
+    # la venta) -- si el pago manual viene en una moneda extranjera
+    # (BRL/USD), hay que sumar el monto ya convertido, no el monto crudo,
+    # o el saldo/estado de la venta quedan mal calculados.
+    monto_pyg = data.monto if sale.moneda == "PYG" else data.monto * sale.tipo_cambio
 
     payment = Payment(
         company_id=sale.company_id,
@@ -537,7 +1835,7 @@ async def add_payment(db: AsyncSession, sale_id: str, data: SaleAddPayment) -> d
         moneda=sale.moneda,
         tipo_cambio=sale.tipo_cambio,
         monto=data.monto,
-        monto_pyg=data.monto if sale.moneda == "PYG" else data.monto * sale.tipo_cambio,
+        monto_pyg=monto_pyg,
         referencia=data.referencia,
         estado="confirmado",
         user_id=data.user_id,
@@ -550,10 +1848,10 @@ async def add_payment(db: AsyncSession, sale_id: str, data: SaleAddPayment) -> d
             INSERT INTO payment_allocations (payment_id, sale_id, monto_asignado)
             VALUES (:payment_id, :sale_id, :monto)
         """),
-        {"payment_id": payment.id, "sale_id": sale.id, "monto": float(data.monto)},
+        {"payment_id": payment.id, "sale_id": sale.id, "monto": float(monto_pyg)},
     )
 
-    sale.total_pagado = (sale.total_pagado or 0) + data.monto
+    sale.total_pagado = (sale.total_pagado or 0) + monto_pyg
     sale.saldo = sale.total - sale.total_pagado
 
     if sale.saldo <= 0:
@@ -566,26 +1864,9 @@ async def add_payment(db: AsyncSession, sale_id: str, data: SaleAddPayment) -> d
     sale.updated_at = datetime.now(timezone.utc)
 
     from api.src.accounts_receivable.service import apply_payment_to_receivable
-    ar_result = await apply_payment_to_receivable(db, str(sale.company_id), str(sale.id), data.monto)
+    await apply_payment_to_receivable(db, str(sale.company_id), str(sale.id), data.monto)
 
-    if payment_method and payment_method.tipo in ("cheque", "pagare") and data.check_numero:
-        from api.src.checks.service import record_check
-        from api.src.checks.schemas import CheckCreate
-        await record_check(db, CheckCreate(
-            company_id=sale.company_id,
-            customer_id=sale.customer_id,
-            tipo=payment_method.tipo,
-            numero=data.check_numero,
-            banco=data.check_banco,
-            titular=data.check_titular,
-            monto=data.monto,
-            moneda=sale.moneda,
-            fecha_vencimiento=data.check_fecha_vencimiento or datetime.now(timezone.utc).date(),
-            payment_id=payment.id,
-            accounts_receivable_id=uuid.UUID(ar_result["receivable_id"]) if ar_result and "receivable_id" in ar_result else None,
-        ))
-
-    await db.commit()
+    await db.flush()
     await db.refresh(sale)
     return {"sale": sale, "payment": payment}
 

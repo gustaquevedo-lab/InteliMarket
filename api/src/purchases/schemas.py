@@ -1,7 +1,7 @@
 """Purchase schemas — suppliers, orders, receipts, requisitions, contracts, forecasting, suggestions, budgets"""
 
-from pydantic import BaseModel, Field
-from typing import Optional
+from pydantic import BaseModel, Field, field_validator
+from typing import Optional, List
 from datetime import datetime, date
 from uuid import UUID
 from decimal import Decimal
@@ -12,9 +12,17 @@ from decimal import Decimal
 class SupplierCreate(BaseModel):
     company_id: UUID
     tipo_persona: str = "juridica"
-    ruc: Optional[str] = Field(default=None, max_length=15)
-    ci: Optional[str] = Field(default=None, max_length=20)
+    ruc: Optional[str] = Field(default=None, max_length=30)
+    ci: Optional[str] = Field(default=None, max_length=30)
     razon_social: str = Field(min_length=2, max_length=255)
+    nombre_fantasia: Optional[str] = None
+    contacto: Optional[str] = None
+    tipo_provision: str = "bienes"  # bienes | servicios | mixto
+    rubro: Optional[str] = None
+    pais: str = "Paraguay"
+    limite_credito: Decimal = Decimal("0")
+    dia_visita: Optional[str] = None
+    frecuencia_entrega: Optional[str] = None
     condicion_iva: Optional[str] = None
     direccion: Optional[str] = None
     ciudad: Optional[str] = None
@@ -32,12 +40,29 @@ class SupplierCreate(BaseModel):
     contacto_email: Optional[str] = None
     banco: Optional[str] = None
     cuenta_bancaria: Optional[str] = None
+    titular_cuenta_bancaria: Optional[str] = None
+    tipo_cuenta_bancaria: Optional[str] = None
+    identificacion_bancaria: Optional[str] = None
     tipo_contribuyente: Optional[str] = None
     retencion_irp: bool = False
     retencion_iva: bool = False
+    porcentaje_retencion_iva: int = 30
+    agente_retencion: bool = False
 
 
 class SupplierUpdate(BaseModel):
+    razon_social: Optional[str] = None
+    nombre_fantasia: Optional[str] = None
+    contacto: Optional[str] = None
+    ruc: Optional[str] = None
+    ci: Optional[str] = None
+    tipo_persona: Optional[str] = None
+    tipo_provision: Optional[str] = None  # bienes | servicios | mixto
+    rubro: Optional[str] = None
+    pais: Optional[str] = None
+    limite_credito: Optional[Decimal] = None
+    dia_visita: Optional[str] = None
+    frecuencia_entrega: Optional[str] = None
     condicion_iva: Optional[str] = None
     direccion: Optional[str] = None
     ciudad: Optional[str] = None
@@ -56,9 +81,14 @@ class SupplierUpdate(BaseModel):
     contacto_email: Optional[str] = None
     banco: Optional[str] = None
     cuenta_bancaria: Optional[str] = None
+    titular_cuenta_bancaria: Optional[str] = None
+    tipo_cuenta_bancaria: Optional[str] = None
+    identificacion_bancaria: Optional[str] = None
     tipo_contribuyente: Optional[str] = None
     retencion_irp: Optional[bool] = None
     retencion_iva: Optional[bool] = None
+    porcentaje_retencion_iva: Optional[int] = None
+    agente_retencion: Optional[bool] = None
 
 
 class SupplierResponse(BaseModel):
@@ -68,23 +98,26 @@ class SupplierResponse(BaseModel):
     ruc: Optional[str] = None
     ci: Optional[str] = None
     razon_social: str
+    nombre_fantasia: Optional[str] = None
+    contacto: Optional[str] = None
+    tipo_provision: Optional[str] = "bienes"
+    rubro: Optional[str] = None
+    pais: Optional[str] = "Paraguay"
+    limite_credito: Optional[Decimal] = Decimal("0")
+    dia_visita: Optional[str] = None
+    frecuencia_entrega: Optional[str] = None
     condicion_iva: Optional[str] = None
     direccion: Optional[str] = None
     ciudad: Optional[str] = None
     telefono: Optional[str] = None
     email: Optional[str] = None
-    # Optional en vez de required-con-default: un default de Pydantic solo
-    # aplica cuando el atributo esta AUSENTE, no cuando el ORM lo trae en
-    # None explicito (que es el caso real para los 2.514 proveedores
-    # migrados de Casa Gonzalito) — con estos como required, GET /suppliers
-    # tiraba 500 para todos.
-    plazo_pago_dias: Optional[int] = None
-    activo: bool
-    tipo_proveedor: Optional[str] = "nacional"
+    plazo_pago_dias: int = 0
+    activo: bool = True
+    tipo_proveedor: str = "nacional"
     grupo: Optional[str] = None
     categoria_ids: Optional[list[UUID]] = None
-    moneda_default: Optional[str] = "PYG"
-    plazo_entrega_promedio: Optional[int] = None
+    moneda_default: str = "PYG"
+    plazo_entrega_promedio: int = 0
     rating: Optional[Decimal] = None
     notas: Optional[str] = None
     contacto_nombre: Optional[str] = None
@@ -92,9 +125,14 @@ class SupplierResponse(BaseModel):
     contacto_email: Optional[str] = None
     banco: Optional[str] = None
     cuenta_bancaria: Optional[str] = None
+    titular_cuenta_bancaria: Optional[str] = None
+    tipo_cuenta_bancaria: Optional[str] = None
+    identificacion_bancaria: Optional[str] = None
     tipo_contribuyente: Optional[str] = None
-    retencion_irp: Optional[bool] = None
-    retencion_iva: Optional[bool] = None
+    retencion_irp: bool = False
+    retencion_iva: bool = False
+    porcentaje_retencion_iva: int = 30
+    agente_retencion: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -135,6 +173,7 @@ class POCreate(BaseModel):
     otros_costos: Decimal = Decimal("0")
     created_by_name: Optional[str] = None
     seguimiento_numero: Optional[str] = None
+    update_default_supplier: bool = False
 
 
 class POUpdate(BaseModel):
@@ -153,31 +192,19 @@ class POUpdate(BaseModel):
     customs_cost: Optional[Decimal] = None
     otros_costos: Optional[Decimal] = None
     updated_by_name: Optional[str] = None
-
-
-class SupplierSummary(BaseModel):
-    id: UUID
-    razon_social: str
-    ruc: Optional[str] = None
-    ci: Optional[str] = None
-
-    class Config:
-        from_attributes = True
+    update_default_supplier: bool = False
 
 
 class POResponse(BaseModel):
     id: UUID
     company_id: UUID
     supplier_id: UUID
-    supplier: Optional[SupplierSummary] = None
     numero: str
     fecha: datetime
     fecha_entrega_estimada: Optional[date] = None
     estado: str
     moneda: str
-    # NULL en las 106.726 ordenes migradas de Casa Gonzalito (el legacy no
-    # maneja tipo de cambio) — required tiraba 500 en TODA la lista.
-    tipo_cambio: Optional[Decimal] = None
+    tipo_cambio: Decimal
     subtotal: Optional[Decimal] = None
     descuento_total: Optional[Decimal] = None
     iva_10: Optional[Decimal] = None
@@ -205,6 +232,7 @@ class POResponse(BaseModel):
     updated_by_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    supplier: Optional[SupplierResponse] = None
 
     class Config:
         from_attributes = True
@@ -231,6 +259,9 @@ class POItemResponse(BaseModel):
     fecha_entrega_real: Optional[date] = None
     warehouse_id: Optional[UUID] = None
     created_at: datetime
+    sku: Optional[str] = None
+    codigo_barra: Optional[str] = None
+    unidad_medida: Optional[str] = "UN"
 
     class Config:
         from_attributes = True
@@ -256,32 +287,82 @@ class ReceiptItemInput(BaseModel):
     product_id: UUID
     variant_id: Optional[UUID] = None
     cantidad_ordenada: Optional[Decimal] = None
-    cantidad_recibida: Decimal = Field(ge=Decimal("0.001"))
-    costo_unitario: Decimal = Field(ge=0)
+    cantidad_recibida: Decimal = Field(default=Decimal("0"), ge=0)
+    costo_unitario: Decimal = Field(default=Decimal("0"), ge=0)
+    lote: Optional[str] = None
+    fecha_vencimiento: Optional[datetime] = None
+    cantidad_rechazada: Optional[Decimal] = None
+    motivo_rechazo: Optional[str] = None
     batch_id: Optional[UUID] = None
+    es_extraordinario: bool = False
+    autorizado_por: Optional[UUID] = None
+    autorizacion_motivo: Optional[str] = None
+
+    @field_validator("fecha_vencimiento", mode="before")
+    def _clean_empty_dt(cls, v):
+        if v == "" or v is None:
+            return None
+        return v
+
+    @field_validator("autorizado_por", "batch_id", "variant_id", mode="before")
+    def _clean_empty_uuid(cls, v):
+        if v == "" or v is None:
+            return None
+        if isinstance(v, UUID):
+            return v
+        try:
+            return UUID(str(v).strip())
+        except Exception:
+            return None
+
+    @field_validator("lote", "motivo_rechazo", "autorizacion_motivo", mode="before")
+    def _clean_empty_str(cls, v):
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s if s else None
 
 
 class ReceiptCreate(BaseModel):
-    company_id: UUID
+    company_id: Optional[UUID] = None
     purchase_order_id: Optional[UUID] = None
-    warehouse_id: UUID
+    supplier_id: Optional[UUID] = None
+    warehouse_id: Optional[UUID] = None
     proveedor_ref: Optional[str] = None
+    total_brl: Optional[Decimal] = None
+    tipo_cambio: Optional[Decimal] = None
     items: list[ReceiptItemInput]
     observaciones: Optional[str] = None
     user_id: Optional[UUID] = None
+
+    @field_validator("company_id", "purchase_order_id", "supplier_id", "warehouse_id", "user_id", mode="before")
+    def _clean_empty_uuids_create(cls, v):
+        if v == "" or v is None:
+            return None
+        if isinstance(v, UUID):
+            return v
+        try:
+            return UUID(str(v).strip())
+        except Exception:
+            return None
 
 
 class ReceiptResponse(BaseModel):
     id: UUID
     company_id: UUID
     purchase_order_id: Optional[UUID] = None
+    supplier_id: UUID
     warehouse_id: UUID
     numero: str
     fecha: datetime
+    total: Decimal
     proveedor_ref: Optional[str] = None
     estado: str
     observaciones: Optional[str] = None
+    requiere_revision: bool = False
+    motivo_revision: Optional[str] = None
     created_at: datetime
+    supplier: Optional[SupplierResponse] = None
 
     class Config:
         from_attributes = True
@@ -295,11 +376,15 @@ class ReceiptItemResponse(BaseModel):
     id: UUID
     receipt_id: UUID
     product_id: UUID
+    producto_nombre: Optional[str] = None
+    producto_sku: Optional[str] = None
     variant_id: Optional[UUID] = None
     cantidad_ordenada: Optional[Decimal] = None
     cantidad_recibida: Decimal
     costo_unitario: Decimal
     batch_id: Optional[UUID] = None
+    cantidad_rechazada: Optional[Decimal] = None
+    motivo_rechazo: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -754,4 +839,533 @@ class PurchaseKPIsResponse(BaseModel):
     ordenes_atrasadas: int
     ahorro_estimado: Decimal
     cumplimiento_rate: Optional[Decimal] = None
- 
+
+
+# ── RFQ / Cotizacion comparativa ────────────────────────────────────────────────
+
+class RfqItemInput(BaseModel):
+    product_id: UUID
+    variant_id: Optional[UUID] = None
+    descripcion: Optional[str] = None
+    cantidad_solicitada: Decimal
+
+
+class RfqCreate(BaseModel):
+    company_id: UUID
+    requisition_id: Optional[UUID] = None
+    fecha_limite: Optional[date] = None
+    motivo: Optional[str] = None
+    observaciones: Optional[str] = None
+    items: Optional[list[RfqItemInput]] = None  # si no se manda, se toman de la requisicion
+    supplier_ids: list[UUID] = Field(min_length=2)
+    user_id: Optional[UUID] = None
+
+
+class RfqItemResponse(BaseModel):
+    id: UUID
+    rfq_id: UUID
+    product_id: UUID
+    variant_id: Optional[UUID] = None
+    descripcion: Optional[str] = None
+    cantidad_solicitada: Decimal
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class RfqResponseItemInput(BaseModel):
+    product_id: UUID
+    precio_unitario: Decimal = Field(ge=0)
+    plazo_entrega_dias: Optional[int] = None
+
+
+class RfqResponseSubmit(BaseModel):
+    plazo_entrega_dias: Optional[int] = None
+    observaciones: Optional[str] = None
+    items: list[RfqResponseItemInput]
+
+
+class RfqResponseItemResponse(BaseModel):
+    id: UUID
+    response_id: UUID
+    rfq_item_id: UUID
+    product_id: UUID
+    precio_unitario: Decimal
+    plazo_entrega_dias: Optional[int] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class RfqResponseResponse(BaseModel):
+    id: UUID
+    rfq_id: UUID
+    supplier_id: UUID
+    estado: str
+    fecha_respuesta: Optional[datetime] = None
+    plazo_entrega_dias: Optional[int] = None
+    observaciones: Optional[str] = None
+    supplier: Optional[SupplierResponse] = None
+    items: list[RfqResponseItemResponse] = []
+    total_cotizado: Optional[Decimal] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class RfqResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    requisition_id: Optional[UUID] = None
+    numero: str
+    fecha: datetime
+    fecha_limite: Optional[date] = None
+    estado: str
+    motivo: Optional[str] = None
+    observaciones: Optional[str] = None
+    ganador_supplier_id: Optional[UUID] = None
+    purchase_order_id: Optional[UUID] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class RfqWithDetail(RfqResponse):
+    items: list[RfqItemResponse] = []
+    responses: list[RfqResponseResponse] = []
+
+
+class RfqAwardRequest(BaseModel):
+    supplier_id: UUID
+    user_id: Optional[UUID] = None
+    user_name: Optional[str] = None
+
+
+# ── Smart Replenishment & Demand Forecast (AI) ────────────────────────────────
+
+class SmartReplenishmentRequest(BaseModel):
+    company_id: UUID
+    supplier_id: Optional[UUID] = None
+    categoria_id: Optional[UUID] = None
+    dias_cobertura: int = 30
+    lead_time_dias: int = 3
+    dias_historial_ventas: int = 30
+    factor_fin_semana: bool = False
+    factor_fin_mes: bool = False
+    factor_clima: str = "normal"  # normal, calor, frio, lluvia
+    factor_evento: str = "normal"  # normal, feriado, semana_santa, fin_de_ano
+    solo_quiebre_o_bajo: bool = False
+    search: Optional[str] = None
+    limit: int = 500
+
+
+
+class SmartReplenishmentItem(BaseModel):
+    product_id: UUID
+    nombre: str
+    sku: Optional[str] = None
+    codigo_barra: Optional[str] = None
+    unidad_medida: str = "UN"
+    stock_actual: float
+    stock_en_transito: float = 0.0
+    ventas_periodo: float
+    ventas_mes_actual: float = 0.0
+    ventas_mes_1: float = 0.0
+    ventas_mes_2: float = 0.0
+    ventas_mes_3: float = 0.0
+    ventas_mes_4: float = 0.0
+    costo_promedio: float = 0.0
+    ultimo_costo: float = 0.0
+    variacion_costo_pct: Optional[float] = 0.0
+    pulso_tendencia: Optional[str] = "estable"  # "acelerando", "estable", "desacelerando"
+    tiene_promocion_detectada: bool = False
+    promocion_info: Optional[str] = None
+    ultimo_proveedor_id: Optional[UUID] = None
+    ultimo_proveedor_nombre: Optional[str] = None
+    demanda_diaria_base: float
+    multiplicador_estacional: float
+    demanda_diaria_ajustada: float
+    dias_stock_restantes: float
+    autonomia_estado: str  # critico, bajo, optimo, sobrestock
+    stock_seguridad: Optional[float] = None
+    punto_reorden: Optional[float] = None
+    target_stock: Optional[float] = None
+    cantidad_sugerida: float
+    costo_unitario_estimado: float
+    subtotal_estimado: float
+    iva_tasa: float
+    explicacion_ia: str
+    generada_automaticamente: Optional[bool] = True
+
+
+class SmartReplenishmentResponse(BaseModel):
+    total_evaluados: int
+    total_quiebres: int
+    total_bajos: int
+    total_sugeridos: int
+    monto_total_estimado: float
+    meses_labels: list[str] = []
+    mes_actual_label: Optional[str] = None
+    items: list[SmartReplenishmentItem]
+
+
+class CreatePOFromReplenishmentRequest(BaseModel):
+    company_id: UUID
+    supplier_id: UUID
+    fecha_entrega_estimada: Optional[date] = None
+    moneda: str = "PYG"
+    prioridad: str = "normal"
+    condiciones_pago: Optional[str] = None
+    observaciones: Optional[str] = None
+    user_id: Optional[UUID] = None
+    user_name: Optional[str] = None
+    items: list[POItemInput]
+
+
+class GenerateMultiPOItem(BaseModel):
+    product_id: UUID
+    variant_id: Optional[UUID] = None
+    descripcion: Optional[str] = None
+    cantidad: float
+    precio_unitario: float
+    descuento_pct: Optional[float] = 0.0
+    iva_tasa: Optional[float] = 10.0
+
+
+class MultiPOGroup(BaseModel):
+    supplier_id: UUID
+    fecha_entrega_estimada: Optional[date] = None
+    moneda: str = "PYG"
+    prioridad: str = "normal"
+    condiciones_pago: Optional[str] = None
+    observaciones: Optional[str] = None
+    items: list[GenerateMultiPOItem]
+
+
+class GenerateMultiPORequest(BaseModel):
+    company_id: UUID
+    user_id: Optional[UUID] = None
+    user_name: Optional[str] = None
+    orders: list[MultiPOGroup]
+
+
+class GenerateMultiPOResponse(BaseModel):
+    total_created: int
+    orders: list[POResponse]
+
+class LostDemandCreate(BaseModel):
+    company_id: UUID
+    producto_nombre: str
+    categoria: Optional[str] = None
+    marca: Optional[str] = None
+    notas: Optional[str] = None
+    cliente_nombre: Optional[str] = None
+    cliente_contacto: Optional[str] = None
+    customer_id: Optional[UUID] = None
+    urgencia: str = "normal"
+    cajero_id: Optional[UUID] = None
+    cajero_nombre: Optional[str] = None
+    caja_id: Optional[str] = None
+
+
+class LostDemandUpdate(BaseModel):
+    estado: Optional[str] = None
+    notas: Optional[str] = None
+    orden_compra_id: Optional[UUID] = None
+
+
+class LostDemandResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    producto_nombre: str
+    categoria: Optional[str] = None
+    marca: Optional[str] = None
+    notas: Optional[str] = None
+    cliente_nombre: Optional[str] = None
+    cliente_contacto: Optional[str] = None
+    customer_id: Optional[UUID] = None
+    urgencia: str = "normal"
+    cajero_id: Optional[UUID] = None
+    cajero_nombre: Optional[str] = None
+    caja_id: Optional[str] = None
+    estado: str
+    orden_compra_id: Optional[UUID] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ── INBOX IMAP Y FACTURAS SIFEN ───────────────────────────────────────────────
+
+class PurchaseInboxConfigCreate(BaseModel):
+    company_id: UUID
+    imap_host: str
+    imap_port: int = 993
+    imap_user: str
+    imap_password: str
+    imap_ssl: bool = True
+    imap_folder: str = "INBOX"
+    activo: bool = True
+
+
+class PurchaseInboxConfigUpdate(BaseModel):
+    imap_host: Optional[str] = None
+    imap_port: Optional[int] = None
+    imap_user: Optional[str] = None
+    imap_password: Optional[str] = None
+    imap_ssl: Optional[bool] = None
+    imap_folder: Optional[str] = None
+    activo: Optional[bool] = None
+
+
+class PurchaseInboxConfigResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    imap_host: str
+    imap_port: int
+    imap_user: str
+    imap_ssl: bool
+    imap_folder: str
+    activo: bool
+    ultimo_sync: Optional[datetime] = None
+    ultimo_error: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SyncInboxResponse(BaseModel):
+    success: bool
+    emails_procesados: int = 0
+    facturas_nuevas: int = 0
+    facturas_existentes: int = 0
+    errores: list[str] = []
+    facturas: list[dict] = []
+    error: Optional[str] = None
+
+
+class UploadXmlResponse(BaseModel):
+    success: bool
+    factura_id: Optional[str] = None
+    numero_factura: Optional[str] = None
+    timbrado: Optional[str] = None
+    cdc: Optional[str] = None
+    supplier_id: Optional[str] = None
+    supplier_nombre: Optional[str] = None
+    total: Optional[float] = None
+    items_count: int = 0
+    items_mapeados: int = 0
+    purchase_order_id: Optional[str] = None
+    purchase_order_numero: Optional[str] = None
+    mensaje: Optional[str] = None
+    matching: Optional[dict] = None
+    error: Optional[str] = None
+
+
+# ── 3-WAY MATCH Y DISCREPANCIAS ───────────────────────────────────────────────
+
+class Perform3WayMatchRequest(BaseModel):
+    invoice_id: UUID
+    user_id: Optional[UUID] = None
+
+
+class AssociatePurchaseOrderRequest(BaseModel):
+    purchase_order_id: UUID
+    user_id: Optional[UUID] = None
+
+
+class MatchItemLine(BaseModel):
+    product_id: Optional[str] = None
+    descripcion: str
+    codigo_proveedor: Optional[str] = None
+    cantidad_ordenada: Optional[float] = None
+    cantidad_recibida: float
+    cantidad_rechazada: float = 0
+    cantidad_facturada: float
+    precio_orden: Optional[float] = None
+    precio_facturado: float
+    diferencia_cantidad: float
+    diferencia_precio: float
+    diferencia_monto: float
+    estado: str
+    motivos: str
+
+
+class Perform3WayMatchResponse(BaseModel):
+    invoice_id: str
+    numero_factura: str
+    timbrado: Optional[str] = None
+    cdc: Optional[str] = None
+    purchase_order_id: Optional[str] = None
+    purchase_order_numero: Optional[str] = None
+    purchase_order_total: Optional[float] = None
+    diferencia_pedido_monto: Optional[float] = None
+    receipt_id: Optional[str] = None
+    receipt_numero: Optional[str] = None
+    estado_match: str  # conciliado_100, discrepancia_detectada, conforme_pendiente_recepcion, sin_orden_ni_recepcion
+    estado_matching: Optional[str] = None
+    match_pedido_exacto: Optional[bool] = None
+    mensaje: Optional[str] = None
+    bloqueada_para_pago: bool
+    motivo_bloqueo: Optional[str] = None
+    total_facturado: float
+    total_factura: Optional[float] = None
+    total_recibido_val: float
+    total_calculado_recepcion: Optional[float] = None
+    total_discrepancia_monto: float
+    diferencia_total: Optional[float] = None
+    monto_neto_a_pagar: float
+    solicitud_nc: Optional[dict] = None
+    nc_request_generada: Optional[dict] = None
+    items: list[dict]
+    discrepancias: Optional[list[dict]] = None
+    items_faltantes_po: Optional[list[dict]] = None
+
+
+# ── SOLICITUDES Y RESOLUCIÓN DE NOTAS DE CRÉDITO ──────────────────────────────
+
+class SupplierNcRequestResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    supplier_id: UUID
+    invoice_id: UUID
+    receipt_id: Optional[UUID] = None
+    purchase_order_id: Optional[UUID] = None
+    numero_solicitud: str
+    tipo_motivo: str
+    monto_reclamado: Decimal
+    estado: str  # pendiente_entrega, entregada_parcial, resuelta, rechazada
+    nc_recibida_numero: Optional[str] = None
+    nc_recibida_timbrado: Optional[str] = None
+    nc_recibida_cdc: Optional[str] = None
+    nc_recibida_monto: Optional[Decimal] = None
+    nc_recibida_fecha: Optional[date] = None
+    observaciones: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    resolved_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ResolveSupplierNcRequest(BaseModel):
+    nc_recibida_numero: str
+    nc_recibida_timbrado: str
+    nc_recibida_monto: Decimal
+    nc_recibida_fecha: date
+    nc_recibida_cdc: Optional[str] = None
+    observaciones: Optional[str] = None
+    user_id: Optional[UUID] = None
+
+
+# ── Devoluciones a Proveedor en Compras ────────────────────────────────────────
+
+class SupplierProductItemResponse(BaseModel):
+    id: str
+    nombre: str
+    sku: Optional[str] = None
+    codigo_barra: Optional[str] = None
+    costo_promedio: float = 0.0
+    unidad_medida: str = "UN"
+
+
+class ProductInvoiceOptionResponse(BaseModel):
+    invoice_id: str
+    numero_factura: str
+    timbrado: Optional[str] = None
+    fecha_emision: Optional[str] = None
+    cantidad_comprada: float = 0.0
+    precio_unitario: float = 0.0
+    item_total: float = 0.0
+    saldo_pendiente_factura: float = 0.0
+
+
+class SupplierReturnItemInput(BaseModel):
+    producto_id: UUID
+    factura_id: Optional[UUID] = None
+    factura_numero: Optional[str] = None
+    cantidad: Decimal = Field(..., gt=0)
+    valor_unitario: Decimal = Field(..., ge=0)
+    motivo: str = "vencido"  # vencido, danado, sobrestock, acuerdo_comercial, orden_incorrecta, calidad_insuficiente, otro
+    lote: Optional[str] = None
+    fecha_vencimiento: Optional[date] = None
+    detalle: Optional[str] = None
+
+
+class SupplierReturnCreateInput(BaseModel):
+    proveedor_id: UUID
+    warehouse_id: Optional[UUID] = None
+    tipo: str = "devolucion"  # devolucion, recall
+    fecha_estimada_retiro: Optional[date] = None
+    observaciones: Optional[str] = None
+    items: List[SupplierReturnItemInput]
+
+
+class SupplierReturnRejectInput(BaseModel):
+    motivo_rechazo: str
+
+
+class SupplierReturnUpdateInput(BaseModel):
+    proveedor_id: Optional[UUID] = None
+    warehouse_id: Optional[UUID] = None
+    tipo: Optional[str] = "devolucion"
+    fecha_estimada_retiro: Optional[date] = None
+    observaciones: Optional[str] = None
+    items: List[SupplierReturnItemInput]
+
+
+class SupplierReturnCompleteInput(BaseModel):
+    nota_credito_numero: Optional[str] = None
+
+
+SupplierReturnItemInput.model_rebuild()
+SupplierReturnCreateInput.model_rebuild()
+SupplierReturnUpdateInput.model_rebuild()
+SupplierReturnRejectInput.model_rebuild()
+SupplierReturnCompleteInput.model_rebuild()
+
+
+class SupplierPriceComparisonItem(BaseModel):
+    supplier_id: UUID
+    razon_social: str
+    nombre_fantasia: Optional[str] = None
+    ruc: Optional[str] = None
+    telefono: Optional[str] = None
+    es_habitual: bool = False
+    ultimo_precio: Decimal
+    mejor_precio: Decimal
+    moneda: str = "PYG"
+    fecha_ultima_compra: Optional[datetime] = None
+    origen: str = "orden_compra"  # "orden_compra", "factura", "contrato", "catalogo"
+    referencia_doc: Optional[str] = None
+    es_mas_barato: bool = False
+    ahorro_vs_habitual: Optional[Decimal] = None
+    ahorro_pct: Optional[Decimal] = None
+
+
+class ProductSupplierComparisonResponse(BaseModel):
+    product_id: UUID
+    nombre: str
+    sku: Optional[str] = None
+    codigo_barra: Optional[str] = None
+    costo_unitario_actual: Decimal
+    ultimo_costo: Decimal
+    habitual_supplier_id: Optional[UUID] = None
+    habitual_supplier_nombre: Optional[str] = None
+    mejor_precio: Optional[Decimal] = None
+    mejor_supplier_id: Optional[UUID] = None
+    mejor_supplier_nombre: Optional[str] = None
+    ahorro_maximo_gs: Decimal = Decimal("0")
+    ahorro_maximo_pct: Decimal = Decimal("0")
+    proveedores: list[SupplierPriceComparisonItem]
+
+

@@ -1,4 +1,6 @@
+import { copyToClipboard } from "../../utils/clipboard"
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
+import { createPortal } from "react-dom"
 import {
   Search, ScanLine, ShoppingCart, Calculator, ClipboardList, Save, Loader2, Sun, Moon, Plus, Minus, Trash2, User, Pause, Play,
   Percent, X, CheckCircle, Printer, RefreshCw, Banknote,
@@ -9,13 +11,22 @@ import {
   Maximize2, Eye, Image as ImageIcon, ZoomIn, LogOut, Lock, Unlock,
   Coins, HelpCircle, Package, Flame, ShoppingBag, LayoutGrid, ListFilter,
   Layers, Tag, Boxes, Radio, Activity, ShieldAlert, ArrowUpRight, Sliders, UserPlus, Sparkle, RotateCcw, ExternalLink, Smartphone,
-  Ticket, Scissors, Heart
+  Ticket, Scissors, Heart, Copy
 } from "lucide-react"
-import { api, type Product, type Customer, type Sale, type Warehouse, API_ORIGIN, COMPANY_ID } from "../../api"
+import { api, withTimeout, type Product, type Customer, type Sale, type Warehouse, API_ORIGIN, COMPANY_ID } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useTheme } from "../../context/ThemeContext"
 import { useToast } from "../../context/ToastContext"
-import { formatPYG } from "../../utils/format"
+import { useOffline } from "../../context/OfflineContext"
+import { formatPYG, formatInputDecimal, parseInputDecimal } from "../../utils/format"
+import { DEFAULT_RECEIPT_CONFIG } from "../../constants/receiptDefaults"
+import { loadCachedPOSData, persistPOSCatalog } from "../../utils/posOfflineSync"
+import { offlineDB } from "../../utils/offlineDB"
+import { syncPendingSales, syncPendingCupones, syncFullCatalog } from "../../utils/syncManager"
+import { verifySupervisorPinLocal, syncSupervisorPins } from "../../utils/localAuth"
+import QRCode from "qrcode"
+import { imDinelco, imBancard } from "../../monitor/integrations"
+
 
 // ── BANDERAS VECTORIALES SVG PARA COMPATIBILIDAD TOTAL EN WINDOWS / ELECTRON ─
 const FlagPY = () => (
@@ -82,6 +93,8 @@ interface PausedSale {
   customer: Customer
   items: CartItem[]
   total: number
+  appliedDiscount?: { type: "percentage" | "fixed"; value: number; montoPyg: number; reason: string; supervisorId: string; supervisorNombre: string } | null
+  extraPaymentLegs?: any[]
 }
 
 interface CurrencyRates {
@@ -118,12 +131,101 @@ const ESCPOS_ALIGN_CENTER = ESC + 'a' + '\x01'
 const ESCPOS_DOUBLE_ON = GS + '!' + '\x11'
 const ESCPOS_HEIGHT_ON = GS + '!' + '\x10'
 const ESCPOS_DOUBLE_OFF = GS + '!' + '\x00'
+// Video inverso (texto blanco sobre fondo negro) -- lo que en la impresora
+// térmica hace de "fondo llamativo" para distinguir de un vistazo con qué
+// integración se cobró (PlugPay vs Bancard QR), sin agrandar el ticket.
+const ESCPOS_REVERSE_ON = GS + 'B' + '\x01'
+const ESCPOS_REVERSE_OFF = GS + 'B' + '\x00'
 const ESCPOS_LINE_WIDTH = 48
+
+// Etiqueta del proveedor: negrita + fondo invertido, bien chica (una sola
+// línea) para que el comprobante siga siendo mínimo pero quede clarísimo
+// con cuál de las dos integraciones "en pantalla" se cobró.
+function escposProviderBadge(label: string): string {
+  return ESCPOS_BOLD_ON + ESCPOS_REVERSE_ON + ` ${label} ` + ESCPOS_REVERSE_OFF + ESCPOS_BOLD_OFF + '\n'
+}
+
+function escposFormatDateTime(val?: string | number | Date | null): string {
+  if (!val) return '-'
+  const d = typeof val === 'string' || typeof val === 'number' ? new Date(val) : val
+  if (!d || isNaN(d.getTime())) return String(val || '-')
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const dd = pad(d.getDate())
+  const mm = pad(d.getMonth() + 1)
+  const yyyy = d.getFullYear()
+  const hh = pad(d.getHours())
+  const min = pad(d.getMinutes())
+  const ss = pad(d.getSeconds())
+  return `${dd}/${mm}/${yyyy} ${hh}:${min}:${ss}`
+}
+
+function escposFormatDate(val?: string | number | Date | null): string {
+  if (!val) return '-'
+  const d = typeof val === 'string' || typeof val === 'number' ? new Date(val) : val
+  if (!d || isNaN(d.getTime())) return String(val || '-')
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const dd = pad(d.getDate())
+  const mm = pad(d.getMonth() + 1)
+  const yyyy = d.getFullYear()
+  return `${dd}/${mm}/${yyyy}`
+}
+
+function escposFormatTime(val?: string | number | Date | null): string {
+  if (!val) return '-'
+  const d = typeof val === 'string' || typeof val === 'number' ? new Date(val) : val
+  if (!d || isNaN(d.getTime())) return String(val || '-')
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const hh = pad(d.getHours())
+  const min = pad(d.getMinutes())
+  const ss = pad(d.getSeconds())
+  return `${hh}:${min}:${ss}`
+}
 
 function escposStripAccents(s: string): string {
   return String(s ?? '')
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\u202F\u00A0\u2000-\u200B\u2060]/g, ' ')
+    .replace(/₲/g, 'Gs.')
+    .replace(/ñ/g, 'n')
+    .replace(/Ñ/g, 'N')
+    .replace(/[–—]/g, '-')
+    .replace(/[“”""]/g, '"')
+    .replace(/[‘’'']/g, "'")
+    .replace(/·/g, '-')
     .replace(/[^\x20-\x7E\n]/g, '')
+}
+function patchEscposTicketCustomer(b64: string, name: string, doc: string): string {
+  if (!b64) return b64
+  try {
+    let raw = atob(b64)
+    const cleanName = escposStripAccents(name || 'CONSUMIDOR FINAL').slice(0, 32)
+    const cleanDoc = escposStripAccents(doc || '44444401-7').slice(0, 20)
+    if (/(Cliente:\s*)[^\r\n]+/i.test(raw)) {
+      raw = raw.replace(/(Cliente:\s*)[^\r\n]+/i, `$1${cleanName}`)
+      if (/(RUC(?:\s*\/\s*CI)?:\s*)[^\r\n]+/i.test(raw)) {
+        raw = raw.replace(/(RUC(?:\s*\/\s*CI)?:\s*)[^\r\n]+/i, `$1${cleanDoc}`)
+      }
+      return btoa(raw)
+    }
+  } catch (e) {
+    console.warn('No se pudo parchar ticket ESC/POS en frontend:', e)
+  }
+  return b64
+}
+// crypto.randomUUID() exige "contexto seguro" (HTTPS o localhost) -- las
+// cajas reales cargan por HTTP plano en la LAN (http://192.168.0.10:5173),
+// asi que ahi NO existe y tira TypeError. Mismo patron ya usado en
+// CustomersPage.tsx para el mismo problema.
+function generarUUIDLocal(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID()
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    const v = c === "x" ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
 }
 function escposPadRight(s: string, n: number): string {
   s = escposStripAccents(s)
@@ -177,11 +279,19 @@ function escposWrapText(text: string, width = ESCPOS_LINE_WIDTH, align: 'left' |
 function escposDashes(width = ESCPOS_LINE_WIDTH): string {
   return '-'.repeat(width)
 }
-// btoa espera char codes 0-255 -- ya garantizado por escposStripAccents +
-// los propios bytes de control ESC/GS (todos < 256).
 function escposToBase64(escposText: string): string {
-  return btoa(escposText)
+  let sanitized = ''
+  for (let i = 0; i < escposText.length; i++) {
+    const code = escposText.charCodeAt(i)
+    if (code <= 255) {
+      sanitized += escposText[i]
+    } else {
+      sanitized += ' '
+    }
+  }
+  return btoa(sanitized)
 }
+
 
 // Codigo QR nativo del propio firmware de la impresora (comando GS ( k,
 // familia de codigos 2D estandar ESC/POS) -- no es una imagen, es la
@@ -253,6 +363,24 @@ function escposLogoFromDataUrl(dataUrl: string, maxWidthPx = 384): Promise<strin
   })
 }
 
+const triggerSuccessSound = () => {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
+    if (!AudioCtx) return
+    const ctx = new AudioCtx()
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime) // D5
+    osc.frequency.setValueAtTime(880, ctx.currentTime + 0.1) // A5
+    gain.gain.setValueAtTime(0.2, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3)
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.start(ctx.currentTime)
+    osc.stop(ctx.currentTime + 0.3)
+  } catch (e) {}
+}
+
 const FORMA_PAGO_LABEL: Record<string, string> = {
   EFECTIVO: "Efectivo",
   TARJETA_BANCARD: "Tarjeta Bancard",
@@ -283,44 +411,51 @@ function normalizeCustomer(c: any): Customer {
 }
 
 const PUNTOS_EMISION = [
-  { id: "001-001", nombre: "Caja Mostrador 01 · Casa Central (Punto 001)" },
-  { id: "001-002", nombre: "Caja Mostrador 02 · Casa Central (Punto 002)" },
-  { id: "001-003", nombre: "Caja Mayorista 03 · Salón / Despacho (Punto 003)" },
-  { id: "001-004", nombre: "Caja Cobranzas / Créditos (Punto 004)" },
-  { id: "001-005", nombre: "Caja Ventas Salón B2C / Preventa (Punto 005)" },
-  { id: "001-010", nombre: "Caja Administración / Tesorería (Punto 010)" },
+  { id: "001-011", nombre: "Caja 01 · Salón Central (Boca 011)" },
+  { id: "001-012", nombre: "Caja 02 · Salón Central (Boca 012)" },
+  { id: "001-013", nombre: "Caja 03 · Salón Central (Boca 013)" },
+  { id: "001-014", nombre: "Caja 04 · Salón Central (Boca 014)" },
+  { id: "001-015", nombre: "Caja 05 · Salón Central (Boca 015)" },
+  { id: "001-016", nombre: "Caja 06 · Salón Central (Boca 016)" },
+  { id: "001-017", nombre: "Caja 07 · Línea de Caja (Boca 017)" },
+  { id: "001-018", nombre: "Caja 08 · Mayorista (Boca 018)" },
+  { id: "001-019", nombre: "Caja 09 · Esquina / Administración (Boca 019)" },
+  { id: "001-020", nombre: "Caja 10 · Esquina / Refuerzo (Boca 020)" },
 ]
 
 // Padrón de Top Productos Verificados de Supermercado Extra
 const TOP_CATALOG_SEED: Partial<Product>[] = [
-  { id: "seed-1", nombre: "CERVEZA DEL PUERTO 269MLX12", sku: "345601", codigo_barra: "7840058000001", precio_venta: 36000 as any, stock_minimo: 48, tipo_venta: "unidad" as any },
-  { id: "seed-2", nombre: "BENEDICTINO SIN GAS 500MLX12", sku: "829", codigo_barra: "7840058008381", precio_venta: 24000 as any, stock_minimo: 60, tipo_venta: "unidad" as any },
-  { id: "seed-3", nombre: "TREBOL 1LT.ENTERA MID", sku: "317", codigo_barra: "7840005012379", precio_venta: 6800 as any, stock_minimo: 100, tipo_venta: "unidad" as any },
-  { id: "seed-4", nombre: "KRO JAMON SEMALLO 100GRX10UN", sku: "1151", codigo_barra: "7896221400483", precio_venta: 45000 as any, stock_minimo: 40, tipo_venta: "unidad" as any },
-  { id: "seed-5", nombre: "ONE WAY 500MLX6 COCA COLA", sku: "1055", codigo_barra: "7840058000019", precio_venta: 28000 as any, stock_minimo: 50, tipo_venta: "unidad" as any },
-  { id: "seed-6", nombre: "DEL VALLE DURAZNO 200MLX6", sku: "2911", codigo_barra: "7840058008992", precio_venta: 15000 as any, stock_minimo: 60, tipo_venta: "unidad" as any },
-  { id: "seed-7", nombre: "DEL VALLE MANZANA 200MLX6", sku: "2912", codigo_barra: "7840058009050", precio_venta: 15000 as any, stock_minimo: 60, tipo_venta: "unidad" as any },
-  { id: "seed-8", nombre: "PET 2.0 COCA COLA RA", sku: "118", codigo_barra: "7840058008084", precio_venta: 13500 as any, stock_minimo: 80, tipo_venta: "unidad" as any },
-  { id: "seed-9", nombre: "PAJARITO 250GR TRADICIONALX20", sku: "10092", codigo_barra: "7840013000030", precio_venta: 95000 as any, stock_minimo: 40, tipo_venta: "unidad" as any },
-  { id: "seed-10", nombre: "ADES MANZANA 200MLX6", sku: "3743", codigo_barra: "7790895643743", precio_venta: 18000 as any, stock_minimo: 40, tipo_venta: "unidad" as any },
-  { id: "seed-11", nombre: "FAMLAC 1LT. UAT ENTERA", sku: "325", codigo_barra: "7840005011174", precio_venta: 6200 as any, stock_minimo: 80, tipo_venta: "unidad" as any },
-  { id: "seed-12", nombre: "PAJARITO 500GR TRADICIONAL", sku: "10091", codigo_barra: "7840013000023", precio_venta: 11500 as any, stock_minimo: 50, tipo_venta: "unidad" as any },
-  { id: "seed-13", nombre: "TREBOLIN 200CC.CHOCOLAT.", sku: "313", codigo_barra: "7840005000062", precio_venta: 2500 as any, stock_minimo: 70, tipo_venta: "unidad" as any },
-  { id: "seed-14", nombre: "DASANI PLAIN CON GAS 500X6", sku: "5550", codigo_barra: "7840058002105", precio_venta: 12000 as any, stock_minimo: 60, tipo_venta: "unidad" as any },
-  { id: "seed-15", nombre: "F.DEL VALLE FRESH NARANJA 1.5LTSX4", sku: "1260", codigo_barra: "7840058008312", precio_venta: 22000 as any, stock_minimo: 40, tipo_venta: "unidad" as any },
-  { id: "seed-16", nombre: "TANG LARANJA 10DSX18UNX18GR", sku: "71601", codigo_barra: "7622210571601", precio_venta: 38000 as any, stock_minimo: 50, tipo_venta: "unidad" as any },
-  { id: "seed-17", nombre: "ONE WAY C.COLA 250MLX6 FILM DEC.", sku: "3012", codigo_barra: "7840058007988", precio_venta: 18000 as any, stock_minimo: 40, tipo_venta: "unidad" as any },
-  { id: "seed-18", nombre: "PET 2.0 FANTA NARANJA FN", sku: "1018", codigo_barra: "7840058010391", precio_venta: 13500 as any, stock_minimo: 60, tipo_venta: "unidad" as any },
-  { id: "seed-19", nombre: "PET 1.500 COCA COLA", sku: "31", codigo_barra: "7840058000675", precio_venta: 10500 as any, stock_minimo: 60, tipo_venta: "unidad" as any },
-  { id: "seed-20", nombre: "TANG UVA INTENSA 10DSX18UNX18GR", sku: "7256", codigo_barra: "7622210571663", precio_venta: 38000 as any, stock_minimo: 50, tipo_venta: "unidad" as any },
-  { id: "seed-21", nombre: "PLATITO P-15 VERDE(600)", sku: "11555", codigo_barra: "7840263111555", precio_venta: 48000 as any, stock_minimo: 30, tipo_venta: "unidad" as any },
-  { id: "seed-22", nombre: "COAMO ACEITE DE SOJA 900ML (20)", sku: "119293", codigo_barra: "7896279600538", precio_venta: 165000 as any, stock_minimo: 40, tipo_venta: "unidad" as any },
+  { id: "seed-1", nombre: "COCA COLA PET 250ML (6)", sku: "118971", codigo_barra: "7840058001887", precio_venta: 3500 as any, stock_minimo: 48, imagen_url: "/uploads/products/118971.jpg" },
+  { id: "seed-2", nombre: "COCA COLA PET 1L (4)", sku: "118900", codigo_barra: "7840058009449", precio_venta: 7900 as any, stock_minimo: 36, imagen_url: "/uploads/products/118900.jpg" },
+  { id: "seed-3", nombre: "COCA COLA PET 500ML (6)", sku: "6202", codigo_barra: "7840058000019", precio_venta: 6500 as any, stock_minimo: 24, imagen_url: "/uploads/products/6202.jpg" },
+  { id: "seed-4", nombre: "COCA COLA ZERO PET 250ML (6)", sku: "118974", codigo_barra: "7840058002556", precio_venta: 3500 as any, stock_minimo: 48, imagen_url: "/uploads/products/118974.jpg" },
+  { id: "seed-5", nombre: "FANTA NARANJA PET 250ML (6)", sku: "118895", codigo_barra: "7840058010339", precio_venta: 3500 as any, stock_minimo: 30, imagen_url: "/uploads/products/118895.jpg" },
+  { id: "seed-6", nombre: "PAN FRANCES KG", sku: "120257", codigo_barra: "2000098", precio_venta: 10000 as any, stock_minimo: 100, tipo_venta: "peso" as any },
+  { id: "seed-7", nombre: "TOMATE SALSA KG", sku: "120178", codigo_barra: "2000077", precio_venta: 11700 as any, stock_minimo: 80, tipo_venta: "peso" as any },
+  { id: "seed-8", nombre: "CEBOLLA KG", sku: "120179", codigo_barra: "2000078", precio_venta: 9477 as any, stock_minimo: 95, tipo_venta: "peso" as any, imagen_url: "/uploads/products/120179.jpg" },
+  { id: "seed-9", nombre: "BANANA KARAPE KG", sku: "120180", codigo_barra: "2000079", precio_venta: 7200 as any, stock_minimo: 60, tipo_venta: "peso" as any },
+  { id: "seed-10", nombre: "PAPA ESPECIAL KG", sku: "120396", codigo_barra: "2000164", precio_venta: 7500 as any, stock_minimo: 120, tipo_venta: "peso" as any },
+  { id: "seed-11", nombre: "COAMO ACEITE DE SOJA 900ML (20)", sku: "119293", codigo_barra: "7896279600538", precio_venta: 8750 as any, stock_minimo: 50, imagen_url: "/uploads/products/119293.jpg" },
+  { id: "seed-12", nombre: "HUEVO BLANCO C/30", sku: "121082", codigo_barra: "2000341", precio_venta: 17377 as any, stock_minimo: 40 },
+  { id: "seed-13", nombre: "LECHE SACHET ULTRA X1LT", sku: "120020", codigo_barra: "7840042000216", precio_venta: 6800 as any, stock_minimo: 72, imagen_url: "/uploads/products/120020.jpg" },
+  { id: "seed-14", nombre: "QUESO MUZZARELA B", sku: "122534", codigo_barra: "2000370", precio_venta: 55777 as any, stock_minimo: 35, tipo_venta: "peso" as any, imagen_url: "/uploads/products/122534.jpg" },
+  { id: "seed-15", nombre: "ML COSTILLA DE PRIMERA / MATAMBRE KG", sku: "120093", codigo_barra: "2000007", precio_venta: 34777 as any, stock_minimo: 45, tipo_venta: "peso" as any },
+  { id: "seed-16", nombre: "ML CARNE MOLIDA DE PRIMERA KG", sku: "120099", codigo_barra: "2000012", precio_venta: 38977 as any, stock_minimo: 50, tipo_venta: "peso" as any },
+  { id: "seed-17", nombre: "BENEDICTINO AGUA PET 500ML (12)", sku: "99109", codigo_barra: "7840058008381", precio_venta: 2000 as any, stock_minimo: 60, imagen_url: "/uploads/products/99109.jpg" },
+  { id: "seed-18", nombre: "BRAHMITA CERV ULTRA CERO LT 269ML (12)", sku: "120121", codigo_barra: "7840050008655", precio_venta: 2500 as any, stock_minimo: 48, imagen_url: "/uploads/products/120121.jpg" },
+  { id: "seed-19", nombre: "GALLETA CUARTEL KG", sku: "120254", codigo_barra: "2000096", precio_venta: 8977 as any, stock_minimo: 30, tipo_venta: "peso" as any },
+  { id: "seed-20", nombre: "BOLSA PLASTICA INTERNA", sku: "120594", codigo_barra: "2000265", precio_venta: 500 as any, stock_minimo: 500 },
+  { id: "seed-21", nombre: "CHIPA TRADICIONAL", sku: "120264", codigo_barra: "2000101", precio_venta: 30977 as any, stock_minimo: 25, tipo_venta: "peso" as any },
+  { id: "seed-22", nombre: "NARANJA KG", sku: "120363", codigo_barra: "2000133", precio_venta: 5200 as any, stock_minimo: 70, tipo_venta: "peso" as any },
+  { id: "seed-23", nombre: "LIMÓN TAITI KG", sku: "120290", codigo_barra: "2000106", precio_venta: 4800 as any, stock_minimo: 65, tipo_venta: "peso" as any, imagen_url: "/uploads/products/120290.jpg" },
+  { id: "seed-24", nombre: "ZANAHORIA KG", sku: "120289", codigo_barra: "2000105", precio_venta: 12500 as any, stock_minimo: 40, tipo_venta: "peso" as any, imagen_url: "/uploads/products/120289.jpg" }
 ]
 
 export default function POSPage() {
   const { user, logout } = useAuth()
   const toast = useToast()
   const { dark, toggle: toggleTheme } = useTheme()
+  const { isOnline: serverOnline, pendingSalesCount, getExtraClubOfflineBalance, recordExtraClubOfflineConsumption } = useOffline()
 
   // ── TOKENS DE TEMA REUTILIZABLES PARA TODOS LOS MODALES ────────────────────
   // Antes cada modal tenía el fondo oscuro fijo (bg-slate-900/950) sin
@@ -348,10 +483,10 @@ export default function POSPage() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved)
-        return parsed.puntoEmision || "001-001"
+        return parsed.puntoEmision || "001-012"
       } catch (e) {}
     }
-    return "001-001"
+    return "001-012"
   })
 
   // Caja/punto de emisión fijos por máquina física (hostname de Windows,
@@ -363,7 +498,7 @@ export default function POSPage() {
   const [terminalAssignment, setTerminalAssignment] = useState<{ id: string; punto_emision: string; caja_nombre: string } | null>(null)
   const [terminalAssignmentChecked, setTerminalAssignmentChecked] = useState(false)
   const [showAssignTerminalModal, setShowAssignTerminalModal] = useState(false)
-  const [assignPuntoEmision, setAssignPuntoEmision] = useState("001")
+  const [assignPuntoEmision, setAssignPuntoEmision] = useState("012")
   const [assignCajaNombre, setAssignCajaNombre] = useState("")
   const [showAperturaModal, setShowAperturaModal] = useState<boolean>(!cajaAbierta)
   const [montoAperturaPyg, setMontoAperturaPyg] = useState<string>("300.000")
@@ -379,6 +514,10 @@ export default function POSPage() {
     }
     return null
   })
+  const cajaAbiertaRef = useRef<boolean>(cajaAbierta)
+  cajaAbiertaRef.current = cajaAbierta
+  const cashSessionIdRef = useRef<string | null>(cashSessionId)
+  cashSessionIdRef.current = cashSessionId
   const [cashRegisterId, setCashRegisterId] = useState<string | null>(null)
   // Logo real del supermercado para el header -- mismo cache que ya usa el
   // ticket (pos_logo_data_url), asi no se vuelve a bajar por red.
@@ -389,6 +528,32 @@ export default function POSPage() {
   const [montoCierreBrl, setMontoCierreBrl] = useState<string>("")
   const [submittingCierre, setSubmittingCierre] = useState(false)
   const [cierreResult, setCierreResult] = useState<{ monto_cierre_esperado: number; diferencia: number; requiere_revision: boolean; diferencia_usd: number; diferencia_brl: number; desglose_formas_pago: { forma_pago: string; moneda: string; monto: number }[]; contado: number; contado_usd: number; contado_brl: number } | null>(null)
+  const [preCloseData, setPreCloseData] = useState<any>(null)
+  const [loadingPreClose, setLoadingPreClose] = useState(false)
+  const [cierreTab, setCierreTab] = useState<"conteo" | "conciliacion">("conteo")
+  const [lastClosedSessionId, setLastClosedSessionId] = useState<string | null>(null)
+  const [lastCierreTicketHtml, setLastCierreTicketHtml] = useState<string | null>(null)
+  const [lastCierreEscPosB64, setLastCierreEscPosB64] = useState<string | null>(null)
+  const pendingDropIdsRef = useRef<Set<string>>(new Set())
+  const confirmedDropIdsRef = useRef<Set<string>>(new Set())
+  const pendingHandoffIdRef = useRef<string | null>(null)
+
+  // ── TURNO NÓMADA & PAUSA DE TURNO (MODELO A / ENFOQUE 1) ─────────────────
+  const [showPausaTurnoModal, setShowPausaTurnoModal] = useState(false)
+  const [pausaMotivo, setPausaMotivo] = useState("Salida a almuerzo / relevo de gaveta")
+  const [submittingPausa, setSubmittingPausa] = useState(false)
+  const [activeUserSessionInfo, setActiveUserSessionInfo] = useState<any>(null)
+  // "pendiente": todavia no volvio la respuesta de activeUser(). "sin_turno":
+  // el backend confirmo que no hay turno en ninguna caja -- seguro abrir
+  // offline si hace falta. "sin_confirmar": la consulta fallo y esta
+  // maquina no tenia nada guardado -- podria haber un turno real en otra
+  // caja que no se detecto por la misma falla; la apertura offline exige
+  // una confirmacion explicita en ese caso, no abre en modo local solo.
+  const [activeUserCheckOk, setActiveUserCheckOk] = useState<"pendiente" | "sin_turno" | "sin_confirmar">("pendiente")
+  const [confirmoPrimerTurnoDelDia, setConfirmoPrimerTurnoDelDia] = useState(false)
+  const [showReanudarModal, setShowReanudarModal] = useState(false)
+  const [submittingReanudar, setSubmittingReanudar] = useState(false)
+
   const [showCashDropModal, setShowCashDropModal] = useState(false)
   const [cashDropMonto, setCashDropMonto] = useState<string>("")
   const [cashDropMontoUsd, setCashDropMontoUsd] = useState<string>("")
@@ -402,7 +567,7 @@ export default function POSPage() {
   // (antes de que la venta se cree en el backend) para poder imprimir
   // "Sumaste X puntos" en el mismo comprobante, igual que ya se hace con
   // el bloque de firma de Extra Club.
-  const [loyaltyConfig, setLoyaltyConfig] = useState<{ activo: boolean; crear_en_venta: boolean; puntos_por_guarani: number } | null>(null)
+  const [loyaltyConfig, setLoyaltyConfig] = useState<any>(null)
   useEffect(() => {
     api.loyalty.getConfig(COMPANY_ID).then((cfg: any) => setLoyaltyConfig(cfg)).catch(() => {})
   }, [])
@@ -411,19 +576,17 @@ export default function POSPage() {
     api.caja.registers.list()
       .then((regs) => {
         if (!Array.isArray(regs) || regs.length === 0) return
-        const normalizado = puntoEmision.replace(/[^0-9]/g, "").replace(/^0+/, "") || puntoEmision
-        const match = regs.find((r: any) =>
-          r.codigo === puntoEmision ||
-          r.codigo?.replace(/[^0-9]/g, "").replace(/^0+/, "") === normalizado
-        )
-        // Los puntos de emision fiscales (001-012..020, PUNTOS_EMISION) y las
-        // cash_registers fisicas (POS-01..05) son dos numeraciones que nunca
-        // coinciden por texto -- antes esto siempre caia en regs[0] sin
-        // importar que "Caja" se eligiera en la apertura, asi que CUALQUIER
-        // seleccion terminaba pisando la misma caja fisica (y fallaba si esa
-        // ya tenia sesion abierta). Mientras no haya una asignacion real
-        // punto_emision -> caja fisica, se reparte por indice para que cada
-        // opcion del desplegable use una caja fisica distinta.
+        const peNum = puntoEmision.includes("-") ? puntoEmision.split("-")[1] : puntoEmision
+        const peClean = peNum.replace(/[^0-9]/g, "").replace(/^0+/, "")
+        const match = regs.find((r: any) => {
+          const rNum = (r.codigo || "").replace(/[^0-9]/g, "").replace(/^0+/, "")
+          return (
+            r.codigo === puntoEmision ||
+            r.codigo === `POS-${peNum.padStart(3, "0")}` ||
+            (peClean && rNum === peClean) ||
+            (terminalAssignment?.caja_nombre && r.nombre?.toLowerCase() === terminalAssignment.caja_nombre.toLowerCase())
+          )
+        })
         if (match) {
           setCashRegisterId(match.id)
         } else {
@@ -433,7 +596,7 @@ export default function POSPage() {
         }
       })
       .catch(() => {})
-  }, [puntoEmision])
+  }, [puntoEmision, terminalAssignment])
 
   // Detecta el hostname real de esta máquina (vía Electron) y busca si un
   // administrador ya la asignó a una caja fija. Si existe, puntoEmision
@@ -444,11 +607,31 @@ export default function POSPage() {
       try {
         const status = await (window as any).electronAPI?.getStatus?.()
         const hostname = status?.hostname
-        if (!hostname) return
-        setMachineHostname(hostname)
-        const assignment = await api.posTerminals.getByHostname(hostname)
-        setTerminalAssignment(assignment)
-        setPuntoEmision(`001-${assignment.punto_emision}`)
+        let assignment: any = null
+        if (hostname) {
+          setMachineHostname(hostname)
+          try {
+            assignment = await api.posTerminals.getByHostname(hostname)
+          } catch (e) {}
+        }
+        if (!assignment) {
+          try {
+            assignment = await api.posTerminals.detect({ hostname: hostname || undefined })
+          } catch (e) {}
+        }
+        if (assignment && assignment.punto_emision) {
+          const rawPe = String(assignment.punto_emision).trim()
+          const pe = rawPe.startsWith("001-")
+            ? rawPe
+            : `001-${rawPe.replace(/[^0-9]/g, "").padStart(3, "0")}`
+          setTerminalAssignment(assignment)
+          setPuntoEmision(pe)
+          try {
+            const saved = localStorage.getItem(userCajaKey)
+            const currentData = saved ? JSON.parse(saved) : {}
+            localStorage.setItem(userCajaKey, JSON.stringify({ ...currentData, puntoEmision: pe }))
+          } catch (e) {}
+        }
       } catch (e) {
         // sin asignación todavía -- se maneja en la UI de Apertura de Caja
       } finally {
@@ -459,11 +642,17 @@ export default function POSPage() {
 
   // ── 2. ESTADOS GENERALES Y CATÁLOGO ───────────────────────────────────────
   const [products, setProducts] = useState<Product[]>([])
+  // Codigos de barra de pack/caja (1 codigo = N unidades del producto base,
+  // ver Productos > "Codigos de Pack / Caja"). Se indexa por codigo de barra
+  // para que el escaneo lo resuelva en memoria, igual que el resto del
+  // catalogo -- no pega al backend por cada escaneo.
+  const [packBarcodeMap, setPackBarcodeMap] = useState<Map<string, { productId: string; etiqueta: string; unidadesPorPaquete: number }>>(new Map())
   const [stockMap, setStockMap] = useState<Record<string, number>>({})
   const [searchResults, setSearchResults] = useState<Product[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [customerSearchResults, setCustomerSearchResults] = useState<Customer[]>([])
   const [searchingCustomers, setSearchingCustomers] = useState(false)
+  const customerSearchInputRef = useRef<HTMLInputElement>(null)
   const [loading, setLoading] = useState(true)
   const [searchingServer, setSearchingServer] = useState(false)
   const [search, setSearch] = useState("")
@@ -474,19 +663,21 @@ export default function POSPage() {
   const [currentScaleWeight, setCurrentScaleWeight] = useState<number>(0.000)
   const [isScaleStable, setIsScaleStable] = useState<boolean>(true)
   // Verificacion peso etiqueta vs balanza -- pedido explicito: al escanear
-  // el codigo PLU de una etiqueta de pesables, comparar el peso que trae
-  // esa etiqueta contra lo que hay AHORA en la balanza conectada, para
-  // frenar el caso de que se cambie el contenido de una bolsa ya
-  // etiquetada sin volver a pesarla. Antes esto no existia -- se confiaba
-  // ciegamente en el numero de la etiqueta, sin ningun cruce contra la
-  // balanza real.
-  const PESO_TOLERANCIA_KG = 0.020
+  // ── CONTROL CRUZADO INTELIGENTE: TOLERANCIA DINÁMICA Y ASENTAMIENTO DE BALANZA ─
+  const getPesoTolerancia = (etiquetaKg: number) => Math.max(0.035, etiquetaKg * 0.035)
+  const isPesableProduct = (p: Product | null | undefined): boolean => {
+    if (!p) return false
+    return (p as any).tipo_venta === "peso" ||
+           (p as any).unidad_medida?.toUpperCase() === "KG" ||
+           ((p as any).plu_balanza != null && (p as any).unidad_medida?.toUpperCase() !== "UN")
+  }
+  const scaleSettlingTimerRef = useRef<any>(null)
+
   const [weightMismatch, setWeightMismatch] = useState<{ product: Product; etiquetaKg: number; balanzaKg: number } | null>(null)
-    const [scaleUsbConnected, setScaleUsbConnected] = useState<boolean>(false)
-  const [isScaleEnabled, setIsScaleEnabled] = useState<boolean>(() => localStorage.getItem("pos_scale_enabled") === "true")
-  const [isLostDemandEnabled, setIsLostDemandEnabled] = useState<boolean>(() => localStorage.getItem("pos_lost_demand_enabled") === "true")
-  const [isExtraClubEnabled, setIsExtraClubEnabled] = useState<boolean>(() => localStorage.getItem("pos_extra_club_enabled") === "true")
+  const [weightPendingScale, setWeightPendingScale] = useState<{ product: Product; etiquetaKg: number } | null>(null)
+  const [scaleUsbConnected, setScaleUsbConnected] = useState<boolean>(false)
   const [scalePortName, setScalePortName] = useState<string>("COM3")
+
   const [scaleBaudRate, setScaleBaudRate] = useState<number>(9600)
   const [scaleRawLog, setScaleRawLog] = useState<string>("Balanza lista. Presione Probar Lectura.")
   const [showScaleModal, setShowScaleModal] = useState<boolean>(false)
@@ -495,6 +686,35 @@ export default function POSPage() {
   const [showManualWeightModal, setShowManualWeightModal] = useState<boolean>(false)
   const [manualWeightInput, setManualWeightInput] = useState<string>("")
   const [targetWeighProduct, setTargetWeighProduct] = useState<Product | null>(null)
+
+  // ── PIN corto de autorizaciones offline (solo supervisor/admin) ─────────
+  const [showSetPinModal, setShowSetPinModal] = useState(false)
+  const [newPosPin, setNewPosPin] = useState("")
+  const [newPosPinConfirm, setNewPosPinConfirm] = useState("")
+  const [settingPosPin, setSettingPosPin] = useState(false)
+  const handleSetPosPin = async () => {
+    if (!/^\d{4,6}$/.test(newPosPin)) {
+      toast.warning("PIN inválido", "Ingresá un PIN de 4 a 6 dígitos.")
+      return
+    }
+    if (newPosPin !== newPosPinConfirm) {
+      toast.warning("Los PIN no coinciden", "Verificá que ambos campos sean iguales.")
+      return
+    }
+    setSettingPosPin(true)
+    try {
+      await api.auth.setPosPin({ pin: newPosPin })
+      await syncSupervisorPins().catch(() => {})
+      toast.success("PIN configurado", "Ya podés usarlo para autorizar sin conexión en cualquier caja.")
+      setShowSetPinModal(false)
+      setNewPosPin("")
+      setNewPosPinConfirm("")
+    } catch (e: any) {
+      toast.error("No se pudo configurar el PIN", e?.message || "Intentá de nuevo.")
+    } finally {
+      setSettingPosPin(false)
+    }
+  }
 
   // ── CONFIGURACIÓN DE ASIGNACIÓN DE POS BANCARD & DINELCO POR CAJA ───────────
   const [showPosConfigModal, setShowPosConfigModal] = useState(false)
@@ -527,12 +747,21 @@ export default function POSPage() {
   // nada cargado, se cae al valor de posAssignments (localStorage) como
   // respaldo, para no romper cajas que ya tenian la IP puesta a mano.
   const [bancardIpsPorCaja, setBancardIpsPorCaja] = useState<Record<string, string>>({})
+  const [dinelcoIpsPorCaja, setDinelcoIpsPorCaja] = useState<Record<string, string>>({})
   const [plugpayEnabled, setPlugpayEnabled] = useState(false)
   useEffect(() => {
     api.paymentIntegrations.get("bancard")
       .then((cfg) => {
         if (cfg?.config?.ips_por_punto_emision) {
           setBancardIpsPorCaja(cfg.config.ips_por_punto_emision)
+        }
+      })
+      .catch(() => {})
+
+    api.paymentIntegrations.get("dinelco")
+      .then((cfg) => {
+        if (cfg?.config?.ips_por_punto_emision) {
+          setDinelcoIpsPorCaja(cfg.config.ips_por_punto_emision)
         }
       })
       .catch(() => {})
@@ -559,8 +788,12 @@ export default function POSPage() {
       dinelcoLote: "001",
       dinelcoPort: "COM7",
     }
-    return { ...base, bancardIp: bancardIpsPorCaja[puntoEmision] || base.bancardIp }
-  }, [posAssignments, puntoEmision, bancardIpsPorCaja])
+    return {
+      ...base,
+      bancardIp: bancardIpsPorCaja[puntoEmision] || base.bancardIp,
+      dinelcoIp: dinelcoIpsPorCaja[puntoEmision] || "",
+    }
+  }, [posAssignments, puntoEmision, bancardIpsPorCaja, dinelcoIpsPorCaja])
 
   // ── SEGURIDAD Y CONTROL DE SUPERVISOR (PIN) ──────────────────────────────
   const isSupervisorUser = useMemo(() => {
@@ -576,19 +809,35 @@ export default function POSPage() {
   const [verifyingSupervisor, setVerifyingSupervisor] = useState(false)
   const [supervisorReason, setSupervisorReason] = useState("Error de escaneo / digitación")
   const [pendingSupervisorAction, setPendingSupervisorAction] = useState<{
-    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "use_label_weight"
+    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "otros_payment" | "reopen_invoice" | "reopen_payment" | "use_label_weight" | "direct_discount"
     itemId?: string
     delta?: number
     sale?: Sale
     customer?: Customer
+    formaPago?: string
+    motivo?: string
+    voucher?: string
+    lote?: string
+    tarjetaMarca?: string
+    terminalIp?: string
+    moneda?: string
+    montoMoneda?: number
     weightProduct?: Product
     weightEtiquetaKg?: number
     weightBalanzaKg?: number
+    discountType?: "percentage" | "fixed"
+    discountValue?: number
+    discountReason?: string
+    otrosSubtipo?: string
+    otrosComprobante?: string
+    otrosMonto?: number
   } | null>(null)
+
   const [showRemoteAuthModal, setShowRemoteAuthModal] = useState(false)
   const [remoteAuthRequestId, setRemoteAuthRequestId] = useState<string | null>(null)
   const [remoteAuthStatus, setRemoteAuthStatus] = useState<"pendiente" | "aprobado" | "rechazado">("pendiente")
   const [remoteAuthLocalSupervisorAvailable, setRemoteAuthLocalSupervisorAvailable] = useState(false)
+  const authRequestInFlightRef = useRef(false)
 
   // Ranking real de productos más vendidos (por sku, viene de reportes reales
   // de ventas) -- la pestaña "TOP"/Frecuentes antes mostraba products.slice(0,30)
@@ -600,6 +849,7 @@ export default function POSPage() {
   const [showDevolucionModal, setShowDevolucionModal] = useState(false)
   const [devolucionStep, setDevolucionStep] = useState<"buscar" | "items">("buscar")
   const [devolucionSales, setDevolucionSales] = useState<Sale[]>([])
+  const [devolucionSalesRecientes, setDevolucionSalesRecientes] = useState<Sale[]>([])
   const [devolucionSalesLoading, setDevolucionSalesLoading] = useState(false)
   const [devolucionSearch, setDevolucionSearch] = useState("")
   const [devolucionSaleSeleccionada, setDevolucionSaleSeleccionada] = useState<Sale | null>(null)
@@ -611,9 +861,56 @@ export default function POSPage() {
   const [devolucionObservaciones, setDevolucionObservaciones] = useState("")
   const [devolucionSubmitting, setDevolucionSubmitting] = useState(false)
 
-  // ── ESTADOS DE CARRITO & CLIENTE ──────────────────────────────────────────
-  const [cart, setCart] = useState<CartItem[]>([])
-  const [customer, setCustomer] = useState<Customer>(DEFAULT_CUSTOMER)
+  // ── ESTADOS DE CARRITO & CLIENTE (Auto-Persistidos contra recargas o reinicios) ──
+  const ACTIVE_CART_KEY = `pos_active_cart_${COMPANY_ID}`
+  const ACTIVE_CUSTOMER_KEY = `pos_active_customer_${COMPANY_ID}`
+
+  const [cart, setCart] = useState<CartItem[]>(() => {
+    try {
+      const s = localStorage.getItem(`pos_active_cart_${COMPANY_ID}`)
+      return s ? JSON.parse(s) : []
+    } catch {
+      return []
+    }
+  })
+  const [customer, setCustomer] = useState<Customer>(() => {
+    try {
+      const s = localStorage.getItem(`pos_active_customer_${COMPANY_ID}`)
+      return s ? JSON.parse(s) : DEFAULT_CUSTOMER
+    } catch {
+      return DEFAULT_CUSTOMER
+    }
+  })
+
+  // ── OFERTAS PERSONALIZADAS "TE EXTRAÑAMOS" DIRIGIDAS AL CLIENTE ──
+  const [activeCustomerOffers, setActiveCustomerOffers] = useState<any[]>([])
+  const [festiveOfferAlert, setFestiveOfferAlert] = useState<{
+    cliente: string
+    producto: string
+    precio: number
+    ahorro: number
+  } | null>(null)
+
+  useEffect(() => {
+    try {
+      if (cart.length > 0) {
+        localStorage.setItem(ACTIVE_CART_KEY, JSON.stringify(cart))
+      } else {
+        localStorage.removeItem(ACTIVE_CART_KEY)
+      }
+    } catch {}
+  }, [cart])
+
+  useEffect(() => {
+    try {
+      if (customer && customer.id !== DEFAULT_CUSTOMER.id) {
+        localStorage.setItem(ACTIVE_CUSTOMER_KEY, JSON.stringify(customer))
+      } else {
+        localStorage.removeItem(ACTIVE_CUSTOMER_KEY)
+      }
+    } catch {}
+  }, [customer])
+
   const [showCustomerModal, setShowCustomerModal] = useState(false)
   const [customerSearch, setCustomerSearch] = useState("")
   const [showCreateCustomerForm, setShowCreateCustomerForm] = useState(false)
@@ -622,6 +919,16 @@ export default function POSPage() {
   const [newCustTelefono, setNewCustTelefono] = useState("")
   const [lookupDvSuggested, setLookupDvSuggested] = useState<string | null>(null)
   const [customerHighlight, setCustomerHighlight] = useState(0)
+
+  // Foco garantizado en el input de búsqueda de clientes al abrir modal (F9)
+  useEffect(() => {
+    if (showCustomerModal) {
+      requestAnimationFrame(() => {
+        customerSearchInputRef.current?.focus()
+      })
+    }
+  }, [showCustomerModal])
+
 
   // Persistidas en localStorage -- antes vivían solo en memoria y una venta
   // pausada se perdía sin aviso ante cualquier recarga (HMR, crash, F5).
@@ -655,6 +962,9 @@ export default function POSPage() {
   const [priceCheckLoadingStock, setPriceCheckLoadingStock] = useState(false)
   const [priceCheckPromo, setPriceCheckPromo] = useState<{ nombre: string; tipo: string; descuento: number; precio_final: number } | null>(null)
   const [priceCheckLoadingPromo, setPriceCheckLoadingPromo] = useState(false)
+  const [priceCheckPacks, setPriceCheckPacks] = useState<{ id: string; etiqueta: string; unidades_por_paquete: number }[]>([])
+  const [priceCheckScannedAsPack, setPriceCheckScannedAsPack] = useState<{ etiqueta: string; unidadesPorPaquete: number } | null>(null)
+  const priceCheckRequestIdRef = useRef(0)
 
   // ── MULTIMONEDA & COTIZACIONES ────────────────────────────────────────────
   const [rates, setRates] = useState<CurrencyRates>(() => {
@@ -674,12 +984,28 @@ export default function POSPage() {
     precio: number
   } | null>(null)
 
+  // ── DESCUENTO DIRECTO AUTORIZADO POR SUPERVISOR (AUDITABLE) ────────────────
+  const [appliedDiscount, setAppliedDiscount] = useState<{
+    type: "percentage" | "fixed"
+    value: number
+    montoPyg: number
+    reason: string
+    supervisorId: string
+    supervisorNombre: string
+  } | null>(null)
+  const [showDiscountModal, setShowDiscountModal] = useState(false)
+  const [discountInputType, setDiscountInputType] = useState<"percentage" | "fixed">("percentage")
+  const [discountInputValue, setDiscountInputValue] = useState<string>("10")
+
   // ── MODALES DE COBRO MULTIMONEDA & PASARELAS POS BANCARD / DINELCO ─────────
   const [showPaymentModal, setShowPaymentModal] = useState(false)
+  // Calculadora de Vuelto Mixto (R$ + Gs.)
+  const [vueltoMixtoBrl, setVueltoMixtoBrl] = useState<string>("")
   // Redondeo Solidario & Donación ("Abre tu corazón" - Centro Amor y Esperanza)
   const [donacionActiva, setDonacionActiva] = useState(false)
   const [montoDonacionManual, setMontoDonacionManual] = useState<number | null>(null)
   const [campanaActivaDonacion, setCampanaActivaDonacion] = useState<any>(null)
+
   // Metodos de cobro activos -- reemplaza el viejo "paymentTab" de
   // seleccion unica (+ una pestana "Pago Mixto" que duplicaba cada campo).
   // Ahora cada metodo es un boton que se prende/apaga: con uno solo activo
@@ -687,7 +1013,8 @@ export default function POSPage() {
   // visible salvo en Efectivo); con 2+ activos, cada linea no-efectivo
   // muestra su propio campo de monto para dividir el cobro -- eso ES el
   // pago mixto, sin pantalla aparte.
-  const [activeMethods, setActiveMethods] = useState<Set<"cash" | "bancard" | "dinelco" | "qr" | "extra_club" | "plugpay_pix" | "plugpay_credito">>(new Set(["cash"]))
+  type PosPaymentMethodType = "cash" | "bancard" | "dinelco" | "plugpay" | "extra_club" | "otros" | "qr" | "plugpay_credito"
+  const [activeMethods, setActiveMethods] = useState<Set<PosPaymentMethodType>>(new Set(["cash"]))
   const isMultiPayment = activeMethods.size > 1
   // Por defecto un tap en un medio de pago REEMPLAZA la seleccion (un solo
   // medio activo a la vez, como espera cualquier cajero). Antes cada tap
@@ -696,31 +1023,100 @@ export default function POSPage() {
   // forma obvia de volver atras. El pago dividido en varios medios sigue
   // existiendo, pero ahora requiere prender "Pago mixto" a proposito.
   const [allowMixedPayment, setAllowMixedPayment] = useState(false)
-  const toggleActiveMethod = (m: "cash" | "bancard" | "dinelco" | "qr" | "extra_club" | "plugpay_pix" | "plugpay_credito") => {
+  const toggleActiveMethod = (m: PosPaymentMethodType) => {
+    // Solo resetear Bancard/Dinelco/QR/PlugPay cuando de verdad corresponde:
+    // reemplazo total (modo no-mixto) o se está SACANDO un metodo del mix.
+    // Agregar un metodo nuevo al pago mixto (el caso real de "Bancard +
+    // Efectivo", "Dinelco + Bancard", etc.) NO puede resetear nada -- antes
+    // togglear cualquier metodo llamaba resetBancardFlow() sin condicion,
+    // asi que si la cajera ya habia cobrado con Bancard (resultado
+    // "aprobada" ya en pantalla) y despues prendia otro medio para
+    // completar el mix, ese resultado recien obtenido se borraba solo,
+    // obligando a cargar el voucher a mano como si nunca se hubiera leido.
+    let shouldReset = false
     setActiveMethods(prev => {
       if (!allowMixedPayment) {
+        shouldReset = true
         return new Set([m])
       }
       const next = new Set(prev as any)
       if (next.has(m)) {
         if (next.size === 1) return prev
         next.delete(m)
+        shouldReset = true
       } else {
         next.add(m)
       }
       return next as any
     })
+    // Si se selecciona un medio no-efectivo en modo no-mixto, limpiar el
+    // efectivo precargado para que no siga sumando al total recibido.
+    if (!allowMixedPayment && m !== "cash") {
+      setPayCashPyg("")
+      setPayCashBrl("")
+      setPayCashUsd("")
+    }
     setPosVerifyStatus("idle")
     setPosVerifyCandidates([])
     setPosVerifiedTxn(null)
-    resetBancardFlow()
+    if (shouldReset) resetBancardFlow()
   }
+
+  // ── SUB-MÉTODOS UNIFICADOS (Bancard, Dinelco, PlugPay, Otros) ──────────
+  const [bancardSubMethod, setBancardSubMethod] = useState<"debito" | "credito" | "qr_zimple" | "qr_cloud">("debito")
+  const [dinelcoSubMethod, setDinelcoSubMethod] = useState<"debito" | "credito" | "social" | "qr" | "pix">("debito")
+  const [plugpaySubMethod, setPlugpaySubMethod] = useState<"pix" | "parcelado">("pix")
+  const [showPlugpayManualFallback, setShowPlugpayManualFallback] = useState(false)
+  const [plugpayManualComprobante, setPlugpayManualComprobante] = useState("")
+  const [plugpayManualAutorizacion, setPlugpayManualAutorizacion] = useState("")
+
+  // Otros (Transferencia Bancaria, Cheques y Vales de Compra)
+  const [otrosSubMethod, setOtrosSubMethod] = useState<"transferencia" | "cheque" | "vale">("transferencia")
+  const [transfComprobante, setTransfComprobante] = useState("")
+  const [transfBancoOrigen, setTransfBancoOrigen] = useState("")
+  const [transfTitular, setTransfTitular] = useState("")
+  const [chequeBanco, setChequeBanco] = useState("")
+  const [chequeNumero, setChequeNumero] = useState("")
+  const [chequeFechaVenc, setChequeFechaVenc] = useState("")
+  const [chequeTitular, setChequeTitular] = useState("")
+  const [valeCodigo, setValeCodigo] = useState("")
+  const [valeValidating, setValeValidating] = useState(false)
+  const [valeData, setValeData] = useState<{ id: string; numero_vale: string; convenio_nombre: string; monto: number } | null>(null)
+  const valeInputRef = useRef<HTMLInputElement>(null)
+  const [mixedPlugPayPyg, setMixedPlugPayPyg] = useState("")
+  const [mixedOtrosPyg, setMixedOtrosPyg] = useState("")
+  const mixedPlugPayPygInputRef = useRef<HTMLInputElement>(null)
+  const mixedOtrosPygInputRef = useRef<HTMLInputElement>(null)
+  const [otrosSupervisorApproved, setOtrosSupervisorApproved] = useState(false)
   
-  const [qrSubMethod, setQrSubMethod] = useState<"zimple" | "pix">("zimple")
+  const [qrSubMethod, setQrSubMethod] = useState<"zimple" | "pix" | "dinelco" | "bancard_cloud">("zimple")
+  // QR Bancard "en pantalla" -- API HTTPS directa (generate-qr-express /
+  // revert) segun spec "Qr en API de Comercios v1.2", distinto del QR
+  // Zimple de arriba (que lo genera el propio terminal fisico en SU
+  // pantalla via electronAPI.bancardCall). Este QR se muestra en la
+  // pantalla del Electron y el pago se confirma por webhook al backend,
+  // por eso hace polling contra nuestra propia API en vez de esperar una
+  // respuesta directa del terminal.
+  const [bancardCloudQrState, setBancardCloudQrState] = useState<"idle" | "generando" | "esperando" | "aprobada" | "error">("idle")
+  const [bancardCloudQrError, setBancardCloudQrError] = useState("")
+  const [bancardCloudQrData, setBancardCloudQrData] = useState<{ hookAlias: string; qrUrl: string; qrData: string; amount: number } | null>(null)
+  const bancardCloudPollRef = useRef<any>(null)
+  const [dinelcoQrState, setDinelcoQrState] = useState<"idle" | "esperando" | "aprobada" | "error_rechazo" | "error_conexion">("idle")
+  const [dinelcoQrError, setDinelcoQrError] = useState<string>("")
+  const [dinelcoQrMode, setDinelcoQrMode] = useState<"qr" | "pix">("qr")
+  const [dinelcoPixCpf, setDinelcoPixCpf] = useState("")
   // Efectivo Multimoneda simultáneo (Guaraníes NUNCA tiene decimales)
   const [payCashPyg, setPayCashPyg] = useState<string>("")
   const [payCashBrl, setPayCashBrl] = useState<string>("")
   const [payCashUsd, setPayCashUsd] = useState<string>("")
+  // El Enter en un campo de efectivo cerraba la venta apenas el monto
+  // cubria el total -- si hubo vuelto, no daba tiempo ni de verlo ni de
+  // ofrecer "Abre tu corazon". Ahora, la PRIMERA vez que el monto alcanza
+  // a cubrir el total, ese Enter solo "marca listo" (deja ver el vuelto
+  // tranquilo); recien el Enter SIGUIENTE cierra la venta de verdad. Si
+  // el cajero vuelve a tocar algun monto despues de eso, se reinicia (ver
+  // el useEffect mas abajo) para no saltarse la revision por accidente.
+  const [listoParaCerrar, setListoParaCerrar] = useState(false)
   const [hasClickedQuickCash, setHasClickedQuickCash] = useState<boolean>(false)
   const confirmCheckoutBtnRef = useRef<HTMLButtonElement>(null)
   const payCashPygInputRef = useRef<HTMLInputElement>(null)
@@ -772,6 +1168,74 @@ export default function POSPage() {
   const [bancardTxnResult, setBancardTxnResult] = useState<BancardTxnResult | null>(null)
   const [bancardTxnError, setBancardTxnError] = useState<string>("")
   const [showBancardManualFallback, setShowBancardManualFallback] = useState(false)
+
+  // ── COBROS ADICIONALES DEL MISMO MEDIO (2da/3ra tarjeta, 2do/3er QR, etc.) ──
+  // Genérico y N-instancias: se suma a la "línea principal" de cada método
+  // (que sigue funcionando exactamente igual, sin tocar) en vez de reemplazarla.
+  // Ver memoria "pendiente-pagos-multiples-mismo-metodo" para el porqué.
+  type ExtraLegMethod = "bancard" | "qr" | "dinelco" | "plugpay" | "plugpay_credito"
+  interface ExtraPaymentLeg {
+    id: string
+    method: ExtraLegMethod
+    montoStr: string
+    cardType: "debito" | "credito"
+    cardCuotas: number
+    txnState: "idle" | "esperando" | "generando" | "confirmando" | "aprobada" | "error_rechazo" | "error_conexion"
+    txnResult: any
+    txnError: string
+    showManualFallback: boolean
+    manualCupon: string
+    manualAuth: string
+    logId: string | null
+    // QR Bancard "Pantalla" (bancard_cloud) -- generación + polling propios por leg
+    qrUrl?: string
+    qrData?: string
+    hookAlias?: string
+    // Dinelco tiene tarjeta y QR/PIX bajo el mismo activeMethods("dinelco"),
+    // igual que la UI de la linea principal (dinelcoSubMethod) -- dinelcoOpType
+    // distingue las dos secciones de legs adicionales entre si.
+    dinelcoOpType?: "card" | "qr"
+    dinelcoQrMode?: "qr" | "pix"
+    pixCpf?: string
+    // PlugPay (PIX y Parcelado Brasil)
+    plugpayCpf?: string
+    plugpayPhone?: string
+    plugpayQrImageUrl?: string
+    plugpayBrlValue?: number | null
+  }
+  const extraLegPollRefs = useRef<Map<string, any>>(new Map())
+  const [extraPaymentLegs, setExtraPaymentLegs] = useState<ExtraPaymentLeg[]>([])
+  const updateExtraLeg = (id: string, patch: Partial<ExtraPaymentLeg>) => {
+    setExtraPaymentLegs((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)))
+  }
+  const addExtraLeg = (method: ExtraLegMethod, dinelcoOpType: "card" | "qr" = "card") => {
+    const id = `leg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    setExtraPaymentLegs((prev) => [...prev, {
+      id, method, montoStr: "", cardType: "debito", cardCuotas: 1,
+      txnState: "idle", txnResult: null, txnError: "", showManualFallback: false,
+      manualCupon: "", manualAuth: "", logId: null, dinelcoOpType, dinelcoQrMode: "qr", pixCpf: "",
+      plugpayCpf: "", plugpayPhone: "", plugpayQrImageUrl: "", plugpayBrlValue: null,
+    }])
+  }
+  const removeExtraLeg = (id: string) => {
+    const interval = extraLegPollRefs.current.get(id)
+    if (interval) { clearInterval(interval); extraLegPollRefs.current.delete(id) }
+    setExtraPaymentLegs((prev) => prev.filter((l) => l.id !== id))
+  }
+  const clearAllExtraLegs = () => {
+    for (const interval of extraLegPollRefs.current.values()) clearInterval(interval)
+    extraLegPollRefs.current.clear()
+    setExtraPaymentLegs([])
+  }
+  const extraLegsMontoTotal = (method: ExtraLegMethod) =>
+    extraPaymentLegs.filter((l) => l.method === method && (l.txnState === "aprobada" || l.manualCupon.trim())).reduce((sum, l) => sum + (parseInt(l.montoStr.replace(/\D/g, "") || "0", 10)), 0)
+  const [dinelcoTxnState, setDinelcoTxnState] = useState<"idle" | "esperando_tarjeta" | "confirmando" | "aprobada" | "error_rechazo" | "error_conexion">("idle")
+  const [dinelcoTxnResult, setDinelcoTxnResult] = useState<any>(null)
+  const [dinelcoTxnError, setDinelcoTxnError] = useState<string>("")
+  const [dinelcoTxnLogId, setDinelcoTxnLogId] = useState<string | null>(null)
+  const [dinelcoSessionId, setDinelcoSessionId] = useState<string | null>(null)
+  const [dinelcoCuotas, setDinelcoCuotas] = useState(1)
+  const [showDinelcoManualFallback, setShowDinelcoManualFallback] = useState(false)
   const [bancardTxnLogId, setBancardTxnLogId] = useState<string | null>(null)
 
   const [bancardQrState, setBancardQrState] = useState<"idle" | "esperando" | "aprobada" | "error_rechazo" | "error_conexion">("idle")
@@ -779,6 +1243,27 @@ export default function POSPage() {
   const [bancardQrError, setBancardQrError] = useState<string>("")
   const [bancardQrManualConfirm, setBancardQrManualConfirm] = useState(false)
   const [bancardQrLogId, setBancardQrLogId] = useState<string | null>(null)
+  const [showBancardQrManualFallback, setShowBancardQrManualFallback] = useState(false)
+  const [posQrCupon, setPosQrCupon] = useState("")
+  const [posQrAuth, setPosQrAuth] = useState("")
+
+  const handleManualConfirmQr = () => {
+    if (!posQrCupon.trim()) {
+      toast.warning("Falta Nº de Boleta / Ticket", "Ingresá el número de boleta o cupón impreso en el voucher del terminal.")
+      return
+    }
+    const result: BancardTxnResult = {
+      codigoAutorizacion: posQrAuth.trim() || "MANUAL",
+      nroBoleta: posQrCupon.trim(),
+      mensajeDisplay: "APROBADA MANUAL",
+      nombreTarjeta: "QR ZIMPLE / BANCARD",
+      nombreCliente: customer?.nombre || "CLIENTE",
+    }
+    setBancardQrResult(result)
+    setBancardQrState("aprobada")
+    setBancardQrManualConfirm(true)
+    toast.success("Pago QR Confirmado", `Voucher Nº ${posQrCupon.trim()} registrado manualmente.`)
+  }
 
   // ── FLUJO DE COBRO PLUGPAY (PIX & CRÉDITO PARCELADO BRASIL) ────────────────
   const [plugpayMethod, setPlugpayMethod] = useState<"zimple" | "pix" | "parcelado">("zimple")
@@ -789,6 +1274,7 @@ export default function POSPage() {
   const [plugpayPhone, setPlugpayPhone] = useState("")
   const [plugpayCuotas, setPlugpayCuotas] = useState(3)
   const [plugpayBrlValue, setPlugpayBrlValue] = useState<number | null>(null)
+  const [plugpayQrImageUrl, setPlugpayQrImageUrl] = useState<string>("")
   const plugpayPollIntervalRef = useRef<any>(null)
 
   const clearPlugpayPoll = () => {
@@ -804,7 +1290,7 @@ export default function POSPage() {
       toast.warning("CPF inválido", "El CPF brasileño debe tener exactamente 11 números.")
       return
     }
-    const montoPyg = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    const montoPyg = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay")) ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
     if (montoPyg <= 0) {
       toast.warning("Monto inválido", "Ingrese un monto mayor a 0.")
       return
@@ -828,10 +1314,10 @@ export default function POSPage() {
       }
       setPlugpayBrlValue(valBrlNum)
 
-      console.log(`[PLUGPAY-TRACE] Creando PIX de R$ ${valBrlNum} para CPF ${cleanCpf}`)
+      console.log(`[PLUGPAY-TRACE] Creando PIX de Gs. ${montoPyg} para CPF ${cleanCpf}`)
       const pixRes = await api.plugpay.createPix({
-        monto: valBrlNum,
-        moneda: "BRL",
+        monto: montoPyg,
+        moneda: "PYG",
         customer_cpf: cleanCpf,
       })
 
@@ -840,6 +1326,15 @@ export default function POSPage() {
       }
 
       setPlugpayResult(pixRes.data)
+      if (pixRes.data?.valueBRL) {
+        setPlugpayBrlValue(parseFloat(pixRes.data.valueBRL))
+      }
+      setPlugpayQrImageUrl("")
+      if (pixRes.data?.qrCodeCopiaCola) {
+        QRCode.toDataURL(pixRes.data.qrCodeCopiaCola, { margin: 1, width: 320 })
+          .then(setPlugpayQrImageUrl)
+          .catch(() => {})
+      }
       const refInterna = pixRes.data.referenciaInterna
 
       plugpayPollIntervalRef.current = setInterval(async () => {
@@ -860,6 +1355,7 @@ export default function POSPage() {
                 nombreCliente: "CLIENTE BRASILEÑO",
               })
               setBancardQrState("aprobada")
+              printPlugpayPixVoucher(pixRes.data, montoPyg, cleanCpf)
             } else if (status === 6) {
               clearPlugpayPoll()
               setPlugpayState("error")
@@ -891,7 +1387,7 @@ export default function POSPage() {
       toast.warning("Teléfono inválido", "Ingrese un número de teléfono válido para el cliente.")
       return
     }
-    const montoPyg = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    const montoPyg = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay_credito")) ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
     if (montoPyg <= 0) {
       toast.warning("Monto inválido", "Ingrese un monto mayor a 0.")
       return
@@ -931,27 +1427,28 @@ export default function POSPage() {
       }
 
       setPlugpayResult(startRes.data)
-      const refInterna = startRes.data.referenciaInterna
+      const refInterna = startRes.data.serialNumber || startRes.data.SerialNumber || startRes.data.referenciaInterna || String(startRes.data.IdInitialTransaction || "")
 
       plugpayPollIntervalRef.current = setInterval(async () => {
         try {
           const statusRes = await api.plugpay.parceladoStatus(refInterna)
           if (statusRes.ok && statusRes.data) {
-            const status = statusRes.data.status || (statusRes.data.transaction && statusRes.data.transaction.status)
-            console.log(`[PLUGPAY-TRACE] Polling Crédito status=${status}`)
-            if (status === 1) {
+            const txn = statusRes.data.transaction || statusRes.data
+            console.log(`[PLUGPAY-TRACE] Polling Crédito status:`, txn)
+            if (txn.token || txn.payment_method_id || txn.status === 1 || txn.status === "approved") {
               clearPlugpayPoll()
               setPlugpayState("aprobada")
               toast.success("Crédito Aprobado", "La transacción con tarjeta de Brasil fue aprobada con éxito.")
               setBancardQrResult({
-                codigoAutorizacion: statusRes.data.transaction?.transactionCode || "PLUGPAY",
-                nroBoleta: String(statusRes.data.transaction?.id || Date.now()),
+                codigoAutorizacion: txn.SerialNumber || String(txn.id || "PLUGPAY"),
+                nroBoleta: String(txn.id || Date.now()),
                 mensajeDisplay: "APROBADA",
-                nombreTarjeta: "PLUGPAY BRL",
-                nombreCliente: "CLIENTE BRASILEÑO",
+                nombreTarjeta: "PLUGPAY CRÉDITO",
+                nombreCliente: plugpayCpf,
               })
               setBancardQrState("aprobada")
-            } else if (status === 6) {
+              printPlugpayParceladoVoucher(txn, montoPyg, cleanCpf, plugpayCuotas)
+            } else if (txn.status === 6 || txn.status === "rejected" || txn.status === "cancelled") {
               clearPlugpayPoll()
               setPlugpayState("error")
               setPlugpayError("La transacción con tarjeta fue cancelada o rechazada.")
@@ -961,13 +1458,137 @@ export default function POSPage() {
         } catch (err) {
           console.error("Error en polling parcelado:", err)
         }
-      }, 5000)
+      }, 4000)
 
     } catch (e: any) {
       console.error(e)
       setPlugpayState("error")
       setPlugpayError(e.message || "Error al conectar con PlugPay.")
       toast.error("Error PlugPay", e.message || "No se pudo procesar el crédito.")
+    }
+  }
+
+  // Version leg-scoped de handlePlugpayPix, para el 2do/3er PIX de la
+  // misma venta. El polling se guarda en extraLegPollRefs (Map por leg id),
+  // igual que el QR Bancard "Pantalla".
+  const handlePlugpayPixForLeg = async (leg: ExtraPaymentLeg) => {
+    const cleanCpf = (leg.plugpayCpf || "").replace(/\D/g, "")
+    if (!cleanCpf || cleanCpf.length !== 11) {
+      toast.warning("CPF inválido", "El CPF brasileño debe tener exactamente 11 números.")
+      return
+    }
+    const montoPyg = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+    if (montoPyg <= 0) {
+      toast.warning("Monto inválido", "Ingrese un monto mayor a 0.")
+      return
+    }
+    updateExtraLeg(leg.id, { txnState: "esperando", txnError: "", txnResult: null })
+    const existing = extraLegPollRefs.current.get(leg.id)
+    if (existing) clearInterval(existing)
+
+    try {
+      const quoteRes = await api.plugpay.quotePix({ monto: montoPyg, moneda: "PYG" })
+      if (!quoteRes.ok) throw new Error(quoteRes.error_message || "Error al obtener cotización.")
+      const valBrl = quoteRes.data?.valorEmBRL || quoteRes.data?.valueBRL || (rates.BRL > 0 ? (montoPyg / rates.BRL) : 0)
+      const valBrlNum = parseFloat(valBrl)
+      if (!valBrlNum || valBrlNum <= 0) throw new Error("La cotización devolvió un monto en Reales inválido.")
+
+      const pixRes = await api.plugpay.createPix({ monto: montoPyg, moneda: "PYG", customer_cpf: cleanCpf })
+      if (!pixRes.ok) throw new Error(pixRes.error_message || "Error al generar cobro PIX.")
+
+      let qrImg = ""
+      if (pixRes.data?.qrCodeCopiaCola) {
+        try { qrImg = await QRCode.toDataURL(pixRes.data.qrCodeCopiaCola, { margin: 1, width: 320 }) } catch { /* sin QR visual, no bloquea */ }
+      }
+      updateExtraLeg(leg.id, {
+        txnResult: pixRes.data, plugpayQrImageUrl: qrImg,
+        plugpayBrlValue: pixRes.data?.valueBRL ? parseFloat(pixRes.data.valueBRL) : valBrlNum,
+      })
+      const refInterna = pixRes.data.referenciaInterna
+
+      const interval = setInterval(async () => {
+        try {
+          const statusRes = await api.plugpay.pixStatus(refInterna)
+          if (statusRes.ok && statusRes.data) {
+            const status = statusRes.data.status
+            if (status === 1) {
+              clearInterval(extraLegPollRefs.current.get(leg.id)); extraLegPollRefs.current.delete(leg.id)
+              updateExtraLeg(leg.id, {
+                txnState: "aprobada",
+                logId: String(statusRes.data.IdTransacao || Date.now()),
+              })
+              toast.success("Pago Aprobado", "La transacción PIX fue aprobada con éxito.")
+            } else if (status === 6) {
+              clearInterval(extraLegPollRefs.current.get(leg.id)); extraLegPollRefs.current.delete(leg.id)
+              updateExtraLeg(leg.id, { txnState: "error_rechazo", txnError: "La transacción fue cancelada o expiró en PlugPay." })
+            }
+          }
+        } catch (err) {
+          console.error("Error en polling PIX (leg):", err)
+        }
+      }, 5000)
+      extraLegPollRefs.current.set(leg.id, interval)
+    } catch (e: any) {
+      updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: e.message || "No se pudo procesar el PIX." })
+    }
+  }
+
+  // Version leg-scoped de handlePlugpayParcelado, para el 2do/3er crédito
+  // parcelado Brasil de la misma venta.
+  const handlePlugpayParceladoForLeg = async (leg: ExtraPaymentLeg) => {
+    const cleanCpf = (leg.plugpayCpf || "").replace(/\D/g, "")
+    if (!cleanCpf || cleanCpf.length !== 11) {
+      toast.warning("CPF inválido", "El CPF brasileño debe tener exactamente 11 números.")
+      return
+    }
+    const cleanPhone = (leg.plugpayPhone || "").replace(/\D/g, "")
+    if (!cleanPhone || cleanPhone.length < 8) {
+      toast.warning("Teléfono inválido", "Ingrese un número de teléfono válido para el cliente.")
+      return
+    }
+    const montoPyg = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+    if (montoPyg <= 0) {
+      toast.warning("Monto inválido", "Ingrese un monto mayor a 0.")
+      return
+    }
+    updateExtraLeg(leg.id, { txnState: "esperando", txnError: "", txnResult: null })
+    const existing = extraLegPollRefs.current.get(leg.id)
+    if (existing) clearInterval(existing)
+
+    try {
+      const simRes = await api.plugpay.calcularParcelado({ monto: montoPyg, moneda: "PYG", cuotas: leg.cardCuotas })
+      if (!simRes.ok) throw new Error(simRes.error_message || "Error al simular parcelado.")
+      const valBrl = simRes.data?.valorEmBRL || simRes.data?.calculoParcelas?.valorOriginal || (rates.BRL > 0 ? (montoPyg / rates.BRL) : 0)
+      updateExtraLeg(leg.id, { plugpayBrlValue: parseFloat(valBrl) })
+
+      const startRes = await api.plugpay.startParcelado({
+        monto: montoPyg, moneda: "PYG", cuotas: leg.cardCuotas, customer_cpf: cleanCpf, customer_phone: cleanPhone,
+      })
+      if (!startRes.ok) throw new Error(startRes.error_message || "Error al iniciar Crédito Parcelado.")
+      updateExtraLeg(leg.id, { txnResult: startRes.data })
+      const refInterna = startRes.data.serialNumber || startRes.data.SerialNumber || startRes.data.referenciaInterna || String(startRes.data.IdInitialTransaction || "")
+
+      const interval = setInterval(async () => {
+        try {
+          const statusRes = await api.plugpay.parceladoStatus(refInterna)
+          if (statusRes.ok && statusRes.data) {
+            const txn = statusRes.data.transaction || statusRes.data
+            if (txn.token || txn.payment_method_id || txn.status === 1 || txn.status === "approved") {
+              clearInterval(extraLegPollRefs.current.get(leg.id)); extraLegPollRefs.current.delete(leg.id)
+              updateExtraLeg(leg.id, { txnState: "aprobada", logId: String(txn.id || Date.now()) })
+              toast.success("Crédito Aprobado", "La transacción con tarjeta de Brasil fue aprobada con éxito.")
+            } else if (txn.status === 6 || txn.status === "rejected" || txn.status === "cancelled") {
+              clearInterval(extraLegPollRefs.current.get(leg.id)); extraLegPollRefs.current.delete(leg.id)
+              updateExtraLeg(leg.id, { txnState: "error_rechazo", txnError: "El pago con tarjeta fue rechazado." })
+            }
+          }
+        } catch (err) {
+          console.error("Error en polling parcelado (leg):", err)
+        }
+      }, 4000)
+      extraLegPollRefs.current.set(leg.id, interval)
+    } catch (e: any) {
+      updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: e.message || "No se pudo procesar el crédito." })
     }
   }
 
@@ -979,8 +1600,142 @@ export default function POSPage() {
 
   const resetBancardFlow = () => {
     setBancardTxnState("idle"); setBancardTxnResult(null); setBancardTxnError(""); setShowBancardManualFallback(false); setBancardTxnLogId(null); setPosCardCuotas(1)
-    setBancardQrState("idle"); setBancardQrResult(null); setBancardQrError(""); setBancardQrManualConfirm(false); setBancardQrLogId(null)
-    setPlugpayState("idle"); setPlugpayResult(null); setPlugpayError(""); setPlugpayBrlValue(null); clearPlugpayPoll()
+    setBancardQrState("idle"); setBancardQrResult(null); setBancardQrError(""); setBancardQrManualConfirm(false); setBancardQrLogId(null); setShowBancardQrManualFallback(false); setPosQrCupon(""); setPosQrAuth("")
+    setPlugpayState("idle"); setPlugpayResult(null); setPlugpayError(""); setPlugpayBrlValue(null); setPlugpayQrImageUrl(""); clearPlugpayPoll()
+    // Si se abandona el flujo con una sesion RBIN/ENDOP abierta con el terminal
+    // Dinelco (ej. la cajera cancela a mitad de cobro), hay que avisarle al
+    // terminal con CANCEL -- si no, se queda esperando el ENDOP para siempre
+    // ("esperando informacion de caja" en su pantalla) y bloquea el siguiente
+    // cobro en esa misma caja.
+    if (dinelcoSessionId) {
+      (window as any).electronAPI?.dinelcoCancel?.(dinelcoSessionId).catch(() => {})
+    }
+    setDinelcoTxnState("idle"); setDinelcoTxnResult(null); setDinelcoTxnError(""); setDinelcoTxnLogId(null); setDinelcoSessionId(null); setDinelcoCuotas(1); setShowDinelcoManualFallback(false)
+    setDinelcoQrState("idle"); setDinelcoQrError(""); setDinelcoQrMode("qr"); setDinelcoPixCpf("")
+    if (bancardCloudPollRef.current) { clearInterval(bancardCloudPollRef.current); bancardCloudPollRef.current = null }
+    // Mismo caso que Dinelco: si se abandona el flujo con un QR de Bancard
+    // todavia sin confirmar (por el cierre generico del panel, no el boton
+    // "Cancelar QR" dedicado que ya llama a revert), hay que revertirlo
+    // igual -- si no, el QR queda activo indefinidamente del lado de Bancard.
+    if (bancardCloudQrData?.hookAlias && bancardCloudQrState === "esperando") {
+      api.bancardQr.revert(bancardCloudQrData.hookAlias).catch(() => {})
+    }
+    setBancardCloudQrState("idle"); setBancardCloudQrError(""); setBancardCloudQrData(null)
+  }
+
+  const handleGenerateBancardCloudQr = async () => {
+    const monto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    if (monto <= 0) {
+      toast.warning("Monto inválido", "Cargá el monto a cobrar por QR antes de continuar.")
+      return
+    }
+    setBancardCloudQrState("generando")
+    setBancardCloudQrError("")
+    setBancardCloudQrData(null)
+    try {
+      const res = await api.bancardQr.generate({ amount: monto, description: `Venta Caja ${puntoEmision}`, punto_emision: puntoEmision })
+      setBancardCloudQrData({ hookAlias: res.hook_alias, qrUrl: res.qr_url || "", qrData: res.qr_data || "", amount: res.amount })
+      setBancardCloudQrState("esperando")
+      if (bancardCloudPollRef.current) clearInterval(bancardCloudPollRef.current)
+      // Bancard recomienda mostrar el QR un maximo de 5 min y llamar a
+      // revert si el cliente nunca llega a pagar -- sin esto el QR queda
+      // activo indefinidamente del lado de ellos.
+      const generatedAt = Date.now()
+      const QR_TIMEOUT_MS = 5 * 60 * 1000
+      bancardCloudPollRef.current = setInterval(async () => {
+        if (Date.now() - generatedAt >= QR_TIMEOUT_MS) {
+          clearInterval(bancardCloudPollRef.current); bancardCloudPollRef.current = null
+          api.bancardQr.revert(res.hook_alias).catch(() => {})
+          setBancardCloudQrState("error")
+          setBancardCloudQrError("El QR expiró sin pago (5 minutos) y fue cancelado automáticamente.")
+          return
+        }
+        try {
+          const st = await api.bancardQr.status(res.hook_alias)
+          if (st.status === "confirmed") {
+            setBancardCloudQrState("aprobada")
+            clearInterval(bancardCloudPollRef.current); bancardCloudPollRef.current = null
+            printBancardCloudQrVoucher({ hookAlias: res.hook_alias, amount: res.amount }, st)
+          } else if (st.status === "failed" || st.status === "reverted") {
+            setBancardCloudQrState("error")
+            setBancardCloudQrError(st.response_description || "El pago no se pudo confirmar.")
+            clearInterval(bancardCloudPollRef.current); bancardCloudPollRef.current = null
+          }
+        } catch { /* red caida en un tick -- se reintenta solo en el proximo */ }
+      }, 3000)
+    } catch (e: any) {
+      setBancardCloudQrState("error")
+      setBancardCloudQrError(e instanceof Error ? e.message : "No se pudo generar el QR con Bancard.")
+    }
+  }
+
+  const handleCancelBancardCloudQr = async () => {
+    if (!bancardCloudQrData) return
+    if (bancardCloudPollRef.current) { clearInterval(bancardCloudPollRef.current); bancardCloudPollRef.current = null }
+    try {
+      await api.bancardQr.revert(bancardCloudQrData.hookAlias)
+    } catch (e: any) {
+      toast.warning("No se pudo reversar en Bancard", e instanceof Error ? e.message : "El QR puede seguir activo del lado de Bancard -- verificá antes de generar uno nuevo.")
+    }
+    setBancardCloudQrState("idle")
+    setBancardCloudQrData(null)
+    setBancardCloudQrError("")
+  }
+
+  // Version leg-scoped de handleGenerateBancardCloudQr (QR "Pantalla"), para
+  // el 2do/3er QR de la misma venta. El interval de polling se guarda en
+  // extraLegPollRefs (Map por leg id) en vez de un ref unico -- varios QR
+  // en pantalla a la vez, cada uno con su propio reloj de 5 minutos.
+  const handleGenerateBancardCloudQrForLeg = async (leg: ExtraPaymentLeg) => {
+    const monto = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+    if (monto <= 0) {
+      toast.warning("Monto inválido", "Cargá el monto a cobrar por QR antes de continuar.")
+      return
+    }
+    updateExtraLeg(leg.id, { txnState: "generando", txnError: "" })
+    try {
+      const res = await api.bancardQr.generate({ amount: monto, description: `Venta Caja ${puntoEmision} (adicional)`, punto_emision: puntoEmision })
+      updateExtraLeg(leg.id, { txnState: "esperando", qrUrl: res.qr_url || "", qrData: res.qr_data || "", hookAlias: res.hook_alias })
+      const existing = extraLegPollRefs.current.get(leg.id)
+      if (existing) clearInterval(existing)
+      const generatedAt = Date.now()
+      const QR_TIMEOUT_MS = 5 * 60 * 1000
+      const interval = setInterval(async () => {
+        if (Date.now() - generatedAt >= QR_TIMEOUT_MS) {
+          clearInterval(extraLegPollRefs.current.get(leg.id)); extraLegPollRefs.current.delete(leg.id)
+          api.bancardQr.revert(res.hook_alias).catch(() => {})
+          updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: "El QR expiró sin pago (5 minutos) y fue cancelado automáticamente." })
+          return
+        }
+        try {
+          const st = await api.bancardQr.status(res.hook_alias)
+          if (st.status === "confirmed") {
+            updateExtraLeg(leg.id, { txnState: "aprobada" })
+            clearInterval(extraLegPollRefs.current.get(leg.id)); extraLegPollRefs.current.delete(leg.id)
+            printBancardCloudQrVoucher({ hookAlias: res.hook_alias, amount: monto }, st)
+          } else if (st.status === "failed" || st.status === "reverted") {
+            updateExtraLeg(leg.id, { txnState: "error_rechazo", txnError: st.response_description || "El pago no se pudo confirmar." })
+            clearInterval(extraLegPollRefs.current.get(leg.id)); extraLegPollRefs.current.delete(leg.id)
+          }
+        } catch { /* red caida en un tick -- se reintenta solo en el proximo */ }
+      }, 3000)
+      extraLegPollRefs.current.set(leg.id, interval)
+    } catch (e: any) {
+      updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: e instanceof Error ? e.message : "No se pudo generar el QR con Bancard." })
+    }
+  }
+
+  const handleCancelBancardCloudQrForLeg = async (leg: ExtraPaymentLeg) => {
+    const interval = extraLegPollRefs.current.get(leg.id)
+    if (interval) { clearInterval(interval); extraLegPollRefs.current.delete(leg.id) }
+    if (leg.hookAlias) {
+      try {
+        await api.bancardQr.revert(leg.hookAlias)
+      } catch (e: any) {
+        toast.warning("No se pudo reversar en Bancard", e instanceof Error ? e.message : "El QR puede seguir activo del lado de Bancard -- verificá antes de generar uno nuevo.")
+      }
+    }
+    updateExtraLeg(leg.id, { txnState: "idle", qrUrl: undefined, qrData: undefined, hookAlias: undefined, txnError: "" })
   }
 
   // El terminal Bancard no tiene forma via API de forzar la limpieza de una
@@ -1017,7 +1772,7 @@ export default function POSPage() {
       toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Bancard para esta caja en \"Configurar Terminales POS\".")
       return
     }
-    const montoBancard = isMultiPayment ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    const montoBancard = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "bancard")) ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
     if (montoBancard <= 0) {
       toast.warning("Monto inválido", "Cargá el monto a cobrar por Bancard antes de continuar.")
       return
@@ -1044,7 +1799,7 @@ export default function POSPage() {
       body1.plan = 1
     }
     console.log(`[BANCARD-TRACE] paso1 -> ip=${ip} path=${path1} body=${JSON.stringify(body1)}`)
-    const res1 = await electronAPI.bancardCall(ip, path1, body1, 90000)
+    const res1 = await imBancard(electronAPI, ip, path1, body1, 90000)
     console.log(`[BANCARD-TRACE] paso1 <- ${JSON.stringify(res1)}`)
 
     if (!res1.ok) {
@@ -1068,7 +1823,7 @@ export default function POSPage() {
     setBancardTxnState("confirmando")
     const body2 = { bin, nsu, monto: montoBancard }
     console.log(`[BANCARD-TRACE] paso2 -> ip=${ip} path=/pos/descuento body=${JSON.stringify(body2)}`)
-    const res2 = await electronAPI.bancardCall(ip, "/pos/descuento", body2, 30000)
+    const res2 = await imBancard(electronAPI, ip, "/pos/descuento", body2, 30000)
     console.log(`[BANCARD-TRACE] paso2 <- ${JSON.stringify(res2)}`)
 
     if (!res2.ok) {
@@ -1104,6 +1859,348 @@ export default function POSPage() {
     setPosCardCupon(result.nroBoleta || "")
   }
 
+  // Version leg-scoped de handleBancardCharge, para el 2do/3er cobro con
+  // tarjeta de la misma venta -- misma logica de protocolo, escribe en
+  // extraPaymentLegs en vez de las variables singleton de la linea principal.
+  const handleBancardChargeForLeg = async (leg: ExtraPaymentLeg) => {
+    const ip = activePosConfig.bancardIp
+    if (!ip) {
+      toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Bancard para esta caja en \"Configurar Terminales POS\".")
+      return
+    }
+    const montoBancard = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+    if (montoBancard <= 0) {
+      toast.warning("Monto inválido", "Cargá el monto a cobrar por Bancard antes de continuar.")
+      return
+    }
+    const electronAPI = (window as any).electronAPI
+    if (!electronAPI?.bancardCall) {
+      updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: "Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá.", showManualFallback: true })
+      return
+    }
+    const facturaNro = Date.now()
+    updateExtraLeg(leg.id, { txnState: "esperando", txnError: "", txnResult: null, showManualFallback: false })
+
+    const tipoOperacion = leg.cardType === "debito" ? "venta_debito" : (leg.cardCuotas > 1 ? `venta_credito_${leg.cardCuotas}cuotas` : "venta_credito")
+    const path1 = "/pos/venta-ux"
+    const body1: any = { facturaNro, monto: montoBancard }
+    if (leg.cardType === "credito" && leg.cardCuotas > 1) {
+      body1.cuotas = leg.cardCuotas
+      body1.plan = 1
+    }
+    const res1 = await imBancard(electronAPI, ip, path1, body1, 90000)
+
+    if (!res1.ok) {
+      if (res1.status === 400 || res1.status === 500) {
+        updateExtraLeg(leg.id, { txnState: "error_rechazo", txnError: bancardErrorMessage(res1.body?.message) })
+        await logBancardTxn({
+          tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true, error_message: res1.body?.message,
+          monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res1.body,
+        })
+      } else {
+        updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: `No se pudo conectar con el terminal (${res1.message || "error de red"}) -- verificá la red o cargá el cupón manualmente si ya cobraste en el terminal.`, showManualFallback: true })
+      }
+      return
+    }
+
+    const { bin, nsu } = res1.body || {}
+    updateExtraLeg(leg.id, { txnState: "confirmando" })
+    const body2 = { bin, nsu, monto: montoBancard }
+    const res2 = await imBancard(electronAPI, ip, "/pos/descuento", body2, 30000)
+
+    if (!res2.ok) {
+      if (res2.status === 400 || res2.status === 500) {
+        updateExtraLeg(leg.id, { txnState: "error_rechazo", txnError: bancardErrorMessage(res2.body?.message) })
+        await logBancardTxn({
+          tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true, error_message: res2.body?.message,
+          bin, nsu, monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res2.body,
+        })
+      } else {
+        updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: `Se cobró en el terminal pero no se pudo confirmar la respuesta (${res2.message || "error de red"}) -- revisá el terminal y cargá el cupón manualmente.`, showManualFallback: true })
+      }
+      return
+    }
+
+    const result = res2.body || {}
+    const logged = await logBancardTxn({
+      tipo_operacion: tipoOperacion, exitosa: true, verificado_automaticamente: true,
+      bin, nsu, monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro),
+      codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.codigoComercio,
+      issuer_id: result.issuerId, nombre_tarjeta: result.nombreTarjeta, pan: result.pan,
+      mensaje_display: result.mensajeDisplay, nombre_cliente: result.nombreCliente,
+      monto_vuelto: result.montoVuelto, saldo: result.saldo, raw_response: result,
+    })
+    updateExtraLeg(leg.id, { txnState: "aprobada", txnResult: result, logId: (logged as any)?.id || null, manualCupon: result.nroBoleta || "" })
+  }
+
+  const logDinelcoTxn = async (data: Record<string, any>) => {
+    try {
+      return await api.posTerminalTransactions.create({
+        ...data,
+        punto_emision: puntoEmision,
+        customer_id: customer && customer.id !== DEFAULT_CUSTOMER.id ? customer.id : null,
+      } as any)
+    } catch (e) {
+      console.error("No se pudo registrar la transacción del terminal Dinelco:", e)
+      return null
+    }
+  }
+
+  // Protocolo Dinelco real (manual "Integracion Caja - POS WIFI/LAN/USB v2.6"):
+  // TCP crudo puerto 9600, pipe-delimited. Secuencia: RBIN (pide monto+OP, el
+  // terminal solicita la tarjeta) -> ENDOP (confirma monto/cuotas, dispara la
+  // autorizacion). El bridge vive en Electron main (net.Socket), no en el
+  // backend Python, porque el terminal esta en la LAN de la caja, igual que
+  // Bancard -- ver electron/dinelco-client.cjs.
+  const handleDinelcoCharge = async () => {
+    const ip = activePosConfig.dinelcoIp
+    if (!ip) {
+      toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Dinelco para esta caja en \"Configurar Terminales POS\".")
+      return
+    }
+    const montoDinelco = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "dinelco")) ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    if (montoDinelco <= 0) {
+      toast.warning("Monto inválido", "Cargá el monto a cobrar por Dinelco antes de continuar.")
+      return
+    }
+    const electronAPI = (window as any).electronAPI
+    if (!electronAPI?.dinelcoCall) {
+      setDinelcoTxnState("error_conexion")
+      setDinelcoTxnError("Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá.")
+      setShowDinelcoManualFallback(true)
+      return
+    }
+    setDinelcoTxnState("esperando_tarjeta")
+    setDinelcoTxnError("")
+    setDinelcoTxnResult(null)
+    setShowDinelcoManualFallback(false)
+
+    const res1 = await imDinelco(electronAPI, ip, "venta_inicio", { op: "01", monto: montoDinelco }, null, 90000)
+
+    if (!res1.ok) {
+      setDinelcoTxnState(res1.error ? "error_conexion" : "error_rechazo")
+      setDinelcoTxnError(res1.error ? `No se pudo conectar con el terminal (${res1.error}) -- verificá la red o cargá el cupón manualmente si ya cobraste en el terminal.` : (res1.desc || "El terminal rechazó la operación."))
+      if (res1.error) setShowDinelcoManualFallback(true)
+      await logDinelcoTxn({
+        tipo_operacion: dinelcoCardType === "credito" && dinelcoCuotas > 1 ? `dinelco_venta_credito_${dinelcoCuotas}cuotas` : `dinelco_venta_${dinelcoCardType}`,
+        exitosa: false, verificado_automaticamente: true, error_message: res1.desc || res1.error,
+        monto: montoDinelco, terminal_ip: ip, raw_response: res1,
+      })
+      return
+    }
+
+    setDinelcoSessionId(res1.sessionId)
+    setDinelcoTxnState("confirmando")
+    const cuotasParam = dinelcoCardType === "credito" && dinelcoCuotas > 1 ? dinelcoCuotas : 0
+    // ENDOP dispara la autorizacion real via ISO8583 contra el adquirente
+    // (manual Bepsa/Dinelco pag. 10, pasos 3-6) -- una autorizacion real
+    // puede tardar mas que un mensaje local. 30s quedaba corto (mas corto
+    // incluso que el timeout de QR/PIX, que ademas de la autorizacion
+    // esperan que el cliente escanee y apruebe en su banco) y explicaba el
+    // sintoma reportado: el terminal seguia "calculando" la autorizacion
+    // real mientras nuestro cliente ya habia tirado la toalla por timeout.
+    const res2 = await imDinelco(electronAPI, ip, "venta_confirmar", { cuotas: cuotasParam, monto: montoDinelco }, res1.sessionId, 90000)
+
+    if (!res2.ok) {
+      setDinelcoTxnState(res2.error ? "error_conexion" : "error_rechazo")
+      setDinelcoTxnError(res2.error ? `Se inició el cobro en el terminal pero no se pudo confirmar la respuesta (${res2.error}) -- revisá el terminal y cargá el cupón manualmente.` : (res2.desc || "El terminal rechazó la operación."))
+      if (res2.error) setShowDinelcoManualFallback(true)
+      await logDinelcoTxn({
+        tipo_operacion: dinelcoCardType === "credito" && dinelcoCuotas > 1 ? `dinelco_venta_credito_${dinelcoCuotas}cuotas` : `dinelco_venta_${dinelcoCardType}`,
+        exitosa: false, verificado_automaticamente: true, error_message: res2.desc || res2.error,
+        monto: montoDinelco, terminal_ip: ip, raw_response: res2,
+      })
+      // Avisarle al terminal que la sesion abierta por el RBIN anterior queda
+      // cancelada -- sin esto se queda "esperando informacion de caja" y
+      // arruina el proximo intento de cobro en esta caja.
+      electronAPI.dinelcoCancel?.(res1.sessionId).catch(() => {})
+      setDinelcoSessionId(null)
+      return
+    }
+
+    // Orden de CAMPOSOK del manual: AUTHCODE|AUTHORIZER|OPTYPE|BOLETA|TERMINAL|COMERCIO|ULTIMOS4|PUNTOS
+    const c = res2.campos || []
+    const result = {
+      codigoAutorizacion: c[0] || "", authorizer: c[1] || "", opType: c[2] || "",
+      nroBoleta: c[3] || "", terminal: c[4] || "", comercio: c[5] || "", ultimos4: c[6] || "", puntos: c[7] || "",
+    }
+    setDinelcoTxnResult(result)
+    setDinelcoTxnState("aprobada")
+    const logged = await logDinelcoTxn({
+      tipo_operacion: dinelcoCardType === "credito" && dinelcoCuotas > 1 ? `dinelco_venta_credito_${dinelcoCuotas}cuotas` : `dinelco_venta_${dinelcoCardType}`,
+      exitosa: true, verificado_automaticamente: true,
+      monto: montoDinelco, terminal_ip: ip,
+      codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.comercio,
+      mensaje_display: "APROBADA", raw_response: result,
+    })
+    setDinelcoTxnLogId((logged as any)?.id || null)
+    setDinelcoSessionId(null)
+    setDinelcoCupon(result.nroBoleta || "")
+  }
+
+  const handleDinelcoQR = async () => {
+    const ip = activePosConfig.dinelcoIp
+    if (!ip) {
+      toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Dinelco para esta caja en \"Configurar Terminales POS\".")
+      return
+    }
+    const montoQrDinelco = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "dinelco")) ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    if (montoQrDinelco <= 0) {
+      toast.warning("Monto inválido", "Cargá el monto a cobrar por QR antes de continuar.")
+      return
+    }
+    if (dinelcoQrMode === "pix" && dinelcoPixCpf.replace(/\D/g, "").length !== 11) {
+      toast.warning("CPF inválido", "El CPF del comprador debe tener 11 dígitos para procesar PIX.")
+      return
+    }
+    const electronAPI = (window as any).electronAPI
+    if (!electronAPI?.dinelcoCall) {
+      setDinelcoQrState("error_conexion")
+      setDinelcoQrError("Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá.")
+      return
+    }
+    setDinelcoQrState("esperando")
+    setDinelcoQrError("")
+
+    const res = dinelcoQrMode === "pix"
+      ? await imDinelco(electronAPI, ip, "pix", { monto: montoQrDinelco, cpf: dinelcoPixCpf.replace(/\D/g, "") }, null, 90000)
+      : await imDinelco(electronAPI, ip, "qr", { op: "01", monto: montoQrDinelco }, null, 90000)
+
+    const tipoOperacion = dinelcoQrMode === "pix" ? "dinelco_pix" : "dinelco_qr"
+
+    if (!res.ok) {
+      setDinelcoQrState(res.error ? "error_conexion" : "error_rechazo")
+      setDinelcoQrError(res.error ? `No se pudo conectar con el terminal (${res.error}).` : (res.desc || "El terminal rechazó la operación."))
+      await logDinelcoTxn({
+        tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true,
+        error_message: res.desc || res.error, monto: montoQrDinelco, terminal_ip: ip, raw_response: res,
+      })
+      return
+    }
+
+    setDinelcoQrState("aprobada")
+    await logDinelcoTxn({
+      tipo_operacion: tipoOperacion, exitosa: true, verificado_automaticamente: true,
+      monto: montoQrDinelco, terminal_ip: ip, mensaje_display: "APROBADA", raw_response: res,
+    })
+  }
+
+  // Version leg-scoped de handleDinelcoCharge, para el 2do/3er cobro con
+  // tarjeta Dinelco de la misma venta.
+  const handleDinelcoChargeForLeg = async (leg: ExtraPaymentLeg) => {
+    const ip = activePosConfig.dinelcoIp
+    if (!ip) {
+      toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Dinelco para esta caja en \"Configurar Terminales POS\".")
+      return
+    }
+    const montoDinelco = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+    if (montoDinelco <= 0) {
+      toast.warning("Monto inválido", "Cargá el monto a cobrar por Dinelco antes de continuar.")
+      return
+    }
+    const electronAPI = (window as any).electronAPI
+    if (!electronAPI?.dinelcoCall) {
+      updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: "Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá.", showManualFallback: true })
+      return
+    }
+    updateExtraLeg(leg.id, { txnState: "esperando", txnError: "", txnResult: null, showManualFallback: false })
+
+    const tipoOperacion = leg.cardType === "credito" && leg.cardCuotas > 1 ? `dinelco_venta_credito_${leg.cardCuotas}cuotas` : `dinelco_venta_${leg.cardType}`
+    const res1 = await imDinelco(electronAPI, ip, "venta_inicio", { op: "01", monto: montoDinelco }, null, 90000)
+
+    if (!res1.ok) {
+      updateExtraLeg(leg.id, {
+        txnState: res1.error ? "error_conexion" : "error_rechazo",
+        txnError: res1.error ? `No se pudo conectar con el terminal (${res1.error}) -- verificá la red o cargá el cupón manualmente si ya cobraste en el terminal.` : (res1.desc || "El terminal rechazó la operación."),
+        showManualFallback: !!res1.error,
+      })
+      await logDinelcoTxn({
+        tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true, error_message: res1.desc || res1.error,
+        monto: montoDinelco, terminal_ip: ip, raw_response: res1,
+      })
+      return
+    }
+
+    updateExtraLeg(leg.id, { txnState: "confirmando" })
+    const cuotasParam = leg.cardType === "credito" && leg.cardCuotas > 1 ? leg.cardCuotas : 0
+    const res2 = await imDinelco(electronAPI, ip, "venta_confirmar", { cuotas: cuotasParam, monto: montoDinelco }, res1.sessionId, 90000)
+
+    if (!res2.ok) {
+      updateExtraLeg(leg.id, {
+        txnState: res2.error ? "error_conexion" : "error_rechazo",
+        txnError: res2.error ? `Se inició el cobro en el terminal pero no se pudo confirmar la respuesta (${res2.error}) -- revisá el terminal y cargá el cupón manualmente.` : (res2.desc || "El terminal rechazó la operación."),
+        showManualFallback: !!res2.error,
+      })
+      await logDinelcoTxn({
+        tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true, error_message: res2.desc || res2.error,
+        monto: montoDinelco, terminal_ip: ip, raw_response: res2,
+      })
+      electronAPI.dinelcoCancel?.(res1.sessionId).catch(() => {})
+      return
+    }
+
+    const c = res2.campos || []
+    const result = {
+      codigoAutorizacion: c[0] || "", authorizer: c[1] || "", opType: c[2] || "",
+      nroBoleta: c[3] || "", terminal: c[4] || "", comercio: c[5] || "", ultimos4: c[6] || "", puntos: c[7] || "",
+    }
+    const logged = await logDinelcoTxn({
+      tipo_operacion: tipoOperacion, exitosa: true, verificado_automaticamente: true,
+      monto: montoDinelco, terminal_ip: ip,
+      codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.comercio,
+      mensaje_display: "APROBADA", raw_response: result,
+    })
+    updateExtraLeg(leg.id, { txnState: "aprobada", txnResult: result, logId: (logged as any)?.id || null, manualCupon: result.nroBoleta || "" })
+  }
+
+  // Version leg-scoped de handleDinelcoQR (QR Guaraníes / PIX Brasil).
+  const handleDinelcoQRForLeg = async (leg: ExtraPaymentLeg) => {
+    const ip = activePosConfig.dinelcoIp
+    if (!ip) {
+      toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Dinelco para esta caja en \"Configurar Terminales POS\".")
+      return
+    }
+    const montoQrDinelco = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+    if (montoQrDinelco <= 0) {
+      toast.warning("Monto inválido", "Cargá el monto a cobrar por QR antes de continuar.")
+      return
+    }
+    if (leg.dinelcoQrMode === "pix" && (leg.pixCpf || "").replace(/\D/g, "").length !== 11) {
+      toast.warning("CPF inválido", "El CPF del comprador debe tener 11 dígitos para procesar PIX.")
+      return
+    }
+    const electronAPI = (window as any).electronAPI
+    if (!electronAPI?.dinelcoCall) {
+      updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: "Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá." })
+      return
+    }
+    updateExtraLeg(leg.id, { txnState: "esperando", txnError: "" })
+
+    const res = leg.dinelcoQrMode === "pix"
+      ? await imDinelco(electronAPI, ip, "pix", { monto: montoQrDinelco, cpf: (leg.pixCpf || "").replace(/\D/g, "") }, null, 90000)
+      : await imDinelco(electronAPI, ip, "qr", { op: "01", monto: montoQrDinelco }, null, 90000)
+
+    const tipoOperacion = leg.dinelcoQrMode === "pix" ? "dinelco_pix" : "dinelco_qr"
+
+    if (!res.ok) {
+      updateExtraLeg(leg.id, {
+        txnState: res.error ? "error_conexion" : "error_rechazo",
+        txnError: res.error ? `No se pudo conectar con el terminal (${res.error}).` : (res.desc || "El terminal rechazó la operación."),
+      })
+      await logDinelcoTxn({
+        tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true,
+        error_message: res.desc || res.error, monto: montoQrDinelco, terminal_ip: ip, raw_response: res,
+      })
+      return
+    }
+
+    updateExtraLeg(leg.id, { txnState: "aprobada" })
+    await logDinelcoTxn({
+      tipo_operacion: tipoOperacion, exitosa: true, verificado_automaticamente: true,
+      monto: montoQrDinelco, terminal_ip: ip, mensaje_display: "APROBADA", raw_response: res,
+    })
+  }
+
   const handleBancardQR = async () => {
     console.log(`[BANCARD-TRACE] QR handler invocado, bancardIp=${activePosConfig.bancardIp || "(vacio)"}`)
     const ip = activePosConfig.bancardIp
@@ -1111,7 +2208,7 @@ export default function POSPage() {
       toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Bancard para esta caja en \"Configurar Terminales POS\".")
       return
     }
-    const montoQr = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    const montoQr = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
     if (montoQr <= 0) {
       toast.warning("Monto inválido", "Cargá el monto a cobrar por QR antes de continuar.")
       return
@@ -1130,7 +2227,7 @@ export default function POSPage() {
 
     const bodyQr = { facturaNro, monto: montoQr, montoVuelto: 0 }
     console.log(`[BANCARD-TRACE] QR -> ip=${ip} path=/pos/venta-qr body=${JSON.stringify(bodyQr)}`)
-    const res = await electronAPI.bancardCall(ip, "/pos/venta-qr", bodyQr, 180000)
+    const res = await imBancard(electronAPI, ip, "/pos/venta-qr", bodyQr, 180000)
     console.log(`[BANCARD-TRACE] QR <- ${JSON.stringify(res)}`)
 
     if (!res.ok) {
@@ -1162,6 +2259,55 @@ export default function POSPage() {
     setBancardQrLogId((logged as any)?.id || null)
   }
 
+  // Version leg-scoped de handleBancardQR (QR Zimple), para el 2do/3er
+  // cobro con QR de la misma venta.
+  const handleBancardQRForLeg = async (leg: ExtraPaymentLeg) => {
+    const ip = activePosConfig.bancardIp
+    if (!ip) {
+      toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Bancard para esta caja en \"Configurar Terminales POS\".")
+      return
+    }
+    const montoQr = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+    if (montoQr <= 0) {
+      toast.warning("Monto inválido", "Cargá el monto a cobrar por QR antes de continuar.")
+      return
+    }
+    const electronAPI = (window as any).electronAPI
+    if (!electronAPI?.bancardCall) {
+      updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: "Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá." })
+      return
+    }
+    const facturaNro = Date.now()
+    updateExtraLeg(leg.id, { txnState: "esperando", txnError: "", txnResult: null })
+
+    const bodyQr = { facturaNro, monto: montoQr, montoVuelto: 0 }
+    const res = await imBancard(electronAPI, ip, "/pos/venta-qr", bodyQr, 180000)
+
+    if (!res.ok) {
+      if (res.status === 400 || res.status === 500) {
+        updateExtraLeg(leg.id, { txnState: "error_rechazo", txnError: bancardErrorMessage(res.body?.message) })
+        await logBancardTxn({
+          tipo_operacion: "venta_qr", exitosa: false, verificado_automaticamente: true, error_message: res.body?.message,
+          monto: montoQr, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res.body,
+        })
+      } else {
+        updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: `No se pudo conectar con el terminal (${res.message || "error de red"}).` })
+      }
+      return
+    }
+
+    const result = res.body || {}
+    const logged = await logBancardTxn({
+      tipo_operacion: "venta_qr", exitosa: true, verificado_automaticamente: true,
+      monto: montoQr, terminal_ip: ip, factura_nro_provisional: String(facturaNro),
+      codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.codigoComercio,
+      issuer_id: result.issuerId, nombre_tarjeta: result.nombreTarjeta, pan: result.pan,
+      mensaje_display: result.mensajeDisplay, nombre_cliente: result.nombreCliente,
+      monto_vuelto: result.montoVuelto, saldo: result.saldo, raw_response: result,
+    })
+    updateExtraLeg(leg.id, { txnState: "aprobada", txnResult: result, logId: (logged as any)?.id || null })
+  }
+
 
   // Sincronizar terminales cuando cambia la caja
   useEffect(() => {
@@ -1175,6 +2321,7 @@ export default function POSPage() {
   const [mixedCardPyg, setMixedCardPyg] = useState("")
   const [mixedDinelcoPyg, setMixedDinelcoPyg] = useState("")
   const [mixedQrPyg, setMixedQrPyg] = useState("")
+  const [mixedParceladoPyg, setMixedParceladoPyg] = useState("")
   const [mixedExtraClubPyg, setMixedExtraClubPyg] = useState("")
 
   // ── Extra Club (pago a credito) -- busqueda propia dentro del tab de pago,
@@ -1215,61 +2362,95 @@ export default function POSPage() {
   const [submitting, setSubmitting] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
-  // ── CARGA INICIAL DE CATÁLOGO Y CLIENTES ──────────────────────────────────
+  // ── CARGA OFFLINE INSTANTÁNEA (INDEXEDDB) Y SINCRONIZACIÓN DELTA EN SEGUNDO PLANO ──
   useEffect(() => {
-    async function loadData() {
-      setLoading(true)
+    let isMounted = true
+
+    async function syncCatalog(isInitial: boolean) {
+      if (isInitial) {
+        // 1. Cargar inmediatamente de IndexedDB (0ms, 100% offline)
+        try {
+          const cached = await loadCachedPOSData()
+          if (isMounted) {
+            if (cached.cachedProducts.length > 0) setProducts(cached.cachedProducts)
+            if (cached.cachedStaff.length > 0) setSupervisorStaffOptions(cached.cachedStaff)
+          }
+        } catch (e) {
+          console.warn("[POS] Error leyendo cache offline:", e)
+        }
+      }
+
+      // 2. Consulta en segundo plano de metadatos y sincronización delta
       try {
-        const [prodData, custData, whData, staffData, topData, stockData] = await Promise.allSettled([
-          api.products.list({ limit: 5000 }).catch(() => []),
-          api.customers.list({ limit: 300 }).catch(() => []),
-          api.warehouses.list().catch(() => []),
-          api.auth.posAuthorizers().catch(() => ({ staff: [] })),
-          api.reports.salesByProduct({ limit: 100 }).catch(() => []),
-          api.inventory.getStockMap().catch(() => ({})),
+        const [whData, staffData, topData, stockData, packBarcodeData] = await Promise.allSettled([
+          api.warehouses.list(),
+          api.auth.posAuthorizers(),
+          api.reports.salesByProduct({ limit: 100 }),
+          api.inventory.getStockMap(),
+          api.products.packBarcodes.list(),
         ])
 
-        if (prodData.status === "fulfilled") {
-          const validProds = (prodData.value || []).filter(
-            (p: any) => p && p.nombre && p.nombre.trim() !== "..."
-          )
-          const combined = [...validProds, ...TOP_CATALOG_SEED as Product[]]
-          const map = new Map<string, Product>()
-          for (const item of combined) {
-            if (item.sku && !map.has(item.sku)) {
-              map.set(item.sku, item)
-            }
-          }
-          setProducts(Array.from(map.values()))
-        }
-
-        if (custData.status === "fulfilled") {
-          setCustomers((custData.value || []).map(normalizeCustomer))
-        }
-
-        if (whData.status === "fulfilled") {
+        if (whData.status === "fulfilled" && isMounted) {
           setWarehouses((whData.value || []).filter((w: any) => w.activo !== false))
         }
 
-        if (staffData.status === "fulfilled") {
+        if (staffData.status === "fulfilled" && isMounted) {
           setSupervisorStaffOptions(staffData.value?.staff || [])
         }
 
-        if (topData.status === "fulfilled") {
+        if (topData.status === "fulfilled" && isMounted) {
           setTopProductSkus((topData.value || []).map((r: any) => r.sku).filter(Boolean))
         }
 
-        if (stockData.status === "fulfilled") {
+        if (stockData.status === "fulfilled" && isMounted) {
           setStockMap(stockData.value || {})
         }
+
+        if (packBarcodeData.status === "fulfilled" && isMounted) {
+          const map = new Map<string, { productId: string; etiqueta: string; unidadesPorPaquete: number }>()
+          for (const pb of packBarcodeData.value || []) {
+            map.set(pb.codigo_barra, {
+              productId: pb.product_id,
+              etiqueta: pb.etiqueta,
+              unidadesPorPaquete: Number(pb.unidades_por_paquete),
+            })
+          }
+          setPackBarcodeMap(map)
+        }
+
+        // 3. Sincronización DELTA liviana (solo novedades desde el último sync)
+        const syncRes = await syncFullCatalog(false)
+        if (syncRes && syncRes.products > 0 && isMounted) {
+          const freshProds = await offlineDB.products.getAll()
+          if (freshProds && freshProds.length > 0 && isMounted) {
+            setProducts(freshProds as Product[])
+          }
+        }
       } catch (err: any) {
-        toast.error("Error al sincronizar datos", err.message)
+        if (isInitial) {
+          console.warn("[POS] Trabajando en modo offline con datos locales indexados.")
+        }
       } finally {
-        setLoading(false)
+        if (isInitial && isMounted) setLoading(false)
       }
     }
-    loadData()
+
+    // Carga inicial
+    syncCatalog(true)
+    syncPendingSales().catch(() => {})
+
+    // Sincronización Delta silenciosa cada 5 minutos
+    const syncInterval = setInterval(() => {
+      syncCatalog(false)
+      syncPendingSales().catch(() => {})
+    }, 5 * 60 * 1000)
+
+    return () => {
+      isMounted = false
+      clearInterval(syncInterval)
+    }
   }, [])
+
 
   // Búsqueda remota de productos con debounce
   useEffect(() => {
@@ -1293,7 +2474,11 @@ export default function POSPage() {
     return () => clearTimeout(timer)
   }, [search])
 
-  // Búsqueda remota de productos para Consulta de Precios, con debounce
+  // Búsqueda LOCAL de productos para Consulta de Precios.
+  // Usa el array `products` que ya está en memoria (cargado al abrir el POS)
+  // para dar resultados instantáneos y funcionar 100% offline.
+  // Solo cae al servidor como fallback si el catálogo local todavía está vacío
+  // (p.ej. primera carga antes de que termine la descarga inicial).
   useEffect(() => {
     if (!showPriceCheckModal) return
     const query = priceCheckSearch.trim()
@@ -1303,18 +2488,68 @@ export default function POSPage() {
       return
     }
 
+    // --- Búsqueda local instantánea ---
+    if (products.length > 0) {
+      const q = query.toLowerCase()
+
+      // 1. Prioridad: ¿Es código de barra exacto de un pack / caja?
+      const packMatch = packBarcodeMap.get(query)
+      if (packMatch) {
+        const baseProduct = products.find((p) => p.id === packMatch.productId)
+        if (baseProduct) {
+          setPriceCheckResults([baseProduct])
+          setPriceCheckHighlight(0)
+          handlePriceCheckSelect(baseProduct, { etiqueta: packMatch.etiqueta, unidadesPorPaquete: packMatch.unidadesPorPaquete })
+          return
+        }
+      }
+
+      // 2. Prioridad: ¿Es código de barra o SKU EXACTO de un producto suelto?
+      const exactMatch = products.find((p) => {
+        if (p.codigo_barra === query || p.sku === query) return true
+        const pCode = p.codigo_barra?.trim()
+        if (pCode && pCode.length >= 8 && query.length >= 8) {
+          return pCode.padStart(13, "0") === query.padStart(13, "0")
+        }
+        return false
+      })
+      if (exactMatch) {
+        setPriceCheckResults([exactMatch])
+        setPriceCheckHighlight(0)
+        handlePriceCheckSelect(exactMatch)
+        return
+      }
+
+      // 3. Coincidencia parcial por subcadena (para búsqueda interactiva por texto)
+      const matched = products.filter(
+        (p) =>
+          p.nombre?.toLowerCase().includes(q) ||
+          p.sku?.toLowerCase().includes(q) ||
+          (p.codigo_barra && p.codigo_barra.toLowerCase().includes(q))
+      ).slice(0, 30)
+
+      setPriceCheckResults(matched)
+      setPriceCheckHighlight(0)
+
+      // NUNCA auto-seleccionar por subcadena intermedia de código de barras mientras
+      // el lector o el usuario está tipeando (evita que un prefijo común como 78400500101
+      // seleccione prematuramente un producto ajeno de la misma marca antes de que
+      // termine de entrar el código completo del pack u otro producto).
+      // Solo auto-seleccionar si el resultado único es coincidencia EXACTA.
+      if (matched.length === 1 && (matched[0].codigo_barra === query || matched[0].sku === query)) {
+        handlePriceCheckSelect(matched[0])
+      }
+      return
+    }
+
+    // --- Fallback remoto (catálogo local aún vacío) ---
     const timer = setTimeout(async () => {
       setPriceCheckSearching(true)
       try {
         const res = await api.products.list({ search: query, limit: 30 })
         setPriceCheckResults(res || [])
         setPriceCheckHighlight(0)
-        // Consulta directa: un codigo de barras escaneado siempre da una
-        // sola coincidencia exacta -- antes había que ademas tocar la fila
-        // o apretar Enter para recien ver el detalle (foto/escala/monedas),
-        // un paso de mas que generaba exactamente la confusion de "no
-        // aparece nada" cuando lo unico visible todavia era la lista.
-        if (res && res.length === 1) {
+        if (res && res.length === 1 && (res[0].codigo_barra === query || res[0].sku === query)) {
           handlePriceCheckSelect(res[0])
         }
       } catch (e) {
@@ -1324,9 +2559,9 @@ export default function POSPage() {
     }, 200)
 
     return () => clearTimeout(timer)
-  }, [priceCheckSearch, showPriceCheckModal])
+  }, [priceCheckSearch, showPriceCheckModal, products, packBarcodeMap])
 
-  // Búsqueda remota y en vivo de Clientes (F9) con debounce y consulta RUC
+  // Búsqueda remota y en vivo de Clientes (F9) con debounce, índices locales y consulta RUC
   useEffect(() => {
     if (!showCustomerModal) return
 
@@ -1340,10 +2575,19 @@ export default function POSPage() {
     const timer = setTimeout(async () => {
       setSearchingCustomers(true)
       try {
+        // 1. Intentar búsqueda remota en backend
         const res = await api.customers.list({ search: query, limit: 30 })
-        setCustomerSearchResults((res || []).map(normalizeCustomer))
+        const normalized = (res || []).map(normalizeCustomer)
 
-        // Si es número de cédula o RUC, intentar consultar el padrón
+        if (normalized.length > 0) {
+          setCustomerSearchResults(normalized)
+        } else {
+          // Si el servidor no devolvió coincidencias, buscar localmente en IndexedDB por índices RUC, CI, Nombre
+          const local = await offlineDB.customers.search(query, 30)
+          setCustomerSearchResults(local.map(normalizeCustomer))
+        }
+
+        // Si es número de cédula o RUC, intentar consultar el padrón adicional
         const digits = query.replace(/\D/g, "")
         if (digits.length >= 5) {
           try {
@@ -1369,10 +2613,17 @@ export default function POSPage() {
           } catch (e) {}
         }
       } catch (e) {
+        // Fallback Offline total: búsqueda indexada en IndexedDB (RUC, CI, Nombre)
+        try {
+          const local = await offlineDB.customers.search(query, 30)
+          setCustomerSearchResults(local.map(normalizeCustomer))
+        } catch (dbErr) {
+          console.warn("[POS] Error buscando clientes en IndexedDB offline:", dbErr)
+        }
       } finally {
         setSearchingCustomers(false)
       }
-    }, 250)
+    }, 150)
 
     return () => clearTimeout(timer)
   }, [customerSearch, showCustomerModal])
@@ -1437,13 +2688,25 @@ export default function POSPage() {
     }
   }
 
+  // El lector de la tarjeta teclea el UUID del QR, pero lo hace con la
+  // distribucion de teclado que tenga Windows: donde el QR dice "-" puede
+  // llegar "'" (paso en caja el 16-09: el servidor recibio
+  // "d5c5c7d3'a43f'4c3f'8565'f0507434d7a2" y no encontro al socio). Por eso
+  // el numero se reconstruye a partir de los 32 caracteres hexadecimales,
+  // sea cual sea el separador que haya mandado el lector.
+  const normalizarCodigoSocio = (texto: string): string | null => {
+    const hex = (texto || "").replace(/[^0-9a-fA-F]/g, "").toLowerCase()
+    if (hex.length !== 32) return null
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+  }
+
   // Busqueda de socio Extra Club por numero/RUC/cedula/nombre -- mismo
   // criterio de fallback pedido explicitamente ("estandar, con fallback a
   // cedula y nombre"), ya cubierto por el search del backend que matchea
   // extra_club_numero/ruc/ci/razon_social en un solo query.
   useEffect(() => {
     if (!activeMethods.has("extra_club")) return
-    const query = extraClubQuery.trim()
+    const query = normalizarCodigoSocio(extraClubQuery) || extraClubQuery.trim()
     if (!query) { setExtraClubResults([]); setExtraClubSearching(false); return }
     const timer = setTimeout(async () => {
       setExtraClubSearching(true)
@@ -1474,6 +2737,17 @@ export default function POSPage() {
   // apenas hay un cliente real seleccionado en ese tab (no el generico
   // DEFAULT_CUSTOMER). Sin cuenta de credito, extraClubCredit queda null
   // -- eso es lo que bloquea el cobro salvo override de admin.
+  //
+  // Offline: si la llamada en vivo falla, en vez de bloquear se usa el
+  // ultimo saldo sincronizado (cacheado en esta caja) ajustado por lo que
+  // CUALQUIER caja de la malla LAN le vendio a este cliente a credito y
+  // todavia no se confirmo con el servidor (ver OfflineContext). Es
+  // deliberado que esto NO tenga tope: si el saldo ajustado ya viene
+  // negativo, `activo` sigue en true y la venta se deja pasar igual -- la
+  // decision de negocio es no perder la venta. Si al sincronizar el
+  // servidor la rechaza por limite real superado, ya queda "marcada para
+  // revision" por el mecanismo existente (status "error" + audit_logs
+  // accion=venta_offline_rechazada), sin reintentar en bucle.
   useEffect(() => {
     if (!activeMethods.has("extra_club") || !customer || customer.id === DEFAULT_CUSTOMER.id) {
       setExtraClubCredit(null)
@@ -1483,15 +2757,19 @@ export default function POSPage() {
     setExtraClubCredit("loading")
     api.creditAccounts.getByCustomer(customer.id)
       .then((acc) => { if (!cancelled) setExtraClubCredit(acc ? { limite_credito: Number(acc.limite_credito || 0), saldo_disponible: Number(acc.saldo_disponible || 0), saldo_utilizado: Number(acc.saldo_utilizado || 0), activo: acc.activo !== false } : null) })
-      .catch(() => { if (!cancelled) setExtraClubCredit(null) })
+      .catch(async () => {
+        if (cancelled) return
+        const offlineBalance = await getExtraClubOfflineBalance(customer.id).catch(() => null)
+        if (!cancelled) setExtraClubCredit(offlineBalance)
+      })
     return () => { cancelled = true }
-  }, [customer, activeMethods])
+  }, [customer, activeMethods, getExtraClubOfflineBalance])
 
   // Busqueda para el boton dedicado de consulta de saldo (Electron toolbar)
   // -- no toca el carrito ni el cliente de la venta, es solo lectura.
   useEffect(() => {
     if (!showExtraClubBalanceModal) return
-    const query = balanceModalQuery.trim()
+    const query = normalizarCodigoSocio(balanceModalQuery) || balanceModalQuery.trim()
     if (!query) { setBalanceModalResults([]); setBalanceModalSearching(false); return }
     const timer = setTimeout(async () => {
       setBalanceModalSearching(true)
@@ -1588,11 +2866,21 @@ export default function POSPage() {
         const comps = await api.companies.list()
         if (Array.isArray(comps) && comps.length > 0) {
           const c = comps[0]
-          const fantasia = c.nombre_fantasia || c.nombre || "Casa Gonzalito S.R.L."
+          const fantasia = c.nombre_fantasia || c.nombre || "Extra Supermercado Mayorista"
           const merged = { ...c, nombre: fantasia, nombre_fantasia: fantasia }
           localStorage.setItem("pos_company_data", JSON.stringify(merged))
           if ((c.config as any)?.receipt_template) {
-            localStorage.setItem("pos_receipt_template_config", JSON.stringify((c.config as any).receipt_template))
+            // Merge en cascada: DEFAULT_RECEIPT_CONFIG (base) < DB (empresa) < localStorage (último guardado por el operador).
+            // El localStorage es la fuente de verdad del operador: si modificó algo en el Diseñador
+            // de Facturas y guardó, eso prevalece sobre lo que la DB tenga. Así los mensajes
+            // personalizados sobreviven al reiniciar la caja.
+            const dbTpl = (c.config as any).receipt_template as Record<string, unknown>
+            const localTplRaw = localStorage.getItem("pos_receipt_template_config")
+            const localTpl: Record<string, unknown> = localTplRaw
+              ? (() => { try { return JSON.parse(localTplRaw) } catch { return {} } })()
+              : {}
+            const mergedTpl = { ...DEFAULT_RECEIPT_CONFIG, ...dbTpl, ...localTpl }
+            localStorage.setItem("pos_receipt_template_config", JSON.stringify(mergedTpl))
           }
           if ((c.config as any)?.currencies) {
             const currs = (c.config as any).currencies
@@ -1650,15 +2938,35 @@ export default function POSPage() {
 
   // ── AGREGAR AL CARRITO ────────────────────────────────────────────────────
   const addToCart = useCallback((product: Product, quantityOverride?: number, origenBalanza?: "balmak_bck30" | "etiqueta_plu") => {
+    if (!cajaAbiertaRef.current || !cashSessionIdRef.current) {
+      toast.warning("Caja Cerrada", "Debe ingresar el fondo inicial de apertura para operar.")
+      setShowAperturaModal(true)
+      return
+    }
+
     setLastScannedProduct(product)
 
-    const isPesable = (product as any).tipo_venta === "peso" ||
-                      (product as any).es_pesable === true ||
-                      (product.nombre || "").toUpperCase().includes(" KG") ||
-                      (product.nombre || "").toUpperCase().includes("KILO")
+    const isPesable = isPesableProduct(product)
+
 
     let finalQty = 1
     if (quantityOverride !== undefined) {
+      if (isPesable) {
+        if (quantityOverride >= 1000) {
+          toast.warning(
+            "Posible confusión Gramos / Guaraníes",
+            `Ingresó ${quantityOverride.toLocaleString("es-PY")} KG (${(quantityOverride / 1000).toFixed(3)} Toneladas). Si el cliente lleva ${(quantityOverride / 1000).toFixed(3)} KG, corrija el valor.`
+          )
+          return
+        }
+        if (quantityOverride > 300) {
+          toast.warning(
+            "Cantidad Excesiva (> 300 KG)",
+            `La cantidad ingresada (${quantityOverride} KG) para ${product.nombre} requiere autorización de supervisor para pesajes industriales.`
+          )
+          return
+        }
+      }
       finalQty = quantityOverride
     } else if (isPesable) {
       if (currentScaleWeight > 0.015) {
@@ -1673,6 +2981,19 @@ export default function POSPage() {
 
     const unitPrice = Number(product.precio_venta) || 0
     const ivaTasa = Number(product.iva_tasa) || 10
+    // Promo baked-in desde el catálogo (1 query en background, 0 llamadas al escanear)
+    const promoPrice = (product as any).en_promocion && (product as any).precio_promo
+      ? Number((product as any).precio_promo)
+      : null
+    const effectivePrice = promoPrice !== null ? promoPrice : unitPrice
+    // El conector Ñemuha, cuando el producto tiene promo activa, sincroniza
+    // precio_venta = precio de promo y respalda el precio original en
+    // precio_regular (ver nemuha_connector/service.py). Si se usara precio_venta
+    // como base para calcular el ahorro, quedaría igual al precio de promo y
+    // el cartel "TU EXTRA AHORRO HOY" nunca se mostraría.
+    const basePrice = promoPrice !== null && Number(product.precio_regular) > 0
+      ? Number(product.precio_regular)
+      : unitPrice
 
     if (isPesable) {
       // Cada pesaje es una pieza física distinta (ej. dos cortes de carne del
@@ -1683,15 +3004,20 @@ export default function POSPage() {
           id: `${product.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           product_id: product.id,
           nombre: product.nombre,
-          precio: unitPrice,
-          precio_base: unitPrice,
+          precio: effectivePrice,
+          precio_base: basePrice,
           sku: product.sku || "",
           codigo_barra: product.codigo_barra,
           imagen_url: product.imagen_url,
           quantity: finalQty,
           iva_tasa: ivaTasa,
           es_pesable: true,
-          origen_balanza: origenBalanza || "balmak_bck30"
+          origen_balanza: origenBalanza || "balmak_bck30",
+          ...(promoPrice !== null ? {
+            en_promocion: true,
+            promocion_id: (product as any).promocion_id || null,
+            promocion_nombre: (product as any).promocion_nombre || null,
+          } : {})
         },
         ...prev,
       ])
@@ -1718,15 +3044,20 @@ export default function POSPage() {
           id: product.id,
           product_id: product.id,
           nombre: product.nombre,
-          precio: unitPrice,
-          precio_base: unitPrice,
+          precio: effectivePrice,
+          precio_base: basePrice,
           sku: product.sku || "",
           codigo_barra: product.codigo_barra,
           imagen_url: product.imagen_url,
           quantity: newQty,
           iva_tasa: ivaTasa,
           es_pesable: false,
-          origen_balanza: null
+          origen_balanza: null,
+          ...(promoPrice !== null ? {
+            en_promocion: true,
+            promocion_id: (product as any).promocion_id || null,
+            promocion_nombre: (product as any).promocion_nombre || null,
+          } : {})
         },
         ...prev,
       ]
@@ -1734,8 +3065,11 @@ export default function POSPage() {
 
     setSearch("")
     searchInputRef.current?.focus()
-    applyTieredPrice(product.id, newQty, customer.id)
-  }, [currentScaleWeight, cart, customer.id])
+    // Saltar tiered price si el producto ya tiene promo activa (precio ya correcto)
+    if (promoPrice === null) {
+      applyTieredPrice(product.id, newQty, customer.id)
+    }
+  }, [currentScaleWeight, cart, customer.id, cajaAbierta, cashSessionId])
 
   // ── ESCALA DE PRECIOS POR CANTIDAD (sp_tiered_prices) ──────────────────────
   // Recalcula el precio unitario de la línea no pesable de `productId` contra
@@ -1752,12 +3086,24 @@ export default function POSPage() {
   // precio_base) -- ningun camino existente cambia de comportamiento.
   const applyTieredPrice = useCallback(async (productId: string, quantity: number, customerId?: string) => {
     try {
+      // Regla Comercial Extra Supermercado: Si el producto está en promoción activa,
+      // las escalas quedan ON HOLD (se preserva el precio promocional).
+      let isPromoActive = false
+      setCart((prev) => {
+        const existing = prev.find((i) => i.product_id === productId && !i.es_pesable)
+        if (existing && (existing as any).en_promocion) {
+          isPromoActive = true
+        }
+        return prev
+      })
+      if (isPromoActive) return
+
       if (customerId && customerId !== DEFAULT_CUSTOMER.id) {
         const resolved = await api.priceLists.resolvePrice(customerId, productId, Math.floor(quantity)).catch(() => null)
         const resolvedPrice = resolved && typeof resolved.precio !== "undefined" ? Number(resolved.precio) : null
         if (resolvedPrice !== null && !isNaN(resolvedPrice)) {
           setCart((prev) => prev.map((item) =>
-            item.product_id === productId && !item.es_pesable
+            item.product_id === productId && !item.es_pesable && !(item as any).en_promocion
               ? { ...item, precio: resolvedPrice }
               : item
           ))
@@ -1767,13 +3113,13 @@ export default function POSPage() {
       const tier = await api.smartPricing.calculateTieredPrice(productId, Math.floor(quantity))
       const tierPrice = tier && typeof tier.precio_unitario !== "undefined" ? Number(tier.precio_unitario) : null
       setCart((prev) => prev.map((item) =>
-        item.product_id === productId && !item.es_pesable
+        item.product_id === productId && !item.es_pesable && !(item as any).en_promocion
           ? { ...item, precio: tierPrice !== null && !isNaN(tierPrice) ? tierPrice : item.precio_base }
           : item
       ))
     } catch (e) {
       setCart((prev) => prev.map((item) =>
-        item.product_id === productId && !item.es_pesable
+        item.product_id === productId && !item.es_pesable && !(item as any).en_promocion
           ? { ...item, precio: item.precio_base }
           : item
       ))
@@ -1782,13 +3128,63 @@ export default function POSPage() {
 
   // Cuando cambia el cliente de la venta (F9, o volver a Consumidor Final),
   // recalcular el precio de las lineas no pesables ya en el carrito contra
-  // la lista/asignacion del nuevo cliente.
+  // la lista/asignacion del nuevo cliente y cargar ofertas 1-a-1 activas.
   useEffect(() => {
     cart.forEach((item) => {
       if (!item.es_pesable) applyTieredPrice(item.product_id, item.quantity, customer.id)
     })
+
+    if (customer && customer.id && customer.id !== DEFAULT_CUSTOMER.id) {
+      api.sales.getCustomerOffers(customer.id)
+        .then((offers) => {
+          if (Array.isArray(offers)) {
+            setActiveCustomerOffers(offers)
+          } else {
+            setActiveCustomerOffers([])
+          }
+        })
+        .catch(() => setActiveCustomerOffers([]))
+    } else {
+      setActiveCustomerOffers([])
+      setFestiveOfferAlert(null)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customer.id])
+
+  // Aplicar ofertas personalizadas "Te Extrañamos" a los productos en el carrito
+  useEffect(() => {
+    if (!activeCustomerOffers || activeCustomerOffers.length === 0 || cart.length === 0) return
+
+    let cartUpdated = false
+    const newCart = cart.map((item) => {
+      const matchingOffer = activeCustomerOffers.find((o) => o.product_id === item.product_id)
+      if (matchingOffer && matchingOffer.precio_oferta && item.precio !== matchingOffer.precio_oferta) {
+        cartUpdated = true
+        setFestiveOfferAlert({
+          cliente: (customer as any).razon_social || customer.nombre || "Cliente",
+          producto: matchingOffer.producto_nombre || item.nombre,
+          precio: matchingOffer.precio_oferta,
+          ahorro: Math.max(0, (item.precio_base || item.precio) - matchingOffer.precio_oferta),
+        })
+        return {
+          ...item,
+          precio: matchingOffer.precio_oferta,
+          es_oferta_personalizada: true,
+          oferta_personalizada_titulo: matchingOffer.titulo || "Oferta Te Extrañamos",
+        }
+      }
+      return item
+    })
+
+    if (cartUpdated) {
+      setCart(newCart)
+      toast.success(
+        "🎉 ¡Oferta Personalizada Aplicada!",
+        `Descuento especial otorgado a ${(customer as any).razon_social || customer.nombre} en caja.`
+      )
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCustomerOffers, cart.length])
 
   // Iniciar/asegurar flujo de lectura serie continuo al abrir el modal de pesaje
   useEffect(() => {
@@ -1817,8 +3213,23 @@ export default function POSPage() {
 
   const handleConfirmManualWeight = () => {
     if (!targetWeighProduct) return
-    const w = parseFloat(manualWeightInput.replace(/,/g, "."))
+    const clean = manualWeightInput.replace(/,/g, ".").trim()
+    const w = parseFloat(clean)
     if (!isNaN(w) && w > 0) {
+      if (w >= 1000) {
+        toast.warning(
+          "Posible confusión Gramos / Guaraníes",
+          `Ingresó ${w.toLocaleString("es-PY")} KG (${(w / 1000).toFixed(3)} Toneladas). Si el cliente lleva ${(w / 1000).toFixed(3)} KG, ingrese ${(w / 1000).toFixed(3)}.`
+        )
+        return
+      }
+      if (w > 300) {
+        toast.warning(
+          "Cantidad Excesiva (> 300 KG)",
+          `El peso ingresado (${w} KG) excede 300 KG. Requiere autorización de supervisor para pesajes industriales.`
+        )
+        return
+      }
       addToCart(targetWeighProduct, w)
       setShowManualWeightModal(false)
       setTargetWeighProduct(null)
@@ -1835,7 +3246,7 @@ export default function POSPage() {
       const saved = localStorage.getItem("pos_company_data")
       if (saved) companyData = JSON.parse(saved)
     } catch (e) {}
-    const fantasia = companyData.nombre_fantasia || companyData.nombre || "Casa Gonzalito S.R.L."
+    const fantasia = companyData.nombre_fantasia || companyData.nombre || "Extra Supermercado Mayorista"
     const logoUrl = localStorage.getItem("pos_logo_data_url") || ""
     return `
       <div style="font-family: 'Consolas','Segoe UI',monospace; font-size: 10.5px; line-height: 1.3; width: 100%; color: #000;">
@@ -1858,58 +3269,309 @@ export default function POSPage() {
   const handleConfirmAperturaCaja = async (e: React.FormEvent) => {
     e.preventDefault()
     const fondoPyg = parseInt(montoAperturaPyg.replace(/\D/g, "") || "0", 10)
+    const fondoBrl = parseFloat(montoAperturaBrl.replace(/,/g, ".") || "0") || 300
+    const fondoUsd = parseFloat(montoAperturaUsd.replace(/,/g, ".") || "0") || 0
     setSubmittingApertura(true)
+    const aperturaPayload = {
+      cash_register_id: cashRegisterId || undefined,
+      user_id: user?.id,
+      cajero_nombre: user?.nombre || "Cajero",
+      monto_apertura: fondoPyg,
+      monto_apertura_brl: fondoBrl,
+      monto_apertura_usd: fondoUsd,
+    }
+    // Sin esto, si el servidor estaba caido justo al empezar el turno, la
+    // cajera no podia ni abrir la caja -- no vendia nada, ni en efectivo,
+    // aunque el resto del sistema offline (venta, ticket) si funcionara.
+    // Con timeout corto: si falla, se abre con una sesion PROVISORIA local
+    // (UUID propio) y se reconcilia con la real apenas vuelva la conexion
+    // (ver reconciliarSesionProvisoria mas abajo).
+    //
+    // El guard de activeUserCheckOk va ACA, no antes de intentar create()
+    // -- si el servidor esta sano, create() va a funcionar sin importar si
+    // activeUser() ya resolvio o no, y no tiene sentido frenar el camino
+    // normal por una duda que ni siquiera aplica. Solo importa si create()
+    // TAMBIEN falla: ahi si, sin confirmacion explicita, no se abre en modo
+    // local (podria duplicar un turno real que ya esta abierto en otra
+    // caja y que no se detecto por la misma falla de red).
+    let sessionId: string
+    let sessionPendienteSync = false
     try {
-      const session = await api.caja.sessions.create({
+      const session = await withTimeout(api.caja.sessions.create(aperturaPayload), 1500)
+      sessionId = session.id
+    } catch (err: any) {
+      if (activeUserCheckOk !== "sin_turno" && !confirmoPrimerTurnoDelDia) {
+        setSubmittingApertura(false)
+        toast.error(
+          "No se pudo abrir la caja",
+          "No se pudo confirmar si ya tenés un turno abierto en otra caja -- marcá la casilla de confirmación e intentá de nuevo."
+        )
+        return
+      }
+      sessionId = generarUUIDLocal()
+      sessionPendienteSync = true
+      console.warn("No se pudo abrir la sesión en el servidor, abriendo en modo local:", err)
+    }
+    const registro = {
+      puntoEmision,
+      cajeroId: user?.id,
+      cajeroNombre: user?.nombre || "Cajero",
+      fechaApertura: new Date().toISOString(),
+      fondoPyg,
+      fondoBrl: parseFloat(montoAperturaBrl.replace(/,/g, ".") || "0"),
+      fondoUsd: parseFloat(montoAperturaUsd.replace(/,/g, ".") || "0"),
+      cashSessionId: sessionId,
+      sessionPendienteSync,
+      aperturaPayload: sessionPendienteSync ? aperturaPayload : undefined,
+    }
+    localStorage.setItem(userCajaKey, JSON.stringify(registro))
+    cajaAbiertaRef.current = true
+    cashSessionIdRef.current = sessionId
+    setCashSessionId(sessionId)
+    setCajaAbierta(true)
+    setShowAperturaModal(false)
+    setSubmittingApertura(false)
+    if (sessionPendienteSync) {
+      toast.warning(
+        "Caja abierta en modo local",
+        "No se pudo confirmar con el servidor -- podés vender igual, se sincroniza sola cuando vuelva la conexión."
+      )
+    } else {
+      toast.success(
+        "¡Caja Habilitada con Éxito!",
+        `${PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision} abierta para operar.`
+      )
+    }
+  }
+
+  // ── RECONCILIACIÓN DE SESIÓN PROVISORIA (Fase 2 offline-first) ──────────
+  // Si la caja se abrió sin servidor (sessionPendienteSync), en cuanto el
+  // heartbeat de OfflineContext confirma que hay conexión real: crea la
+  // sesión de verdad con los datos originales de apertura, y reescribe el
+  // session_id de cualquier venta que haya quedado en la cola offline
+  // apuntando al UUID provisorio -- antes de que esa cola se sincronice,
+  // para que ninguna venta quede huérfana del arqueo de esa sesión.
+  const reconciliandoSesionRef = useRef(false)
+  useEffect(() => {
+    if (!serverOnline) return
+    // No alcanza con reaccionar SOLO al cambio de serverOnline -- si ya
+    // estaba online cuando se creo la sesion provisoria (ej. una falla
+    // puntual de esa request nada mas, sin caida real detectada por el
+    // heartbeat), el efecto nunca se hubiera vuelto a disparar. Por eso
+    // reintenta el chequeo cada 20s mientras haya conexion, no solo una vez.
+    let cancelled = false
+    const tryReconcile = async () => {
+      if (cancelled || reconciliandoSesionRef.current) return
+      let registro: any = null
+      try { registro = JSON.parse(localStorage.getItem(userCajaKey) || "null") } catch (e) {}
+      if (!registro?.sessionPendienteSync || !registro?.aperturaPayload) return
+
+      reconciliandoSesionRef.current = true
+      const sesionProvisoria = registro.cashSessionId as string
+      try {
+        const session = await api.caja.sessions.create(registro.aperturaPayload)
+        const pendientes = await offlineDB.pendingSales.getAll()
+        for (const p of pendientes) {
+          const data = p.data as any
+          if (data?.session_id === sesionProvisoria) {
+            await offlineDB.pendingSales.update({ ...p, data: { ...data, session_id: session.id } })
+          }
+        }
+        const registroActualizado = { ...registro, cashSessionId: session.id, sessionPendienteSync: false, aperturaPayload: undefined }
+        localStorage.setItem(userCajaKey, JSON.stringify(registroActualizado))
+        cashSessionIdRef.current = session.id
+        setCashSessionId(session.id)
+        toast.success("Turno sincronizado", "La apertura de caja ya quedó registrada en el servidor.")
+      } catch (err) {
+        console.warn("No se pudo reconciliar la sesión provisoria todavía, se reintenta en el próximo chequeo:", err)
+      } finally {
+        reconciliandoSesionRef.current = false
+      }
+    }
+    tryReconcile()
+    const interval = setInterval(tryReconcile, 20000)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [serverOnline])
+
+  // ── DETECCIÓN AUTOMÁTICA DE TURNO ACTIVO / PAUSADO (NÓMADA & MODELO A) ──
+  // activeUserCheckOk distingue "confirmado que NO hay turno en otra caja"
+  // de "no se pudo confirmar" -- esto ultimo es lo que la apertura offline
+  // (mas abajo) necesita saber ANTES de decidir si abre en modo local sin
+  // preguntar, porque si esta cajera ya abrio turno en otra caja hoy y esa
+  // sesion no se detecto por la misma falla de red, abrir otra la duplica.
+  useEffect(() => {
+    if (!user?.id) return
+    let isCancelled = false
+    api.caja.sessions.activeUser()
+      .then((active) => {
+        if (isCancelled) return
+        if (!active) {
+          setActiveUserCheckOk("sin_turno")
+          // Si el backend confirma que NO hay sesión activa en base de datos para este usuario,
+          // limpiar inmediatamente cualquier residuo local de turnos anteriores
+          localStorage.removeItem(userCajaKey)
+          localStorage.removeItem("current_cash_session")
+          cajaAbiertaRef.current = false
+          cashSessionIdRef.current = null
+          setCashSessionId(null)
+          setCajaAbierta(false)
+          setShowAperturaModal(true)
+          setActiveUserSessionInfo(null)
+          return
+        }
+        localStorage.setItem("current_cash_session", JSON.stringify(active))
+        setActiveUserSessionInfo(active)
+        if (active.estado === "pausada") {
+          // Sesión pausada (Modelo A: Relevo / Almuerzo) -> Mostrar modal para reanudar
+          setShowReanudarModal(true)
+          setShowAperturaModal(false)
+        } else if (active.estado === "abierta") {
+          // Sesión abierta detectada en backend
+          cajaAbiertaRef.current = true
+          cashSessionIdRef.current = active.id
+          setCashSessionId(active.id)
+          setCajaAbierta(true)
+          setShowAperturaModal(false)
+          if (!cashSessionId || cashSessionId !== active.id) {
+            toast.info(
+              "Turno Activo Detectado",
+              `Continuando turno de ${active.cajero_nombre || user?.nombre} (${active.total_ventas} ventas hoy).`
+            )
+          }
+        }
+      })
+      .catch((err) => {
+        // Fallback offline: si el servidor central se reinicia, restaurar turno desde almacenamiento local
+        const cached = localStorage.getItem("current_cash_session")
+        let restaurado = false
+        if (cached) {
+          try {
+            const sess = JSON.parse(cached)
+            if (sess?.id && sess.estado === "abierta") {
+              cajaAbiertaRef.current = true
+              cashSessionIdRef.current = sess.id
+              setCashSessionId(sess.id)
+              setCajaAbierta(true)
+              setShowAperturaModal(false)
+              setActiveUserSessionInfo(sess)
+              console.info("[POS] Servidor offline: turno restaurado desde almacenamiento local:", sess.id)
+              restaurado = true
+            }
+          } catch {}
+        }
+        // Si no habia nada en ESTA maquina, no significa que no haya turno
+        // en OTRA caja -- el localStorage nunca lo sabria, es por-maquina.
+        // Queda "sin_confirmar": la apertura offline va a pedir un chequeo
+        // explicito antes de abrir en modo local para no duplicar turno.
+        if (!restaurado) setActiveUserCheckOk("sin_confirmar")
+      })
+    return () => { isCancelled = true }
+  }, [user?.id])
+
+  const handleConfirmPausaTurno = async () => {
+    if (!cashSessionId) return
+    setSubmittingPausa(true)
+    try {
+      await api.caja.sessions.pause(cashSessionId, { motivo: pausaMotivo.trim() || undefined })
+      localStorage.removeItem(userCajaKey)
+      localStorage.removeItem("current_cash_session")
+      setCashSessionId(null)
+      setCajaAbierta(false)
+      setShowPausaTurnoModal(false)
+      toast.success(
+        "Turno en Pausa",
+        "Tu turno fue pausado con éxito. Puedes retirar tu gaveta. Al regresar podrás reanudarlo aquí o en otra caja."
+      )
+      // Salir de la sesión de usuario para dejar la pantalla lista para la siguiente cajera
+      logout()
+      window.location.reload()
+    } catch (e: any) {
+      toast.error("No se pudo pausar el turno", e?.message || "Intente nuevamente.")
+    } finally {
+      setSubmittingPausa(false)
+    }
+  }
+
+  const handleReanudarTurno = async (sessionData?: any) => {
+    const targetSession = sessionData || activeUserSessionInfo
+    if (!targetSession?.id) return
+    setSubmittingReanudar(true)
+    try {
+      await api.caja.sessions.resume(targetSession.id, {
         cash_register_id: cashRegisterId || undefined,
-        user_id: user?.id,
-        cajero_nombre: user?.nombre || "Cajero",
-        monto_apertura: fondoPyg,
+        punto_emision: puntoEmision || undefined,
       })
       const registro = {
         puntoEmision,
         cajeroId: user?.id,
         cajeroNombre: user?.nombre || "Cajero",
-        fechaApertura: new Date().toISOString(),
-        fondoPyg,
-        fondoBrl: parseFloat(montoAperturaBrl.replace(/,/g, ".") || "0"),
-        fondoUsd: parseFloat(montoAperturaUsd.replace(/,/g, ".") || "0"),
-        cashSessionId: session.id,
+        fechaApertura: targetSession.fecha_apertura || new Date().toISOString(),
+        fondoPyg: targetSession.monto_apertura || 0,
+        fondoBrl: targetSession.monto_apertura_brl || 0,
+        fondoUsd: targetSession.monto_apertura_usd || 0,
+        cashSessionId: targetSession.id,
       }
       localStorage.setItem(userCajaKey, JSON.stringify(registro))
-      setCashSessionId(session.id)
+      cajaAbiertaRef.current = true
+      cashSessionIdRef.current = targetSession.id
+      setCashSessionId(targetSession.id)
       setCajaAbierta(true)
+      setShowReanudarModal(false)
       setShowAperturaModal(false)
       toast.success(
-        "¡Caja Habilitada con Éxito!",
-        `${PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision} abierta para operar.`
+        "¡Turno Reanudado!",
+        `Continuando turno en ${PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision}.`
       )
-    } catch (err: any) {
-      const msg = err?.response?.data?.detail || err?.message || "Verifique la conexión con el servidor e intente de nuevo."
-      toast.error("No se pudo abrir la caja", msg)
+    } catch (e: any) {
+      toast.error("No se pudo reanudar el turno", e?.message || "Intente nuevamente.")
     } finally {
-      setSubmittingApertura(false)
+      setSubmittingReanudar(false)
     }
   }
 
-  // Cierre a ciegas: el cajero solo carga lo que contó físicamente. El
-  // sistema recién revela el esperado y la diferencia DESPUÉS de enviar --
-  // nunca antes, para que el conteo no esté sesgado por el número esperado.
+  const handleOpenCierreModal = async () => {
+    if (pendingSalesCount > 0) {
+      toast.warning("Ventas Pendientes", `Hay ${pendingSalesCount} venta(s) guardadas localmente sin sincronizar. Sincronícelas antes de cerrar para asegurar el arqueo correcto.`)
+    }
+    setShowCierreTurnoModal(true)
+    setCierreTab("conteo")
+    if (cashSessionId) {
+      setLoadingPreClose(true)
+      try {
+        const data = await api.caja.sessions.preCloseSummary(cashSessionId)
+        setPreCloseData(data)
+      } catch (e) {
+        console.error("Error cargando pre-cierre:", e)
+      } finally {
+        setLoadingPreClose(false)
+      }
+    }
+  }
+
+  // Cierre de caja: con vista previa de conciliación por formas de pago
   const handleConfirmCierreCaja = async () => {
     if (!cashSessionId) {
       toast.warning("No hay sesión de caja activa", "")
       return
     }
+    const parseForeignCurr = (v: string): number => {
+      return parseInputDecimal(v)
+    }
     const contado = parseInt(montoCierreReal.replace(/\D/g, "") || "0", 10)
-    const contadoUsd = parseFloat(montoCierreUsd.replace(/,/g, ".") || "0") || 0
-    const contadoBrl = parseFloat(montoCierreBrl.replace(/,/g, ".") || "0") || 0
+    const contadoUsd = parseForeignCurr(montoCierreUsd)
+    const contadoBrl = parseForeignCurr(montoCierreBrl)
+    const currentSessionId = cashSessionId
     setSubmittingCierre(true)
     try {
-      const result = await api.caja.sessions.close(cashSessionId, {
+      const result = await api.caja.sessions.close(currentSessionId, {
         monto_cierre_real: contado,
         monto_cierre_usd: contadoUsd,
         monto_cierre_brl: contadoBrl,
       })
+      setLastClosedSessionId(currentSessionId)
+      if ((result as any)?.handoff_id) {
+        pendingHandoffIdRef.current = String((result as any).handoff_id)
+      }
       setCierreResult({
         monto_cierre_esperado: result.monto_cierre_esperado,
         diferencia: result.diferencia,
@@ -1922,43 +3584,142 @@ export default function POSPage() {
         contado_brl: contadoBrl,
       })
 
+      const resAny = result as any
+      const fondoPyg = Number(resAny?.monto_apertura ?? preCloseData?.monto_apertura_pyg ?? 0)
+      const fondoBrl = Number(resAny?.monto_apertura_brl ?? preCloseData?.monto_apertura_brl ?? 0)
+      const fondoUsd = Number(resAny?.monto_apertura_usd ?? preCloseData?.monto_apertura_usd ?? 0)
       const diferencia = result.diferencia || 0
-      const body = buildTicketPrelude("CIERRE DE CAJA") + `
-        <div style="padding: 4px 0; font-size: 10px;">
-          <div>Cajero: ${user?.nombre || "-"}</div>
-          <div>Caja: ${PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision}</div>
-          <div>Fecha/Hora: ${new Date().toLocaleString("es-PY")}</div>
-        </div>
-        <table style="width:100%; border-collapse:collapse; border-top:1px dashed #000; margin-top:4px; padding-top:4px; font-size:10px;">
-          <tr><td>Fondo de apertura:</td><td style="text-align:right;">${formatPYG(parseInt(montoAperturaPyg.replace(/\D/g,"")||"0",10))}</td></tr>
-          <tr><td>Efectivo esperado (Gs.):</td><td style="text-align:right;">${formatPYG(result.monto_cierre_esperado)}</td></tr>
-          <tr><td>Efectivo contado (Gs.):</td><td style="text-align:right;">${formatPYG(contado)}</td></tr>
-          <tr style="font-weight:900; border-top:1px dashed #000;"><td>Diferencia (Gs.):</td><td style="text-align:right;">${diferencia >= 0 ? "+" : ""}${formatPYG(diferencia)}</td></tr>
-          ${(contadoUsd > 0 || result.diferencia_usd) ? `<tr><td>Diferencia US$:</td><td style="text-align:right;">${result.diferencia_usd >= 0 ? "+" : ""}${result.diferencia_usd.toFixed(2)}</td></tr>` : ""}
-          ${(contadoBrl > 0 || result.diferencia_brl) ? `<tr><td>Diferencia R$:</td><td style="text-align:right;">${result.diferencia_brl >= 0 ? "+" : ""}${result.diferencia_brl.toFixed(2)}</td></tr>` : ""}
-        </table>
-        ${(result.desglose_formas_pago || []).length > 0 ? `
-        <table style="width:100%; border-collapse:collapse; border-top:1px dashed #000; margin-top:4px; padding-top:4px; font-size:10px;">
-          <tr><td colspan="2" style="font-weight:900;">Ventas del turno por forma de pago:</td></tr>
-          ${result.desglose_formas_pago.map((p: any) => `<tr><td>${FORMA_PAGO_LABEL[p.forma_pago] || p.forma_pago}${p.moneda && p.moneda !== "PYG" ? ` (${p.moneda})` : ""}:</td><td style="text-align:right;">${p.moneda === "PYG" ? formatPYG(p.monto) : Number(p.monto).toFixed(2)}</td></tr>`).join("")}
-        </table>` : ""}
-        ${result.requiere_revision ? `<div style="text-align:center; font-weight:900; margin-top:6px; border:1px dashed #000; padding:4px;">⚠ DIFERENCIA FUERA DE TOLERANCIA -- REQUIERE REVISIÓN</div>` : ""}
-        <div style="text-align:center; margin-top:10px; font-size:9px;">Firma cajero: ______________________</div>
-        <br/><br/>
-      </div>`
-      await printTicketHtml(body)
+      const difBrl = result.diferencia_brl || 0
+      const difUsd = result.diferencia_usd || 0
+      const puntoNombre = PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision || "Caja"
+
+      // ── Impresión ESC/POS Nativa para Impresora Térmica ZKP8008 ────────
+      if ((window as any).electronAPI?.printEscPos) {
+        let b64 = (result as any).ticket_escpos_b64
+        if (!b64) {
+          const W = ESCPOS_LINE_WIDTH
+          let t = ESCPOS_INIT
+          t += ESCPOS_ALIGN_CENTER
+          t += ESCPOS_BOLD_ON + "EXTRA SUPERMERCADO MAYORISTA\n" + ESCPOS_BOLD_OFF
+          t += "GRUPO SANTA TERESA E.A.S.\n"
+          t += "RUC: 80150377-9\n"
+          t += ESCPOS_BOLD_ON + "CIERRE DE TURNO / ARQUEO DE CAJA\n" + ESCPOS_BOLD_OFF
+          t += escposDashes(W) + "\n"
+          t += ESCPOS_ALIGN_LEFT
+          t += `Cajero/a:    ${escposStripAccents(user?.nombre || "Cajero")}\n`
+          t += `Caja / Boca: ${escposStripAccents(puntoNombre)} (${escposStripAccents(puntoEmision || "012")})\n`
+          t += `Fecha/Hora:  ${escposFormatDateTime(new Date())}\n`
+          t += `Turno ID:    ${currentSessionId.slice(0, 8).toUpperCase()}\n`
+          t += escposDashes(W) + "\n"
+          t += ESCPOS_BOLD_ON + "FONDOS DE APERTURA INICIAL:\n" + ESCPOS_BOLD_OFF
+          t += escposTwoCol("  Guaranies (PYG):", `GS. ${formatPYG(fondoPyg)}`, W) + "\n"
+          if (fondoBrl > 0 || contadoBrl > 0) {
+            t += escposTwoCol("  Reales (BRL):", `R$ ${fondoBrl.toFixed(2)}`, W) + "\n"
+          }
+          if (fondoUsd > 0 || contadoUsd > 0) {
+            t += escposTwoCol("  Dolares (USD):", `US$ ${fondoUsd.toFixed(2)}`, W) + "\n"
+          }
+          t += escposDashes(W) + "\n"
+
+          if ((result.desglose_formas_pago || []).length > 0) {
+            t += ESCPOS_BOLD_ON + "VENTAS DEL TURNO POR FORMA DE PAGO:\n" + ESCPOS_BOLD_OFF
+            for (const p of result.desglose_formas_pago) {
+              const label = "  " + (FORMA_PAGO_LABEL[p.forma_pago] || p.forma_pago) + (p.moneda && p.moneda !== "PYG" ? ` (${p.moneda})` : "") + ":"
+              const mTxt = p.moneda === "PYG" ? `GS. ${formatPYG(p.monto)}` : `${p.moneda} ${Number(p.monto).toFixed(2)}`
+              t += escposTwoCol(label, mTxt, W) + "\n"
+            }
+            t += escposDashes(W) + "\n"
+          }
+
+          t += ESCPOS_BOLD_ON + "CONCILIACION DE EFECTIVO EN GAVETA:\n" + ESCPOS_BOLD_OFF
+          t += "[GUARANIES - PYG]\n"
+          t += escposTwoCol("  Fondo Inicial:", `GS. ${formatPYG(fondoPyg)}`, W) + "\n"
+          t += escposTwoCol("  Ventas en Efectivo:", `+GS. ${formatPYG(Number(result.monto_cierre_esperado || 0) - fondoPyg)}`, W) + "\n"
+          t += escposTwoCol("  Total Esperado:", `GS. ${formatPYG(result.monto_cierre_esperado)}`, W) + "\n"
+          t += ESCPOS_BOLD_ON + escposTwoCol("  Total Contado Fisico:", `GS. ${formatPYG(contado)}`, W) + ESCPOS_BOLD_OFF + "\n"
+          t += ESCPOS_BOLD_ON + escposTwoCol("  DIFERENCIA PYG:", `${diferencia >= 0 ? "+" : ""}GS. ${formatPYG(diferencia)}`, W) + ESCPOS_BOLD_OFF + "\n"
+
+          if (fondoBrl > 0 || contadoBrl > 0 || result.diferencia_brl) {
+            t += "\n[REALES - BRL]\n"
+            t += escposTwoCol("  Fondo Inicial:", `R$ ${fondoBrl.toFixed(2)}`, W) + "\n"
+            t += escposTwoCol("  Total Esperado:", `R$ ${Number(resAny?.monto_cierre_esperado_brl || (fondoBrl + contadoBrl - difBrl)).toFixed(2)}`, W) + "\n"
+            t += ESCPOS_BOLD_ON + escposTwoCol("  Total Contado Fisico:", `R$ ${contadoBrl.toFixed(2)}`, W) + ESCPOS_BOLD_OFF + "\n"
+            t += ESCPOS_BOLD_ON + escposTwoCol("  DIFERENCIA BRL:", `${difBrl >= 0 ? "+" : ""}R$ ${Number(difBrl).toFixed(2)}`, W) + ESCPOS_BOLD_OFF + "\n"
+          }
+
+          if (fondoUsd > 0 || contadoUsd > 0 || result.diferencia_usd) {
+            t += "\n[DOLARES - USD]\n"
+            t += escposTwoCol("  Fondo Inicial:", `US$ ${fondoUsd.toFixed(2)}`, W) + "\n"
+            t += escposTwoCol("  Total Esperado:", `US$ ${Number(resAny?.monto_cierre_esperado_usd || (fondoUsd + contadoUsd - difUsd)).toFixed(2)}`, W) + "\n"
+            t += ESCPOS_BOLD_ON + escposTwoCol("  Total Contado Fisico:", `US$ ${contadoUsd.toFixed(2)}`, W) + ESCPOS_BOLD_OFF + "\n"
+            t += ESCPOS_BOLD_ON + escposTwoCol("  DIFERENCIA USD:", `${difUsd >= 0 ? "+" : ""}US$ ${Number(difUsd).toFixed(2)}`, W) + ESCPOS_BOLD_OFF + "\n"
+          }
+
+          if (result.requiere_revision) {
+            t += "\n" + ESCPOS_BOLD_ON + ESCPOS_ALIGN_CENTER
+            t += "! DIFERENCIA FUERA DE TOLERANCIA !\n"
+            t += "REQUIERE REVISION DE SUPERVISION\n" + ESCPOS_BOLD_OFF + ESCPOS_ALIGN_LEFT
+          }
+
+          t += escposDashes(W) + "\n\n"
+          t += "Firma Cajero/a: _________________________\n\n"
+          t += "Firma Supervisora: ______________________\n\n\n\n\n\n"
+          t += GS + 'V' + '\x01'
+
+          b64 = escposToBase64(t)
+        }
+
+        setLastCierreEscPosB64(b64)
+        const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
+        try {
+          await (window as any).electronAPI.printEscPos(b64, tpl.nombre_impresora_windows || "ZKP8008")
+        } catch (printErr) {
+          console.error("Error al imprimir ESC/POS:", printErr)
+        }
+      } else {
+        const body = (result as any).ticket_text
+          ? `<div style="padding: 10px; font-family: monospace; font-size: 11px; white-space: pre-wrap;">${(result as any).ticket_text}</div>`
+          : (buildTicketPrelude("CIERRE DE CAJA / ARQUEO") + `
+          <div style="padding: 4px 0; font-size: 10px;">
+            <div>Cajero/a: ${user?.nombre || "-"}</div>
+            <div>Caja: ${puntoNombre}</div>
+            <div>Fecha/Hora: ${new Date().toLocaleString("es-PY")}</div>
+            <div>Turno ID: ${currentSessionId.slice(0, 8).toUpperCase()}</div>
+          </div>
+          <table style="width:100%; border-collapse:collapse; border-top:1px dashed #000; margin-top:4px; padding-top:4px; font-size:10px;">
+            <tr><td>Fondo apertura (Gs):</td><td style="text-align:right;">${formatPYG(fondoPyg)}</td></tr>
+            ${fondoBrl > 0 ? `<tr><td>Fondo apertura (R$):</td><td style="text-align:right;">R$ ${fondoBrl.toFixed(2)}</td></tr>` : ""}
+            <tr><td>Efectivo esperado (Gs.):</td><td style="text-align:right;">${formatPYG(result.monto_cierre_esperado)}</td></tr>
+            <tr><td>Efectivo contado (Gs.):</td><td style="text-align:right; font-weight:bold;">${formatPYG(contado)}</td></tr>
+            <tr style="font-weight:900; border-top:1px dashed #000;"><td>Diferencia (Gs.):</td><td style="text-align:right;">${diferencia >= 0 ? "+" : ""}${formatPYG(diferencia)}</td></tr>
+            ${(contadoUsd > 0 || result.diferencia_usd) ? `<tr><td>Diferencia US$:</td><td style="text-align:right;">${result.diferencia_usd >= 0 ? "+" : ""}${Number(result.diferencia_usd).toFixed(2)}</td></tr>` : ""}
+            ${(contadoBrl > 0 || result.diferencia_brl) ? `<tr><td>Diferencia R$:</td><td style="text-align:right;">${result.diferencia_brl >= 0 ? "+" : ""}${Number(result.diferencia_brl).toFixed(2)}</td></tr>` : ""}
+          </table>
+          ${(result.desglose_formas_pago || []).length > 0 ? `
+          <table style="width:100%; border-collapse:collapse; border-top:1px dashed #000; margin-top:4px; padding-top:4px; font-size:10px;">
+            <tr><td colspan="2" style="font-weight:900; padding-bottom:2px;">Ventas del turno por forma de pago:</td></tr>
+            ${result.desglose_formas_pago.map((p: any) => `<tr><td>${FORMA_PAGO_LABEL[p.forma_pago] || p.forma_pago}${p.moneda && p.moneda !== "PYG" ? ` (${p.moneda})` : ""}:</td><td style="text-align:right;">${p.moneda === "PYG" ? formatPYG(p.monto) : Number(p.monto).toFixed(2)}</td></tr>`).join("")}
+          </table>` : ""}
+          ${result.requiere_revision ? `<div style="text-align:center; font-weight:900; margin-top:6px; border:1px dashed #000; padding:4px;">⚠ DIFERENCIA FUERA DE TOLERANCIA -- REQUIERE REVISIÓN</div>` : ""}
+          <div style="margin-top:14px; font-size:9px;">
+            <div>Firma Cajero/a: ___________________________</div>
+            <div style="margin-top:10px;">Firma Supervisora: _________________________</div>
+          </div>
+          <br/><br/>
+        </div>`)
+        setLastCierreTicketHtml(body)
+        await printTicketHtml(body)
+      }
+
 
       localStorage.removeItem(userCajaKey)
+      localStorage.removeItem("current_cash_session")
       setCashSessionId(null)
       setCajaAbierta(false)
       setMontoCierreReal("")
       setMontoCierreUsd("")
       setMontoCierreBrl("")
       toast.info("Turno de Caja Cerrado", result.requiere_revision ? "Cierre registrado con diferencia fuera de tolerancia." : "Cierre registrado sin novedades.")
-      // El modal se queda abierto mostrando el resumen (esperado vs contado,
-      // desglose por forma de pago) -- antes se cerraba solo en este mismo
-      // instante, asi que la cajera nunca llegaba a ver esa pantalla. Ahora
-      // solo se cierra y se reabre la apertura cuando ella confirma "Cerrar".
     } catch (err) {
       toast.error("No se pudo cerrar la caja", "Verifique la conexión con el servidor e intente de nuevo.")
     } finally {
@@ -1966,16 +3727,13 @@ export default function POSPage() {
     }
   }
 
-  // ── Aviso de umbral de retiro -- antes esto solo se veia en el modulo
-  // administrativo de Caja, que la cajera nunca abre mientras vende. Sin
-  // esto, nadie se entera de que hay que hacer un retiro hasta que alguien
-  // lo nota por otro lado (o nunca). Se sondea cada 60s y avisa una sola vez
-  // por transicion de nivel (no en cada poll) para no ser repetitivo.
+  // ── Aviso de umbral de retiro y Monitoreo de confirmaciones en Bóveda ────────
   useEffect(() => {
     if (!cashSessionId || !cashRegisterId) { setCashDropStatus(null); return }
     let cancelled = false
     const check = async () => {
       try {
+        // 1. Monitoreo de umbral de caja
         const sessions = await api.caja.sessionsSummary({ register_id: cashRegisterId, estado: "abierta" } as any)
         const mine = (sessions || []).find((s: any) => s.id === cashSessionId)
         if (cancelled || !mine) return
@@ -1995,12 +3753,89 @@ export default function POSPage() {
           }
         }
         cashDropStatusNotifiedRef.current = level
-      } catch { /* silencioso -- no bloquea la venta si esto falla */ }
+
+        // 2. Monitoreo reactivo de confirmación de Cash Drop (Imprime Ticket 2)
+        if (pendingDropIdsRef.current.size > 0) {
+          const drops = await api.caja.cashDropRequests.list("confirmado")
+          if (Array.isArray(drops)) {
+            for (const d of drops) {
+              if (pendingDropIdsRef.current.has(d.id) && !confirmedDropIdsRef.current.has(d.id)) {
+                confirmedDropIdsRef.current.add(d.id)
+                pendingDropIdsRef.current.delete(d.id)
+                triggerSuccessSound()
+                const puntoNombre = PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision || "Caja"
+                const bodyConfirm = buildTicketPrelude("CONFIRMACIÓN DE SANGRÍA - BÓVEDA") + `
+                  <div style="padding: 4px 0; font-size: 10px;">
+                    <div style="font-weight:900; text-align:center; font-size:11px; border-bottom:1px dashed #000; padding-bottom:3px;">
+                      RETIRO INGRESADO A BÓVEDA
+                    </div>
+                    <div style="margin-top:4px;">Caja: ${puntoNombre}</div>
+                    <div>Cajero/a: ${d.solicitado_por_nombre || user?.nombre || "-"}</div>
+                    <div>Supervisora: ${d.confirmado_por_nombre || "Supervisor/a"}</div>
+                    <div>Fecha Confirmación: ${d.fecha_confirmacion ? new Date(d.fecha_confirmacion).toLocaleString("es-PY") : new Date().toLocaleString("es-PY")}</div>
+                    <div>Nro. Solicitud: CD-${String(d.id).slice(0, 8).toUpperCase()}</div>
+                  </div>
+                  <table style="width:100%; border-collapse:collapse; border-top:1px dashed #000; margin-top:4px; font-size:10px;">
+                    <tr><td>Monto Declarado:</td><td style="text-align:right; font-weight:bold;">${formatPYG(d.monto_pyg)}</td></tr>
+                    <tr><td>Recibido en Bóveda:</td><td style="text-align:right; font-weight:900;">${formatPYG(d.monto_confirmado_pyg || d.monto_pyg)}</td></tr>
+                    ${d.monto_usd ? `<tr><td>USD:</td><td style="text-align:right;">US$ ${(d.monto_confirmado_usd || d.monto_usd).toFixed(2)}</td></tr>` : ""}
+                    ${d.monto_brl ? `<tr><td>BRL:</td><td style="text-align:right;">R$ ${(d.monto_confirmado_brl || d.monto_brl).toFixed(2)}</td></tr>` : ""}
+                  </table>
+                  ${d.discrepancia_confirmacion ? `<div style="font-weight:900; text-align:center; border:1px dashed #000; margin-top:4px; padding:2px;">⚠ DISCREPANCIA EN RECUENTO DE BÓVEDA</div>` : `<div style="text-align:center; font-weight:bold; margin-top:4px;">✓ RECUENTO COINCIDENTE (EXACTO)</div>`}
+                  <div style="text-align:center; font-size:9px; margin-top:6px; border-top:1px dashed #000; padding-top:4px;">
+                    ✅ Efectivo transferido a Bóveda. Cajera liberada de custodia.
+                  </div>
+                  <br/><br/>
+                </div>`
+                await printTicketHtml(bodyConfirm)
+                toast.success("Sangría Confirmada en Bóveda", `Recibido por ${d.confirmado_por_nombre || 'Supervisora'}`)
+              }
+            }
+          }
+        }
+
+        // 3. Monitoreo reactivo de confirmación de Handoff (Entrega de Cierre)
+        if (pendingHandoffIdRef.current) {
+          const handoffs = await api.caja.handoffs.list({ estado: "confirmado" })
+          if (Array.isArray(handoffs)) {
+            const match = handoffs.find((h: any) => h.id === pendingHandoffIdRef.current)
+            if (match) {
+              pendingHandoffIdRef.current = null
+              triggerSuccessSound()
+              const puntoNombre = PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision || "Caja"
+              const bodyHandoff = buildTicketPrelude("RECEPCIÓN DE CIERRE EN BÓVEDA") + `
+                <div style="padding: 4px 0; font-size: 10px;">
+                  <div style="font-weight:900; text-align:center; font-size:11px; border-bottom:1px dashed #000; padding-bottom:3px;">
+                    ENTREGA DE TURNO RECIBIDA
+                  </div>
+                  <div style="margin-top:4px;">Caja: ${puntoNombre}</div>
+                  <div>Cajero/a: ${match.entregado_por_nombre || user?.nombre || "-"}</div>
+                  <div>Supervisora: ${match.recibido_por_nombre || "Supervisor/a"}</div>
+                  <div>Fecha Recepción: ${match.fecha_confirmacion ? new Date(match.fecha_confirmacion).toLocaleString("es-PY") : new Date().toLocaleString("es-PY")}</div>
+                </div>
+                <table style="width:100%; border-collapse:collapse; border-top:1px dashed #000; margin-top:4px; font-size:10px;">
+                  <tr><td>Monto Declarado:</td><td style="text-align:right; font-weight:bold;">${formatPYG(match.monto_pyg)}</td></tr>
+                  <tr><td>Recibido en Bóveda:</td><td style="text-align:right; font-weight:900;">${formatPYG(match.monto_confirmado_pyg || match.monto_pyg)}</td></tr>
+                  ${match.monto_usd ? `<tr><td>USD:</td><td style="text-align:right;">US$ ${(match.monto_confirmado_usd || match.monto_usd).toFixed(2)}</td></tr>` : ""}
+                  ${match.monto_brl ? `<tr><td>BRL:</td><td style="text-align:right;">R$ ${(match.monto_confirmado_brl || match.monto_brl).toFixed(2)}</td></tr>` : ""}
+                </table>
+                ${match.discrepancia_confirmacion ? `<div style="font-weight:900; text-align:center; border:1px dashed #000; margin-top:4px; padding:2px;">⚠ DISCREPANCIA REGISTRADA EN BÓVEDA</div>` : `<div style="text-align:center; font-weight:bold; margin-top:4px;">✓ RECUENTO DE ENTREGA CONFORME</div>`}
+                <div style="text-align:center; font-size:9px; margin-top:6px; border-top:1px dashed #000; padding-top:4px;">
+                  ✅ Cierre recibido formalmente en Bóveda Central.
+                </div>
+                <br/><br/>
+              </div>`
+              await printTicketHtml(bodyHandoff)
+              toast.success("Cierre Recibido en Bóveda", `Confirmado por ${match.recibido_por_nombre || 'Supervisora'}`)
+            }
+          }
+        }
+      } catch { /* silencioso */ }
     }
     check()
-    const interval = setInterval(check, 60000)
+    const interval = setInterval(check, 10000)
     return () => { cancelled = true; clearInterval(interval) }
-  }, [cashSessionId, cashRegisterId])
+  }, [cashSessionId, cashRegisterId, puntoEmision, user])
 
   const handleConfirmCashDrop = async () => {
     if (!cashSessionId) {
@@ -2016,25 +3851,40 @@ export default function POSPage() {
     }
     setSubmittingCashDrop(true)
     try {
-      await api.caja.cashDrop(cashSessionId, { monto, monto_usd: montoUsd, monto_brl: montoBrl, observaciones: cashDropObs.trim() || undefined })
+      const dropRes = await api.caja.cashDrop(cashSessionId, { monto, monto_usd: montoUsd, monto_brl: montoBrl, observaciones: cashDropObs.trim() || undefined })
+      if (dropRes?.id) {
+        pendingDropIdsRef.current.add(String(dropRes.id))
+      }
       const montosTexto = [
         monto > 0 ? formatPYG(monto) : null,
         montoUsd > 0 ? `US$ ${montoUsd.toFixed(2)}` : null,
         montoBrl > 0 ? `R$ ${montoBrl.toFixed(2)}` : null,
       ].filter(Boolean).join(" + ")
-      const body = buildTicketPrelude("RETIRO DE EFECTIVO (CASH DROP)") + `
+      const puntoNombre = PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision || "Caja"
+      const dropIdStr = dropRes?.id ? String(dropRes.id).slice(0, 8).toUpperCase() : "-"
+      const body = buildTicketPrelude("SOLICITUD DE RETIRO (CASH DROP)") + `
         <div style="padding: 4px 0; font-size: 10px;">
-          <div>Cajero: ${user?.nombre || "-"}</div>
+          <div>Cajero/a: ${user?.nombre || "-"}</div>
+          <div>Caja: ${puntoNombre}</div>
           <div>Fecha/Hora: ${new Date().toLocaleString("es-PY")}</div>
-          <div style="font-weight:900; font-size:13px; margin-top:6px;">Monto retirado: ${montosTexto}</div>
-          <div style="margin-top:4px;">Pendiente de confirmación por supervisora</div>
-          ${cashDropObs.trim() ? `<div style="margin-top:4px;">Obs: ${cashDropObs.trim()}</div>` : ""}
+          <div>Nro. Solicitud: CD-${dropIdStr}</div>
+          <div style="font-weight:900; font-size:12px; margin-top:6px; border-top:1px dashed #000; border-bottom:1px dashed #000; padding:3px 0;">
+            Monto Retirado: ${montosTexto}
+          </div>
+          <div style="margin-top:4px; font-weight:bold;">[ESTADO: PENDIENTE DE RECUENTO EN BÓVEDA]</div>
+          ${cashDropObs.trim() ? `<div style="margin-top:2px;">Obs: ${cashDropObs.trim()}</div>` : ""}
         </div>
-        <div style="text-align:center; margin-top:10px; font-size:9px;">Firma cajero: ______________________</div>
+        <div style="margin-top:12px; font-size:9px;">
+          <div>Firma Cajero/a: ___________________________</div>
+          <div style="margin-top:10px;">Firma Supervisora: _________________________</div>
+        </div>
+        <div style="text-align:center; font-size:8.5px; margin-top:8px; color:#555;">
+          Comprobante de custodia temporal hasta confirmación en Bóveda.
+        </div>
         <br/><br/>
       </div>`
       await printTicketHtml(body)
-      toast.success("Retiro registrado", `${montosTexto} -- pendiente de que la supervisora lo confirme.`)
+      toast.success("Retiro registrado", `${montosTexto} -- pendiente de confirmación por supervisora.`)
       setShowCashDropModal(false)
       setCashDropMonto("")
       setCashDropMontoUsd("")
@@ -2057,11 +3907,129 @@ export default function POSPage() {
 
   // ── REIMPRESIÓN DE VENTAS YA EMITIDAS ──────────────────────────────────────
   const [showReimprimirModal, setShowReimprimirModal] = useState(false)
-  const [reimprimirTab, setReimprimirTab] = useState<"ventas" | "devoluciones">("ventas")
+  const [reimprimirTab, setReimprimirTab] = useState<"ventas" | "supervisor" | "devoluciones" | "cierres">("ventas")
+  const [reimprimirSearch, setReimprimirSearch] = useState("")
   const [reimprimirSales, setReimprimirSales] = useState<Sale[]>([])
   const [reimprimirReturns, setReimprimirReturns] = useState<any[]>([])
+  const [reimprimirSessions, setReimprimirSessions] = useState<any[]>([])
+  const [reimprimirCierreCajero, setReimprimirCierreCajero] = useState("")
+  const [reimprimirCierreFecha, setReimprimirCierreFecha] = useState("")
   const [reimprimirLoading, setReimprimirLoading] = useState(false)
   const [reimprimirError, setReimprimirError] = useState("")
+
+  // Modo Supervisora para consulta y reimpresión de todas las cajas (últimos 7 días)
+  const [reimprimirSupervisorUnlocked, setReimprimirSupervisorUnlocked] = useState(false)
+  const [reimprimirSupervisorEmail, setReimprimirSupervisorEmail] = useState("")
+  const [reimprimirSupervisorPin, setReimprimirSupervisorPin] = useState("")
+  const [reimprimirSupervisorVerifying, setReimprimirSupervisorVerifying] = useState(false)
+  const [reimprimirSupervisorSales, setReimprimirSupervisorSales] = useState<Sale[]>([])
+  const [reimprimirSupervisorLoading, setReimprimirSupervisorLoading] = useState(false)
+  const [reimprimirSupervisorSearch, setReimprimirSupervisorSearch] = useState("")
+  const [reimprimirSupervisorCajero, setReimprimirSupervisorCajero] = useState("")
+
+  const validReimprimirSessions = useMemo(() => {
+    const LEGACY_SESSION_IDS = new Set([
+      "b3cf7fa8-dba3-4859-90d6-4bbac9e72f1c", // Liz Caja 2 legacy 31/08
+      "f8217bfa-484b-419f-a973-f627ad328d99", // Nilda Caja 2 legacy 31/08
+      "6552392f-6844-4ba7-9cce-ca792b52a41b", // Tomasa Caja 4 legacy 31/08
+      "e93a5246-d1de-4de2-b016-b9bb86de0a15", // Zunilda Caja 2 legacy 31/08
+      "0fca771a-860a-4e80-9513-d8ada4f7043d", // Tomasa Caja 2 apertura 29 seg
+    ])
+    return reimprimirSessions.filter((s) => !LEGACY_SESSION_IDS.has(s.id))
+  }, [reimprimirSessions])
+
+  const filteredReimprimirSessions = useMemo(() => {
+    const toLocalDateStr = (iso?: string | null) => {
+      if (!iso) return ""
+      try {
+        const d = new Date(iso)
+        if (isNaN(d.getTime())) return (iso || "").slice(0, 10)
+        return d.toLocaleDateString("en-CA", { timeZone: "America/Asuncion" })
+      } catch {
+        return (iso || "").slice(0, 10)
+      }
+    }
+    return validReimprimirSessions.filter((s) => {
+      if (reimprimirCierreCajero && s.cajero_nombre !== reimprimirCierreCajero) {
+        return false
+      }
+      if (reimprimirCierreFecha) {
+        const cierreDateStr = toLocalDateStr(s.fecha_cierre)
+        const aperturaDateStr = toLocalDateStr(s.fecha_apertura)
+        if (cierreDateStr !== reimprimirCierreFecha && aperturaDateStr !== reimprimirCierreFecha) {
+          return false
+        }
+      }
+      return true
+    })
+  }, [validReimprimirSessions, reimprimirCierreCajero, reimprimirCierreFecha])
+
+  const filteredReimprimirSales = useMemo(() => {
+    const q = reimprimirSearch.trim().toLowerCase()
+    if (!q) return reimprimirSales
+    const qNum = q.replace(/\D/g, "")
+    return reimprimirSales.filter(s => {
+      const num = (s.numero || "").toLowerCase()
+      const numInt = (s.numero_interno || "").toLowerCase()
+      const cNom = (s.customer_nombre || s.customer?.nombre || s.customer?.razon_social || "").toLowerCase()
+      const cDoc = (s.customer_doc || s.customer?.ruc || s.customer?.ci || s.customer?.telefono || "").toLowerCase()
+      const cDocClean = cDoc.replace(/\D/g, "")
+      const cEc = (s.customer_extra_club || s.customer?.extra_club_numero || "").toLowerCase()
+      const totalStr = String(s.total || 0)
+      const totalFormatted = (s.total || 0).toLocaleString("es-PY").toLowerCase()
+      const fp = (s.forma_pago || (s.condicion === "credito" ? "EXTRA_CLUB" : "EFECTIVO")).toLowerCase()
+
+      return (
+        num.includes(q) ||
+        numInt.includes(q) ||
+        cNom.includes(q) ||
+        cDoc.includes(q) ||
+        (qNum && cDocClean.includes(qNum)) ||
+        cEc.includes(q) ||
+        fp.includes(q) ||
+        totalStr.includes(q) ||
+        totalFormatted.includes(q) ||
+        (qNum && totalStr.includes(qNum))
+      )
+    })
+  }, [reimprimirSales, reimprimirSearch])
+
+  const filteredReimprimirSupervisorSales = useMemo(() => {
+    let list = reimprimirSupervisorSales
+    if (reimprimirSupervisorCajero) {
+      list = list.filter((s: any) => s.cajero_nombre === reimprimirSupervisorCajero || (s.user && s.user.nombre === reimprimirSupervisorCajero))
+    }
+    const q = reimprimirSupervisorSearch.trim().toLowerCase()
+    if (!q) return list
+    const qNum = q.replace(/\D/g, "")
+    return list.filter((s: any) => {
+      const num = (s.numero || "").toLowerCase()
+      const numInt = (s.numero_interno || "").toLowerCase()
+      const cNom = (s.customer_nombre || s.customer?.nombre || s.customer?.razon_social || "").toLowerCase()
+      const cDoc = (s.customer_doc || s.customer?.ruc || s.customer?.ci || s.customer?.telefono || "").toLowerCase()
+      const cDocClean = cDoc.replace(/\D/g, "")
+      const cEc = (s.customer_extra_club || s.customer?.extra_club_numero || "").toLowerCase()
+      const totalStr = String(s.total || 0)
+      const totalFormatted = (s.total || 0).toLocaleString("es-PY").toLowerCase()
+      const fp = (s.forma_pago || (s.condicion === "credito" ? "EXTRA_CLUB" : "EFECTIVO")).toLowerCase()
+      const cajero = (s.cajero_nombre || (s.user && s.user.nombre) || "").toLowerCase()
+
+      return (
+        num.includes(q) ||
+        numInt.includes(q) ||
+        cNom.includes(q) ||
+        cDoc.includes(q) ||
+        cajero.includes(q) ||
+        (qNum && cDocClean.includes(qNum)) ||
+        cEc.includes(q) ||
+        fp.includes(q) ||
+        totalStr.includes(q) ||
+        totalFormatted.includes(q) ||
+        (qNum && totalStr.includes(qNum))
+      )
+    })
+  }, [reimprimirSupervisorSales, reimprimirSupervisorCajero, reimprimirSupervisorSearch])
+
   // Reabrir factura -- agregar identificacion de cliente a una venta que
   // salio como Consumidor Final. Pedido real: el cliente se va, la caja
   // sigue, y despues vuelve pidiendo que la factura lleve su nombre.
@@ -2072,11 +4040,29 @@ export default function POSPage() {
   const [reabrirFacturaSearching, setReabrirFacturaSearching] = useState(false)
   const [submittingReabrirFactura, setSubmittingReabrirFactura] = useState(false)
 
+  // Cambio de forma de pago en venta ya cerrada (solo turno activo)
+  const [reabrirPagoSaleId, setReabrirPagoSaleId] = useState<string | null>(null)
+  const [reabrirPagoFormaPago, setReabrirPagoFormaPago] = useState("")
+  const [reabrirPagoMotivo, setReabrirPagoMotivo] = useState("")
+  const [reabrirPagoCustomer, setReabrirPagoCustomer] = useState<Customer | null>(null)
+  const [reabrirPagoCustomerSearch, setReabrirPagoCustomerSearch] = useState("")
+  const [reabrirPagoCustomerResults, setReabrirPagoCustomerResults] = useState<Customer[]>([])
+  const [reabrirPagoCustomerSearching, setReabrirPagoCustomerSearching] = useState(false)
+  const [reabrirPagoVoucher, setReabrirPagoVoucher] = useState("")
+  const [reabrirPagoLote, setReabrirPagoLote] = useState("")
+  const [reabrirPagoTarjetaMarca, setReabrirPagoTarjetaMarca] = useState("")
+  const [reabrirPagoMoneda, setReabrirPagoMoneda] = useState("PYG")
+  const [reabrirPagoMontoMoneda, setReabrirPagoMontoMoneda] = useState<number | undefined>(undefined)
+  const [reabrirPagoPosLoading, setReabrirPagoPosLoading] = useState(false)
+  const [reabrirPagoPosMsg, setReabrirPagoPosMsg] = useState<string | null>(null)
+  const [submittingReabrirPago, setSubmittingReabrirPago] = useState(false)
+
   // ── CUPONES DE SORTEO EN CAJA (ELECTRON / POS MULTI-CAMPAÑA) ────────────────
   const [showCuponModal, setShowCuponModal] = useState(false)
   const [cuponModalStep, setCuponModalStep] = useState<"pregunta" | "formulario">("pregunta")
   const [lookingUpDoc, setLookingUpDoc] = useState(false)
   const [pendingCuponData, setPendingCuponData] = useState<{
+    saleId?: string
     saleNumero: string
     montoCompra: number
     totalCupones: number
@@ -2101,9 +4087,22 @@ export default function POSPage() {
     ciudad: string
     items: any[]
     origenDoc?: string
+    vueltoBreakdown?: {
+      totalPyg: number
+      brl: number
+      saldoGs: number
+    }
     printInvoiceCallback?: () => Promise<void>
   } | null>(null)
   const [savingCupon, setSavingCupon] = useState(false)
+  const [lastSaleDraft, setLastSaleDraft] = useState<{
+    cart: CartItem[]
+    customer: Customer
+    appliedDiscount: any
+    extraClubAdminOverride: boolean
+    saleId?: string | null
+    offlineSaleId?: string | null
+  } | null>(null)
 
   const lastLookedUpDocRef = useRef<string>("")
   const lookupDocTimerRef = useRef<any>(null)
@@ -2119,7 +4118,8 @@ export default function POSPage() {
       if (lastLookedUpDocRef.current === clean) return
       try {
         setLookingUpDoc(true)
-        const res = await api.cupones.buscarDocumento(clean)
+        // Intentar consultar al servidor con timeout rápido (800ms) para no trabar la cajera
+        const res = await withTimeout(api.cupones.buscarDocumento(clean), 800, null)
         lastLookedUpDocRef.current = clean
         if (res && res.encontrado && res.nombre) {
           setPendingCuponData(prev => {
@@ -2153,9 +4153,26 @@ export default function POSPage() {
             "Cliente Localizado",
             `${res.nombre} (${res.origen === "padron_tsje" ? "Padrón Nacional TSJE" : "Base de Clientes"})`
           )
+        } else {
+          // Fallback local: buscar en clientes cacheados en IndexedDB
+          try {
+            const localCusts = await offlineDB.customers.getByCI(clean)
+            if (localCusts && localCusts.length > 0 && localCusts[0]?.razon_social) {
+              const c = localCusts[0]
+              setPendingCuponData(prev => prev ? ({
+                ...prev,
+                doc: clean,
+                nombre: c.razon_social || prev.nombre,
+                telefono: c.telefono || prev.telefono,
+                ciudad: c.ciudad || prev.ciudad,
+                origenDoc: "local_cache"
+              }) : null)
+              toast.info("Cliente Localizado (Local)", `${c.razon_social}`)
+            }
+          } catch {}
         }
       } catch {
-        // Silencioso
+        // Silencioso ante timeout o desconexión
       } finally {
         setLookingUpDoc(false)
       }
@@ -2201,9 +4218,9 @@ export default function POSPage() {
         t += ESCPOS_ALIGN_CENTER
 
         // 1. Encabezado configurable
-        const encabezado = camp.ticket_encabezado?.trim() || tpl.nombre_fantasia || "CASA GONZALITO DISTRIBUIDORA"
+        const encabezado = camp.ticket_encabezado?.trim() || tpl.nombre_fantasia || "EXTRA SUPERMERCADO MAYORISTA"
         t += ESCPOS_BOLD_ON + escposStripAccents(encabezado) + ESCPOS_BOLD_OFF + '\n'
-        t += "Pedro Juan Caballero · Paraguay\n"
+        t += "Pedro Juan Caballero - Paraguay\n"
         t += escposDashes(W) + '\n'
 
         // 2. Subtítulo del Sorteo y Premio
@@ -2213,7 +4230,7 @@ export default function POSPage() {
         if (camp.premio_destacado) {
           t += escposWrapText(`Premio: ${camp.premio_destacado}`, W, 'center')
         }
-        if (camp.patrocinador && camp.patrocinador !== "Casa Gonzalito") {
+        if (camp.patrocinador && camp.patrocinador !== "Extra Supermercado") {
           t += escposWrapText(`Patrocinador: ${camp.patrocinador}`, W, 'center')
         }
 
@@ -2224,7 +4241,7 @@ export default function POSPage() {
 
         // 4. Datos del Ticket
         t += escposTwoCol(`Ticket: #${cuponData.saleNumero}`, `Gs. ${formatPYG(cuponData.montoCompra)}`, W) + '\n'
-        t += escposTwoCol(`Fecha: ${new Date().toLocaleDateString("es-PY")} ${new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })}`, `Boca: ${puntoEmision || "012"}`, W) + '\n'
+        t += escposTwoCol(`Fecha: ${escposFormatDate(new Date())} ${escposFormatTime(new Date())}`, `Boca: ${escposStripAccents(puntoEmision || "012")}`, W) + '\n'
         t += escposDashes(W) + '\n'
 
         // 5. Datos del Participante
@@ -2261,31 +4278,49 @@ export default function POSPage() {
 
     setSavingCupon(true)
     const fullTel = `${pendingCuponData.telCodigo}${pendingCuponData.telefono.trim()}`
-    try {
-      await api.cupones.registrarMultiple({
-        documento: pendingCuponData.doc.trim(),
-        nombre: pendingCuponData.nombre.trim(),
-        telefono: fullTel,
-        barrio: pendingCuponData.barrio.trim() || "Centro",
-        ciudad: pendingCuponData.ciudad.trim() || "Pedro Juan Caballero",
-        nro_ticket: pendingCuponData.saleNumero,
-        monto_compra: pendingCuponData.montoCompra,
-        usuario_nombre: user?.nombre || "Cajero POS",
-        cupones_por_campana: pendingCuponData.campanasCalificadas.map(c => ({
-          campana_id: c.campana_id,
-          campana_nombre: c.nombre,
-          cantidad: c.cupones_ganados
-        })),
-        items: pendingCuponData.items,
-        enviar_whatsapp: true
-      })
+    const cuponPayload = {
+      sale_id: pendingCuponData.saleId || undefined,
+      documento: pendingCuponData.doc.trim(),
+      nombre: pendingCuponData.nombre.trim(),
+      telefono: fullTel,
+      barrio: pendingCuponData.barrio.trim() || "Centro",
+      ciudad: pendingCuponData.ciudad.trim() || "Pedro Juan Caballero",
+      nro_ticket: pendingCuponData.saleNumero,
+      monto_compra: pendingCuponData.montoCompra,
+      usuario_nombre: user?.nombre || "Cajero POS",
+      cupones_por_campana: pendingCuponData.campanasCalificadas.map(c => ({
+        campana_id: c.campana_id,
+        campana_nombre: c.nombre,
+        cantidad: c.cupones_ganados
+      })),
+      items: pendingCuponData.items,
+      enviar_whatsapp: true
+    }
 
-      // Imprimir factura primero
+    let syncedOnline = false
+    try {
+      // 1. Intento con fast-timeout (1200ms) al backend
+      try {
+        await withTimeout(api.cupones.registrarMultiple(cuponPayload), 1200)
+        syncedOnline = true
+      } catch (backendErr) {
+        console.warn("[POS Cupones] Backend central no disponible o lento. Encolando cupones en IndexedDB...", backendErr)
+        const cuponOfflineId = `cup-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+        await offlineDB.pendingCupones.add({
+          id: cuponOfflineId,
+          data: cuponPayload,
+          created_at: new Date().toISOString(),
+          status: "pending",
+          retry_count: 0,
+        })
+      }
+
+      // 2. Imprimir factura primero
       if (pendingCuponData.printInvoiceCallback) {
         await pendingCuponData.printInvoiceCallback()
       }
 
-      // Luego imprimir cupones
+      // 3. Luego imprimir cupones físicos en ticketera térmica ESC/POS
       await printCuponesMultiCampanaEscPos({
         saleNumero: pendingCuponData.saleNumero,
         montoCompra: pendingCuponData.montoCompra,
@@ -2297,11 +4332,17 @@ export default function POSPage() {
         ciudad: pendingCuponData.ciudad.trim() || "Pedro Juan Caballero",
       })
 
-      toast.success("Cupones Emitidos", `Se emitieron ${pendingCuponData.totalCupones} cupón(es) para ${pendingCuponData.campanasCalificadas.length} sorteo(s).`)
+      if (syncedOnline) {
+        toast.success("Cupones Emitidos", `Se emitieron ${pendingCuponData.totalCupones} cupón(es) para ${pendingCuponData.campanasCalificadas.length} sorteo(s).`)
+      } else {
+        toast.info("Cupones Emitidos (Offline)", `Se emitieron e imprimieron ${pendingCuponData.totalCupones} cupón(es). Se sincronizarán automáticamente al reconectar.`)
+      }
       setShowCuponModal(false)
       setPendingCuponData(null)
+      setLastSaleDraft(null)
     } catch (err: any) {
-      toast.error("Error al emitir cupones", err?.message || "No se pudo guardar el cupón.")
+      console.error("Error emitiendo cupones:", err)
+      toast.error("Error al emitir cupones", err?.message || "No se pudo completar la emisión.")
     } finally {
       setSavingCupon(false)
     }
@@ -2313,6 +4354,55 @@ export default function POSPage() {
     }
     setShowCuponModal(false)
     setPendingCuponData(null)
+    setLastSaleDraft(null)
+  }
+
+  const handleReturnToSale = async () => {
+    if (!lastSaleDraft) {
+      setShowCuponModal(false)
+      setPendingCuponData(null)
+      return
+    }
+
+    const confirmReopen = window.confirm(
+      "¿Desea volver a la venta activa para agregar productos o modificar datos del cliente?\n\nLa venta provisoria actual (aún no impresa) será anulada y el carrito será restaurado exactamente como estaba."
+    )
+    if (!confirmReopen) return
+
+    try {
+      if (lastSaleDraft.saleId) {
+        try {
+          await api.sales.cancel(lastSaleDraft.saleId)
+        } catch (cancelErr) {
+          console.warn("[POS] No se pudo anular venta en backend al retornar:", cancelErr)
+        }
+      }
+      if (lastSaleDraft.offlineSaleId) {
+        try {
+          await offlineDB.pendingSales.remove(lastSaleDraft.offlineSaleId)
+        } catch (dbErr) {
+          console.warn("[POS] No se pudo remover venta offline al retornar:", dbErr)
+        }
+      }
+
+      // Restaurar carrito y cliente
+      setCart(lastSaleDraft.cart)
+      setCustomer(lastSaleDraft.customer)
+      setAppliedDiscount(lastSaleDraft.appliedDiscount)
+      setExtraClubAdminOverride(lastSaleDraft.extraClubAdminOverride)
+
+      setShowCuponModal(false)
+      setPendingCuponData(null)
+      setLastSaleDraft(null)
+
+      toast.info(
+        "Venta Restaurada para Modificación",
+        "El carrito y el cliente fueron recuperados. Puede agregar más items o modificar datos antes de volver a cobrar."
+      )
+    } catch (err: any) {
+      console.error("Error al retornar a la venta:", err)
+      toast.error("Error al volver a la venta", err?.message || "Ocurrió un problema.")
+    }
   }
 
 
@@ -2333,23 +4423,181 @@ export default function POSPage() {
     return () => clearTimeout(timer)
   }, [reabrirFacturaSearch, reabrirFacturaSaleId])
 
+  // Búsqueda debounce de socios para cambio de forma de pago a Extra Club / Crédito
+  useEffect(() => {
+    if (!reabrirPagoSaleId || !reabrirPagoCustomerSearch.trim() || reabrirPagoCustomerSearch.trim().length < 2) {
+      setReabrirPagoCustomerResults([])
+      return
+    }
+    setReabrirPagoCustomerSearching(true)
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api.customers.list({ search: reabrirPagoCustomerSearch.trim(), limit: 10 } as any)
+        setReabrirPagoCustomerResults((res || []).map(normalizeCustomer))
+      } catch (e) {
+        setReabrirPagoCustomerResults([])
+      } finally {
+        setReabrirPagoCustomerSearching(false)
+      }
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [reabrirPagoCustomerSearch, reabrirPagoSaleId])
+
+  const handleReabrirPagoCobrarPos = async (sale: Sale) => {
+    const ip = activePosConfig.bancardIp
+    if (!ip) {
+      toast.error("POS no configurado", "No hay IP asignada para la terminal Bancard en esta caja.")
+      return
+    }
+    if (!(window as any).electronAPI?.bancardCall) {
+      toast.error("Integración Electron requerida", "El cobro integrado con AXIUM DX8000 requiere ejecutar en la aplicación de escritorio.")
+      return
+    }
+    setReabrirPagoPosLoading(true)
+    setReabrirPagoPosMsg("Iniciando cobro en terminal DX8000... Pase o inserte la tarjeta en el POS.")
+    try {
+      const res = await (window as any).electronAPI.bancardCall({
+        url: `http://${ip}:8080/pos/venta-ux`,
+        method: "POST",
+        body: {
+          monto: String(Math.round(sale.total || 0)),
+          tipo: "CREDITO",
+          cuotas: "00",
+          ticket: true,
+        }
+      })
+      if (!res.ok) {
+        throw new Error(res.error || `HTTP ${res.status}`)
+      }
+      const data = res.data || {}
+      if (data.responseCode === "00" || data.status === "APPROVED" || data.codigoRespuesta === "00") {
+        const ticketNum = data.ticketNumber || data.secuencia || data.nroComprobante || data.nroTicket || ""
+        const loteNum = data.batchNumber || data.nroLote || data.lote || ""
+        const cardBrand = data.cardBrand || data.marca || data.tarjeta || ""
+        setReabrirPagoVoucher(ticketNum ? String(ticketNum) : "POS-APROBADO")
+        if (loteNum) setReabrirPagoLote(String(loteNum))
+        if (cardBrand) setReabrirPagoTarjetaMarca(String(cardBrand))
+        setReabrirPagoPosMsg("✅ Cobro aprobado exitosamente en POS.")
+        toast.success("Cobro POS Aprobado", `Voucher: ${ticketNum || "OK"} - Lote: ${loteNum || "—"}`)
+      } else {
+        const desc = data.responseDescription || data.mensajeRespuesta || data.message || "Operación cancelada o rechazada en el POS."
+        setReabrirPagoPosMsg(`❌ Rechazado: ${desc}`)
+        toast.error("Cobro POS Rechazado", desc)
+      }
+    } catch (err: any) {
+      setReabrirPagoPosMsg(`❌ Error de comunicación con POS (${ip}): ${err.message}`)
+      toast.error("Fallo de comunicación con POS", err.message)
+    } finally {
+      setReabrirPagoPosLoading(false)
+    }
+  }
+
   const submitReabrirFactura = async (sale: Sale, selected: Customer, resolverId: string, resolverNombre: string) => {
     setSubmittingReabrirFactura(true)
     try {
+      const isDefault = !selected?.id || String(selected.id) === DEFAULT_CUSTOMER.id
       const updated = await api.sales.reopenCustomer(sale.id, {
-        customer_id: String(selected.id),
+        customer_id: isDefault ? null : String(selected.id),
         autorizado_por_id: resolverId,
         autorizado_por_nombre: resolverNombre,
       })
-      setReimprimirSales(prev => prev.map(s => s.id === sale.id ? { ...s, customer_id: updated.customer_id } as any : s))
+      const baseTicket = updated.recibo_escpos_b64 || sale.recibo_escpos_b64
+      const customerNombre = isDefault ? "Consumidor Final" : (selected.nombre || selected.razon_social || "")
+      const customerDoc = isDefault ? "" : ((selected.ruc || selected.ci) || "")
+      const patchedB64 = baseTicket
+        ? patchEscposTicketCustomer(baseTicket, customerNombre, customerDoc)
+        : baseTicket
+
+      const saleActualizada = {
+        ...sale,
+        customer_id: updated.customer_id ?? (isDefault ? null : String(selected.id)),
+        customer: isDefault ? DEFAULT_CUSTOMER : (selected || sale.customer),
+        customer_nombre: customerNombre,
+        customer_doc: customerDoc,
+        customer_extra_club: isDefault ? undefined : ((selected as any).extra_club_numero || sale.customer_extra_club),
+        observaciones: updated.observaciones || sale.observaciones,
+        recibo_escpos_b64: patchedB64,
+        recibo_html: updated.recibo_html || sale.recibo_html,
+      } as Sale
+      setReimprimirSales(prev => prev.map(s => s.id === sale.id ? saleActualizada : s))
       setReabrirFacturaSaleId(null)
       setReabrirFacturaSearch("")
       setReabrirFacturaResults([])
-      toast.success("Factura reabierta", `${selected.nombre} vinculado a la venta Nº ${sale.numero}. Se puede reimprimir con su identificación.`)
+      toast.success(
+        isDefault ? "Factura convertida a Consumidor Final" : "Factura reabierta",
+        `Venta Nº ${sale.numero}: ${customerNombre}. Reimprimiendo con datos actualizados...`
+      )
+      await handleReimprimirSale(saleActualizada)
     } catch (e: any) {
       toast.error("No se pudo reabrir la factura", e?.message || "Intente nuevamente.")
     } finally {
       setSubmittingReabrirFactura(false)
+    }
+  }
+
+  const submitReabrirPago = async (
+    sale: Sale,
+    formaPago: string,
+    motivo: string,
+    resolverId: string,
+    resolverNombre: string,
+    selectedCustomer?: Customer | null,
+    voucher?: string,
+    lote?: string,
+    tarjetaMarca?: string,
+    terminalIp?: string,
+    moneda?: string,
+    montoMoneda?: number,
+  ) => {
+    setSubmittingReabrirPago(true)
+    try {
+      const updated = await api.sales.reopenPayment(sale.id, {
+        forma_pago: formaPago,
+        motivo,
+        autorizado_por_id: resolverId,
+        autorizado_por_nombre: resolverNombre,
+        customer_id: selectedCustomer?.id ? String(selectedCustomer.id) : undefined,
+        voucher,
+        lote,
+        tarjeta_marca: tarjetaMarca,
+        terminal_ip: terminalIp,
+        moneda,
+        monto_moneda: montoMoneda,
+      })
+      // Actualizar el objeto en memoria con la nueva forma de pago y cliente para que
+      // la reimpresión inmediata use los datos correctos.
+      const saleActualizada = {
+        ...sale,
+        forma_pago: updated.forma_pago ?? formaPago,
+        customer_id: updated.customer_id ?? (selectedCustomer?.id ? String(selectedCustomer.id) : sale.customer_id),
+        customer: selectedCustomer || sale.customer,
+        observaciones: updated.observaciones,
+        recibo_escpos_b64: updated.recibo_escpos_b64 || sale.recibo_escpos_b64,
+        recibo_html: updated.recibo_html || sale.recibo_html,
+      } as Sale
+      setReimprimirSales(prev => prev.map(s => s.id === sale.id ? saleActualizada : s))
+      setReabrirPagoSaleId(null)
+      setReabrirPagoFormaPago("")
+      setReabrirPagoMotivo("")
+      setReabrirPagoCustomer(null)
+      setReabrirPagoCustomerSearch("")
+      setReabrirPagoCustomerResults([])
+      setReabrirPagoVoucher("")
+      setReabrirPagoLote("")
+      setReabrirPagoTarjetaMarca("")
+      setReabrirPagoMoneda("PYG")
+      setReabrirPagoMontoMoneda(undefined)
+      setReabrirPagoPosMsg(null)
+      toast.success(
+        "Forma de pago actualizada",
+        `Venta Nº ${sale.numero}: ${sale.forma_pago} → ${formaPago}${selectedCustomer ? ` (${selectedCustomer.nombre})` : ""}. Reimprimiendo con el dato correcto...`
+      )
+      // Reimprimir automáticamente con la venta ya actualizada
+      await handleReimprimirSale(saleActualizada)
+    } catch (e: any) {
+      toast.error("No se pudo cambiar la forma de pago", e?.message || "Intente nuevamente.")
+    } finally {
+      setSubmittingReabrirPago(false)
     }
   }
 
@@ -2372,23 +4620,76 @@ export default function POSPage() {
     setReimprimirLoading(true)
     setReimprimirError("")
     try {
-      // Acotado a la sesión de caja actual (este cajero, turno todavía no
-      // rendido) -- no la lista completa de la empresa. Al cerrar caja la
-      // sesión cambia, así que las ventas ya rendidas dejan de aparecer acá.
-      // Si esa consulta acotada no trae nada (sesión recién abierta, o
-      // ventas viejas de antes de que existiera este seguimiento), se cae
-      // a las últimas de la empresa en vez de dejar la lista vacía.
-      let sales = cashSessionId
-        ? await api.sales.list({ session_id: cashSessionId } as any)
-        : (user?.id ? await api.sales.list({ user_id: user.id } as any) : [])
-      if (!Array.isArray(sales) || sales.length === 0) {
-        sales = await api.sales.list()
+      // Política comercial y de seguridad: la cajera solo puede consultar y reimprimir sus propias
+      // facturas emitidas hasta 48 horas antes. Sin mezclar con ventas de otras cajeras.
+      const date48hAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
+      let sales: any[] = []
+      if (user?.id) {
+        sales = await api.sales.list({ user_id: user.id, fecha_desde: date48hAgo, limit: 100 } as any)
+      } else if (cashSessionId) {
+        sales = await api.sales.list({ session_id: cashSessionId, fecha_desde: date48hAgo, limit: 100 } as any)
       }
       setReimprimirSales(Array.isArray(sales) ? sales : [])
     } catch (e) {
       setReimprimirError("No se pudo cargar el historial de ventas.")
     } finally {
       setReimprimirLoading(false)
+    }
+  }
+
+  const fetchSupervisorSales = async (searchTerm?: string) => {
+    setReimprimirSupervisorLoading(true)
+    try {
+      const date7dAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+      const q = searchTerm !== undefined ? searchTerm : reimprimirSupervisorSearch.trim()
+      const res = await api.sales.list({
+        fecha_desde: date7dAgo,
+        search: q || undefined,
+        limit: 150,
+      } as any)
+      setReimprimirSupervisorSales(Array.isArray(res) ? res : [])
+    } catch (e) {
+      toast.error("Error al cargar ventas", "No se pudieron obtener las ventas de los últimos 7 días.")
+    } finally {
+      setReimprimirSupervisorLoading(false)
+    }
+  }
+
+  const handleUnlockSupervisor = async () => {
+    if (!reimprimirSupervisorEmail) {
+      toast.warning("Seleccione supervisor", "Debe elegir una cuenta de supervisor.")
+      return
+    }
+    if (!reimprimirSupervisorPin) {
+      toast.warning("Ingrese PIN / Clave", "Debe ingresar la clave o PIN del supervisor.")
+      return
+    }
+    setReimprimirSupervisorVerifying(true)
+    try {
+      const selectedStaff = supervisorStaffOptions.find((s) => s.email === reimprimirSupervisorEmail)
+      let res: { valid: boolean; id?: string; nombre?: string; rol?: string } | null = null
+      if (selectedStaff) {
+        const local = await verifySupervisorPinLocal(reimprimirSupervisorPin, selectedStaff.id)
+        if (local.valid) res = { valid: true, id: local.id, nombre: local.nombre, rol: local.rol }
+      }
+      if (!res) {
+        res = await api.auth.verifySupervisor({
+          email: reimprimirSupervisorEmail,
+          password: reimprimirSupervisorPin,
+        })
+      }
+      if (!res?.valid) {
+        toast.warning("Autorización rechazada", "Contraseña incorrecta o la cuenta no tiene nivel de supervisor.")
+        return
+      }
+      setReimprimirSupervisorUnlocked(true)
+      setReimprimirSupervisorPin("")
+      toast.success("Modo Supervisora Habilitado", `Autorizado por ${res.nombre || "Supervisor"}.`)
+      await fetchSupervisorSales()
+    } catch (e) {
+      toast.error("Error de verificación", "No se pudo verificar la clave del supervisor.")
+    } finally {
+      setReimprimirSupervisorVerifying(false)
     }
   }
 
@@ -2442,6 +4743,83 @@ export default function POSPage() {
     }
   }
 
+  const fetchReimprimirSessions = async () => {
+    setReimprimirLoading(true)
+    setReimprimirError("")
+    try {
+      const sessions = await api.caja.sessionsSummary({ estado: "cerrada", limit: 200, fecha_desde: "2026-08-30T00:00:00" })
+      setReimprimirSessions(Array.isArray(sessions) ? sessions : [])
+    } catch (e) {
+      setReimprimirError("No se pudo cargar el historial de cierres de caja.")
+    } finally {
+      setReimprimirLoading(false)
+    }
+  }
+
+  const handleDownloadCierrePdf = async (sessionId: string) => {
+    try {
+      const token = localStorage.getItem("access_token") || localStorage.getItem("auth_token") || ""
+      const res = await fetch(`/api/v1/cash-sessions/${sessionId}/export/cierre.pdf`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) {
+        throw new Error("No se pudo generar el PDF del cierre.")
+      }
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `cierre_caja_${sessionId.slice(0, 8)}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(url)
+      toast.success("PDF Descargado", `Cierre oficial ${sessionId.slice(0, 8)} descargado correctamente.`)
+    } catch (e: any) {
+      toast.error("Error al descargar PDF", e?.message || "Verifique la conexión.")
+    }
+  }
+
+  const handleReimprimirCierreEscPos = async (sessionSummary: any) => {
+    try {
+      const data = await api.caja.sessions.ticketEscpos(sessionSummary.id)
+      const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
+      const b64 = data.ticket_escpos_b64
+      if ((window as any).electronAPI?.printEscPos) {
+        const res = await (window as any).electronAPI.printEscPos(b64, tpl.nombre_impresora_windows || "ZKP8008")
+        if (!res?.success) {
+          toast.warning("No se pudo imprimir", res?.error || "Revise la impresora.")
+          return
+        }
+      } else {
+        const printWindow = window.open("", "_blank")
+        if (printWindow) {
+          printWindow.document.write(`
+            <html>
+              <head>
+                <title>Arqueo de Caja - InteliMarket</title>
+                <style>
+                  body { font-family: monospace; font-size: 12px; white-space: pre; margin: 0; padding: 10px; width: 300px; }
+                  @media print { @page { margin: 0; size: 80mm auto; } body { width: 100%; } }
+                </style>
+              </head>
+              <body>${data.ticket_text}</body>
+            </html>
+          `)
+          printWindow.document.close()
+          printWindow.focus()
+          printWindow.print()
+          printWindow.close()
+        }
+      }
+      toast.success("Cierre Reimpreso", `Arqueo del turno ${sessionSummary.id.slice(0, 8)} enviado a la impresora.`)
+
+    } catch (e: any) {
+      toast.warning("Error al reimprimir", e?.message || "Verifique la conexión.")
+    }
+  }
+
+
   // ── PRODUCTOS FALTANTES (DEMANDA PERDIDA) -> COMPRAS ────────────────────────
   // El backend y el cliente API ya existian (api.purchases.lostDemand),
   // usado desde la pantalla de Compras -- lo que faltaba era el modal en el
@@ -2493,16 +4871,17 @@ export default function POSPage() {
     }
   }
 
-  // ── FILTROS DE CATEGORÍAS MAYORISTAS Y DISTRIBUIDORA ─────────────────────
+  // ── FILTROS DE CATEGORÍAS COMPLETOS ───────────────────────────────────────
   const CATEGORY_TABS = [
-    { key: "TOP", label: "⭐ Top Ventas" },
+    { key: "TOP", label: "⭐ Frecuentes" },
+    { key: "PESABLES", label: "⚖️ Pesables (Balanza)" },
+    { key: "CARNICERIA", label: "🥩 Carnicería" },
+    { key: "PANADERIA", label: "🥖 Panadería & Rotisería" },
+    { key: "VERDULERIA", label: "🥬 Frutas & Verduras" },
     { key: "BEBIDAS", label: "🥤 Bebidas & Cervezas" },
-    { key: "LACTEOS", label: "🧀 Lácteos & Embutidos" },
-    { key: "YERBAS", label: "🌿 Yerba Mate & Despensa" },
-    { key: "JUGOS", label: "🧃 Jugos & Aguas" },
-    { key: "ALMACEN", label: "🥫 Alimentos & Abarrotes" },
-    { key: "DESCARTABLES", label: "📦 Bazar & Descartables" },
-    { key: "TODOS", label: "📋 Todo el Catálogo" },
+    { key: "LACTEOS", label: "🧀 Lácteos & Fiambres" },
+    { key: "ALMACEN", label: "🥫 Almacén" },
+    { key: "LIMPIEZA", label: "🧼 Limpieza & Perfumería" },
   ]
 
   const filteredProducts = useMemo(() => {
@@ -2520,62 +4899,245 @@ export default function POSPage() {
       return Array.from(pool.values()).filter((p) => {
         const target = `${p.nombre || ""} ${p.codigo_barra || ""} ${p.sku || ""}`.toLowerCase()
         return tokens.every((token) => target.includes(token))
-      }).slice(0, 50)
+      }).slice(0, 45)
     }
-
-    const baseList = products.length > 0 ? products : (TOP_CATALOG_SEED as Product[])
 
     if (selectedCategoryTab === "TOP") {
-      return baseList.slice(0, 35)
+      if (topProductSkus.length > 0 && products.length > 0) {
+        const bySku = new Map(products.map((p) => [p.sku, p]))
+        const ranked = topProductSkus.map((sku) => bySku.get(sku)).filter(Boolean) as Product[]
+        if (ranked.length > 0) return ranked.slice(0, 30)
+      }
+      return (products.length > 0 ? products : TOP_CATALOG_SEED as Product[]).slice(0, 30)
     }
 
-    const matchName = (p: Product, keywords: string[]) => {
-      const nom = (p.nombre || "").toUpperCase()
-      return keywords.some((k) => nom.includes(k))
+    if (selectedCategoryTab === "PESABLES") {
+      return products.filter((p: any) => isPesableProduct(p)).slice(0, 35)
+    }
+
+
+    // A partir de aca, filtro por la categoria REAL del producto
+    // (categoria.nombre, la que ya carga y mantiene el catalogo), no por
+    // palabras sueltas adivinadas del nombre -- eso traia cualquier cosa
+    // (en Carnicería aparecía cualquier producto salvo carne, en Panadería
+    // cualquier cosa salvo pan) porque el nombre de un producto no dice de
+    // forma confiable a que rubro pertenece.
+    // catMatch robusto: prioriza la categoría REGISTRADA del producto y si no
+    // tiene categoría, cae a palabras clave del nombre como último recurso.
+    const catMatch = (p: Product, keywords: string[]) => {
+      const catNombre = (
+        (p as any).categoria?.nombre ||
+        (p as any).categoria_nombre ||
+        (typeof (p as any).categoria === "string" ? (p as any).categoria : "")
+      )
+      const catUp = escposStripAccents(catNombre).toUpperCase()
+      if (catUp.length > 0 && keywords.some((k) => catUp.includes(k))) return true
+      // Fallback: nombre del producto solo si no tiene categoría registrada
+      if (catUp.length === 0) {
+        const nameUp = escposStripAccents(p.nombre || "").toUpperCase()
+        return keywords.some((k) => nameUp.includes(k))
+      }
+      return false
+    }
+
+    // Categorías grandes se cortan por CATEGORY_TILE_LIMIT ordenadas por
+    // frecuencia real de venta (topProductSkus), así lo que se recorta es
+    // lo menos relevante, nunca la selección arbitraria.
+    const topRankIndex = new Map(topProductSkus.map((sku, idx) => [sku, idx]))
+    const rankSlice = (list: Product[], limit: number) => {
+      if (topRankIndex.size === 0) return list.slice(0, limit)
+      const sorted = [...list].sort((a, b) => {
+        const ra = topRankIndex.has(a.sku) ? topRankIndex.get(a.sku)! : Infinity
+        const rb = topRankIndex.has(b.sku) ? topRankIndex.get(b.sku)! : Infinity
+        return ra - rb
+      })
+      return sorted.slice(0, limit)
+    }
+    const CATEGORY_TILE_LIMIT = 150
+
+    if (selectedCategoryTab === "CARNICERIA") {
+      return rankSlice(products.filter((p) => catMatch(p, [
+        "CARNE", "CARNICERIA", "POLLO", "PESCADO", "TILAPIA", "CAMARON", "CONGELADO",
+        "EMBUTIDO", "NUGGET", "BOVINO", "AVICOLA", "COSTILLA", "BIFE", "MOLIDA",
+        "ASADO", "VACIO", "CHORIZO", "CERDO",
+      ])), CATEGORY_TILE_LIMIT)
+    }
+
+    if (selectedCategoryTab === "PANADERIA") {
+      return rankSlice(products.filter((p) => catMatch(p, [
+        "PAN", "PANIFIC", "PANADER", "REPOSTER", "HORNEAD", "MASA", "TOSTADA",
+        "GALLETITA", "PASTELERIA", "CHIPA", "FACTURA", "BIZCOCHO",
+      ])), CATEGORY_TILE_LIMIT)
+    }
+
+    if (selectedCategoryTab === "VERDULERIA") {
+      return rankSlice(products.filter((p) => catMatch(p, [
+        "VERDU", "FRUTA", "LEGUMBRE", "FLV", "HUEVO", "MANDIOCA", "TOMATE",
+        "CEBOLLA", "PAPA", "BANANA", "MANZANA", "NARANJA", "LECHUGA",
+        "ZANAHORIA", "ZAPALLO",
+      ])), CATEGORY_TILE_LIMIT)
     }
 
     if (selectedCategoryTab === "BEBIDAS") {
-      return baseList.filter((p) => matchName(p, ["COCA", "CERV", "BEBIDA", "FANTA", "SPRITE", "CRUSH", "PUERTO", "BRAHMA", "SKOL", "HEINEKEN", "STELLA", "SCHIN", "CERVEZA"])).slice(0, 40)
+      return rankSlice(products.filter((p) => catMatch(p, [
+        "BEBIDA", "ALCOHOL", "GASEOSA", "PARESA", "REFRESCO", "CERVEZA",
+        "VINO", "JUGO", "AGUA", "COCA", "PEPSI", "BRAHMA", "PILSEN",
+      ])), CATEGORY_TILE_LIMIT)
     }
 
     if (selectedCategoryTab === "LACTEOS") {
-      return baseList.filter((p) => matchName(p, ["TREBOL", "LECHE", "QUESO", "JAMON", "KRO", "FAMLAC", "YOGUR", "MANTECA", "REQUESON", "DULCE DE LECHE"])).slice(0, 40)
-    }
-
-    if (selectedCategoryTab === "YERBAS") {
-      return baseList.filter((p) => matchName(p, ["PAJARITO", "YERBA", "KURUPI", "CAMPESINO", "COLON", "SELECTA", "MATE"])).slice(0, 40)
-    }
-
-    if (selectedCategoryTab === "JUGOS") {
-      return baseList.filter((p) => matchName(p, ["DEL VALLE", "TANG", "ADES", "BENEDICTINO", "DASANI", "AGUA", "CAMPELLA", "JUGO", "FRUGOS", "PULP"])).slice(0, 40)
+      return rankSlice(products.filter((p) => catMatch(p, [
+        "LACTEO", "LECHE", "MANTECA", "CUAJADA", "DERIVADO", "DULCE DE LECHE",
+        "HELADO", "TREBOL", "QUESO", "YOGUR", "FIAMBRE", "JAMON", "PALETA",
+      ])), CATEGORY_TILE_LIMIT)
     }
 
     if (selectedCategoryTab === "ALMACEN") {
-      return baseList.filter((p) => matchName(p, ["ACEITE", "ARROZ", "HARINA", "AZUCAR", "FIDEO", "EXTRACTO", "SAL", "COAMO", "SOPA", "GALLETA"])).slice(0, 40)
+      return rankSlice(products.filter((p) => catMatch(p, [
+        "ALMACEN", "ABARROTE", "ACEITE", "ADEREZO", "ALIMENTO", "ALMIDON",
+        "ARROZ", "AZUCAR", "CEREAL", "COMESTIBLE", "CONDIMENTO", "CONSERV",
+        "DULCE", "FARINHA", "FAROFA", "FEIJAO", "FIDEO", "GOLOSINA", "SNACK",
+        "HARINA", "INFUSION", "LASANA", "LENTEJA", "LEVADURA", "MAIZ",
+        "MATINAL", "PASTA", "SEMILLA", "CAF", "YERBA",
+      ])), CATEGORY_TILE_LIMIT)
     }
 
-    if (selectedCategoryTab === "DESCARTABLES") {
-      return baseList.filter((p) => matchName(p, ["PLATITO", "VASO", "BOLSA", "FILM", "SERVILLETA", "PAPEL", "DESCAR"])).slice(0, 40)
+    if (selectedCategoryTab === "LIMPIEZA") {
+      return rankSlice(products.filter((p) => catMatch(p, [
+        "LIMPIEZA", "HIGIENE", "JABON", "PERFUMERIA", "CUIDADO", "DENTAL",
+        "DESODORANTE", "CAPILAR", "FEMENINO", "PANAL", "PAPEL HIGIENICO",
+        "LIMPIA VIDRIO", "PLAGA", "VENENO", "HOGAR", "BAZAR", "COCINA",
+        "DETERGENTE", "LAVANDINA", "SUAVIZANTE",
+      ])), CATEGORY_TILE_LIMIT)
     }
 
-    if (selectedCategoryTab === "TODOS") {
-      return baseList.slice(0, 60)
-    }
-
-    return baseList.slice(0, 35)
+    return products.slice(0, 30)
   }, [search, selectedCategoryTab, products, searchResults, topProductSkus])
+
+  // ── CONTROL CRUZADO INTELIGENTE CON BALANZA DE CHECKOUT (CON DEBOUNCE DE ASENTAMIENTO) ──
+  useEffect(() => {
+    if (!weightPendingScale) {
+
+      if (scaleSettlingTimerRef.current) {
+        clearTimeout(scaleSettlingTimerRef.current)
+        scaleSettlingTimerRef.current = null
+      }
+      return
+    }
+
+    const { product, etiquetaKg } = weightPendingScale
+    const tol = getPesoTolerancia(etiquetaKg)
+
+    // Si aún no hay peso en la balanza de checkout (> 15g), seguimos esperando que coloquen el producto
+    if (currentScaleWeight <= 0.015) {
+      if (scaleSettlingTimerRef.current) {
+        clearTimeout(scaleSettlingTimerRef.current)
+        scaleSettlingTimerRef.current = null
+      }
+      return
+    }
+
+    const diffKg = Math.abs(currentScaleWeight - etiquetaKg)
+
+    // CASO 1: Coincide con la etiqueta dentro de la tolerancia permitida (mín. 35g o 3.5%)
+    if (diffKg <= tol) {
+      if (scaleSettlingTimerRef.current) {
+        clearTimeout(scaleSettlingTimerRef.current)
+        scaleSettlingTimerRef.current = null
+      }
+
+      if (isScaleStable) {
+        api.inteliaudit.recordEvent({
+          company_id: COMPANY_ID,
+          user_id: user?.id,
+          accion: "peso_etiqueta_verificado",
+          entidad: "producto_pesable",
+          entidad_id: product.id,
+          datos_nuevos: {
+            producto_nombre: product.nombre,
+            etiqueta_kg: etiquetaKg,
+            balanza_kg: currentScaleWeight,
+            diferencia_g: Math.round(diffKg * 1000),
+            tolerancia_g: Math.round(tol * 1000),
+            caja: puntoEmision,
+            cajero: user?.nombre,
+          },
+        } as any).catch(() => {})
+
+        addToCart(product, etiquetaKg, "etiqueta_plu")
+        setWeightPendingScale(null)
+        searchInputRef.current?.focus()
+        toast.success("Balanza de Sección", `${product.nombre}: ${etiquetaKg.toFixed(3)} KG -- verificado en balanza (${currentScaleWeight.toFixed(3)} KG).`)
+      }
+      return
+    }
+
+    // CASO 2: Discrepancia aparente (diffKg > tol).
+    // Esperamos 650ms continuos de lectura estable antes de declarar discrepancia real
+    if (isScaleStable) {
+      if (!scaleSettlingTimerRef.current) {
+        scaleSettlingTimerRef.current = setTimeout(() => {
+          scaleSettlingTimerRef.current = null
+          const finalDiff = Math.abs(currentScaleWeight - etiquetaKg)
+          if (finalDiff > tol && currentScaleWeight > 0.015) {
+            api.inteliaudit.recordEvent({
+              company_id: COMPANY_ID,
+              user_id: user?.id,
+              accion: "peso_discrepancia_detectada",
+              entidad: "producto_pesable",
+              entidad_id: product.id,
+              datos_nuevos: {
+                producto_nombre: product.nombre,
+                etiqueta_kg: etiquetaKg,
+                balanza_kg: currentScaleWeight,
+                diferencia_g: Math.round(finalDiff * 1000),
+                tolerancia_g: Math.round(tol * 1000),
+                caja: puntoEmision,
+                cajero: user?.nombre,
+              },
+            } as any).catch(() => {})
+
+            setWeightMismatch({ product, etiquetaKg, balanzaKg: currentScaleWeight })
+            setWeightPendingScale(null)
+          }
+        }, 650)
+      }
+    } else {
+      if (scaleSettlingTimerRef.current) {
+        clearTimeout(scaleSettlingTimerRef.current)
+        scaleSettlingTimerRef.current = null
+      }
+    }
+  }, [currentScaleWeight, isScaleStable, weightPendingScale])
+
+  // ── FOCO SIEMPRE EN "ESCANEAR PRODUCTO" AL CERRAR CUALQUIER MODAL ──────────
+  const anyModalOpen =
+    showAssignTerminalModal || showAperturaModal || showCierreTurnoModal || showCashDropModal ||
+    showScaleModal || showManualWeightModal || showPosConfigModal || showSupervisorModal ||
+    showRemoteAuthModal || showDevolucionModal || showCustomerModal || showCreateCustomerForm ||
+    showPausedModal || showPriceCheckModal || showRatesModal || showPaymentModal ||
+    showBancardManualFallback || showExtraClubBalanceModal || showLostDemandModal ||
+    showLostDemandRegisterForm || showReimprimirModal || showCuponModal ||
+    !!weightMismatch || !!weightPendingScale
+
+  useEffect(() => {
+    if (!anyModalOpen) {
+      searchInputRef.current?.focus()
+    }
+  }, [anyModalOpen])
 
   // ── ESCANEO DIRECTO Y DECODIFICACIÓN DE BALANZAS DE GÓNDOLA (EAN-13 PREFIJO 2) ─
   const handleBarcodeSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!cajaAbiertaRef.current || !cashSessionIdRef.current) {
+      toast.warning("Caja Cerrada", "Debe ingresar el fondo inicial de apertura para operar.")
+      setShowAperturaModal(true)
+      return
+    }
     let code = search.trim()
     if (!code) return
 
-    // 0. Cantidad rapida: "3*<codigo>" o "3x<codigo>" -- convencion estandar
-    //    de caja (escribir la cantidad, *, escanear/tipear el codigo) en vez
-    //    de escanear el mismo producto varias veces. Si no hay codigo despues
-    //    del separador (ej. tipeo "3*" y recien va a escanear), no hace nada
-    //    todavia -- se espera el codigo real.
+    // 0. Cantidad rápida: "3*<codigo>" o "3x<codigo>"
     let qtyPrefix: number | null = null
     const qtyMatch = code.match(/^(\d{1,4})\s*[*x]\s*(.*)$/i)
     if (qtyMatch) {
@@ -2585,66 +5147,113 @@ export default function POSPage() {
         qtyPrefix = n
         code = rest
       } else if (n > 0 && !rest) {
-        return // "3*" solo, todavia esperando el codigo
+        return
       }
     }
 
-    // 1. DECODIFICACIÓN AUTOMÁTICA DE CÓDIGOS DE BALANZA DE GÓNDOLA (EAN-13 PREFIJO 2)
-    if (!qtyPrefix && code.length === 13 && code.startsWith("2")) {
+    // 1. DECODIFICACIÓN AUTOMÁTICA DE CÓDIGOS DE BALANZA DE GÓNDOLA (EAN-13 EXCLUSIVAMENTE PREFIJO 20)
+    // Las balanzas etiquetadoras (Balmak Edge, Toledo, DIGI) usan estrictamente prefijo 20.
+    // Los prefijos 21 a 29 (ej. 28 de juguetería/bazar) son productos unitarios normales.
+    const isExactNonPesable = products.some(p => (p.codigo_barra === code || p.sku === code) && !isPesableProduct(p))
+    if (!qtyPrefix && code.length === 13 && code.startsWith("20") && !isExactNonPesable) {
       const pluCandidate = code.substring(0, 7)
       const weightGrams = parseInt(code.substring(7, 12), 10)
       if (weightGrams > 0) {
         const weightKg = weightGrams / 1000
-        const matchPesable = products.find(p => p.codigo_barra === pluCandidate || p.sku === pluCandidate || p.codigo_barra?.startsWith(pluCandidate))
+        const matchPesable = products.find(p => isPesableProduct(p) && (p.codigo_barra === pluCandidate || p.sku === pluCandidate || (p.codigo_barra?.startsWith(pluCandidate) && p.codigo_barra.length <= 7)))
         if (matchPesable) {
-          // Verificacion contra la balanza conectada: si hay una lectura
-          // estable ahora mismo y difiere de lo que dice la etiqueta por
-          // mas de la tolerancia, no se agrega solo -- se pide resolver la
-          // discrepancia (posible cambio de contenido en una bolsa ya
-          // etiquetada, o etiqueta de otro producto).
-          const balanzaDisponible = isScaleStable && currentScaleWeight > 0.015
-          const diffKg = balanzaDisponible ? Math.abs(currentScaleWeight - weightKg) : 0
-          const esRiesgo = balanzaDisponible && diffKg > PESO_TOLERANCIA_KG
-          // Log de auditoria de CADA escaneo de etiqueta pesable -- coincida
-          // o no -- para que quede rastro completo, no solo de los casos
-          // que generan riesgo. accion distinta para el caso de riesgo asi
-          // se puede filtrar directo en /audit.
-          api.inteliaudit.recordEvent({
-            company_id: COMPANY_ID,
-            user_id: user?.id,
-            accion: esRiesgo ? "peso_discrepancia_detectada" : "peso_etiqueta_verificado",
-            entidad: "producto_pesable",
-            entidad_id: matchPesable.id,
-            datos_nuevos: {
-              producto_nombre: matchPesable.nombre,
-              etiqueta_kg: weightKg,
-              balanza_kg: balanzaDisponible ? currentScaleWeight : null,
-              balanza_disponible: balanzaDisponible,
-              diferencia_g: balanzaDisponible ? Math.round(diffKg * 1000) : null,
-              caja: puntoEmision,
-              cajero: user?.nombre,
-            },
-          } as any).catch(() => {})
-          if (esRiesgo) {
-            setWeightMismatch({ product: matchPesable, etiquetaKg: weightKg, balanzaKg: currentScaleWeight })
+          const tol = getPesoTolerancia(weightKg)
+          const diffKg = Math.abs(currentScaleWeight - weightKg)
+          const balanzaCoincideYa = isScaleStable && currentScaleWeight > 0.015 && diffKg <= tol
+
+          if (balanzaCoincideYa) {
+            // Si el producto ya está en la balanza del checkout y coincide, validar al instante
+            api.inteliaudit.recordEvent({
+              company_id: COMPANY_ID,
+              user_id: user?.id,
+              accion: "peso_etiqueta_verificado",
+              entidad: "producto_pesable",
+              entidad_id: matchPesable.id,
+              datos_nuevos: {
+                producto_nombre: matchPesable.nombre,
+                etiqueta_kg: weightKg,
+                balanza_kg: currentScaleWeight,
+                diferencia_g: Math.round(diffKg * 1000),
+                tolerancia_g: Math.round(tol * 1000),
+                caja: puntoEmision,
+                cajero: user?.nombre,
+              },
+            } as any).catch(() => {})
+
+            addToCart(matchPesable, weightKg, "etiqueta_plu")
             setSearch("")
+            searchInputRef.current?.focus()
+            toast.success("Balanza de Sección", `${matchPesable.nombre}: ${weightKg.toFixed(3)} KG -- verificado en balanza.`)
             return
           }
-          addToCart(matchPesable, weightKg, "etiqueta_plu")
+
+          // Activamos verificación en balanza con feedback interactivo
+          setWeightPendingScale({ product: matchPesable, etiquetaKg: weightKg })
           setSearch("")
-          searchInputRef.current?.focus()
-          toast.success("Balanza de Sección", balanzaDisponible
-            ? `${matchPesable.nombre}: ${weightKg.toFixed(3)} KG -- coincide con la balanza.`
-            : `${matchPesable.nombre}: ${weightKg.toFixed(3)} KG leídos de etiqueta (balanza no disponible para verificar).`)
           return
         }
       }
     }
 
-    // 2. Coincidencia exacta en memoria local
-    const localMatch = products.find(
-      (p) => p.codigo_barra === code || p.sku === code || p.codigo_barra?.endsWith(code) || (p.codigo_barra && code.endsWith(p.codigo_barra))
-    )
+    // 1.5 TARJETA QR / CÓDIGO DE SOCIO EXTRA CLUB (Búsqueda Offline-First en Memoria Local)
+    // Acepta el UUID con guiones, sin separadores o con el separador que haya
+    // puesto el teclado del lector: lo que importa son los 32 hexadecimales.
+    const codigoSocio = qtyPrefix ? null : normalizarCodigoSocio(code)
+    if (codigoSocio) {
+      const cleanCode = codigoSocio
+      // Búsqueda en memoria local (0ms, 100% offline)
+      const localMatch = customers.find((c) =>
+        c.extra_club_numero?.toLowerCase() === cleanCode ||
+        (c as any).ruc_sin_dv === cleanCode ||
+        c.ruc === cleanCode ||
+        c.id === cleanCode
+      )
+      if (localMatch) {
+        setShowExtraClubBalanceModal(true)
+        setBalanceModalQuery("")
+        setBalanceModalResults([])
+        setBalanceModalSelected(localMatch)
+        setSearch("")
+        searchInputRef.current?.focus()
+        toast.success("Socio Extra Club", `${localMatch.razon_social || localMatch.nombre} -- consultando saldo.`)
+        return
+      }
+
+      try {
+        const found = (await api.customers.list({ search: cleanCode, limit: 5 })) || []
+        const match = found.find((c) => c.extra_club_numero?.toLowerCase() === cleanCode || (c as any).ruc_sin_dv === cleanCode || c.ruc === cleanCode)
+
+        if (match) {
+          const normalized = normalizeCustomer(match)
+          setShowExtraClubBalanceModal(true)
+          setBalanceModalQuery("")
+          setBalanceModalResults([])
+          setBalanceModalSelected(normalized)
+          setSearch("")
+          searchInputRef.current?.focus()
+          toast.success("Socio Extra Club", `${normalized.razon_social || normalized.nombre} -- consultando saldo.`)
+          return
+        }
+      } catch (e) {}
+      toast.warning("Socio no encontrado", `El código de socio ${code} no está registrado.`)
+    }
+
+    // 2. Coincidencia exacta en memoria local (con soporte estricto de padding para EAN-13/UPC)
+
+    const cleanCode = code.trim()
+    const localMatch = products.find((p) => {
+      if (p.codigo_barra === cleanCode || p.sku === cleanCode) return true
+      const pCode = p.codigo_barra?.trim()
+      if (pCode && pCode.length >= 8 && cleanCode.length >= 8) {
+        return pCode.padStart(13, "0") === cleanCode.padStart(13, "0")
+      }
+      return false
+    })
 
     if (localMatch) {
       addToCart(localMatch, qtyPrefix ?? undefined)
@@ -2653,31 +5262,61 @@ export default function POSPage() {
       return
     }
 
-    // 3. Consulta inmediata al backend por código de barras
+    // 2.5 Código de pack/caja -- 1 código impreso en la caja = N unidades del
+    // producto base (ver Productos > "Códigos de Pack / Caja"). Se resuelve
+    // en memoria, igual que el match de arriba, antes de caer al backend.
+    const packMatch = packBarcodeMap.get(cleanCode)
+    if (packMatch) {
+      const baseProduct = products.find((p) => p.id === packMatch.productId)
+      if (baseProduct) {
+        const totalUnidades = (qtyPrefix ?? 1) * packMatch.unidadesPorPaquete
+        addToCart(baseProduct, totalUnidades)
+        setSearch("")
+        searchInputRef.current?.focus()
+        toast.success(`${packMatch.etiqueta} detectado`, `Se agregaron ${totalUnidades} unidades de ${baseProduct.nombre}.`)
+        return
+      }
+    }
+
+    // 3. Consulta al backend por código exacto
     try {
-      const serverRes = await api.products.list({ search: code, limit: 10 })
+      const serverRes = await api.products.list({ search: cleanCode, limit: 10 })
       if (serverRes && serverRes.length > 0) {
-        const best = serverRes.find((p) => p.codigo_barra === code || p.sku === code) || serverRes[0]
-        addToCart(best, qtyPrefix ?? undefined)
+        const best = serverRes.find((p) => {
+          if (p.codigo_barra === cleanCode || p.sku === cleanCode) return true
+          const pCode = p.codigo_barra?.trim()
+          if (pCode && pCode.length >= 8 && cleanCode.length >= 8) {
+            return pCode.padStart(13, "0") === cleanCode.padStart(13, "0")
+          }
+          return false
+        })
+        if (best) {
+          addToCart(best, qtyPrefix ?? undefined)
+          setSearch("")
+          searchInputRef.current?.focus()
+          return
+        }
+      }
+    } catch (err) {}
+
+    // 3.5 Fallback en IndexedDB local por código de barra o SKU (100% offline)
+    try {
+      const dbByBar = await offlineDB.products.getByBarcode(cleanCode)
+      const dbMatch = (dbByBar && dbByBar.length > 0) ? dbByBar[0] : (await offlineDB.products.getBySku(cleanCode))?.[0]
+      if (dbMatch) {
+        addToCart(dbMatch, qtyPrefix ?? undefined)
         setSearch("")
         searchInputRef.current?.focus()
         return
       }
-    } catch (err) {}
+    } catch (dbErr) {}
 
-    // 4. Si hay un único resultado en la lista filtrada
-    if (filteredProducts.length === 1) {
-      addToCart(filteredProducts[0], qtyPrefix ?? undefined)
-      setSearch("")
-      searchInputRef.current?.focus()
-      return
-    }
-
-    // 5. Si no existe, abrir modal de faltante
-    toast.warning("Producto no encontrado", `Código ${code} no está en catálogo.`)
-    setLostDemandRows([{ producto: code, motivo: "sin_stock" }])
+    // 4. Si no existe coincidencia exacta de código, no adivinar ni agregar productos ajenos
+    toast.warning("Producto no encontrado", `Código ${cleanCode} no está en catálogo.`)
+    setLostDemandRows([{ producto: cleanCode, motivo: "sin_stock" }])
     setShowLostDemandModal(true)
   }
+
 
   // ── CONTROL DE SEGURIDAD PARA ANULACIONES Y AJUSTES DE POS (SUPERVISOR PIN) ──
   // Ademas del PIN (sin cambios, a proposito), ahora se exige que exista un
@@ -2696,8 +5335,13 @@ export default function POSPage() {
       }
       case "clear_cart":
         return `Vaciar carrito completo (${cart.length} ítems, ${formatPYG(totalPyg)})`
-      case "process_return":
-        return `Aprobar devolución de venta ${devolucionSaleSeleccionada?.numero || ""} (${formatPYG(devolucionItems.reduce((s, it) => s + (devolucionSeleccion[it.id] || 0) * it.precio_unitario, 0))})`
+      case "process_return": {
+        const snap = (action as any).returnSnapshot
+        const saleD = snap ? snap.sale : devolucionSaleSeleccionada
+        const itemsD = snap ? snap.items : devolucionItems
+        const selD = snap ? snap.seleccion : devolucionSeleccion
+        return `Aprobar devolución de venta ${saleD?.numero || ""} (${formatPYG((itemsD || []).reduce((s: number, it: any) => s + (selD?.[it.id] || 0) * it.precio_unitario, 0))})`
+      }
       case "open_pos_config":
         return "Abrir configuración de terminales POS"
       case "assign_terminal":
@@ -2715,14 +5359,33 @@ export default function POSPage() {
         }
         return `Pago Extra Club: ${nombre}${numero} · ${formatPYG(totalPyg)}${saldoTxt}`
       }
+      case "otros_payment": {
+        const sub = (action as any).otrosSubtipo || "Transferencia / Cheque"
+        const comp = (action as any).otrosComprobante ? ` - ${(action as any).otrosComprobante}` : ""
+        const m = (action as any).otrosMonto ? ` por ${formatPYG((action as any).otrosMonto)}` : ""
+        return `Autorizar cobro no habitual: ${sub}${comp}${m}`
+      }
       case "reopen_invoice": {
         const nombre = (action as any).customer?.nombre || "cliente"
         return `Agregar identificación a factura Nº ${(action as any).sale?.numero || ""}: ${nombre}`
+      }
+      case "reopen_payment": {
+        const s = (action as any).sale
+        const fp = (action as any).formaPago || "—"
+        const motTxt = (action as any).motivo || ""
+        const socio = (action as any).customer?.nombre ? ` (Socio: ${(action as any).customer.nombre})` : ""
+        const vch = (action as any).voucher ? ` | Vch: ${(action as any).voucher}` : ""
+        const cur = (action as any).moneda && (action as any).moneda !== "PYG" ? ` | ${(action as any).moneda} ${(action as any).montoMoneda || ""}` : ""
+        return `⚠️ CAMBIO DE FORMA DE PAGO — Venta Nº ${s?.numero || ""}: ${s?.forma_pago || ""} → ${fp}${socio}${vch}${cur} | Motivo: ${motTxt}`
       }
       case "use_label_weight": {
         const wp = (action as any).weightProduct
         const etiquetaKg = (action as any).weightEtiquetaKg
         return `Usar peso de etiqueta pese a diferencia con la balanza: ${wp?.nombre || "producto"} · Etiqueta ${Number(etiquetaKg || 0).toFixed(3)} KG`
+      }
+      case "direct_discount": {
+        const dType = (action as any).discountType === "percentage" ? `${(action as any).discountValue}%` : `₲ ${Number((action as any).discountValue || 0).toLocaleString("es-PY")}`
+        return `Autorizar Descuento Directo: ${dType} sobre total de ${formatPYG(totalBrutoPyg)}`
       }
       default:
         return "Autorización de supervisor"
@@ -2731,39 +5394,133 @@ export default function POSPage() {
 
   const executeApprovedRemoteAction = async (action: any, resolverId: string, resolverNombre: string) => {
     if (action.type === "process_return") {
-      await submitDevolucion(resolverId, resolverNombre)
+      await submitDevolucion(resolverId, resolverNombre, action.returnSnapshot)
     } else if (action.type === "assign_terminal") {
       await submitAssignTerminal()
-    } else if (action.type === "extra_club_payment") {
+    } else if (action.type === "extra_club_payment" || action.type === "otros_payment") {
+      setOtrosSupervisorApproved(true)
       await handleProcessCheckout()
     } else if (action.type === "reopen_invoice") {
       await submitReabrirFactura(action.sale, action.customer, resolverId, resolverNombre)
+    } else if (action.type === "reopen_payment") {
+      await submitReabrirPago(
+        action.sale,
+        action.formaPago,
+        action.motivo,
+        resolverId,
+        resolverNombre,
+        action.customer,
+        action.voucher,
+        action.lote,
+        action.tarjetaMarca,
+        action.terminalIp,
+        action.moneda,
+        action.montoMoneda,
+      )
     } else {
       executeSupervisorAction(action, resolverId, resolverNombre)
     }
   }
 
-  const requestSupervisorAuthorization = async (action: { type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "use_label_weight", itemId?: string, delta?: number, sale?: Sale, customer?: Customer, weightProduct?: Product, weightEtiquetaKg?: number, weightBalanzaKg?: number }) => {
+  // Clasificacion de riesgo por tipo de accion que requiere autorizacion de
+  // supervisor -- antes solo el descuento directo y el uso de peso de
+  // etiqueta dejaban rastro en auditoria; el resto (anular item, vaciar
+  // carrito, reabrir factura/pago, devoluciones, etc.) se ejecutaba sin
+  // ningun registro. direct_discount y use_label_weight quedan afuera de
+  // este mapa a proposito -- ya logean su propio evento mas detallado en
+  // executeSupervisorAction, esto evita duplicarlo.
+  const SUPERVISOR_ACTION_RISK: Record<string, { nivel: string; categoria: string }> = {
+    remove_item: { nivel: "BAJO", categoria: "operativo" },
+    decrease_qty: { nivel: "BAJO", categoria: "operativo" },
+    clear_cart: { nivel: "MEDIO", categoria: "operativo" },
+    open_pos_config: { nivel: "MEDIO", categoria: "seguridad" },
+    assign_terminal: { nivel: "MEDIO", categoria: "operativo" },
+    extra_club_payment: { nivel: "ALTO", categoria: "financiero" },
+    otros_payment: { nivel: "ALTO", categoria: "financiero" },
+    process_return: { nivel: "ALTO", categoria: "financiero" },
+    reopen_invoice: { nivel: "ALTO", categoria: "fiscal" },
+    reopen_payment: { nivel: "ALTO", categoria: "financiero" },
+  }
+
+  const logSupervisorRiskEvent = (action: { type: string, [k: string]: any }, resolverId?: string, resolverNombre?: string) => {
+    const risk = SUPERVISOR_ACTION_RISK[action.type]
+    if (!risk) return
+    api.inteliaudit.recordEvent({
+      company_id: COMPANY_ID,
+      user_id: resolverId || user?.id,
+      accion: `supervisor_${action.type}`,
+      entidad: "autorizacion_supervisor",
+      datos_nuevos: {
+        descripcion: describeSupervisorAction(action),
+        nivel_riesgo: risk.nivel,
+        categoria_riesgo: risk.categoria,
+        cajero_id: user?.id,
+        cajero_nombre: user?.nombre,
+        autorizado_por_id: resolverId,
+        autorizado_por_nombre: resolverNombre,
+        caja: terminalAssignment?.caja_nombre || machineHostname || "Caja POS",
+        timestamp: new Date().toISOString(),
+      },
+    } as any).catch((err: any) => console.warn("Error grabando auditoria de supervisor:", err))
+  }
+
+  const requestSupervisorAuthorizationImpl = async (action: {
+    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "otros_payment" | "reopen_invoice" | "reopen_payment" | "use_label_weight" | "direct_discount",
+    itemId?: string,
+    delta?: number,
+    sale?: Sale,
+    customer?: Customer,
+    formaPago?: string,
+    motivo?: string,
+    weightProduct?: Product,
+    weightEtiquetaKg?: number,
+    weightBalanzaKg?: number,
+    discountType?: "percentage" | "fixed",
+    discountValue?: number,
+    discountReason?: string,
+    otrosSubtipo?: string,
+    otrosComprobante?: string,
+    otrosMonto?: number,
+  }) => {
+    if (action.type === "process_return") {
+      ;(action as any).returnSnapshot = {
+        sale: devolucionSaleSeleccionada,
+        items: devolucionItems,
+        seleccion: devolucionSeleccion,
+        motivo: devolucionMotivo,
+        condicion: devolucionCondicion,
+        observaciones: devolucionObservaciones,
+      }
+    }
     if (isSupervisorUser) {
+      logSupervisorRiskEvent(action, user!.id, user?.nombre || "Supervisor")
       if (action.type === "process_return") {
-        await submitDevolucion(user!.id, user?.nombre || "Supervisor")
+        await submitDevolucion(user!.id, user?.nombre || "Supervisor", (action as any).returnSnapshot)
       } else if (action.type === "assign_terminal") {
         await submitAssignTerminal()
       } else if (action.type === "reopen_invoice") {
         await submitReabrirFactura(action.sale!, action.customer!, user!.id, user?.nombre || "Supervisor")
+      } else if (action.type === "reopen_payment") {
+        await submitReabrirPago(
+          action.sale!,
+          (action as any).formaPago!,
+          (action as any).motivo!,
+          user!.id,
+          user?.nombre || "Supervisor",
+          action.customer,
+          (action as any).voucher,
+          (action as any).lote,
+          (action as any).tarjetaMarca,
+          (action as any).terminalIp,
+          (action as any).moneda,
+          (action as any).montoMoneda,
+        )
       } else {
         executeSupervisorAction(action, user!.id, user?.nombre || "Supervisor")
       }
       return
     }
 
-    // "Turno activo" ya no significa "hay alguien parado en esta caja" --
-    // desde que existe la PWA, un supervisor puede tener turno activo
-    // logueada solo en su celular. Antes ESO hacía que se saltee la alerta
-    // remota y se pidiera clave local (que nunca nadie tipeaba, porque el
-    // supervisor no estaba ahí). Ahora la solicitud remota SIEMPRE se manda
-    // -- si además hay alguien con turno activo, se ofrece el atajo de
-    // clave local como alternativa más rápida, no como el único camino.
     let localSupervisorAvailable = false
     try {
       const res = await api.auth.activeSupervisor()
@@ -2785,9 +5542,24 @@ export default function POSPage() {
       })
       setRemoteAuthRequestId(created.id)
       setRemoteAuthStatus("pendiente")
+      if (action.type === "reopen_invoice" || action.type === "reopen_payment") {
+        setShowReimprimirModal(false)
+      }
       setShowRemoteAuthModal(true)
     } catch (e: any) {
       toast.error("No se pudo enviar la solicitud", e?.message || "Intente nuevamente.")
+    }
+  }
+
+  // Un doble clic en "Solicitar Autorizacion" creaba DOS pedidos al supervisor
+  // (21-09, Caja 4: 20:18:37 y 20:18:39); el segundo quedaba huerfano.
+  const requestSupervisorAuthorization = async (action: Parameters<typeof requestSupervisorAuthorizationImpl>[0]) => {
+    if (authRequestInFlightRef.current || showRemoteAuthModal) return
+    authRequestInFlightRef.current = true
+    try {
+      await requestSupervisorAuthorizationImpl(action)
+    } finally {
+      authRequestInFlightRef.current = false
     }
   }
 
@@ -2802,6 +5574,7 @@ export default function POSPage() {
           setRemoteAuthStatus("aprobado")
           setShowRemoteAuthModal(false)
           if (pendingSupervisorAction) {
+            logSupervisorRiskEvent(pendingSupervisorAction, req.resuelto_por || "", req.resuelto_por_nombre || "Supervisor")
             await executeApprovedRemoteAction(pendingSupervisorAction, req.resuelto_por || "", req.resuelto_por_nombre || "Supervisor")
           }
           toast.success("Autorización Aprobada", `Aprobado por ${req.resuelto_por_nombre || "supervisor"} desde su celular.`)
@@ -2816,10 +5589,79 @@ export default function POSPage() {
     return () => clearInterval(interval)
   }, [showRemoteAuthModal, remoteAuthRequestId, pendingSupervisorAction])
 
-  const executeSupervisorAction = (action: { type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "use_label_weight", itemId?: string, delta?: number, sale?: Sale, customer?: Customer, weightProduct?: Product, weightEtiquetaKg?: number, weightBalanzaKg?: number }, resolverId?: string, resolverNombre?: string) => {
-    if (action.type === "extra_club_payment") {
+  const executeSupervisorAction = (action: {
+    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "otros_payment" | "reopen_invoice" | "reopen_payment" | "use_label_weight" | "direct_discount",
+    itemId?: string,
+    delta?: number,
+    sale?: Sale,
+    customer?: Customer,
+    formaPago?: string,
+    motivo?: string,
+    weightProduct?: Product,
+    weightEtiquetaKg?: number,
+    weightBalanzaKg?: number,
+    discountType?: "percentage" | "fixed",
+    discountValue?: number,
+    discountReason?: string,
+    otrosSubtipo?: string,
+    otrosComprobante?: string,
+    otrosMonto?: number,
+  }, resolverId?: string, resolverNombre?: string) => {
+    if (action.type === "extra_club_payment" || action.type === "otros_payment") {
+      setOtrosSupervisorApproved(true)
       handleProcessCheckout()
+    } else if (action.type === "direct_discount") {
+      const dType = action.discountType || "percentage"
+      const dVal = Number(action.discountValue) || 0
+      const reason = (supervisorReason || action.discountReason || "Descuento autorizado por supervisor").trim()
+
+      let discountAmountPyg = 0
+      if (dType === "percentage") {
+        discountAmountPyg = Math.round(totalBrutoPyg * (dVal / 100))
+      } else {
+        discountAmountPyg = Math.min(totalBrutoPyg, Math.round(dVal))
+      }
+
+      setAppliedDiscount({
+        type: dType,
+        value: dVal,
+        montoPyg: discountAmountPyg,
+        reason: reason,
+        supervisorId: resolverId || user?.id || "",
+        supervisorNombre: resolverNombre || user?.nombre || "Supervisor",
+      })
+      setShowDiscountModal(false)
+
+      // REGISTRO DE EVENTO DE AUDITORÍA Y RIESGO EN INTELIAUDIT
+      api.inteliaudit.recordEvent({
+        company_id: COMPANY_ID,
+        user_id: resolverId || user?.id,
+        accion: "descuento_directo_autorizado",
+        entidad: "venta_pos",
+        entidad_id: null,
+        datos_anteriores: {
+          total_bruto_pyg: totalBrutoPyg,
+          items_count: cart.length,
+        },
+        datos_nuevos: {
+          tipo_descuento: dType,
+          valor_descuento: dVal,
+          monto_descuento_pyg: discountAmountPyg,
+          total_con_descuento_pyg: Math.max(0, totalBrutoPyg - discountAmountPyg),
+          motivo: reason,
+          autorizado_por_id: resolverId || user?.id,
+          autorizado_por_nombre: resolverNombre || user?.nombre,
+          cajero_id: user?.id,
+          cajero_nombre: user?.nombre,
+          caja: terminalAssignment?.caja_nombre || machineHostname || "Caja POS",
+          nivel_riesgo: "ALTO_RIESGO_FINANCIERO",
+          timestamp: new Date().toISOString(),
+        },
+      } as any).catch((err) => console.warn("Error grabando auditoria de descuento:", err))
+
+      toast.success("Descuento Aplicado", `Descuento de ${dType === "percentage" ? `${dVal}%` : formatPYG(discountAmountPyg)} autorizado por ${resolverNombre || "Supervisor"}.`)
     } else if (action.type === "use_label_weight" && action.weightProduct && action.weightEtiquetaKg) {
+
       api.inteliaudit.recordEvent({
         company_id: COMPANY_ID,
         user_id: resolverId || user?.id,
@@ -2838,6 +5680,7 @@ export default function POSPage() {
       } as any).catch(() => {})
       addToCart(action.weightProduct, action.weightEtiquetaKg, "etiqueta_plu")
       setWeightMismatch(null)
+      setWeightPendingScale(null)
       searchInputRef.current?.focus()
       toast.warning("Peso de etiqueta autorizado", `${action.weightProduct.nombre}: se usó ${action.weightEtiquetaKg.toFixed(3)} KG de la etiqueta pese a la diferencia con la balanza.`)
     } else if (action.type === "remove_item" && action.itemId) {
@@ -2847,6 +5690,9 @@ export default function POSPage() {
     } else if (action.type === "clear_cart") {
       setCart([])
       setCustomer(DEFAULT_CUSTOMER)
+      setAppliedDiscount(null)
+      setExtraClubAdminOverride(false)
+      clearAllExtraLegs()
       toast.warning("Venta Cancelada", "Se anularon todos los productos del ticket.")
     } else if (action.type === "decrease_qty" && action.itemId && action.delta) {
       const itemBefore = cart.find((i) => i.id === action.itemId)
@@ -2880,23 +5726,71 @@ export default function POSPage() {
       toast.warning("Datos incompletos", "Seleccione el supervisor e ingrese su contraseña.")
       return
     }
+    if (pendingSupervisorAction?.type === "direct_discount") {
+      if (!supervisorReason || supervisorReason.trim().length < 5) {
+        toast.warning("Motivo Obligatorio", "El supervisor debe ingresar obligatoriamente el motivo del descuento (mín. 5 caracteres).")
+        return
+      }
+    }
     setVerifyingSupervisor(true)
     try {
-      const res = await api.auth.verifySupervisor({ email: supervisorEmail, password: supervisorPin })
+      // Offline-first real: si el PIN corto del supervisor ya esta cacheado
+      // localmente (ver localAuth.ts), se verifica 100% en el cliente, sin
+      // depender de que el servidor este arriba -- esto es lo que resuelve
+      // de raiz el "bullicio" en caja cuando la API se reinicia. Si no hay
+      // match local (PIN no cacheado, o la cuenta todavia usa la clave real
+      // de login), se cae al camino remoto de siempre.
+      const selectedStaff = supervisorStaffOptions.find((s) => s.email === supervisorEmail)
+      let res: { valid: boolean; id?: string; nombre?: string; rol?: string } | null = null
+      if (selectedStaff) {
+        const local = await verifySupervisorPinLocal(supervisorPin, selectedStaff.id)
+        if (local.valid) res = { valid: true, id: local.id, nombre: local.nombre, rol: local.rol }
+      }
+      if (!res) {
+        try {
+          res = await api.auth.verifySupervisor({ email: supervisorEmail, password: supervisorPin })
+        } catch (netErr) {
+          toast.error("Sin conexión y sin PIN local válido", "No se pudo verificar al supervisor -- pedile que configure su PIN de caja (Perfil → PIN de autorizaciones) para poder aprobar sin conexión la próxima vez.")
+          return
+        }
+      }
       if (!res?.valid) {
         toast.warning("Autorización Rechazada", "Contraseña incorrecta o la cuenta no tiene nivel de supervisor.")
         return
       }
+      if (res?.id && user?.id && res.id === user.id) {
+        toast.error("Auto-autorización no permitida", "El cajero que opera la caja no puede autorizarse a sí mismo. Debe autorizar otro supervisor o gerente.")
+        return
+      }
       setShowSupervisorModal(false)
       if (pendingSupervisorAction) {
+        logSupervisorRiskEvent(pendingSupervisorAction, res.id!, res.nombre || "Supervisor")
         if (pendingSupervisorAction.type === "process_return") {
-          await submitDevolucion(res.id!, res.nombre || "Supervisor")
+          await submitDevolucion(res.id!, res.nombre || "Supervisor", (pendingSupervisorAction as any).returnSnapshot)
         } else if (pendingSupervisorAction.type === "assign_terminal") {
           await submitAssignTerminal()
-        } else if (pendingSupervisorAction.type === "extra_club_payment") {
+        } else if (pendingSupervisorAction.type === "extra_club_payment" || pendingSupervisorAction.type === "otros_payment") {
+          setOtrosSupervisorApproved(true)
           await handleProcessCheckout()
+        } else if (pendingSupervisorAction.type === "reopen_invoice") {
+          await submitReabrirFactura(pendingSupervisorAction.sale!, pendingSupervisorAction.customer!, res.id!, res.nombre || "Supervisor")
+        } else if (pendingSupervisorAction.type === "reopen_payment") {
+          await submitReabrirPago(
+            pendingSupervisorAction.sale!,
+            pendingSupervisorAction.formaPago!,
+            pendingSupervisorAction.motivo!,
+            res.id!,
+            res.nombre || "Supervisor",
+            pendingSupervisorAction.customer,
+            pendingSupervisorAction.voucher,
+            pendingSupervisorAction.lote,
+            pendingSupervisorAction.tarjetaMarca,
+            pendingSupervisorAction.terminalIp,
+            pendingSupervisorAction.moneda,
+            pendingSupervisorAction.montoMoneda,
+          )
         } else {
-          executeSupervisorAction(pendingSupervisorAction)
+          executeSupervisorAction(pendingSupervisorAction, res.id!, res.nombre || "Supervisor")
         }
       }
       toast.success("Autorización Exitosa", `Acción aprobada por ${res.nombre} (${supervisorReason}).`)
@@ -2909,6 +5803,7 @@ export default function POSPage() {
       setVerifyingSupervisor(false)
     }
   }
+
 
   // ── DEVOLUCIONES DE CLIENTES ────────────────────────────────────────────
   // Flujo completo contra el backend real (misma tabla `returns` que usa
@@ -2928,19 +5823,50 @@ export default function POSPage() {
     setDevolucionObservaciones("")
     setDevolucionSalesLoading(true)
     try {
-      let sales = cashSessionId
-        ? await api.sales.list({ session_id: cashSessionId } as any)
-        : (user?.id ? await api.sales.list({ user_id: user.id } as any) : [])
-      if (!Array.isArray(sales) || sales.length === 0) {
-        sales = await api.sales.list()
-      }
-      setDevolucionSales(Array.isArray(sales) ? sales : [])
+      // Política comercial de devoluciones: compras emitidas hasta 48 horas antes
+      const date48hAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
+      const sales = await api.sales.list({ fecha_desde: date48hAgo, limit: 100 } as any)
+      const list = Array.isArray(sales) ? sales : []
+      setDevolucionSales(list)
+      setDevolucionSalesRecientes(list)
     } catch (e) {
       toast.error("No se pudo cargar el historial de ventas", "Intente nuevamente.")
     } finally {
       setDevolucionSalesLoading(false)
     }
   }
+
+  // Búsqueda remota en BD para el modal de devoluciones del POS (soporte todas las fechas y nº de comprobante)
+  useEffect(() => {
+    if (!showDevolucionModal || devolucionStep !== "buscar") return
+
+    const term = devolucionSearch.trim()
+    if (!term) {
+      if (devolucionSalesRecientes.length > 0) {
+        setDevolucionSales(devolucionSalesRecientes)
+      }
+      return
+    }
+
+    setDevolucionSalesLoading(true)
+    const timer = setTimeout(async () => {
+      try {
+        const results = await api.sales.list({
+          search: term,
+          all_dates: true,
+          estado: "confirmado",
+          limit: 25,
+        })
+        setDevolucionSales(Array.isArray(results) ? results : [])
+      } catch (err) {
+        console.error("Error buscando ventas para devolución en POS:", err)
+      } finally {
+        setDevolucionSalesLoading(false)
+      }
+    }, 300)
+
+    return () => clearTimeout(timer)
+  }, [devolucionSearch, showDevolucionModal, devolucionStep, devolucionSalesRecientes])
 
   const closeDevolucionModal = () => {
     setShowDevolucionModal(false)
@@ -2988,19 +5914,31 @@ export default function POSPage() {
     setDevolucionSeleccion((prev) => ({ ...prev, [itemId]: clamped }))
   }
 
-  const submitDevolucion = async (aprobadoPorId: string, aprobadoPorNombre: string) => {
-    if (!devolucionSaleSeleccionada) return
-    const itemsToReturn = devolucionItems
-      .filter((it) => (devolucionSeleccion[it.id] || 0) > 0)
+  const submitDevolucion = async (aprobadoPorId: string, aprobadoPorNombre: string, snapshot?: any) => {
+    const saleDev = snapshot?.sale ?? devolucionSaleSeleccionada
+    const itemsDev: any[] = snapshot?.items ?? devolucionItems
+    const selDev: Record<string, number> = snapshot?.seleccion ?? devolucionSeleccion
+    const motivoDev = snapshot?.motivo ?? devolucionMotivo
+    const condicionDev = snapshot?.condicion ?? devolucionCondicion
+    const obsDev = snapshot?.observaciones ?? devolucionObservaciones
+    if (!saleDev) {
+      toast.error(
+        "La devolución NO se registró",
+        "Se perdió la venta seleccionada antes de guardar. Volvé a abrir Devoluciones y repetí el proceso; pedí una nueva autorización."
+      )
+      return
+    }
+    const itemsToReturn = itemsDev
+      .filter((it) => (selDev[it.id] || 0) > 0)
       .map((it) => ({
         sale_item_id: it.id,
         product_id: it.product_id,
         descripcion: it.productName,
-        cantidad: devolucionSeleccion[it.id],
+        cantidad: selDev[it.id],
         precio_unitario: it.precio_unitario,
         iva_tasa: it.iva_tasa,
-        motivo_detalle: devolucionObservaciones || undefined,
-        condicion: devolucionCondicion,
+        motivo_detalle: obsDev || undefined,
+        condicion: condicionDev,
       }))
     if (itemsToReturn.length === 0) {
       toast.warning("Sin ítems seleccionados", "Elija al menos un producto a devolver.")
@@ -3010,10 +5948,10 @@ export default function POSPage() {
     try {
       const created = await api.returns.create({
         company_id: COMPANY_ID,
-        sale_id: devolucionSaleSeleccionada.id,
-        customer_id: (devolucionSaleSeleccionada as any).customer_id || undefined,
-        motivo: devolucionMotivo,
-        observaciones: devolucionObservaciones || undefined,
+        sale_id: saleDev.id,
+        customer_id: (saleDev as any).customer_id || undefined,
+        motivo: motivoDev,
+        observaciones: obsDev || undefined,
         warehouse_id: warehouses[0]?.id,
         user_id: user?.id,
         items: itemsToReturn,
@@ -3023,7 +5961,7 @@ export default function POSPage() {
       if (approved?.nota_credito_numero) {
         toast.success("Devolución Registrada", `NC ${approved.nota_credito_numero} aprobada por ${aprobadoPorNombre}. Imprimiendo...`)
         try {
-          await printNotaCreditoTicket(approved, itemsToReturn, devolucionSaleSeleccionada, aprobadoPorNombre)
+          await printNotaCreditoTicket(approved, itemsToReturn, saleDev, aprobadoPorNombre)
         } catch (printErr: any) {
           toast.warning("NC generada, no se pudo imprimir", printErr?.message || "Reimprima desde el historial de devoluciones.")
         }
@@ -3042,6 +5980,130 @@ export default function POSPage() {
     } finally {
       setDevolucionSubmitting(false)
     }
+  }
+
+  // Comprobante ESC/POS del pago PIX (PlugPay) -- a diferencia de Bancard/Dinelco,
+  // que tienen su propia impresora física en el pinpad, PlugPay es 100% cloud y
+  // no entrega ningún voucher físico, así que lo generamos nosotros al aprobarse.
+  const printPlugpayPixVoucher = async (pixData: any, montoPyg: number, cpf: string) => {
+    if (!(window as any).electronAPI?.printEscPos) return
+
+    const fmtGs = (val: number | string | null | undefined): string => {
+      const n = typeof val === "number" ? val : parseFloat(String(val ?? 0)) || 0
+      return Math.round(n).toLocaleString("es-PY")
+    }
+
+    const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
+    const W = ESCPOS_LINE_WIDTH
+
+    let t = ESCPOS_INIT
+    t += ESCPOS_ALIGN_CENTER
+    t += escposProviderBadge('PLUGPAY')
+    t += ESCPOS_BOLD_ON + 'COMPROBANTE PIX' + ESCPOS_BOLD_OFF + '\n'
+    t += 'EXTRA SUPERMERCADO\n'
+    t += ESCPOS_ALIGN_LEFT
+    t += escposDashes(W) + '\n'
+    t += `${new Date().toLocaleString("es-PY")} - Caja (${puntoEmision})\n`
+    t += `Cajero: ${escposStripAccents(user?.nombre || '')}\n`
+    if (cpf) t += `CPF: ${cpf}\n`
+    t += `ID: ${pixData?.IdTransacao ?? '-'} | Ref: ${pixData?.referenciaInterna ?? '-'}\n`
+    t += escposDashes(W) + '\n'
+    t += escposTwoCol('TOTAL Gs.:', fmtGs(montoPyg), W) + '\n'
+    const valBrl = pixData?.valueBRL || pixData?.valorEmBRL
+    if (valBrl) {
+      t += escposTwoCol('TOTAL R$:', Number(valBrl).toFixed(2), W) + '\n'
+    }
+    t += escposDashes(W) + '\n'
+    t += ESCPOS_ALIGN_CENTER
+    t += ESCPOS_BOLD_ON + 'APROBADO' + ESCPOS_BOLD_OFF + '\n'
+
+    // Exactamente 2 saltos antes de cortar
+    t += '\n\n'
+    t += GS + 'V' + '\x01'
+
+    try {
+      await (window as any).electronAPI.printEscPos(escposToBase64(t), tpl.nombre_impresora_windows || "ZKP8008")
+    } catch (e) {}
+  }
+
+  // Mismo comprobante minimo que PIX, para Crédito Parcelado Brasil (tambien
+  // PlugPay, tambien 100% cloud sin voucher fisico propio) -- antes no
+  // imprimia nada al aprobarse.
+  const printPlugpayParceladoVoucher = async (txn: any, montoPyg: number, cpf: string, cuotas: number) => {
+    if (!(window as any).electronAPI?.printEscPos) return
+
+    const fmtGs = (val: number | string | null | undefined): string => {
+      const n = typeof val === "number" ? val : parseFloat(String(val ?? 0)) || 0
+      return Math.round(n).toLocaleString("es-PY")
+    }
+
+    const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
+    const W = ESCPOS_LINE_WIDTH
+
+    let t = ESCPOS_INIT
+    t += ESCPOS_ALIGN_CENTER
+    t += escposProviderBadge('PLUGPAY')
+    t += ESCPOS_BOLD_ON + 'COMPROBANTE CRÉDITO BRASIL' + ESCPOS_BOLD_OFF + '\n'
+    t += 'EXTRA SUPERMERCADO\n'
+    t += ESCPOS_ALIGN_LEFT
+    t += escposDashes(W) + '\n'
+    t += `${new Date().toLocaleString("es-PY")} - Caja (${puntoEmision})\n`
+    t += `Cajero: ${escposStripAccents(user?.nombre || '')}\n`
+    if (cpf) t += `CPF: ${cpf}\n`
+    t += `Cuotas: ${cuotas}x | Aut: ${txn?.SerialNumber || txn?.id || '-'}\n`
+    t += escposDashes(W) + '\n'
+    t += escposTwoCol('TOTAL Gs.:', fmtGs(montoPyg), W) + '\n'
+    t += escposDashes(W) + '\n'
+    t += ESCPOS_ALIGN_CENTER
+    t += ESCPOS_BOLD_ON + 'APROBADO' + ESCPOS_BOLD_OFF + '\n'
+    t += '\n\n'
+    t += GS + 'V' + '\x01'
+
+    try {
+      await (window as any).electronAPI.printEscPos(escposToBase64(t), tpl.nombre_impresora_windows || "ZKP8008")
+    } catch (e) {}
+  }
+
+  // Mismo mecanismo que PlugPay: Bancard QR "en pantalla" (cloud, no el
+  // terminal Zimple físico que ya tiene su propio voucher) tampoco entrega
+  // ningún comprobante propio -- lo generamos nosotros al confirmarse el pago.
+  const printBancardCloudQrVoucher = async (
+    data: { hookAlias: string; amount: number },
+    status?: { ticket_number?: string; authorization_code?: string; payer_name?: string; payer_lastname?: string },
+  ) => {
+    if (!(window as any).electronAPI?.printEscPos) return
+
+    const fmtGs = (val: number | string | null | undefined): string => {
+      const n = typeof val === "number" ? val : parseFloat(String(val ?? 0)) || 0
+      return Math.round(n).toLocaleString("es-PY")
+    }
+
+    const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
+    const W = ESCPOS_LINE_WIDTH
+
+    let t = ESCPOS_INIT
+    t += ESCPOS_ALIGN_CENTER
+    t += escposProviderBadge('BANCARD QR')
+    t += ESCPOS_BOLD_ON + 'COMPROBANTE QR' + ESCPOS_BOLD_OFF + '\n'
+    t += 'EXTRA SUPERMERCADO\n'
+    t += ESCPOS_ALIGN_LEFT
+    t += escposDashes(W) + '\n'
+    t += `${new Date().toLocaleString("es-PY")} - Caja (${puntoEmision})\n`
+    t += `Cajero: ${escposStripAccents(user?.nombre || '')}\n`
+    const pagador = [status?.payer_name, status?.payer_lastname].filter(Boolean).join(' ')
+    if (pagador) t += `Cliente: ${escposStripAccents(pagador)}\n`
+    t += `Aut: ${status?.authorization_code || '-'} | Bol: ${status?.ticket_number || data.hookAlias}\n`
+    t += escposDashes(W) + '\n'
+    t += escposTwoCol('TOTAL Gs.:', fmtGs(data.amount), W) + '\n'
+    t += escposDashes(W) + '\n'
+    t += ESCPOS_ALIGN_CENTER
+    t += ESCPOS_BOLD_ON + 'APROBADO' + ESCPOS_BOLD_OFF + '\n'
+    t += '\n\n'
+    t += GS + 'V' + '\x01'
+
+    try {
+      await (window as any).electronAPI.printEscPos(escposToBase64(t), tpl.nombre_impresora_windows || "ZKP8008")
+    } catch (e) {}
   }
 
   // Ticket ESC/POS real de la Nota de Crédito -- mismo mecanismo crudo que
@@ -3068,7 +6130,7 @@ export default function POSPage() {
       if (Array.isArray(comps) && comps.length > 0) companyData = comps[0]
     } catch (e) {}
 
-    const fantasia = companyData.nombre_fantasia || companyData.nombre || "Casa Gonzalito S.R.L."
+    const fantasia = companyData.nombre_fantasia || companyData.nombre || "Extra Supermercado Mayorista"
     const razon = companyData.razon_social || "GRUPO SANTA TERESA E.A.S."
     const rucEmpresa = companyData.ruc || "80150377-9"
     const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
@@ -3104,7 +6166,7 @@ export default function POSPage() {
     t += ESCPOS_ALIGN_LEFT
     t += ESCPOS_BOLD_ON + `NC No: ${approved.nota_credito_numero}` + ESCPOS_BOLD_OFF + '\n'
     t += `Devolucion No: ${approved.numero || ''}\n`
-    t += `Fecha/Hora: ${new Date().toLocaleString("es-PY")}\n`
+    t += `Fecha/Hora: ${escposFormatDateTime(new Date())}\n`
     // Referencia a la factura que se devuelve -- destacada en su propio
     // recuadro, no una línea más entre las demás, porque es el dato que
     // vincula legalmente la NC a la factura original.
@@ -3146,7 +6208,15 @@ export default function POSPage() {
   const devolucionSalesFiltradas = useMemo(() => {
     const q = devolucionSearch.trim().toLowerCase()
     if (!q) return devolucionSales
-    return devolucionSales.filter((s) => (s.numero || "").toLowerCase().includes(q))
+    const qNum = q.replace(/\D/g, "")
+    const filtered = devolucionSales.filter((s) => {
+      const num = (s.numero || "").toLowerCase()
+      const numInt = (s.numero_interno || "").toLowerCase()
+      const cNom = (s.customer_nombre || s.customer?.nombre || s.customer?.razon_social || "").toLowerCase()
+      const cDoc = (s.customer_doc || s.customer?.ruc || s.customer?.ci || "").toLowerCase()
+      return num.includes(q) || numInt.includes(q) || cNom.includes(q) || cDoc.includes(q) || (qNum && cDoc.includes(qNum))
+    })
+    return filtered.length > 0 ? filtered : devolucionSales
   }, [devolucionSales, devolucionSearch])
 
   const updateQuantity = (id: string, delta: number) => {
@@ -3186,16 +6256,23 @@ export default function POSPage() {
       customer,
       items: [...cart],
       total: totalPyg,
+      appliedDiscount,
+      extraPaymentLegs,
     }
     setPausedSales((prev) => [newPaused, ...prev])
     setCart([])
     setCustomer(DEFAULT_CUSTOMER)
+    setAppliedDiscount(null)
+    setExtraClubAdminOverride(false)
+    clearAllExtraLegs()
     toast.info("Venta en Espera", "La venta fue pausada exitosamente.")
   }
 
   const resumePausedSale = (paused: PausedSale) => {
     setCart(paused.items)
     setCustomer(paused.customer)
+    setAppliedDiscount(paused.appliedDiscount || null)
+    setExtraPaymentLegs(paused.extraPaymentLegs || [])
     setPausedSales((prev) => prev.filter((p) => p.id !== paused.id))
     setShowPausedModal(false)
     toast.success("Venta Recuperada", `Restaurados ${paused.items.length} ítems.`)
@@ -3227,18 +6304,13 @@ export default function POSPage() {
 
   // ── GESTIÓN Y CREACIÓN RÁPIDA DE CLIENTES (F9) CON RUC AUTOCALCULADO ────────
   const combinedCustomerList = useMemo(() => {
-    const list = customerSearch.trim() && customerSearchResults.length > 0
-      ? customerSearchResults
-      : customers
-
-    const query = customerSearch.trim().toLowerCase()
-    if (!query) return list
-
-    const tokens = query.split(/\s+/).filter(Boolean)
-    return list.filter(c => {
-      const text = `${c.nombre || ''} ${c.razon_social || ''} ${c.ruc || ''} ${c.ci || ''} ${(c as any).telefono || ''} ${(c as any).extra_club_numero || ''}`.toLowerCase()
-      return tokens.every(token => text.includes(token))
-    })
+    if (customerSearchResults.length > 0) {
+      return customerSearchResults.slice(0, 20)
+    }
+    if (!customerSearch.trim()) {
+      return customers.slice(0, 20)
+    }
+    return []
   }, [customerSearch, customerSearchResults, customers])
 
   // El índice 0 siempre es "Consumidor Final"; 1..N son los resultados de
@@ -3280,7 +6352,10 @@ export default function POSPage() {
       return
     }
 
-    const finalRuc = lookupDvSuggested || newCustRuc.trim() || undefined
+    let finalRuc = newCustRuc.trim()
+    if (lookupDvSuggested && !finalRuc.includes("-")) {
+      finalRuc = `${finalRuc}-${lookupDvSuggested}`
+    }
 
     try {
       const createdRaw = await api.customers.create({
@@ -3295,6 +6370,7 @@ export default function POSPage() {
 
       if (created) {
         setCustomers(prev => [created, ...prev])
+        offlineDB.customers.put(created).catch(() => {})
         setCustomer(created)
         setShowCreateCustomerForm(false)
         setShowCustomerModal(false)
@@ -3336,6 +6412,7 @@ export default function POSPage() {
       } as any)
       const created = normalizeCustomer(createdRaw)
       setCustomers(prev => [created, ...prev])
+      offlineDB.customers.put(created).catch(() => {})
       setCustomer(created)
       setShowCustomerModal(false)
       toast.success("Cliente Creado y Asignado", `${created.nombre} (${created.ruc || created.ci || 'CI'})`)
@@ -3356,33 +6433,74 @@ export default function POSPage() {
     } else if (e.key === "Enter") {
       e.preventDefault()
       const p = priceCheckResults[priceCheckHighlight]
-      if (p) handlePriceCheckSelect(p)
+      if (p) {
+        const packMatch = packBarcodeMap.get(priceCheckSearch.trim())
+        if (packMatch && packMatch.productId === p.id) {
+          handlePriceCheckSelect(p, { etiqueta: packMatch.etiqueta, unidadesPorPaquete: packMatch.unidadesPorPaquete })
+        } else {
+          handlePriceCheckSelect(p)
+        }
+      }
     }
   }
 
-  const handlePriceCheckSelect = async (p: Product) => {
+  // El pack casi siempre alcanza o supera el minimo de alguna escala mayorista
+  // (una caja de 6 ya califica para "6+ unidades") -- usar el precio unitario
+  // al contado ahi seria mostrarle al cliente un total mas caro del que
+  // realmente le corresponde pagar. Se toma la escala mas favorable (min_qty
+  // mas alto) que la cantidad del pack alcance, igual criterio que el backend
+  // del verificador (kiosk/service.py::lookup_product).
+  const precioParaCantidad = (qty: number, tiers: any[], precioBase: number) => {
+    const aplicables = tiers.filter((t) => qty >= (t.min_qty || 0) && (t.max_qty == null || qty <= t.max_qty))
+    if (aplicables.length === 0) return precioBase
+    return aplicables.reduce((best, t) => (t.min_qty > best.min_qty ? t : best), aplicables[0]).precio_unitario
+  }
+
+  const handlePriceCheckSelect = async (p: Product, scannedAsPack?: { etiqueta: string; unidadesPorPaquete: number }) => {
+    const reqId = ++priceCheckRequestIdRef.current
     setPriceCheckSelected(p)
     setPriceCheckTiers([])
     setPriceCheckStock(null)
     setPriceCheckPromo(null)
+    setPriceCheckPacks([])
+    setPriceCheckScannedAsPack(scannedAsPack || null)
+
     setPriceCheckLoadingTiers(true)
     setPriceCheckLoadingStock(true)
     setPriceCheckLoadingPromo(true)
 
-    api.smartPricing.listTieredPrices(COMPANY_ID, p.id)
-      .then((tiers) => setPriceCheckTiers((tiers || []).slice().sort((a: any, b: any) => (a.min_qty || 0) - (b.min_qty || 0))))
+    api.products.packBarcodes.list(p.id)
+      .then((packs) => {
+        if (priceCheckRequestIdRef.current !== reqId) return
+        setPriceCheckPacks((packs || []).map((pk: any) => ({ id: pk.id, etiqueta: pk.etiqueta, unidades_por_paquete: Number(pk.unidades_por_paquete) })))
+      })
       .catch(() => {})
-      .finally(() => setPriceCheckLoadingTiers(false))
+
+    api.smartPricing.listTieredPrices(COMPANY_ID, p.id)
+      .then((tiers) => {
+        if (priceCheckRequestIdRef.current !== reqId) return
+        setPriceCheckTiers((tiers || []).slice().sort((a: any, b: any) => (a.min_qty || 0) - (b.min_qty || 0)))
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (priceCheckRequestIdRef.current === reqId) setPriceCheckLoadingTiers(false)
+      })
 
     api.inventory.getProductStock(p.id)
-      .then((res) => setPriceCheckStock(res))
+      .then((res) => {
+        if (priceCheckRequestIdRef.current !== reqId) return
+        setPriceCheckStock(res)
+      })
       .catch(() => {})
-      .finally(() => setPriceCheckLoadingStock(false))
+      .finally(() => {
+        if (priceCheckRequestIdRef.current === reqId) setPriceCheckLoadingStock(false)
+      })
 
     api.promotions.calculate({
       items: [{ producto_id: p.id, categoria_id: p.categoria_id || undefined, cantidad: 1, precio_unitario: Number(p.precio_venta) || 0 }],
     })
       .then((res) => {
+        if (priceCheckRequestIdRef.current !== reqId) return
         const promo = res?.applicable_promotions?.[0]
         if (promo) {
           setPriceCheckPromo({
@@ -3394,10 +6512,13 @@ export default function POSPage() {
         }
       })
       .catch(() => {})
-      .finally(() => setPriceCheckLoadingPromo(false))
+      .finally(() => {
+        if (priceCheckRequestIdRef.current === reqId) setPriceCheckLoadingPromo(false)
+      })
   }
 
   const closePriceCheckModal = () => {
+    priceCheckRequestIdRef.current++
     setShowPriceCheckModal(false)
     setPriceCheckSearch("")
     setPriceCheckResults([])
@@ -3405,6 +6526,8 @@ export default function POSPage() {
     setPriceCheckTiers([])
     setPriceCheckStock(null)
     setPriceCheckPromo(null)
+    setPriceCheckPacks([])
+    setPriceCheckScannedAsPack(null)
   }
 
   // Temporizador de auto-cierre -- igual criterio que el kiosco de precios
@@ -3438,15 +6561,32 @@ export default function POSPage() {
   }
 
   // ── CÁLCULOS DE TOTALES Y MULTIMONEDA ──────────────────────────────────────
-  const { totalPyg, totalBrl, totalUsd, gravada10Pyg, gravada5Pyg, exentaPyg, iva10Pyg, iva5Pyg } = useMemo(() => {
-    let totPyg = 0
+  const { totalBrutoPyg, totalBasePyg, totalAhorroPyg, ahorroPromoPyg, ahorroMayoristaPyg, descuentoTotalPyg, totalPyg, totalBrl, totalUsd, gravada10Pyg, gravada5Pyg, exentaPyg, iva10Pyg, iva5Pyg } = useMemo(() => {
+    let totBruto = 0
+    let totBase = 0
     let g10 = 0
     let g5 = 0
     let ex = 0
+    // Desglose del ahorro por fuente para el recuadro impreso del ticket
+    // (SECCIÓN A del diseñador: "En Promociones" vs "En Precios Mayoristas"):
+    // un item con en_promocion=true bajó de precio por una promoción activa;
+    // cualquier otro item cuyo precio quedó por debajo de precio_base bajó
+    // por un escalón de precio por cantidad (applyTieredPrice / mayorista).
+    let ahorroPromo = 0
+    let ahorroMayorista = 0
 
     for (const item of cart) {
       const lineTotal = item.precio * item.quantity
-      totPyg += lineTotal
+      const lineBase = (Number(item.precio_base) || Number(item.precio) || 0) * item.quantity
+      totBruto += lineTotal
+      totBase += lineBase
+
+      const lineAhorro = Math.max(0, lineBase - lineTotal)
+      if ((item as any).en_promocion) {
+        ahorroPromo += lineAhorro
+      } else {
+        ahorroMayorista += lineAhorro
+      }
 
       if (item.iva_tasa === 10) {
         g10 += lineTotal
@@ -3457,23 +6597,44 @@ export default function POSPage() {
       }
     }
 
-    const iv10 = Math.round(g10 / 11)
-    const iv5 = Math.round(g5 / 21)
+    let descMonto = 0
+    if (appliedDiscount) {
+      if (appliedDiscount.type === "percentage") {
+        descMonto = Math.round(totBruto * (appliedDiscount.value / 100))
+      } else {
+        descMonto = Math.min(totBruto, Math.round(appliedDiscount.value))
+      }
+    }
 
-    const totBrl = rates.BRL > 0 ? (totPyg / rates.BRL).toFixed(2) : "0.00"
-    const totUsd = rates.USD > 0 ? (totPyg / rates.USD).toFixed(2) : "0.00"
+    const ahorroPromos = Math.max(0, totBase - totBruto)
+    const totalAhorro = Math.round(ahorroPromos + descMonto)
+    const netTot = Math.max(0, totBruto - descMonto)
+    const factorDesc = totBruto > 0 ? netTot / totBruto : 1
+
+    const iv10 = Math.round((g10 * factorDesc) / 11)
+    const iv5 = Math.round((g5 * factorDesc) / 21)
+
+    const totBrl = rates.BRL > 0 ? (netTot / rates.BRL).toFixed(2) : "0.00"
+    const totUsd = rates.USD > 0 ? (netTot / rates.USD).toFixed(2) : "0.00"
 
     return {
-      totalPyg: Math.round(totPyg),
+      totalBrutoPyg: Math.round(totBruto),
+      totalBasePyg: Math.round(totBase),
+      totalAhorroPyg: totalAhorro,
+      ahorroPromoPyg: Math.round(ahorroPromo),
+      ahorroMayoristaPyg: Math.round(ahorroMayorista),
+      descuentoTotalPyg: Math.round(descMonto),
+      totalPyg: Math.round(netTot),
       totalBrl: totBrl,
       totalUsd: totUsd,
-      gravada10Pyg: Math.round(g10),
-      gravada5Pyg: Math.round(g5),
-      exentaPyg: Math.round(ex),
+      gravada10Pyg: Math.round(g10 * factorDesc),
+      gravada5Pyg: Math.round(g5 * factorDesc),
+      exentaPyg: Math.round(ex * factorDesc),
       iva10Pyg: Math.round(iv10),
       iva5Pyg: Math.round(iv5),
     }
-  }, [cart, rates])
+  }, [cart, rates, appliedDiscount])
+
 
   // Cálculos dinámicos de vuelto multimoneda en el modal de cobro (SIN CÉNTIMOS EN PYG)
   const { totalRecibidoPyg, saldoRestantePyg, vueltoPyg } = useMemo(() => {
@@ -3496,16 +6657,26 @@ export default function POSPage() {
       recibido += pyg + brl + usd
     }
     if (activeMethods.has("bancard")) {
-      recibido += isMultiPayment ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+      recibido += (isMultiPayment || extraPaymentLegs.some((l) => l.method === "bancard")) ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+      recibido += extraLegsMontoTotal("bancard")
     }
     if (activeMethods.has("dinelco")) {
-      recibido += isMultiPayment ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+      recibido += (isMultiPayment || extraPaymentLegs.some((l) => l.method === "dinelco")) ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+      recibido += extraLegsMontoTotal("dinelco")
     }
     if (activeMethods.has("qr")) {
-      recibido += isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+      recibido += (isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+      recibido += extraLegsMontoTotal("qr")
+    }
+    if (activeMethods.has("plugpay") || activeMethods.has("plugpay_credito")) {
+      recibido += (isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay" || l.method === "plugpay_credito")) ? parseInt((mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg).replace(/\D/g, "") || "0", 10) : totalPyg
+      recibido += extraLegsMontoTotal("plugpay") + extraLegsMontoTotal("plugpay_credito")
     }
     if (activeMethods.has("extra_club")) {
       recibido += isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    }
+    if (activeMethods.has("otros")) {
+      recibido += isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg
     }
 
     // El guaraní no circula en billetes/monedas por debajo de ₲500 -- al
@@ -3525,7 +6696,7 @@ export default function POSPage() {
       saldoRestantePyg: Math.round(saldo),
       vueltoPyg: Math.round(vuelto)
     }
-  }, [activeMethods, isMultiPayment, payCashPyg, payCashBrl, payCashUsd, mixedCardPyg, mixedDinelcoPyg, mixedQrPyg, mixedExtraClubPyg, totalPyg, rates])
+  }, [activeMethods, isMultiPayment, payCashPyg, payCashBrl, payCashUsd, mixedCardPyg, mixedDinelcoPyg, mixedQrPyg, mixedParceladoPyg, mixedPlugPayPyg, mixedExtraClubPyg, mixedOtrosPyg, totalPyg, rates, extraPaymentLegs])
 
   // ── Detección inteligente de redondeo para Centro Amor y Esperanza ("Abre tu corazón") ──
   const montoSugeridoDonacion = useMemo(() => {
@@ -3552,14 +6723,26 @@ export default function POSPage() {
     setDonacionActiva(nextActiva)
     if (customMonto !== undefined) {
       setMontoDonacionManual(customMonto)
-    } else if (!nextActiva) {
+    } else {
+      // Sin customMonto -- ya sea al desactivar, o al elegir el chip "Vuelto
+      // Total" (modo automatico/en vivo) -- se limpia cualquier monto
+      // congelado de un chip anterior para que vuelva a seguir el vuelto
+      // real/sugerido en cada recalculo, no un numero pegado del momento
+      // en que se hizo clic.
       setMontoDonacionManual(null)
     }
     const monto = customMonto !== undefined ? customMonto : (montoDonacionManual !== null ? montoDonacionManual : montoSugeridoDonacion)
     const currentCash = parseInt(payCashPyg.replace(/\D/g, "") || "0", 10)
+    // Esta formula (total + donacion) solo tiene sentido para un cobro
+    // 100% en efectivo Gs -- si ya hay algo cargado en R$/US$ (pago
+    // multimoneda), pisar el campo de Gs con este numero arruinaba lo
+    // que el cajero ya venia armando. El vuelto y la donacion efectiva
+    // ya se recalculan solos via vueltoPyg/montoDonacionEfectiva sin
+    // necesidad de tocar ningun campo en ese caso.
+    const hayOtraMoneda = (parseFloat(payCashBrl.replace(/,/g, ".") || "0") || 0) > 0 || (parseFloat(payCashUsd.replace(/,/g, ".") || "0") || 0) > 0
     
     // Solo actualizar el campo de efectivo si el cajero estaba en el monto exacto base sin haber ingresado un billete mayor
-    if (currentCash <= totalPyg) {
+    if (currentCash <= totalPyg && !hayOtraMoneda) {
       if (nextActiva) {
         setPayCashPyg((totalPyg + monto).toLocaleString("es-PY"))
       } else {
@@ -3603,7 +6786,14 @@ export default function POSPage() {
     if (e.key === "Enter") {
       e.preventDefault()
       if (totalRecibidoPyg >= totalPyg && totalPyg > 0 && !submitting) {
-        handleProcessCheckout()
+        // Doble-Enter: primer Enter "marca listo", segundo Enter cierra.
+        // Sin esta guardia un Enter accidental en cualquier campo no-efectivo
+        // disparaba el checkout si el efectivo precargado ya cubria el total.
+        if (listoParaCerrar) {
+          handleProcessCheckout()
+        } else {
+          setListoParaCerrar(true)
+        }
       } else {
         const faltante = Math.max(0, totalPyg - totalRecibidoPyg)
         if (faltante > 0) setValue(Math.ceil(faltante).toLocaleString("es-PY"))
@@ -3628,8 +6818,21 @@ export default function POSPage() {
   ) => {
     if (e.key === "Enter") {
       e.preventDefault()
+      // El campo de efectivo se auto-enfoca apenas se abre el modal
+      // (handleOpenPayment), con el monto exacto ya precargado -- asi que un
+      // Enter puede llegar aca sin que el cajero haya tocado nada de verdad,
+      // igual que el caso de F12 en el keydown global. Mismo guardado.
+      const cashSinTocar = activeMethods.size === 1 && activeMethods.has("cash") && !hasClickedQuickCash
+      if (cashSinTocar) {
+        toast.warning("Confirmá el monto primero", "Tocá \"Exacto\" o cargá el monto recibido antes de cerrar la venta.")
+        return
+      }
       if (totalRecibidoPyg >= totalPyg && totalPyg > 0 && !submitting) {
-        handleProcessCheckout()
+        if (listoParaCerrar) {
+          handleProcessCheckout()
+        } else {
+          setListoParaCerrar(true)
+        }
       } else {
         const faltante = Math.max(0, totalPyg - totalRecibidoPyg)
         if (faltante > 0) {
@@ -3671,6 +6874,15 @@ export default function POSPage() {
   }
 
   // ── MANEJO DEL SECTOR RÁPIDO DE BILLETES (SOBREESCRIBE EN EL 1ER CLIC, INCREMENTA DESPUÉS) ──
+  useEffect(() => {
+    setListoParaCerrar(false)
+  }, [payCashPyg, payCashBrl, payCashUsd])
+
+  // Resetear la guardia de doble-Enter cuando cambia el medio de pago.
+  useEffect(() => {
+    setListoParaCerrar(false)
+  }, [activeMethods])
+
   const handleQuickCashClick = (amount: number) => {
     if (!hasClickedQuickCash) {
       setPayCashPyg(amount.toLocaleString("es-PY"))
@@ -3683,6 +6895,11 @@ export default function POSPage() {
 
   // ── PROCESAMIENTO DE COBRO (FACTURACIÓN E IMPRESIÓN 80MM) ──────────────────
   const handleOpenPayment = () => {
+    if (!cajaAbiertaRef.current || !cashSessionIdRef.current) {
+      toast.warning("Caja Cerrada", "Debe ingresar el fondo inicial de apertura para operar.")
+      setShowAperturaModal(true)
+      return
+    }
     setActiveMethods(new Set(["cash"]))
     setAllowMixedPayment(false)
     setPayCashPyg(totalPyg.toLocaleString("es-PY"))
@@ -3692,7 +6909,24 @@ export default function POSPage() {
     setMixedCardPyg("")
     setMixedDinelcoPyg("")
     setMixedQrPyg("")
+    setMixedParceladoPyg("")
+    setMixedPlugPayPyg("")
     setMixedExtraClubPyg("")
+    setMixedOtrosPyg("")
+    setTransfComprobante("")
+    setTransfBancoOrigen("")
+    setTransfTitular("")
+    setChequeBanco("")
+    setChequeNumero("")
+    setChequeFechaVenc("")
+    setChequeTitular("")
+    setValeCodigo("")
+    setValeValidating(false)
+    setValeData(null)
+    setOtrosSupervisorApproved(false)
+    setShowPlugpayManualFallback(false)
+    setPlugpayManualComprobante("")
+    setPlugpayManualAutorizacion("")
     setPosVerifyStatus("idle")
     setPosVerifyCandidates([])
     setPosVerifiedTxn(null)
@@ -3700,6 +6934,7 @@ export default function POSPage() {
     resetBancardFlow()
     setDonacionActiva(false)
     setMontoDonacionManual(null)
+    setVueltoMixtoBrl("")
     setShowPaymentModal(true)
   }
 
@@ -3711,7 +6946,7 @@ export default function POSPage() {
   const handleVerifyPosTerminal = async (metodo: "bancard" | "dinelco") => {
     const procesador = metodo === "bancard" ? "BANCARD" : "DINELCO"
     const montoStr = metodo === "bancard" ? mixedCardPyg : mixedDinelcoPyg
-    const monto = isMultiPayment ? parseInt(montoStr.replace(/\D/g, "") || String(totalPyg), 10) : totalPyg
+    const monto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === metodo)) ? parseInt(montoStr.replace(/\D/g, "") || String(totalPyg), 10) : totalPyg
     setPosVerifyStatus("searching")
     setPosVerifyCandidates([])
     setPosVerifiedTxn(null)
@@ -3743,9 +6978,28 @@ export default function POSPage() {
   }
 
   const handleProcessCheckout = async () => {
+    if (!cajaAbiertaRef.current || !cashSessionIdRef.current) {
+      toast.warning("Caja Cerrada", "Debe ingresar el fondo inicial de apertura para emitir comprobantes.")
+      setShowAperturaModal(true)
+      return
+    }
     if (saldoRestantePyg > 0 && !(activeMethods.size === 1 && activeMethods.has("qr"))) {
       toast.warning("Saldo Pendiente", `Falta saldar ${formatPYG(saldoRestantePyg)} para completar el cobro.`)
       return
+    }
+
+    // ── REGLA GENERAL INELUDIBLE: BLOQUEO RADICAL DE EXTRA CLUB SIN DISPONIBLE ──
+    const montoExtraClubCheck = activeMethods.has("extra_club") ? (isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg) : 0
+    if (montoExtraClubCheck > 0) {
+      const tieneLinea = extraClubCredit && extraClubCredit !== "loading" && extraClubCredit.activo
+      const disponible = Number(extraClubCredit && extraClubCredit !== "loading" ? extraClubCredit.saldo_disponible : 0)
+      if (!tieneLinea || disponible < montoExtraClubCheck) {
+        toast.error(
+          "Venta bloqueada: Crédito insuficiente",
+          `El cliente dispone de ${formatPYG(disponible)} y la compra es de ${formatPYG(montoExtraClubCheck)}. Regla general ineludible: no se puede facturar con Extra Club sin saldo disponible. Debe cobrar con otro medio de pago.`
+        )
+        return
+      }
     }
 
     setSubmitting(true)
@@ -3764,7 +7018,7 @@ export default function POSPage() {
           const comps = await api.companies.list()
           if (Array.isArray(comps) && comps.length > 0) {
             companyData = comps[0]
-            const fantasia = companyData.nombre_fantasia || companyData.nombre || "Casa Gonzalito S.R.L."
+            const fantasia = companyData.nombre_fantasia || companyData.nombre || "Extra Supermercado Mayorista"
             companyData.nombre = fantasia
             companyData.nombre_fantasia = fantasia
           }
@@ -3814,7 +7068,7 @@ export default function POSPage() {
       }
 
       const logoWidth = tpl.logo_ancho_px || 160
-      const fantasia = companyData.nombre_fantasia || companyData.nombre || tpl.nombre_fantasia || "Casa Gonzalito S.R.L."
+      const fantasia = companyData.nombre_fantasia || companyData.nombre || tpl.nombre_fantasia || "Extra Supermercado Mayorista"
       const razon = companyData.razon_social || tpl.razon_social || "GRUPO SANTA TERESA E.A.S."
       const rucEmpresa = companyData.ruc || tpl.ruc || "80150377-9"
       const timbrado = String((companyData.config as any)?.timbrado_dnit || companyData.timbrado_numero || tpl.timbrado || "18545636")
@@ -3836,13 +7090,31 @@ export default function POSPage() {
       const showIva = tpl.mostrar_liquidacion_iva !== false
       const showPagos = tpl.mostrar_desglose_pagos !== false
       const showClub = tpl.habilitar_extra_club !== false
-      // isClubMember antes se calculaba solo por "hay un cliente elegido"
-      // (cualquier venta con nombre de cliente salia rotulada "FACTURA
-      // CREDITO", incluso pagada en efectivo) -- ahora es especificamente
-      // "se pago con Extra Club", que es lo unico que realmente es credito.
+      // isClubMember determina si la condición fiscal de la factura es CRÉDITO (pago con Extra Club)
       const isClubMember = activeMethods.has("extra_club") && (!isMultiPayment || parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) > 0)
-      const msgSocio = tpl.mensaje_socio_club || `⭐ SOCIO EXTRA CLUB: Sumaste +${Math.round(totalPyg / 1000)} Puntos. Saldo Total: 2.850 Puntos.`
-      const msgInvitacion = tpl.mensaje_invitacion_club || "🎁 ¿Aún no eres socio Extra Club? Regístrate gratis en caja o en club.extrasuper.com.py y acumula puntos para canjear por premios y descuentos exclusivos."
+
+      // Identificación estricta de Socio Extra Club (por número de socio, independiente del medio de pago)
+      const isSocioExtraClub = Boolean(
+        customer.id !== DEFAULT_CUSTOMER.id &&
+        (customer as any)?.extra_club_numero &&
+        String((customer as any).extra_club_numero).trim() !== ""
+      )
+      const socioNumero = isSocioExtraClub ? String((customer as any).extra_club_numero).trim() : ""
+
+      // Reglas dinámicas de lealtad leídas desde loyaltyConfig (sin valores hardcodeados)
+      const divisorPyg = (loyaltyConfig?.puntos_por_guarani && loyaltyConfig.puntos_por_guarani > 0)
+        ? loyaltyConfig.puntos_por_guarani
+        : 1000
+      const promoActiva = Boolean((loyaltyConfig as any)?.promocion_activa && ((loyaltyConfig as any)?.multiplicador_promocional || 1) > 1)
+      const factorPromo = promoActiva ? Number((loyaltyConfig as any)?.multiplicador_promocional || 1) : 1.0
+      const promoNombre = promoActiva ? ((loyaltyConfig as any)?.promocion_nombre || "Campaña Especial") : null
+
+      const puntosBase = (isSocioExtraClub && loyaltyConfig?.activo !== false && loyaltyConfig?.crear_en_venta !== false)
+        ? Math.floor(totalPyg / divisorPyg)
+        : 0
+      const puntosEstimados = Math.floor(puntosBase * factorPromo)
+
+      const msgInvitacion = tpl.mensaje_invitacion_club || `🎁 ¿Aún no eres socio Extra Club? Regístrate gratis en caja y acumula 1 punto por cada Gs. ${divisorPyg.toLocaleString("es-PY")} en premios y beneficios exclusivos.`
       const showMarketing = tpl.habilitar_mensaje_marketing && tpl.mensaje_marketing
       const showCupon = tpl.habilitar_cupon_descuento && tpl.cupon_codigo
       const cuponCod = tpl.cupon_codigo || "EXTRA10OFF"
@@ -3861,6 +7133,21 @@ export default function POSPage() {
         if (isNaN(n)) return "0"
         return n.toLocaleString("es-PY", { minimumFractionDigits: 0, maximumFractionDigits: 0 })
       }
+
+      const saleItemsForCreate = cart.map(i => {
+        const itemTotalBruto = i.precio * i.quantity
+        const pctDesc = totalBrutoPyg > 0 && descuentoTotalPyg > 0 ? (descuentoTotalPyg / totalBrutoPyg) * 100 : (i.descuento_pct || 0)
+        return {
+          product_id: i.product_id || i.id,
+          cantidad: i.quantity,
+          precio_unitario: i.precio,
+          iva_tasa: i.iva_tasa,
+          descuento_pct: Number(pctDesc.toFixed(2)),
+          descuento_monto: Math.round(itemTotalBruto * (pctDesc / 100)),
+          subtotal: itemTotalBruto,
+          origen_balanza: i.origen_balanza || undefined,
+        }
+      })
 
       const anchoImprimibleMm = tpl.ancho_imprimible_mm || 68
       const margenIzqMm = tpl.margen_izq_mm || 0
@@ -3891,14 +7178,7 @@ export default function POSPage() {
       // el total quedaba en 0 aunque el ticket impreso mostrara los
       // productos reales). Si un product_id es inválido, que lo rechace el
       // servidor con un error visible, nunca perder el dato en silencio.
-      const saleItemsForCreate = cart
-        .map(i => ({
-          product_id: i.product_id || i.id,
-          cantidad: i.quantity,
-          precio_unitario: i.precio,
-          iva_tasa: i.iva_tasa,
-          subtotal: i.precio * i.quantity
-        }))
+      
       // Desglose real de medios de pago -- antes era una sola linea fija
       // por pestaña (ni "mixed" ni "extra_club" quedaban bien representados)
       // y ademas se descartaba en silencio del lado del backend (ver fix en
@@ -3907,44 +7187,155 @@ export default function POSPage() {
       // efectivo acumulado de la alerta de retiro.
       const salePaymentsForCreate: { forma_pago: string; monto: number; moneda?: string }[] = (() => {
         const out: { forma_pago: string; monto: number; moneda?: string }[] = []
-        if (activeMethods.has("cash")) {
-          const pyg = parseInt(payCashPyg.replace(/\D/g, "") || "0", 10)
-          const brl = parseFloat(payCashBrl.replace(/,/g, ".") || "0")
-          const usd = parseFloat(payCashUsd.replace(/,/g, ".") || "0")
-          if (pyg > 0) out.push({ forma_pago: "EFECTIVO", monto: pyg, moneda: "PYG" })
-          if (brl > 0) out.push({ forma_pago: "EFECTIVO", monto: brl, moneda: "BRL" })
-          if (usd > 0) out.push({ forma_pago: "EFECTIVO", monto: usd, moneda: "USD" })
-        }
+        
+        let cardMonto = 0
+        let dinelcoMonto = 0
+        let plugpayMonto = 0
+        let qrMonto = 0
+        let parceladoMonto = 0
+        let extraClubMonto = 0
+        let otrosMonto = 0
+
         if (activeMethods.has("bancard")) {
-          const monto = isMultiPayment ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-          if (monto > 0) out.push({ forma_pago: "TARJETA_BANCARD", monto, moneda: "PYG" })
+          cardMonto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "bancard")) ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          if (cardMonto > 0) {
+            let fp = "TARJETA_BANCARD"
+            if (bancardSubMethod === "debito") fp = "TARJETA DEBITO"
+            else if (bancardSubMethod === "credito") fp = "TARJETA CREDITO"
+            else if (bancardSubMethod === "qr_zimple" || bancardSubMethod === "qr_cloud") fp = "QR"
+            out.push({ forma_pago: fp, monto: cardMonto, moneda: "PYG" })
+          }
+          for (const leg of extraPaymentLegs.filter((l) => l.method === "bancard")) {
+            const legMonto = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+            if (legMonto > 0 && (leg.txnState === "aprobada" || leg.manualCupon.trim())) {
+              out.push({ forma_pago: leg.cardType === "debito" ? "TARJETA DEBITO" : "TARJETA CREDITO", monto: legMonto, moneda: "PYG" })
+            }
+          }
         }
         if (activeMethods.has("dinelco")) {
-          const monto = isMultiPayment ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-          if (monto > 0) out.push({ forma_pago: "TARJETA_DINELCO", monto, moneda: "PYG" })
+          dinelcoMonto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "dinelco")) ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          if (dinelcoMonto > 0) {
+            let fp = "TARJETA_DINELCO"
+            if (dinelcoSubMethod === "debito") fp = "TARJETA DEBITO"
+            else if (dinelcoSubMethod === "credito") fp = "TARJETA CREDITO"
+            else if (dinelcoSubMethod === "qr") fp = "QR"
+            else if (dinelcoSubMethod === "pix") fp = "PIX"
+            out.push({ forma_pago: fp, monto: dinelcoMonto, moneda: "PYG" })
+          }
+          for (const leg of extraPaymentLegs.filter((l) => l.method === "dinelco")) {
+            const legMonto = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+            if (legMonto > 0 && (leg.txnState === "aprobada" || leg.manualCupon.trim())) {
+              let legFp = "TARJETA DEBITO"
+              if (leg.dinelcoOpType === "qr") legFp = leg.dinelcoQrMode === "pix" ? "PIX" : "QR"
+              else if (leg.cardType === "credito") legFp = "TARJETA CREDITO"
+              out.push({ forma_pago: legFp, monto: legMonto, moneda: "PYG" })
+            }
+          }
+        }
+        if (activeMethods.has("plugpay")) {
+          plugpayMonto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay")) ? parseInt((mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg).replace(/\D/g, "") || "0", 10) : totalPyg
+          if (plugpayMonto > 0) {
+            let fp = plugpaySubMethod === "pix" ? "PIX" : "TARJETA CREDITO"
+            out.push({ forma_pago: fp, monto: plugpayMonto, moneda: "PYG" })
+          }
+          for (const leg of extraPaymentLegs.filter((l) => l.method === "plugpay")) {
+            const legMonto = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+            if (legMonto > 0 && (leg.txnState === "aprobada" || leg.manualCupon.trim())) {
+              out.push({ forma_pago: "PIX", monto: legMonto, moneda: "PYG" })
+            }
+          }
         }
         if (activeMethods.has("qr")) {
-          const monto = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-          if (monto > 0) {
-            if (qrSubMethod === "pix" || plugpayState === "aprobada") {
-              out.push({ forma_pago: "PLUGPAY_PIX", monto, moneda: "PYG" })
-            } else {
-              out.push({ forma_pago: "QR", monto, moneda: "PYG" })
+          qrMonto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          if (qrMonto > 0) out.push({ forma_pago: "QR", monto: qrMonto, moneda: "PYG" })
+          for (const leg of extraPaymentLegs.filter((l) => l.method === "qr")) {
+            const legMonto = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+            if (legMonto > 0 && (leg.txnState === "aprobada" || leg.manualCupon.trim())) {
+              out.push({ forma_pago: "QR", monto: legMonto, moneda: "PYG" })
             }
           }
         }
         if (activeMethods.has("plugpay_credito")) {
-          const monto = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-          if (monto > 0) out.push({ forma_pago: "PLUGPAY_CREDITO", monto, moneda: "PYG" })
+          parceladoMonto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay_credito")) ? parseInt(mixedParceladoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          if (parceladoMonto > 0) out.push({ forma_pago: "TARJETA CREDITO", monto: parceladoMonto, moneda: "PYG" })
+          for (const leg of extraPaymentLegs.filter((l) => l.method === "plugpay_credito")) {
+            const legMonto = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+            if (legMonto > 0 && (leg.txnState === "aprobada" || leg.manualCupon.trim())) {
+              out.push({ forma_pago: "TARJETA CREDITO", monto: legMonto, moneda: "PYG" })
+            }
+          }
         }
         if (activeMethods.has("extra_club")) {
-          const monto = isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-          if (monto > 0) out.push({ forma_pago: "EXTRA_CLUB", monto, moneda: "PYG" })
+          extraClubMonto = isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          if (extraClubMonto > 0) out.push({ forma_pago: "EXTRA_CLUB", monto: extraClubMonto, moneda: "PYG" })
         }
+        if (activeMethods.has("otros")) {
+          otrosMonto = isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          if (otrosMonto > 0) {
+            let fp = otrosSubMethod === "transferencia" ? "TRANF. BANCARIA" : (otrosSubMethod === "vale" ? "VALE_CONVENIO" : "CHEQUES")
+            out.push({ forma_pago: fp, monto: otrosMonto, moneda: "PYG" })
+          }
+        }
+        if (activeMethods.has("cash")) {
+          const extraLegsTotal = extraLegsMontoTotal("bancard") + extraLegsMontoTotal("qr") + extraLegsMontoTotal("dinelco") + extraLegsMontoTotal("plugpay") + extraLegsMontoTotal("plugpay_credito")
+          const otrosNonCash = cardMonto + dinelcoMonto + plugpayMonto + qrMonto + parceladoMonto + extraClubMonto + otrosMonto + extraLegsTotal
+          let remainingPyg = Math.max(0, totalPyg - otrosNonCash)
+
+          const brlInput = parseFloat(payCashBrl.replace(",", ".")) || 0
+          const usdInput = parseFloat(payCashUsd.replace(",", ".")) || 0
+
+          if (brlInput > 0 && remainingPyg > 0) {
+            const brlRate = rates.BRL > 0 ? rates.BRL : 1480
+            const brlValueInPyg = brlInput * brlRate
+            const netPygCoveredByBrl = Math.min(brlValueInPyg, remainingPyg)
+            const netBrl = Math.round((netPygCoveredByBrl / brlRate) * 100) / 100
+            if (netBrl > 0) {
+              out.push({ forma_pago: "EFECTIVO", monto: netBrl, moneda: "BRL" })
+              remainingPyg = Math.max(0, remainingPyg - netPygCoveredByBrl)
+            }
+          }
+
+          if (usdInput > 0 && remainingPyg > 0) {
+            const usdRate = rates.USD > 0 ? rates.USD : 7550
+            const usdValueInPyg = usdInput * usdRate
+            const netPygCoveredByUsd = Math.min(usdValueInPyg, remainingPyg)
+            const netUsd = Math.round((netPygCoveredByUsd / usdRate) * 100) / 100
+            if (netUsd > 0) {
+              out.push({ forma_pago: "EFECTIVO", monto: netUsd, moneda: "USD" })
+              remainingPyg = Math.max(0, remainingPyg - netPygCoveredByUsd)
+            }
+          }
+
+          if (remainingPyg > 0) {
+            out.push({ forma_pago: "EFECTIVO", monto: remainingPyg, moneda: "PYG" })
+          }
+        }
+
         if (out.length === 0) out.push({ forma_pago: "EFECTIVO", monto: totalPyg, moneda: "PYG" })
         return out
       })()
+
+      const obsParts: string[] = []
+      if (appliedDiscount) obsParts.push(`Descuento directo autorizado por ${appliedDiscount.supervisorNombre} (${appliedDiscount.reason})`)
+      if (activeMethods.has("otros")) {
+        if (otrosSubMethod === "transferencia") {
+          obsParts.push(`Transferencia Bancaria: Comp #${transfComprobante}${transfBancoOrigen ? ` (${transfBancoOrigen})` : ""}${transfTitular ? ` - Titular: ${transfTitular}` : ""}`)
+        } else {
+          obsParts.push(`Cheque: #${chequeNumero} (${chequeBanco})${chequeTitular ? ` - Titular: ${chequeTitular}` : ""}${chequeFechaVenc ? ` - Venc: ${chequeFechaVenc}` : ""}`)
+        }
+      }
+      if (activeMethods.has("plugpay") && plugpayManualComprobante) {
+        obsParts.push(`PlugPay Manual: Comp #${plugpayManualComprobante}${plugpayManualAutorizacion ? ` Aut: ${plugpayManualAutorizacion}` : ""}`)
+      }
+
+      // ── IDEMPOTENCIA DETERMINÍSTICA CLIENTE-SERVIDOR ──
+      // Generar el UUID único de la venta aquí en el cliente. Este ID acompaña
+      // a la venta tanto en el envío online como en la cola offline (IndexedDB),
+      // asegurando que ante caídas de red o reintentos NUNCA se duplique.
+      const clientSaleId = generarUUIDLocal()
+
       const saleBasePayload = {
+        id: clientSaleId,
         company_id: COMPANY_ID,
         customer_id: customer.id,
         user_id: user?.id,
@@ -3953,9 +7344,10 @@ export default function POSPage() {
         // administrador) -- sin esto, el backend cae al único punto de
         // emisión por defecto de toda la empresa, sin importar en qué caja
         // real se hizo la venta.
-        punto_emision: terminalAssignment?.punto_emision || undefined,
-        subtotal: totalPyg,
+        subtotal: totalBrutoPyg,
+        descuento_total: descuentoTotalPyg,
         total: totalPyg,
+        observaciones: obsParts.length > 0 ? obsParts.join(" | ") : undefined,
         condicion: isClubMember ? "credito" : "contado",
         estado: "completada",
         items: saleItemsForCreate,
@@ -3970,30 +7362,25 @@ export default function POSPage() {
       let numeroInterno: string | null = null
       let ventaYaCreadaSinRecibo = false
       let createdSaleId: string | null = null
+      let createdOfflineSaleId: string | null = null
       let saleCreatePromise: Promise<any> | null = null
       if (tpl.usar_numero_interno_venta) {
-        try {
-          const created = await api.sales.create(saleBasePayload as any)
-          numeroComprobante = created.numero || saleNumber
-          numeroInterno = (created as any).numero_interno || null
-          ventaYaCreadaSinRecibo = true
-          createdSaleId = created.id
-        } catch (apiErr: any) {
-          console.error("No se pudo registrar la venta para obtener el número interno:", apiErr)
-          toast.error("No se obtuvo el número real de venta", apiErr?.message || "El ticket sale con un número provisorio -- avisá a soporte.")
+        if (serverOnline && navigator.onLine) {
+          try {
+            // withTimeout: 8s para permitir cálculo fiscal completo sin falsos fallos en red local
+            const created = await withTimeout(api.sales.create(saleBasePayload as any), 8000)
+            numeroComprobante = created.numero || saleNumber
+            numeroInterno = (created as any).numero_interno || null
+            ventaYaCreadaSinRecibo = true
+            createdSaleId = created.id
+          } catch (apiErr: any) {
+            console.error("No se pudo registrar la venta para obtener el número interno, se reintenta en modo offline:", apiErr)
+          }
         }
       }
 
       // Formateo de Factura Térmica Dinámica (Calibrada al ancho y márgenes configurados en el Diseñador)
-      // Estimacion de puntos de fidelidad -- misma formula que usa el backend
-      // (piso de total/puntos_por_guarani), asi que coincide con lo que
-      // realmente se va a guardar. No aplica a Consumidor Final.
-      const puntosEstimados = (
-        customer.id !== DEFAULT_CUSTOMER.id &&
-        loyaltyConfig?.activo &&
-        loyaltyConfig?.crear_en_venta &&
-        loyaltyConfig?.puntos_por_guarani > 0
-      ) ? Math.floor(totalPyg / loyaltyConfig.puntos_por_guarani) : 0
+      // Puntos dinámicos ya calculados arriba (puntosEstimados) leyendo divisor y multiplicadores de loyaltyConfig.
 
       const receiptHtml = `
         <div style="font-family: '${font}', 'Consolas', 'Segoe UI', monospace; font-size: ${fontSize}px; line-height: ${interlineado}; margin: 0 auto; padding-left: ${margenIzqMm}mm; padding-right: ${margenDerMm}mm; box-sizing: border-box; width: 100%; max-width: ${anchoImprimibleMm}mm; color: #000;">
@@ -4015,7 +7402,7 @@ export default function POSPage() {
             <div><strong>${tipoComprobanteLabel}${tpl.mostrar_numero_comprobante !== false ? `:</strong> ${numeroComprobante}` : '</strong>'}</div>
             ${numeroInterno ? `<div><strong>Nº VENTA:</strong> ${numeroInterno}</div>` : ''}
             <div><strong>FECHA / HORA:</strong> ${new Date().toLocaleString("es-PY")}</div>
-            <div><strong>CONDICIÓN:</strong> CONTADO</div>
+            <div><strong>CONDICIÓN:</strong> ${isClubMember ? "CRÉDITO" : "CONTADO"}</div>
             ${showCajero ? `<div><strong>CAJERO:</strong> ${user?.nombre || "Cajero 01"} (${puntoEmision})</div>` : ''}
             ${showCliente ? `<div><strong>CLIENTE:</strong> ${customer.nombre}</div>` : ''}
             ${showRucCliente ? `<div><strong>RUC / CI:</strong> ${customer.ruc || customer.ci || "44444401-7 (Sin RUC)"}</div>` : ''}
@@ -4075,12 +7462,60 @@ export default function POSPage() {
                 <col style="width: 50%;">
               </colgroup>
               <tr><td colspan="2" style="font-weight: bold; padding-bottom: 1px;">Medios de Pago Utilizados:</td></tr>
-              ${salePaymentsForCreate.map((p) => `
-                <tr>
-                  <td>${FORMA_PAGO_LABEL[p.forma_pago] || p.forma_pago}${p.moneda && p.moneda !== "PYG" ? ` (${p.moneda})` : ""}:</td>
-                  <td style="text-align: right;">${p.moneda === "USD" ? `US$ ${p.monto.toFixed(2)}` : p.moneda === "BRL" ? `R$ ${p.monto.toFixed(2)}` : `Gs. ${fmtGs(p.monto)}`}</td>
-                </tr>
-              `).join("")}
+              ${salePaymentsForCreate.map((p) => {
+                if (p.forma_pago === "EFECTIVO") {
+                  if (p.moneda === "BRL") {
+                    const brlRecibido = parseFloat(payCashBrl.replace(",", ".")) || 0
+                    const montoMostrar = brlRecibido > p.monto ? brlRecibido : p.monto
+                    const equivGs = Math.round(montoMostrar * (rates.BRL > 0 ? rates.BRL : 1))
+                    return `
+                      <tr>
+                        <td>Efectivo (BRL)${brlRecibido > p.monto ? " Entregado" : ""}:</td>
+                        <td style="text-align: right;">R$ ${montoMostrar.toFixed(2)}</td>
+                      </tr>
+                      ${rates.BRL > 0 ? `
+                        <tr>
+                          <td colspan="2" style="font-size: 8px; color: #555; padding-bottom: 1px;">(Cotiz: ${fmtGs(rates.BRL)} &rarr; Equiv: Gs. ${fmtGs(equivGs)})</td>
+                        </tr>
+                      ` : ""}
+                    `
+                  }
+                  if (p.moneda === "USD") {
+                    const usdRecibido = parseFloat(payCashUsd.replace(",", ".")) || 0
+                    const montoMostrar = usdRecibido > p.monto ? usdRecibido : p.monto
+                    const equivGs = Math.round(montoMostrar * (rates.USD > 0 ? rates.USD : 1))
+                    return `
+                      <tr>
+                        <td>Efectivo (USD)${usdRecibido > p.monto ? " Entregado" : ""}:</td>
+                        <td style="text-align: right;">US$ ${montoMostrar.toFixed(2)}</td>
+                      </tr>
+                      ${rates.USD > 0 ? `
+                        <tr>
+                          <td colspan="2" style="font-size: 8px; color: #555; padding-bottom: 1px;">(Cotiz: ${fmtGs(rates.USD)} &rarr; Equiv: Gs. ${fmtGs(equivGs)})</td>
+                        </tr>
+                      ` : ""}
+                    `
+                  }
+                  if (p.moneda === "PYG" || !p.moneda) {
+                    const pygRecibido = parseInt(payCashPyg.replace(/\D/g, "") || "0", 10) || 0
+                    const montoMostrar = pygRecibido > p.monto ? pygRecibido : p.monto
+                    return `
+                      <tr>
+                        <td>Efectivo${pygRecibido > p.monto ? " Entregado" : ""}:</td>
+                        <td style="text-align: right;">Gs. ${fmtGs(montoMostrar)}</td>
+                      </tr>
+                    `
+                  }
+                }
+                const label = (FORMA_PAGO_LABEL[p.forma_pago] || p.forma_pago) + (p.moneda && p.moneda !== "PYG" ? ` (${p.moneda})` : "")
+                const montoTxt = p.moneda === "USD" ? `US$ ${p.monto.toFixed(2)}` : p.moneda === "BRL" ? `R$ ${p.monto.toFixed(2)}` : `Gs. ${fmtGs(p.monto)}`
+                return `
+                  <tr>
+                    <td>${label}:</td>
+                    <td style="text-align: right;">${montoTxt}</td>
+                  </tr>
+                `
+              }).join("")}
               ${(bancardTxnState === "aprobada" && bancardTxnResult) ? `
                 <tr><td colspan="2" style="font-size: 8.5px; padding-top: 1px;">${bancardTxnResult.nombreTarjeta || ""}${bancardTxnResult.pan ? ` **** ${bancardTxnResult.pan}` : ""}</td></tr>
                 <tr><td colspan="2" style="font-size: 8.5px;">Aut. ${bancardTxnResult.codigoAutorizacion || "-"} · Boleta ${bancardTxnResult.nroBoleta || "-"}</td></tr>
@@ -4101,7 +7536,15 @@ export default function POSPage() {
               <tr style="font-weight: bold; font-size: 10.5px;">
                 <td style="padding-top: 2px;">VUELTO:</td>
                 <td style="text-align: right; padding-top: 2px; white-space: nowrap;">
-                  Gs. ${fmtGs(vueltoFinalPyg)} ${rates.BRL > 0 ? `(R$ ${(vueltoFinalPyg / rates.BRL).toFixed(2)})` : ''}
+                  ${(() => {
+                    const brlEnt = parseFloat(vueltoMixtoBrl) || 0
+                    if (brlEnt > 0 && rates.BRL > 0) {
+                      const brlEnGs = Math.round(brlEnt * rates.BRL)
+                      const saldoGs = Math.max(0, vueltoFinalPyg - brlEnGs)
+                      return `R$ ${brlEnt.toFixed(2)} + Gs. ${fmtGs(saldoGs)} <span style="font-size: 8px; font-weight: normal; color: #555;">(Total Gs. ${fmtGs(vueltoFinalPyg)})</span>`
+                    }
+                    return `Gs. ${fmtGs(vueltoFinalPyg)} ${rates.BRL > 0 ? `(R$ ${(vueltoFinalPyg / rates.BRL).toFixed(2)})` : ''}`
+                  })()}
                 </td>
               </tr>
             </table>
@@ -4124,12 +7567,6 @@ export default function POSPage() {
               <div>Empresa: ${customer.empresa_vinculada_nombre ? `${customer.empresa_vinculada_nombre.trim()}${customer.empresa_vinculada_ruc ? ` (${customer.empresa_vinculada_ruc})` : ""}` : "-"}</div>
               <div style="text-align: center; margin-top: 14px; border-top: 1px solid #000; padding-top: 2px; width: 70%; margin-left: auto; margin-right: auto;">Firma del cliente</div>
               <div style="text-align: center; font-size: 8px; margin-top: 3px;">Factura a crédito Extra Club -- documento con valor para cobro</div>
-            </div>
-          ` : ''}
-
-          ${puntosEstimados > 0 ? `
-            <div style="border-top: 1px dashed #000; margin-top: 5px; padding-top: 3px; font-size: 9.5px; text-align: center; font-weight: bold;">
-              ⭐ Sumaste ${puntosEstimados} puntos de fidelidad
             </div>
           ` : ''}
 
@@ -4161,10 +7598,14 @@ export default function POSPage() {
           ` : ''}
 
           ${showClub ? `
-            <div style="border: 1px dashed #000; padding: 4px; margin: 5px 0; text-align: center; font-size: 9.5px;">
-              ${isClubMember ? `
-                <div style="font-weight: 900; font-size: 10px;">★ CLUB FIDELIDAD EXTRA ★</div>
-                <div style="margin-top: 2px;">${msgSocio}</div>
+            <div style="border: 1px dashed #000; padding: 5px; margin: 5px 0; text-align: center; font-size: 9.5px;">
+              ${isSocioExtraClub ? `
+                <div style="font-weight: 900; font-size: 10px; letter-spacing: 0.5px;">★ SOCIO EXTRA CLUB ★</div>
+                <div style="font-size: 8.5px; color: #333; margin-top: 1px;">Socio N°: <strong>${socioNumero}</strong></div>
+                <div style="font-size: 11px; font-weight: 900; margin-top: 3px;">⭐ Sumaste: +${fmtGs(puntosEstimados)} Puntos</div>
+                <div style="font-size: 8px; margin-top: 2px; color: #555;">
+                  ${promoActiva ? `🎉 Multiplicador Especial: ${promoNombre} (x${factorPromo})` : `(Política: 1 Punto por cada Gs. ${fmtGs(divisorPyg)})`}
+                </div>
               ` : `
                 <div style="font-weight: 900; font-size: 10px;">★ ÚNETE AL EXTRA CLUB ★</div>
                 <div style="margin-top: 2px; font-size: 8.5px;">${msgInvitacion}</div>
@@ -4214,11 +7655,65 @@ export default function POSPage() {
       // ticket -- antes se esperaba esta llamada antes de imprimir, lo que
       // sumaba al delay entre cobrar y que salga el ticket.
       if (!ventaYaCreadaSinRecibo) {
-        saleCreatePromise = api.sales.create({ ...saleBasePayload, recibo_html: receiptHtml } as any).catch((apiErr: any) => {
-          console.error("No se pudo guardar la venta:", apiErr)
-          toast.error("Venta no guardada en el sistema", apiErr?.message || "El ticket se imprimió igual, pero avisá a soporte -- esta venta puede no quedar registrada.")
-          return null
-        })
+        if (!serverOnline || !navigator.onLine) {
+          // Modo Offline Inmediato (0ms de espera): encolado directo en IndexedDB
+          try {
+            const offlineId = `off-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+            createdOfflineSaleId = offlineId
+            await offlineDB.pendingSales.add({
+              id: offlineId,
+              data: { ...saleBasePayload, recibo_html: receiptHtml },
+              created_at: new Date().toISOString(),
+              status: "pending",
+              retry_count: 0,
+              last_retry: new Date().toISOString(),
+              next_retry: new Date().toISOString(),
+            })
+            // Avisa a la malla LAN cuanto se le vendio a este cliente a
+            // credito, para que las demas cajas descuenten lo mismo de su
+            // saldo offline aunque el servidor siga caido (ver
+            // OfflineContext.getExtraClubOfflineBalance).
+            {
+              const extraClubMontoOffline = salePaymentsForCreate.find((p) => p.forma_pago === "EXTRA_CLUB")?.monto || 0
+              if (extraClubMontoOffline > 0) {
+                recordExtraClubOfflineConsumption(customer.id, extraClubMontoOffline, offlineId).catch(() => {})
+              }
+            }
+            toast.warning("Venta guardada en modo offline", "El ticket se imprimió y la venta se sincronizará automáticamente cuando vuelva la conexión.")
+          } catch (dbErr) {
+            console.error("Error guardando en pendingSales:", dbErr)
+            toast.error("Venta no guardada en el sistema", "Error de almacenamiento local. Avisá a soporte.")
+          }
+        } else {
+          // Modo Online: registro en segundo plano sin retrasar la salida del ticket
+          saleCreatePromise = withTimeout(api.sales.create({ ...saleBasePayload, recibo_html: receiptHtml } as any), 8000).catch(async (apiErr: any) => {
+            console.warn("[POS] API central no disponible o demorada, encolando venta offline en IndexedDB...", apiErr)
+            try {
+              const offlineId = `off-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+              createdOfflineSaleId = offlineId
+              await offlineDB.pendingSales.add({
+                id: offlineId,
+                data: { ...saleBasePayload, recibo_html: receiptHtml },
+                created_at: new Date().toISOString(),
+                status: "pending",
+                retry_count: 0,
+                last_retry: new Date().toISOString(),
+                next_retry: new Date().toISOString(),
+              })
+              {
+                const extraClubMontoOffline = salePaymentsForCreate.find((p) => p.forma_pago === "EXTRA_CLUB")?.monto || 0
+                if (extraClubMontoOffline > 0) {
+                  recordExtraClubOfflineConsumption(customer.id, extraClubMontoOffline, offlineId).catch(() => {})
+                }
+              }
+              toast.warning("Venta guardada en modo offline", "El ticket se imprimió y la venta se sincronizará automáticamente cuando vuelva la conexión.")
+            } catch (dbErr) {
+              console.error("Error guardando en pendingSales:", dbErr)
+              toast.error("Venta no guardada en el sistema", apiErr?.message || "Avisá a soporte.")
+            }
+            return null
+          })
+        }
       }
 
       // Si el cobro con tarjeta se verificó contra la transacción real de la
@@ -4242,6 +7737,26 @@ export default function POSPage() {
           saleCreatePromise.then((s: any) => doClaim(s?.id))
         } else {
           doClaim()
+        }
+      }
+
+      // Si el cobro se realizó con Vale Institucional, se quema de forma atómica en el backend
+      if (activeMethods.has("otros") && otrosSubMethod === "vale" && valeData) {
+        const barcodeToRedeem = valeCodigo.trim()
+        const doRedeemVoucher = (saleIdForRedeem?: string) => {
+          api.vouchers.redeem({
+            codigo_barras: barcodeToRedeem,
+            sale_id: saleIdForRedeem,
+            caja_session_id: cashSessionId || undefined,
+            caja_numero: terminalAssignment?.caja_nombre || (typeof puntoEmision !== "undefined" ? String(puntoEmision) : "CAJA-02"),
+          }).catch((err: any) => console.warn("[POS] Error quemando vale en backend:", err))
+        }
+        if (createdSaleId) {
+          doRedeemVoucher(createdSaleId)
+        } else if (saleCreatePromise) {
+          saleCreatePromise.then((s: any) => doRedeemVoucher(s?.id))
+        } else {
+          doRedeemVoucher()
         }
       }
 
@@ -4299,13 +7814,17 @@ export default function POSPage() {
         t += `Timbrado No: ${timbrado} - Valido hasta: ${timbradoVenc}\n`
         t += ESCPOS_ALIGN_LEFT
         t += escposDashes(W) + '\n'
-        t += ESCPOS_BOLD_ON + (tpl.mostrar_numero_comprobante !== false ? `${escposStripAccents(tipoComprobanteLabel)}: ${numeroComprobante}` : escposStripAccents(tipoComprobanteLabel)) + ESCPOS_BOLD_OFF + '\n'
-        if (numeroInterno) t += `No Venta: ${numeroInterno}\n`
-        t += `Fecha/Hora: ${new Date().toLocaleString("es-PY")}\n`
+        t += ESCPOS_BOLD_ON + `${escposStripAccents(tipoComprobanteLabel)} No: ${numeroComprobante}` + ESCPOS_BOLD_OFF + '\n'
+        if (tpl.usar_numero_interno_venta !== false && numeroInterno) {
+          t += `No Venta: ${numeroInterno}\n`
+        }
+        t += `Fecha/Hora: ${escposFormatDateTime(new Date())}\n`
         t += `Condicion: ${isClubMember ? "CREDITO" : "CONTADO"}\n`
         if (showCajero) t += `Cajero: ${escposStripAccents(user?.nombre || "Cajero 01")} (${puntoEmision})\n`
         if (showCliente) t += `Cliente: ${escposStripAccents(customer.nombre)}\n`
         if (showRucCliente) t += `RUC/CI: ${escposStripAccents(customer.ruc || customer.ci || "44444401-7")}\n`
+        t += escposDashes(W) + '\n'
+        t += escposTwoCol('DESCRIPCION / DETALLE', 'TOTAL (GS)', W) + '\n'
         t += escposDashes(W) + '\n'
 
         const itemsUnaLinea = tpl.formato_items === "una_linea"
@@ -4319,12 +7838,7 @@ export default function POSPage() {
             // Una sola linea: nombre (recortado si hace falta) + subtotal a la derecha
             t += escposTwoCol(escposStripAccents(item.nombre) + balanza, lineTotalStr) + '\n'
           } else {
-            // Maximo 2 lineas: nombre solo en la primera (el codigo de
-            // barras pegado ahi se estaba truncando junto con nombres
-            // largos y quedaba invisible). El codigo va en la segunda linea,
-            // junto a cantidad x precio, protegido por escposTwoCol -- si no
-            // entra todo, se recorta el texto de la izquierda pero el monto
-            // de la derecha nunca se solapa.
+            // Maximo 2 lineas: nombre solo en la primera
             let nombreLine = escposStripAccents(item.nombre) + balanza
             if (nombreLine.length > W) nombreLine = escposPadRight(nombreLine, W)
             t += nombreLine + '\n'
@@ -4332,7 +7846,18 @@ export default function POSPage() {
           }
         }
         t += escposDashes(W) + '\n'
+        if (descuentoTotalPyg > 0) {
+          t += escposTwoCol('SUBTOTAL:', fmtGs(totalBrutoPyg), W) + '\n'
+          t += escposTwoCol('DESC. AUTORIZADO:', `-${fmtGs(descuentoTotalPyg)}`, W) + '\n'
+          if (appliedDiscount?.reason) {
+            t += `  Motivo: ${escposStripAccents(appliedDiscount.reason.slice(0, 30))}\n`
+          }
+          if (appliedDiscount?.supervisorNombre) {
+            t += `  Aut: ${escposStripAccents(appliedDiscount.supervisorNombre.slice(0, 20))}\n`
+          }
+        }
         t += ESCPOS_BOLD_ON + ESCPOS_DOUBLE_ON + escposTwoCol('TOTAL:', fmtGs(totalPyg), 24) + ESCPOS_DOUBLE_OFF + ESCPOS_BOLD_OFF + '\n'
+
         if (showMulti && showBrl) t += escposTwoCol('Equiv. Reales:', `R$ ${totalBrl}`) + '\n'
         if (showMulti && showUsd) t += escposTwoCol('Equiv. Dolares:', `US$ ${totalUsd}`) + '\n'
 
@@ -4340,6 +7865,37 @@ export default function POSPage() {
           t += escposDashes(W) + '\n'
           t += 'Medios de Pago Utilizados:\n'
           for (const p of salePaymentsForCreate) {
+            if (p.forma_pago === "EFECTIVO") {
+              if (p.moneda === "BRL") {
+                const brlRecibido = parseFloat(payCashBrl.replace(",", ".")) || 0
+                const montoMostrar = brlRecibido > p.monto ? brlRecibido : p.monto
+                const label = `Efectivo (BRL)${brlRecibido > p.monto ? " Entregado" : ""}:`
+                t += escposTwoCol(label, `R$ ${montoMostrar.toFixed(2)}`) + '\n'
+                if (rates.BRL > 0) {
+                  const equivGs = Math.round(montoMostrar * rates.BRL)
+                  t += `  (Cotiz: ${fmtGs(rates.BRL)} -> Equiv: Gs. ${fmtGs(equivGs)})\n`
+                }
+                continue
+              }
+              if (p.moneda === "USD") {
+                const usdRecibido = parseFloat(payCashUsd.replace(",", ".")) || 0
+                const montoMostrar = usdRecibido > p.monto ? usdRecibido : p.monto
+                const label = `Efectivo (USD)${usdRecibido > p.monto ? " Entregado" : ""}:`
+                t += escposTwoCol(label, `US$ ${montoMostrar.toFixed(2)}`) + '\n'
+                if (rates.USD > 0) {
+                  const equivGs = Math.round(montoMostrar * rates.USD)
+                  t += `  (Cotiz: ${fmtGs(rates.USD)} -> Equiv: Gs. ${fmtGs(equivGs)})\n`
+                }
+                continue
+              }
+              if (p.moneda === "PYG" || !p.moneda) {
+                const pygRecibido = parseInt(payCashPyg.replace(/\D/g, "") || "0", 10) || 0
+                const montoMostrar = pygRecibido > p.monto ? pygRecibido : p.monto
+                const label = `Efectivo${pygRecibido > p.monto ? " Entregado" : ""}:`
+                t += escposTwoCol(label, fmtGs(montoMostrar)) + '\n'
+                continue
+              }
+            }
             const label = (FORMA_PAGO_LABEL[p.forma_pago] || p.forma_pago) + (p.moneda && p.moneda !== "PYG" ? ` (${p.moneda})` : "")
             const montoTxt = p.moneda === "USD" ? `US$ ${p.monto.toFixed(2)}` : p.moneda === "BRL" ? `R$ ${p.monto.toFixed(2)}` : fmtGs(p.monto)
             t += escposTwoCol(escposStripAccents(label) + ':', montoTxt) + '\n'
@@ -4348,8 +7904,53 @@ export default function POSPage() {
             t += ESCPOS_BOLD_ON + escposTwoCol('DONACION SOLIDARIA:', fmtGs(montoDonacionEfectiva)) + ESCPOS_BOLD_OFF + '\n'
             t += ' (Centro Amor y Esperanza)\n'
           }
-          t += ESCPOS_BOLD_ON + escposTwoCol('VUELTO:', fmtGs(vueltoFinalPyg)) + ESCPOS_BOLD_OFF + '\n'
+          const brlEnt = parseFloat(vueltoMixtoBrl) || 0
+          if (brlEnt > 0 && rates.BRL > 0) {
+            const brlEnGs = Math.round(brlEnt * rates.BRL)
+            const saldoGs = Math.max(0, vueltoFinalPyg - brlEnGs)
+            t += ESCPOS_BOLD_ON + escposTwoCol('VUELTO (R$ + GS):', `R$ ${brlEnt.toFixed(2)} + ${fmtGs(saldoGs)}`) + ESCPOS_BOLD_OFF + '\n'
+            t += escposTwoCol(' (TOTAL VUELTO):', fmtGs(vueltoFinalPyg)) + '\n'
+          } else {
+            const vueltoTxt = tpl.mostrar_vuelto_extranjero && rates.BRL > 0 && vueltoFinalPyg > 0
+              ? `${fmtGs(vueltoFinalPyg)} (R$ ${(vueltoFinalPyg / rates.BRL).toFixed(2)})`
+              : fmtGs(vueltoFinalPyg)
+            t += ESCPOS_BOLD_ON + escposTwoCol('VUELTO:', vueltoTxt) + ESCPOS_BOLD_OFF + '\n'
+          }
         }
+
+          if (tpl.habilitar_recuadro_ahorro !== false) {
+            t += escposDashes(W) + '\n'
+            t += ESCPOS_ALIGN_CENTER
+            // 'left' aqui es intencional: la impresora ya esta en modo ALIGN_CENTER;
+            // si ademas se agregan espacios manuales de centrado (escposCenter) el
+            // texto queda desplazado hacia la derecha en el papel.
+            // El recuadro de ahorro se decide por si HUBO ahorro real en la
+            // venta (promocion o precio mayorista), no por el medio de pago
+            // usado -- antes se gateaba con isClubMember (pago con Extra Club)
+            // y una venta pagada en efectivo con descuento nunca lo mostraba.
+            const huboAhorro = ahorroPromoPyg + ahorroMayoristaPyg > 0
+            if (huboAhorro) {
+              t += ESCPOS_BOLD_ON + escposStripAccents(tpl.titulo_ahorro_con_descuento || 'TU EXTRA AHORRO HOY:') + ESCPOS_BOLD_OFF + '\n'
+              // Monto real junto a cada etiqueta configurada (antes solo se
+              // imprimia el texto de la etiqueta, sin el numero calculado).
+              if (ahorroPromoPyg > 0) {
+                t += escposTwoCol(tpl.subtitulo_ahorro_promo || '- En Promociones:', `-${fmtGs(ahorroPromoPyg)}`, W) + '\n'
+              }
+              if (ahorroMayoristaPyg > 0) {
+                t += escposTwoCol(tpl.subtitulo_ahorro_mayorista || '- En Precios Mayoristas:', `-${fmtGs(ahorroMayoristaPyg)}`, W) + '\n'
+              }
+              if (ahorroPromoPyg + ahorroMayoristaPyg > 0) {
+                t += ESCPOS_BOLD_ON + escposTwoCol('TOTAL EXTRA AHORRO:', `-${fmtGs(ahorroPromoPyg + ahorroMayoristaPyg)}`, W) + ESCPOS_BOLD_OFF + '\n'
+              }
+            } else {
+              t += ESCPOS_BOLD_ON + escposStripAccents(tpl.titulo_invitacion_ahorro || 'SUMATE AL EXTRA AHORRO DIARIO!') + ESCPOS_BOLD_OFF + '\n'
+              // Las 3 lineas configurables -- se imprimen si tienen contenido
+              if (tpl.linea1_invitacion_ahorro) t += escposWrapText(tpl.linea1_invitacion_ahorro, W)
+              if (tpl.linea2_invitacion_ahorro) t += escposWrapText(tpl.linea2_invitacion_ahorro, W)
+              if (tpl.linea3_invitacion_ahorro) t += ESCPOS_BOLD_ON + escposStripAccents(tpl.linea3_invitacion_ahorro) + ESCPOS_BOLD_OFF + '\n'
+            }
+            t += ESCPOS_ALIGN_LEFT
+          }
 
         if (isClubMember) {
           t += escposDashes(W) + '\n'
@@ -4365,12 +7966,7 @@ export default function POSPage() {
           t += ESCPOS_ALIGN_LEFT
         }
 
-        if (puntosEstimados > 0) {
-          t += escposDashes(W) + '\n'
-          t += ESCPOS_ALIGN_CENTER
-          t += ESCPOS_BOLD_ON + `Sumaste ${puntosEstimados} puntos de fidelidad` + ESCPOS_BOLD_OFF + '\n'
-          t += ESCPOS_ALIGN_LEFT
-        }
+
 
         if (showIva) {
           t += escposDashes(W) + '\n'
@@ -4383,12 +7979,18 @@ export default function POSPage() {
         if (showClub) {
           t += escposDashes(W) + '\n'
           t += ESCPOS_ALIGN_CENTER
-          if (isClubMember) {
-            t += ESCPOS_BOLD_ON + '* CLUB FIDELIDAD EXTRA *' + ESCPOS_BOLD_OFF + '\n'
-            t += escposWrapText(msgSocio, W, 'center')
+          if (isSocioExtraClub) {
+            t += ESCPOS_BOLD_ON + '* SOCIO EXTRA CLUB *' + ESCPOS_BOLD_OFF + '\n'
+            t += `Socio Nro: ${socioNumero}\n`
+            t += ESCPOS_BOLD_ON + `Sumaste: +${fmtGs(puntosEstimados)} Pts.` + ESCPOS_BOLD_OFF + '\n'
+            if (promoActiva) {
+              t += escposWrapText(`Campana: ${promoNombre} (x${factorPromo})`, W)
+            } else {
+              t += `(1 pt = Gs. ${fmtGs(divisorPyg)})\n`
+            }
           } else {
             t += ESCPOS_BOLD_ON + '* UNITE AL EXTRA CLUB *' + ESCPOS_BOLD_OFF + '\n'
-            t += escposWrapText(msgInvitacion, W, 'center')
+            t += escposWrapText(msgInvitacion, W)  // sin 'center'
             if (tpl.mostrar_qr_club && tpl.qr_url_club) {
               t += escposQr(tpl.qr_url_club) + '\n'
             }
@@ -4396,8 +7998,21 @@ export default function POSPage() {
           t += ESCPOS_ALIGN_LEFT
         }
 
+        const itemsWithPersonalPromo = cart.filter(i => (i as any).es_oferta_personalizada)
+        if (itemsWithPersonalPromo.length > 0) {
+          t += escposDashes(W) + '\n'
+          t += ESCPOS_ALIGN_CENTER
+          t += ESCPOS_BOLD_ON + '¡BENEFICIO EXCLUSIVO APLICADO!' + ESCPOS_BOLD_OFF + '\n'
+          itemsWithPersonalPromo.forEach(it => {
+            const promoTit = (it as any).oferta_personalizada_titulo || "Promo Te Extrañamos"
+            t += escposWrapText(`* ${promoTit}: ${escposStripAccents(it.nombre)}`, W) + '\n'
+          })
+          t += '¡Gracias por volver a Extra Supermercado!\n'
+          t += ESCPOS_ALIGN_LEFT
+        }
+
         if (showMarketing && tpl.mensaje_marketing) {
-          t += ESCPOS_ALIGN_CENTER + ESCPOS_BOLD_ON + escposWrapText(tpl.mensaje_marketing, W, 'center') + ESCPOS_BOLD_OFF + ESCPOS_ALIGN_LEFT
+          t += ESCPOS_ALIGN_CENTER + ESCPOS_BOLD_ON + escposWrapText(tpl.mensaje_marketing, W) + ESCPOS_BOLD_OFF + ESCPOS_ALIGN_LEFT
         }
 
         if (donacionActiva && montoDonacionEfectiva > 0) {
@@ -4405,7 +8020,7 @@ export default function POSPage() {
           t += ESCPOS_ALIGN_CENTER
           t += ESCPOS_BOLD_ON + escposStripAccents(tpl.donacion_titulo || '* ABRE TU CORAZON *') + ESCPOS_BOLD_OFF + '\n'
           const donMsg = tpl.donacion_mensaje || `Gracias por colaborar con ${fmtGs(montoDonacionEfectiva)} para el Centro Amor y Esperanza.`
-          t += escposWrapText(donMsg, W, 'center')
+          t += escposWrapText(donMsg, W)  // sin 'center': impresora ya centra
           t += 'Conoce mas en:\n'
           t += ESCPOS_BOLD_ON + escposStripAccents(tpl.donacion_web || 'www.centroamoresperanza.org') + ESCPOS_BOLD_OFF + '\n'
           t += ESCPOS_ALIGN_LEFT
@@ -4415,14 +8030,14 @@ export default function POSPage() {
           t += ESCPOS_ALIGN_CENTER
           t += 'CUPON DE RECOMPRA\n'
           t += ESCPOS_BOLD_ON + ESCPOS_DOUBLE_ON + cuponCod + ESCPOS_DOUBLE_OFF + ESCPOS_BOLD_OFF + '\n'
-          t += escposWrapText(cuponDesc, W, 'center')
+          t += escposWrapText(cuponDesc, W)  // sin 'center'
           t += `Valido por ${cuponDias} dias\n`
           t += ESCPOS_ALIGN_LEFT
         }
 
         t += ESCPOS_ALIGN_CENTER
         if (showQrSifen) t += `Consulte en: ${sifenUrl}\n`
-        t += ESCPOS_BOLD_ON + escposWrapText(msgDespedida, W, 'center') + ESCPOS_BOLD_OFF
+        t += ESCPOS_BOLD_ON + escposWrapText(msgDespedida, W) + ESCPOS_BOLD_OFF  // sin 'center'
         t += '\n'.repeat(Math.max(8, feedLinesCount))
         // Corte automatico (GS V 1 = corte parcial).
         if (tpl.corte_automatico !== false) t += GS + 'V' + '\x01'
@@ -4482,7 +8097,26 @@ export default function POSPage() {
               initialTelNum = initialTelNum.slice(3)
             }
 
+            // Si la venta se estaba creando en background, esperamos el id
+            let finalSaleId = createdSaleId
+            if (!finalSaleId && saleCreatePromise) {
+              try {
+                const createdRes = await saleCreatePromise
+                if (createdRes?.id) finalSaleId = createdRes.id
+              } catch (e) {}
+            }
+
+            const brlEntregado = parseFloat(vueltoMixtoBrl) || 0
+            const brlEnGs = Math.round(brlEntregado * (rates.BRL > 0 ? rates.BRL : 1))
+            const saldoGs = Math.max(0, vueltoFinalPyg - brlEnGs)
+            const vueltoBreakdown = vueltoFinalPyg > 0 ? {
+              totalPyg: vueltoFinalPyg,
+              brl: brlEntregado,
+              saldoGs: brlEntregado > 0 ? saldoGs : vueltoFinalPyg
+            } : undefined
+
             setPendingCuponData({
+              saleId: finalSaleId || undefined,
               saleNumero: numeroComprobante,
               montoCompra: totalPyg,
               totalCupones: evalRes.total_cupones,
@@ -4494,8 +8128,20 @@ export default function POSPage() {
               barrio: (customer as any)?.barrio || "Centro",
               ciudad: (customer as any)?.ciudad || "Pedro Juan Caballero",
               items: itemsEvaluacion,
+              vueltoBreakdown,
               printInvoiceCallback: executePrintInvoice
             })
+
+            // Guardamos snapshot para poder volver a la venta sin perder nada
+            setLastSaleDraft({
+              cart: [...cart],
+              customer: { ...customer },
+              appliedDiscount: appliedDiscount ? { ...appliedDiscount } : null,
+              extraClubAdminOverride,
+              saleId: finalSaleId,
+              offlineSaleId: createdOfflineSaleId,
+            })
+
             setCuponModalStep("pregunta")
             setShowCuponModal(true)
           }
@@ -4514,6 +8160,9 @@ export default function POSPage() {
       setShowPaymentModal(false)
       setCart([])
       setCustomer(DEFAULT_CUSTOMER)
+      setAppliedDiscount(null)
+      setExtraClubAdminOverride(false)
+      clearAllExtraLegs()
       toast.success(
         "¡Cobro Exitoso!",
         `Comprobante ${numeroComprobante} emitido. Vuelto: ${formatPYG(vueltoFinalPyg)}` +
@@ -4532,6 +8181,26 @@ export default function POSPage() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (showAperturaModal || showCierreTurnoModal || showSupervisorModal || showPosConfigModal) return
 
+      // Con la ventana de cupones abierta, los atajos de la caja NO actuan por
+      // detras (F2, F9, Escape...). Escape solo retrocede dentro de esa ventana
+      // y desde la pregunta sale imprimiendo la factura; nunca anula: la venta ya esta cobrada y la
+      // factura todavia no se imprimio. Reportado en Caja 4 el 14-09.
+      if (showCuponModal) {
+        if (e.key === "Escape") {
+          e.preventDefault()
+          if (cuponModalStep === "formulario") {
+            setCuponModalStep("pregunta")
+          } else {
+            // Pedido del dueño (14-09): Escape sale de la ventana y vuelve a la anterior.
+            // La venta ya esta cobrada, asi que salir desde la pregunta equivale a
+            // "No participar": imprime la factura sin cupones y vuelve a la caja.
+            // Nunca anula la venta (eso es solo el boton Volver a Modificar Venta).
+            void handleSkipCupon()
+          }
+        }
+        return
+      }
+
       if (showManualWeightModal) {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault()
@@ -4545,12 +8214,48 @@ export default function POSPage() {
 
       if (e.key === "F12" || (e.code === "Space" && e.ctrlKey)) {
         e.preventDefault()
-        // Si el modal de cobro ya esta abierto, un F12 de mas (reflejo
-        // comun justo despues de abrirlo) no debe reiniciar handleOpenPayment
-        // -- eso borraba en silencio los montos que el cajero ya habia
-        // cargado en un pago dividido. Con el modal abierto, F12 no hace
-        // nada aca (el boton de Confirmar Cobro ya tiene su propio F12).
-        if (cart.length > 0 && !showPaymentModal) handleOpenPayment()
+        if (cart.length > 0 && !showPaymentModal) {
+          handleOpenPayment()
+        } else if (showPaymentModal) {
+          // Resguardo de doble-confirmacion, igual que Enter en los campos de
+          // monto (handleCashFieldKeyDown/handleMixedFieldKeyDown). No alcanza
+          // por si solo: Efectivo se precarga con el monto exacto apenas se
+          // abre el modal (handleOpenPayment), asi que sin este segundo chequeo
+          // un cajero que habitualmente toca F12 dos o tres veces seguidas --
+          // ANTES de llegar a hacer clic en el metodo que realmente queria
+          // (Extra Club, Bancard, etc.) -- cerraba la venta sola como CONTADO.
+          // Confirmado dos veces el mismo dia (Caja 3 y Caja 4, con y sin el
+          // guardado de abajo) via auditoria: "CAMBIO DE FORMA DE PAGO --
+          // EFECTIVO -> EXTRA_CLUB, Motivo: fallo de sistema".
+          //
+          // cashSinTocar: si Efectivo es el UNICO metodo activo y el cajero
+          // todavia no interactuo con el monto (no escribio nada, no toco
+          // "Exacto" ni ningun billete rapido -- hasClickedQuickCash sigue en
+          // false desde que se abrio el modal), el monto exacto precargado NO
+          // cuenta como una confirmacion real. F12 no hace nada en ese caso:
+          // obliga a que el cajero primero interactue con la pantalla (tocar
+          // un metodo, "Exacto", o tipear un monto) antes de poder cerrar la
+          // venta por atajo de teclado.
+          const cashSinTocar = activeMethods.size === 1 && activeMethods.has("cash") && !hasClickedQuickCash
+          if (cashSinTocar) {
+            toast.warning("Confirmá el monto primero", "Tocá \"Exacto\" o cargá el monto recibido antes de cerrar la venta.")
+          } else if (totalRecibidoPyg >= totalPyg && totalPyg > 0 && !submitting) {
+            if (listoParaCerrar) {
+              confirmCheckoutBtnRef.current?.click()
+            } else {
+              setListoParaCerrar(true)
+            }
+          } else {
+            confirmCheckoutBtnRef.current?.click()
+          }
+        }
+      } else if (showPaymentModal && !["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName || "")) {
+        if (e.key === "1") { e.preventDefault(); toggleActiveMethod("cash") }
+        else if (e.key === "2") { e.preventDefault(); toggleActiveMethod("bancard") }
+        else if (e.key === "3") { e.preventDefault(); toggleActiveMethod("dinelco") }
+        else if (e.key === "4") { e.preventDefault(); toggleActiveMethod("plugpay") }
+        else if (e.key === "5") { e.preventDefault(); toggleActiveMethod("extra_club") }
+        else if (e.key === "6") { e.preventDefault(); toggleActiveMethod("otros") }
       } else if (e.key === "F2") {
         e.preventDefault()
         searchInputRef.current?.focus()
@@ -4563,10 +8268,6 @@ export default function POSPage() {
         setShowLostDemandModal(true)
       } else if (e.key === "F6") {
         e.preventDefault()
-        // Mismo motivo que F12 arriba: con el modal de cobro abierto, F6
-        // pausaba la venta (vaciando el carrito) sin cerrar el modal, que
-        // se quedaba mostrando un cobro de una venta que ya no estaba en
-        // curso.
         if (cart.length > 0 && !showPaymentModal) pauseCurrentSale()
       } else if (e.key === "F7") {
         e.preventDefault()
@@ -4579,6 +8280,14 @@ export default function POSPage() {
         setShowCustomerModal(true)
       } else if (e.key === "Escape") {
         e.preventDefault()
+        // Con un cobro en curso, Escape NO puede cerrar la ventana de cobro:
+        // cerrarla no cancela el cobro. La venta se sigue registrando y, si
+        // califica, se abren los cupones -- la cajera cree que cancelo y la
+        // venta queda cobrada. Caja 4, 14-09, venta 001-014-0034430.
+        if (submitting) {
+          toast.warning("Cobro en proceso", "Esperá a que termine: una venta que ya se está registrando no se cancela con Escape.")
+          return
+        }
         setShowPaymentModal(false)
         setShowCustomerModal(false)
         setShowScaleModal(false)
@@ -4589,7 +8298,7 @@ export default function POSPage() {
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [cart, totalPyg, pausedSales.length, showAperturaModal, showCierreTurnoModal, showManualWeightModal, showScaleModal, showSupervisorModal, showPosConfigModal, showPaymentModal, manualWeightInput, targetWeighProduct])
+  }, [cart, totalPyg, totalRecibidoPyg, submitting, listoParaCerrar, activeMethods, hasClickedQuickCash, pausedSales.length, showAperturaModal, showCierreTurnoModal, showManualWeightModal, showScaleModal, showSupervisorModal, showPosConfigModal, showPaymentModal, showCuponModal, cuponModalStep, pendingCuponData, manualWeightInput, targetWeighProduct, toggleActiveMethod])
 
   // ── PALETA DE COLORES Y CONTRASTE DINÁMICO ────────────────────────────────
   const bgMain = dark ? "bg-slate-950 text-slate-100" : "bg-slate-100 text-slate-900"
@@ -4601,7 +8310,7 @@ export default function POSPage() {
   const borderTone = dark ? "border-slate-800" : "border-slate-300"
 
   return (
-    <div className={`w-full h-[calc(100vh-5.5rem)] flex flex-col select-none overflow-hidden font-sans rounded-2xl border ${bgMain}`}>
+    <div className={`fixed inset-0 h-screen w-screen flex flex-col select-none overflow-hidden font-sans ${bgMain}`}>
       
       {/* ── 1. HEADER EN DOS FILAS -- antes todo (identidad, balanza,
           cotizaciones, 10 botones de accion) se apretaba en una sola fila
@@ -4636,12 +8345,60 @@ export default function POSPage() {
                 {isSupervisorUser && <span className="text-[9px] bg-purple-500/20 text-purple-600 font-bold px-1 rounded shrink-0">SUPERVISOR</span>}
               </div>
               <div className={`text-[10px] font-posMono tabular-nums leading-none mt-0.5 ${textMuted}`}>
-                {PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre?.split('·')?.[0] || puntoEmision}
+                {terminalAssignment?.caja_nombre || PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre.split('·')[0] || puntoEmision}
               </div>
             </div>
 
+            {/* Indicador real de conexion con el servidor -- antes no habia
+                ninguna señal de que la caja estaba operando en modo local,
+                lo que confundia a la cajera cuando algo (ej. Extra Club)
+                fallaba sin explicacion. Se basa en el heartbeat real de
+                OfflineContext, no en navigator.onLine. */}
+            {!serverOnline && (
+              <span
+                className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full bg-amber-500/15 text-amber-500 border border-amber-500/40 shrink-0 animate-pulse"
+                title="No se pudo confirmar conexión con el servidor -- vendiendo en modo local, se sincroniza sola cuando vuelva la conexión."
+              >
+                ⚠ SIN CONEXIÓN
+              </span>
+            )}
+            {pendingSalesCount > 0 && (
+              <button
+                type="button"
+                onClick={async () => {
+                  toast.info("Sincronizando...", "Enviando ventas pendientes al servidor...")
+                  try {
+                    const res = await syncPendingSales()
+                    if (res.synced > 0) {
+                      toast.success("Sincronización Exitosa", `${res.synced} venta(s) enviadas al servidor.`)
+                    } else if (res.failed > 0) {
+                      toast.warning("Sincronización Incompleta", `${res.failed} venta(s) pendientes. Verifique conexión.`)
+                    }
+                  } catch (e: any) {
+                    toast.error("Error de sincronización", e?.message || "Servidor no alcanzable.")
+                  }
+                }}
+                className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full bg-blue-500/15 text-blue-500 border border-blue-500/40 shrink-0 cursor-pointer hover:bg-blue-500/25 active:scale-95 transition-all"
+                title="Haga clic para forzar la sincronización de ventas pendientes con el servidor ahora."
+              >
+                🔄 {pendingSalesCount} pend.
+              </button>
+            )}
+
+            {isSupervisorUser && (
+              <button
+                onClick={() => setShowSetPinModal(true)}
+                title="Configurar mi PIN de autorizaciones (para aprobar sin conexión)"
+                className={`flex items-center justify-center w-7 h-7 rounded-lg border text-xs font-bold transition-colors cursor-pointer shrink-0 ml-1 ${
+                  dark ? "bg-slate-800 text-amber-400 border-slate-700 hover:bg-amber-900/40" : "bg-slate-200 text-amber-600 border-slate-300 hover:bg-amber-100"
+                }`}
+              >
+                <Lock className="w-3.5 h-3.5" />
+              </button>
+            )}
+
             <button
-              onClick={() => { api.auth.endPosShift().catch(() => {}); logout() }}
+              onClick={() => { api.auth.endPosShift().catch(() => {}); logout(); window.location.reload() }}
               title="Cerrar Sesión"
               className={`flex items-center justify-center w-7 h-7 rounded-lg border text-xs font-bold transition-colors cursor-pointer shrink-0 ml-1 ${
                 dark ? "bg-slate-800 text-rose-400 border-slate-700 hover:bg-rose-900/40" : "bg-slate-200 text-rose-600 border-slate-300 hover:bg-rose-100"
@@ -4652,25 +8409,23 @@ export default function POSPage() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            {/* Widget Balanza USB (Opcional) */}
-            {isScaleEnabled && (
-              <div
-                onClick={() => setShowScaleModal(true)}
-                title="Balanza Checkout. Haga clic para configurar o presione F3."
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border cursor-pointer transition-all ${
-                  scaleUsbConnected
-                    ? isScaleStable
-                      ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/40"
-                      : "bg-amber-500/15 text-amber-600 border-amber-500/50 animate-pulse"
-                    : "bg-amber-500/10 text-amber-600 border-amber-500/40 hover:bg-amber-500/20"
-                }`}
-              >
-                <Scale className={`w-3.5 h-3.5 ${scaleUsbConnected ? (isScaleStable ? "text-emerald-500" : "text-amber-500") : "text-amber-500"}`} />
-                <span className="text-xs font-posMono tabular-nums font-black">
-                  {scaleUsbConnected ? `${currentScaleWeight.toFixed(3)} KG` : "F3"}
-                </span>
-              </div>
-            )}
+            {/* Widget Balanza USB Balmak BCK30 */}
+            <div
+              onClick={() => setShowScaleModal(true)}
+              title="Balanza Checkout Balmak BCK30. Haga clic para configurar o presione F3."
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border cursor-pointer transition-all ${
+                scaleUsbConnected
+                  ? isScaleStable
+                    ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/40"
+                    : "bg-amber-500/15 text-amber-600 border-amber-500/50 animate-pulse"
+                  : "bg-amber-500/10 text-amber-600 border-amber-500/40 hover:bg-amber-500/20"
+              }`}
+            >
+              <Scale className={`w-3.5 h-3.5 ${scaleUsbConnected ? (isScaleStable ? "text-emerald-500" : "text-amber-500") : "text-amber-500"}`} />
+              <span className="text-xs font-posMono tabular-nums font-black">
+                {scaleUsbConnected ? `${currentScaleWeight.toFixed(3)} KG` : "F3"}
+              </span>
+            </div>
 
             {/* Cotizaciones -- sin candado: el titulo ya explica si es
                 editable o solo lectura, el icono no sumaba nada. */}
@@ -4714,7 +8469,7 @@ export default function POSPage() {
             }`}
           >
             <Sliders className="w-3.5 h-3.5" />
-            <span className="text-[10px] hidden md:inline">POS {activePosConfig?.bancardTerminalId ? (activePosConfig.bancardTerminalId.split('-')[1] || activePosConfig.bancardTerminalId) : '01'}</span>
+            <span className="text-[10px] hidden md:inline">POS {activePosConfig.bancardTerminalId.split('-')[1]}</span>
           </button>
 
           <span className={`w-px h-5 shrink-0 ${borderTone} border-l`} />
@@ -4748,7 +8503,13 @@ export default function POSPage() {
             <span className="text-[11px] hidden sm:inline">Productos</span>
           </button>
 
-
+          <button
+            onClick={() => setShowLostDemandModal(true)}
+            title="Registrar Producto que el Cliente No Encontró (F4)"
+            className="p-1.5 rounded-lg border text-xs font-bold transition-colors cursor-pointer bg-amber-500/10 text-amber-600 border-amber-500/40 hover:bg-amber-500/20 shrink-0"
+          >
+            <Package className="w-4 h-4" />
+          </button>
 
           <span className={`w-px h-5 shrink-0 ${borderTone} border-l`} />
 
@@ -4788,33 +8549,28 @@ export default function POSPage() {
             )}
           </button>
 
-
+          <button
+            onClick={() => { setShowExtraClubBalanceModal(true); setBalanceModalQuery(""); setBalanceModalResults([]); setBalanceModalSelected(null) }}
+            title="Consultar saldo de línea de crédito Extra Club"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-purple-600/10 text-purple-600 border border-purple-500/30 hover:bg-purple-600/20 cursor-pointer shrink-0"
+          >
+            <Star className="w-3.5 h-3.5" />
+            <span className="text-[11px] hidden sm:inline">Extra Club</span>
+          </button>
 
           <span className={`w-px h-5 shrink-0 ${borderTone} border-l`} />
 
-          {isLostDemandEnabled && (
-            <button
-              onClick={() => setShowLostDemandModal(true)}
-              title="Registrar Producto que el Cliente No Encontró (F4)"
-              className="p-1.5 rounded-lg border text-xs font-bold transition-colors cursor-pointer bg-amber-500/10 text-amber-600 border-amber-500/40 hover:bg-amber-500/20 shrink-0"
-            >
-              <Package className="w-4 h-4" />
-            </button>
-          )}
-
-          {isExtraClubEnabled && (
-            <button
-              onClick={() => { setShowExtraClubBalanceModal(true); setBalanceModalQuery(""); setBalanceModalResults([]); setBalanceModalSelected(null) }}
-              title="Consultar saldo de línea de crédito Extra Club"
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-purple-600/10 text-purple-600 border border-purple-500/30 hover:bg-purple-600/20 cursor-pointer shrink-0"
-            >
-              <Star className="w-3.5 h-3.5" />
-              <span className="text-[11px] hidden sm:inline">Extra Club</span>
-            </button>
-          )}
+          <button
+            onClick={() => { setPausaMotivo("Salida a almuerzo / relevo de gaveta"); setShowPausaTurnoModal(true) }}
+            title="Pausar Turno (Relevo / Salida a Almuerzo con gaveta extraíble)"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 hover:bg-amber-500/25 cursor-pointer shrink-0"
+          >
+            <Pause className="w-3.5 h-3.5" />
+            <span className="text-[11px] hidden sm:inline">Pausar</span>
+          </button>
 
           <button
-            onClick={() => setShowCierreTurnoModal(true)}
+            onClick={handleOpenCierreModal}
             title="Cierre de Turno y Arqueo"
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-600/10 text-amber-600 border border-amber-500/30 hover:bg-amber-600/20 cursor-pointer shrink-0"
           >
@@ -4840,12 +8596,11 @@ export default function POSPage() {
                   <div className={`font-bold text-xs truncate ${textHeading}`}>
                     {customer.nombre}
                   </div>
-                  {isExtraClubEnabled && ((customer as any).extra_club_numero || (customer as any).extra_club_activo) && (
+                  {((customer as any).extra_club_numero || (customer as any).extra_club_activo) && (
                     <span className="px-1.5 py-0.5 rounded-md bg-purple-500/20 text-purple-600 dark:text-purple-300 text-[9px] font-black uppercase tracking-wider shrink-0 border border-purple-500/30 flex items-center gap-0.5">
                       <Star className="w-2.5 h-2.5 fill-purple-500" /> Extra Club
                     </span>
                   )}
-
                 </div>
                 <div className={`text-[10px] font-posMono tabular-nums ${textMuted}`}>
                   {customer.ruc || customer.ci || "Sin RUC"} · {customer.razon_social || "Consumidor Final"}
@@ -4922,8 +8677,13 @@ export default function POSPage() {
                           </div>
                         </td>
                         <td className="py-2 px-2">
-                          <div className={`font-bold text-xs truncate max-w-[160px] lg:max-w-[200px] ${textHeading}`}>
-                            {item.nombre}
+                          <div className={`font-bold text-xs ${textHeading} flex items-start gap-1`}>
+                            {((item as any).en_promocion || (item.precio_base && item.precio < item.precio_base)) && (
+                              <span className="inline-flex items-center gap-0.5 bg-gradient-to-r from-red-600 to-amber-600 text-white text-[8px] font-black px-1.5 py-0.5 rounded shrink-0 animate-pulse shadow-xs mt-0.5">
+                                🔥 PROMO
+                              </span>
+                            )}
+                            <span className="leading-tight">{item.nombre}</span>
                           </div>
                           <div className={`text-[10px] font-posMono tabular-nums flex items-center gap-1.5 ${textMuted}`}>
                             <span>SKU: {item.sku}</span>
@@ -4932,10 +8692,22 @@ export default function POSPage() {
                                 ⚖️ Balanza ({item.quantity.toFixed(3)} KG)
                               </span>
                             )}
+                            {item.precio_base && item.precio < item.precio_base && (
+                              <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-black">
+                                Ahorras {formatPYG((item.precio_base - item.precio) * item.quantity)}
+                              </span>
+                            )}
                           </div>
                         </td>
-                        <td className={`py-2 px-2 text-right font-posMono tabular-nums font-semibold ${textBody}`}>
-                          {formatPYG(item.precio)}
+                        <td className={`py-2 px-2 text-right font-posMono tabular-nums ${textBody}`}>
+                          {item.precio_base && item.precio < item.precio_base ? (
+                            <div className="flex flex-col items-end">
+                              <span className="line-through text-[10px] text-slate-400 font-normal">{formatPYG(item.precio_base)}</span>
+                              <span className="font-black text-red-600 dark:text-red-400 text-xs">{formatPYG(item.precio)}</span>
+                            </div>
+                          ) : (
+                            <span className="font-semibold">{formatPYG(item.precio)}</span>
+                          )}
                         </td>
                         <td className="py-2 px-2 text-right font-posMono tabular-nums font-black text-emerald-600">
                           {formatPYG(lineTotal)}
@@ -4959,6 +8731,61 @@ export default function POSPage() {
 
           {/* Panel de Totales y Liquidación */}
           <div className={`p-3 border-t space-y-2 shrink-0 ${bgInner}`}>
+            {/* 🎊 Bullicio Festivo: Banner de Oferta Personalizada 'Te Extrañamos' */}
+            {festiveOfferAlert && (
+              <div className="bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 border-2 border-yellow-300 text-white rounded-xl px-3 py-2.5 flex items-center justify-between shadow-lg shadow-rose-500/20 animate-bounce">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="text-xl animate-spin">🌟</span>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[9px] font-black uppercase tracking-wider bg-yellow-300 text-slate-950 px-2 py-0.2 rounded-full shadow-xs">
+                        🎉 ¡OFERTA PERSONALIZADA APLICADA!
+                      </span>
+                      <span className="text-[10px] font-bold text-yellow-100 truncate">
+                        {festiveOfferAlert.cliente}
+                      </span>
+                    </div>
+                    <div className="text-[11px] font-black tracking-tight text-white mt-0.5 truncate">
+                      {festiveOfferAlert.producto} · Precio Especial: Gs. {festiveOfferAlert.precio?.toLocaleString('es-PY')}
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <button 
+                    onClick={() => setFestiveOfferAlert(null)}
+                    className="text-white/80 hover:text-white text-xs font-black px-1.5 py-0.5 rounded-lg bg-black/20 hover:bg-black/40 transition"
+                  >
+                    ✕
+                  </button>
+                  {festiveOfferAlert.ahorro > 0 && (
+                    <div className="text-[9px] font-extrabold text-yellow-200 mt-0.5">
+                      Ahorro: Gs. {festiveOfferAlert.ahorro?.toLocaleString('es-PY')}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Banner Destacado y Animado de Ahorro */}
+            {totalAhorroPyg > 0 && (
+              <div className="bg-gradient-to-r from-amber-500/20 via-emerald-500/20 to-amber-500/20 border-2 border-amber-500/50 rounded-xl px-3 py-2 flex items-center justify-between shadow-xs animate-pulse">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg animate-bounce">🎉</span>
+                  <div>
+                    <div className="text-[11px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-wide leading-tight">
+                      ¡TU EXTRA AHORRO HOY!
+                    </div>
+                    <div className="text-[9px] text-slate-500 dark:text-slate-400 font-medium">
+                      Descuentos y ofertas aplicadas en tu compra
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right font-posMono tabular-nums font-black text-base text-emerald-600 dark:text-emerald-400">
+                  -{formatPYG(totalAhorroPyg)}
+                </div>
+              </div>
+            )}
+
             <div className="flex items-baseline justify-between">
               <span className={`text-xs font-bold uppercase tracking-wider ${textMuted}`}>Total a Cobrar:</span>
               <div className="text-right">
@@ -5039,7 +8866,7 @@ export default function POSPage() {
                 }
               }}
               title="Haga clic para ampliar fotografía en HD"
-              className={`w-24 h-24 lg:w-28 lg:h-28 rounded-xl overflow-hidden shrink-0 border flex items-center justify-center relative cursor-pointer group shadow-sm ${bgInner}`}
+              className={`w-36 h-36 lg:w-40 lg:h-40 rounded-xl overflow-hidden shrink-0 border flex items-center justify-center relative cursor-pointer group shadow-sm ${bgInner}`}
             >
               {lastScannedProduct?.imagen_url ? (
                 <>
@@ -5067,7 +8894,7 @@ export default function POSPage() {
                 <div className={`text-[11px] font-bold uppercase tracking-wider ${textMuted}`}>
                   ÚLTIMO PRODUCTO ESCANEADO
                 </div>
-                <div className={`font-black text-sm lg:text-base truncate mt-0.5 ${textHeading}`}>
+                <div className={`font-black text-sm lg:text-base leading-tight mt-0.5 ${textHeading}`}>
                   {lastScannedProduct ? lastScannedProduct.nombre : "LISTO PARA ESCANEAR"}
                 </div>
                 {lastScannedProduct && (
@@ -5174,21 +9001,32 @@ export default function POSPage() {
                   </thead>
                   <tbody className={`divide-y ${dark ? "divide-slate-800/40" : "divide-slate-200"}`}>
                     {filteredProducts.map((p) => {
-                      const pVenta = Number(p.precio_venta) || 0
-                      const pMayor = Math.round(pVenta * 0.93)
-                      const isPesable = (p as any).tipo_venta === "peso" || (p.nombre || "").toUpperCase().includes("KG")
+                      const pBase = Number(p.precio_venta) || 0
+                      const isPromo = Boolean((p as any).en_promocion && (p as any).precio_promo)
+                      const pPromo = isPromo ? Number((p as any).precio_promo) : null
+                      const pEffective = isPromo && pPromo ? pPromo : pBase
+                      const pMayor = Math.round(pEffective * 0.93)
+                      const isPesable = isPesableProduct(p)
+                      const ahorroUnit = isPromo && pPromo ? Math.max(0, pBase - pPromo) : 0
 
                       return (
                         <tr
                           key={p.id}
                           onClick={() => addToCart(p)}
                           className={`group cursor-pointer transition-colors ${
-                            dark ? "hover:bg-blue-600/10" : "hover:bg-blue-50"
+                            isPromo
+                              ? (dark ? "bg-red-950/20 hover:bg-red-900/30" : "bg-red-50/40 hover:bg-red-100/60")
+                              : (dark ? "hover:bg-blue-600/10" : "hover:bg-blue-50")
                           }`}
                         >
                           <td className="py-2 px-2">
-                            <div className={`font-bold text-xs group-hover:text-blue-600 truncate max-w-[190px] ${textHeading}`}>
-                              {p.nombre}
+                            <div className={`font-bold text-xs group-hover:text-blue-600 ${textHeading} flex items-start gap-1`}>
+                              {isPromo && (
+                                <span className="inline-flex items-center gap-0.5 bg-gradient-to-r from-red-600 to-amber-600 text-white text-[8px] font-black px-1.5 py-0.5 rounded shrink-0 animate-pulse shadow-xs mt-0.5">
+                                  🔥 OFERTA
+                                </span>
+                              )}
+                              <span className="leading-tight">{p.nombre}</span>
                             </div>
                             <div className={`text-[10px] font-posMono tabular-nums flex items-center gap-1.5 ${textMuted}`}>
                               <span>SKU: {p.sku}</span>
@@ -5197,15 +9035,27 @@ export default function POSPage() {
                                   ⚖️ KG
                                 </span>
                               )}
+                              {ahorroUnit > 0 && (
+                                <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-extrabold">
+                                  (Ahorras {formatPYG(ahorroUnit)})
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className={`py-2 px-2 text-center font-posMono tabular-nums font-bold ${textBody}`}>
                             {stockMap[p.id] ?? 0} UN
                           </td>
-                          <td className="py-2 px-2 text-right font-posMono tabular-nums font-black text-emerald-600">
-                            {formatPYG(pVenta)}
+                          <td className="py-2 px-2 text-right font-posMono tabular-nums">
+                            {isPromo && pPromo ? (
+                              <div className="flex flex-col items-end">
+                                <span className="line-through text-[10px] text-slate-400 font-normal">{formatPYG(pBase)}</span>
+                                <span className="font-black text-red-600 dark:text-red-400 text-xs">{formatPYG(pPromo)}</span>
+                              </div>
+                            ) : (
+                              <span className="font-black text-emerald-600 text-xs">{formatPYG(pBase)}</span>
+                            )}
                           </td>
-                          <td className="py-2 px-2 text-right font-posMono tabular-nums font-bold text-amber-600">
+                          <td className="py-2 px-2 text-right font-posMono tabular-nums font-bold text-amber-600 text-xs">
                             {formatPYG(pMayor)}
                           </td>
                           <td className="py-2 px-2 text-center">
@@ -5214,7 +9064,7 @@ export default function POSPage() {
                                 e.stopPropagation()
                                 addToCart(p)
                               }}
-                              className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-[11px] font-bold shadow-xs cursor-pointer active:scale-95"
+                              className={`px-2.5 py-1 ${isPromo ? 'bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500' : 'bg-blue-600 hover:bg-blue-500'} text-white rounded-lg text-[11px] font-bold shadow-xs cursor-pointer active:scale-95`}
                             >
                               + Agregar
                             </button>
@@ -5229,21 +9079,30 @@ export default function POSPage() {
                 /* ── MODO TARJETAS CON ESCALA DE PRECIOS ────────────────────────── */
                 <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
                   {filteredProducts.map((p) => {
-                    const pVenta = Number(p.precio_venta) || 0
-                    const pMayor = Math.round(pVenta * 0.93)
-                    const isPesable = (p as any).tipo_venta === "peso" || (p.nombre || "").toUpperCase().includes("KG")
+                    const pBase = Number(p.precio_venta) || 0
+                    const isPromo = Boolean((p as any).en_promocion && (p as any).precio_promo)
+                    const pPromo = isPromo ? Number((p as any).precio_promo) : null
+                    const pEffective = isPromo && pPromo ? pPromo : pBase
+                    const pMayor = Math.round(pEffective * 0.93)
+                    const isPesable = isPesableProduct(p)
+                    const ahorroUnit = isPromo && pPromo ? Math.max(0, pBase - pPromo) : 0
 
                     return (
                       <button
                         key={p.id}
                         onClick={() => addToCart(p)}
                         className={`border rounded-xl p-2 text-left flex flex-col justify-between transition-all group active:scale-98 cursor-pointer ${
-                          dark 
-                            ? "bg-slate-950/80 hover:bg-slate-800/80 border-slate-800 hover:border-blue-500/50" 
-                            : "bg-white hover:bg-blue-50/50 border-slate-300 hover:border-blue-500 shadow-xs"
+                          isPromo
+                            ? (dark ? "bg-red-950/30 hover:bg-red-900/40 border-red-800/60 hover:border-red-500" : "bg-red-50/60 hover:bg-red-100/80 border-red-300 hover:border-red-500 shadow-xs")
+                            : (dark ? "bg-slate-950/80 hover:bg-slate-800/80 border-slate-800 hover:border-blue-500/50" : "bg-white hover:bg-blue-50/50 border-slate-300 hover:border-blue-500 shadow-xs")
                         }`}
                       >
                         <div className={`w-full h-20 rounded-lg overflow-hidden mb-1 flex items-center justify-center border relative ${bgInner}`}>
+                          {isPromo && (
+                            <span className="absolute top-1 left-1 bg-gradient-to-r from-red-600 to-amber-600 text-white text-[8px] font-black px-1.5 py-0.5 rounded shadow-xs z-10 animate-pulse">
+                              🔥 OFERTA
+                            </span>
+                          )}
                           {p.imagen_url ? (
                             <img
                               src={p.imagen_url.startsWith("http") ? p.imagen_url : `${API_ORIGIN}${p.imagen_url}`}
@@ -5254,23 +9113,35 @@ export default function POSPage() {
                             <Package className="w-8 h-8 opacity-40" />
                           )}
                           {isPesable && (
-                            <span className="absolute top-1 right-1 bg-emerald-600 text-white text-[8px] font-black px-1 rounded">
+                            <span className="absolute top-1 right-1 bg-emerald-600 text-white text-[8px] font-black px-1 rounded z-10">
                               KG
                             </span>
                           )}
                         </div>
                         <div>
-                          <div className={`font-bold text-xs line-clamp-1 group-hover:text-blue-600 transition-colors ${textHeading}`}>
+                          <div className={`font-bold text-xs leading-tight group-hover:text-blue-600 transition-colors ${textHeading}`}>
                             {p.nombre}
                           </div>
                           <div className="flex items-center justify-between mt-1 font-posMono tabular-nums">
-                            <span className="font-black text-xs text-emerald-600">
-                              {formatPYG(pVenta)}
-                            </span>
+                            {isPromo && pPromo ? (
+                              <div className="flex items-baseline gap-1">
+                                <span className="line-through text-[10px] text-slate-400 font-normal">{formatPYG(pBase)}</span>
+                                <span className="font-black text-xs text-red-600 dark:text-red-400">{formatPYG(pPromo)}</span>
+                              </div>
+                            ) : (
+                              <span className="font-black text-xs text-emerald-600">
+                                {formatPYG(pBase)}
+                              </span>
+                            )}
                             <span className="font-bold text-[10px] text-amber-600">
                               M: {formatPYG(pMayor)}
                             </span>
                           </div>
+                          {ahorroUnit > 0 && (
+                            <div className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 font-posMono mt-0.5">
+                              Ahorras {formatPYG(ahorroUnit)}
+                            </div>
+                          )}
                         </div>
                       </button>
                     )
@@ -5285,9 +9156,9 @@ export default function POSPage() {
       {/* ── 3. MODAL OBLIGATORIO DE APERTURA DE CAJA AL INICIAR SESIÓN ───────── */}
       {showAperturaModal && (
         <div className="fixed inset-0 z-[100] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border-2 border-emerald-500 rounded-2xl max-w-md w-full p-6 shadow-2xl animate-fade-in text-slate-900 dark:text-slate-100">
+          <div className="bg-white dark:bg-slate-900 border-2 border-blue-500 rounded-2xl max-w-md w-full p-6 shadow-2xl animate-fade-in text-slate-900 dark:text-slate-100">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black shadow-sm shadow-emerald-500/20">
+              <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] font-black shadow-sm shadow-orange-500/30">
                 <Wallet className="w-5 h-5" />
               </div>
               <div>
@@ -5389,9 +9260,26 @@ export default function POSPage() {
                 </div>
               </div>
 
+              {activeUserCheckOk === "sin_confirmar" && (
+                <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-3 space-y-2">
+                  <p className="text-[11px] text-amber-700 dark:text-amber-300 font-bold">
+                    ⚠ No se pudo confirmar si ya tenés un turno abierto en otra caja (falla de conexión). Abrir uno nuevo sin verificar puede duplicar tu turno.
+                  </p>
+                  <label className="flex items-start gap-2 text-[11px] text-slate-700 dark:text-slate-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={confirmoPrimerTurnoDelDia}
+                      onChange={(e) => setConfirmoPrimerTurnoDelDia(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <span>Confirmo que este es mi primer turno de hoy -- no tengo caja abierta en ninguna otra terminal.</span>
+                  </label>
+                </div>
+              )}
+
               <button
                 type="submit"
-                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 rounded-xl shadow-lg shadow-emerald-500/20 transition-all text-sm flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full bg-brand-orange hover:brightness-95 disabled:opacity-40 disabled:cursor-not-allowed text-[#1C1710] font-black py-3 rounded-xl shadow-lg shadow-orange-500/30 transition-all text-sm flex items-center justify-center gap-2 cursor-pointer"
               >
                 <CheckCircle className="w-4 h-4" />
                 <span>Confirmar Apertura e Iniciar Cobros</span>
@@ -5407,7 +9295,7 @@ export default function POSPage() {
           <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-2xl max-w-md w-full p-5 shadow-2xl text-slate-900 dark:text-slate-100 animate-fade-in">
             <div className="flex items-center justify-between mb-3 border-b border-slate-200 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white shrink-0 shadow-sm shadow-emerald-500/20">
+                <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] shrink-0 shadow-sm shadow-orange-500/30">
                   <Scale className="w-5 h-5" />
                 </div>
                 <div>
@@ -5494,6 +9382,64 @@ export default function POSPage() {
       )}
 
       {/* ── 5. MODAL REACTIVO DE PESAJE DE BALANZA (CON AUTO-CONFIRMACIÓN) ──────── */}
+      {weightPendingScale && (
+        <div className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-amber-400 dark:border-amber-600">
+            <div className="flex items-center gap-3 mb-3">
+              <Scale className="w-6 h-6 text-amber-500 animate-pulse" />
+              <div>
+                <h3 className="font-black text-sm text-slate-900 dark:text-white">Verificación de peso pendiente</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{weightPendingScale.product.nombre}</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-center">
+                <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Etiqueta PLU</span>
+                <span className="text-xl font-black font-posMono text-slate-900 dark:text-white">{weightPendingScale.etiquetaKg.toFixed(3)} KG</span>
+              </div>
+              <div className={`p-3 rounded-xl border text-center transition-colors ${
+                Math.abs(currentScaleWeight - weightPendingScale.etiquetaKg) <= getPesoTolerancia(weightPendingScale.etiquetaKg) && currentScaleWeight > 0.015
+                  ? "bg-emerald-500/10 border-emerald-500 text-emerald-600 dark:text-emerald-400 font-black"
+                  : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-black"
+              }`}>
+                <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Balanza de Caja</span>
+                <span className="text-xl font-posMono">{currentScaleWeight.toFixed(3)} KG</span>
+              </div>
+            </div>
+            <div className="text-center mb-4">
+              <span className={`text-[11px] font-bold px-3 py-1 rounded-full ${
+                currentScaleWeight <= 0.015
+                  ? "bg-amber-500/20 text-amber-600 dark:text-amber-400"
+                  : Math.abs(currentScaleWeight - weightPendingScale.etiquetaKg) <= getPesoTolerancia(weightPendingScale.etiquetaKg)
+                  ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-black animate-pulse"
+                  : "bg-amber-500/20 text-amber-600 dark:text-amber-400"
+              }`}>
+                {currentScaleWeight <= 0.015
+                  ? "Coloque el producto en la balanza..."
+                  : Math.abs(currentScaleWeight - weightPendingScale.etiquetaKg) <= getPesoTolerancia(weightPendingScale.etiquetaKg)
+                  ? "✓ Peso verificado -- agregando..."
+                  : "Asentando lectura de balanza..."}
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              <button
+                onClick={() => requestSupervisorAuthorization({ type: "use_label_weight", weightProduct: weightPendingScale.product, weightEtiquetaKg: weightPendingScale.etiquetaKg })}
+                className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <ShieldCheck className="w-4 h-4" /> Balanza no disponible -- usar etiqueta (requiere supervisor)
+              </button>
+              <button
+                onClick={() => { setWeightPendingScale(null); searchInputRef.current?.focus() }}
+                className="w-full py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 cursor-pointer"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {weightMismatch && (
         <div className="fixed inset-0 z-[120] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border-2 border-rose-500 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 animate-fade-in">
@@ -5586,7 +9532,7 @@ export default function POSPage() {
           <div className="bg-white dark:bg-slate-900 border-2 border-emerald-500 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 animate-fade-in">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white shrink-0 shadow-sm shadow-emerald-500/20">
+                <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] shrink-0 shadow-sm shadow-orange-500/30">
                   <Scale className="w-5 h-5 animate-pulse" />
                 </div>
                 <div>
@@ -5668,12 +9614,69 @@ export default function POSPage() {
       )}
 
       {/* ── 6. MODAL DE ASIGNACIÓN DE TERMINALES POS (BANCARD & DINELCO) POR CAJA ─ */}
+      {showSetPinModal && (
+        <div className="fixed inset-0 z-[130] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-2xl max-w-sm w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 animate-fade-in">
+            <div className="flex items-center justify-between mb-3 border-b border-slate-200 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500 flex items-center justify-center text-white shrink-0 shadow-sm shadow-amber-500/30">
+                  <Lock className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-black text-slate-900 dark:text-white font-posDisplay tracking-tight">Mi PIN de Autorizaciones</h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Para aprobar acciones en caja sin necesitar conexión al servidor.</p>
+                </div>
+              </div>
+              <button onClick={() => setShowSetPinModal(false)} className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 leading-relaxed">
+              Este PIN es distinto de tu contraseña de acceso. Se usa solo para autorizar acciones en las cajas (descuentos, anulaciones, Extra Club, devoluciones, etc.) -- incluso si el servidor está caído o reiniciando.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nuevo PIN (4 a 6 dígitos):</label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  value={newPosPin}
+                  onChange={(e) => setNewPosPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="••••"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 font-posMono tabular-nums text-center text-lg tracking-widest outline-none focus:border-amber-500"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Confirmar PIN:</label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  value={newPosPinConfirm}
+                  onChange={(e) => setNewPosPinConfirm(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="••••"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 font-posMono tabular-nums text-center text-lg tracking-widest outline-none focus:border-amber-500"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleSetPosPin}
+                disabled={settingPosPin}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-black bg-amber-600 hover:bg-amber-500 text-white disabled:opacity-50 cursor-pointer shadow-sm shadow-amber-600/20"
+              >
+                {settingPosPin ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
+                Guardar PIN
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showPosConfigModal && (
         <div className="fixed inset-0 z-[120] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-2xl max-w-xl w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 animate-fade-in max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-3 border-b border-slate-200 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white shrink-0 shadow-sm shadow-emerald-500/20">
+                <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] shrink-0 shadow-sm shadow-orange-500/30">
                   <Sliders className="w-5 h-5" />
                 </div>
                 <div>
@@ -5815,84 +9818,6 @@ export default function POSPage() {
                 })}
               </div>
 
-              {/* Opciones Opcionales y Módulos Adicionales con Toggle */}
-              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
-                <span className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider block">
-                  ⚙️ Módulos Opcionales del POS (Activar / Desactivar)
-                </span>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next = !isScaleEnabled
-                      setIsScaleEnabled(next)
-                      localStorage.setItem("pos_scale_enabled", next ? "true" : "false")
-                      toast.success(next ? "Balanza USB Habilitada" : "Balanza USB Deshabilitada")
-                    }}
-                    className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                      isScaleEnabled
-                        ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-500 text-emerald-700 dark:text-emerald-300 shadow-xs"
-                        : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-500 opacity-70 hover:opacity-100"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between w-full mb-1">
-                      <span className="text-xs font-bold">⚖️ Balanza USB (F3)</span>
-                      <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${isScaleEnabled ? "bg-emerald-500 text-white" : "bg-slate-300 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`}>
-                        {isScaleEnabled ? "ON" : "OFF"}
-                      </span>
-                    </div>
-                    <span className="text-[10px] opacity-80">Pesaje en caja Balmak/Toledo</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next = !isExtraClubEnabled
-                      setIsExtraClubEnabled(next)
-                      localStorage.setItem("pos_extra_club_enabled", next ? "true" : "false")
-                      toast.success(next ? "Extra Club Habilitado" : "Extra Club Deshabilitado")
-                    }}
-                    className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                      isExtraClubEnabled
-                        ? "bg-purple-50 dark:bg-purple-950/30 border-purple-500 text-purple-700 dark:text-purple-300 shadow-xs"
-                        : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-500 opacity-70 hover:opacity-100"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between w-full mb-1">
-                      <span className="text-xs font-bold">⭐ Extra Club</span>
-                      <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${isExtraClubEnabled ? "bg-purple-500 text-white" : "bg-slate-300 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`}>
-                        {isExtraClubEnabled ? "ON" : "OFF"}
-                      </span>
-                    </div>
-                    <span className="text-[10px] opacity-80">Puntos y crédito fidelidad</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next = !isLostDemandEnabled
-                      setIsLostDemandEnabled(next)
-                      localStorage.setItem("pos_lost_demand_enabled", next ? "true" : "false")
-                      toast.success(next ? "Demanda Insatisfecha Habilitada" : "Demanda Insatisfecha Deshabilitada")
-                    }}
-                    className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                      isLostDemandEnabled
-                        ? "bg-amber-50 dark:bg-amber-950/30 border-amber-500 text-amber-700 dark:text-amber-300 shadow-xs"
-                        : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-500 opacity-70 hover:opacity-100"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between w-full mb-1">
-                      <span className="text-xs font-bold">📝 Demanda F4</span>
-                      <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${isLostDemandEnabled ? "bg-amber-500 text-white" : "bg-slate-300 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`}>
-                        {isLostDemandEnabled ? "ON" : "OFF"}
-                      </span>
-                    </div>
-                    <span className="text-[10px] opacity-80">Productos no encontrados</span>
-                  </button>
-                </div>
-              </div>
-
               <div className="flex gap-2 pt-2">
                 <button
                   type="button"
@@ -5903,7 +9828,7 @@ export default function POSPage() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-500/20 cursor-pointer"
+                  className="flex-1 py-3 bg-brand-orange hover:brightness-95 text-[#1C1710] font-black rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-orange-500/30 cursor-pointer"
                 >
                   <Save className="w-4 h-4" />
                   <span>Guardar Asignaciones de POS</span>
@@ -5916,9 +9841,9 @@ export default function POSPage() {
 
       {/* ── SOLICITUD DE AUTORIZACIÓN REMOTA (SIN SUPERVISOR EN ESTA CAJA) ──── */}
       {showRemoteAuthModal && (
-        <div className="fixed inset-0 z-[125] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[220] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border-2 border-brand-orange rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 animate-fade-in text-center">
-            <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-emerald-600 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20 animate-pulse">
+            <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-brand-orange flex items-center justify-center text-[#1C1710] shadow-lg shadow-orange-500/30 animate-pulse">
               <ShieldAlert className="w-7 h-7" />
             </div>
             <h2 className="text-lg font-black font-posDisplay tracking-tight mb-1">Esperando Autorización</h2>
@@ -5950,7 +9875,7 @@ export default function POSPage() {
                 setSupervisorEmail("")
                 setShowSupervisorModal(true)
               }}
-              className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 cursor-pointer mb-2"
+              className="w-full py-3 rounded-xl bg-brand-orange hover:brightness-95 text-[#1C1710] font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-orange-500/30 cursor-pointer mb-2"
             >
               <KeyRound className="w-4 h-4" /> Tengo un supervisor acá — ingresar clave
             </button>
@@ -5981,10 +9906,10 @@ export default function POSPage() {
 
       {/* ── 7. MODAL DE AUTORIZACIÓN DE SUPERVISOR (SEGURIDAD DE CAJA) ──────── */}
       {showSupervisorModal && (
-        <div className="fixed inset-0 z-[125] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[230] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border-2 border-rose-500 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 animate-fade-in">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black shadow-sm shadow-emerald-500/20">
+              <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] font-black shadow-sm shadow-orange-500/30">
                 <ShieldAlert className="w-6 h-6" />
               </div>
               <div>
@@ -6001,6 +9926,8 @@ export default function POSPage() {
                 <div className="font-bold text-xs text-rose-600 dark:text-rose-400">
                   {pendingSupervisorAction?.type === "clear_cart"
                     ? "❌ Cancelación / Anulación de Toda la Venta"
+                    : pendingSupervisorAction?.type === "direct_discount"
+                    ? `🏷️ Descuento Directo: ${pendingSupervisorAction.discountType === "percentage" ? `${pendingSupervisorAction.discountValue}%` : `₲ ${Number(pendingSupervisorAction.discountValue || 0).toLocaleString("es-PY")}`}`
                     : pendingSupervisorAction?.type === "open_pos_config"
                     ? "⚙️ Configuración y Asignación de Terminales POS"
                     : pendingSupervisorAction?.type === "process_return"
@@ -6010,20 +9937,47 @@ export default function POSPage() {
               </div>
 
               <div>
-                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">Motivo:</label>
-                <select
-                  value={supervisorReason}
-                  onChange={(e) => setSupervisorReason(e.target.value)}
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs text-slate-900 dark:text-white font-bold outline-none focus:border-rose-500"
-                >
-                  <option value="Error de escaneo / digitación">Error de escaneo / digitación</option>
-                  <option value="Cliente desistió de comprar el producto">Cliente desistió de comprar el producto</option>
-                  <option value="Configuración de Terminales POS">Configuración de Terminales POS</option>
-                  <option value="Producto dañado / fecha de vencimiento">Producto dañado / fecha de vencimiento</option>
-                  <option value="Precio incorrecto en góndola">Precio incorrecto en góndola</option>
-                  <option value="Devolución de cliente">Devolución de cliente</option>
-                </select>
+                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
+                  Motivo de Autorización {pendingSupervisorAction?.type === "direct_discount" ? <span className="text-rose-500 font-black">*(OBLIGATORIO)</span> : ":"}:
+                </label>
+                {pendingSupervisorAction?.type === "direct_discount" ? (
+                  <div>
+                    <input
+                      type="text"
+                      value={supervisorReason}
+                      onChange={(e) => setSupervisorReason(e.target.value)}
+                      placeholder="Escriba el motivo del descuento (mín. 5 letras)..."
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs text-slate-900 dark:text-white font-bold outline-none focus:border-rose-500"
+                    />
+                    <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                      {["Atención al cliente", "Mercadería con detalle", "Convenio especial", "Aprobación de gerencia"].map((sug) => (
+                        <button
+                          key={sug}
+                          type="button"
+                          onClick={() => setSupervisorReason(sug)}
+                          className="text-[9px] px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+                        >
+                          {sug}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <select
+                    value={supervisorReason}
+                    onChange={(e) => setSupervisorReason(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs text-slate-900 dark:text-white font-bold outline-none focus:border-rose-500"
+                  >
+                    <option value="Error de escaneo / digitación">Error de escaneo / digitación</option>
+                    <option value="Cliente desistió de comprar el producto">Cliente desistió de comprar el producto</option>
+                    <option value="Configuración de Terminales POS">Configuración de Terminales POS</option>
+                    <option value="Producto dañado / fecha de vencimiento">Producto dañado / fecha de vencimiento</option>
+                    <option value="Precio incorrecto en góndola">Precio incorrecto en góndola</option>
+                    <option value="Devolución de cliente">Devolución de cliente</option>
+                  </select>
+                )}
               </div>
+
 
               <div>
                 <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">Supervisor que autoriza:</label>
@@ -6082,7 +10036,7 @@ export default function POSPage() {
           <div className="bg-white dark:bg-slate-900 border-2 border-rose-500 rounded-2xl max-w-2xl w-full p-6 shadow-2xl animate-fade-in text-slate-900 dark:text-slate-100 max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between mb-4 shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black shadow-sm shadow-emerald-500/20">
+                <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] font-black shadow-sm shadow-orange-500/30">
                   <RotateCcw className="w-5 h-5" />
                 </div>
                 <div>
@@ -6106,9 +10060,12 @@ export default function POSPage() {
                     type="text"
                     value={devolucionSearch}
                     onChange={(e) => setDevolucionSearch(e.target.value)}
-                    placeholder="Filtrar por número de comprobante..."
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl pl-9 pr-3 py-2.5 text-sm text-slate-900 dark:text-white font-bold outline-none focus:border-rose-500"
+                    placeholder="Filtrar por número de comprobante, RUC o cliente..."
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl pl-9 pr-9 py-2.5 text-sm text-slate-900 dark:text-white font-bold outline-none focus:border-rose-500"
                   />
+                  {devolucionSalesLoading && (
+                    <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-rose-500 animate-spin" />
+                  )}
                 </div>
 
                 {devolucionSalesLoading ? (
@@ -6194,7 +10151,7 @@ export default function POSPage() {
                               className="w-4 h-4 accent-rose-500 cursor-pointer disabled:cursor-not-allowed"
                             />
                             <div className="flex-1 min-w-0">
-                              <div className="font-bold text-xs text-slate-900 dark:text-white truncate">{it.productName}</div>
+                              <div className="font-bold text-xs text-slate-900 dark:text-white leading-tight">{it.productName}</div>
                               <div className="text-[10px] font-posMono tabular-nums text-slate-500 dark:text-slate-400">
                                 Vendido: {it.cantidad} x {formatPYG(it.precio_unitario)}
                                 {yaDevuelto > 0 && (
@@ -6286,9 +10243,9 @@ export default function POSPage() {
       {/* ── ASIGNAR ESTA MÁQUINA A UNA CAJA FIJA (requiere supervisor) ──────── */}
       {showAssignTerminalModal && (
         <div className="fixed inset-0 z-[130] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border-2 border-emerald-500 rounded-2xl max-w-md w-full p-6 shadow-2xl animate-fade-in text-slate-900 dark:text-slate-100">
+          <div className="bg-white dark:bg-slate-900 border-2 border-blue-500 rounded-2xl max-w-md w-full p-6 shadow-2xl animate-fade-in text-slate-900 dark:text-slate-100">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black shadow-sm shadow-emerald-500/20">
+              <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] font-black shadow-sm shadow-orange-500/30">
                 <Lock className="w-5 h-5" />
               </div>
               <div>
@@ -6339,7 +10296,7 @@ export default function POSPage() {
                     setShowAssignTerminalModal(false)
                     requestSupervisorAuthorization({ type: "assign_terminal" })
                   }}
-                  className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-500/20 cursor-pointer"
+                  className="flex-1 py-3 bg-brand-orange hover:brightness-95 text-[#1C1710] font-black rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-orange-500/30 cursor-pointer"
                 >
                   <ShieldAlert className="w-4 h-4" />
                   <span>Autorizar y Asignar</span>
@@ -6351,12 +10308,12 @@ export default function POSPage() {
       )}
 
       {/* ── 8. MODAL DE COBRO MULTIMONEDA & PASARELAS POS BANCARD / DINELCO (F12) ── */}
-      {showPaymentModal && (
-        <div className="fixed inset-0 z-[100] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-5xl w-full shadow-2xl text-slate-900 dark:text-slate-100 overflow-hidden flex flex-col">
+      {showPaymentModal && createPortal(
+        <div className="fixed inset-0 z-[100] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-5xl w-full max-h-[92vh] shadow-2xl text-slate-900 dark:text-slate-100 overflow-hidden flex flex-col">
             
             {/* 1. HEADER BAR */}
-            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/60">
+            <div className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/60">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-500 to-orange-500 flex items-center justify-center text-slate-950 shrink-0 shadow-sm font-black text-base">
                   ₲
@@ -6377,7 +10334,7 @@ export default function POSPage() {
               </div>
               <button
                 type="button"
-                onClick={() => setShowPaymentModal(false)}
+                disabled={submitting} onClick={() => { if (!submitting) setShowPaymentModal(false) }}
                 className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-slate-800 transition cursor-pointer"
                 title="Cerrar [ESC]"
               >
@@ -6385,11 +10342,11 @@ export default function POSPage() {
               </button>
             </div>
 
-            {/* 2. BODY SPLIT (2 COLUMNS) */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-0 divide-y lg:divide-y-0 lg:divide-x divide-slate-200 dark:divide-slate-800">
+            {/* 2. BODY SPLIT (2 COLUMNS) WITH INTERNAL SCROLL */}
+            <div className="overflow-y-auto flex-1 p-0 grid grid-cols-1 lg:grid-cols-12 gap-0 divide-y lg:divide-y-0 lg:divide-x divide-slate-200 dark:divide-slate-800">
               
               {/* ── COLUMNA IZQUIERDA: RESUMEN FINANCIERO Y VUELTO (5 COLS) ── */}
-              <div className="lg:col-span-5 p-4 bg-slate-50/60 dark:bg-slate-950/40 space-y-2.5">
+              <div className="lg:col-span-5 p-4 bg-slate-50/60 dark:bg-slate-950/40 space-y-2.5 min-w-0">
                 {/* Hero Total Venta */}
                 <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-1.5">
                   <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
@@ -6401,18 +10358,55 @@ export default function POSPage() {
                   <div className="text-3xl font-black font-posMono tabular-nums text-slate-950 dark:text-white tracking-tight">
                     {formatPYG(totalPyg)}
                   </div>
-                  <div className="flex items-center gap-2 pt-1 border-t border-slate-100 dark:border-slate-800 text-[11px] font-posMono tabular-nums text-slate-500 dark:text-slate-400">
-                    <span className="flex items-center gap-1 font-bold text-emerald-600 dark:text-emerald-400">
+                  <div className="flex items-center gap-2.5 pt-1.5 border-t border-slate-100 dark:border-slate-800 text-sm font-posMono tabular-nums">
+                    <span className="flex items-center gap-1.5 font-black text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-xl border border-amber-500/25">
                       <FlagBR /> R$ {totalBrl}
                     </span>
-                    <span>·</span>
-                    <span className="flex items-center gap-1 font-bold text-blue-600 dark:text-blue-400">
+                    <span className="flex items-center gap-1.5 font-black text-blue-600 dark:text-blue-400 bg-blue-500/10 px-2.5 py-1 rounded-xl border border-blue-500/25">
                       <FlagUS /> US$ {totalUsd}
                     </span>
                   </div>
                 </div>
 
+                {/* Descuento Directo Autorizado */}
+                {appliedDiscount ? (
+                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between text-xs animate-fade-in">
+                    <div className="min-w-0 pr-2">
+                      <div className="flex items-center gap-1.5 font-bold text-emerald-600 dark:text-emerald-400 text-[11px]">
+                        <Percent className="w-3.5 h-3.5 shrink-0" />
+                        <span>Descuento Directo: -{formatPYG(descuentoTotalPyg)} ({appliedDiscount.type === "percentage" ? `${appliedDiscount.value}%` : "Fijo"})</span>
+                      </div>
+                      <div className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80 mt-0.5 truncate">
+                        Motivo: <strong className="font-semibold">{appliedDiscount.reason}</strong> · Aut: {appliedDiscount.supervisorNombre}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setAppliedDiscount(null)}
+                      className="p-1 rounded-lg text-rose-500 hover:bg-rose-100 dark:hover:bg-rose-950/50 cursor-pointer shrink-0"
+                      title="Quitar Descuento"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowDiscountModal(true)}
+                    className="w-full py-2 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-bold flex items-center justify-between transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Percent className="w-3.5 h-3.5 text-amber-500" />
+                      Aplicar Descuento Especial
+                    </span>
+                    <span className="text-[10px] font-mono bg-amber-500/20 px-2 py-0.5 rounded-md font-semibold">
+                      Requiere Supervisor
+                    </span>
+                  </button>
+                )}
+
                 {/* Recibido Parcial si hay múltiples pagos */}
+
                 {totalRecibidoPyg > 0 && totalRecibidoPyg < totalPyg && (
                   <div className="p-2.5 rounded-xl bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/50 flex items-center justify-between text-xs font-bold">
                     <span className="text-blue-700 dark:text-blue-300 uppercase text-[10px]">Total Recibido:</span>
@@ -6422,29 +10416,150 @@ export default function POSPage() {
 
                 {/* Hero Vuelto / Saldo Restante */}
                 {saldoRestantePyg > 0 ? (
-                  <div className="p-3 rounded-2xl border-2 border-rose-500 bg-rose-50/80 dark:bg-rose-950/40 text-center shadow-sm space-y-0.5">
-                    <span className="text-[11px] font-black text-rose-600 dark:text-rose-400 uppercase tracking-wider block">
+                  <div className="p-3.5 rounded-2xl border-2 border-rose-500 bg-rose-50/80 dark:bg-rose-950/40 text-center shadow-sm space-y-1">
+                    <span className="text-xs font-black text-rose-600 dark:text-rose-400 uppercase tracking-wider block">
                       Falta Cobrar
                     </span>
-                    <div className="text-2xl sm:text-3xl font-black font-posMono tabular-nums text-rose-600 dark:text-rose-400 leading-tight">
+                    <div className="text-3xl font-black font-posMono tabular-nums text-rose-600 dark:text-rose-400 leading-tight">
                       {formatPYG(saldoRestantePyg)}
                     </div>
-                    <div className="text-[10px] font-posMono tabular-nums text-rose-500 dark:text-rose-300/80">
-                      ≈ R$ {(saldoRestantePyg / rates.BRL).toFixed(2)} · US$ {(saldoRestantePyg / rates.USD).toFixed(2)}
+                    <div className="flex items-center justify-center gap-2 pt-1 font-posMono tabular-nums">
+                      <span className="px-2 py-0.5 rounded-lg bg-rose-500/15 text-rose-700 dark:text-rose-300 text-xs font-black">
+                        ≈ R$ {(saldoRestantePyg / rates.BRL).toFixed(2)}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-lg bg-rose-500/15 text-rose-700 dark:text-rose-300 text-xs font-black">
+                        ≈ US$ {(saldoRestantePyg / rates.USD).toFixed(2)}
+                      </span>
                     </div>
                   </div>
                 ) : (
-                  <div className="p-3 rounded-2xl border-2 border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/40 text-center shadow-sm space-y-0.5">
-                    <span className="text-[11px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">
+                  <div className="p-3.5 rounded-2xl border-2 border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/40 text-center shadow-sm space-y-2">
+                    <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">
                       {donacionActiva && montoDonacionEfectiva > 0 ? "Vuelto Limpio a Entregar" : "Vuelto a Entregar"}
                     </span>
-                    <div className="text-2xl sm:text-3xl font-black font-posMono tabular-nums text-emerald-600 dark:text-emerald-400 leading-tight">
+                    <div className="text-3xl font-black font-posMono tabular-nums text-emerald-600 dark:text-emerald-400 leading-tight">
                       {formatPYG(vueltoFinalPyg)}
                     </div>
-                    <div className="text-[10px] font-posMono tabular-nums text-emerald-600 dark:text-emerald-300">
-                      R$ {(vueltoFinalPyg / rates.BRL).toFixed(2)} · US$ {(vueltoFinalPyg / rates.USD).toFixed(2)}
+                    <div className="flex items-center justify-center gap-2 pt-1 font-posMono tabular-nums">
+                      <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-black">
+                        R$ {(vueltoFinalPyg / rates.BRL).toFixed(2)}
+                      </span>
+                      <span className="px-2.5 py-1 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-700 dark:text-blue-300 text-xs font-black">
+                        US$ {(vueltoFinalPyg / rates.USD).toFixed(2)}
+                      </span>
                     </div>
+
+                    {/* Calculadora de Vuelto Mixto (R$ + Gs.) */}
+                    {vueltoFinalPyg > 0 && rates.BRL > 0 && (() => {
+                      const maxBrlPosible = Math.floor(vueltoFinalPyg / rates.BRL)
+                      const billetesComunes = [2, 5, 10, 20, 50, 100].filter(b => b <= maxBrlPosible)
+                      return (
+                        <div className="mt-2 pt-2 border-t border-emerald-500/30 text-left space-y-2 bg-white/80 dark:bg-slate-900/80 p-3 rounded-2xl shadow-xs">
+                          <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                            <span className="flex items-center gap-1.5">
+                              <span>💱 Vuelto Multimoneda (R$ + Gs.):</span>
+                            </span>
+                            {vueltoMixtoBrl && (
+                              <button
+                                type="button"
+                                onClick={() => setVueltoMixtoBrl("")}
+                                className="text-[10px] text-slate-400 hover:text-rose-500 font-bold underline cursor-pointer"
+                              >
+                                Limpiar
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Chips de Billetes Rápidos en Reales */}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[10px] font-bold text-slate-400">Fijar R$:</span>
+                            {billetesComunes.map(b => (
+                              <button
+                                key={b}
+                                type="button"
+                                onClick={() => setVueltoMixtoBrl(String(b))}
+                                className={`px-2 py-0.5 rounded-lg text-xs font-black transition cursor-pointer border ${
+                                  parseFloat(vueltoMixtoBrl) === b
+                                    ? "bg-amber-500 text-white border-amber-600 shadow-xs"
+                                    : "bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/30 text-amber-800 dark:text-amber-300"
+                                }`}
+                              >
+                                {b} R$
+                              </button>
+                            ))}
+                            {maxBrlPosible > 0 && !billetesComunes.includes(maxBrlPosible) && (
+                              <button
+                                type="button"
+                                onClick={() => setVueltoMixtoBrl(String(maxBrlPosible))}
+                                className="px-2 py-0.5 rounded-lg text-xs font-black bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-900 dark:text-amber-200 transition cursor-pointer"
+                              >
+                                Máx ({maxBrlPosible} R$)
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Input directo con incremento */}
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1.5 flex-1">
+                              <span className="text-xs font-black text-amber-600 dark:text-amber-400">R$</span>
+                              <input
+                                type="number"
+                                step="any"
+                                value={vueltoMixtoBrl}
+                                onChange={e => setVueltoMixtoBrl(e.target.value)}
+                                placeholder="¿Cuánto entregás en R$? (ej: 5)"
+                                className="w-full text-xs font-mono font-black px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500"
+                              />
+                            </div>
+                            {/* Botones de incremento rápido */}
+                            <div className="flex items-center gap-1 shrink-0">
+                              {[2, 5, 10].map(inc => (
+                                <button
+                                  key={inc}
+                                  type="button"
+                                  onClick={() => setVueltoMixtoBrl(prev => String(Math.min(maxBrlPosible, (parseFloat(prev) || 0) + inc)))}
+                                  className="px-1.5 py-1 rounded-lg text-[10px] font-black bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 cursor-pointer"
+                                  title={`Sumar ${inc} R$`}
+                                >
+                                  +{inc}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {parseFloat(vueltoMixtoBrl) > 0 && (() => {
+                            const brlEntregado = parseFloat(vueltoMixtoBrl) || 0
+                            const brlEnGs = Math.round(brlEntregado * rates.BRL)
+                            const saldoGs = vueltoFinalPyg - brlEnGs
+                            if (saldoGs < 0) {
+                              return (
+                                <div className="p-2 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-800 text-[11px] text-rose-600 dark:text-rose-400 font-bold">
+                                  ⚠️ Supera el vuelto total por R$ {Math.abs(saldoGs / rates.BRL).toFixed(2)} ({formatPYG(Math.abs(saldoGs))})
+                                </div>
+                              )
+                            }
+                            return (
+                              <div className="p-2.5 rounded-xl bg-gradient-to-r from-emerald-500/15 to-amber-500/15 border-2 border-emerald-500/50 text-xs">
+                                <span className="text-[10px] text-emerald-800 dark:text-emerald-300 font-black uppercase tracking-wider block">
+                                  Saldo a entregar en Guaraníes:
+                                </span>
+                                <span className="text-lg font-black font-posMono text-emerald-800 dark:text-emerald-200 leading-tight block">
+                                  {formatPYG(saldoGs)}
+                                </span>
+                                <div className="text-xs text-slate-800 dark:text-slate-200 mt-1 font-bold flex items-center gap-1">
+                                  <span>👉 Entregar:</span>
+                                  <span className="text-amber-600 dark:text-amber-400 font-black font-posMono text-sm">R$ {brlEntregado.toFixed(2)}</span>
+                                  <span>+</span>
+                                  <span className="text-emerald-600 dark:text-emerald-400 font-black font-posMono text-sm">{formatPYG(saldoGs)}</span>
+                                </div>
+                              </div>
+                            )
+                          })()}
+                        </div>
+                      )
+                    })()}
                   </div>
+
                 )}
 
                 {/* Cliente Seleccionado Card */}
@@ -6496,19 +10611,29 @@ export default function POSPage() {
                   if (!isDonacionOn) return null
 
                   return (
-                    <div className={`p-2.5 rounded-xl border transition-all ${
+                    <div className={`p-3.5 rounded-2xl border-2 transition-all shadow-sm ${
                       donacionActiva
-                        ? "bg-gradient-to-br from-rose-50/90 to-amber-50/80 dark:from-rose-950/50 dark:to-amber-950/40 border-rose-400 dark:border-rose-600"
+                        ? "bg-gradient-to-br from-rose-50 via-rose-100/50 to-amber-50/80 dark:from-rose-950/70 dark:via-rose-900/40 dark:to-amber-950/50 border-rose-500 dark:border-rose-500 shadow-md shadow-rose-500/10"
                         : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"
                     }`}>
                       <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <Heart className={`w-3.5 h-3.5 shrink-0 ${donacionActiva ? "fill-rose-500 text-rose-500" : "text-slate-400"}`} />
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <Heart className={`w-5 h-5 shrink-0 transition-transform ${donacionActiva ? "fill-rose-500 text-rose-500 animate-pulse scale-110" : "text-slate-400"}`} />
                           <div className="min-w-0">
-                            <span className="text-[11px] font-black text-slate-800 dark:text-slate-200 truncate block leading-tight">
-                              Abre tu corazón <span className="text-[9px] font-bold text-rose-500">(F8)</span>
-                            </span>
-                            <p className="text-[9px] text-slate-400 truncate">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm font-black text-slate-900 dark:text-white truncate block leading-tight">
+                                Abre tu corazón
+                              </span>
+                              <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-rose-500 text-white shadow-xs">
+                                F8
+                              </span>
+                              {donacionActiva && (
+                                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-200 dark:bg-rose-900/60 text-rose-800 dark:text-rose-200 border border-rose-300 dark:border-rose-700">
+                                  ACTIVO
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300 truncate mt-0.5">
                               {campanaActivaDonacion?.ong_nombre || "Centro Amor y Esperanza"}
                             </p>
                           </div>
@@ -6516,30 +10641,29 @@ export default function POSPage() {
                         <button
                           type="button"
                           onClick={() => handleToggleDonacion(!donacionActiva)}
-                          className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
-                            donacionActiva ? "bg-rose-600" : "bg-slate-300 dark:bg-slate-700"
+                          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors shadow-inner ${
+                            donacionActiva ? "bg-rose-600 ring-2 ring-rose-400/40" : "bg-slate-300 dark:bg-slate-700"
                           }`}
                         >
-                          <span className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow-sm transition ${
-                            donacionActiva ? "translate-x-3" : "translate-x-0"
+                          <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition ${
+                            donacionActiva ? "translate-x-5" : "translate-x-0"
                           }`} />
                         </button>
                       </div>
 
-                      {/* Chips de montos rápidos inteligentes */}
-                      <div className="mt-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800/80 flex items-center gap-1 flex-wrap">
+                      {/* Chips de montos rápidos inteligentes con tipografía ampliada */}
+                      <div className="mt-2.5 pt-2.5 border-t border-slate-200 dark:border-slate-800/80 flex items-center gap-1.5 flex-wrap">
                         {(() => {
-                          const rawCash = parseInt(payCashPyg.replace(/\D/g, "") || "0", 10)
-                          const vueltoSinDonar = Math.max(0, rawCash - totalPyg)
+                          const vueltoSinDonar = vueltoPyg
                           const restoCompra = totalPyg % 1000
                           const redondeoCompra = restoCompra > 0 ? 1000 - restoCompra : 500
 
-                          const quickChips: Array<{ label: string; val: number }> = []
+                          const quickChips: Array<{ label: string; val: number; live?: boolean }> = []
 
                           if (vueltoSinDonar > 0) {
-                            quickChips.push({ label: `Vuelto Total (${formatPYG(vueltoSinDonar)})`, val: vueltoSinDonar })
+                            quickChips.push({ label: `Vuelto Total (${formatPYG(vueltoSinDonar)})`, val: vueltoSinDonar, live: true })
                             if (redondeoCompra !== vueltoSinDonar) {
-                              quickChips.push({ label: `Redondeo Compra (${formatPYG(redondeoCompra)})`, val: redondeoCompra })
+                              quickChips.push({ label: `Redondeo (${formatPYG(redondeoCompra)})`, val: redondeoCompra })
                             }
                           } else {
                             quickChips.push({ label: `Sugerido (${formatPYG(redondeoCompra)})`, val: redondeoCompra })
@@ -6554,6 +10678,7 @@ export default function POSPage() {
 
                           return quickChips.map((btn, idx) => {
                             const isSelected = donacionActiva && (
+                              (btn.live && montoDonacionManual === null) ||
                               montoDonacionManual === btn.val ||
                               (montoDonacionManual === null && btn.val === montoSugeridoDonacion)
                             )
@@ -6561,11 +10686,11 @@ export default function POSPage() {
                               <button
                                 key={idx}
                                 type="button"
-                                onClick={() => handleToggleDonacion(true, btn.val)}
-                                className={`px-1.5 py-0.5 rounded text-[9px] font-bold font-posMono tabular-nums transition-all cursor-pointer ${
+                                onClick={() => btn.live ? handleToggleDonacion(true) : handleToggleDonacion(true, btn.val)}
+                                className={`px-2.5 py-1.5 rounded-xl text-xs font-black font-posMono tabular-nums transition-all cursor-pointer shadow-xs ${
                                   isSelected
-                                    ? "bg-rose-600 text-white shadow-sm"
-                                    : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100"
+                                    ? "bg-rose-600 text-white shadow-md shadow-rose-600/30 ring-2 ring-rose-400 scale-[1.02]"
+                                    : "bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 hover:border-rose-400 hover:bg-rose-50/50 dark:hover:bg-slate-700/80"
                                 }`}
                               >
                                 {btn.label}
@@ -6574,13 +10699,38 @@ export default function POSPage() {
                           })
                         })()}
                       </div>
+
+                      {/* Campo Manual de Donación */}
+                      <div className="mt-2.5 pt-2.5 border-t border-dashed border-rose-200 dark:border-rose-900/60 flex items-center justify-between gap-2">
+                        <label className="text-[11px] font-black uppercase text-rose-700 dark:text-rose-300 shrink-0 flex items-center gap-1">
+                          <Heart className="w-3.5 h-3.5 text-rose-500 fill-rose-500" />
+                          <span>Monto Libre:</span>
+                        </label>
+                        <div className="relative">
+                          <span className="absolute left-2.5 top-1.5 text-xs font-black text-rose-400">₲</span>
+                          <input
+                            type="text"
+                            value={montoDonacionManual !== null ? montoDonacionManual.toLocaleString("es-PY") : ""}
+                            onChange={(e) => {
+                              const clean = e.target.value.replace(/\D/g, "")
+                              if (clean) {
+                                handleToggleDonacion(true, parseInt(clean, 10))
+                              } else {
+                                handleToggleDonacion(true, undefined)
+                              }
+                            }}
+                            placeholder={montoSugeridoDonacion.toLocaleString("es-PY")}
+                            className="w-36 bg-white dark:bg-slate-950 border-2 border-rose-400 dark:border-rose-600 rounded-xl pl-6 pr-2.5 py-1.5 text-sm font-posMono font-black text-rose-600 dark:text-rose-400 text-right outline-none focus:border-rose-600 focus:ring-2 focus:ring-rose-400/30 shadow-sm"
+                          />
+                        </div>
+                      </div>
                     </div>
                   )
                 })()}
               </div>
 
               {/* ── COLUMNA DERECHA: SELECCIÓN DE MÉTODO Y ENTRADA DE PAGO (7 COLS) ── */}
-              <div className="lg:col-span-7 p-4 space-y-3">
+              <div className="lg:col-span-7 p-4 space-y-3 min-w-0">
                 {/* Selector de Métodos de Pago */}
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
@@ -6637,9 +10787,9 @@ export default function POSPage() {
                         { id: "cash", key: "1", label: "Efectivo", icon: Banknote, show: isEnabled("EFECTIVO") },
                         { id: "bancard", key: "2", label: "Bancard", icon: CreditCard, show: isEnabled("BANCARD") },
                         { id: "dinelco", key: "3", label: "Dinelco", icon: CreditCard, show: isEnabled("DINELCO") },
-                        { id: "qr", key: "4", label: "QR / PIX", icon: QrCode, show: isEnabled("QR") || isEnabled("PIX") },
-                        { id: "plugpay_credito", key: "5", label: "Crédito BRL", icon: CreditCard, show: true },
-                        { id: "extra_club", key: "6", label: "Extra Club", icon: Star, show: isExtraClubOn && isEnabled("EXTRA_CLUB") },
+                        { id: "plugpay", key: "4", label: "Plug Pay", icon: Smartphone, show: isEnabled("PLUGPAY") || isEnabled("PIX") },
+                        { id: "extra_club", key: "5", label: "Extra Club", icon: Star, show: isExtraClubOn && isEnabled("EXTRA_CLUB") },
+                        { id: "otros", key: "6", label: "Otros", icon: Receipt, show: isEnabled("OTROS") || isEnabled("TRANSFERENCIA") || isEnabled("CHEQUE") },
                       ]
 
                       return allTabs.filter(t => t.show).map((m) => {
@@ -6698,6 +10848,7 @@ export default function POSPage() {
                             onChange={(e) => {
                               const clean = e.target.value.replace(/\D/g, "")
                               setPayCashPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "")
+                              setHasClickedQuickCash(true)
                             }}
                             onKeyDown={(e) => handleCashFieldKeyDown(e, payCashBrlInputRef, "BRL")}
                             onFocus={(e) => e.target.select()}
@@ -6714,7 +10865,7 @@ export default function POSPage() {
                             ref={payCashBrlInputRef}
                             type="text"
                             value={payCashBrl}
-                            onChange={(e) => setPayCashBrl(e.target.value.replace(/[^0-9.,]/g, ""))}
+                            onChange={(e) => { setPayCashBrl(e.target.value.replace(/[^0-9.,]/g, "")); setHasClickedQuickCash(true) }}
                             onKeyDown={(e) => handleCashFieldKeyDown(e, payCashUsdInputRef, "USD")}
                             onFocus={(e) => e.target.select()}
                             onClick={(e) => e.currentTarget.select()}
@@ -6730,7 +10881,7 @@ export default function POSPage() {
                             ref={payCashUsdInputRef}
                             type="text"
                             value={payCashUsd}
-                            onChange={(e) => setPayCashUsd(e.target.value.replace(/[^0-9.,]/g, ""))}
+                            onChange={(e) => { setPayCashUsd(e.target.value.replace(/[^0-9.,]/g, "")); setHasClickedQuickCash(true) }}
                             onKeyDown={(e) => handleCashFieldKeyDown(e, payCashPygInputRef, "PYG")}
                             onFocus={(e) => e.target.select()}
                             onClick={(e) => e.currentTarget.select()}
@@ -6775,35 +10926,68 @@ export default function POSPage() {
                     </div>
                   )}
 
-                    {/* 2. POS BANCARD INFONET */}
+                    {/* 2. BANCARD (UNIFICADO: Débito, Crédito, QR Zimple, QR Bancard Cloud) */}
                     {activeMethods.has("bancard") && (
                       <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
-                        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2.5">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2.5">
                           <div className="flex items-center gap-2">
                             <CreditCard className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                             <span className="font-black text-xs text-slate-900 dark:text-white">Terminal POS Bancard Infonet</span>
                           </div>
-                          <div className="flex gap-1">
+                          
+                          {/* Segmented control de sub-métodos Bancard */}
+                          <div className="flex bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-xl gap-0.5 flex-wrap">
                             <button
                               type="button"
-                              onClick={() => { setPosCardType("debito"); setPosCardCuotas(1); }}
+                              onClick={() => { setBancardSubMethod("debito"); setPosCardType("debito"); setPosCardCuotas(1); }}
                               disabled={bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando"}
-                              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${posCardType === "debito" ? "bg-blue-600 text-white shadow-xs" : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                bancardSubMethod === "debito"
+                                  ? "bg-blue-600 text-white shadow-xs"
+                                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                              }`}
                             >
                               Débito
                             </button>
                             <button
                               type="button"
-                              onClick={() => setPosCardType("credito")}
+                              onClick={() => { setBancardSubMethod("credito"); setPosCardType("credito"); }}
                               disabled={bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando"}
-                              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${posCardType === "credito" ? "bg-blue-600 text-white shadow-xs" : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                bancardSubMethod === "credito"
+                                  ? "bg-blue-600 text-white shadow-xs"
+                                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                              }`}
                             >
                               Crédito
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setBancardSubMethod("qr_zimple")}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                bancardSubMethod === "qr_zimple"
+                                  ? "bg-purple-600 text-white shadow-xs"
+                                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                              }`}
+                            >
+                              QR Zimple
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setBancardSubMethod("qr_cloud")}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                bancardSubMethod === "qr_cloud"
+                                  ? "bg-blue-700 text-white shadow-xs"
+                                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                              }`}
+                            >
+                              QR Pantalla
                             </button>
                           </div>
                         </div>
 
-                        {posCardType === "credito" && (
+                        {/* Cuotas si es crédito */}
+                        {bancardSubMethod === "credito" && (
                           <div className="flex items-center gap-1.5 p-2 bg-blue-50/60 dark:bg-blue-950/30 rounded-xl border border-blue-200 dark:border-blue-800/60">
                             <span className="text-[10px] font-bold text-blue-700 dark:text-blue-300 uppercase shrink-0">Cuotas:</span>
                             <div className="flex gap-1 flex-wrap">
@@ -6822,9 +11006,10 @@ export default function POSPage() {
                           </div>
                         )}
 
-                        {isMultiPayment && (
+                        {/* Monto de línea si es pago mixto, o si ya se esta dividiendo entre varias tarjetas del mismo Bancard */}
+                        {(isMultiPayment || extraPaymentLegs.some((l) => l.method === "bancard")) && (
                           <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto en esta línea (₲):</label>
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto Bancard en esta línea (₲):</label>
                             <div className="flex gap-1">
                               <input
                                 ref={mixedCardPygInputRef}
@@ -6848,114 +11033,601 @@ export default function POSPage() {
                           </div>
                         )}
 
-                        {!activePosConfig.bancardIp && (
-                          <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300">
-                            No hay IP de terminal configurada para esta caja.{" "}
-                            <button type="button" onClick={() => setShowPosConfigModal(true)} className="underline font-bold cursor-pointer">Configurar ahora</button>
-                          </div>
-                        )}
+                        {/* SUB-MODALIDAD: DÉBITO O CRÉDITO */}
+                        {(bancardSubMethod === "debito" || bancardSubMethod === "credito") && (
+                          <>
+                            {!activePosConfig.bancardIp && (
+                              <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300">
+                                No hay IP de terminal configurada para esta caja.{" "}
+                                <button type="button" onClick={() => setShowPosConfigModal(true)} className="underline font-bold cursor-pointer">Configurar ahora</button>
+                              </div>
+                            )}
 
-                        {bancardTxnState !== "aprobada" && (
-                          <button
-                            type="button"
-                            onClick={handleBancardCharge}
-                            disabled={!activePosConfig.bancardIp || bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando"}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-black bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 cursor-pointer shadow-md shadow-blue-600/20"
-                          >
-                            {(bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando") ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
-                            <span>
-                              {bancardTxnState === "esperando_tarjeta" ? "Presente la tarjeta en el terminal..."
-                                : bancardTxnState === "confirmando" ? "Confirmando con el terminal..."
-                                : "Cobrar con Bancard"}
-                            </span>
-                          </button>
-                        )}
+                            {bancardTxnState !== "aprobada" && (
+                              <button
+                                type="button"
+                                onClick={handleBancardCharge}
+                                disabled={!activePosConfig.bancardIp || bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando"}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-black bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 cursor-pointer shadow-md shadow-blue-600/20"
+                              >
+                                {(bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando") ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
+                                <span>
+                                  {bancardTxnState === "esperando_tarjeta" ? "Presente la tarjeta en el terminal..."
+                                    : bancardTxnState === "confirmando" ? "Confirmando con el terminal..."
+                                    : `Cobrar con Bancard ${bancardSubMethod === "debito" ? "Débito" : "Crédito"}`}
+                                </span>
+                              </button>
+                            )}
 
-                        {bancardTxnState === "aprobada" && bancardTxnResult && (
-                          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 space-y-0.5">
-                            <div className="font-black">✓ {bancardTxnResult.mensajeDisplay || "Aprobada"}</div>
-                            {bancardTxnResult.nombreTarjeta && <div>{bancardTxnResult.nombreTarjeta}{bancardTxnResult.pan ? ` · **** ${bancardTxnResult.pan}` : ""}</div>}
-                            {bancardTxnResult.nombreCliente && <div>{bancardTxnResult.nombreCliente}</div>}
-                            <div className="font-posMono tabular-nums">Autorización {bancardTxnResult.codigoAutorizacion} · Boleta {bancardTxnResult.nroBoleta}</div>
-                          </div>
-                        )}
+                            {bancardTxnState === "aprobada" && bancardTxnResult && (
+                              <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 space-y-0.5">
+                                <div className="font-black">✓ {bancardTxnResult.mensajeDisplay || "Aprobada"}</div>
+                                {bancardTxnResult.nombreTarjeta && <div>{bancardTxnResult.nombreTarjeta}{bancardTxnResult.pan ? ` · **** ${bancardTxnResult.pan}` : ""}</div>}
+                                {bancardTxnResult.nombreCliente && <div>{bancardTxnResult.nombreCliente}</div>}
+                                <div className="font-posMono tabular-nums">Autorización {bancardTxnResult.codigoAutorizacion} · Boleta {bancardTxnResult.nroBoleta}</div>
+                              </div>
+                            )}
 
-                        {bancardTxnState === "error_rechazo" && (
-                          <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5">
-                            <div className="font-black">✕ {bancardTxnError}</div>
-                            <button type="button" onClick={handleBancardCharge} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
-                          </div>
-                        )}
+                            {bancardTxnState === "error_rechazo" && (
+                              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5">
+                                <div className="font-black">✕ {bancardTxnError}</div>
+                                <button type="button" onClick={handleBancardCharge} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
+                              </div>
+                            )}
 
-                        {bancardTxnState === "error_conexion" && (
-                          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5">
-                            <div className="font-black">⚠ {bancardTxnError}</div>
-                            <button type="button" onClick={handleBancardCharge} className="text-xs font-bold underline cursor-pointer">Reintentar conexión</button>
-                          </div>
-                        )}
+                            {bancardTxnState === "error_conexion" && (
+                              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5">
+                                <div className="font-black">⚠ {bancardTxnError}</div>
+                                <button type="button" onClick={handleBancardCharge} className="text-xs font-bold underline cursor-pointer">Reintentar conexión</button>
+                              </div>
+                            )}
 
-                        {/* Respaldo manual */}
-                        {bancardTxnState !== "aprobada" && (
-                          <div className="pt-1 border-t border-slate-200 dark:border-slate-800">
-                            <button
-                              type="button"
-                              onClick={() => setShowBancardManualFallback((v) => !v)}
-                              className="text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
-                            >
-                              {showBancardManualFallback ? "▾ Ocultar carga manual" : "▸ Cargar voucher manualmente"}
-                            </button>
+                            {/* Respaldo manual */}
+                            {bancardTxnState !== "aprobada" && (
+                              <div className="pt-1 border-t border-slate-200 dark:border-slate-800">
+                                <button
+                                  type="button"
+                                  onClick={() => setShowBancardManualFallback((v) => !v)}
+                                  className="text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                                >
+                                  {showBancardManualFallback ? "▾ Ocultar carga manual" : "▸ Cargar voucher manualmente"}
+                                </button>
 
-                            {showBancardManualFallback && (
-                              <div className="mt-2 space-y-2">
-                                <div className="grid grid-cols-3 gap-2">
-                                  <div>
-                                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Terminal:</label>
-                                    <input
-                                      type="text"
-                                      value={posTerminalId}
-                                      onChange={(e) => setPosTerminalId(e.target.value)}
-                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs text-blue-600 dark:text-blue-400 font-bold outline-none"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Lote:</label>
-                                    <input
-                                      type="text"
-                                      value={posCardLote}
-                                      onChange={(e) => setPosCardLote(e.target.value)}
-                                      placeholder="001"
-                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs outline-none"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Voucher:</label>
-                                    <input
-                                      type="text"
-                                      value={posCardCupon}
-                                      onChange={(e) => setPosCardCupon(e.target.value)}
-                                      placeholder="123456"
-                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs text-emerald-600 dark:text-emerald-400 font-bold outline-none"
-                                    />
-                                  </div>
-                                </div>
-
-                                <div className="mt-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleVerifyPosTerminal("bancard")}
-                                    disabled={posVerifyStatus === "searching"}
-                                    className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold bg-blue-600/10 text-blue-600 dark:text-blue-400 border border-blue-500/30 hover:bg-blue-600/20 disabled:opacity-60 cursor-pointer"
-                                  >
-                                    {posVerifyStatus === "searching" ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
-                                    <span>{posVerifyStatus === "searching" ? "Buscando en terminal..." : "Verificar Transacción en Terminal"}</span>
-                                  </button>
-
-                                  {posVerifyStatus === "found" && posVerifiedTxn && (
-                                    <div className="mt-2 p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300">
-                                      ✓ Verificado: {posVerifiedTxn.tarjeta_marca} · {formatPYG(posVerifiedTxn.monto)} · Voucher {posVerifiedTxn.voucher}
+                                {showBancardManualFallback && (
+                                  <div className="mt-2 space-y-2">
+                                    <div className="grid grid-cols-3 gap-2">
+                                      <div>
+                                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Terminal:</label>
+                                        <input
+                                          type="text"
+                                          value={posTerminalId}
+                                          onChange={(e) => setPosTerminalId(e.target.value)}
+                                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs text-blue-600 dark:text-blue-400 font-bold outline-none"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Lote:</label>
+                                        <input
+                                          type="text"
+                                          value={posCardLote}
+                                          onChange={(e) => setPosCardLote(e.target.value)}
+                                          placeholder="001"
+                                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs outline-none"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Voucher:</label>
+                                        <input
+                                          type="text"
+                                          value={posCardCupon}
+                                          onChange={(e) => setPosCardCupon(e.target.value)}
+                                          placeholder="123456"
+                                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs text-emerald-600 dark:text-emerald-400 font-bold outline-none"
+                                        />
+                                      </div>
                                     </div>
+
+                                    <div className="mt-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleVerifyPosTerminal("bancard")}
+                                        disabled={posVerifyStatus === "searching"}
+                                        className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold bg-blue-600/10 text-blue-600 dark:text-blue-400 border border-blue-500/30 hover:bg-blue-600/20 disabled:opacity-60 cursor-pointer"
+                                      >
+                                        {posVerifyStatus === "searching" ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                                        <span>{posVerifyStatus === "searching" ? "Buscando en terminal..." : "Verificar Transacción en Terminal"}</span>
+                                      </button>
+
+                                      {posVerifyStatus === "found" && posVerifiedTxn && (
+                                        <div className="mt-2 p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300">
+                                          ✓ Verificado: {posVerifiedTxn.tarjeta_marca} · {formatPYG(posVerifiedTxn.monto)} · Voucher {posVerifiedTxn.voucher}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        )}
+
+                        {/* COBROS ADICIONALES CON TARJETA (2da, 3ra... -- otras cuentas/tarjetas en la misma venta).
+                            No depende de "Pago mixto": dividir entre 2+ tarjetas del mismo Bancard es un caso
+                            valido incluso con un solo metodo activo -- antes quedaba escondido detras de activar
+                            un segundo metodo distinto (ej. Efectivo) solo para desbloquear este boton. */}
+                        {(bancardSubMethod === "debito" || bancardSubMethod === "credito") && (
+                          <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
+                            {extraPaymentLegs.filter((l) => l.method === "bancard").map((leg, idx) => (
+                              <div key={leg.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase">Tarjeta #{idx + 2}</span>
+                                  {leg.txnState === "idle" && (
+                                    <button type="button" onClick={() => removeExtraLeg(leg.id)} className="text-[10px] text-slate-400 hover:text-rose-500 cursor-pointer">Quitar</button>
                                   )}
                                 </div>
+                                <div className="flex gap-1">
+                                  <div className="flex bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-lg gap-0.5">
+                                    <button type="button" disabled={leg.txnState !== "idle"} onClick={() => updateExtraLeg(leg.id, { cardType: "debito", cardCuotas: 1 })} className={`px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer ${leg.cardType === "debito" ? "bg-blue-600 text-white" : "text-slate-600 dark:text-slate-400"}`}>Débito</button>
+                                    <button type="button" disabled={leg.txnState !== "idle"} onClick={() => updateExtraLeg(leg.id, { cardType: "credito" })} className={`px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer ${leg.cardType === "credito" ? "bg-blue-600 text-white" : "text-slate-600 dark:text-slate-400"}`}>Crédito</button>
+                                  </div>
+                                  <input
+                                    type="text"
+                                    value={leg.montoStr}
+                                    disabled={leg.txnState !== "idle"}
+                                    onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); updateExtraLeg(leg.id, { montoStr: clean ? parseInt(clean, 10).toLocaleString("es-PY") : "" }) }}
+                                    onFocus={(e) => e.target.select()}
+                                    placeholder="Monto ₲"
+                                    className="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums font-bold text-xs text-blue-600 dark:text-blue-400 outline-none focus:border-blue-500"
+                                  />
+                                </div>
+
+                                {leg.txnState === "idle" && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleBancardChargeForLeg(leg)}
+                                    disabled={!activePosConfig.bancardIp}
+                                    className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 cursor-pointer"
+                                  >
+                                    <CreditCard className="w-3.5 h-3.5" />
+                                    Cobrar Tarjeta #{idx + 2}
+                                  </button>
+                                )}
+                                {(leg.txnState === "esperando" || leg.txnState === "confirmando") && (
+                                  <div className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-blue-600/60 text-white">
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    {leg.txnState === "esperando" ? "Presente la tarjeta..." : "Confirmando..."}
+                                  </div>
+                                )}
+                                {leg.txnState === "aprobada" && leg.txnResult && (
+                                  <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-600 dark:text-emerald-300 space-y-0.5">
+                                    <div className="font-black">✓ {leg.txnResult.mensajeDisplay || "Aprobada"}</div>
+                                    <div className="font-posMono tabular-nums">Aut. {leg.txnResult.codigoAutorizacion} · Boleta {leg.txnResult.nroBoleta}</div>
+                                  </div>
+                                )}
+                                {leg.txnState === "error_rechazo" && (
+                                  <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-600 dark:text-rose-300 space-y-1">
+                                    <div className="font-black">✕ {leg.txnError}</div>
+                                    <button type="button" onClick={() => updateExtraLeg(leg.id, { txnState: "idle", txnError: "" })} className="text-[10px] font-bold underline cursor-pointer">Reintentar</button>
+                                  </div>
+                                )}
+                                {leg.txnState === "error_conexion" && (
+                                  <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1">
+                                    <div className="font-black">⚠ {leg.txnError}</div>
+                                    <button type="button" onClick={() => handleBancardChargeForLeg(leg)} className="text-[10px] font-bold underline cursor-pointer">Reintentar conexión</button>
+                                    <div>
+                                      <button type="button" onClick={() => updateExtraLeg(leg.id, { showManualFallback: !leg.showManualFallback })} className="text-[10px] font-bold underline cursor-pointer">
+                                        {leg.showManualFallback ? "Ocultar carga manual" : "Cargar voucher manualmente"}
+                                      </button>
+                                      {leg.showManualFallback && (
+                                        <input
+                                          type="text"
+                                          value={leg.manualCupon}
+                                          onChange={(e) => updateExtraLeg(leg.id, { manualCupon: e.target.value })}
+                                          placeholder="Nº Voucher"
+                                          className="mt-1 w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums text-[11px] text-emerald-600 dark:text-emerald-400 font-bold outline-none"
+                                        />
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => addExtraLeg("bancard")}
+                              className="w-full text-[11px] font-bold text-blue-600 dark:text-blue-400 border border-dashed border-blue-400/50 rounded-xl py-2 hover:bg-blue-500/5 cursor-pointer"
+                            >
+                              + Agregar otra tarjeta (otra cuenta/cliente)
+                            </button>
+                          </div>
+                        )}
+
+                        {/* SUB-MODALIDAD: QR ZIMPLE */}
+                        {bancardSubMethod === "qr_zimple" && (
+                          <div className="flex flex-col items-center text-center space-y-2.5 w-full">
+                            <div className="flex items-center gap-2">
+                              <QrCode className="w-7 h-7 text-purple-600" />
+                              <div className="text-left">
+                                <div className="font-bold text-xs text-slate-900 dark:text-white">QR Dinámico Bancard Zimple</div>
+                                {!(isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) && (
+                                  <div className="text-xs font-posMono tabular-nums font-black text-purple-600 dark:text-purple-400">
+                                    {formatPYG(totalPyg)} (R$ {totalBrl})
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {(isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) && (
+                              <div className="w-full max-w-sm text-left">
+                                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto QR en esta línea (₲):</label>
+                                <div className="flex gap-1">
+                                  <input
+                                    type="text"
+                                    value={mixedQrPyg}
+                                    onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedQrPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                                    onFocus={(e) => e.target.select()}
+                                    placeholder="0"
+                                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
+                                  />
+                                  <button
+                                    type="button"
+                                    title="Completar con el resto"
+                                    onClick={() => setMixedQrPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                                    className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
+                                  >
+                                    Resto
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {bancardQrState !== "aprobada" && (
+                              <button
+                                type="button"
+                                onClick={handleBancardQR}
+                                disabled={!activePosConfig.bancardIp || bancardQrState === "esperando"}
+                                className="w-full max-w-sm flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer shadow-sm shadow-purple-600/20"
+                              >
+                                {bancardQrState === "esperando" ? <Loader2 className="w-4 h-4 animate-spin" /> : <QrCode className="w-4 h-4" />}
+                                <span>{bancardQrState === "esperando" ? "Esperando el pago del cliente..." : "Generar QR Zimple en Terminal"}</span>
+                              </button>
+                            )}
+
+                            {bancardQrState === "error_rechazo" && (
+                              <div className="w-full max-w-sm p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5 text-left">
+                                <div className="font-black">✕ {bancardQrError || "Transacción QR rechazada"}</div>
+                                <button type="button" onClick={handleBancardQR} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
+                              </div>
+                            )}
+
+                            {bancardQrState === "error_conexion" && (
+                              <div className="w-full max-w-sm p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5 text-left">
+                                <div className="font-black">⚠ {bancardQrError || "Error de conexión con el terminal"}</div>
+                                <button type="button" onClick={handleBancardQR} className="text-xs font-bold underline cursor-pointer">Reintentar conexión</button>
+                              </div>
+                            )}
+
+                            {/* Respaldo manual de voucher para QR */}
+                            {bancardQrState !== "aprobada" && (
+                              <div className="w-full max-w-sm pt-1 border-t border-slate-200 dark:border-slate-800 text-left">
+                                <button
+                                  type="button"
+                                  onClick={() => setShowBancardQrManualFallback((v) => !v)}
+                                  className="text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer flex items-center gap-1"
+                                >
+                                  <span>{showBancardQrManualFallback ? "▾ Ocultar carga manual de voucher QR" : "▸ Cargar voucher QR manualmente"}</span>
+                                </button>
+
+                                {showBancardQrManualFallback && (
+                                  <div className="mt-2 p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
+                                    <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                                      Si el terminal ya cobró y emitió el ticket impreso, cargá los datos para validar la venta:
+                                    </p>
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div>
+                                        <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-0.5">Nº Boleta / Ticket:</label>
+                                        <input
+                                          type="text"
+                                          value={posQrCupon}
+                                          onChange={(e) => setPosQrCupon(e.target.value)}
+                                          placeholder="123456"
+                                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums text-xs text-purple-600 dark:text-purple-400 font-bold outline-none"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-0.5">Cod. Autorización:</label>
+                                        <input
+                                          type="text"
+                                          value={posQrAuth}
+                                          onChange={(e) => setPosQrAuth(e.target.value)}
+                                          placeholder="000123"
+                                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums text-xs outline-none"
+                                        />
+                                      </div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={handleManualConfirmQr}
+                                      className="w-full py-2 px-3 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
+                                    >
+                                      <CheckCircle className="w-3.5 h-3.5" />
+                                      <span>Confirmar Pago QR con Voucher</span>
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {bancardQrState === "aprobada" && bancardQrResult && (
+                              <div className="w-full max-w-sm p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 space-y-0.5 text-left">
+                                <div className="font-black flex items-center justify-between">
+                                  <span>✓ {bancardQrResult.mensajeDisplay || "Pago Exitoso"}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setBancardQrState("idle")
+                                      setBancardQrResult(null)
+                                      setBancardQrManualConfirm(false)
+                                    }}
+                                    className="text-[10px] text-rose-500 hover:underline cursor-pointer font-bold"
+                                  >
+                                    Cambiar
+                                  </button>
+                                </div>
+                                <div className="font-posMono tabular-nums">Autorización {bancardQrResult.codigoAutorizacion} · Boleta {bancardQrResult.nroBoleta}</div>
+                              </div>
+                            )}
+
+                            {/* COBROS ADICIONALES CON QR ZIMPLE (2do, 3er QR -- otras cuentas/clientes en la misma venta).
+                                Ya no depende de "Pago mixto": se puede dividir entre 2+ QR del mismo Bancard con un solo metodo activo. */}
+                            {(
+                              <div className="w-full max-w-sm pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5 text-left">
+                                {extraPaymentLegs.filter((l) => l.method === "qr").map((leg, idx) => (
+                                  <div key={leg.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[10px] font-black text-purple-600 dark:text-purple-400 uppercase">QR #{idx + 2}</span>
+                                      {leg.txnState === "idle" && (
+                                        <button type="button" onClick={() => removeExtraLeg(leg.id)} className="text-[10px] text-slate-400 hover:text-rose-500 cursor-pointer">Quitar</button>
+                                      )}
+                                    </div>
+                                    <input
+                                      type="text"
+                                      value={leg.montoStr}
+                                      disabled={leg.txnState !== "idle"}
+                                      onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); updateExtraLeg(leg.id, { montoStr: clean ? parseInt(clean, 10).toLocaleString("es-PY") : "" }) }}
+                                      onFocus={(e) => e.target.select()}
+                                      placeholder="Monto ₲"
+                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums font-bold text-xs text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
+                                    />
+                                    {(leg.txnState === "idle" || leg.txnState === "esperando") && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleBancardQRForLeg(leg)}
+                                        disabled={!activePosConfig.bancardIp || leg.txnState === "esperando"}
+                                        className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer"
+                                      >
+                                        {leg.txnState === "esperando" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <QrCode className="w-3.5 h-3.5" />}
+                                        {leg.txnState === "esperando" ? "Esperando el pago..." : `Generar QR #${idx + 2}`}
+                                      </button>
+                                    )}
+                                    {leg.txnState === "aprobada" && leg.txnResult && (
+                                      <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-600 dark:text-emerald-300 space-y-0.5">
+                                        <div className="font-black">✓ {leg.txnResult.mensajeDisplay || "Pago Exitoso"}</div>
+                                        <div className="font-posMono tabular-nums">Aut. {leg.txnResult.codigoAutorizacion} · Boleta {leg.txnResult.nroBoleta}</div>
+                                      </div>
+                                    )}
+                                    {leg.txnState === "error_rechazo" && (
+                                      <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-600 dark:text-rose-300 space-y-1">
+                                        <div className="font-black">✕ {leg.txnError}</div>
+                                        <button type="button" onClick={() => updateExtraLeg(leg.id, { txnState: "idle", txnError: "" })} className="text-[10px] font-bold underline cursor-pointer">Reintentar</button>
+                                      </div>
+                                    )}
+                                    {leg.txnState === "error_conexion" && (
+                                      <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1">
+                                        <div className="font-black">⚠ {leg.txnError}</div>
+                                        <button type="button" onClick={() => handleBancardQRForLeg(leg)} className="text-[10px] font-bold underline cursor-pointer">Reintentar conexión</button>
+                                        <div>
+                                          <button type="button" onClick={() => updateExtraLeg(leg.id, { showManualFallback: !leg.showManualFallback })} className="text-[10px] font-bold underline cursor-pointer">
+                                            {leg.showManualFallback ? "Ocultar carga manual" : "Cargar voucher manualmente"}
+                                          </button>
+                                          {leg.showManualFallback && (
+                                            <input
+                                              type="text"
+                                              value={leg.manualCupon}
+                                              onChange={(e) => updateExtraLeg(leg.id, { manualCupon: e.target.value })}
+                                              placeholder="Nº Boleta"
+                                              className="mt-1 w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums text-[11px] text-emerald-600 dark:text-emerald-400 font-bold outline-none"
+                                            />
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                                <button
+                                  type="button"
+                                  onClick={() => addExtraLeg("qr")}
+                                  className="w-full text-[11px] font-bold text-purple-600 dark:text-purple-400 border border-dashed border-purple-400/50 rounded-xl py-2 hover:bg-purple-500/5 cursor-pointer"
+                                >
+                                  + Agregar otro QR (otra cuenta/cliente)
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* SUB-MODALIDAD: QR BANCARD EN PANTALLA (API DIRECTA) */}
+                        {bancardSubMethod === "qr_cloud" && (
+                          <div className="flex flex-col items-center text-center space-y-2.5 w-full">
+                            <div className="flex items-center gap-2">
+                              <QrCode className="w-7 h-7 text-blue-600" />
+                              <div className="text-left">
+                                <div className="font-bold text-xs text-slate-900 dark:text-white">QR Bancard (Pantalla API)</div>
+                                {!(isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) && (
+                                  <div className="text-xs font-posMono tabular-nums font-black text-blue-600 dark:text-blue-400">
+                                    {formatPYG(totalPyg)}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {(isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) && (
+                              <div className="w-full max-w-sm text-left">
+                                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto QR en esta línea (₲):</label>
+                                <div className="flex gap-1">
+                                  <input
+                                    type="text"
+                                    value={mixedQrPyg}
+                                    onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedQrPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                                    onFocus={(e) => e.target.select()}
+                                    placeholder="0"
+                                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-blue-600 dark:text-blue-400 outline-none focus:border-blue-500"
+                                  />
+                                  <button
+                                    type="button"
+                                    title="Completar con el resto"
+                                    onClick={() => setMixedQrPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                                    className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
+                                  >
+                                    Resto
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {bancardCloudQrState === "idle" && (
+                              <button
+                                type="button"
+                                onClick={handleGenerateBancardCloudQr}
+                                className="w-full max-w-sm flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-blue-600 hover:bg-blue-500 text-white cursor-pointer shadow-sm shadow-blue-600/20"
+                              >
+                                <QrCode className="w-4 h-4" />
+                                <span>Generar QR Bancard</span>
+                              </button>
+                            )}
+
+                            {bancardCloudQrState === "generando" && (
+                              <div className="w-full max-w-sm flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
+                                <Loader2 className="w-4 h-4 animate-spin" /> Generando QR con Bancard...
+                              </div>
+                            )}
+
+                            {bancardCloudQrState === "esperando" && bancardCloudQrData && (
+                              <div className="w-full p-3 bg-blue-50/80 dark:bg-blue-950/40 rounded-2xl border border-blue-200 dark:border-blue-800 space-y-2.5">
+                                <div className="flex items-center justify-between border-b border-blue-200/60 dark:border-blue-800/60 pb-1.5">
+                                  <div className="flex items-center gap-1.5 text-xs font-black text-blue-700 dark:text-blue-300">
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                                    <span>Esperando el pago del cliente...</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={handleCancelBancardCloudQr}
+                                    className="text-xs text-rose-500 hover:text-rose-600 font-bold underline cursor-pointer"
+                                  >
+                                    Cancelar QR
+                                  </button>
+                                </div>
+
+                                <div className="flex flex-col sm:flex-row items-center sm:items-start gap-3.5 min-w-0">
+                                  {bancardCloudQrData.qrUrl && (
+                                    <div className="p-2 bg-white rounded-xl shadow-xs border border-blue-300 shrink-0">
+                                      <img src={bancardCloudQrData.qrUrl} alt="QR Bancard" className="w-40 h-40 sm:w-52 sm:h-52 object-contain rounded-md" />
+                                    </div>
+                                  )}
+                                  <div className="flex-1 space-y-2 text-center sm:text-left min-w-0 w-full">
+                                    <div>
+                                      <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Total a pagar:</span>
+                                      <span className="text-xl font-black font-posMono text-blue-600 dark:text-blue-400">
+                                        {formatPYG(bancardCloudQrData.amount)}
+                                      </span>
+                                    </div>
+                                    <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
+                                      Escanear con Pago Móvil o la app del banco. El QR vence en 5 minutos.
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {bancardCloudQrState === "aprobada" && (
+                              <div className="w-full max-w-sm p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left">
+                                <div className="font-black">✓ Pago QR Bancard confirmado</div>
+                              </div>
+                            )}
+
+                            {bancardCloudQrState === "error" && (
+                              <div className="w-full max-w-sm p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5 text-left">
+                                <div className="font-black">✕ {bancardCloudQrError}</div>
+                                <button type="button" onClick={handleGenerateBancardCloudQr} className="text-xs font-bold underline cursor-pointer">Generar QR nuevamente</button>
+                              </div>
+                            )}
+
+                            {/* COBROS ADICIONALES CON QR PANTALLA (2do, 3er QR -- otras cuentas/clientes en la misma venta).
+                                Ya no depende de "Pago mixto". */}
+                            {(
+                              <div className="w-full max-w-sm pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5 text-left">
+                                {extraPaymentLegs.filter((l) => l.method === "qr").map((leg, idx) => (
+                                  <div key={leg.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase">QR #{idx + 2}</span>
+                                      {leg.txnState === "idle" && (
+                                        <button type="button" onClick={() => removeExtraLeg(leg.id)} className="text-[10px] text-slate-400 hover:text-rose-500 cursor-pointer">Quitar</button>
+                                      )}
+                                    </div>
+                                    {leg.txnState === "idle" && (
+                                      <>
+                                        <input
+                                          type="text"
+                                          value={leg.montoStr}
+                                          onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); updateExtraLeg(leg.id, { montoStr: clean ? parseInt(clean, 10).toLocaleString("es-PY") : "" }) }}
+                                          onFocus={(e) => e.target.select()}
+                                          placeholder="Monto ₲"
+                                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums font-bold text-xs text-blue-600 dark:text-blue-400 outline-none focus:border-blue-500"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => handleGenerateBancardCloudQrForLeg(leg)}
+                                          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-blue-600 hover:bg-blue-500 text-white cursor-pointer"
+                                        >
+                                          <QrCode className="w-3.5 h-3.5" />
+                                          Generar QR #{idx + 2}
+                                        </button>
+                                      </>
+                                    )}
+                                    {leg.txnState === "generando" && (
+                                      <div className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Generando QR...
+                                      </div>
+                                    )}
+                                    {leg.txnState === "esperando" && (
+                                      <div className="flex flex-col items-center gap-1.5">
+                                        {leg.qrUrl && <img src={leg.qrUrl} alt={`QR #${idx + 2}`} className="w-32 h-32 rounded-lg border border-slate-200 dark:border-slate-700 bg-white p-1.5" />}
+                                        <div className="flex items-center gap-1 text-[11px] font-bold text-blue-600 dark:text-blue-400">
+                                          <Loader2 className="w-3 h-3 animate-spin" /> Esperando el pago...
+                                        </div>
+                                        <button type="button" onClick={() => handleCancelBancardCloudQrForLeg(leg)} className="text-[10px] font-bold text-rose-500 hover:text-rose-600 underline cursor-pointer">Cancelar QR</button>
+                                      </div>
+                                    )}
+                                    {leg.txnState === "aprobada" && (
+                                      <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-600 dark:text-emerald-300">
+                                        <div className="font-black">✓ Pago QR confirmado</div>
+                                      </div>
+                                    )}
+                                    {(leg.txnState === "error_rechazo" || leg.txnState === "error_conexion") && (
+                                      <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-600 dark:text-rose-300 space-y-1">
+                                        <div className="font-black">✕ {leg.txnError}</div>
+                                        <button type="button" onClick={() => updateExtraLeg(leg.id, { txnState: "idle", txnError: "" })} className="text-[10px] font-bold underline cursor-pointer">Generar QR nuevamente</button>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                                <button
+                                  type="button"
+                                  onClick={() => addExtraLeg("qr")}
+                                  className="w-full text-[11px] font-bold text-blue-600 dark:text-blue-400 border border-dashed border-blue-400/50 rounded-xl py-2 hover:bg-blue-500/5 cursor-pointer"
+                                >
+                                  + Agregar otro QR (otra cuenta/cliente)
+                                </button>
                               </div>
                             )}
                           </div>
@@ -6963,63 +11635,81 @@ export default function POSPage() {
                       </div>
                     )}
 
-                    {/* 3. POS DINELCO BEPSA */}
+                    {/* 3. DINELCO (UNIFICADO: Débito, Crédito, Social, QR Guaraníes, PIX Brasil) */}
                     {activeMethods.has("dinelco") && (
                       <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
-                        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2.5">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2.5">
                           <div className="flex items-center gap-2">
                             <CreditCard className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-                            <span className="font-black text-xs text-slate-900 dark:text-white">Terminal POS Dinelco BEPSA</span>
+                            <span className="font-black text-xs text-slate-900 dark:text-white">Terminal POS Dinelco (Ingenico AXIUM)</span>
                           </div>
-                          <div className="flex gap-1">
+                          
+                          {/* Segmented control de sub-métodos Dinelco */}
+                          <div className="flex bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-xl gap-0.5 flex-wrap">
                             {(["debito", "credito", "social"] as const).map(t => (
                               <button
                                 key={t}
                                 type="button"
-                                onClick={() => setDinelcoCardType(t)}
-                                className={`px-2.5 py-1 rounded-xl text-xs font-bold uppercase transition-all ${dinelcoCardType === t ? "bg-purple-600 text-white shadow-xs" : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}
+                                onClick={() => { setDinelcoSubMethod(t); setDinelcoCardType(t); }}
+                                disabled={dinelcoTxnState === "esperando_tarjeta" || dinelcoTxnState === "confirmando"}
+                                className={`px-2.5 py-1 rounded-lg text-xs font-bold uppercase transition-all cursor-pointer ${
+                                  dinelcoSubMethod === t
+                                    ? "bg-purple-600 text-white shadow-xs"
+                                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                                }`}
                               >
                                 {t}
                               </button>
                             ))}
+                            <button
+                              type="button"
+                              onClick={() => { setDinelcoSubMethod("qr"); setDinelcoQrMode("qr"); }}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                dinelcoSubMethod === "qr"
+                                  ? "bg-purple-600 text-white shadow-xs"
+                                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                              }`}
+                            >
+                              QR Gs.
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setDinelcoSubMethod("pix"); setDinelcoQrMode("pix"); }}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                dinelcoSubMethod === "pix"
+                                  ? "bg-orange-600 text-white shadow-xs"
+                                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                              }`}
+                            >
+                              PIX BR
+                            </button>
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-3 gap-2">
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Terminal:</label>
-                            <input
-                              type="text"
-                              value={dinelcoTerminalId}
-                              onChange={(e) => setDinelcoTerminalId(e.target.value)}
-                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs text-purple-600 dark:text-purple-400 font-bold outline-none"
-                            />
+                        {/* Cuotas si es crédito */}
+                        {dinelcoSubMethod === "credito" && (
+                          <div className="flex items-center gap-1.5 p-2 bg-purple-50/60 dark:bg-purple-950/30 rounded-xl border border-purple-200 dark:border-purple-800/60">
+                            <span className="text-[10px] font-bold text-purple-700 dark:text-purple-300 uppercase shrink-0">Cuotas:</span>
+                            <div className="flex gap-1 flex-wrap">
+                              {[1, 2, 3, 6, 12, 18, 24].map((c) => (
+                                <button
+                                  key={c}
+                                  type="button"
+                                  onClick={() => setDinelcoCuotas(c)}
+                                  disabled={dinelcoTxnState === "esperando_tarjeta" || dinelcoTxnState === "confirmando"}
+                                  className={`px-2 py-0.5 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${dinelcoCuotas === c ? "bg-purple-600 text-white shadow-xs" : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700"}`}
+                                >
+                                  {c === 1 ? "1 (Directo)" : `${c}x`}
+                                </button>
+                              ))}
+                            </div>
                           </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Lote:</label>
-                            <input
-                              type="text"
-                              value={dinelcoLote}
-                              onChange={(e) => setDinelcoLote(e.target.value)}
-                              placeholder="001"
-                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Voucher:</label>
-                            <input
-                              type="text"
-                              value={dinelcoCupon}
-                              onChange={(e) => setDinelcoCupon(e.target.value)}
-                              placeholder="654321"
-                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs text-purple-600 dark:text-purple-400 font-bold outline-none"
-                            />
-                          </div>
-                        </div>
+                        )}
 
-                        {isMultiPayment && (
+                        {/* Monto de línea si es pago mixto */}
+                        {(isMultiPayment || extraPaymentLegs.some((l) => l.method === "dinelco")) && (
                           <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto en esta línea (₲):</label>
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto Dinelco en esta línea (₲):</label>
                             <div className="flex gap-1">
                               <input
                                 ref={mixedDinelcoPygInputRef}
@@ -7043,67 +11733,449 @@ export default function POSPage() {
                           </div>
                         )}
 
-                        <div className="mt-2">
-                          <button
-                            type="button"
-                            onClick={() => handleVerifyPosTerminal("dinelco")}
-                            disabled={posVerifyStatus === "searching"}
-                            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold bg-purple-600/10 text-purple-600 dark:text-purple-400 border border-purple-500/30 hover:bg-purple-600/20 disabled:opacity-60 cursor-pointer"
-                          >
-                            {posVerifyStatus === "searching" ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
-                            <span>{posVerifyStatus === "searching" ? "Buscando en terminal..." : "Verificar Transacción en Terminal"}</span>
-                          </button>
-                        </div>
+                        {/* SUB-MODALIDAD: TARJETAS FÍSICAS (Débito / Crédito / Social) */}
+                        {(dinelcoSubMethod === "debito" || dinelcoSubMethod === "credito" || dinelcoSubMethod === "social") && (
+                          <>
+                            {!activePosConfig.dinelcoIp && (
+                              <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300">
+                                No hay IP de terminal Dinelco configurada para esta caja.{" "}
+                                <button type="button" onClick={() => setShowPosConfigModal(true)} className="underline font-bold cursor-pointer">Configurar ahora</button>
+                              </div>
+                            )}
+
+                            {activePosConfig.dinelcoIp && dinelcoTxnState !== "aprobada" && (
+                              <button
+                                type="button"
+                                onClick={handleDinelcoCharge}
+                                disabled={dinelcoTxnState === "esperando_tarjeta" || dinelcoTxnState === "confirmando"}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer shadow-md shadow-purple-600/20"
+                              >
+                                {(dinelcoTxnState === "esperando_tarjeta" || dinelcoTxnState === "confirmando") ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
+                                <span>
+                                  {dinelcoTxnState === "esperando_tarjeta" ? "Presente la tarjeta en el terminal..."
+                                    : dinelcoTxnState === "confirmando" ? "Confirmando con el terminal..."
+                                    : `Cobrar con Dinelco ${dinelcoSubMethod.toUpperCase()}`}
+                                </span>
+                              </button>
+                            )}
+
+                            {dinelcoTxnState === "aprobada" && dinelcoTxnResult && (
+                              <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 space-y-0.5">
+                                <div className="font-black">✓ Aprobada</div>
+                                {dinelcoTxnResult.ultimos4 && <div>**** {dinelcoTxnResult.ultimos4}</div>}
+                                <div className="font-posMono tabular-nums">Autorización {dinelcoTxnResult.codigoAutorizacion} · Boleta {dinelcoTxnResult.nroBoleta}</div>
+                              </div>
+                            )}
+
+                            {dinelcoTxnState === "error_rechazo" && (
+                              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5">
+                                <div className="font-black">✕ {dinelcoTxnError}</div>
+                                <button type="button" onClick={handleDinelcoCharge} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
+                              </div>
+                            )}
+
+                            {dinelcoTxnState === "error_conexion" && (
+                              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5">
+                                <div className="font-black">⚠ {dinelcoTxnError}</div>
+                                <button type="button" onClick={handleDinelcoCharge} className="text-xs font-bold underline cursor-pointer">Reintentar conexión</button>
+                              </div>
+                            )}
+
+                            {/* Respaldo manual */}
+                            {dinelcoTxnState !== "aprobada" && (
+                              <div className="pt-1 border-t border-slate-200 dark:border-slate-800">
+                                <button
+                                  type="button"
+                                  onClick={() => setShowDinelcoManualFallback((v) => !v)}
+                                  className="text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                                >
+                                  {showDinelcoManualFallback ? "▾ Ocultar carga manual" : "▸ Cargar voucher manualmente"}
+                                </button>
+
+                                {showDinelcoManualFallback && (
+                                  <div className="mt-2 space-y-2">
+                                    <div className="grid grid-cols-3 gap-2">
+                                      <div>
+                                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Terminal:</label>
+                                        <input
+                                          type="text"
+                                          value={dinelcoTerminalId}
+                                          onChange={(e) => setDinelcoTerminalId(e.target.value)}
+                                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs text-purple-600 dark:text-purple-400 font-bold outline-none"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Lote:</label>
+                                        <input
+                                          type="text"
+                                          value={dinelcoLote}
+                                          onChange={(e) => setDinelcoLote(e.target.value)}
+                                          placeholder="001"
+                                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs outline-none"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Voucher:</label>
+                                        <input
+                                          type="text"
+                                          value={dinelcoCupon}
+                                          onChange={(e) => setDinelcoCupon(e.target.value)}
+                                          placeholder="654321"
+                                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs text-purple-600 dark:text-purple-400 font-bold outline-none"
+                                        />
+                                      </div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleVerifyPosTerminal("dinelco")}
+                                      disabled={posVerifyStatus === "searching"}
+                                      className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold bg-purple-600/10 text-purple-600 dark:text-purple-400 border border-purple-500/30 hover:bg-purple-600/20 disabled:opacity-60 cursor-pointer"
+                                    >
+                                      {posVerifyStatus === "searching" ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                                      <span>{posVerifyStatus === "searching" ? "Buscando en terminal..." : "Verificar Transacción en Terminal"}</span>
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* COBROS ADICIONALES CON TARJETA DINELCO (2da, 3ra... -- otras cuentas/tarjetas en la misma venta).
+                                Ya no depende de "Pago mixto". */}
+                            {(
+                              <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
+                                {extraPaymentLegs.filter((l) => l.method === "dinelco" && l.dinelcoOpType !== "qr").map((leg, idx) => (
+                                  <div key={leg.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[10px] font-black text-purple-600 dark:text-purple-400 uppercase">Tarjeta Dinelco #{idx + 2}</span>
+                                      {leg.txnState === "idle" && (
+                                        <button type="button" onClick={() => removeExtraLeg(leg.id)} className="text-[10px] text-slate-400 hover:text-rose-500 cursor-pointer">Quitar</button>
+                                      )}
+                                    </div>
+                                    <div className="flex gap-1">
+                                      <div className="flex bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-lg gap-0.5">
+                                        <button type="button" disabled={leg.txnState !== "idle"} onClick={() => updateExtraLeg(leg.id, { cardType: "debito", cardCuotas: 1 })} className={`px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer ${leg.cardType === "debito" ? "bg-purple-600 text-white" : "text-slate-600 dark:text-slate-400"}`}>Débito</button>
+                                        <button type="button" disabled={leg.txnState !== "idle"} onClick={() => updateExtraLeg(leg.id, { cardType: "credito" })} className={`px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer ${leg.cardType === "credito" ? "bg-purple-600 text-white" : "text-slate-600 dark:text-slate-400"}`}>Crédito</button>
+                                      </div>
+                                      <input
+                                        type="text"
+                                        value={leg.montoStr}
+                                        disabled={leg.txnState !== "idle"}
+                                        onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); updateExtraLeg(leg.id, { montoStr: clean ? parseInt(clean, 10).toLocaleString("es-PY") : "" }) }}
+                                        onFocus={(e) => e.target.select()}
+                                        placeholder="Monto ₲"
+                                        className="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums font-bold text-xs text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
+                                      />
+                                    </div>
+                                    {leg.txnState === "idle" && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDinelcoChargeForLeg(leg)}
+                                        disabled={!activePosConfig.dinelcoIp}
+                                        className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer"
+                                      >
+                                        <CreditCard className="w-3.5 h-3.5" />
+                                        Cobrar Dinelco #{idx + 2}
+                                      </button>
+                                    )}
+                                    {(leg.txnState === "esperando" || leg.txnState === "confirmando") && (
+                                      <div className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-purple-600/60 text-white">
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        {leg.txnState === "esperando" ? "Presente la tarjeta..." : "Confirmando..."}
+                                      </div>
+                                    )}
+                                    {leg.txnState === "aprobada" && leg.txnResult && (
+                                      <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-600 dark:text-emerald-300 space-y-0.5">
+                                        <div className="font-black">✓ Aprobada</div>
+                                        <div className="font-posMono tabular-nums">Aut. {leg.txnResult.codigoAutorizacion} · Boleta {leg.txnResult.nroBoleta}</div>
+                                      </div>
+                                    )}
+                                    {leg.txnState === "error_rechazo" && (
+                                      <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-600 dark:text-rose-300 space-y-1">
+                                        <div className="font-black">✕ {leg.txnError}</div>
+                                        <button type="button" onClick={() => updateExtraLeg(leg.id, { txnState: "idle", txnError: "" })} className="text-[10px] font-bold underline cursor-pointer">Reintentar</button>
+                                      </div>
+                                    )}
+                                    {leg.txnState === "error_conexion" && (
+                                      <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1">
+                                        <div className="font-black">⚠ {leg.txnError}</div>
+                                        <button type="button" onClick={() => handleDinelcoChargeForLeg(leg)} className="text-[10px] font-bold underline cursor-pointer">Reintentar conexión</button>
+                                        <div>
+                                          <button type="button" onClick={() => updateExtraLeg(leg.id, { showManualFallback: !leg.showManualFallback })} className="text-[10px] font-bold underline cursor-pointer">
+                                            {leg.showManualFallback ? "Ocultar carga manual" : "Cargar voucher manualmente"}
+                                          </button>
+                                          {leg.showManualFallback && (
+                                            <input
+                                              type="text"
+                                              value={leg.manualCupon}
+                                              onChange={(e) => updateExtraLeg(leg.id, { manualCupon: e.target.value })}
+                                              placeholder="Nº Voucher"
+                                              className="mt-1 w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums text-[11px] text-emerald-600 dark:text-emerald-400 font-bold outline-none"
+                                            />
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                                <button
+                                  type="button"
+                                  onClick={() => addExtraLeg("dinelco")}
+                                  className="w-full text-[11px] font-bold text-purple-600 dark:text-purple-400 border border-dashed border-purple-400/50 rounded-xl py-2 hover:bg-purple-500/5 cursor-pointer"
+                                >
+                                  + Agregar otra tarjeta Dinelco (otra cuenta/cliente)
+                                </button>
+                              </div>
+                            )}
+                          </>
+                        )}
+
+                        {/* SUB-MODALIDAD: QR / PIX DINELCO */}
+                        {(dinelcoSubMethod === "qr" || dinelcoSubMethod === "pix") && (
+                          <div className="flex flex-col items-center text-center space-y-2.5 w-full">
+                            <div className="flex items-center gap-2">
+                              <QrCode className="w-7 h-7 text-purple-600" />
+                              <div className="text-left">
+                                <div className="font-bold text-xs text-slate-900 dark:text-white">Dinelco (Ingenico AXIUM) - {dinelcoSubMethod === "pix" ? "PIX Brasil" : "QR Guaraníes"}</div>
+                                {!(isMultiPayment || extraPaymentLegs.some((l) => l.method === "dinelco")) && (
+                                  <div className="text-xs font-posMono tabular-nums font-black text-purple-600 dark:text-purple-400">
+                                    {formatPYG(totalPyg)}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {(isMultiPayment || extraPaymentLegs.some((l) => l.method === "dinelco")) && (
+                              <div className="w-full max-w-md text-left">
+                                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto Dinelco QR/PIX en esta línea (₲):</label>
+                                <div className="flex gap-1">
+                                  <input
+                                    type="text"
+                                    value={mixedQrPyg}
+                                    onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedQrPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                                    onFocus={(e) => e.target.select()}
+                                    placeholder="0"
+                                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
+                                  />
+                                  <button
+                                    type="button"
+                                    title="Completar con el resto"
+                                    onClick={() => setMixedQrPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                                    className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
+                                  >
+                                    Resto
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {!activePosConfig.dinelcoIp && (
+                              <div className="w-full max-w-sm p-2 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300">
+                                No hay IP de terminal Dinelco configurada para esta caja.{" "}
+                                <button type="button" onClick={() => setShowPosConfigModal(true)} className="underline font-bold cursor-pointer">Configurar ahora</button>
+                              </div>
+                            )}
+
+                            {dinelcoSubMethod === "pix" && dinelcoQrState !== "aprobada" && (
+                              <div className="w-full max-w-md">
+                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">CPF del comprador (11 dígitos):</label>
+                                <input
+                                  type="text"
+                                  value={dinelcoPixCpf}
+                                  onChange={(e) => setDinelcoPixCpf(e.target.value.replace(/\D/g, "").slice(0, 11))}
+                                  placeholder="52998224725"
+                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs outline-none focus:border-orange-500 text-center font-bold"
+                                />
+                              </div>
+                            )}
+
+                            {dinelcoQrState !== "aprobada" && (
+                              <button
+                                type="button"
+                                onClick={handleDinelcoQR}
+                                disabled={!activePosConfig.dinelcoIp || dinelcoQrState === "esperando"}
+                                className="w-full max-w-md flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer shadow-sm shadow-purple-600/20"
+                              >
+                                {dinelcoQrState === "esperando" ? <Loader2 className="w-4 h-4 animate-spin" /> : <QrCode className="w-4 h-4" />}
+                                <span>
+                                  {dinelcoQrState === "esperando"
+                                    ? "Esperando el pago del cliente..."
+                                    : dinelcoSubMethod === "pix" ? "Generar PIX en Terminal Dinelco" : "Generar QR en Terminal Dinelco"}
+                                </span>
+                              </button>
+                            )}
+
+                            {dinelcoQrState === "aprobada" && (
+                              <div className="w-full max-w-md p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left">
+                                <div className="font-black">✓ Transacción {dinelcoSubMethod === "pix" ? "PIX" : "QR"} Dinelco Aprobada</div>
+                              </div>
+                            )}
+
+                            {dinelcoQrState === "error_rechazo" && (
+                              <div className="w-full max-w-md p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5 text-left">
+                                <div className="font-black">✕ {dinelcoQrError}</div>
+                                <button type="button" onClick={handleDinelcoQR} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
+                              </div>
+                            )}
+
+                            {dinelcoQrState === "error_conexion" && (
+                              <div className="w-full max-w-md p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5 text-left">
+                                <div className="font-black">⚠ {dinelcoQrError}</div>
+                                <button type="button" onClick={handleDinelcoQR} className="text-xs font-bold underline cursor-pointer">Reintentar conexión</button>
+                              </div>
+                            )}
+
+                            {/* COBROS ADICIONALES CON QR/PIX DINELCO (2do, 3er QR -- otras cuentas/clientes en la misma venta).
+                                Ya no depende de "Pago mixto". */}
+                            {(
+                              <div className="w-full max-w-md pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5 text-left">
+                                {extraPaymentLegs.filter((l) => l.method === "dinelco" && l.dinelcoOpType === "qr").map((leg, idx) => (
+                                  <div key={leg.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[10px] font-black text-purple-600 dark:text-purple-400 uppercase">Dinelco QR/PIX #{idx + 2}</span>
+                                      {leg.txnState === "idle" && (
+                                        <button type="button" onClick={() => removeExtraLeg(leg.id)} className="text-[10px] text-slate-400 hover:text-rose-500 cursor-pointer">Quitar</button>
+                                      )}
+                                    </div>
+                                    {leg.txnState === "idle" && (
+                                      <>
+                                        <div className="flex bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-lg gap-0.5 w-fit">
+                                          <button type="button" onClick={() => updateExtraLeg(leg.id, { dinelcoQrMode: "qr" })} className={`px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer ${leg.dinelcoQrMode === "qr" ? "bg-purple-600 text-white" : "text-slate-600 dark:text-slate-400"}`}>QR Gs.</button>
+                                          <button type="button" onClick={() => updateExtraLeg(leg.id, { dinelcoQrMode: "pix" })} className={`px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer ${leg.dinelcoQrMode === "pix" ? "bg-orange-600 text-white" : "text-slate-600 dark:text-slate-400"}`}>PIX BR</button>
+                                        </div>
+                                        {leg.dinelcoQrMode === "pix" && (
+                                          <input
+                                            type="text"
+                                            value={leg.pixCpf || ""}
+                                            onChange={(e) => updateExtraLeg(leg.id, { pixCpf: e.target.value.replace(/\D/g, "").slice(0, 11) })}
+                                            placeholder="CPF (11 dígitos)"
+                                            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-mono text-[11px] text-center font-bold outline-none"
+                                          />
+                                        )}
+                                        <input
+                                          type="text"
+                                          value={leg.montoStr}
+                                          onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); updateExtraLeg(leg.id, { montoStr: clean ? parseInt(clean, 10).toLocaleString("es-PY") : "" }) }}
+                                          onFocus={(e) => e.target.select()}
+                                          placeholder="Monto ₲"
+                                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums font-bold text-xs text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDinelcoQRForLeg(leg)}
+                                          disabled={!activePosConfig.dinelcoIp}
+                                          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer"
+                                        >
+                                          <QrCode className="w-3.5 h-3.5" />
+                                          {leg.dinelcoQrMode === "pix" ? "Generar PIX" : "Generar QR"} #{idx + 2}
+                                        </button>
+                                      </>
+                                    )}
+                                    {leg.txnState === "esperando" && (
+                                      <div className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-purple-600/60 text-white">
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Esperando el pago...
+                                      </div>
+                                    )}
+                                    {leg.txnState === "aprobada" && (
+                                      <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-600 dark:text-emerald-300">
+                                        <div className="font-black">✓ Transacción {leg.dinelcoQrMode === "pix" ? "PIX" : "QR"} Aprobada</div>
+                                      </div>
+                                    )}
+                                    {leg.txnState === "error_rechazo" && (
+                                      <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-600 dark:text-rose-300 space-y-1">
+                                        <div className="font-black">✕ {leg.txnError}</div>
+                                        <button type="button" onClick={() => updateExtraLeg(leg.id, { txnState: "idle", txnError: "" })} className="text-[10px] font-bold underline cursor-pointer">Reintentar</button>
+                                      </div>
+                                    )}
+                                    {leg.txnState === "error_conexion" && (
+                                      <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1">
+                                        <div className="font-black">⚠ {leg.txnError}</div>
+                                        <button type="button" onClick={() => handleDinelcoQRForLeg(leg)} className="text-[10px] font-bold underline cursor-pointer">Reintentar conexión</button>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                                <button
+                                  type="button"
+                                  onClick={() => addExtraLeg("dinelco", "qr")}
+                                  className="w-full text-[11px] font-bold text-purple-600 dark:text-purple-400 border border-dashed border-purple-400/50 rounded-xl py-2 hover:bg-purple-500/5 cursor-pointer"
+                                >
+                                  + Agregar otro QR/PIX Dinelco (otra cuenta/cliente)
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
 
-                    {/* 4. QR / PIX (Bancard Zimple + PlugPay PIX) */}
-                    {activeMethods.has("qr") && (
-                      <div className="bg-white dark:bg-slate-900 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-2.5">
-                        {/* Subselector Segmented Control */}
-                        <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl gap-1 max-w-xs mx-auto">
-                          <button
-                            type="button"
-                            onClick={() => setQrSubMethod("zimple")}
-                            className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                              qrSubMethod === "zimple"
-                                ? "bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-300 shadow-xs"
-                                : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                            }`}
-                          >
-                            <FlagPY /> <span>QR Zimple</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setQrSubMethod("pix")}
-                            className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                              qrSubMethod === "pix"
-                                ? "bg-white dark:bg-slate-900 text-orange-600 dark:text-orange-300 shadow-xs"
-                                : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                            }`}
-                          >
-                            <FlagBR /> <span>PIX Brasil</span>
-                          </button>
+                    {/* 4. PLUG PAY (UNIFICADO: PIX Brasil en Tiempo Real, Crédito Parcelado, y Procesado Manual) */}
+                    {(activeMethods.has("plugpay") || activeMethods.has("qr") || activeMethods.has("plugpay_credito")) && (
+                      <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2.5">
+                          <div className="flex items-center gap-2">
+                            <Smartphone className="w-5 h-5 text-orange-600 dark:text-orange-400" />
+                            <div>
+                              <span className="font-black text-xs text-slate-900 dark:text-white">Plug Pay Internacional</span>
+                              <span className="text-[10px] text-slate-400 block font-medium">PIX y Parcelado Brasil</span>
+                            </div>
+                          </div>
+
+                          {/* Sub-métodos Plug Pay */}
+                          <div className="flex bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-xl gap-0.5">
+                            <button
+                              type="button"
+                              onClick={() => setPlugpaySubMethod("pix")}
+                              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                plugpaySubMethod === "pix"
+                                  ? "bg-orange-600 text-white shadow-xs"
+                                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                              }`}
+                            >
+                              ⚡ PIX Brasil
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPlugpaySubMethod("parcelado")}
+                              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                plugpaySubMethod === "parcelado"
+                                  ? "bg-blue-600 text-white shadow-xs"
+                                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                              }`}
+                            >
+                              💳 Crédito Parcelado
+                            </button>
+                          </div>
                         </div>
 
-                        {isMultiPayment && (
+                        {/* Monto de línea si es pago mixto, o si ya se esta dividiendo entre varios cobros de Plug Pay */}
+                        {(isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay" || l.method === "plugpay_credito")) && (
                           <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto en esta línea (₲):</label>
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto Plug Pay en esta línea (₲):</label>
                             <div className="flex gap-1">
                               <input
-                                ref={mixedQrPygInputRef}
                                 type="text"
-                                value={mixedQrPyg}
-                                onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedQrPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
-                                onKeyDown={(e) => handleMixedFieldKeyDown(e, setMixedQrPyg)}
+                                value={mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg}
+                                onChange={(e) => {
+                                  const clean = e.target.value.replace(/\D/g, "")
+                                  const val = clean ? parseInt(clean, 10).toLocaleString("es-PY") : ""
+                                  setMixedPlugPayPyg(val)
+                                  setMixedParceladoPyg(val)
+                                  setMixedQrPyg(val)
+                                }}
+                                onKeyDown={(e) => handleMixedFieldKeyDown(e, (v) => { setMixedPlugPayPyg(v); setMixedParceladoPyg(v); setMixedQrPyg(v); })}
                                 onFocus={(e) => e.target.select()}
                                 placeholder="0"
-                                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500 text-center"
+                                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-orange-600 dark:text-orange-400 outline-none focus:border-orange-500"
                               />
                               <button
                                 type="button"
                                 title="Completar con el resto"
-                                onClick={() => setMixedQrPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                                onClick={() => {
+                                  const resto = Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt((mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg).replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY")
+                                  setMixedPlugPayPyg(resto)
+                                  setMixedParceladoPyg(resto)
+                                  setMixedQrPyg(resto)
+                                }}
                                 className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
                               >
                                 Resto
@@ -7112,57 +12184,14 @@ export default function POSPage() {
                           </div>
                         )}
 
-                        {/* SUB-PANEL 1: QR ZIMPLE */}
-                        {qrSubMethod === "zimple" && (
-                          <div className="flex flex-col items-center text-center space-y-2">
-                            <div className="flex items-center gap-2">
-                              <QrCode className="w-8 h-8 text-purple-600" />
-                              <div className="text-left">
-                                <div className="font-bold text-xs text-slate-900 dark:text-white">QR Dinámico Bancard Zimple</div>
-                                {!isMultiPayment && (
-                                  <div className="text-xs font-posMono tabular-nums font-black text-purple-600 dark:text-purple-400">
-                                    {formatPYG(totalPyg)} (R$ {totalBrl})
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-
-                            {bancardQrState !== "aprobada" && (
-                              <button
-                                type="button"
-                                onClick={handleBancardQR}
-                                disabled={!activePosConfig.bancardIp || bancardQrState === "esperando"}
-                                className="w-full max-w-sm flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer shadow-sm shadow-purple-600/20"
-                              >
-                                {bancardQrState === "esperando" ? <Loader2 className="w-4 h-4 animate-spin" /> : <QrCode className="w-4 h-4" />}
-                                <span>{bancardQrState === "esperando" ? "Esperando el pago del cliente..." : "Generar QR Zimple"}</span>
-                              </button>
-                            )}
-
-                            {bancardQrState === "aprobada" && bancardQrResult && (
-                              <div className="w-full max-w-sm p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 space-y-0.5 text-left">
-                                <div className="font-black">✓ {bancardQrResult.mensajeDisplay || "Pago Exitoso"}</div>
-                                <div className="font-posMono tabular-nums">Autorización {bancardQrResult.codigoAutorizacion} · Boleta {bancardQrResult.nroBoleta}</div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* SUB-PANEL 2: PIX BRASIL */}
-                        {qrSubMethod === "pix" && (
+                        {/* SUB-MODALIDAD 1: PIX BRASIL TIEMPO REAL */}
+                        {plugpaySubMethod === "pix" && (
                           <div className="space-y-2">
-                            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-1.5">
-                              <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 rounded-lg bg-orange-50 dark:bg-orange-950 flex items-center justify-center text-orange-600">
-                                  <Smartphone className="w-3.5 h-3.5" />
-                                </div>
-                                <span className="font-bold text-xs text-slate-900 dark:text-white">PIX Brasil (PlugPay)</span>
-                              </div>
-                              <div className="text-right">
-                                <span className="text-xs font-posMono font-black text-orange-600 dark:text-orange-400">
-                                  {plugpayBrlValue ? `R$ ${plugpayBrlValue.toFixed(2)}` : `Gs. ${formatPYG(isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg)}`}
-                                </span>
-                              </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Cobro PIX dinámico en Reales:</span>
+                              <span className="text-xs font-posMono font-black text-orange-600 dark:text-orange-400">
+                                {plugpayBrlValue ? `R$ ${plugpayBrlValue.toFixed(2)}` : `Gs. ${formatPYG(isMultiPayment ? parseInt((mixedPlugPayPyg || mixedQrPyg).replace(/\D/g, "") || "0", 10) : totalPyg)}`}
+                              </span>
                             </div>
 
                             {plugpayState === "idle" && (
@@ -7191,30 +12220,439 @@ export default function POSPage() {
                             )}
 
                             {plugpayState === "esperando" && (
-                              <div className="flex items-center justify-between p-2.5 bg-orange-50 dark:bg-orange-950/40 rounded-xl border border-orange-200 dark:border-orange-800">
-                                {plugpayResult?.qrCodeStringImage && (
-                                  <img src={`data:image/png;base64,${plugpayResult.qrCodeStringImage}`} className="w-14 h-14 rounded-lg bg-white p-1 border shrink-0" alt="PIX QR" />
-                                )}
-                                <div className="flex-1 px-2.5 text-left">
-                                  <div className="flex items-center gap-1 text-xs font-bold text-orange-700 dark:text-orange-300">
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                    <span>Esperando confirmación de PlugPay...</span>
+                              <div className="p-3 bg-orange-50/80 dark:bg-orange-950/40 rounded-2xl border border-orange-200 dark:border-orange-800 space-y-2.5">
+                                <div className="flex items-center justify-between border-b border-orange-200/60 dark:border-orange-800/60 pb-1.5">
+                                  <div className="flex items-center gap-1.5 text-xs font-black text-orange-700 dark:text-orange-300">
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin text-orange-600" />
+                                    <span>Esperando pago PIX en tiempo real...</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={resetBancardFlow}
+                                    className="text-xs text-rose-500 hover:text-rose-600 font-bold underline cursor-pointer"
+                                  >
+                                    Cancelar
+                                  </button>
+                                </div>
+
+                                <div className="flex flex-col sm:flex-row items-center sm:items-start gap-3.5 min-w-0">
+                                  {(plugpayQrImageUrl || plugpayResult?.qrCodeStringImage) && (
+                                    <div className="p-2 bg-white rounded-xl shadow-xs border border-orange-300 shrink-0">
+                                      <img
+                                        src={plugpayQrImageUrl || `data:image/png;base64,${plugpayResult.qrCodeStringImage}`}
+                                        className="w-36 h-36 sm:w-44 sm:h-44 object-contain rounded-md"
+                                        alt="PIX QR Code Brasil"
+                                      />
+                                    </div>
+                                  )}
+                                  <div className="flex-1 space-y-2 text-center sm:text-left min-w-0 w-full">
+                                    <div>
+                                      <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Total a pagar:</span>
+                                      <span className="text-xl font-black font-posMono text-orange-600 dark:text-orange-400">
+                                        R$ {plugpayResult?.valueBRL || (plugpayBrlValue ? plugpayBrlValue.toFixed(2) : "0.00")}
+                                      </span>
+                                    </div>
+
+                                    {plugpayResult?.qrCodeCopiaCola && (
+                                      <div>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            void copyToClipboard(plugpayResult.qrCodeCopiaCola)
+                                            toast.success("Copiado", "Código PIX Copia y Cola copiado.")
+                                          }}
+                                          className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-orange-600/15 hover:bg-orange-600/25 text-orange-700 dark:text-orange-400 border border-orange-500/30 rounded-lg text-[11px] font-bold transition cursor-pointer shadow-xs"
+                                        >
+                                          <Copy className="w-3 h-3" />
+                                          <span>Copiar código</span>
+                                        </button>
+                                      </div>
+                                    )}
+
+                                    <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
+                                      Escanear desde app de banco (Nubank, Itaú, Bradesco, Mercado Pago, Inter).
+                                    </p>
                                   </div>
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={resetBancardFlow}
-                                  className="text-xs text-rose-500 hover:text-rose-600 font-bold underline cursor-pointer shrink-0"
-                                >
-                                  Cancelar
-                                </button>
                               </div>
                             )}
 
                             {plugpayState === "aprobada" && (
-                              <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left space-y-0.5">
-                                <div className="font-black">✓ Transacción PIX Aprobada</div>
-                                <div>ID: {plugpayResult?.IdTransacao}</div>
+                              <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left space-y-0.5">
+                                <div className="font-black flex items-center gap-1.5">
+                                  <CheckCircle className="w-4 h-4 text-emerald-600" />
+                                  <span>✓ Transacción PIX Aprobada</span>
+                                </div>
+                                <div>ID Transacción: {plugpayResult?.IdTransacao || plugpayResult?.serialNumber}</div>
+                              </div>
+                            )}
+
+                            {/* COBROS ADICIONALES CON PIX (2do, 3er PIX -- otras cuentas/clientes en la misma venta).
+                                Ya no depende de "Pago mixto". */}
+                            {(
+                              <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
+                                {extraPaymentLegs.filter((l) => l.method === "plugpay").map((leg, idx) => (
+                                  <div key={leg.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[10px] font-black text-orange-600 dark:text-orange-400 uppercase">PIX #{idx + 2}</span>
+                                      {leg.txnState === "idle" && (
+                                        <button type="button" onClick={() => removeExtraLeg(leg.id)} className="text-[10px] text-slate-400 hover:text-rose-500 cursor-pointer">Quitar</button>
+                                      )}
+                                    </div>
+                                    {leg.txnState === "idle" && (
+                                      <>
+                                        <input
+                                          type="text"
+                                          value={leg.plugpayCpf || ""}
+                                          onChange={(e) => updateExtraLeg(leg.id, { plugpayCpf: e.target.value.replace(/\D/g, "").slice(0, 11) })}
+                                          placeholder="CPF (11 dígitos)"
+                                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-mono text-[11px] text-center font-bold outline-none"
+                                        />
+                                        <input
+                                          type="text"
+                                          value={leg.montoStr}
+                                          onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); updateExtraLeg(leg.id, { montoStr: clean ? parseInt(clean, 10).toLocaleString("es-PY") : "" }) }}
+                                          onFocus={(e) => e.target.select()}
+                                          placeholder="Monto ₲"
+                                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums font-bold text-xs text-orange-600 dark:text-orange-400 outline-none focus:border-orange-500"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => handlePlugpayPixForLeg(leg)}
+                                          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-orange-600 hover:bg-orange-500 text-white cursor-pointer"
+                                        >
+                                          <QrCode className="w-3.5 h-3.5" />
+                                          Generar PIX #{idx + 2}
+                                        </button>
+                                      </>
+                                    )}
+                                    {leg.txnState === "esperando" && (
+                                      <div className="flex flex-col items-center gap-1.5">
+                                        {(leg.plugpayQrImageUrl || (leg.txnResult as any)?.qrCodeStringImage) && (
+                                          <img
+                                            src={leg.plugpayQrImageUrl || `data:image/png;base64,${(leg.txnResult as any).qrCodeStringImage}`}
+                                            className="w-28 h-28 rounded-lg border border-orange-300 bg-white p-1.5"
+                                            alt={`PIX QR #${idx + 2}`}
+                                          />
+                                        )}
+                                        <div className="text-[11px] font-black text-orange-600 dark:text-orange-400">
+                                          R$ {(leg.txnResult as any)?.valueBRL || (leg.plugpayBrlValue ? leg.plugpayBrlValue.toFixed(2) : "0.00")}
+                                        </div>
+                                        <div className="flex items-center gap-1 text-[11px] font-bold text-orange-600 dark:text-orange-400">
+                                          <Loader2 className="w-3 h-3 animate-spin" /> Esperando el pago...
+                                        </div>
+                                      </div>
+                                    )}
+                                    {leg.txnState === "aprobada" && (
+                                      <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-600 dark:text-emerald-300">
+                                        <div className="font-black">✓ Transacción PIX Aprobada</div>
+                                      </div>
+                                    )}
+                                    {(leg.txnState === "error_rechazo" || leg.txnState === "error_conexion") && (
+                                      <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-600 dark:text-rose-300 space-y-1">
+                                        <div className="font-black">✕ {leg.txnError}</div>
+                                        <button type="button" onClick={() => updateExtraLeg(leg.id, { txnState: "idle", txnError: "" })} className="text-[10px] font-bold underline cursor-pointer">Reintentar</button>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                                <button
+                                  type="button"
+                                  onClick={() => addExtraLeg("plugpay")}
+                                  className="w-full text-[11px] font-bold text-orange-600 dark:text-orange-400 border border-dashed border-orange-400/50 rounded-xl py-2 hover:bg-orange-500/5 cursor-pointer"
+                                >
+                                  + Agregar otro PIX (otra cuenta/cliente)
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* SUB-MODALIDAD 2: CRÉDITO PARCELADO BRASIL */}
+                        {plugpaySubMethod === "parcelado" && (
+                          <div className="space-y-2.5">
+                            {plugpayBrlValue && (
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Total a Financiar en BRL:</span>
+                                <span className="text-xs font-posMono font-black text-blue-600 dark:text-blue-400">
+                                  R$ {plugpayBrlValue.toFixed(2)}
+                                </span>
+                              </div>
+                            )}
+
+                            {plugpayState === "idle" && (
+                              <div className="space-y-2.5">
+                                <div className="grid grid-cols-3 gap-2">
+                                  <div>
+                                    <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">CPF (11 dígitos):</label>
+                                    <input
+                                      type="text"
+                                      value={plugpayCpf}
+                                      onChange={(e) => setPlugpayCpf(e.target.value.replace(/\D/g, "").slice(0, 11))}
+                                      placeholder="52998224725"
+                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs outline-none focus:border-blue-500 text-center font-bold"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">WhatsApp:</label>
+                                    <input
+                                      type="text"
+                                      value={plugpayPhone}
+                                      onChange={(e) => setPlugpayPhone(e.target.value.replace(/\D/g, ""))}
+                                      placeholder="48999999999"
+                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs outline-none focus:border-blue-500 text-center font-bold"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">Cuotas:</label>
+                                    <select
+                                      value={plugpayCuotas}
+                                      onChange={(e) => setPlugpayCuotas(Number(e.target.value))}
+                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs outline-none focus:border-blue-500 font-bold"
+                                    >
+                                      {[1, 2, 3, 4, 5, 6, 9, 12, 18, 24].map((c) => (
+                                        <option key={c} value={c}>{c === 1 ? "1 pago directo" : `${c} cuotas`}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={handlePlugpayParcelado}
+                                  className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black rounded-xl transition cursor-pointer shadow-sm shadow-blue-600/20 flex items-center justify-center gap-2"
+                                >
+                                  <CreditCard className="w-4 h-4" />
+                                  <span>Iniciar Crédito Parcelado</span>
+                                </button>
+                              </div>
+                            )}
+
+                            {plugpayState === "esperando" && (
+                              <div className="p-3 bg-blue-50 dark:bg-blue-950/40 rounded-xl border border-blue-200 dark:border-blue-800 space-y-2.5">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-1.5 text-xs font-bold text-blue-700 dark:text-blue-300">
+                                    <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                                    <span>Esperando cobro con tarjeta...</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={resetBancardFlow}
+                                    className="text-xs text-rose-500 hover:text-rose-600 font-bold underline cursor-pointer"
+                                  >
+                                    Cancelar
+                                  </button>
+                                </div>
+
+                                {plugpayResult?.UrlPaymentForm && (
+                                  <div className="bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-blue-200 dark:border-blue-800 flex items-center justify-between gap-2">
+                                    <div className="text-[11px] text-slate-600 dark:text-slate-300">
+                                      <span className="font-bold block text-xs text-slate-900 dark:text-white">Pasarela de Pago Segura</span>
+                                      {plugpayCuotas} cuotas de R$ {(plugpayBrlValue ? (plugpayBrlValue / plugpayCuotas).toFixed(2) : "0.00")}
+                                    </div>
+                                    <a
+                                      href={plugpayResult.UrlPaymentForm}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-lg flex items-center gap-1 shrink-0 shadow-sm cursor-pointer"
+                                    >
+                                      <span>Abrir Pasarela</span>
+                                      <ExternalLink className="w-3.5 h-3.5" />
+                                    </a>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {plugpayState === "aprobada" && (
+                              <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left space-y-0.5">
+                                <div className="font-black flex items-center gap-1.5">
+                                  <CheckCircle className="w-4 h-4 text-emerald-500" />
+                                  <span>✓ Crédito Parcelado Aprobado</span>
+                                </div>
+                                <div className="text-[11px] opacity-90">Autorización / Serial: {plugpayResult?.serialNumber || plugpayResult?.SerialNumber || plugpayResult?.IdInitialTransaction}</div>
+                              </div>
+                            )}
+
+                            {plugpayState === "error" && (
+                              <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 text-left space-y-1.5">
+                                <div className="font-bold flex items-center gap-1">
+                                  <AlertCircle className="w-4 h-4 text-rose-500" />
+                                  <span>Error en PlugPay: {plugpayError || "Transacción cancelada o fallida"}</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => { setPlugpayState("idle"); setPlugpayError("") }}
+                                  className="px-2.5 py-1 bg-rose-600 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                                >
+                                  Reintentar
+                                </button>
+                              </div>
+                            )}
+
+                            {/* COBROS ADICIONALES CON CRÉDITO PARCELADO (2do, 3er crédito -- otras cuentas/clientes en la misma venta).
+                                Ya no depende de "Pago mixto". */}
+                            {(
+                              <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
+                                {extraPaymentLegs.filter((l) => l.method === "plugpay_credito").map((leg, idx) => (
+                                  <div key={leg.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase">Parcelado #{idx + 2}</span>
+                                      {leg.txnState === "idle" && (
+                                        <button type="button" onClick={() => removeExtraLeg(leg.id)} className="text-[10px] text-slate-400 hover:text-rose-500 cursor-pointer">Quitar</button>
+                                      )}
+                                    </div>
+                                    {leg.txnState === "idle" && (
+                                      <>
+                                        <div className="grid grid-cols-3 gap-1.5">
+                                          <input
+                                            type="text"
+                                            value={leg.plugpayCpf || ""}
+                                            onChange={(e) => updateExtraLeg(leg.id, { plugpayCpf: e.target.value.replace(/\D/g, "").slice(0, 11) })}
+                                            placeholder="CPF"
+                                            className="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-mono text-[10px] text-center font-bold outline-none"
+                                          />
+                                          <input
+                                            type="text"
+                                            value={leg.plugpayPhone || ""}
+                                            onChange={(e) => updateExtraLeg(leg.id, { plugpayPhone: e.target.value.replace(/\D/g, "") })}
+                                            placeholder="WhatsApp"
+                                            className="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-mono text-[10px] text-center font-bold outline-none"
+                                          />
+                                          <select
+                                            value={leg.cardCuotas}
+                                            onChange={(e) => updateExtraLeg(leg.id, { cardCuotas: Number(e.target.value) })}
+                                            className="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 text-[10px] font-bold outline-none"
+                                          >
+                                            {[1, 2, 3, 4, 5, 6, 9, 12, 18, 24].map((c) => (
+                                              <option key={c} value={c}>{c}x</option>
+                                            ))}
+                                          </select>
+                                        </div>
+                                        <input
+                                          type="text"
+                                          value={leg.montoStr}
+                                          onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); updateExtraLeg(leg.id, { montoStr: clean ? parseInt(clean, 10).toLocaleString("es-PY") : "" }) }}
+                                          onFocus={(e) => e.target.select()}
+                                          placeholder="Monto ₲"
+                                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums font-bold text-xs text-blue-600 dark:text-blue-400 outline-none focus:border-blue-500"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => handlePlugpayParceladoForLeg(leg)}
+                                          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-blue-600 hover:bg-blue-500 text-white cursor-pointer"
+                                        >
+                                          <CreditCard className="w-3.5 h-3.5" />
+                                          Iniciar Parcelado #{idx + 2}
+                                        </button>
+                                      </>
+                                    )}
+                                    {leg.txnState === "esperando" && (
+                                      <div className="space-y-1.5">
+                                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-blue-700 dark:text-blue-300">
+                                          <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                                          <span>Esperando cobro con tarjeta...</span>
+                                        </div>
+                                        {(leg.txnResult as any)?.UrlPaymentForm && (
+                                          <a
+                                            href={(leg.txnResult as any).UrlPaymentForm}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] rounded-lg shadow-xs cursor-pointer"
+                                          >
+                                            <span>Abrir Pasarela</span>
+                                            <ExternalLink className="w-3 h-3" />
+                                          </a>
+                                        )}
+                                      </div>
+                                    )}
+                                    {leg.txnState === "aprobada" && (
+                                      <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-600 dark:text-emerald-300">
+                                        <div className="font-black">✓ Crédito Parcelado Aprobado</div>
+                                      </div>
+                                    )}
+                                    {(leg.txnState === "error_rechazo" || leg.txnState === "error_conexion") && (
+                                      <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-600 dark:text-rose-300 space-y-1">
+                                        <div className="font-black">✕ {leg.txnError}</div>
+                                        <button type="button" onClick={() => updateExtraLeg(leg.id, { txnState: "idle", txnError: "" })} className="text-[10px] font-bold underline cursor-pointer">Reintentar</button>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                                <button
+                                  type="button"
+                                  onClick={() => addExtraLeg("plugpay_credito")}
+                                  className="w-full text-[11px] font-bold text-blue-600 dark:text-blue-400 border border-dashed border-blue-400/50 rounded-xl py-2 hover:bg-blue-500/5 cursor-pointer"
+                                >
+                                  + Agregar otro crédito parcelado (otra cuenta/cliente)
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* CARGA / PROCESADO MANUAL DE RESPALDO PLUG PAY */}
+                        {plugpayState !== "aprobada" && (
+                          <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
+                            <button
+                              type="button"
+                              onClick={() => setShowPlugpayManualFallback((v) => !v)}
+                              className="text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer flex items-center gap-1"
+                            >
+                              <span>{showPlugpayManualFallback ? "▾ Ocultar carga manual Plug Pay" : "▸ Carga / Procesado Manual Plug Pay (Comprobante de respaldo)"}</span>
+                            </button>
+
+                            {showPlugpayManualFallback && (
+                              <div className="mt-2 p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2.5">
+                                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                                  Si el cobro se procesó por fuera de la integración o se dispone del comprobante manual de la pasarela:
+                                </p>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div>
+                                    <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
+                                      Nº Comprobante / Transacción (*):
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={plugpayManualComprobante}
+                                      onChange={(e) => setPlugpayManualComprobante(e.target.value)}
+                                      placeholder="Ej: PIX-948210"
+                                      className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-mono text-xs font-bold outline-none focus:border-orange-500"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
+                                      Autorización / Serial:
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={plugpayManualAutorizacion}
+                                      onChange={(e) => setPlugpayManualAutorizacion(e.target.value)}
+                                      placeholder="Ej: 004819"
+                                      className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-mono text-xs outline-none focus:border-orange-500"
+                                    />
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (!plugpayManualComprobante.trim()) {
+                                      toast.warning("Falta Comprobante", "Ingrese el número de comprobante o transacción de Plug Pay.")
+                                      return
+                                    }
+                                    setPlugpayState("aprobada")
+                                    setPlugpayResult({
+                                      IdTransacao: plugpayManualComprobante.trim(),
+                                      serialNumber: plugpayManualAutorizacion.trim() || plugpayManualComprobante.trim(),
+                                      manual: true,
+                                      valueBRL: plugpayBrlValue ? plugpayBrlValue.toFixed(2) : undefined
+                                    } as any)
+                                    toast.success("Comprobante Guardado", "Pago manual de Plug Pay validado.")
+                                  }}
+                                  className="w-full py-2 px-3 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-xs font-black transition cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
+                                >
+                                  <CheckCircle className="w-3.5 h-3.5" />
+                                  <span>Validar Comprobante Manual Plug Pay</span>
+                                </button>
                               </div>
                             )}
                           </div>
@@ -7222,79 +12660,7 @@ export default function POSPage() {
                       </div>
                     )}
 
-                    {/* 5. CRÉDITO BRASIL (PlugPay) */}
-                    {activeMethods.has("plugpay_credito") && (
-                      <div className="bg-white dark:bg-slate-900 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-2.5">
-                        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
-                          <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-950 flex items-center justify-center text-blue-600">
-                              <CreditCard className="w-4 h-4" />
-                            </div>
-                            <div>
-                              <span className="font-black text-xs text-slate-900 dark:text-white">Crédito Brasil (PlugPay)</span>
-                              <span className="text-[10px] text-slate-400 block font-normal">Cobro parcelado internacional</span>
-                            </div>
-                          </div>
-                          {plugpayBrlValue && (
-                            <div className="text-right">
-                              <div className="text-[9px] text-slate-400 uppercase font-bold">Total a Financiar</div>
-                              <div className="text-xs font-posMono font-black text-blue-600 dark:text-blue-400">
-                                R$ {plugpayBrlValue.toFixed(2)}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        {plugpayState === "idle" && (
-                          <div className="space-y-2.5">
-                            <div className="grid grid-cols-3 gap-2">
-                              <div>
-                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">CPF (11 dígitos):</label>
-                                <input
-                                  type="text"
-                                  value={plugpayCpf}
-                                  onChange={(e) => setPlugpayCpf(e.target.value.replace(/\D/g, "").slice(0, 11))}
-                                  placeholder="52998224725"
-                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs outline-none focus:border-blue-500 text-center font-bold"
-                                />
-                              </div>
-                              <div>
-                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">WhatsApp:</label>
-                                <input
-                                  type="text"
-                                  value={plugpayPhone}
-                                  onChange={(e) => setPlugpayPhone(e.target.value.replace(/\D/g, ""))}
-                                  placeholder="48999999999"
-                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs outline-none focus:border-blue-500 text-center font-bold"
-                                />
-                              </div>
-                              <div>
-                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">Cuotas:</label>
-                                <select
-                                  value={plugpayCuotas}
-                                  onChange={(e) => setPlugpayCuotas(Number(e.target.value))}
-                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs outline-none focus:border-blue-500 font-bold"
-                                >
-                                  {[1, 2, 3, 4, 5, 6, 9, 12, 18, 24].map((c) => (
-                                    <option key={c} value={c}>{c === 1 ? "1 pago directo" : `${c} cuotas`}</option>
-                                  ))}
-                                </select>
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={handlePlugpayParcelado}
-                              className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black rounded-xl transition cursor-pointer shadow-sm shadow-blue-600/20 flex items-center justify-center gap-2"
-                            >
-                              <CreditCard className="w-4 h-4" />
-                              <span>Iniciar Crédito Parcelado en Terminal</span>
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* 7. EXTRA CLUB */}
+                    {/* 5. EXTRA CLUB */}
                     {activeMethods.has("extra_club") && (
                       <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
                         {(!customer || customer.id === DEFAULT_CUSTOMER.id) ? (
@@ -7307,13 +12673,22 @@ export default function POSPage() {
                               autoFocus
                               value={extraClubQuery}
                               onChange={(e) => setExtraClubQuery(e.target.value)}
-                              onKeyDown={(e) => {
+                              onKeyDown={async (e) => {
                                 if (e.key === "ArrowDown") { e.preventDefault(); setExtraClubHighlight((h) => Math.min(h + 1, extraClubResults.length - 1)) }
                                 else if (e.key === "ArrowUp") { e.preventDefault(); setExtraClubHighlight((h) => Math.max(h - 1, 0)) }
                                 else if (e.key === "Enter") {
                                   e.preventDefault()
                                   const c = extraClubResults[extraClubHighlight]
-                                  if (c) { setCustomer(c); setExtraClubQuery(""); setExtraClubResults([]); setExtraClubAdminOverride(false) }
+                                  if (c) { setCustomer(c); setExtraClubQuery(""); setExtraClubResults([]); setExtraClubAdminOverride(false); return }
+                                  const q = extraClubQuery.trim()
+                                  if (!q) return
+                                  try {
+                                    const found = (await api.customers.list({ search: q, limit: 5 })) || []
+                                    if (found.length > 0) {
+                                      const c2 = normalizeCustomer(found[0])
+                                      setCustomer(c2); setExtraClubQuery(""); setExtraClubResults([]); setExtraClubAdminOverride(false)
+                                    }
+                                  } catch (err) {}
                                 }
                               }}
                               placeholder="Número de socio / RUC / cédula / nombre"
@@ -7336,6 +12711,30 @@ export default function POSPage() {
                               </button>
                             </div>
 
+                            {isMultiPayment && (
+                              <div>
+                                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto a Crédito Extra Club (₲):</label>
+                                <div className="flex gap-1">
+                                  <input
+                                    type="text"
+                                    value={mixedExtraClubPyg}
+                                    onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedExtraClubPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                                    onFocus={(e) => e.target.select()}
+                                    placeholder="0"
+                                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500 text-center"
+                                  />
+                                  <button
+                                    type="button"
+                                    title="Completar con el resto"
+                                    onClick={() => setMixedExtraClubPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                                    className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
+                                  >
+                                    Resto
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
                             {extraClubCredit && extraClubCredit !== "loading" && (
                               <div className="grid grid-cols-2 gap-2">
                                 <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
@@ -7348,6 +12747,382 @@ export default function POSPage() {
                                 </div>
                               </div>
                             )}
+
+                            {extraClubCredit && extraClubCredit !== "loading" && extraClubCredit.saldo_disponible < (isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg) && (
+                              <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center gap-2">
+                                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400" />
+                                <span>Saldo insuficiente. Regla ineludible: no se puede facturar con Extra Club sin disponible. Debe cobrar en otro medio de pago.</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 6. OTROS (TRANSFERENCIAS Y CHEQUES) CON AUTORIZACIÓN OBLIGATORIA */}
+                    {activeMethods.has("otros") && (
+                      <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2.5">
+                          <div className="flex items-center gap-2">
+                            <Receipt className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                            <div>
+                              <span className="font-black text-xs text-slate-900 dark:text-white">Otros Medios de Pago</span>
+                              <span className="text-[10px] text-slate-400 block font-medium">Transferencia Bancaria & Cheques</span>
+                            </div>
+                          </div>
+
+                          {/* Segmented control Transferencia / Cheque / Vale */}
+                          <div className="flex bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-xl gap-0.5">
+                            <button
+                              type="button"
+                              onClick={() => setOtrosSubMethod("transferencia")}
+                              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                otrosSubMethod === "transferencia"
+                                  ? "bg-blue-600 text-white shadow-xs"
+                                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                              }`}
+                            >
+                              🏛️ Transferencia
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setOtrosSubMethod("cheque")}
+                              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                otrosSubMethod === "cheque"
+                                  ? "bg-amber-600 text-white shadow-xs"
+                                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                              }`}
+                            >
+                              📄 Cheque
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOtrosSubMethod("vale")
+                                setTimeout(() => valeInputRef.current?.focus(), 80)
+                              }}
+                              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                otrosSubMethod === "vale"
+                                  ? "bg-orange-600 text-white shadow-xs"
+                                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                              }`}
+                            >
+                              🎟️ Vale de Compra
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Banner de Autorización / Verificación */}
+                        {otrosSubMethod === "vale" ? (
+                          valeData ? (
+                            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-700 dark:text-emerald-300 flex items-center justify-between">
+                              <div className="flex items-center gap-2 font-black">
+                                <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
+                                <span>✓ {valeData.convenio_nombre} • Vale N° {valeData.numero_vale} (Gs. {valeData.monto.toLocaleString("es-PY")})</span>
+                              </div>
+                              <span className="text-[10px] bg-emerald-600 text-white font-black px-2 py-0.5 rounded-full uppercase">
+                                Verificado
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="p-3 rounded-xl bg-orange-500/10 border border-orange-500/40 text-xs text-orange-800 dark:text-orange-200 flex items-center gap-2">
+                              <Ticket className="w-5 h-5 text-orange-600 shrink-0" />
+                              <div>
+                                <span className="font-black block">Convenio Institucional (Vales Prepagados)</span>
+                                <span className="text-[10px] opacity-80">
+                                  Escanee el código de barras del vale con la pistola lectora para validar y descontar.
+                                </span>
+                              </div>
+                            </div>
+                          )
+                        ) : otrosSupervisorApproved ? (
+                          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-700 dark:text-emerald-300 flex items-center justify-between">
+                            <div className="flex items-center gap-2 font-black">
+                              <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
+                              <span>✓ Operación Autorizada por Supervisor</span>
+                            </div>
+                            <span className="text-[10px] bg-emerald-600 text-white font-black px-2 py-0.5 rounded-full uppercase">
+                              Aprobado
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-800 dark:text-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                              <div>
+                                <span className="font-black block">Requiere Autorización Obligatoria</span>
+                                <span className="text-[10px] opacity-80">
+                                  Cualquier cobro con {otrosSubMethod === "transferencia" ? "Transferencia" : "Cheque"} requiere confirmación de supervisor.
+                                </span>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (otrosSubMethod === "transferencia" && !transfComprobante.trim()) {
+                                  toast.warning("Falta Nº de Comprobante", "Ingrese el número de comprobante antes de solicitar autorización.")
+                                  return
+                                }
+                                if (otrosSubMethod === "cheque" && (!chequeBanco.trim() || !chequeNumero.trim())) {
+                                  toast.warning("Faltan Datos del Cheque", "Ingrese el banco emisor y número de cheque antes de solicitar autorización.")
+                                  return
+                                }
+                                requestSupervisorAuthorization({
+                                  type: "otros_payment",
+                                  otrosSubtipo: otrosSubMethod === "transferencia" ? "Transferencia Bancaria" : "Cheque",
+                                  otrosComprobante: otrosSubMethod === "transferencia" ? transfComprobante : `${chequeBanco} #${chequeNumero}`,
+                                  otrosMonto: isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg,
+                                  motivo: `Cobro con ${otrosSubMethod === "transferencia" ? "Transferencia Bancaria" : "Cheque"}: ${formatPYG(isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg)}`
+                                })
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-black text-xs cursor-pointer shadow-xs shrink-0 self-end sm:self-center"
+                            >
+                              Pedir Autorización
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Monto de línea si es pago mixto */}
+                        {isMultiPayment && (
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto en esta línea (₲):</label>
+                            <div className="flex gap-1">
+                              <input
+                                type="text"
+                                value={mixedOtrosPyg}
+                                onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedOtrosPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                                onKeyDown={(e) => handleMixedFieldKeyDown(e, setMixedOtrosPyg)}
+                                onFocus={(e) => e.target.select()}
+                                placeholder="0"
+                                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-amber-600 dark:text-amber-400 outline-none focus:border-amber-500"
+                              />
+                              <button
+                                type="button"
+                                title="Completar con el resto"
+                                onClick={() => setMixedOtrosPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                                className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
+                              >
+                                Resto
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* PESTAÑA TRANSFERENCIA */}
+                        {otrosSubMethod === "transferencia" && (
+                          <div className="space-y-2.5">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              <div>
+                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
+                                  Nº Comprobante / Transacción (*):
+                                </label>
+                                <input
+                                  type="text"
+                                  value={transfComprobante}
+                                  onChange={(e) => setTransfComprobante(e.target.value)}
+                                  placeholder="Ej: 9912048"
+                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs font-bold outline-none focus:border-blue-500 text-blue-600 dark:text-blue-400"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
+                                  Banco Origen (Opcional):
+                                </label>
+                                <input
+                                  type="text"
+                                  value={transfBancoOrigen}
+                                  onChange={(e) => setTransfBancoOrigen(e.target.value)}
+                                  placeholder="Ej: Itaú / Ueno / Continental"
+                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs font-bold outline-none focus:border-blue-500"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
+                                  Titular Transferencia:
+                                </label>
+                                <input
+                                  type="text"
+                                  value={transfTitular}
+                                  onChange={(e) => setTransfTitular(e.target.value)}
+                                  placeholder="Nombre o RUC del pagador"
+                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs outline-none focus:border-blue-500"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="p-2 rounded-xl bg-blue-50/50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/50 text-[10px] text-blue-700 dark:text-blue-300">
+                              ℹ️ <strong>Cuenta Destino Única:</strong> Los fondos ingresan a la cuenta habilitada de GRUPO SANTA TERESA E.A.S.
+                            </div>
+                          </div>
+                        )}
+
+                        {/* PESTAÑA CHEQUE */}
+                        {otrosSubMethod === "cheque" && (
+                          <div className="space-y-2.5">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <div>
+                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
+                                  Banco Emisor (*):
+                                </label>
+                                <input
+                                  type="text"
+                                  value={chequeBanco}
+                                  onChange={(e) => setChequeBanco(e.target.value)}
+                                  placeholder="Ej: Banco Familiar / Atlas / GNB"
+                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs font-bold outline-none focus:border-amber-500"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
+                                  Nº de Cheque (*):
+                                </label>
+                                <input
+                                  type="text"
+                                  value={chequeNumero}
+                                  onChange={(e) => setChequeNumero(e.target.value)}
+                                  placeholder="Ej: 00123849"
+                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs font-bold outline-none focus:border-amber-500 text-amber-600 dark:text-amber-400"
+                                />
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <div>
+                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
+                                  Fecha de Cobro / Vencimiento:
+                                </label>
+                                <input
+                                  type="date"
+                                  value={chequeFechaVenc}
+                                  onChange={(e) => setChequeFechaVenc(e.target.value)}
+                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs font-bold outline-none focus:border-amber-500"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
+                                  Titular / RUC del Cheque:
+                                </label>
+                                <input
+                                  type="text"
+                                  value={chequeTitular}
+                                  onChange={(e) => setChequeTitular(e.target.value)}
+                                  placeholder="Nombre o RUC del librador"
+                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs outline-none focus:border-amber-500"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* PESTAÑA VALE DE COMPRA */}
+                        {otrosSubMethod === "vale" && (
+                          <div className="space-y-2.5">
+                            <div>
+                              <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
+                                Escanee o Ingrese Código del Vale (*):
+                              </label>
+                              <div className="flex gap-2">
+                                <div className="relative flex-1">
+                                  <input
+                                    ref={valeInputRef}
+                                    type="text"
+                                    value={valeCodigo}
+                                    onChange={(e) => setValeCodigo(e.target.value)}
+                                    onKeyDown={async (e) => {
+                                      if (e.key === "Enter") {
+                                        e.preventDefault()
+                                        if (!valeCodigo.trim()) return
+                                        try {
+                                          setValeValidating(true)
+                                          const res = await api.vouchers.check(valeCodigo.trim())
+                                          if (res.es_valido) {
+                                            const saldoVale = Number(res.saldo_disponible)
+                                            const montoAplicar = totalPyg > 0 ? Math.min(saldoVale, totalPyg) : saldoVale
+                                            setValeData({
+                                              id: res.id,
+                                              numero_vale: res.numero_vale,
+                                              convenio_nombre: res.convenio_nombre,
+                                              monto: montoAplicar,
+                                            })
+                                            setMixedOtrosPyg(montoAplicar.toLocaleString("es-PY"))
+                                            setOtrosSupervisorApproved(true)
+                                            if (totalPyg > 0 && totalPyg > saldoVale) {
+                                              const resto = totalPyg - saldoVale
+                                              toast.success("Vale Válido", `${res.convenio_nombre} • N° ${res.numero_vale} por Gs. ${saldoVale.toLocaleString("es-PY")}. Restan Gs. ${resto.toLocaleString("es-PY")} por cobrar con otro medio.`)
+                                            } else {
+                                              toast.success("Vale Válido", `${res.convenio_nombre} • Vale N° ${res.numero_vale} por Gs. ${montoAplicar.toLocaleString("es-PY")} (cubierto al 100%, sin vuelto).`)
+                                            }
+                                          } else {
+                                            setValeData(null)
+                                            setOtrosSupervisorApproved(false)
+                                            toast.error("Vale Inválido", res.mensaje)
+                                          }
+                                        } catch (err: any) {
+                                          toast.error("Error al validar", err?.message || "Error al conectar con la API")
+                                        } finally {
+                                          setValeValidating(false)
+                                        }
+                                      }
+                                    }}
+                                    placeholder="Apunte la pistola al código de barras o digite N°..."
+                                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs font-bold outline-none focus:border-orange-500 text-orange-600 dark:text-orange-400"
+                                  />
+                                  {valeValidating && (
+                                    <Loader2 className="w-4 h-4 animate-spin absolute right-3 top-1/2 -translate-y-1/2 text-orange-500" />
+                                  )}
+                                </div>
+                                <button
+                                  type="button"
+                                  disabled={valeValidating || !valeCodigo.trim()}
+                                  onClick={async () => {
+                                    if (!valeCodigo.trim()) return
+                                    try {
+                                      setValeValidating(true)
+                                      const res = await api.vouchers.check(valeCodigo.trim())
+                                      if (res.es_valido) {
+                                        const saldoVale = Number(res.saldo_disponible)
+                                        const montoAplicar = totalPyg > 0 ? Math.min(saldoVale, totalPyg) : saldoVale
+                                        setValeData({
+                                          id: res.id,
+                                          numero_vale: res.numero_vale,
+                                          convenio_nombre: res.convenio_nombre,
+                                          monto: montoAplicar,
+                                        })
+                                        setMixedOtrosPyg(montoAplicar.toLocaleString("es-PY"))
+                                        setOtrosSupervisorApproved(true)
+                                        if (totalPyg > 0 && totalPyg > saldoVale) {
+                                          const resto = totalPyg - saldoVale
+                                          toast.success("Vale Válido", `${res.convenio_nombre} • N° ${res.numero_vale} por Gs. ${saldoVale.toLocaleString("es-PY")}. Restan Gs. ${resto.toLocaleString("es-PY")} por cobrar con otro medio.`)
+                                        } else {
+                                          toast.success("Vale Válido", `${res.convenio_nombre} • Vale N° ${res.numero_vale} por Gs. ${montoAplicar.toLocaleString("es-PY")} (cubierto al 100%, sin vuelto).`)
+                                        }
+                                      } else {
+                                        setValeData(null)
+                                        setOtrosSupervisorApproved(false)
+                                        toast.error("Vale Inválido", res.mensaje)
+                                      }
+                                    } catch (err: any) {
+                                      toast.error("Error al validar", err?.message || "Error al conectar con la API")
+                                    } finally {
+                                      setValeValidating(false)
+                                    }
+                                  }}
+                                  className="px-3 bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs rounded-xl cursor-pointer"
+                                >
+                                  Validar
+                                </button>
+                              </div>
+                            </div>
+                            {valeData && (
+                              <div className="p-2.5 rounded-xl bg-orange-50/70 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800/50 text-xs flex items-center justify-between text-orange-900 dark:text-orange-200">
+                                <div>
+                                  <span className="font-black block">{valeData.convenio_nombre} • Vale N° {valeData.numero_vale}</span>
+                                  <span className="text-[10px] opacity-75">Saldo aplicado al cobro: Gs. {valeData.monto.toLocaleString("es-PY")}</span>
+                                </div>
+                                <span className="text-xs font-black bg-orange-600 text-white px-2 py-0.5 rounded-lg">
+                                  Gs. {valeData.monto.toLocaleString("es-PY")}
+                                </span>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -7358,10 +13133,10 @@ export default function POSPage() {
               </div>
 
               {/* 3. FOOTER ACTION BAR */}
-              <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/70">
+              <div className="shrink-0 flex items-center justify-between gap-3 px-5 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/70">
                 <button
                   type="button"
-                  onClick={() => setShowPaymentModal(false)}
+                  disabled={submitting} onClick={() => { if (!submitting) setShowPaymentModal(false) }}
                   className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer flex items-center gap-1.5 shadow-xs"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
@@ -7372,13 +13147,50 @@ export default function POSPage() {
                 <button
                   ref={confirmCheckoutBtnRef}
                   onClick={() => {
-                    if (activeMethods.has("bancard") && bancardTxnState !== "aprobada" && !posCardCupon.trim()) {
-                      toast.warning("Bancard sin confirmar", "Cobrá con el terminal o cargá el cupón manualmente antes de continuar.")
+                    if (activeMethods.has("bancard") && bancardTxnState !== "aprobada" && !posCardCupon.trim() && !bancardQrManualConfirm && bancardCloudQrState !== "aprobada" && bancardQrState !== "aprobada") {
+                      toast.warning("Bancard sin confirmar", "Cobrá con el terminal o cargá el cupón/voucher manualmente antes de continuar.")
                       return
                     }
-                    if (activeMethods.has("qr") && bancardQrState !== "aprobada" && !bancardQrManualConfirm) {
-                      toast.warning("QR sin confirmar", "Generá el QR y esperá el pago, o marcá que ya cobraste por fuera del sistema.")
+                    const legPendiente = extraPaymentLegs.find((l) => l.txnState !== "aprobada" && !l.manualCupon.trim())
+                    if (legPendiente) {
+                      toast.warning("Cobro adicional sin confirmar", "Hay una tarjeta/QR adicional cargada pero sin cobrar -- completala o quitala antes de continuar.")
                       return
+                    }
+                    if (activeMethods.has("dinelco") && dinelcoTxnState !== "aprobada" && !dinelcoCupon.trim() && dinelcoQrState !== "aprobada") {
+                      toast.warning("Dinelco sin confirmar", "Cobrá con el terminal o cargá el cupón manualmente antes de continuar.")
+                      return
+                    }
+                    if (activeMethods.has("plugpay") && plugpayState !== "aprobada" && !plugpayManualComprobante.trim()) {
+                      toast.warning("Plug Pay sin confirmar", "Generá el cobro o cargá el comprobante manual de respaldo antes de continuar.")
+                      return
+                    }
+                    if (activeMethods.has("otros")) {
+                      if (otrosSubMethod === "transferencia") {
+                        if (!transfComprobante.trim()) {
+                          toast.warning("Falta Nº de Comprobante", "Ingrese el número de comprobante o transacción de la transferencia.")
+                          return
+                        }
+                      } else if (otrosSubMethod === "cheque") {
+                        if (!chequeBanco.trim() || !chequeNumero.trim()) {
+                          toast.warning("Faltan Datos del Cheque", "Ingrese el banco emisor y número de cheque.")
+                          return
+                        }
+                      } else if (otrosSubMethod === "vale") {
+                        if (!valeCodigo.trim() || !valeData) {
+                          toast.warning("Vale no validado", "Escanee y valide el código de barras del vale antes de continuar.")
+                          return
+                        }
+                      }
+                      if (otrosSubMethod !== "vale" && !otrosSupervisorApproved) {
+                        requestSupervisorAuthorization({
+                          type: "otros_payment",
+                          otrosSubtipo: otrosSubMethod === "transferencia" ? "Transferencia Bancaria" : "Cheque",
+                          otrosComprobante: otrosSubMethod === "transferencia" ? transfComprobante : `${chequeBanco} #${chequeNumero}`,
+                          otrosMonto: isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg,
+                          motivo: `Cobro con ${otrosSubMethod === "transferencia" ? "Transferencia Bancaria" : "Cheque"}: ${formatPYG(isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg)}`
+                        })
+                        return
+                      }
                     }
                     const montoExtraClub = activeMethods.has("extra_club") ? (isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg) : 0
                     if (montoExtraClub > 0) {
@@ -7387,8 +13199,16 @@ export default function POSPage() {
                         return
                       }
                       const tieneLinea = extraClubCredit && extraClubCredit !== "loading" && extraClubCredit.activo
-                      if (!tieneLinea && !extraClubAdminOverride) {
-                        toast.warning("Sin línea de crédito", "Este cliente no tiene cuenta de crédito activa. Solo un admin puede autorizar la excepción.")
+                      if (!tieneLinea) {
+                        toast.error("Sin cuenta de crédito activa", "Este cliente no tiene cuenta de crédito activa. No se puede cobrar con Extra Club.")
+                        return
+                      }
+                      const disponible = Number(extraClubCredit.saldo_disponible || 0)
+                      if (disponible < montoExtraClub) {
+                        toast.error(
+                          "Crédito insuficiente",
+                          `El cliente dispone de ${formatPYG(disponible)} y la compra es de ${formatPYG(montoExtraClub)}. Regla ineludible: no se puede facturar a crédito sin saldo disponible bajo ninguna autorización. Cobre con otro medio de pago.`
+                        )
                         return
                       }
                       requestSupervisorAuthorization({ type: "extra_club_payment" })
@@ -7396,22 +13216,31 @@ export default function POSPage() {
                     }
                     handleProcessCheckout()
                   }}
-                  disabled={submitting}
-                  className="flex-1 max-w-lg py-3 px-6 rounded-xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm shadow-md shadow-emerald-600/30 flex items-center justify-center gap-2 transition cursor-pointer active:scale-[0.99] disabled:opacity-50"
+                  disabled={submitting || (activeMethods.has("extra_club") && Boolean(extraClubCredit && extraClubCredit !== "loading" && extraClubCredit.saldo_disponible < (isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg)))}
+                  className={`flex-1 max-w-lg py-3 px-6 rounded-xl font-black text-sm shadow-md flex items-center justify-center gap-2 transition cursor-pointer active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed ${
+                    activeMethods.has("extra_club") && extraClubCredit && extraClubCredit !== "loading" && extraClubCredit.saldo_disponible < (isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg)
+                      ? "bg-rose-600 text-white shadow-rose-600/30"
+                      : "bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-600/30"
+                  }`}
                 >
                   {submitting ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
                     <>
                       <Printer className="w-4 h-4" />
-                      <span>Confirmar Cobro e Imprimir Factura</span>
-                      <span className="text-[10px] font-mono bg-emerald-700/80 px-1.5 py-0.5 rounded border border-emerald-400/40 text-emerald-100">F12 / Enter</span>
+                      <span>
+                        {activeMethods.has("extra_club") && extraClubCredit && extraClubCredit !== "loading" && extraClubCredit.saldo_disponible < (isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg)
+                          ? "Crédito Insuficiente (Bloqueado)"
+                          : "Confirmar Cobro e Imprimir Factura"}
+                      </span>
+                      <span className="text-[10px] font-mono bg-black/20 px-1.5 py-0.5 rounded border border-white/20 text-white">F12 / Enter</span>
                     </>
                   )}
                 </button>
               </div>
             </div>
           </div>
+          , document.body
         )}
 
       {/* ── 9. MODAL DE CLIENTES (F9) CON BÚSQUEDA EN VIVO Y ALTA RÁPIDA ───────── */}
@@ -7420,7 +13249,7 @@ export default function POSPage() {
           <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-2xl max-w-lg w-full p-5 shadow-2xl text-slate-900 dark:text-slate-100 animate-fade-in">
             <div className="flex items-center justify-between mb-3 border-b border-slate-200 dark:border-slate-800 pb-2">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white shrink-0 shadow-sm shadow-emerald-500/20">
+                <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] shrink-0 shadow-sm shadow-orange-500/30">
                   <User className="w-5 h-5" />
                 </div>
                 <h3 className="font-black text-sm text-slate-900 dark:text-white font-posDisplay tracking-tight">Seleccionar Cliente para Facturación</h3>
@@ -7500,6 +13329,7 @@ export default function POSPage() {
               <div className="flex items-center gap-2 mb-3">
                 <div className="relative flex-1">
                   <input
+                    ref={customerSearchInputRef}
                     type="text"
                     value={customerSearch}
                     onChange={(e) => setCustomerSearch(e.target.value)}
@@ -7599,7 +13429,7 @@ export default function POSPage() {
           <div className="bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl animate-fade-in text-slate-900 dark:text-slate-100 max-h-[85vh] flex flex-col">
             <div className="flex items-center justify-between mb-4 shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black shadow-sm shadow-emerald-500/20">
+                <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] font-black shadow-sm shadow-orange-500/30">
                   <Pause className="w-5 h-5" />
                 </div>
                 <div>
@@ -7650,13 +13480,175 @@ export default function POSPage() {
         </div>
       )}
 
+      {/* ── MODAL DE DESCUENTO DIRECTO EN PAGO (AUTORIZACIÓN OBLIGATORIA) ──── */}
+      {showDiscountModal && (
+
+        <div className="fixed inset-0 z-[150] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border-2 border-amber-500 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500 flex items-center justify-center text-[#1C1710] font-black shadow-md shadow-amber-500/30">
+                  <Percent className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-black text-slate-900 dark:text-white font-posDisplay tracking-tight">
+                    Descuento Directo en Venta
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Requiere autorización y motivo obligatorio del supervisor.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDiscountModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-500">Total Venta Actual:</span>
+                <span className="text-sm font-black font-posMono text-slate-900 dark:text-white">{formatPYG(totalBrutoPyg)}</span>
+              </div>
+
+              {/* Selector de Tipo de Descuento */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setDiscountInputType("percentage"); setDiscountInputValue("10") }}
+                  className={`py-2 px-3 rounded-xl text-xs font-black cursor-pointer transition ${
+                    discountInputType === "percentage"
+                      ? "bg-amber-500 text-[#1C1710] shadow-md shadow-amber-500/20"
+                      : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
+                  }`}
+                >
+                  Por Porcentaje (%)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setDiscountInputType("fixed"); setDiscountInputValue("") }}
+                  className={`py-2 px-3 rounded-xl text-xs font-black cursor-pointer transition ${
+                    discountInputType === "fixed"
+                      ? "bg-amber-500 text-[#1C1710] shadow-md shadow-amber-500/20"
+                      : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
+                  }`}
+                >
+                  Por Monto Fijo (₲)
+                </button>
+              </div>
+
+              {discountInputType === "percentage" ? (
+                <div>
+                  <div className="flex gap-2 mb-2">
+                    {[5, 10, 15, 20].map((pct) => (
+                      <button
+                        key={pct}
+                        type="button"
+                        onClick={() => setDiscountInputValue(String(pct))}
+                        className={`flex-1 py-1.5 rounded-lg text-xs font-bold font-posMono cursor-pointer border ${
+                          discountInputValue === String(pct)
+                            ? "bg-amber-500/20 border-amber-500 text-amber-700 dark:text-amber-300"
+                            : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300"
+                        }`}
+                      >
+                        {pct}%
+                      </button>
+                    ))}
+                  </div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Porcentaje de Descuento (%):</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={discountInputValue}
+                    onChange={(e) => setDiscountInputValue(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-3 text-lg font-posMono font-black text-amber-600 dark:text-amber-400 outline-none focus:border-amber-500"
+                    placeholder="10"
+                    autoFocus
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Monto de Descuento (₲):</label>
+                  <input
+                    type="text"
+                    value={discountInputValue}
+                    onChange={(e) => {
+                      const clean = e.target.value.replace(/\D/g, "")
+                      setDiscountInputValue(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "")
+                    }}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-3 text-lg font-posMono font-black text-amber-600 dark:text-amber-400 outline-none focus:border-amber-500"
+                    placeholder="0"
+                    autoFocus
+                  />
+                </div>
+              )}
+
+              {/* Resumen Calculado */}
+              {(() => {
+                const numVal = discountInputType === "percentage"
+                  ? parseFloat(discountInputValue) || 0
+                  : parseInt(discountInputValue.replace(/\D/g, "") || "0", 10)
+                let calcMonto = 0
+                if (discountInputType === "percentage") {
+                  calcMonto = Math.round(totalBrutoPyg * (numVal / 100))
+                } else {
+                  calcMonto = Math.min(totalBrutoPyg, numVal)
+                }
+                const newNet = Math.max(0, totalBrutoPyg - calcMonto)
+
+                return (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs space-y-1">
+                    <div className="flex justify-between font-bold text-amber-800 dark:text-amber-200">
+                      <span>Monto a Descontar:</span>
+                      <span className="font-posMono text-sm font-black">-{formatPYG(calcMonto)}</span>
+                    </div>
+                    <div className="flex justify-between font-bold text-slate-700 dark:text-slate-300 pt-1 border-t border-amber-500/20">
+                      <span>Nuevo Total a Cobrar:</span>
+                      <span className="font-posMono text-sm font-black text-emerald-600 dark:text-emerald-400">{formatPYG(newNet)}</span>
+                    </div>
+                  </div>
+                )
+              })()}
+
+              <button
+                type="button"
+                onClick={() => {
+                  const numVal = discountInputType === "percentage"
+                    ? parseFloat(discountInputValue) || 0
+                    : parseInt(discountInputValue.replace(/\D/g, "") || "0", 10)
+                  if (numVal <= 0) {
+                    toast.warning("Monto Inválido", "Ingrese un porcentaje o monto mayor a cero.")
+                    return
+                  }
+                  setShowDiscountModal(false)
+                  requestSupervisorAuthorization({
+                    type: "direct_discount",
+                    discountType: discountInputType,
+                    discountValue: numVal,
+                    discountReason: "",
+                  })
+                }}
+                className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-[#1C1710] font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-amber-500/30 cursor-pointer"
+              >
+                <ShieldAlert className="w-4 h-4" /> Solicitar Autorización de Supervisor
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── CONSULTA DE PRECIOS (solo lectura, con escala por cantidad) ──────── */}
       {showPriceCheckModal && (
+
         <div className="fixed inset-0 z-[100] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border-2 border-emerald-500 rounded-2xl max-w-2xl w-full p-6 shadow-2xl animate-fade-in text-slate-900 dark:text-slate-100 max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between mb-4 shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black shadow-sm shadow-emerald-500/20">
+                <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] font-black shadow-sm shadow-orange-500/30">
                   <Search className="w-5 h-5" />
                 </div>
                 <div>
@@ -7700,14 +13692,21 @@ export default function POSPage() {
                 {priceCheckResults.map((p, i) => (
                   <button
                     key={p.id}
-                    onClick={() => handlePriceCheckSelect(p)}
+                    onClick={() => {
+                      const packMatch = packBarcodeMap.get(priceCheckSearch.trim())
+                      if (packMatch && packMatch.productId === p.id) {
+                        handlePriceCheckSelect(p, { etiqueta: packMatch.etiqueta, unidadesPorPaquete: packMatch.unidadesPorPaquete })
+                      } else {
+                        handlePriceCheckSelect(p)
+                      }
+                    }}
                     onMouseEnter={() => setPriceCheckHighlight(i)}
                     className={`w-full flex items-center justify-between gap-3 py-2.5 px-1 rounded-lg text-left cursor-pointer ${
                       priceCheckHighlight === i ? "bg-orange-100 dark:bg-orange-900/30 ring-1 ring-brand-orange" : "hover:bg-slate-100 dark:hover:bg-slate-800/40"
                     }`}
                   >
-                    <div className="truncate">
-                      <div className="font-bold text-sm text-slate-900 dark:text-white truncate">{p.nombre}</div>
+                    <div className="min-w-0">
+                      <div className="font-bold text-sm text-slate-900 dark:text-white leading-tight">{p.nombre}</div>
                       <div className="text-[10px] font-posMono tabular-nums text-slate-500 dark:text-slate-400">{p.codigo_barra || p.sku || "Sin código"}</div>
                     </div>
                     <div className="font-black text-emerald-600 dark:text-emerald-400 font-posMono tabular-nums shrink-0">{formatPYG(Number(p.precio_venta) || 0)}</div>
@@ -7746,7 +13745,7 @@ export default function POSPage() {
                   </div>
 
                   <div className="min-w-0 flex-1">
-                    <div className="font-black text-xl text-slate-900 dark:text-white mb-1 pr-16 truncate">{priceCheckSelected.nombre}</div>
+                    <div className={`font-black text-xl text-slate-900 dark:text-white mb-1 leading-tight ${priceCheckPromo ? "pr-24" : ""}`}>{priceCheckSelected.nombre}</div>
                     <div className="text-xs font-posMono tabular-nums text-slate-500 dark:text-slate-400 mb-3">
                       {priceCheckSelected.codigo_barra || priceCheckSelected.sku || "Sin código"}
                     </div>
@@ -7777,6 +13776,31 @@ export default function POSPage() {
                     <div className="text-[10px] text-slate-500 mt-1">
                       {priceCheckLoadingPromo ? "Verificando promociones…" : priceCheckPromo ? "Precio unitario con promoción aplicada" : "Precio unitario"}
                     </div>
+                    {priceCheckScannedAsPack && (
+                      <div className="text-[10px] font-bold text-sky-600 dark:text-sky-400 mt-0.5">
+                        Escaneado como: {priceCheckScannedAsPack.etiqueta}
+                      </div>
+                    )}
+
+                    {/* Card extra al lado del precio unitario: SOLO el pack que se
+                        escaneo realmente (nunca "el primero" de la lista -- un
+                        producto puede tener varias presentaciones, ej. Fardo x12 y
+                        Pack x15, y mostrar la que no corresponde confunde al cliente).
+                        Si se busco por nombre/SKU (no se escaneo un pack puntual), no
+                        se asume ninguno acá -- todas quedan en "Otras presentaciones"
+                        mas abajo. El total de la escala mayorista se muestra pegado a
+                        su propio precio unitario en "Escala de Precios por Cantidad". */}
+                    {priceCheckScannedAsPack && (
+                      <div className="inline-flex items-center gap-2 mt-2 bg-sky-50 dark:bg-sky-500/10 border border-sky-300 dark:border-sky-500/40 rounded-lg px-2.5 py-1.5">
+                        <Package className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
+                        <div>
+                          <div className="text-[9px] font-black text-sky-600 dark:text-sky-400 uppercase tracking-wider">{priceCheckScannedAsPack.etiqueta} ({priceCheckScannedAsPack.unidadesPorPaquete % 1 === 0 ? priceCheckScannedAsPack.unidadesPorPaquete.toFixed(0) : priceCheckScannedAsPack.unidadesPorPaquete} un.)</div>
+                          <div className="font-black text-sm text-sky-700 dark:text-sky-300 font-posMono tabular-nums">
+                            {formatPYG(precioParaCantidad(priceCheckScannedAsPack.unidadesPorPaquete, priceCheckTiers, priceCheckPromo ? priceCheckPromo.precio_final : Number(priceCheckSelected.precio_venta) || 0) * priceCheckScannedAsPack.unidadesPorPaquete)}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -7815,25 +13839,61 @@ export default function POSPage() {
                   </div>
                 ) : (
                   <div className="space-y-1.5">
-                    {priceCheckTiers.map((t) => (
-                      <div
-                        key={t.id}
-                        className="flex items-center justify-between bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2"
-                      >
-                        <div className="text-sm font-bold text-slate-800 dark:text-slate-200">
-                          {t.max_qty ? `De ${t.min_qty} a ${t.max_qty} unidades` : `${t.min_qty}+ unidades`}
+                    {priceCheckTiers.map((t, i) => (
+                      <React.Fragment key={t.id}>
+                        <div
+                          className="flex items-center justify-between bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2"
+                        >
+                          <div className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                            {t.max_qty ? `De ${t.min_qty} a ${t.max_qty} unidades` : `${t.min_qty}+ unidades`}
+                          </div>
+                          <div className="text-right">
+                            <div className="font-black text-emerald-600 dark:text-emerald-400 font-posMono tabular-nums">{formatPYG(Number(t.precio_unitario) || 0)}</div>
+                            {(rates.BRL > 0 || rates.USD > 0) && (
+                              <div className="flex items-center gap-2 justify-end mt-1">
+                                {rates.BRL > 0 && <span className="text-sm font-black text-amber-600 dark:text-amber-400 font-posMono tabular-nums">R$ {(Number(t.precio_unitario) / rates.BRL).toFixed(2)}</span>}
+                                {rates.USD > 0 && <span className="text-sm font-black text-blue-600 dark:text-blue-400 font-posMono tabular-nums">US$ {(Number(t.precio_unitario) / rates.USD).toFixed(2)}</span>}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <div className="font-black text-emerald-600 dark:text-emerald-400 font-posMono tabular-nums">{formatPYG(Number(t.precio_unitario) || 0)}</div>
-                          {(rates.BRL > 0 || rates.USD > 0) && (
-                            <div className="flex items-center gap-2 justify-end mt-1">
-                              {rates.BRL > 0 && <span className="text-sm font-black text-amber-600 dark:text-amber-400 font-posMono tabular-nums">R$ {(Number(t.precio_unitario) / rates.BRL).toFixed(2)}</span>}
-                              {rates.USD > 0 && <span className="text-sm font-black text-blue-600 dark:text-blue-400 font-posMono tabular-nums">US$ {(Number(t.precio_unitario) / rates.USD).toFixed(2)}</span>}
+                        {i === 0 && (
+                          <div className="flex items-center justify-between bg-sky-50 dark:bg-sky-500/10 border border-sky-300 dark:border-sky-500/40 rounded-lg px-3 py-2">
+                            <div className="text-sm font-bold text-sky-700 dark:text-sky-300 flex items-center gap-1.5">
+                              <Layers className="w-3.5 h-3.5" /> Total llevando {t.min_qty} un.
                             </div>
-                          )}
-                        </div>
-                      </div>
+                            <div className="font-black text-sky-700 dark:text-sky-300 font-posMono tabular-nums">
+                              {formatPYG((Number(t.precio_unitario) || 0) * t.min_qty)}
+                            </div>
+                          </div>
+                        )}
+                      </React.Fragment>
                     ))}
+                  </div>
+                )}
+
+                {/* Otras presentaciones -- el resto de los packs/cajas registrados
+                    para este producto (todos menos el que se escaneo, si se
+                    escaneo alguno). */}
+                {priceCheckPacks.filter((p) => !priceCheckScannedAsPack || p.etiqueta !== priceCheckScannedAsPack.etiqueta).length > 0 && (
+                  <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-800">
+                    <div className="text-xs font-bold text-sky-600 dark:text-sky-400 uppercase tracking-wider mb-2">
+                      Otras presentaciones disponibles
+                    </div>
+                    <div className="space-y-1.5">
+                      {priceCheckPacks
+                        .filter((p) => !priceCheckScannedAsPack || p.etiqueta !== priceCheckScannedAsPack.etiqueta)
+                        .map((p, i) => (
+                          <div key={i} className="flex items-center justify-between bg-sky-50 dark:bg-sky-500/10 border border-sky-300 dark:border-sky-500/40 rounded-lg px-3 py-2">
+                            <div className="text-sm font-bold text-sky-700 dark:text-sky-300">
+                              {p.etiqueta} ({p.unidades_por_paquete % 1 === 0 ? p.unidades_por_paquete.toFixed(0) : p.unidades_por_paquete} un.)
+                            </div>
+                            <div className="font-black text-sky-700 dark:text-sky-300 font-posMono tabular-nums">
+                              {formatPYG(precioParaCantidad(p.unidades_por_paquete, priceCheckTiers, priceCheckPromo ? priceCheckPromo.precio_final : Number(priceCheckSelected.precio_venta) || 0) * p.unidades_por_paquete)}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -7871,7 +13931,7 @@ export default function POSPage() {
           <div className="bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-2xl max-w-lg w-full max-h-[80vh] flex flex-col shadow-2xl text-slate-900 dark:text-slate-100">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-800">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white shrink-0 shadow-sm shadow-emerald-500/20">
+                <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] shrink-0 shadow-sm shadow-orange-500/30">
                   <Printer className="w-5 h-5" />
                 </div>
                 <h2 className="text-base font-black text-slate-900 dark:text-white font-posDisplay tracking-tight">Reimprimir Comprobante</h2>
@@ -7885,20 +13945,163 @@ export default function POSPage() {
               <button
                 onClick={() => setReimprimirTab("ventas")}
                 className={`flex-1 py-2 rounded-lg text-xs font-bold cursor-pointer ${
-                  reimprimirTab === "ventas" ? "bg-emerald-600 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
+                  reimprimirTab === "ventas" ? "bg-brand-orange text-[#1C1710]" : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
                 }`}
               >
-                Ventas
+                Mis Ventas (48h)
+              </button>
+              <button
+                onClick={() => {
+                  setReimprimirTab("supervisor")
+                  if (isSupervisorUser) {
+                    setReimprimirSupervisorUnlocked(true)
+                    if (reimprimirSupervisorSales.length === 0) fetchSupervisorSales()
+                  }
+                }}
+                className={`flex-1 py-2 rounded-lg text-xs font-bold cursor-pointer flex items-center justify-center gap-1 ${
+                  reimprimirTab === "supervisor"
+                    ? "bg-purple-600 text-white shadow-sm"
+                    : "bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/30"
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                Supervisora (7d)
               </button>
               <button
                 onClick={() => { setReimprimirTab("devoluciones"); if (reimprimirReturns.length === 0) fetchReimprimirReturns() }}
                 className={`flex-1 py-2 rounded-lg text-xs font-bold cursor-pointer ${
-                  reimprimirTab === "devoluciones" ? "bg-emerald-600 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
+                  reimprimirTab === "devoluciones" ? "bg-brand-orange text-[#1C1710]" : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
                 }`}
               >
                 Devoluciones
               </button>
+              <button
+                onClick={() => { setReimprimirTab("cierres"); if (reimprimirSessions.length === 0) fetchReimprimirSessions() }}
+                className={`flex-1 py-2 rounded-lg text-xs font-bold cursor-pointer ${
+                  reimprimirTab === "cierres" ? "bg-brand-orange text-[#1C1710]" : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
+                }`}
+              >
+                Cierres / Arqueos
+              </button>
             </div>
+
+            {/* Buscador Rápido con Fallback a Nombre, CI/RUC y Monto */}
+            {reimprimirTab === "ventas" && (
+              <div className="px-2 pt-2">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={reimprimirSearch}
+                    onChange={(e) => setReimprimirSearch(e.target.value)}
+                    placeholder="🔍 Buscar en mis facturas de las últimas 48h..."
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl pl-9 pr-8 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-amber-500 font-medium placeholder:text-slate-400"
+                  />
+                  {reimprimirSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setReimprimirSearch("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold p-0.5"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Buscador y Filtros para Supervisora (7 días de todas las cajas) */}
+            {reimprimirTab === "supervisor" && reimprimirSupervisorUnlocked && (
+              <div className="px-2 pt-2 space-y-1.5">
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={reimprimirSupervisorSearch}
+                      onChange={(e) => setReimprimirSupervisorSearch(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") fetchSupervisorSales(reimprimirSupervisorSearch) }}
+                      placeholder="🔍 Buscar factura, cliente, CI/RUC, cajera..."
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl pl-9 pr-8 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-purple-500 font-medium placeholder:text-slate-400"
+                    />
+                    {reimprimirSupervisorSearch && (
+                      <button
+                        type="button"
+                        onClick={() => { setReimprimirSupervisorSearch(""); fetchSupervisorSales("") }}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold p-0.5"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => fetchSupervisorSales(reimprimirSupervisorSearch)}
+                    disabled={reimprimirSupervisorLoading}
+                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0 disabled:opacity-50"
+                  >
+                    <Search className="w-3.5 h-3.5" />
+                    Buscar
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <select
+                    value={reimprimirSupervisorCajero}
+                    onChange={(e) => setReimprimirSupervisorCajero(e.target.value)}
+                    className="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-2.5 py-1 text-xs text-slate-900 dark:text-white font-medium outline-none focus:border-purple-500"
+                  >
+                    <option value="">👤 Todas las cajeras ({Array.from(new Set(reimprimirSupervisorSales.map((s: any) => s.cajero_nombre || (s.user && s.user.nombre)).filter(Boolean))).length})</option>
+                    {Array.from(new Set(reimprimirSupervisorSales.map((s: any) => s.cajero_nombre || (s.user && s.user.nombre)).filter(Boolean))).map((nombre: any) => (
+                      <option key={nombre} value={nombre}>{nombre}</option>
+                    ))}
+                  </select>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400 ml-auto font-medium shrink-0">
+                    {filteredReimprimirSupervisorSales.length} ventas (7d)
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {reimprimirTab === "cierres" && (
+              <div className="px-2 pt-2 flex flex-wrap items-center gap-2">
+                <div className="flex-1 min-w-[150px]">
+                  <select
+                    value={reimprimirCierreCajero}
+                    onChange={(e) => setReimprimirCierreCajero(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-900 dark:text-white font-medium outline-none focus:border-amber-500"
+                  >
+                    <option value="">👤 Todas las cajeras ({Array.from(new Set(validReimprimirSessions.map((s) => s.cajero_nombre).filter(Boolean))).length})</option>
+                    {Array.from(new Set(validReimprimirSessions.map((s) => s.cajero_nombre).filter(Boolean))).map((nombre: any) => (
+                      <option key={nombre} value={nombre}>{nombre}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="date"
+                    value={reimprimirCierreFecha}
+                    onChange={(e) => setReimprimirCierreFecha(e.target.value)}
+                    title="Filtrar por fecha de cierre"
+                    className="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-2.5 py-1 text-xs text-slate-900 dark:text-white font-medium outline-none focus:border-amber-500"
+                  />
+                  {(reimprimirCierreCajero || reimprimirCierreFecha) && (
+                    <button
+                      type="button"
+                      onClick={() => { setReimprimirCierreCajero(""); setReimprimirCierreFecha("") }}
+                      className="text-xs text-amber-600 dark:text-amber-400 hover:underline font-bold px-1"
+                    >
+                      Limpiar
+                    </button>
+                  )}
+                </div>
+
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 ml-auto font-medium">
+                  {filteredReimprimirSessions.length} cierres
+                </div>
+              </div>
+            )}
 
             <div className="overflow-y-auto flex-1 p-2">
               {reimprimirLoading && (
@@ -7914,83 +14117,1261 @@ export default function POSPage() {
 
               {reimprimirTab === "ventas" && !reimprimirLoading && !reimprimirError && (
                 <>
-                  {reimprimirSales.length === 0 && (
-                    <div className="text-center text-sm text-slate-500 dark:text-slate-400 py-12">No hay ventas recientes para mostrar.</div>
+                  {filteredReimprimirSales.length === 0 && (
+                    <div className="text-center text-sm text-slate-500 dark:text-slate-400 py-12">
+                      {reimprimirSearch ? `No se encontraron ventas para "${reimprimirSearch}".` : "No hay ventas recientes para mostrar."}
+                    </div>
                   )}
-                  {reimprimirSales.map((sale) => {
-                    const sinIdentificar = !sale.customer_id || sale.customer_id === DEFAULT_CUSTOMER.id
+                  {filteredReimprimirSales.map((sale) => {
+                    const fpActual = (sale.forma_pago || (sale.condicion === "credito" ? "EXTRA_CLUB" : "EFECTIVO")).toUpperCase()
+                    const clienteNombre = sale.customer_nombre || sale.customer?.nombre || sale.customer?.razon_social || "Consumidor Final"
+                    const esConsumidorFinal = !sale.customer_id || sale.customer_id === DEFAULT_CUSTOMER.id || clienteNombre === "Consumidor Final"
+                    const clienteDoc = sale.customer_doc || sale.customer?.ruc || sale.customer?.ci || sale.customer?.telefono || ""
+                    const extraClubNum = sale.customer_extra_club || sale.customer?.extra_club_numero || ""
+
+                    const saleDate = sale.fecha ? new Date(sale.fecha) : null
+                    const horasPasadas = saleDate ? (Date.now() - saleDate.getTime()) / (3600 * 1000) : 0
+                    const isWithin48h = horasPasadas <= 48.0
+                    const isCurrentActiveSession = Boolean(cashSessionId && sale.session_id === cashSessionId)
+
                     return (
                     <div
                       key={sale.id}
-                      className="p-3 mx-1 my-1 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 border border-transparent hover:border-slate-300 dark:hover:border-slate-700"
+                      className="p-3 mx-1 my-2 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 shadow-xs hover:border-slate-300 dark:hover:border-slate-700 transition-all space-y-2"
                     >
-                      <div className="flex items-center justify-between gap-3">
+                      {/* Cabecera: Factura Nº, Hora y Forma de Pago */}
+                      <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-black font-posMono text-slate-900 dark:text-white tracking-tight">
+                            Nº {sale.numero || sale.numero_interno || sale.id.slice(0, 8)}
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {sale.fecha ? new Date(sale.fecha).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" }) : "—"}
+                          </span>
+                        </div>
+                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md border ${
+                          fpActual === "EXTRA_CLUB"
+                            ? "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30"
+                            : fpActual === "TARJETA"
+                            ? "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30"
+                            : fpActual === "TRANSFERENCIA" || fpActual === "QR"
+                            ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                            : fpActual === "CREDITO"
+                            ? "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30"
+                            : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                        }`}>
+                          {fpActual === "EXTRA_CLUB" ? "★ Extra Club" : fpActual}
+                        </span>
+                      </div>
+
+                      {/* Fila Central: Datos del Cliente y Monto Total */}
+                      <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
-                          <div className="text-sm font-bold text-slate-900 dark:text-white truncate">Nº {sale.numero || sale.id.slice(0, 8)}</div>
-                          <div className="text-xs text-slate-500 dark:text-slate-400">
-                            {sale.fecha ? new Date(sale.fecha).toLocaleString("es-PY") : "—"} · {formatPYG(sale.total || 0)}
+                          <div className="flex items-center gap-1 text-xs font-bold text-slate-800 dark:text-slate-200">
+                            <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span className="truncate">{clienteNombre}</span>
+                            {extraClubNum && (
+                              <span className="px-1.5 py-0.2 rounded bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-black shrink-0">
+                                ★ #{extraClubNum}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                            {clienteDoc ? `Doc: ${clienteDoc}` : "Sin documento"} · {sale.condicion ? sale.condicion.toUpperCase() : "CONTADO"}
                           </div>
                         </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          {sinIdentificar && (
+
+                        <div className="text-right shrink-0">
+                          <div className="text-sm font-black font-posMono text-slate-900 dark:text-white">
+                            {formatPYG(sale.total || 0)}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Barra de Acciones */}
+                      <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-slate-100 dark:border-slate-800">
+                        {isWithin48h ? (
+                          <button
+                            onClick={() => {
+                              setReabrirFacturaSaleId(reabrirFacturaSaleId === sale.id ? null : sale.id)
+                              setReabrirFacturaSearch("")
+                              setReabrirFacturaResults([])
+                              setReabrirPagoSaleId(null)
+                            }}
+                            title="Reabrir factura para cambiar titular o asignar cliente (hasta 48h, requiere supervisor)"
+                            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                              reabrirFacturaSaleId === sale.id
+                                ? "bg-purple-600 text-white"
+                                : "bg-purple-600/10 hover:bg-purple-600/20 text-purple-600 dark:text-purple-400 border border-purple-500/30"
+                            }`}
+                          >
+                            <User className="w-3.5 h-3.5" />
+                            Reabrir Factura
+                          </button>
+                        ) : (
+                          <span
+                            title="Plazo comercial vencido: solo se puede modificar titular dentro de las 48 horas posteriores a la venta"
+                            className="text-[10px] font-bold text-slate-400 dark:text-slate-500 px-2 py-1 bg-slate-100 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-800 cursor-not-allowed"
+                          >
+                            Plazo expirado (&gt;48h)
+                          </span>
+                        )}
+                        {isCurrentActiveSession ? (
+                          <button
+                            onClick={() => {
+                              if (reabrirPagoSaleId === sale.id) {
+                                setReabrirPagoSaleId(null)
+                                setReabrirPagoFormaPago("")
+                                setReabrirPagoMotivo("")
+                                setReabrirPagoVoucher("")
+                                setReabrirPagoLote("")
+                                setReabrirPagoTarjetaMarca("")
+                                setReabrirPagoMoneda("PYG")
+                                setReabrirPagoMontoMoneda(undefined)
+                                setReabrirPagoPosMsg("")
+                                setReabrirPagoCustomer(null)
+                                setReabrirPagoCustomerSearch("")
+                                setReabrirPagoCustomerResults([])
+                              } else {
+                                setReabrirPagoSaleId(sale.id)
+                                setReabrirPagoFormaPago(fpActual)
+                                setReabrirPagoMotivo("")
+                                setReabrirPagoVoucher("")
+                                setReabrirPagoLote("")
+                                setReabrirPagoTarjetaMarca("")
+                                setReabrirPagoMoneda((sale as any).moneda || "PYG")
+                                setReabrirPagoPosMsg("")
+                                setReabrirFacturaSaleId(null)
+                                if (sale.customer && String(sale.customer.id) !== DEFAULT_CUSTOMER.id) {
+                                  setReabrirPagoCustomer(normalizeCustomer(sale.customer))
+                                } else if (sale.customer_id && sale.customer_id !== DEFAULT_CUSTOMER.id && sale.customer_nombre) {
+                                  setReabrirPagoCustomer(normalizeCustomer({
+                                    id: sale.customer_id,
+                                    razon_social: sale.customer_nombre,
+                                    nombre: sale.customer_nombre,
+                                    ruc: sale.customer_doc,
+                                    extra_club_numero: sale.customer_extra_club,
+                                  }))
+                                } else {
+                                  setReabrirPagoCustomer(null)
+                                }
+                                setReabrirPagoCustomerSearch("")
+                                setReabrirPagoCustomerResults([])
+                              }
+                            }}
+                            title="Cambiar forma de pago (solo sesión en curso, requiere supervisor y motivo)"
+                            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                              reabrirPagoSaleId === sale.id
+                                ? "bg-amber-600 text-white"
+                                : "bg-amber-600/10 hover:bg-amber-600/20 text-amber-600 dark:text-amber-400 border border-amber-500/30"
+                            }`}
+                          >
+                            <CreditCard className="w-3.5 h-3.5" />
+                            Cambiar Pago
+                          </button>
+                        ) : (
+                          <span
+                            title="El medio de pago solo puede modificarse durante la sesión activa en curso. El turno de esta venta ya está cerrado."
+                            className="flex items-center gap-1 text-[10px] font-bold text-slate-400 dark:text-slate-500 px-2 py-1 bg-slate-100 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-800 cursor-not-allowed"
+                          >
+                            <Lock className="w-3 h-3 text-slate-400" />
+                            Pago bloqueado (turno cerrado)
+                          </span>
+                        )}
+                        <button
+                          onClick={() => handleReimprimirSale(sale)}
+                          className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-black bg-blue-600 hover:bg-blue-700 text-white cursor-pointer shadow-xs active:scale-95 transition-all"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                          Reimprimir
+                        </button>
+                      </div>
+
+                      {/* Panel de Reabrir Factura / Modificar Titular */}
+                      {reabrirFacturaSaleId === sale.id && (
+                        <div className="mt-2 border-t border-purple-500/30 pt-2.5 bg-purple-500/5 dark:bg-purple-500/10 -mx-3 -mb-3 p-3 rounded-b-xl space-y-2.5">
+                          <div className="flex items-center justify-between gap-2 border-b border-purple-500/20 pb-2">
+                            <div className="text-xs">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700 dark:text-purple-300 block">
+                                Titular Actual:
+                              </span>
+                              <span className="font-bold text-slate-900 dark:text-white">
+                                {clienteNombre}
+                              </span>
+                              {clienteDoc && (
+                                <span className="text-slate-500 dark:text-slate-400 ml-1.5 text-[11px]">
+                                  (Doc: {clienteDoc})
+                                </span>
+                              )}
+                            </div>
+                            {!esConsumidorFinal && (
+                              <button
+                                type="button"
+                                disabled={submittingReabrirFactura}
+                                onClick={() => requestSupervisorAuthorization({ type: "reopen_invoice", sale, customer: DEFAULT_CUSTOMER })}
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 cursor-pointer disabled:opacity-50 transition-colors"
+                                title="Elimina el RUC/titular actual y restaura el ticket como Consumidor Final"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                                Pasar a Consumidor Final
+                              </button>
+                            )}
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
+                              Buscar y Asignar Nuevo Cliente:
+                            </label>
+                            <input
+                              type="text"
+                              value={reabrirFacturaSearch}
+                              onChange={(e) => setReabrirFacturaSearch(e.target.value)}
+                              placeholder="Buscar por nombre, CI o RUC..."
+                              autoFocus
+                              className="w-full bg-white dark:bg-slate-950 border border-purple-500/40 rounded-xl p-2 text-xs text-slate-900 dark:text-white outline-none focus:border-purple-600 shadow-inner"
+                            />
+                            {reabrirFacturaSearch.trim() && (
+                              <div className="mt-1.5 border border-purple-500/30 rounded-xl bg-white dark:bg-slate-950 overflow-hidden shadow-lg">
+                                {reabrirFacturaSearching ? (
+                                  <div className="p-2.5 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Buscando cliente...
+                                  </div>
+                                ) : reabrirFacturaResults.length > 0 ? (
+                                  reabrirFacturaResults.map((c) => (
+                                    <button
+                                      key={String(c.id)}
+                                      type="button"
+                                      disabled={submittingReabrirFactura}
+                                      onClick={() => requestSupervisorAuthorization({ type: "reopen_invoice", sale, customer: c })}
+                                      className="w-full text-left p-2.5 text-xs hover:bg-purple-50 dark:hover:bg-purple-500/10 border-b border-slate-100 dark:border-slate-800 last:border-b-0 disabled:opacity-50 flex items-center justify-between"
+                                    >
+                                      <div>
+                                        <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                                          {c.nombre}
+                                          {(c as any).extra_club_numero ? (
+                                            <span className="px-1.5 py-0.5 rounded-md bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-black uppercase tracking-wider">
+                                              ★ Extra Club #{ (c as any).extra_club_numero }
+                                            </span>
+                                          ) : null}
+                                        </div>
+                                        <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                          {c.ruc || c.ci || c.telefono || "Sin documento"}
+                                        </div>
+                                      </div>
+                                      <Check className="w-4 h-4 text-purple-500" />
+                                    </button>
+                                  ))
+                                ) : (
+                                  <div className="p-2.5 text-xs text-slate-500 dark:text-slate-400">
+                                    No se encontró ningún cliente con ese criterio.
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Panel de Cambiar Forma de Pago con Medios Reales, POS Integrado y Auditoría */}
+                      {reabrirPagoSaleId === sale.id && (
+                        <div className="mt-3 border-t border-amber-500/30 pt-3 bg-amber-500/5 dark:bg-amber-500/10 -mx-3 -mb-3 p-3 rounded-b-xl space-y-3">
+                          {/* Banner de Auditoría y Control de Riesgos */}
+                          <div className="flex items-start gap-2 bg-amber-500/20 border border-amber-500/40 rounded-xl p-2.5 text-xs text-amber-900 dark:text-amber-200">
+                            <span className="text-base leading-none">⚠️</span>
+                            <div>
+                              <div className="font-black uppercase tracking-wide text-[11px]">Auditoría de Cambio de Pago — Turno Actual</div>
+                              <div className="text-[11px] opacity-90 leading-relaxed mt-0.5">
+                                Modifica el medio de pago de la venta Nº <strong>{sale.numero}</strong> (anterior: <strong>{fpActual}</strong>). Se registrará la traza completa, se generará el nuevo ticket con voucher y se recalculará el arqueo de gaveta.
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Selector de Nueva Forma de Pago */}
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                              Seleccionar Nueva Forma de Pago:
+                            </label>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                              {[
+                                { id: "EFECTIVO", label: "💵 Efectivo (₲)", desc: "Guaraníes", color: "border-emerald-500 text-emerald-600 bg-emerald-500/10", requiresVoucher: false, isCard: false, isForeign: false },
+                                { id: "EFECTIVO_BRL", label: "💵 Efectivo R$", desc: "Reales", color: "border-teal-500 text-teal-600 bg-teal-500/10", requiresVoucher: false, isCard: false, isForeign: true, moneda: "BRL" },
+                                { id: "EFECTIVO_USD", label: "💵 Efectivo US$", desc: "Dólares", color: "border-cyan-500 text-cyan-600 bg-cyan-500/10", requiresVoucher: false, isCard: false, isForeign: true, moneda: "USD" },
+                                { id: "TARJETA_BANCARD", label: "💳 Tarjeta Bancard", desc: "DX8000 / Manual", color: "border-blue-500 text-blue-600 bg-blue-500/10", requiresVoucher: true, isCard: true, cardNetwork: "Bancard" },
+                                { id: "TARJETA_DINELCO", label: "💳 Tarjeta Dinelco", desc: "POS Dinelco", color: "border-indigo-500 text-indigo-600 bg-indigo-500/10", requiresVoucher: true, isCard: true, cardNetwork: "Dinelco" },
+                                { id: "QR", label: "📱 QR Zimple / PIX", desc: "Pago QR", color: "border-amber-500 text-amber-600 bg-amber-500/10", requiresVoucher: true, isCard: false, isForeign: false },
+                                { id: "EXTRA_CLUB", label: "★ Extra Club", desc: "Crédito a Socio", color: "border-purple-500 text-purple-600 bg-purple-500/10", requiresVoucher: false, isCard: false, isForeign: false, requiresCustomer: true },
+                                { id: "TRANSFERENCIA", label: "🏦 Transferencia", desc: "SIPAP / Cheque", color: "border-sky-500 text-sky-600 bg-sky-500/10", requiresVoucher: true, isCard: false, isForeign: false },
+                              ].map((opt) => {
+                                const isSelected = reabrirPagoFormaPago === opt.id || (reabrirPagoFormaPago === "TARJETA" && opt.id === "TARJETA_BANCARD")
+                                const isSameAsCurrent = fpActual === opt.id || (fpActual === "TARJETA" && opt.id === "TARJETA_BANCARD")
+                                return (
+                                  <button
+                                    key={opt.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setReabrirPagoFormaPago(opt.id)
+                                      if (opt.isForeign && opt.moneda) {
+                                        setReabrirPagoMoneda(opt.moneda)
+                                        const cotiz = opt.moneda === "BRL" ? (rates.BRL || 1400) : (rates.USD || 7800)
+                                        setReabrirPagoMontoMoneda(Number(((sale.total || 0) / cotiz).toFixed(2)))
+                                      } else {
+                                        setReabrirPagoMoneda("PYG")
+                                        setReabrirPagoMontoMoneda(undefined)
+                                      }
+                                    }}
+                                    className={`py-2 px-2 rounded-xl text-xs font-bold border transition-all cursor-pointer text-center relative ${
+                                      isSelected
+                                        ? `${opt.color} border-2 ring-2 ring-amber-500/50 shadow-xs scale-102`
+                                        : "bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-slate-400"
+                                    }`}
+                                  >
+                                    <div className="leading-tight">{opt.label}</div>
+                                    <div className="text-[9px] opacity-75 font-normal mt-0.5">{opt.desc}</div>
+                                    {isSameAsCurrent && (
+                                      <span className="block text-[8px] text-slate-400 font-bold mt-0.5">(Actual)</span>
+                                    )}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Integración POS AXIUM DX8000 para Tarjeta Bancard */}
+                          {(reabrirPagoFormaPago === "TARJETA_BANCARD" || reabrirPagoFormaPago === "TARJETA") && (
+                            <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-3 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[11px] font-black text-blue-700 dark:text-blue-300 uppercase tracking-wider flex items-center gap-1.5">
+                                  <Sparkles className="w-3.5 h-3.5 text-blue-500" />
+                                  Cobro en Terminal POS AXIUM DX8000 ({activePosConfig.bancardIp || "Sin IP"})
+                                </span>
+                                {reabrirPagoPosMsg && (
+                                  <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">
+                                    {reabrirPagoPosMsg}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  disabled={reabrirPagoPosLoading || !activePosConfig.bancardIp}
+                                  onClick={() => handleReabrirPagoCobrarPos(sale)}
+                                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black bg-blue-600 hover:bg-blue-700 text-white shadow-xs cursor-pointer disabled:opacity-50 transition-all"
+                                >
+                                  {reabrirPagoPosLoading ? (
+                                    <>
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      Procesando en Terminal...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <CreditCard className="w-3.5 h-3.5" />
+                                      ⚡ Enviar Cobro {formatPYG(sale.total)} al POS
+                                    </>
+                                  )}
+                                </button>
+                                <span className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                                  O podés ingresar el voucher/cupón manualmente si ya cobraste en el POS.
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Campos de Voucher / Cupón y Lote para Tarjetas, QR y Transferencias */}
+                          {["TARJETA_BANCARD", "TARJETA_DINELCO", "TARJETA", "QR", "TRANSFERENCIA"].includes(reabrirPagoFormaPago) && (
+                            <div className="grid grid-cols-2 gap-2 bg-slate-50 dark:bg-slate-950 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
+                              <div>
+                                <label className="block text-[10px] font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                                  Nº Voucher / Cupón / Comprobante <span className="text-rose-500">*</span>:
+                                </label>
+                                <input
+                                  type="text"
+                                  value={reabrirPagoVoucher}
+                                  onChange={(e) => setReabrirPagoVoucher(e.target.value)}
+                                  placeholder="Ej: 004821 o Nº Comprobante"
+                                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 text-xs font-mono font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
+                                  Lote POS / Tarjeta (Opcional):
+                                </label>
+                                <input
+                                  type="text"
+                                  value={reabrirPagoLote}
+                                  onChange={(e) => setReabrirPagoLote(e.target.value)}
+                                  placeholder="Ej: 001"
+                                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 text-xs font-mono text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Equivalente en Divisa Extranjera (R$ o US$) */}
+                          {(reabrirPagoFormaPago === "EFECTIVO_BRL" || reabrirPagoFormaPago === "EFECTIVO_USD") && (
+                            <div className="bg-teal-500/10 border border-teal-500/30 rounded-xl p-2.5 text-xs text-teal-900 dark:text-teal-200 space-y-1">
+                              <div className="font-bold flex items-center justify-between">
+                                <span>Cobro en Efectivo Divisa ({reabrirPagoFormaPago === "EFECTIVO_BRL" ? "Reales R$" : "Dólares US$"})</span>
+                                <span className="font-mono text-[11px]">
+                                  Cotización: 1 {reabrirPagoMoneda} = {formatPYG(reabrirPagoMoneda === "BRL" ? (rates.BRL || 1400) : (rates.USD || 7800))}
+                                </span>
+                              </div>
+                              <div className="text-[11px] opacity-90">
+                                Importe exacto esperado: <strong>{reabrirPagoMoneda === "BRL" ? "R$" : "US$"} {((sale.total || 0) / (reabrirPagoMoneda === "BRL" ? (rates.BRL || 1400) : (rates.USD || 7800))).toFixed(2)}</strong>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Selector de Socio Extra Club cuando la forma de pago elegida es EXTRA_CLUB o CREDITO */}
+                          {(reabrirPagoFormaPago === "EXTRA_CLUB" || reabrirPagoFormaPago === "CREDITO") && (
+                            <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-3 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[11px] font-black text-purple-700 dark:text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
+                                  <Star className="w-3.5 h-3.5 fill-purple-500 text-purple-500" />
+                                  Socio Extra Club Obligatorio:
+                                </span>
+                                {reabrirPagoCustomer && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setReabrirPagoCustomer(null)
+                                      setReabrirPagoCustomerSearch("")
+                                    }}
+                                    className="text-[10px] text-purple-600 dark:text-purple-400 hover:underline font-bold cursor-pointer"
+                                  >
+                                    Cambiar socio
+                                  </button>
+                                )}
+                              </div>
+
+                              {reabrirPagoCustomer ? (
+                                <div className="bg-white dark:bg-slate-900 border border-purple-500/40 rounded-xl p-2.5 flex items-center justify-between shadow-xs">
+                                  <div>
+                                    <div className="font-black text-xs text-slate-900 dark:text-white flex items-center gap-1.5">
+                                      {reabrirPagoCustomer.nombre}
+                                      <span className="px-1.5 py-0.5 rounded-md bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-black uppercase tracking-wider">
+                                        ★ Extra Club
+                                      </span>
+                                    </div>
+                                    <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                      {reabrirPagoCustomer.ruc || reabrirPagoCustomer.ci || "Sin documento"} · {reabrirPagoCustomer.extra_club_numero ? `Socio #${reabrirPagoCustomer.extra_club_numero}` : "Cuenta Extra Club"}
+                                    </div>
+                                  </div>
+                                  <CheckCircle className="w-5 h-5 text-purple-500 shrink-0" />
+                                </div>
+                              ) : (
+                                <div className="space-y-1.5">
+                                  <input
+                                    type="text"
+                                    value={reabrirPagoCustomerSearch}
+                                    onChange={(e) => setReabrirPagoCustomerSearch(e.target.value)}
+                                    placeholder="Buscar socio por nombre, CI, RUC o Nº Extra Club..."
+                                    className="w-full bg-white dark:bg-slate-950 border border-purple-500/40 rounded-xl p-2 text-xs text-slate-900 dark:text-white outline-none focus:border-purple-600 shadow-inner"
+                                    autoFocus
+                                  />
+                                  {reabrirPagoCustomerSearch.trim().length >= 2 && (
+                                    <div className="max-h-44 overflow-y-auto border border-purple-500/30 rounded-xl bg-white dark:bg-slate-950 divide-y divide-slate-100 dark:divide-slate-800 shadow-lg">
+                                      {reabrirPagoCustomerSearching ? (
+                                        <div className="p-2.5 text-xs text-slate-500 flex items-center gap-2">
+                                          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Buscando socios...
+                                        </div>
+                                      ) : reabrirPagoCustomerResults.length > 0 ? (
+                                        reabrirPagoCustomerResults.map((c) => (
+                                          <button
+                                            key={String(c.id)}
+                                            type="button"
+                                            onClick={() => {
+                                              setReabrirPagoCustomer(c)
+                                              setReabrirPagoCustomerSearch("")
+                                              setReabrirPagoCustomerResults([])
+                                            }}
+                                            className="w-full text-left p-2 hover:bg-purple-50 dark:hover:bg-purple-500/10 flex items-center justify-between transition-colors cursor-pointer"
+                                          >
+                                            <div>
+                                              <div className="font-bold text-xs text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                                                {c.nombre}
+                                                {c.extra_club_numero && (
+                                                  <span className="px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-black">
+                                                    ★ #{c.extra_club_numero}
+                                                  </span>
+                                                )}
+                                              </div>
+                                              <div className="text-[10px] text-slate-500">
+                                                {c.ruc || c.ci || c.telefono || "—"}
+                                              </div>
+                                            </div>
+                                            <Plus className="w-3.5 h-3.5 text-purple-500 shrink-0" />
+                                          </button>
+                                        ))
+                                      ) : (
+                                        <div className="p-2.5 text-xs text-slate-500">No se encontró ningún cliente/socio con ese criterio.</div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Campo de Motivo Obligatorio */}
+                          <div>
+                            <div className="flex justify-between items-baseline mb-1">
+                              <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                                Motivo del Cambio (Obligatorio):
+                              </label>
+                              <span className={`text-[10px] font-bold ${
+                                reabrirPagoMotivo.trim().length >= 10 ? "text-emerald-500" : "text-rose-500"
+                              }`}>
+                                {reabrirPagoMotivo.trim().length}/10 caracteres mín.
+                              </span>
+                            </div>
+                            <textarea
+                              rows={2}
+                              value={reabrirPagoMotivo}
+                              onChange={(e) => setReabrirPagoMotivo(e.target.value)}
+                              placeholder="Ej: Cajera cobró en efectivo por error, se cobró con POS Bancard / cliente es socio Extra Club..."
+                              className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs text-slate-900 dark:text-white outline-none focus:border-amber-500 resize-none"
+                            />
+                          </div>
+
+                          {/* Botones de Acción */}
+                          <div className="flex items-center justify-end gap-2 pt-1">
                             <button
-                              onClick={() => { setReabrirFacturaSaleId(reabrirFacturaSaleId === sale.id ? null : sale.id); setReabrirFacturaSearch(""); setReabrirFacturaResults([]) }}
-                              title="Agregar identificación de cliente a esta factura (requiere autorización de supervisor)"
-                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white"
+                              type="button"
+                              onClick={() => {
+                                setReabrirPagoSaleId(null)
+                                setReabrirPagoFormaPago("")
+                                setReabrirPagoMotivo("")
+                                setReabrirPagoVoucher("")
+                                setReabrirPagoLote("")
+                                setReabrirPagoTarjetaMarca("")
+                                setReabrirPagoMoneda("PYG")
+                                setReabrirPagoMontoMoneda(undefined)
+                                setReabrirPagoPosMsg("")
+                                setReabrirPagoCustomer(null)
+                                setReabrirPagoCustomerSearch("")
+                                setReabrirPagoCustomerResults([])
+                              }}
+                              className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 cursor-pointer"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              type="button"
+                              disabled={
+                                submittingReabrirPago ||
+                                !reabrirPagoFormaPago ||
+                                ((reabrirPagoFormaPago === "EXTRA_CLUB" || reabrirPagoFormaPago === "CREDITO") && !reabrirPagoCustomer) ||
+                                (["TARJETA_BANCARD", "TARJETA_DINELCO", "TARJETA", "QR", "TRANSFERENCIA"].includes(reabrirPagoFormaPago) && !reabrirPagoVoucher.trim()) ||
+                                (reabrirPagoFormaPago === fpActual && (!reabrirPagoCustomer || (sale.customer && String(reabrirPagoCustomer.id) === String(sale.customer.id)))) ||
+                                reabrirPagoMotivo.trim().length < 10
+                              }
+                              onClick={() => {
+                                const isForeign = reabrirPagoFormaPago === "EFECTIVO_BRL" || reabrirPagoFormaPago === "EFECTIVO_USD"
+                                const moneda = isForeign ? (reabrirPagoFormaPago === "EFECTIVO_BRL" ? "BRL" : "USD") : "PYG"
+                                const rate = moneda === "BRL" ? (rates.BRL || 1400) : (rates.USD || 7800)
+                                const montoMoneda = isForeign ? Number(((sale.total || 0) / rate).toFixed(2)) : undefined
+
+                                requestSupervisorAuthorization({
+                                  type: "reopen_payment",
+                                  sale,
+                                  customer: reabrirPagoCustomer || undefined,
+                                  formaPago: reabrirPagoFormaPago,
+                                  motivo: reabrirPagoMotivo.trim(),
+                                  voucher: reabrirPagoVoucher.trim() || undefined,
+                                  lote: reabrirPagoLote.trim() || undefined,
+                                  tarjetaMarca: reabrirPagoTarjetaMarca.trim() || undefined,
+                                  terminalIp: activePosConfig.bancardIp || undefined,
+                                  moneda,
+                                  montoMoneda,
+                                } as any)
+                              }}
+                              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white shadow-md cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-all"
+                            >
+                              {submittingReabrirPago ? (
+                                <>
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  Guardando...
+                                </>
+                              ) : (
+                                <>
+                                  <Printer className="w-3.5 h-3.5" />
+                                  Confirmar y Reimprimir Correcto
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )})}
+                </>
+              )}
+
+              {/* ── MODO SUPERVISORA: CONSULTA Y REIMPRESIÓN GENERAL (7 DÍAS) ── */}
+              {reimprimirTab === "supervisor" && !reimprimirSupervisorUnlocked && (
+                <div className="p-6 flex flex-col items-center justify-center text-center max-w-sm mx-auto my-4">
+                  <div className="w-12 h-12 rounded-2xl bg-purple-500/20 text-purple-600 dark:text-purple-400 flex items-center justify-center mb-3">
+                    <ShieldCheck className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white mb-1">
+                    Acceso de Supervisora (Historial 7 Días)
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                    Permite consultar y reimprimir comprobantes de todas las cajeras emitidos en los últimos 7 días.
+                  </p>
+
+                  <div className="w-full space-y-2.5 text-left">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                        Supervisora / Administrador:
+                      </label>
+                      <select
+                        value={reimprimirSupervisorEmail}
+                        onChange={(e) => setReimprimirSupervisorEmail(e.target.value)}
+                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white font-medium outline-none focus:border-purple-500"
+                      >
+                        <option value="">Seleccione supervisora...</option>
+                        {supervisorStaffOptions.map((s) => (
+                          <option key={s.id} value={s.email}>
+                            {s.nombre} ({s.rol})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                        PIN / Contraseña de Supervisora:
+                      </label>
+                      <input
+                        type="password"
+                        value={reimprimirSupervisorPin}
+                        onChange={(e) => setReimprimirSupervisorPin(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") handleUnlockSupervisor() }}
+                        placeholder="Ingrese clave o PIN..."
+                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white font-medium outline-none focus:border-purple-500"
+                      />
+                    </div>
+
+                    <button
+                      onClick={handleUnlockSupervisor}
+                      disabled={reimprimirSupervisorVerifying}
+                      className="w-full mt-2 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-black text-xs flex items-center justify-center gap-2 cursor-pointer shadow-md disabled:opacity-50"
+                    >
+                      {reimprimirSupervisorVerifying ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <KeyRound className="w-4 h-4" />
+                      )}
+                      Habilitar Consulta (7 Días)
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {reimprimirTab === "supervisor" && reimprimirSupervisorUnlocked && (
+                <>
+                  {reimprimirSupervisorLoading && (
+                    <div className="flex items-center justify-center py-12">
+                      <Loader2 className="w-6 h-6 animate-spin text-purple-600 dark:text-purple-400" />
+                    </div>
+                  )}
+
+                  {!reimprimirSupervisorLoading && filteredReimprimirSupervisorSales.length === 0 && (
+                    <div className="text-center text-sm text-slate-500 dark:text-slate-400 py-12">
+                      {reimprimirSupervisorSearch ? `No se encontraron ventas para "${reimprimirSupervisorSearch}".` : "No se registraron ventas en los últimos 7 días."}
+                    </div>
+                  )}
+
+                  {!reimprimirSupervisorLoading && filteredReimprimirSupervisorSales.map((sale) => {
+                    const fpActual = (sale.forma_pago || (sale.condicion === "credito" ? "EXTRA_CLUB" : "EFECTIVO")).toUpperCase()
+                    const clienteNombre = sale.customer_nombre || sale.customer?.nombre || sale.customer?.razon_social || "Consumidor Final"
+                    const esConsumidorFinal = !sale.customer_id || sale.customer_id === DEFAULT_CUSTOMER.id || clienteNombre === "Consumidor Final"
+                    const clienteDoc = sale.customer_doc || sale.customer?.ruc || sale.customer?.ci || sale.customer?.telefono || ""
+                    const extraClubNum = sale.customer_extra_club || sale.customer?.extra_club_numero || ""
+                    const cajeroNombre = sale.cajero_nombre || (sale.user && sale.user.nombre) || ""
+
+                    const saleDate = sale.fecha ? new Date(sale.fecha) : null
+                    const horasPasadas = saleDate ? (Date.now() - saleDate.getTime()) / (3600 * 1000) : 0
+                    const isWithin48h = horasPasadas <= 48.0
+                    const isCurrentActiveSession = Boolean(cashSessionId && sale.session_id === cashSessionId)
+
+                    return (
+                      <div
+                        key={sale.id}
+                        className="p-3 mx-1 my-2 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 shadow-xs hover:border-slate-300 dark:hover:border-slate-700 transition-all space-y-2"
+                      >
+                        {/* Cabecera: Cajera, Factura Nº, Fecha y Forma de Pago */}
+                        <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-1.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-black font-posMono text-slate-900 dark:text-white tracking-tight">
+                              Nº {sale.numero || sale.numero_interno || sale.id.slice(0, 8)}
+                            </span>
+                            {cajeroNombre && (
+                              <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-800">
+                                👤 {cajeroNombre}
+                              </span>
+                            )}
+                            <span className="text-[10px] text-slate-400">
+                              {sale.fecha ? new Date(sale.fecha).toLocaleString("es-PY", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—"}
+                            </span>
+                          </div>
+                          <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md border ${
+                            fpActual === "EXTRA_CLUB"
+                              ? "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30"
+                              : fpActual === "TARJETA"
+                              ? "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30"
+                              : fpActual === "TRANSFERENCIA" || fpActual === "QR"
+                              ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                              : fpActual === "CREDITO"
+                              ? "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30"
+                              : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                          }`}>
+                            {fpActual === "EXTRA_CLUB" ? "★ Extra Club" : fpActual}
+                          </span>
+                        </div>
+
+                        {/* Fila Central: Datos del Cliente y Monto Total */}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1 text-xs font-bold text-slate-800 dark:text-slate-200">
+                              <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <span className="truncate">{clienteNombre}</span>
+                              {extraClubNum && (
+                                <span className="px-1.5 py-0.2 rounded bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-black shrink-0">
+                                  ★ #{extraClubNum}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                              {clienteDoc ? `Doc: ${clienteDoc}` : "Sin documento"} · {sale.condicion ? sale.condicion.toUpperCase() : "CONTADO"}
+                            </div>
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <div className="text-sm font-black font-posMono text-slate-900 dark:text-white">
+                              {formatPYG(sale.total || 0)}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Barra de Acciones */}
+                        <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-slate-100 dark:border-slate-800">
+                          {isWithin48h ? (
+                            <button
+                              onClick={() => {
+                                setReabrirFacturaSaleId(reabrirFacturaSaleId === sale.id ? null : sale.id)
+                                setReabrirFacturaSearch("")
+                                setReabrirFacturaResults([])
+                                setReabrirPagoSaleId(null)
+                              }}
+                              title="Reabrir factura para cambiar titular o asignar cliente (hasta 48h, requiere supervisor)"
+                              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                                reabrirFacturaSaleId === sale.id
+                                  ? "bg-purple-600 text-white"
+                                  : "bg-purple-600/10 hover:bg-purple-600/20 text-purple-600 dark:text-purple-400 border border-purple-500/30"
+                              }`}
                             >
                               <User className="w-3.5 h-3.5" />
-                              Reabrir
+                              Reabrir Factura
                             </button>
+                          ) : (
+                            <span
+                              title="Plazo comercial vencido: solo se puede modificar titular dentro de las 48 horas posteriores a la venta"
+                              className="text-[10px] font-bold text-slate-400 dark:text-slate-500 px-2 py-1 bg-slate-100 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-800 cursor-not-allowed"
+                            >
+                              Plazo expirado (&gt;48h)
+                            </span>
                           )}
+
+                          {isCurrentActiveSession ? (
+                            <button
+                              onClick={() => {
+                                if (reabrirPagoSaleId === sale.id) {
+                                  setReabrirPagoSaleId(null)
+                                  setReabrirPagoFormaPago("")
+                                  setReabrirPagoMotivo("")
+                                  setReabrirPagoVoucher("")
+                                  setReabrirPagoLote("")
+                                  setReabrirPagoTarjetaMarca("")
+                                  setReabrirPagoMoneda("PYG")
+                                  setReabrirPagoMontoMoneda(undefined)
+                                  setReabrirPagoPosMsg("")
+                                  setReabrirPagoCustomer(null)
+                                  setReabrirPagoCustomerSearch("")
+                                  setReabrirPagoCustomerResults([])
+                                } else {
+                                  setReabrirPagoSaleId(sale.id)
+                                  setReabrirPagoFormaPago(fpActual)
+                                  setReabrirPagoMotivo("")
+                                  setReabrirPagoVoucher("")
+                                  setReabrirPagoLote("")
+                                  setReabrirPagoTarjetaMarca("")
+                                  setReabrirPagoMoneda((sale as any).moneda || "PYG")
+                                  setReabrirPagoPosMsg("")
+                                  setReabrirFacturaSaleId(null)
+                                  if (sale.customer && String(sale.customer.id) !== DEFAULT_CUSTOMER.id) {
+                                    setReabrirPagoCustomer(normalizeCustomer(sale.customer))
+                                  } else if (sale.customer_id && sale.customer_id !== DEFAULT_CUSTOMER.id && sale.customer_nombre) {
+                                    setReabrirPagoCustomer(normalizeCustomer({
+                                      id: sale.customer_id,
+                                      razon_social: sale.customer_nombre,
+                                      nombre: sale.customer_nombre,
+                                      ruc: sale.customer_doc,
+                                      extra_club_numero: sale.customer_extra_club,
+                                    }))
+                                  } else {
+                                    setReabrirPagoCustomer(null)
+                                  }
+                                  setReabrirPagoCustomerSearch("")
+                                  setReabrirPagoCustomerResults([])
+                                }
+                              }}
+                              title="Cambiar forma de pago (solo sesión en curso, requiere supervisor y motivo)"
+                              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                                reabrirPagoSaleId === sale.id
+                                  ? "bg-amber-600 text-white"
+                                  : "bg-amber-600/10 hover:bg-amber-600/20 text-amber-600 dark:text-amber-400 border border-amber-500/30"
+                              }`}
+                            >
+                              <CreditCard className="w-3.5 h-3.5" />
+                              Cambiar Pago
+                            </button>
+                          ) : (
+                            <span
+                              title="El medio de pago solo puede modificarse durante la sesión activa en curso. El turno de esta venta ya está cerrado."
+                              className="flex items-center gap-1 text-[10px] font-bold text-slate-400 dark:text-slate-500 px-2 py-1 bg-slate-100 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-800 cursor-not-allowed"
+                            >
+                              <Lock className="w-3 h-3 text-slate-400" />
+                              Pago bloqueado (turno cerrado)
+                            </span>
+                          )}
+
                           <button
                             onClick={() => handleReimprimirSale(sale)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white"
+                            className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-black bg-blue-600 hover:bg-blue-700 text-white cursor-pointer shadow-xs active:scale-95 transition-all"
                           >
                             <Printer className="w-3.5 h-3.5" />
                             Reimprimir
                           </button>
                         </div>
-                      </div>
-                      {reabrirFacturaSaleId === sale.id && (
-                        <div className="mt-2 border-t border-slate-200 dark:border-slate-800 pt-2">
-                          <input
-                            type="text"
-                            value={reabrirFacturaSearch}
-                            onChange={(e) => setReabrirFacturaSearch(e.target.value)}
-                            placeholder="Buscar cliente por nombre, CI o RUC..."
-                            autoFocus
-                            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-sm text-slate-900 dark:text-white outline-none focus:border-purple-500"
-                          />
-                          {reabrirFacturaSearch.trim() && (
-                            <div className="mt-1.5 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
-                              {reabrirFacturaSearching ? (
-                                <div className="p-2 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Buscando...</div>
-                              ) : reabrirFacturaResults.length > 0 ? (
-                                reabrirFacturaResults.map((c) => (
-                                  <button
-                                    key={String(c.id)}
-                                    disabled={submittingReabrirFactura}
-                                    onClick={() => requestSupervisorAuthorization({ type: "reopen_invoice", sale, customer: c })}
-                                    className="w-full text-left p-2 text-sm hover:bg-purple-50 dark:hover:bg-purple-500/10 border-b border-slate-100 dark:border-slate-800 last:border-b-0 disabled:opacity-50"
-                                  >
-                                    <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                                      {c.nombre}
-                                      {(c as any).extra_club_numero ? (
-                                        <span className="px-1.5 py-0.5 rounded-md bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-black uppercase tracking-wider">★ Extra Club</span>
-                                      ) : null}
-                                    </div>
-                                    <div className="text-xs text-slate-500 dark:text-slate-400">{c.ruc || c.ci || c.telefono || "—"}</div>
-                                  </button>
-                                ))
-                              ) : (
-                                <div className="p-2 text-xs text-slate-500 dark:text-slate-400">No se encontró ningún cliente.</div>
+
+                        {/* Panel de Reabrir Factura / Modificar Titular en Modo Supervisora */}
+                        {reabrirFacturaSaleId === sale.id && (
+                          <div className="mt-2 border-t border-purple-500/30 pt-2.5 bg-purple-500/5 dark:bg-purple-500/10 -mx-3 -mb-3 p-3 rounded-b-xl space-y-2.5">
+                            <div className="flex items-center justify-between gap-2 border-b border-purple-500/20 pb-2">
+                              <div className="text-xs">
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700 dark:text-purple-300 block">
+                                  Titular Actual:
+                                </span>
+                                <span className="font-bold text-slate-900 dark:text-white">
+                                  {clienteNombre}
+                                </span>
+                                {clienteDoc && (
+                                  <span className="text-slate-500 dark:text-slate-400 ml-1.5 text-[11px]">
+                                    (Doc: {clienteDoc})
+                                  </span>
+                                )}
+                              </div>
+                              {!esConsumidorFinal && (
+                                <button
+                                  type="button"
+                                  disabled={submittingReabrirFactura}
+                                  onClick={() => requestSupervisorAuthorization({ type: "reopen_invoice", sale, customer: DEFAULT_CUSTOMER })}
+                                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 cursor-pointer disabled:opacity-50 transition-colors"
+                                  title="Elimina el RUC/titular actual y restaura el ticket como Consumidor Final"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                  Pasar a Consumidor Final
+                                </button>
                               )}
                             </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )})}
+
+                            <div>
+                              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
+                                Buscar y Asignar Nuevo Cliente:
+                              </label>
+                              <input
+                                type="text"
+                                value={reabrirFacturaSearch}
+                                onChange={(e) => setReabrirFacturaSearch(e.target.value)}
+                                placeholder="Buscar por nombre, CI o RUC..."
+                                autoFocus
+                                className="w-full bg-white dark:bg-slate-950 border border-purple-500/40 rounded-xl p-2 text-xs text-slate-900 dark:text-white outline-none focus:border-purple-600 shadow-inner"
+                              />
+                              {reabrirFacturaSearch.trim() && (
+                                <div className="mt-1.5 border border-purple-500/30 rounded-xl bg-white dark:bg-slate-950 overflow-hidden shadow-lg">
+                                  {reabrirFacturaSearching ? (
+                                    <div className="p-2.5 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Buscando cliente...
+                                    </div>
+                                  ) : reabrirFacturaResults.length > 0 ? (
+                                    reabrirFacturaResults.map((c) => (
+                                      <button
+                                        key={String(c.id)}
+                                        type="button"
+                                        disabled={submittingReabrirFactura}
+                                        onClick={() => requestSupervisorAuthorization({ type: "reopen_invoice", sale, customer: c })}
+                                        className="w-full text-left p-2.5 text-xs hover:bg-purple-50 dark:hover:bg-purple-500/10 border-b border-slate-100 dark:border-slate-800 last:border-b-0 disabled:opacity-50 flex items-center justify-between"
+                                      >
+                                        <div>
+                                          <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                                            {c.nombre}
+                                            {(c as any).extra_club_numero ? (
+                                              <span className="px-1.5 py-0.5 rounded-md bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-black uppercase tracking-wider">
+                                                ★ Extra Club #{ (c as any).extra_club_numero }
+                                              </span>
+                                            ) : null}
+                                          </div>
+                                          <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                            {c.ruc || c.ci || c.telefono || "Sin documento"}
+                                          </div>
+                                        </div>
+                                        <Check className="w-4 h-4 text-purple-500" />
+                                      </button>
+                                    ))
+                                  ) : (
+                                    <div className="p-2.5 text-xs text-slate-500 dark:text-slate-400">
+                                      No se encontró ningún cliente con ese criterio.
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Panel de Cambiar Forma de Pago en Modo Supervisora */}
+                        {reabrirPagoSaleId === sale.id && (
+                          <div className="mt-3 border-t border-amber-500/30 pt-3 bg-amber-500/5 dark:bg-amber-500/10 -mx-3 -mb-3 p-3 rounded-b-xl space-y-3">
+                            <div className="flex items-start gap-2 bg-amber-500/20 border border-amber-500/40 rounded-xl p-2.5 text-xs text-amber-900 dark:text-amber-200">
+                              <span className="text-base leading-none">⚠️</span>
+                              <div>
+                                <div className="font-black uppercase tracking-wide text-[11px]">Auditoría de Cambio de Pago — Turno Actual</div>
+                                <div className="text-[11px] opacity-90 leading-relaxed mt-0.5">
+                                  Modifica el medio de pago de la venta Nº <strong>{sale.numero}</strong> (anterior: <strong>{fpActual}</strong>). Se registrará la traza completa y se recalculará el arqueo de gaveta.
+                                </div>
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                                Seleccionar Nueva Forma de Pago:
+                              </label>
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                                {[
+                                  { id: "EFECTIVO", label: "💵 Efectivo (₲)", desc: "Guaraníes", color: "border-emerald-500 text-emerald-600 bg-emerald-500/10", requiresVoucher: false, isCard: false, isForeign: false },
+                                  { id: "EFECTIVO_BRL", label: "💵 Efectivo R$", desc: "Reales", color: "border-teal-500 text-teal-600 bg-teal-500/10", requiresVoucher: false, isCard: false, isForeign: true, moneda: "BRL" },
+                                  { id: "EFECTIVO_USD", label: "💵 Efectivo US$", desc: "Dólares", color: "border-cyan-500 text-cyan-600 bg-cyan-500/10", requiresVoucher: false, isCard: false, isForeign: true, moneda: "USD" },
+                                  { id: "TARJETA_BANCARD", label: "💳 Tarjeta Bancard", desc: "DX8000 / Manual", color: "border-blue-500 text-blue-600 bg-blue-500/10", requiresVoucher: true, isCard: true, cardNetwork: "Bancard" },
+                                  { id: "TARJETA_DINELCO", label: "💳 Tarjeta Dinelco", desc: "POS Dinelco", color: "border-indigo-500 text-indigo-600 bg-indigo-500/10", requiresVoucher: true, isCard: true, cardNetwork: "Dinelco" },
+                                  { id: "QR", label: "📱 QR Zimple / PIX", desc: "Pago QR", color: "border-amber-500 text-amber-600 bg-amber-500/10", requiresVoucher: true, isCard: false, isForeign: false },
+                                  { id: "EXTRA_CLUB", label: "★ Extra Club", desc: "Crédito a Socio", color: "border-purple-500 text-purple-600 bg-purple-500/10", requiresVoucher: false, isCard: false, isForeign: false, requiresCustomer: true },
+                                  { id: "TRANSFERENCIA", label: "🏦 Transferencia", desc: "SIPAP / Cheque", color: "border-sky-500 text-sky-600 bg-sky-500/10", requiresVoucher: true, isCard: false, isForeign: false },
+                                ].map((opt) => {
+                                  const isSelected = reabrirPagoFormaPago === opt.id || (reabrirPagoFormaPago === "TARJETA" && opt.id === "TARJETA_BANCARD")
+                                  const isSameAsCurrent = fpActual === opt.id || (fpActual === "TARJETA" && opt.id === "TARJETA_BANCARD")
+                                  return (
+                                    <button
+                                      key={opt.id}
+                                      type="button"
+                                      onClick={() => {
+                                        setReabrirPagoFormaPago(opt.id)
+                                        if (opt.isForeign && opt.moneda) {
+                                          setReabrirPagoMoneda(opt.moneda)
+                                          const cotiz = opt.moneda === "BRL" ? (rates.BRL || 1400) : (rates.USD || 7800)
+                                          setReabrirPagoMontoMoneda(Number(((sale.total || 0) / cotiz).toFixed(2)))
+                                        } else {
+                                          setReabrirPagoMoneda("PYG")
+                                          setReabrirPagoMontoMoneda(undefined)
+                                        }
+                                      }}
+                                      className={`py-2 px-2 rounded-xl text-xs font-bold border transition-all cursor-pointer text-center relative ${
+                                        isSelected
+                                          ? `${opt.color} border-2 ring-2 ring-amber-500/50 shadow-xs scale-102`
+                                          : "bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-slate-400"
+                                      }`}
+                                    >
+                                      <div className="leading-tight">{opt.label}</div>
+                                      <div className="text-[9px] opacity-75 font-normal mt-0.5">{opt.desc}</div>
+                                      {isSameAsCurrent && (
+                                        <span className="block text-[8px] text-slate-400 font-bold mt-0.5">(Actual)</span>
+                                      )}
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                            </div>
+
+                            {/* Integración POS AXIUM DX8000 para Tarjeta Bancard */}
+                            {(reabrirPagoFormaPago === "TARJETA_BANCARD" || reabrirPagoFormaPago === "TARJETA") && (
+                              <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-3 space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[11px] font-black text-blue-700 dark:text-blue-300 uppercase tracking-wider flex items-center gap-1.5">
+                                    <Sparkles className="w-3.5 h-3.5 text-blue-500" />
+                                    Cobro en Terminal POS AXIUM DX8000 ({activePosConfig.bancardIp || "Sin IP"})
+                                  </span>
+                                  {reabrirPagoPosMsg && (
+                                    <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">
+                                      {reabrirPagoPosMsg}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={reabrirPagoPosLoading || !activePosConfig.bancardIp}
+                                    onClick={() => handleReabrirPagoCobrarPos(sale)}
+                                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black bg-blue-600 hover:bg-blue-700 text-white shadow-xs cursor-pointer disabled:opacity-50 transition-all"
+                                  >
+                                    {reabrirPagoPosLoading ? (
+                                      <>
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        Procesando en Terminal...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <CreditCard className="w-3.5 h-3.5" />
+                                        ⚡ Enviar Cobro {formatPYG(sale.total)} al POS
+                                      </>
+                                    )}
+                                  </button>
+                                  <span className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                                    O podés ingresar el voucher/cupón manualmente si ya cobraste en el POS.
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Campos de Voucher / Cupón y Lote para Tarjetas, QR y Transferencias */}
+                            {["TARJETA_BANCARD", "TARJETA_DINELCO", "TARJETA", "QR", "TRANSFERENCIA"].includes(reabrirPagoFormaPago) && (
+                              <div className="grid grid-cols-2 gap-2 bg-slate-50 dark:bg-slate-950 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
+                                <div>
+                                  <label className="block text-[10px] font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                                    Nº Voucher / Cupón / Comprobante <span className="text-rose-500">*</span>:
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={reabrirPagoVoucher}
+                                    onChange={(e) => setReabrirPagoVoucher(e.target.value)}
+                                    placeholder="Ej: 004821 o Nº Comprobante"
+                                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 text-xs font-mono font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
+                                    Lote POS / Tarjeta (Opcional):
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={reabrirPagoLote}
+                                    onChange={(e) => setReabrirPagoLote(e.target.value)}
+                                    placeholder="Ej: 001"
+                                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 text-xs font-mono text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                                  />
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Equivalente en Divisa Extranjera (R$ o US$) */}
+                            {(reabrirPagoFormaPago === "EFECTIVO_BRL" || reabrirPagoFormaPago === "EFECTIVO_USD") && (
+                              <div className="bg-teal-500/10 border border-teal-500/30 rounded-xl p-2.5 text-xs text-teal-900 dark:text-teal-200 space-y-1">
+                                <div className="font-bold flex items-center justify-between">
+                                  <span>Cobro en Efectivo Divisa ({reabrirPagoFormaPago === "EFECTIVO_BRL" ? "Reales R$" : "Dólares US$"})</span>
+                                  <span className="font-mono text-[11px]">
+                                    Cotización: 1 {reabrirPagoMoneda} = {formatPYG(reabrirPagoMoneda === "BRL" ? (rates.BRL || 1400) : (rates.USD || 7800))}
+                                  </span>
+                                </div>
+                                <div className="text-[11px] opacity-90">
+                                  Importe exacto esperado: <strong>{reabrirPagoMoneda === "BRL" ? "R$" : "US$"} {((sale.total || 0) / (reabrirPagoMoneda === "BRL" ? (rates.BRL || 1400) : (rates.USD || 7800))).toFixed(2)}</strong>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Selector de Socio Extra Club cuando la forma de pago elegida es EXTRA_CLUB o CREDITO */}
+                            {(reabrirPagoFormaPago === "EXTRA_CLUB" || reabrirPagoFormaPago === "CREDITO") && (
+                              <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-3 space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[11px] font-black text-purple-700 dark:text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
+                                    <Star className="w-3.5 h-3.5 fill-purple-500 text-purple-500" />
+                                    Socio Extra Club Obligatorio:
+                                  </span>
+                                  {reabrirPagoCustomer && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setReabrirPagoCustomer(null)
+                                        setReabrirPagoCustomerSearch("")
+                                      }}
+                                      className="text-[10px] text-purple-600 dark:text-purple-400 hover:underline font-bold cursor-pointer"
+                                    >
+                                      Cambiar socio
+                                    </button>
+                                  )}
+                                </div>
+
+                                {reabrirPagoCustomer ? (
+                                  <div className="bg-white dark:bg-slate-900 border border-purple-500/40 rounded-xl p-2.5 flex items-center justify-between shadow-xs">
+                                    <div>
+                                      <div className="font-black text-xs text-slate-900 dark:text-white flex items-center gap-1.5">
+                                        {reabrirPagoCustomer.nombre}
+                                        <span className="px-1.5 py-0.5 rounded-md bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-black uppercase tracking-wider">
+                                          ★ Extra Club
+                                        </span>
+                                      </div>
+                                      <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                        {reabrirPagoCustomer.ruc || reabrirPagoCustomer.ci || "Sin documento"} · {reabrirPagoCustomer.extra_club_numero ? `Socio #${reabrirPagoCustomer.extra_club_numero}` : "Cuenta Extra Club"}
+                                      </div>
+                                    </div>
+                                    <CheckCircle className="w-5 h-5 text-purple-500 shrink-0" />
+                                  </div>
+                                ) : (
+                                  <div className="space-y-1.5">
+                                    <input
+                                      type="text"
+                                      value={reabrirPagoCustomerSearch}
+                                      onChange={(e) => setReabrirPagoCustomerSearch(e.target.value)}
+                                      placeholder="Buscar socio por nombre, CI, RUC o Nº Extra Club..."
+                                      className="w-full bg-white dark:bg-slate-950 border border-purple-500/40 rounded-xl p-2 text-xs text-slate-900 dark:text-white outline-none focus:border-purple-600 shadow-inner"
+                                      autoFocus
+                                    />
+                                    {reabrirPagoCustomerSearch.trim().length >= 2 && (
+                                      <div className="max-h-44 overflow-y-auto border border-purple-500/30 rounded-xl bg-white dark:bg-slate-950 divide-y divide-slate-100 dark:divide-slate-800 shadow-lg">
+                                        {reabrirPagoCustomerSearching ? (
+                                          <div className="p-2.5 text-xs text-slate-500 flex items-center gap-2">
+                                            <Loader2 className="w-3.5 h-3.5 animate-spin" /> Buscando socios...
+                                          </div>
+                                        ) : reabrirPagoCustomerResults.length > 0 ? (
+                                          reabrirPagoCustomerResults.map((c) => (
+                                            <button
+                                              key={String(c.id)}
+                                              type="button"
+                                              onClick={() => {
+                                                setReabrirPagoCustomer(c)
+                                                setReabrirPagoCustomerSearch("")
+                                                setReabrirPagoCustomerResults([])
+                                              }}
+                                              className="w-full text-left p-2 hover:bg-purple-50 dark:hover:bg-purple-500/10 flex items-center justify-between transition-colors cursor-pointer"
+                                            >
+                                              <div>
+                                                <div className="font-bold text-xs text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                                                  {c.nombre}
+                                                  {c.extra_club_numero && (
+                                                    <span className="px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-black">
+                                                      ★ #{c.extra_club_numero}
+                                                    </span>
+                                                  )}
+                                                </div>
+                                                <div className="text-[10px] text-slate-500">
+                                                  {c.ruc || c.ci || c.telefono || "—"}
+                                                </div>
+                                              </div>
+                                              <Plus className="w-3.5 h-3.5 text-purple-500 shrink-0" />
+                                            </button>
+                                          ))
+                                        ) : (
+                                          <div className="p-2.5 text-xs text-slate-500">No se encontró ningún cliente/socio con ese criterio.</div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Campo de Motivo Obligatorio */}
+                            <div>
+                              <div className="flex justify-between items-baseline mb-1">
+                                <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                                  Motivo del Cambio (Obligatorio):
+                                </label>
+                                <span className={`text-[10px] font-bold ${
+                                  reabrirPagoMotivo.trim().length >= 10 ? "text-emerald-500" : "text-rose-500"
+                                }`}>
+                                  {reabrirPagoMotivo.trim().length}/10 caracteres mín.
+                                </span>
+                              </div>
+                              <textarea
+                                rows={2}
+                                value={reabrirPagoMotivo}
+                                onChange={(e) => setReabrirPagoMotivo(e.target.value)}
+                                placeholder="Ej: Cajera cobró en efectivo por error, se cobró con POS Bancard / cliente es socio Extra Club..."
+                                className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs text-slate-900 dark:text-white outline-none focus:border-amber-500 resize-none"
+                              />
+                            </div>
+
+                            {/* Botones de Acción */}
+                            <div className="flex items-center justify-end gap-2 pt-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setReabrirPagoSaleId(null)
+                                  setReabrirPagoFormaPago("")
+                                  setReabrirPagoMotivo("")
+                                  setReabrirPagoVoucher("")
+                                  setReabrirPagoLote("")
+                                  setReabrirPagoTarjetaMarca("")
+                                  setReabrirPagoMoneda("PYG")
+                                  setReabrirPagoMontoMoneda(undefined)
+                                  setReabrirPagoPosMsg("")
+                                  setReabrirPagoCustomer(null)
+                                  setReabrirPagoCustomerSearch("")
+                                  setReabrirPagoCustomerResults([])
+                                }}
+                                className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 cursor-pointer"
+                              >
+                                Cancelar
+                              </button>
+                              <button
+                                type="button"
+                                disabled={
+                                  submittingReabrirPago ||
+                                  !reabrirPagoFormaPago ||
+                                  ((reabrirPagoFormaPago === "EXTRA_CLUB" || reabrirPagoFormaPago === "CREDITO") && !reabrirPagoCustomer) ||
+                                  (["TARJETA_BANCARD", "TARJETA_DINELCO", "TARJETA", "QR", "TRANSFERENCIA"].includes(reabrirPagoFormaPago) && !reabrirPagoVoucher.trim()) ||
+                                  (reabrirPagoFormaPago === fpActual && (!reabrirPagoCustomer || (sale.customer && String(reabrirPagoCustomer.id) === String(sale.customer.id)))) ||
+                                  reabrirPagoMotivo.trim().length < 10
+                                }
+                                onClick={() => {
+                                  const isForeign = reabrirPagoFormaPago === "EFECTIVO_BRL" || reabrirPagoFormaPago === "EFECTIVO_USD"
+                                  const moneda = isForeign ? (reabrirPagoFormaPago === "EFECTIVO_BRL" ? "BRL" : "USD") : "PYG"
+                                  const rate = moneda === "BRL" ? (rates.BRL || 1400) : (rates.USD || 7800)
+                                  const montoMoneda = isForeign ? Number(((sale.total || 0) / rate).toFixed(2)) : undefined
+
+                                  requestSupervisorAuthorization({
+                                    type: "reopen_payment",
+                                    sale,
+                                    customer: reabrirPagoCustomer || undefined,
+                                    formaPago: reabrirPagoFormaPago,
+                                    motivo: reabrirPagoMotivo.trim(),
+                                    voucher: reabrirPagoVoucher.trim() || undefined,
+                                    lote: reabrirPagoLote.trim() || undefined,
+                                    tarjetaMarca: reabrirPagoTarjetaMarca.trim() || undefined,
+                                    terminalIp: activePosConfig.bancardIp || undefined,
+                                    moneda,
+                                    montoMoneda,
+                                  } as any)
+                                }}
+                                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white shadow-md cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-all"
+                              >
+                                {submittingReabrirPago ? (
+                                  <>
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    Guardando...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Printer className="w-3.5 h-3.5" />
+                                    Confirmar y Reimprimir Correcto
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
                 </>
               )}
 
@@ -8024,7 +15405,59 @@ export default function POSPage() {
                   ))}
                 </>
               )}
+
+              {reimprimirTab === "cierres" && !reimprimirLoading && !reimprimirError && (
+                <>
+                  {filteredReimprimirSessions.length === 0 && (
+                    <div className="text-center text-sm text-slate-500 dark:text-slate-400 py-12">
+                      {reimprimirSessions.length === 0
+                        ? "No hay cierres de turno anteriores para mostrar."
+                        : "No hay cierres que coincidan con los filtros seleccionados."}
+                    </div>
+                  )}
+                  {filteredReimprimirSessions.map((ses) => (
+                    <div
+                      key={ses.id}
+                      className="p-3 mx-1 my-1 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 border border-transparent hover:border-slate-300 dark:hover:border-slate-700"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                            <span>Turno {ses.id.slice(0, 8).toUpperCase()}</span>
+                            <span className="text-xs px-2 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold">
+                              {ses.cajero_nombre || "Cajero/a"}
+                            </span>
+                          </div>
+                          <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                            Cierre: {ses.fecha_cierre ? new Date(ses.fecha_cierre).toLocaleString("es-PY", { timeZone: "America/Asuncion" }) : "—"} · Gaveta: <strong className="text-slate-800 dark:text-slate-200">{formatPYG(ses.monto_cierre || 0)}</strong>
+                            {ses.monto_apertura_brl > 0 ? ` · R$ ${Number(ses.monto_apertura_brl).toFixed(2)}` : ""}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            onClick={() => handleDownloadCierrePdf(ses.id)}
+                            title="Descargar PDF Oficial"
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200"
+                          >
+                            <FileText className="w-3.5 h-3.5 text-blue-500" />
+                            PDF
+                          </button>
+                          <button
+                            onClick={() => handleReimprimirCierreEscPos(ses)}
+                            title="Reimprimir Arqueo ESC/POS (ZKP8008)"
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-[#1C1710]"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                            Imprimir Ticket
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
+
           </div>
         </div>
       )}
@@ -8033,7 +15466,7 @@ export default function POSPage() {
         <div className="fixed inset-0 z-[130] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border-2 border-amber-500/50 rounded-2xl max-w-2xl w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black shadow-sm shadow-emerald-500/20">
+              <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] font-black shadow-sm shadow-orange-500/30">
                 <Package className="w-5 h-5" />
               </div>
               <div>
@@ -8239,83 +15672,190 @@ export default function POSPage() {
           </div>
         </div>
       )}
-      {/* ── CIERRE DE CAJA A CIEGAS ───────────────────────────────────────────── */}
+      {/* ── CIERRE DE CAJA Y ARQUEO CON PRE-CONCILIACIÓN ─────────────────────── */}
       {showCierreTurnoModal && (
         <div className="fixed inset-0 z-[130] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border-2 border-amber-500 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black shadow-sm shadow-emerald-500/20">
+          <div className="bg-white dark:bg-slate-900 border-2 border-amber-500 rounded-2xl max-w-lg w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 max-h-[92vh] flex flex-col">
+            <div className="flex items-center gap-3 mb-3 shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-amber-500 flex items-center justify-center text-slate-950 font-black shadow-sm shadow-amber-500/30">
                 <Lock className="w-5 h-5" />
               </div>
-              <div>
-                <h2 className="text-lg font-black text-slate-900 dark:text-white font-posDisplay tracking-tight">Cierre de Caja (Arqueo a Ciegas)</h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400">Cuente el efectivo físico e ingrese el total. El sistema muestra la diferencia recién después de confirmar.</p>
+              <div className="flex-1">
+                <h2 className="text-lg font-black text-slate-900 dark:text-white font-posDisplay tracking-tight">Cierre de Caja y Arqueo de Turno</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Verifique los medios de pago no-efectivo y realice el conteo de gaveta.</p>
               </div>
             </div>
 
             {!cierreResult ? (
               <>
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">Efectivo Contado (Gs.)</label>
-                  <input
-                    type="text"
-                    value={montoCierreReal}
-                    onChange={(e) => {
-                      const clean = e.target.value.replace(/\D/g, "")
-                      setMontoCierreReal(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "")
-                    }}
-                    placeholder="0"
-                    autoFocus
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-3 text-xl font-posMono tabular-nums font-black text-emerald-600 dark:text-emerald-400 outline-none focus:border-amber-500"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-2 mt-3">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">Contado US$</label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={montoCierreUsd}
-                      onChange={(e) => setMontoCierreUsd(e.target.value.replace(/[^0-9.,]/g, ""))}
-                      placeholder="0.00"
-                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm font-posMono tabular-nums font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">Contado R$</label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={montoCierreBrl}
-                      onChange={(e) => setMontoCierreBrl(e.target.value.replace(/[^0-9.,]/g, ""))}
-                      placeholder="0.00"
-                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm font-posMono tabular-nums font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
-                    />
-                  </div>
-                </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2">Solo se cuenta el efectivo físico. Tarjeta, QR y Extra Club ya quedaron registrados electrónicamente y se muestran en el resumen al confirmar.</p>
-                <div className="flex items-center gap-2 pt-4">
+                {/* Selector de pestañas */}
+                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl mb-4 shrink-0">
                   <button
+                    type="button"
+                    onClick={() => setCierreTab("conteo")}
+                    className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                      cierreTab === "conteo"
+                        ? "bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-sm"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                    }`}
+                  >
+                    <Banknote className="w-4 h-4" />
+                    1. Arqueo Efectivo (Gaveta)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCierreTab("conciliacion")}
+                    className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                      cierreTab === "conciliacion"
+                        ? "bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-sm"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                    }`}
+                  >
+                    <Receipt className="w-4 h-4" />
+                    2. Resumen de Turno
+                  </button>
+                </div>
+
+                <div className="overflow-y-auto flex-1 pr-1 space-y-3">
+                  {cierreTab === "conteo" ? (
+                    <>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">
+                          Efectivo Físico en Gaveta (Gs.)
+                        </label>
+                        <input
+                          type="text"
+                          value={montoCierreReal}
+                          onChange={(e) => {
+                            const clean = e.target.value.replace(/\D/g, "")
+                            setMontoCierreReal(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "")
+                          }}
+                          placeholder="0"
+                          autoFocus
+                          className="w-full bg-slate-50 dark:bg-slate-950 border-2 border-slate-300 dark:border-slate-700 rounded-xl p-3 text-2xl font-posMono tabular-nums font-black text-emerald-600 dark:text-emerald-400 outline-none focus:border-amber-500 text-right"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">Contado US$</label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={montoCierreUsd}
+                            onChange={(e) => setMontoCierreUsd(formatInputDecimal(e.target.value).formatted)}
+                            placeholder="0,00"
+                            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm font-posMono tabular-nums font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500 text-right"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">Contado R$</label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={montoCierreBrl}
+                            onChange={(e) => setMontoCierreBrl(formatInputDecimal(e.target.value).formatted)}
+                            placeholder="0,00"
+                            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm font-posMono tabular-nums font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500 text-right"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-700 dark:text-amber-300">
+                        <p className="font-bold flex items-center gap-1.5 mb-1">
+                          <AlertCircle className="w-4 h-4 shrink-0" />
+                          Instrucciones de Arqueo Físico:
+                        </p>
+                        <ul className="list-disc list-inside space-y-0.5 text-[11px] opacity-90">
+                          <li>Cuente todos los billetes y monedas que están en la gaveta.</li>
+                          <li>No incluya cheques ni cupones de tarjeta en este campo.</li>
+                          <li>Revise la pestaña <strong>"2. Resumen de Turno"</strong> para validar sus comprobantes POS (Bancard, QR).</li>
+                        </ul>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="space-y-3">
+                      {loadingPreClose ? (
+                        <div className="py-8 flex flex-col items-center justify-center gap-2 text-slate-500">
+                          <Loader2 className="w-6 h-6 animate-spin text-amber-500" />
+                          <span className="text-xs font-bold">Obteniendo totales del turno...</span>
+                        </div>
+                      ) : preCloseData ? (
+                        <>
+                          <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3 space-y-2 text-xs">
+                            <div className="font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">
+                              Medios Electrónicos y Crédito (Comprobantes POS / Bancard)
+                            </div>
+                            <div className="space-y-1 font-posMono tabular-nums">
+                              {preCloseData.medios_no_efectivo?.length > 0 ? (
+                                preCloseData.medios_no_efectivo.map((m: any, idx: number) => (
+                                  <div key={idx} className="flex justify-between items-center py-1 border-b border-slate-200/50 dark:border-slate-800/50 last:border-0">
+                                    <span className="font-medium text-slate-700 dark:text-slate-300">{FORMA_PAGO_LABEL[m.forma_pago] || m.forma_pago}</span>
+                                    <span className="font-bold text-slate-900 dark:text-white">
+                                      {m.moneda === "PYG" ? formatPYG(m.monto) : `${m.moneda} ${Number(m.monto).toFixed(2)}`}
+                                    </span>
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="text-slate-400 py-1 text-center italic">Sin operaciones electrónicas en este turno</div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3 space-y-1.5 text-xs font-posMono tabular-nums">
+                            <div className="font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] mb-1">
+                              Flujo Operativo de Caja
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-600 dark:text-slate-400">Fondo Inicial de Apertura:</span>
+                              <span className="font-bold">{formatPYG(preCloseData.monto_apertura_pyg || 0)}</span>
+                            </div>
+                            <div className="flex justify-between text-orange-600 dark:text-orange-400">
+                              <span>Sangrías Realizadas (Retiros):</span>
+                              <span className="font-bold">-{formatPYG(preCloseData.total_cash_drops_pyg || 0)}</span>
+                            </div>
+                            {preCloseData.total_donaciones_pyg > 0 && (
+                              <div className="flex justify-between text-pink-600 dark:text-pink-400">
+                                <span>Donaciones Recaudadas:</span>
+                                <span className="font-bold">+{formatPYG(preCloseData.total_donaciones_pyg)}</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between border-t border-slate-200 dark:border-slate-800 pt-1.5 font-black text-slate-900 dark:text-white">
+                              <span>Total Transacciones:</span>
+                              <span>{preCloseData.ventas_count || 0} tickets</span>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-center py-4 text-xs text-slate-400">No se pudieron cargar los datos de pre-conciliación.</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 pt-4 shrink-0 border-t border-slate-200 dark:border-slate-800 mt-2">
+                  <button
+                    type="button"
                     onClick={() => setShowCierreTurnoModal(false)}
-                    className="w-1/3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300"
+                    className="w-1/3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
                   >
                     Cancelar
                   </button>
                   <button
+                    type="button"
                     onClick={handleConfirmCierreCaja}
                     disabled={submittingCierre || !montoCierreReal}
-                    className="w-2/3 bg-amber-600 hover:bg-amber-700 text-white py-2.5 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 disabled:opacity-60"
+                    className="w-2/3 bg-amber-600 hover:bg-amber-700 text-white py-2.5 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 disabled:opacity-60 shadow-lg shadow-amber-600/20"
                   >
                     {submittingCierre ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
-                    Confirmar Cierre
+                    Confirmar Cierre de Turno
                   </button>
                 </div>
               </>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-3 overflow-y-auto flex-1 pr-1">
                 <div className="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-3 space-y-1 text-sm font-posMono tabular-nums">
-                  <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Esperado (Gs.):</span><span>{formatPYG(cierreResult.monto_cierre_esperado)}</span></div>
-                  <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Contado (Gs.):</span><span>{formatPYG(cierreResult.contado)}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Efectivo Esperado:</span><span>{formatPYG(cierreResult.monto_cierre_esperado)}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Efectivo Contado:</span><span className="font-bold">{formatPYG(cierreResult.contado)}</span></div>
                   <div className={`flex justify-between font-black pt-1 border-t border-slate-200 dark:border-slate-800 ${cierreResult.diferencia < 0 ? "text-red-600 dark:text-red-400" : cierreResult.diferencia > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
                     <span>Diferencia Gs.:</span><span>{cierreResult.diferencia >= 0 ? "+" : ""}{formatPYG(cierreResult.diferencia)}</span>
                   </div>
@@ -8330,6 +15870,7 @@ export default function POSPage() {
                     </div>
                   )}
                 </div>
+
                 {cierreResult.desglose_formas_pago.length > 0 && (
                   <div className="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-3 space-y-1 text-xs font-posMono tabular-nums">
                     <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Ventas del turno por forma de pago</div>
@@ -8341,18 +15882,76 @@ export default function POSPage() {
                     ))}
                   </div>
                 )}
+
                 {cierreResult.requiere_revision && (
-                  <div className="text-center text-xs font-bold text-red-400 border border-red-500/40 rounded-xl p-2">
-                    ⚠ Diferencia fuera de tolerancia — quedó marcada para revisión de supervisor.
+                  <div className="text-center text-xs font-bold text-red-500 bg-red-500/10 border border-red-500/40 rounded-xl p-2.5">
+                    ⚠ Diferencia fuera de tolerancia — Turno marcado para auditoría de supervisora.
                   </div>
                 )}
-                <p className="text-center text-xs text-slate-500 dark:text-slate-400">Se imprimió el ticket de cierre. La caja fue cerrada.</p>
-                <button
-                  onClick={() => { setCierreResult(null); setShowCierreTurnoModal(false); setShowAperturaModal(true) }}
-                  className="w-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-white py-2.5 rounded-xl font-bold text-xs"
-                >
-                  Cerrar
-                </button>
+
+                {/* Acciones de Comprobante / Reimpresión / Descarga PDF */}
+                <div className="grid grid-cols-2 gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if ((window as any).electronAPI?.printEscPos && lastCierreEscPosB64) {
+                        const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
+                        try {
+                          await (window as any).electronAPI.printEscPos(lastCierreEscPosB64, tpl.nombre_impresora_windows || "ZKP8008")
+                          toast.success("Ticket reimpreso", "Enviado a impresora térmica.")
+                        } catch (err: any) {
+                          toast.error("Error al reimprimir", err?.message || "Revise la impresora.")
+                        }
+                      } else if (lastCierreTicketHtml) {
+                        await printTicketHtml(lastCierreTicketHtml)
+                        toast.success("Ticket reimpreso", "Enviado a impresora.")
+                      } else if (lastClosedSessionId) {
+                        await handleReimprimirCierreEscPos({
+                          id: lastClosedSessionId,
+                          cajero_nombre: user?.nombre,
+                          register_nombre: puntoEmision || "Caja",
+                          fecha_apertura: preCloseData?.fecha_apertura,
+                          fecha_cierre: new Date().toISOString(),
+                          monto_apertura: preCloseData?.monto_apertura_pyg,
+                          monto_apertura_brl: preCloseData?.monto_apertura_brl,
+                          monto_cierre: cierreResult?.contado,
+                          monto_cierre_esperado: cierreResult?.monto_cierre_esperado,
+                          diferencia: cierreResult?.diferencia,
+                          diferencia_brl: cierreResult?.diferencia_brl,
+                        })
+                      } else {
+                        toast.warning("Sin datos de cierre", "No se encontró el ticket para reimprimir.")
+                      }
+                    }}
+                    className="py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center gap-1.5"
+                  >
+                    <Printer className="w-4 h-4 text-amber-500" />
+                    Reimprimir Ticket
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (lastClosedSessionId) {
+                        handleDownloadCierrePdf(lastClosedSessionId)
+                      }
+                    }}
+                    className="py-2.5 px-3 rounded-xl bg-blue-600/10 hover:bg-blue-600/20 text-blue-600 dark:text-blue-400 border border-blue-500/30 text-xs font-bold flex items-center justify-center gap-1.5"
+                  >
+                    <FileText className="w-4 h-4" />
+                    Descargar PDF Oficial
+                  </button>
+                </div>
+
+
+                <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => { setCierreResult(null); setShowCierreTurnoModal(false); setShowAperturaModal(true) }}
+                    className="w-full bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white text-white dark:text-slate-900 py-3 rounded-xl font-black text-xs uppercase tracking-wider transition-all"
+                  >
+                    Finalizar y Abrir Siguiente Turno
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -8364,7 +15963,7 @@ export default function POSPage() {
         <div className="fixed inset-0 z-[130] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border-2 border-orange-500/60 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black shadow-sm shadow-emerald-500/20">
+              <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] font-black shadow-sm shadow-orange-500/30">
                 <Banknote className="w-5 h-5" />
               </div>
               <div>
@@ -8476,13 +16075,27 @@ export default function POSPage() {
                   autoFocus
                   value={balanceModalQuery}
                   onChange={(e) => setBalanceModalQuery(e.target.value)}
-                  onKeyDown={(e) => {
+                  onKeyDown={async (e) => {
                     if (e.key === "ArrowDown") { e.preventDefault(); setBalanceModalHighlight((h) => Math.min(h + 1, balanceModalResults.length - 1)) }
                     else if (e.key === "ArrowUp") { e.preventDefault(); setBalanceModalHighlight((h) => Math.max(h - 1, 0)) }
                     else if (e.key === "Enter") {
                       e.preventDefault()
                       const c = balanceModalResults[balanceModalHighlight]
-                      if (c) setBalanceModalSelected(c)
+                      if (c) { setBalanceModalSelected(c); return }
+                      // Un lector de codigo de barra/QR "tipea" rapidisimo y
+                      // manda Enter apenas termina -- mucho antes de que el
+                      // debounce de 250ms de arriba llegue siquiera a
+                      // disparar la busqueda, asi que balanceModalResults
+                      // todavia esta vacio en este momento y no habia nada
+                      // que seleccionar. En vez de quedarse sin hacer nada,
+                      // se dispara la busqueda ya mismo con lo que hay
+                      // tipeado/escaneado.
+                      const q = balanceModalQuery.trim()
+                      if (!q) return
+                      try {
+                        const found = (await api.customers.list({ search: q, limit: 5 })) || []
+                        if (found.length > 0) setBalanceModalSelected(normalizeCustomer(found[0]))
+                      } catch (err) {}
                     }
                   }}
                   placeholder="Número de socio / RUC / cédula / nombre"
@@ -8567,10 +16180,48 @@ export default function POSPage() {
       {/* ── MODAL DE PARTICIPACIÓN EN SORTEO & IMPRESIÓN DE CUPONES (MULTI-CAMPAÑA) ── */}
       {showCuponModal && pendingCuponData && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl border-2 border-orange-500/50 p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-6">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border-2 border-orange-500/50 p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-5">
+            {/* Banner de Recordatorio de Vuelto a Entregar */}
+            {pendingCuponData.vueltoBreakdown && pendingCuponData.vueltoBreakdown.totalPyg > 0 && (
+              <div className="p-3.5 bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-amber-500/15 border-2 border-emerald-500/80 rounded-2xl flex items-center justify-between shadow-xs">
+                <div className="flex items-center gap-2.5 text-left">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center font-black text-lg shadow-sm shrink-0">
+                    💵
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-black uppercase text-emerald-800 dark:text-emerald-300 tracking-wider block">
+                      Recordatorio: Vuelto a Entregar
+                    </span>
+                    {pendingCuponData.vueltoBreakdown.brl > 0 ? (
+                      <div className="text-base font-black font-posMono text-slate-900 dark:text-white">
+                        <span className="text-amber-600 dark:text-amber-400">R$ {pendingCuponData.vueltoBreakdown.brl.toFixed(2)}</span>
+                        <span className="text-slate-400 mx-1.5">+</span>
+                        <span className="text-emerald-600 dark:text-emerald-400">{formatPYG(pendingCuponData.vueltoBreakdown.saldoGs)}</span>
+                        <span className="text-[11px] text-slate-500 ml-2 font-normal font-sans">
+                          (Total {formatPYG(pendingCuponData.vueltoBreakdown.totalPyg)})
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="text-base font-black font-posMono text-emerald-600 dark:text-emerald-400">
+                        {formatPYG(pendingCuponData.vueltoBreakdown.totalPyg)}
+                        {rates.BRL > 0 && (
+                          <span className="text-xs text-amber-600 dark:text-amber-400 ml-2 font-normal font-sans">
+                            (≈ R$ {(pendingCuponData.vueltoBreakdown.totalPyg / rates.BRL).toFixed(2)})
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <span className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-black tracking-wide shrink-0 animate-pulse">
+                  ENTREGAR AHORA
+                </span>
+              </div>
+            )}
+
             {cuponModalStep === "pregunta" ? (
               <div className="text-center space-y-4">
-                <div className="w-16 h-16 bg-gradient-to-tr from-orange-500 to-amber-400 text-white rounded-3xl mx-auto flex items-center justify-center shadow-lg shadow-emerald-500/20 animate-bounce">
+                <div className="w-16 h-16 bg-gradient-to-tr from-orange-500 to-amber-400 text-white rounded-3xl mx-auto flex items-center justify-center shadow-lg shadow-orange-500/30 animate-bounce">
                   <Ticket className="w-8 h-8" />
                 </div>
 
@@ -8617,10 +16268,22 @@ export default function POSPage() {
 
                   <button
                     onClick={() => setCuponModalStep("formulario")}
-                    className="py-3 px-4 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    className="py-3 px-4 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs shadow-lg shadow-orange-500/30 flex items-center justify-center gap-1.5 transition cursor-pointer"
                   >
                     <span>Sí, Participar</span>
                     <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Opción para volver a modificar la venta */}
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={handleReturnToSale}
+                    className="w-full py-2.5 px-3 rounded-2xl border border-amber-300 dark:border-amber-700/60 bg-amber-50/80 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 font-bold text-xs hover:bg-amber-100 dark:hover:bg-amber-900/50 flex items-center justify-center gap-2 transition cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                    <span>Volver a Modificar Venta (Agregar Items / Cambiar Cliente)</span>
                   </button>
                 </div>
               </div>
@@ -8747,7 +16410,7 @@ export default function POSPage() {
                 <button
                   onClick={handleConfirmCupon}
                   disabled={savingCupon}
-                  className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50 mt-2"
+                  className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs shadow-lg shadow-orange-500/30 flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50 mt-2"
                 >
                   {savingCupon ? (
                     <>
@@ -8761,8 +16424,195 @@ export default function POSPage() {
                     </>
                   )}
                 </button>
+
+                {/* Barra de opciones de salida / volver a la venta */}
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCuponModalStep("pregunta")}
+                    className="py-2 px-3 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-1 cursor-pointer"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>Atrás</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleReturnToSale}
+                    className="py-2 px-3 rounded-xl border border-amber-300 dark:border-amber-700/60 bg-amber-50/80 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 font-bold text-xs hover:bg-amber-100 dark:hover:bg-amber-900/50 flex items-center gap-1.5 transition cursor-pointer ml-auto"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                    <span>Volver a Modificar Venta</span>
+                  </button>
+                </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+      {/* ── MODAL PAUSAR TURNO (RELEVO DE ALMUERZO CON GAVETA EXTRAÍBLE) ────── */}
+      {showPausaTurnoModal && (
+        <div className="fixed inset-0 z-[140] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-amber-500/40 rounded-3xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3.5 mb-4">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0">
+                <Pause className="w-6 h-6" />
+              </div>
+              <div>
+                <h2 className="text-lg font-black text-slate-900 dark:text-white tracking-tight">Pausar Turno de Caja</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Relevo de almuerzo / cambio de gaveta física</p>
+              </div>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3 text-amber-900 dark:text-amber-200 space-y-1">
+                <div className="font-black flex items-center gap-1.5 uppercase text-[11px]">
+                  <span>🔐 Control de Custodia de Efectivo</span>
+                </div>
+                <div className="text-[11px] leading-relaxed opacity-90">
+                  Tu turno quedará <strong>congelado</strong> en el sistema con tus ventas y montos exactos.
+                  <strong> Recuerda retirar tu gaveta física con llave</strong> para que la cajera de relevo pueda ingresar a esta terminal con su propia gaveta.
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
+                  Motivo de la Pausa / Relevo:
+                </label>
+                <input
+                  type="text"
+                  value={pausaMotivo}
+                  onChange={(e) => setPausaMotivo(e.target.value)}
+                  placeholder="Ej: Salida a almuerzo / relevo de gaveta..."
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="p-3 bg-slate-100 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-1 text-slate-600 dark:text-slate-300 text-[11px]">
+                <div className="flex justify-between">
+                  <span>Cajero:</span>
+                  <strong className="text-slate-900 dark:text-white">{user?.nombre || "Cajero"}</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span>Punto de Emisión:</span>
+                  <strong className="text-slate-900 dark:text-white">{PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision}</strong>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPausaTurnoModal(false)}
+                  className="py-3 px-4 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={submittingPausa}
+                  onClick={handleConfirmPausaTurno}
+                  className="py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-black text-xs shadow-lg shadow-amber-500/25 flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                >
+                  {submittingPausa ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Pausando...
+                    </>
+                  ) : (
+                    <>
+                      <Pause className="w-3.5 h-3.5" />
+                      Confirmar y Salir
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL REANUDAR TURNO (TURNO PAUSADO O TURNO NÓMADA) ───────────────── */}
+      {showReanudarModal && activeUserSessionInfo && (
+        <div className="fixed inset-0 z-[140] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-emerald-500/40 rounded-3xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3.5 mb-4">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+                <Play className="w-6 h-6" />
+              </div>
+              <div>
+                <h2 className="text-lg font-black text-slate-900 dark:text-white tracking-tight">
+                  {activeUserSessionInfo.estado === "pausada" ? "Reanudar Turno Pausado" : "Continuar Turno Nómada"}
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {activeUserSessionInfo.estado === "pausada"
+                    ? "Turno en pausa (regreso de almuerzo / relevo)"
+                    : "Turno iniciado en otra terminal"}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3 text-emerald-900 dark:text-emerald-200 space-y-1">
+                <div className="font-black flex items-center gap-1.5 uppercase text-[11px]">
+                  <span>✅ Estado de Turno Detectado</span>
+                </div>
+                <div className="text-[11px] leading-relaxed opacity-90">
+                  {activeUserSessionInfo.estado === "pausada"
+                    ? `Tienes un turno pausado de hoy (${activeUserSessionInfo.total_ventas} ventas previas). Coloca tu gaveta física con llave para continuar.`
+                    : `Iniciaste tu turno en ${activeUserSessionInfo.register_nombre || "otra caja"}. Las nuevas ventas emitidas aquí saldrán timbradas con el punto fiscal de esta terminal (${PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision}) y tu arqueo de dinero seguirá unificado.`}
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-slate-100 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700/60 space-y-2 text-slate-600 dark:text-slate-300 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Cajera / Titular:</span>
+                  <strong className="text-slate-900 dark:text-white text-sm">{activeUserSessionInfo.cajero_nombre || user?.nombre}</strong>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Fondo Inicial:</span>
+                  <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{formatPYG(activeUserSessionInfo.monto_apertura || 0)}</strong>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Ventas Acumuladas:</span>
+                  <strong className="text-slate-900 dark:text-white font-bold">{activeUserSessionInfo.total_ventas} tickets ({formatPYG(activeUserSessionInfo.total_cobrado || 0)})</strong>
+                </div>
+                <div className="flex justify-between items-center pt-1 border-t border-slate-200 dark:border-slate-700">
+                  <span className="text-slate-500">Terminal Actual:</span>
+                  <strong className="text-blue-600 dark:text-blue-400 font-black">{PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision}</strong>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowReanudarModal(false)
+                    setShowAperturaModal(true)
+                  }}
+                  className="py-3 px-3 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer text-center"
+                >
+                  Abrir Nuevo Turno
+                </button>
+                <button
+                  type="button"
+                  disabled={submittingReanudar}
+                  onClick={() => handleReanudarTurno()}
+                  className="py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                >
+                  {submittingReanudar ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Reanudando...
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-3.5 h-3.5" />
+                      Reanudar Turno
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

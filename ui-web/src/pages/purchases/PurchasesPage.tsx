@@ -1,1628 +1,10158 @@
-import { useState, useEffect, useMemo, useCallback } from "react"
+import Supplier360Modal from "./Supplier360Modal"
+import { ProductPriceComparisonModal } from "./ProductPriceComparisonModal"
+import { useState, useEffect, useMemo, useCallback, useRef } from "react"
+import { useNavigate } from "react-router-dom"
 import {
-  Search, ShoppingCart, Package, DollarSign, TrendingDown, Users, CheckCircle, Loader2,
+  Search, ShoppingCart, Package, DollarSign, TrendingDown, Users, CheckCircle2, Loader2,
   Plus, Eye, X, Trash2, Minus, FileText, Truck, Award, BarChart3, Download, Clock,
-  AlertTriangle, Filter, ChevronDown, ChevronUp, Star, Edit3, Send, Ban, RefreshCw,
+  AlertTriangle, Filter, ChevronDown, ChevronUp, Edit, Edit3, Send, Ban, RefreshCw,
   UserPlus, FileSpreadsheet, ClipboardList, TrendingUp, ArrowUp, ArrowDown, ArrowRight,
   MessageSquare, Calendar, Hash, Percent, Printer, Link2, Check, Save, ExternalLink,
+  Sparkles, Sun, CloudRain, Snowflake, Flame, ShieldAlert, Scale, CheckCircle,
+  HelpCircle, AlertCircle, Box, Layers, Building2, Phone, Mail, MapPin, SlidersHorizontal,
+  ChevronRight, ArrowUpDown, ChevronLeft, CheckSquare, Square, PieChart, Undo2, Receipt, History, Star,
+  Lock, Unlock, FileCheck, Barcode, RotateCcw, CreditCard, Briefcase, Wrench, Globe, LayoutGrid, Table
 } from "lucide-react"
-import { api, type PurchaseOrder, type PurchaseReceipt, type Supplier, type Product } from "../../api"
+import * as XLSX from "xlsx"
+import {
+  api,
+  type PurchaseOrder,
+  type PurchaseOrderItem,
+  type PurchaseReceipt,
+  type PurchaseReceiptItem,
+  type Supplier,
+  type Product,
+  type PurchaseRequisition,
+  type PurchaseRfq,
+  type PurchaseRfqWithDetail,
+  type PurchaseBudget,
+  type PurchaseBudgetConsumption,
+  type SmartReplenishmentItem,
+  type SmartReplenishmentResponse,
+  type SupplierInvoice,
+  type CustomerLostDemand,
+  type PackBarcode,
+} from "../../api"
+import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
-import { useConfirm } from "../../components/ConfirmDialog"
-import { StatusBadge } from "../../components/DataTable"
-import { KPICard } from "../../components/KPICard"
-import { Widget } from "../../components/Widget"
-import { Modal } from "../../components/Modal"
 import { formatPYG, formatDate, formatCurrency } from "../../utils/format"
+import { DevolucionProveedorPrintModal } from "./DevolucionProveedorPrintModal"
+import CurrencyInput from "../../components/CurrencyInput"
 
-﻿type MainTab = "dashboard" | "ordenes" | "recepciones" | "proveedores" | "sugerencias" | "reportes"
-type SubTab = "lista" | "contratos" | "evaluaciones"
-type ReportSubTab = "proveedor" | "categoria" | "varianza"
-type SupplierStatus = "todos" | "activos" | "inactivos"
+type MainTab = "asistente_ia" | "demandas_clientes" | "ordenes" | "recepciones" | "facturas_p2p" | "devoluciones" | "matching" | "proveedores" | "requisiciones" | "cotizaciones" | "presupuestos" | "reportes"
 
-interface OrderItem {
-  product_id: string
-  nombre: string
-  sku: string
-  cantidad: number
-  precio_unitario: number
-  descuento_pct: number
-  iva_tasa: number
-  subtotal: number
+const poStatusMap: Record<string, { label: string; bg: string; text: string }> = {
+  borrador: { label: "Borrador", bg: "bg-slate-100 dark:bg-slate-800", text: "text-slate-600 dark:text-slate-300" },
+  confirmado: { label: "Confirmada", bg: "bg-blue-50 dark:bg-blue-900/30", text: "text-blue-600 dark:text-blue-400" },
+  enviada: { label: "Enviada a Proveedor", bg: "bg-amber-50 dark:bg-amber-900/30", text: "text-amber-600 dark:text-amber-400" },
+  enviado: { label: "Enviada a Proveedor", bg: "bg-amber-50 dark:bg-amber-900/30", text: "text-amber-600 dark:text-amber-400" },
+  parcial: { label: "Entrega Parcial", bg: "bg-purple-50 dark:bg-purple-900/30", text: "text-purple-600 dark:text-purple-400" },
+  completado: { label: "Completada", bg: "bg-emerald-50 dark:bg-emerald-900/30", text: "text-emerald-600 dark:text-emerald-400" },
+  cancelado: { label: "Cancelada", bg: "bg-red-50 dark:bg-red-900/30", text: "text-red-600 dark:text-red-400" },
 }
 
-interface ReceiptItem {
-  product_id: string
-  nombre: string
-  sku: string
-  cantidad_ordenada: number
-  cantidad_recibir: number
-  costo_unitario: number
-  lote: string
-  fecha_vencimiento: string
-}
+export const RUBROS_PROVEEDORES = [
+  "Carnicería y Frigorífico",
+  "Lácteos y Derivados",
+  "Bebidas, Cervezas y Licores",
+  "Abarrotes y Almacén Seco",
+  "Frutas, Verduras y Frescos",
+  "Panadería, Confitería e Insumos",
+  "Limpieza, Hogar y Químicos",
+  "Cuidado Personal y Perfumería",
+  "Bazar, Textil y Descartables",
+  "Alimentos para Mascotas",
+  "Equipamiento, Maquinarias y Balanzas",
+  "Tecnología, Software e Informática",
+  "Logística, Fletes y Transporte",
+  "Seguridad, Alarmas y Vigilancia",
+  "Servicios Profesionales, Contables y Legales",
+  "Servicios Públicos, Energía y Alquileres",
+  "Mantenimiento, Refrigeración y Obras",
+  "Marketing, Publicidad y Cartelería",
+  "Otros Insumos y Servicios Generales"
+]
 
-interface ContractItem {
-  id: string
-  numero: string
-  nombre: string
-  supplier_id: string
-  proveedor: string
-  fecha_inicio: string
-  fecha_fin: string
-  monto: number
-  activo: boolean
-}
-
-interface SupplierEval {
-  id: string
-  supplier_id: string
-  proveedor: string
-  fecha: string
-  calidad: number
-  entrega: number
-  precio: number
-  total: number
-  comentarios: string
-}
-
-interface Suggestion {
-  id: string
-  product_id: string
-  product_name: string
-  sku: string
-  stock_actual: number
-  stock_seguridad: number
-  demanda_diaria: number
-  dias_cobertura: number
-  cantidad_sugerida: number
-  precio_estimado: number
-  total_estimado: number
-  supplier_id: string
-  proveedor_sugerido: string
-  urgencia: "alta" | "media" | "baja"
-  confianza: number
-  estado: "pendiente" | "aplicada" | "descartada"
-}
-
-const poStatusMap: Record<string, string> = {
-  borrador: "badge-accent", confirmado: "badge-info", enviado: "badge-warning",
-  parcial: "badge-warning", completado: "badge-success", cancelado: "badge-danger",
-}
-
-const priorityMap: Record<string, string> = {
-  normal: "badge-info", alta: "badge-warning", urgente: "badge-danger",
-}
-
-const urgencyMap: Record<string, string> = {
-  alta: "badge-danger", media: "badge-warning", baja: "badge-success",
-}
-
-
-// El bloque de datos ficticios (proveedores, productos, contratos,
-// evaluaciones, sugerencias de compra, ordenes y remitos inventados) que
-// estaba acá se eliminó — ninguno se usa mas, todo viene de datos
-// reales (o arranca vacío cuando no hay endpoint conectado).
-
-﻿function BarChart({ data, maxKey, labelKey, colorKey }: {
-  data: any[]
-  maxKey: string
-  labelKey: string
-  colorKey?: string
-}) {
-  const maxVal = Math.max(...data.map(d => d[maxKey]), 1)
-  return (
-    <div className="space-y-2">
-      {data.map((d, i) => (
-        <div key={i} className="flex items-center gap-3">
-          <span className="text-xs text-gray-500 w-24 truncate text-right">{d[labelKey]}</span>
-          <div className="flex-1 bg-gray-100 dark:bg-gray-700 rounded-full h-5 overflow-hidden">
-            <div
-              className={"h-full rounded-full transition-all " + (d[colorKey || "color"] || "bg-primary")}
-              style={{ width: (d[maxKey] / maxVal) * 100 + "%" }}
-            />
-          </div>
-          <span className="text-xs font-mono font-bold w-20 text-left">{d[maxKey].toLocaleString()}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function DonutChart({ data, labelKey, valueKey, colors }: {
-  data: any[]
-  labelKey: string
-  valueKey: string
-  colors: string[]
-}) {
-  const total = data.reduce((a, b) => a + b[valueKey], 0) || 1
-  let cumPct = 0
-  const slices = data.map((d, i) => {
-    const pct = (d[valueKey] / total) * 100
-    const startAngle = cumPct
-    cumPct += pct
-    const endAngle = cumPct
-    const startRad = (startAngle - 90) * Math.PI / 180
-    const endRad = (endAngle - 90) * Math.PI / 180
-    const r = 15.9155
-    const x1 = 18 + r * Math.cos(startRad)
-    const y1 = 18 + r * Math.sin(startRad)
-    const x2 = 18 + r * Math.cos(endRad)
-    const y2 = 18 + r * Math.sin(endRad)
-    const large = pct > 50 ? 1 : 0
-    const path = "M 18 18 L " + x1 + " " + y1 + " A " + r + " " + r + " 0 " + large + " 1 " + x2 + " " + y2 + " Z"
-    return { path, fill: colors[i % colors.length] }
-  })
-  return (
-    <div className="flex flex-col items-center gap-4">
-      <div className="relative w-36 h-36">
-        <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
-          {slices.map((s, i) => <path key={i} d={s.path} fill={s.fill} />)}
-        </svg>
-        <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-lg font-bold text-gray-900 dark:text-white">{total.toLocaleString()}</span>
-        </div>
-      </div>
-      <div className="flex flex-wrap gap-3 justify-center">
-        {data.map((d, i) => (
-          <div key={i} className="flex items-center gap-1.5 text-xs">
-            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colors[i % colors.length] }} />
-            <span className="text-gray-600 dark:text-gray-400">{d[labelKey]}</span>
-            <span className="font-bold text-gray-900 dark:text-white">{((d[valueKey] / total) * 100).toFixed(0) + "%"}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
+export const BANCOS_PROVEEDORES = [
+  "BANCO CONTINENTAL", "BANCO ITAÚ PARAGUAY", "BANCO GNB PARAGUAY",
+  "BANCO ATLAS", "BANCOP", "BANCO SUDAMERIS", "BANCO BASA",
+  "BANCO FAMILIAR", "BANCO INTERFISA", "BANCO NACIONAL DE FOMENTO (BNF)",
+  "SOLAR BANCO", "UENO BANK", "ZETA BANCO",
+  "BANCO DO BRASIL", "BRADESCO", "ITAU UNIBANCO (BR)", "CAIXA ECONOMICA", "SANTANDER (BR)", "SICOOB / SICREDI", "CLAVE PIX"
+]
 
 export default function PurchasesPage() {
-  const [mainTab, setMainTab] = useState<MainTab>("dashboard")
-  const [loading, setLoading] = useState(true)
-  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([])
+  const { user } = useAuth()
+  const toast = useToast()
+
+  // Navegación principal
+  const [tab, setTab] = useState<MainTab>("asistente_ia")
+  const [loading, setLoading] = useState(false)
+  const [initialLoaded, setInitialLoaded] = useState(false)
+
+  // Datos reales sincronizados de Nemuha / DB
+  const [orders, setOrders] = useState<PurchaseOrder[]>([])
   const [receipts, setReceipts] = useState<PurchaseReceipt[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
-  const [products, setProducts] = useState<Product[]>([])
-  const [warehouses, setWarehouses] = useState<any[]>([])
-  const toast = useToast()
-  const confirm = useConfirm()
+  const [invoices, setInvoices] = useState<SupplierInvoice[]>([])
+  const [requisitions, setRequisitions] = useState<PurchaseRequisition[]>([])
+  const [rfqs, setRfqs] = useState<PurchaseRfq[]>([])
 
-  const [showPOModal, setShowPOModal] = useState(false)
-  const [showDetailPO, setShowDetailPO] = useState<PurchaseOrder | null>(null)
+  // Demandas de clientes registradas en cajas
+  const [lostDemands, setLostDemands] = useState<CustomerLostDemand[]>([])
+  const [filterLostDemandStatus, setFilterLostDemandStatus] = useState<string>("ALL")
+  const [searchLostDemand, setSearchLostDemand] = useState<string>("")
+  const [updatingLostDemandId, setUpdatingLostDemandId] = useState<string | null>(null)
+
+  const fetchLostDemands = useCallback(async () => {
+    try {
+      const res = await api.purchases.lostDemand.list()
+      if (Array.isArray(res)) setLostDemands(res)
+    } catch {
+      // fallback
+    }
+  }, [])
+
+  const handleUpdateLostDemandStatus = async (id: string, newStatus: "PENDIENTE" | "EN_EVALUACION" | "COMPRADO" | "DESCARTADO", notas?: string) => {
+    setUpdatingLostDemandId(id)
+    try {
+      await api.purchases.lostDemand.update(id, { estado: newStatus, notas })
+      setLostDemands(prev => prev.map(d => d.id === id ? { ...d, estado: newStatus, notas: notas ?? d.notas } : d))
+      toast.success("Estado Actualizado", `La solicitud de producto fue marcada como ${newStatus}.`)
+    } catch (err: any) {
+      toast.error("Error al actualizar", err.message)
+    } finally {
+      setUpdatingLostDemandId(null)
+    }
+  }
+
+  const [budgets, setBudgets] = useState<PurchaseBudget[]>([])
+  const [budgetConsumptions, setBudgetConsumptions] = useState<PurchaseBudgetConsumption[]>([])
+  const [reportKPIs, setReportKPIs] = useState<any>(null)
+  const [spendBySupplier, setSpendBySupplier] = useState<any[]>([])
+  const [spendByCategory, setSpendByCategory] = useState<any[]>([])
+  const [priceVariance, setPriceVariance] = useState<any[]>([])
+
+  // Devoluciones y Notas de Crédito de Proveedor (Nemuha Legacy & Circuito Compras)
+  const [supplierReturns, setSupplierReturns] = useState<any[]>([])
+  const [supplierCreditNotes, setSupplierCreditNotes] = useState<any[]>([])
+  const [managedReturns, setManagedReturns] = useState<any[]>([])
+  const [warehousesList, setWarehousesList] = useState<any[]>([])
+  const [searchReturns, setSearchReturns] = useState("")
+  const [pageReturns, setPageReturns] = useState(1)
+  const pageSizeReturns = 15
+
+  // Modal y Flujo de Nueva Devolución a Proveedor
+  const [showCreateReturnModal, setShowCreateReturnModal] = useState(false)
+  const [selectedSupplierForReturn, setSelectedSupplierForReturn] = useState("")
+  const [selectedWarehouseForReturn, setSelectedWarehouseForReturn] = useState("")
+  const [supplierProducts, setSupplierProducts] = useState<any[]>([])
+  const [loadingSupplierProducts, setLoadingSupplierProducts] = useState(false)
+  const [selectedProductForReturn, setSelectedProductForReturn] = useState("")
+  const [selectedProductDetails, setSelectedProductDetails] = useState<any | null>(null)
+  const [productInvoices, setProductInvoices] = useState<any[]>([])
+  const [loadingProductInvoices, setLoadingProductInvoices] = useState(false)
+  const [selectedInvoiceForReturn, setSelectedInvoiceForReturn] = useState("")
+  const [returnQuantity, setReturnQuantity] = useState<string>("1")
+  const [returnUnitPrice, setReturnUnitPrice] = useState<string>("0")
+  const [returnReason, setReturnReason] = useState<string>("vencido")
+  const [returnLot, setReturnLot] = useState<string>("")
+  const [returnExpiryDate, setReturnExpiryDate] = useState<string>("")
+  const [returnDetailNotes, setReturnDetailNotes] = useState<string>("")
+  const [returnItemsList, setReturnItemsList] = useState<any[]>([])
+  const [generalReturnNotes, setGeneralReturnNotes] = useState<string>("")
+  const [savingReturn, setSavingReturn] = useState(false)
+  const [editingReturnId, setEditingReturnId] = useState<string | null>(null)
+
+  // Estados avanzados de búsqueda para Proveedores y Productos en Devoluciones
+  const [supplierSearchForReturn, setSupplierSearchForReturn] = useState("")
+  const [showSupplierPickerForReturn, setShowSupplierPickerForReturn] = useState(false)
+  const [productSearchForReturn, setProductSearchForReturn] = useState("")
+  const [showProductPickerForReturn, setShowProductPickerForReturn] = useState(false)
+  const [productSearchScope, setProductSearchScope] = useState<"proveedor" | "todos">("proveedor")
+  const [globalProductResults, setGlobalProductResults] = useState<any[]>([])
+  const [loadingGlobalProducts, setLoadingGlobalProducts] = useState(false)
+  const [productStockInfo, setProductStockInfo] = useState<{ cantidad_disponible: number; cantidad_total: number } | null>(null)
+  const [loadingProductStock, setLoadingProductStock] = useState(false)
+
+  // Modales de Acción sobre Devoluciones (Detalle, Rechazo, Completado, Impresión)
+  const [viewingReturnDetail, setViewingReturnDetail] = useState<any | null>(null)
+  const [rejectingReturnId, setRejectingReturnId] = useState<string | null>(null)
+  const [rejectReasonInput, setRejectReasonInput] = useState("")
+  const [completingReturnId, setCompletingReturnId] = useState<string | null>(null)
+  const [ncNumberInput, setNcNumberInput] = useState("")
+  const [processingReturnAction, setProcessingReturnAction] = useState(false)
+  const [printingReturnDoc, setPrintingReturnDoc] = useState<any | null>(null)
+
+  // Facturas de Proveedores (Procure-to-Pay)
+  const [allSupplierInvoices, setAllSupplierInvoices] = useState<SupplierInvoice[]>([])
+  const [searchInvoices, setSearchInvoices] = useState("")
+  const [filterInvoiceStatus, setFilterInvoiceStatus] = useState("todos")
+  const [pageInvoices, setPageInvoices] = useState(1)
+  const pageSizeInvoices = 15
+  const [revertingInvoiceId, setRevertingInvoiceId] = useState<string | null>(null)
+
+  // Ficha 360° del Proveedor (Scorecard OTIF & Historial de Precios)
+  const [showSupplier360Modal, setShowSupplier360Modal] = useState(false)
+  const [selectedSupplierFor360, setSelectedSupplierFor360] = useState<Supplier | null>(null)
+  const [supplier360Performance, setSupplier360Performance] = useState<any>(null)
+  const [supplier360PriceHistory, setSupplier360PriceHistory] = useState<any[]>([])
+  const [loadingSupplier360, setLoadingSupplier360] = useState(false)
+
+  // Paginación y Filtros de Órdenes
+  const [searchPO, setSearchPO] = useState("")
+  const [filterPOStatus, setFilterPOStatus] = useState("todos")
+  const [filterPOSupplier, setFilterPOSupplier] = useState("")
+  const [pagePO, setPagePO] = useState(1)
+  const pageSizePO = 15
+
+  // Detalle de Orden
+  const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null)
+  const [poDetailItems, setPoDetailItems] = useState<PurchaseOrderItem[]>([])
+  const [loadingPODetail, setLoadingPODetail] = useState(false)
+
+  // Estados para Creación y Edición de Orden de Compra con Libertad de Proveedores y Comparativa
+  const [showManualPOModal, setShowManualPOModal] = useState(false)
+  const [editingPOId, setEditingPOId] = useState<string | null>(null)
+  const [editingPO, setEditingPO] = useState<PurchaseOrder | null>(null)
+  const [manualPOSupplierId, setManualPOSupplierId] = useState("")
+  const [manualPOFechaEntrega, setManualPOFechaEntrega] = useState("")
+  const [manualPOPrioridad, setManualPOPrioridad] = useState("normal")
+  const [manualPOCondiciones, setManualPOCondiciones] = useState("30 Días")
+  const [manualPOCondicionesCustom, setManualPOCondicionesCustom] = useState("")
+  const [manualPOMoneda, setManualPOMoneda] = useState<"PYG" | "USD" | "BRL">("PYG")
+  const [manualPOTipoCambio, setManualPOTipoCambio] = useState<number>(1)
+  const [manualPODiasValidez, setManualPODiasValidez] = useState<number>(30)
+  const [manualPOObservaciones, setManualPOObservaciones] = useState("")
+  const [manualPOFilterBySupplier, setManualPOFilterBySupplier] = useState(false) // false = Catálogo completo sin restricción de proveedor
+  const [manualPOUpdateDefaultSupplier, setManualPOUpdateDefaultSupplier] = useState(false) // Actualizar este proveedor como nuevo habitual
+  const [manualPOItems, setManualPOItems] = useState<any[]>([])
+  const [searchProductPO, setSearchProductPO] = useState("")
+  const [productSearchResultsPO, setProductSearchResultsPO] = useState<Product[]>([])
+  const [searchingProductsPO, setSearchingProductsPO] = useState(false)
+  const [savingManualPO, setSavingManualPO] = useState(false)
+  const [comparisonProductId, setComparisonProductId] = useState<string | null>(null)
+  const [comparisonProductNombre, setComparisonProductNombre] = useState<string>("")
+
+  // Estados para Inbox IMAP cPanel y Facturas SIFEN
+  const [showInboxConfigModal, setShowInboxConfigModal] = useState(false)
+  const [inboxConfig, setInboxConfig] = useState<any>(null)
+  const [inboxConfigForm, setInboxConfigForm] = useState({
+    imap_host: "mail.superextra.com.py",
+    imap_port: 993,
+    imap_user: "facturaelectronica@superextra.com.py",
+    imap_password: "",
+    imap_ssl: true,
+    imap_folder: "INBOX",
+    activo: true,
+  })
+  const [savingInboxConfig, setSavingInboxConfig] = useState(false)
+  const [syncingInbox, setSyncingInbox] = useState(false)
+  const [uploadingXml, setUploadingXml] = useState(false)
+  const [dragOverXml, setDragOverXml] = useState(false)
+
+  // Estados para 3-Way Match y Solicitudes de NC ("Sin NC no hay pago")
+  const [supplierNcRequests, setSupplierNcRequests] = useState<any[]>([])
+  const [showMatchModal, setShowMatchModal] = useState(false)
+  const [matchResult, setMatchResult] = useState<any>(null)
+  const [performingMatch, setPerformingMatch] = useState(false)
+  const [showResolveNcModal, setShowResolveNcModal] = useState(false)
+  const [selectedNcRequestForResolve, setSelectedNcRequestForResolve] = useState<any>(null)
+  const [resolveNcForm, setResolveNcForm] = useState({
+    nc_recibida_numero: "",
+    nc_recibida_timbrado: "",
+    nc_recibida_monto: 0,
+    nc_recibida_fecha: new Date().toISOString().split("T")[0],
+    nc_recibida_cdc: "",
+    observaciones: "",
+  })
+  const [resolvingNc, setResolvingNc] = useState(false)
+
+  // Estados para Recepción de Factura y Matching contra Pedido
+  const [showReceiveInvoiceModal, setShowReceiveInvoiceModal] = useState(false)
+  const [selectedPoForInvoiceReceipt, setSelectedPoForInvoiceReceipt] = useState<PurchaseOrder | null>(null)
+  const [receivingInvoiceMode, setReceivingInvoiceMode] = useState<"xml" | "existente">("xml")
+  const [receivingInvoiceFile, setReceivingInvoiceFile] = useState<File | null>(null)
+  const [selectedExistingInvoiceId, setSelectedExistingInvoiceId] = useState<string>("")
+  const [processingInvoiceReceipt, setProcessingInvoiceReceipt] = useState(false)
+  const [receiptMatchingResult, setReceiptMatchingResult] = useState<any | null>(null)
+  const [dragOverOrderXml, setDragOverOrderXml] = useState(false)
+  const [showAssociatePoModal, setShowAssociatePoModal] = useState(false)
+  const [invoiceToAssociatePo, setInvoiceToAssociatePo] = useState<any | null>(null)
+  const [targetPoIdForAssociation, setTargetPoIdForAssociation] = useState<string>("")
+  const [associatingPo, setAssociatingPo] = useState(false)
+
+  // Carga manual de Facturas de Compra (Nacional / Proveedores BR)
+  const [showManualInvoiceModal, setShowManualInvoiceModal] = useState(false)
+  const [manualInvoiceForm, setManualInvoiceForm] = useState({
+    supplier_id: "",
+    numero_factura: "",
+    timbrado: "",
+    fecha_emision: new Date().toISOString().split("T")[0],
+    fecha_vencimiento: new Date().toISOString().split("T")[0],
+    condicion: "credito",
+    moneda: "PYG" as "PYG" | "BRL",
+    total_brl: "",
+    tipo_cambio: "1350",
+    total_pyg: "",
+    concepto: "",
+  })
+  const [savingManualInvoice, setSavingManualInvoice] = useState(false)
+
+  // Adición extraordinaria en recepción
+  const [extraordinarySearch, setExtraordinarySearch] = useState("")
+  const [extraordinaryResults, setExtraordinaryResults] = useState<Product[]>([])
+  const [searchingExtraordinary, setSearchingExtraordinary] = useState(false)
+
+  // Paginación y Filtros de Proveedores
+  const [searchSupplier, setSearchSupplier] = useState("")
+  const [pageSupplier, setPageSupplier] = useState(1)
+  const pageSizeSupplier = 12
+
+  // ---------------------------------------------------------------------------
+  // MOTOR ASISTENTE IA DE ABASTECIMIENTO POR DÍAS DE STOCK
+  // ---------------------------------------------------------------------------
+  const [diasCobertura, setDiasCobertura] = useState(30)
+  const [leadTimeDias, setLeadTimeDias] = useState(3)
+  const [diasHistorialVentas, setDiasHistorialVentas] = useState(30)
+  const [selectedSupplierIA, setSelectedSupplierIA] = useState("")
+  const [filterSupplierSearchIA, setFilterSupplierSearchIA] = useState("")
+  const [supplierComboboxOpen, setSupplierComboboxOpen] = useState(false)
+  const supplierComboboxRef = useRef<HTMLDivElement>(null)
+  const [searchProductIA, setSearchProductIA] = useState("")
+  const [soloQuiebreIA, setSoloQuiebreIA] = useState(false)
+  const [filterEstadoIA, setFilterEstadoIA] = useState<"todos" | "quiebres" | "bajos" | "sugeridos">("todos")
+
+  // Ordenamiento interactivo de la Matriz de Sugerencia IA
+  type IASortColumn =
+    | "producto"
+    | "proveedor"
+    | "stock"
+    | "m4"
+    | "m3"
+    | "m2"
+    | "m1"
+    | "mes_actual"
+    | "pulso"
+    | "costo_ppp"
+    | "ultimo_costo"
+    | "autonomia"
+    | "sugerencia"
+    | "pedido"
+    | "costo_unit"
+    | "subtotal"
+
+  const [sortColumnIA, setSortColumnIA] = useState<IASortColumn | null>(null)
+  const [sortDirectionIA, setSortDirectionIA] = useState<"asc" | "desc">("asc")
+
+  const handleSortIA = (col: IASortColumn) => {
+    if (sortColumnIA === col) {
+      if (sortDirectionIA === "asc") {
+        setSortDirectionIA("desc")
+      } else {
+        setSortColumnIA(null)
+        setSortDirectionIA("asc")
+      }
+    } else {
+      setSortColumnIA(col)
+      const defaultDesc = ["stock", "m4", "m3", "m2", "m1", "sugerencia", "pedido", "costo_ppp", "ultimo_costo", "costo_unit", "subtotal"].includes(col)
+      setSortDirectionIA(defaultDesc ? "desc" : "asc")
+    }
+  }
+  
+  // Factores Estacionales y Contextuales de Supermercado
+  const [factorFinSemana, setFactorFinSemana] = useState(false)
+  const [factorFinMes, setFactorFinMes] = useState(false)
+  const [factorClima, setFactorClima] = useState<"normal" | "calor" | "frio" | "lluvia">("normal")
+  const [factorEvento, setFactorEvento] = useState<"normal" | "feriado" | "semana_santa" | "fin_de_ano">("normal")
+
+  // Estado del resultado de la IA
+  const [replenishmentData, setReplenishmentData] = useState<SmartReplenishmentResponse | null>(null)
+  const [loadingReplenishment, setLoadingReplenishment] = useState(false)
+  const [editedQuantities, setEditedQuantities] = useState<Record<string, number>>({})
+  const [editedCosts, setEditedCosts] = useState<Record<string, number>>({})
+  const [selectedItemsIA, setSelectedItemsIA] = useState<Record<string, boolean>>({})
+
+  // Modal de Confirmación y Generación de OC desde IA
+  const [showGenerateModal, setShowGenerateModal] = useState(false)
+  const [generatePOForm, setGeneratePOForm] = useState({
+    supplier_id: "",
+    fecha_entrega_estimada: "",
+    prioridad: "normal",
+    condiciones_pago: "30 Días",
+    observaciones: "",
+  })
+  const [generatingPO, setGeneratingPO] = useState(false)
+  // Multi-Proveedor: división y asignación interactiva
+  const [itemAssignedSupplier, setItemAssignedSupplier] = useState<Record<string, string>>({})
+  const [includedSuppliers, setIncludedSuppliers] = useState<Record<string, boolean>>({})
+  const [supplierOrderSettings, setSupplierOrderSettings] = useState<Record<string, {
+    fecha_entrega_estimada: string
+    condiciones_pago: string
+    prioridad: string
+    observaciones: string
+  }>>({})
+  const [globalApplySupplierId, setGlobalApplySupplierId] = useState<string>("")
+
+  // Modal de Recepción en Muelle
   const [showReceiptModal, setShowReceiptModal] = useState(false)
+  const [receiptForm, setReceiptForm] = useState<{
+    purchase_order_id: string
+    proveedor_ref: string
+    observaciones: string
+    es_br?: boolean
+    total_brl?: string
+    tipo_cambio?: string
+    items: {
+      product_id: string
+      nombre: string
+      sku: string
+      cantidad_ordenada: number
+      cantidad_recibir: number
+      presentacion_id: string
+      cantidad_presentacion: number
+      precio_unitario: number
+      lote: string
+      fecha_vencimiento: string
+      cantidad_rechazada: number
+      motivo_rechazo: string
+      es_extraordinario?: boolean
+      autorizado_por?: string
+      autorizacion_motivo?: string
+    }[]
+  }>({
+    purchase_order_id: "",
+    proveedor_ref: "",
+    observaciones: "",
+    es_br: false,
+    total_brl: "",
+    tipo_cambio: "1350",
+    items: [],
+  })
+  const [savingReceipt, setSavingReceipt] = useState(false)
+  const [packBarcodesByProduct, setPackBarcodesByProduct] = useState<Map<string, PackBarcode[]>>(new Map())
+  const [lastReceiptForLabels, setLastReceiptForLabels] = useState<{ id: string; numero: string } | null>(null)
+  const navigate = useNavigate()
+
+  // Modal de Nueva Requisición Interna
+  const [showReqModal, setShowReqModal] = useState(false)
+  const [reqForm, setReqForm] = useState({
+    departamento: "Salón / Góndola",
+    prioridad: "normal",
+    motivo: "Reposición regular de stock",
+    observaciones: "",
+    items: [{ product_id: "", cantidad: 10, precio_estimado: 0, descripcion: "" }],
+  })
+  const [savingReq, setSavingReq] = useState(false)
+
+  // Gestión Integral de Proveedores (Alta, Edición y Clasificación Bienes/Servicios)
   const [showSupplierModal, setShowSupplierModal] = useState(false)
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null)
-  const [showContractModal, setShowContractModal] = useState(false)
-  const [showEvalModal, setShowEvalModal] = useState(false)
+  const [savingSupplier, setSavingSupplier] = useState(false)
+  const [supplierModalTab, setSupplierModalTab] = useState<"general" | "clasificacion" | "comercial" | "bancario" | "contacto">("general")
+  const [supplierFilterType, setSupplierFilterType] = useState<"todos" | "nacional" | "brasilero">("todos")
+  const [supplierFilterProvision, setSupplierFilterProvision] = useState<"todos" | "bienes" | "servicios" | "mixto">("todos")
+  const [supplierViewMode, setSupplierViewMode] = useState<"grid" | "table">("grid")
 
-  const [poSearch, setPoSearch] = useState("")
-  const [poStatusFilter, setPoStatusFilter] = useState("")
-  const [poSupplierFilter, setPoSupplierFilter] = useState("")
-  const [poDateFrom, setPoDateFrom] = useState("")
-  const [poDateTo, setPoDateTo] = useState("")
-
-  const [poFormSupplier, setPoFormSupplier] = useState("")
-  const [poFormTipo, setPoFormTipo] = useState<"local" | "importacion">("local")
-  const [poFormPrioridad, setPoFormPrioridad] = useState<"normal" | "alta" | "urgente">("normal")
-  const [poFormMoneda, setPoFormMoneda] = useState<"PYG" | "USD">("PYG")
-  const [poFormTipoCambio, setPoFormTipoCambio] = useState(1)
-  const [poFormCondiciones, setPoFormCondiciones] = useState("")
-  const [poFormValidez, setPoFormValidez] = useState(30)
-  const [poFormFecEntrega, setPoFormFecEntrega] = useState("")
-  const [poFormShipping, setPoFormShipping] = useState(0)
-  const [poFormInsurance, setPoFormInsurance] = useState(0)
-  const [poFormCustoms, setPoFormCustoms] = useState(0)
-  const [poFormOther, setPoFormOther] = useState(0)
-  const [poFormObs, setPoFormObs] = useState("")
-  const [poFormItems, setPoFormItems] = useState<OrderItem[]>([])
-  const [poProductSearch, setPoProductSearch] = useState("")
-  const [poCreating, setPoCreating] = useState(false)
-
-  const [receiptPO, setReceiptPO] = useState("")
-  const [receiptDirect, setReceiptDirect] = useState(false)
-  const [receiptSupplier, setReceiptSupplier] = useState("")
-  const [receiptWarehouse, setReceiptWarehouse] = useState("")
-  const [receiptRef, setReceiptRef] = useState("")
-  const [receiptItems, setReceiptItems] = useState<ReceiptItem[]>([])
-  const [receiptObs, setReceiptObs] = useState("")
-  const [receiptCreating, setReceiptCreating] = useState(false)
-
-  const [supRazonSocial, setSupRazonSocial] = useState("")
-  const [supRuc, setSupRuc] = useState("")
-  const [supDireccion, setSupDireccion] = useState("")
-  const [supTelefono, setSupTelefono] = useState("")
-  const [supEmail, setSupEmail] = useState("")
-  const [supContacto, setSupContacto] = useState("")
-  const [supTipo, setSupTipo] = useState<"nacional" | "import">("nacional")
-  const [supPlazoPago, setSupPlazoPago] = useState(30)
-  const [supNotas, setSupNotas] = useState("")
-
-  const [proveedorTab, setProveedorTab] = useState<SubTab>("lista")
-  const [reportTab, setReportTab] = useState<ReportSubTab>("proveedor")
-  const [reportPeriod, setReportPeriod] = useState("3")
-  const [supplierSearch, setSupplierSearch] = useState("")
-  const [supplierFilter, setSupplierFilter] = useState<SupplierStatus>("todos")
-  const [generatingSuggestions, setGeneratingSuggestions] = useState(false)
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
-
-  const [contractSupplier, setContractSupplier] = useState("")
-  const [contractNombre, setContractNombre] = useState("")
-  const [contractMonto, setContractMonto] = useState(0)
-  const [contractInicio, setContractInicio] = useState("")
-  const [contractFin, setContractFin] = useState("")
-  const [evalSupplier, setEvalSupplier] = useState("")
-  const [evalCalidad, setEvalCalidad] = useState(10)
-  const [evalEntrega, setEvalEntrega] = useState(10)
-  const [evalPrecio, setEvalPrecio] = useState(10)
-  const [evalComentarios, setEvalComentarios] = useState("")
-
-  const fetchAll = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [pos, recs, sups, prods, wares] = await Promise.allSettled([
-        api.purchases.listPOs(),
-        api.purchases.listReceipts(),
-        api.purchases.listSuppliers(),
-        api.products.list(),
-        api.warehouses.list(),
-      ])
-      // Las URLs reales de compras/proveedores ya estan arregladas (antes
-      // pegaban a /v1/purchases/* que no existe) — si igual falla algo, no
-      // hay que tapar el error con datos inventados, mejor una lista vacia.
-      if (pos.status === "fulfilled") setPurchaseOrders(pos.value)
-      else setPurchaseOrders([])
-      if (recs.status === "fulfilled") setReceipts(recs.value)
-      else setReceipts([])
-      if (sups.status === "fulfilled") setSuppliers(sups.value)
-      else setSuppliers([])
-      if (prods.status === "fulfilled") setProducts(prods.value)
-      else setProducts([])
-      if (wares.status === "fulfilled") setWarehouses(wares.value)
-      else setWarehouses([])
-    } catch {
-      setPurchaseOrders([]); setReceipts([])
-      setSuppliers([]); setProducts([]); setWarehouses([])
-    } finally { setLoading(false) }
-  }, [])
-  useEffect(() => { fetchAll() }, [fetchAll])
-
-  const activePOs = useMemo(() => purchaseOrders.filter(p => p.estado !== "cancelado"), [purchaseOrders])
-  const totalPOValue = useMemo(() => activePOs.reduce((a, b) => a + (b.total || 0), 0), [activePOs])
-  const activeSuppliers = useMemo(() => suppliers.filter(s => s.activo), [suppliers])
-
-  const poByStatus = useMemo(() => {
-    const counts: Record<string, number> = {}
-    purchaseOrders.forEach(p => { const es = p.estado ?? ""; counts[es] = (counts[es] || 0) + 1 })
-    return Object.entries(counts).map(([estado, count]) => ({
-      estado, count,
-      color: estado === "borrador" ? "bg-gray-400" : estado === "confirmado" ? "bg-blue-500" : estado === "enviado" ? "bg-indigo-500" : estado === "parcial" ? "bg-amber-500" : estado === "completado" ? "bg-green-500" : "bg-red-500",
-    }))
-  }, [purchaseOrders])
-
-  const topSuppliers = useMemo(() => {
-    const map: Record<string, { name: string; total: number; count: number }> = {}
-    purchaseOrders.filter(p => p.estado !== "cancelado").forEach(p => {
-      const name = p.supplier?.razon_social || "-"
-      if (!map[name]) map[name] = { name, total: 0, count: 0 }
-      map[name].total += p.total || 0; map[name].count++
-    })
-    return Object.values(map).sort((a, b) => b.total - a.total).slice(0, 5)
-  }, [purchaseOrders])
-
-  const filteredPOs = useMemo(() => {
-    return purchaseOrders.filter(p => {
-      if (poStatusFilter && p.estado !== poStatusFilter) return false
-      if (poSupplierFilter && p.supplier_id !== poSupplierFilter) return false
-      if (poDateFrom && new Date(p.fecha ?? "") < new Date(poDateFrom)) return false
-      if (poDateTo && new Date(p.fecha ?? "") > new Date(poDateTo)) return false
-      if (poSearch) { const s = poSearch.toLowerCase(); if (!(p.numero ?? "").toLowerCase().includes(s) && !(p.supplier?.razon_social || "").toLowerCase().includes(s)) return false }
-      return true
-    })
-  }, [purchaseOrders, poStatusFilter, poSupplierFilter, poDateFrom, poDateTo, poSearch])
-
-  const filteredSuppliers = useMemo(() => {
-    return suppliers.filter(s => {
-      if (supplierFilter === "activos" && !s.activo) return false
-      if (supplierFilter === "inactivos" && s.activo) return false
-      if (supplierSearch) { const q = supplierSearch.toLowerCase(); if (!(s.razon_social ?? "").toLowerCase().includes(q) && !(s.ruc || "").toLowerCase().includes(q)) return false }
-      return true
-    })
-  }, [suppliers, supplierSearch, supplierFilter])
-
-  const filteredProducts = useMemo(() => {
-    if (!poProductSearch) return []
-    return products.filter(p => p.nombre.toLowerCase().includes(poProductSearch.toLowerCase()) || (p.sku && p.sku.toLowerCase().includes(poProductSearch.toLowerCase())))
-  }, [products, poProductSearch])
-
-  const poFormSubtotal = useMemo(() => poFormItems.reduce((a, b) => a + b.cantidad * b.precio_unitario, 0), [poFormItems])
-  const poFormDescTotal = useMemo(() => poFormItems.reduce((a, b) => a + (b.cantidad * b.precio_unitario * b.descuento_pct) / 100, 0), [poFormItems])
-  const poFormBase10 = useMemo(() => poFormItems.filter(i => i.iva_tasa === 10).reduce((a, b) => a + (b.cantidad * b.precio_unitario * (1 - b.descuento_pct / 100)), 0), [poFormItems])
-  const poFormBase5 = useMemo(() => poFormItems.filter(i => i.iva_tasa === 5).reduce((a, b) => a + (b.cantidad * b.precio_unitario * (1 - b.descuento_pct / 100)), 0), [poFormItems])
-  const poFormIva10 = poFormBase10 * 0.10
-  const poFormIva5 = poFormBase5 * 0.05
-  const poFormLanded = poFormShipping + poFormInsurance + poFormCustoms + poFormOther
-  const poFormTotal = poFormSubtotal - poFormDescTotal + poFormIva10 + poFormIva5 + poFormLanded
-  const pendingReceiptPOs = useMemo(() => purchaseOrders.filter(p => p.estado === "enviado" || p.estado === "parcial"), [purchaseOrders])
-
-  const handleCreatePO = async () => {
-    if (!poFormSupplier) { toast.error("Error", "Selecciona un proveedor"); return }
-    if (poFormItems.length === 0) { toast.error("Error", "Agrega al menos un producto"); return }
-    if (poFormItems.some(i => i.cantidad <= 0 || i.precio_unitario <= 0)) { toast.error("Error", "Cantidad y precio requeridos"); return }
-    setPoCreating(true)
-    try {
-      await api.purchases.createPO({
-        supplier_id: poFormSupplier,
-        items: poFormItems.map(i => ({ product_id: i.product_id, cantidad: i.cantidad, precio_unitario: i.precio_unitario })),
-      })
-      toast.success("Orden creada", "La orden de compra fue registrada")
-      resetPOForm(); setShowPOModal(false); fetchAll()
-    } catch {
-      setPurchaseOrders(prev => [{
-        id: "po-" + Date.now(), company_id: "", supplier_id: poFormSupplier,
-        numero: "PO-" + new Date().getFullYear() + "-" + String(purchaseOrders.length + 1).padStart(4, "0"),
-        fecha: new Date().toISOString(),
-        fecha_entrega_estimada: poFormFecEntrega || null, estado: "borrador",
-        moneda: poFormMoneda, tipo_cambio: poFormTipoCambio, subtotal: poFormSubtotal,
-        descuento_total: poFormDescTotal, iva_10: poFormIva10, iva_5: poFormIva5, total: poFormTotal,
-        observaciones: poFormObs || null, user_id: null,
-        created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-        supplier: suppliers.find(s => s.id === poFormSupplier),
-      }, ...prev])
-      toast.success("Orden creada (demo)", "PO registrada")
-      resetPOForm(); setShowPOModal(false)
-    } finally { setPoCreating(false) }
+  const initialSupplierForm = {
+    razon_social: "",
+    nombre_fantasia: "",
+    ruc: "",
+    ci: "",
+    tipo_persona: "juridica",
+    tipo_proveedor: "nacional",
+    tipo_provision: "bienes", // "bienes" | "servicios" | "mixto"
+    rubro: "Abarrotes y Almacén Seco",
+    pais: "Paraguay",
+    moneda_default: "PYG",
+    plazo_pago_dias: 30,
+    limite_credito: 0,
+    dia_visita: "",
+    frecuencia_entrega: "Semanal",
+    telefono: "",
+    email: "",
+    contacto_nombre: "",
+    contacto_telefono: "",
+    contacto_email: "",
+    direccion: "",
+    ciudad: "",
+    condicion_iva: "10",
+    banco: "",
+    tipo_cuenta_bancaria: "cuenta_corriente",
+    cuenta_bancaria: "",
+    titular_cuenta_bancaria: "",
+    identificacion_bancaria: "",
+    retencion_iva: true,
+    porcentaje_retencion_iva: 30,
+    agente_retencion: false,
+    notas: "",
+    activo: true,
   }
 
-  const resetPOForm = () => {
-    setPoFormSupplier(""); setPoFormTipo("local"); setPoFormPrioridad("normal")
-    setPoFormMoneda("PYG"); setPoFormTipoCambio(1); setPoFormCondiciones("")
-    setPoFormValidez(30); setPoFormFecEntrega(""); setPoFormShipping(0)
-    setPoFormInsurance(0); setPoFormCustoms(0); setPoFormOther(0); setPoFormObs("")
-    setPoFormItems([]); setPoProductSearch("")
-  }
+  const [supplierForm, setSupplierForm] = useState(initialSupplierForm)
 
-  const handleConfirmPO = async (po: PurchaseOrder) => {
-    const ok = await confirm({ title: "Confirmar orden?", message: "Se confirmara " + po.numero, variant: "info" })
-    if (!ok) return
-    try {
-      await api.purchases.confirmPO(po.id)
-      toast.success("Confirmada", po.numero + " confirmada")
-      fetchAll()
-    } catch {
-      setPurchaseOrders(prev => prev.map(p => p.id === po.id ? { ...p, estado: "confirmado" } : p))
-      toast.success("Confirmada (demo)", po.numero)
-    }
-  }
-
-  const handleCancelPO = async (po: PurchaseOrder) => {
-    const ok = await confirm({ title: "Cancelar orden?", message: "Se cancelara " + po.numero, variant: "danger" })
-    if (!ok) return
-    setPurchaseOrders(prev => prev.map(p => p.id === po.id ? { ...p, estado: "cancelado" } : p))
-    toast.success("Cancelada", po.numero)
-  }
-
-  const handleChangeStatus = (po: PurchaseOrder, newStatus: string) => {
-    setPurchaseOrders(prev => prev.map(p => p.id === po.id ? { ...p, estado: newStatus } : p))
-    toast.success("Estado actualizado", po.numero + " -> " + newStatus)
-  }
-
-  const handleAddItemToPO = (product: Product) => {
-    if (poFormItems.find(i => i.product_id === product.id)) { toast.info("Ya esta", product.nombre + " ya fue agregado"); return }
-    setPoFormItems(prev => [...prev, {
-      product_id: product.id, nombre: product.nombre, sku: product.sku || "",
-      cantidad: 1, precio_unitario: product.precio || 0, descuento_pct: 0, iva_tasa: product.iva_tasa || 10, subtotal: product.precio || 0,
-    }])
-    setPoProductSearch("")
-  }
-
-  const handleUpdatePOItem = (index: number, field: string, value: number) => {
-    setPoFormItems(prev => { const u = [...prev]; u[index] = { ...u[index], [field]: value }; u[index].subtotal = u[index].cantidad * u[index].precio_unitario * (1 - u[index].descuento_pct / 100); return u })
-  }
-  const handleRemovePOItem = (index: number) => setPoFormItems(prev => prev.filter((_, i) => i !== index))
-
-  const handleSelectPOforReceipt = async (poId: string) => {
-    setReceiptPO(poId)
-    const po = purchaseOrders.find(p => p.id === poId)
-    if (!po) return
-    setReceiptSupplier(po.supplier_id ?? "")
-    // Antes fabricaba 3 items inventados con productos al azar del catalogo,
-    // ignorando por completo que fue realmente pedido en esta orden. Ahora
-    // trae los items reales de la orden.
-    try {
-      const full = await api.purchases.getOrder(poId) as any
-      const items: ReceiptItem[] = (full.items || []).map((it: any) => {
-        const prod = products.find(p => p.id === it.product_id)
-        return {
-          product_id: it.product_id,
-          nombre: prod?.nombre || it.descripcion || it.product_id,
-          sku: prod?.sku || "",
-          cantidad_ordenada: Number(it.cantidad) || 0,
-          cantidad_recibir: Number(it.cantidad) - Number(it.cantidad_recibida || 0),
-          costo_unitario: Number(it.precio_unitario) || 0,
-          lote: "",
-          fecha_vencimiento: "",
-        }
-      })
-      setReceiptItems(items)
-    } catch {
-      setReceiptItems([])
-    }
-  }
-
-  const handleCreateReceipt = async () => {
-    if (!receiptDirect && !receiptPO) { toast.error("Error", "Selecciona una orden"); return }
-    if (receiptDirect && !receiptSupplier) { toast.error("Error", "Selecciona un proveedor"); return }
-    if (receiptItems.length === 0) { toast.error("Error", "Agrega productos"); return }
-    if (!receiptWarehouse) { toast.error("Error", "Selecciona un almacen"); return }
-    setReceiptCreating(true)
-    try {
-      await api.purchases.createReceipt({
-        order_id: receiptDirect ? undefined : receiptPO || undefined,
-        supplier_id: receiptSupplier,
-        items: receiptItems.map(i => ({ product_id: i.product_id, cantidad: i.cantidad_recibir, precio_unitario: i.costo_unitario, costo_unitario: i.costo_unitario })),
-      })
-      toast.success("Recepcion creada", "Stock actualizado")
-      resetReceiptForm(); setShowReceiptModal(false); fetchAll()
-    } catch {
-      toast.success("Recepcion creada (demo)", "Stock actualizado")
-      resetReceiptForm(); setShowReceiptModal(false)
-      setReceipts(prev => [{
-        id: "rc-" + Date.now(), company_id: "", order_id: receiptDirect ? null : receiptPO || null,
-        supplier_id: receiptSupplier, numero: "RCP-" + new Date().getFullYear() + "-" + String(receipts.length + 1).padStart(4, "0"),
-        fecha: new Date().toISOString(), total: receiptItems.reduce((a, b) => a + b.cantidad_recibir * b.costo_unitario, 0),
-        observaciones: receiptObs || null, user_id: null, created_at: new Date().toISOString(),
-        supplier: suppliers.find(s => s.id === receiptSupplier),
-      }, ...prev])
-      if (receiptPO) setPurchaseOrders(prev => prev.map(p => p.id === receiptPO ? { ...p, estado: "parcial" } : p))
-    } finally { setReceiptCreating(false) }
-  }
-
-  const resetReceiptForm = () => { setReceiptPO(""); setReceiptDirect(false); setReceiptSupplier(""); setReceiptWarehouse(""); setReceiptRef(""); setReceiptItems([]); setReceiptObs("") }
-
-  const resetSupplierForm = () => { setSupRazonSocial(""); setSupRuc(""); setSupDireccion(""); setSupTelefono(""); setSupEmail(""); setSupContacto(""); setSupTipo("nacional"); setSupPlazoPago(30) }
-
-  const openEditSupplier = (supplier: Supplier) => {
-    setEditingSupplier(supplier)
-    setSupRuc(supplier.ruc ?? ""); setSupRazonSocial(supplier.razon_social ?? "")
-    setSupDireccion(supplier.direccion || ""); setSupTelefono(supplier.telefono || "")
-    setSupEmail(supplier.email || ""); setSupContacto(supplier.contacto || ""); setSupTipo("nacional"); setSupPlazoPago(30)
+  const handleOpenCreateSupplier = () => {
+    setEditingSupplier(null)
+    setSupplierForm(initialSupplierForm)
+    setSupplierModalTab("general")
     setShowSupplierModal(true)
   }
 
-  const handleSaveSupplier = async () => {
-    if (!supRazonSocial) { toast.error("Error", "Razon social requerida"); return }
+  const handleOpenEditSupplier = (s: Supplier) => {
+    setEditingSupplier(s)
+    setSupplierForm({
+      razon_social: s.razon_social || "",
+      nombre_fantasia: s.nombre_fantasia || "",
+      ruc: s.ruc || "",
+      ci: s.ci || "",
+      tipo_persona: s.tipo_persona || "juridica",
+      tipo_proveedor: s.tipo_proveedor || "nacional",
+      tipo_provision: (s as any).tipo_provision || "bienes",
+      rubro: (s as any).rubro || "Abarrotes y Almacén Seco",
+      pais: (s as any).pais || (s.tipo_proveedor === "brasilero" ? "Brasil" : "Paraguay"),
+      moneda_default: s.moneda_default || (s.tipo_proveedor === "brasilero" ? "BRL" : "PYG"),
+      plazo_pago_dias: s.plazo_pago_dias ?? 30,
+      limite_credito: Number((s as any).limite_credito || 0),
+      dia_visita: (s as any).dia_visita || "",
+      frecuencia_entrega: (s as any).frecuencia_entrega || "Semanal",
+      telefono: s.telefono || "",
+      email: s.email || "",
+      contacto_nombre: s.contacto_nombre || s.contacto || "",
+      contacto_telefono: s.contacto_telefono || "",
+      contacto_email: (s as any).contacto_email || "",
+      direccion: s.direccion || "",
+      ciudad: s.ciudad || "",
+      condicion_iva: s.condicion_iva || "10",
+      banco: (s as any).banco || "",
+      tipo_cuenta_bancaria: (s as any).tipo_cuenta_bancaria || "cuenta_corriente",
+      cuenta_bancaria: (s as any).cuenta_bancaria || "",
+      titular_cuenta_bancaria: (s as any).titular_cuenta_bancaria || "",
+      identificacion_bancaria: (s as any).identificacion_bancaria || "",
+      retencion_iva: (s as any).retencion_iva ?? true,
+      porcentaje_retencion_iva: (s as any).porcentaje_retencion_iva ?? 30,
+      agente_retencion: (s as any).agente_retencion ?? false,
+      notas: (s as any).notas || "",
+      activo: s.activo ?? true,
+    })
+    setSupplierModalTab("general")
+    setShowSupplierModal(true)
+  }
+
+  const handleSaveSupplier = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!supplierForm.razon_social.trim()) {
+      toast.error("Razón Social obligatoria", "Indique la razón social o nombre comercial.")
+      return
+    }
+    setSavingSupplier(true)
     try {
-      if (!editingSupplier) {
-        await api.purchases.createSupplier({ ruc: supRuc || undefined, razon_social: supRazonSocial, direccion: supDireccion || undefined, telefono: supTelefono || undefined, email: supEmail || undefined })
+      const payload: Partial<Supplier> = {
+        company_id: "00000000-0000-0000-0000-000000000001",
+        razon_social: supplierForm.razon_social.trim(),
+        nombre_fantasia: supplierForm.nombre_fantasia.trim() || supplierForm.razon_social.trim(),
+        ruc: supplierForm.ruc.trim() || undefined,
+        ci: supplierForm.ci.trim() || undefined,
+        tipo_persona: supplierForm.tipo_persona,
+        tipo_proveedor: supplierForm.tipo_proveedor,
+        tipo_provision: supplierForm.tipo_provision,
+        rubro: supplierForm.rubro,
+        pais: supplierForm.pais,
+        moneda_default: supplierForm.moneda_default,
+        plazo_pago_dias: Number(supplierForm.plazo_pago_dias) || 0,
+        limite_credito: Number(supplierForm.limite_credito) || 0,
+        dia_visita: supplierForm.dia_visita.trim() || undefined,
+        frecuencia_entrega: supplierForm.frecuencia_entrega.trim() || undefined,
+        telefono: supplierForm.telefono.trim() || undefined,
+        email: supplierForm.email.trim() || undefined,
+        contacto_nombre: supplierForm.contacto_nombre.trim() || undefined,
+        contacto_telefono: supplierForm.contacto_telefono.trim() || undefined,
+        contacto_email: supplierForm.contacto_email.trim() || undefined,
+        contacto: supplierForm.contacto_nombre.trim() || undefined,
+        direccion: supplierForm.direccion.trim() || undefined,
+        ciudad: supplierForm.ciudad.trim() || undefined,
+        condicion_iva: supplierForm.condicion_iva || undefined,
+        banco: supplierForm.banco.trim() || undefined,
+        tipo_cuenta_bancaria: supplierForm.tipo_cuenta_bancaria || undefined,
+        cuenta_bancaria: supplierForm.cuenta_bancaria.trim() || undefined,
+        titular_cuenta_bancaria: supplierForm.titular_cuenta_bancaria.trim() || undefined,
+        identificacion_bancaria: supplierForm.identificacion_bancaria.trim() || undefined,
+        retencion_iva: supplierForm.retencion_iva,
+        porcentaje_retencion_iva: Number(supplierForm.porcentaje_retencion_iva) || 0,
+        agente_retencion: supplierForm.agente_retencion,
+        notas: supplierForm.notas.trim() || undefined,
+        activo: supplierForm.activo,
       }
-      const ns: Supplier = {
-        id: editingSupplier?.id || "s-" + Date.now(), company_id: "",
-        ruc: supRuc || undefined, razon_social: supRazonSocial, nombre_fantasia: undefined, direccion: supDireccion || undefined,
-        telefono: supTelefono || undefined, email: supEmail || undefined, contacto: supContacto || undefined, activo: true,
-        created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+
+      if (editingSupplier) {
+        await api.purchases.updateSupplier(editingSupplier.id, payload)
+        toast.success("Proveedor Actualizado", `Los datos de ${payload.razon_social} se guardaron exitosamente.`)
+      } else {
+        await api.purchases.createSupplier(payload)
+        toast.success("Proveedor Registrado", `${payload.razon_social} fue dado de alta exitosamente.`)
       }
-      setSuppliers(prev => editingSupplier ? prev.map(s => s.id === editingSupplier.id ? ns : s) : [ns, ...prev])
-      toast.success(editingSupplier ? "Actualizado" : "Creado", supRazonSocial)
-      setShowSupplierModal(false); resetSupplierForm(); setEditingSupplier(null)
-    } catch {
-      const ns2: Supplier = {
-        id: editingSupplier?.id || "s-" + Date.now(), company_id: "",
-        ruc: supRuc || undefined, razon_social: supRazonSocial, nombre_fantasia: undefined, direccion: supDireccion || undefined,
-        telefono: supTelefono || undefined, email: supEmail || undefined, contacto: supContacto || undefined, activo: true,
-        created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-      }
-      setSuppliers(prev => editingSupplier ? prev.map(s => s.id === editingSupplier.id ? ns2 : s) : [ns2, ...prev])
-      toast.success(editingSupplier ? "Actualizado (demo)" : "Creado (demo)", supRazonSocial)
-      setShowSupplierModal(false); resetSupplierForm(); setEditingSupplier(null)
+      setShowSupplierModal(false)
+      fetchAll()
+    } catch (err: any) {
+      toast.error("Error al guardar proveedor", err.message)
+    } finally {
+      setSavingSupplier(false)
     }
   }
 
-  const handleToggleSupplier = (sup: Supplier) => {
-    setSuppliers(prev => prev.map(s => s.id === sup.id ? { ...s, activo: !s.activo } : s))
-    toast.success(sup.activo ? "Desactivado" : "Activado", sup.razon_social)
+  // Estado para Eliminación de Órdenes de Compra
+  const [poToDelete, setPoToDelete] = useState<PurchaseOrder | null>(null)
+  const [forceDeletePO, setForceDeletePO] = useState(false)
+  const [deletingPO, setDeletingPO] = useState(false)
+
+  // ---------------------------------------------------------------------------
+  // CARGA DE DATOS GENERALES (100% REALES DE NEMUHA)
+  // ---------------------------------------------------------------------------
+  const fetchAll = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [
+        ordersRes,
+        lostDemandRes,
+        receiptsRes,
+        suppliersRes,
+        kpisRes,
+        invoicesRes,
+        reqsRes,
+        rfqsRes,
+        budgetsRes,
+        consumptionRes,
+        spendSuppRes,
+        spendCatRes,
+        varianceRes,
+        managedReturnsRes,
+        warehousesRes,
+        returnsRes,
+        creditNotesRes,
+        ncRequestsRes,
+        inboxConfigRes,
+      ] = await Promise.allSettled([
+        api.purchases.listPOs(),
+        api.purchases.lostDemand.list(),
+        api.purchases.listReceipts(),
+        api.purchases.listSuppliers(),
+        api.purchases.reports.kpis(),
+        api.financial.invoices.list({ limit: 300 }),
+        api.purchases.requisitions.list(),
+        api.purchases.rfqs.list(),
+        api.purchases.budgets.list(),
+        api.purchases.budgets.consumption(),
+        api.purchases.reports.spendBySupplier(),
+        api.purchases.reports.spendByCategory(),
+        api.purchases.reports.priceVariance(),
+        api.purchases.returns.list().catch(() => []),
+        api.warehouses.list().catch(() => []),
+        api.financial.supplierReturns().catch(() => []),
+        api.financial.creditNotes().catch(() => []),
+        api.purchases.listSupplierNcRequests(),
+        api.purchases.getInboxConfig(),
+      ])
+
+      if (ordersRes.status === "fulfilled") setOrders(ordersRes.value || [])
+      if (lostDemandRes.status === "fulfilled") setLostDemands(lostDemandRes.value || [])
+      if (receiptsRes.status === "fulfilled") setReceipts(receiptsRes.value || [])
+      if (suppliersRes.status === "fulfilled") setSuppliers(suppliersRes.value || [])
+      if (kpisRes.status === "fulfilled") setReportKPIs(kpisRes.value || null)
+      if (invoicesRes.status === "fulfilled") {
+        setInvoices(invoicesRes.value || [])
+        setAllSupplierInvoices(invoicesRes.value || [])
+      }
+      if (reqsRes.status === "fulfilled") setRequisitions(reqsRes.value || [])
+      if (rfqsRes.status === "fulfilled") setRfqs(rfqsRes.value || [])
+      if (budgetsRes.status === "fulfilled") setBudgets(budgetsRes.value || [])
+      if (consumptionRes.status === "fulfilled") setBudgetConsumptions(consumptionRes.value || [])
+      if (spendSuppRes.status === "fulfilled") setSpendBySupplier(spendSuppRes.value || [])
+      if (spendCatRes.status === "fulfilled") setSpendByCategory(spendCatRes.value || [])
+      if (varianceRes.status === "fulfilled") setPriceVariance(varianceRes.value || [])
+      if (managedReturnsRes.status === "fulfilled") setManagedReturns(managedReturnsRes.value || [])
+      if (warehousesRes.status === "fulfilled") setWarehousesList(warehousesRes.value || [])
+      if (returnsRes.status === "fulfilled") setSupplierReturns(returnsRes.value || [])
+      if (creditNotesRes.status === "fulfilled") setSupplierCreditNotes(creditNotesRes.value || [])
+      if (ncRequestsRes.status === "fulfilled") setSupplierNcRequests(ncRequestsRes.value || [])
+      if (inboxConfigRes.status === "fulfilled" && inboxConfigRes.value) {
+        const conf: any = inboxConfigRes.value
+        setInboxConfig(conf)
+        setInboxConfigForm({
+          imap_host: conf.imap_host || "mail.superextra.com.py",
+          imap_port: conf.imap_port || 993,
+          imap_user: conf.imap_user || "facturaelectronica@superextra.com.py",
+          imap_password: "",
+          imap_ssl: conf.imap_ssl ?? true,
+          imap_folder: conf.imap_folder || "INBOX",
+          activo: conf.activo ?? true,
+        })
+      }
+    } catch (e: any) {
+      toast.error("Error al sincronizar datos de compras", e.message)
+    } finally {
+      setLoading(false)
+      setInitialLoaded(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchAll()
+  }, [fetchAll])
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (supplierComboboxRef.current && !supplierComboboxRef.current.contains(event.target as Node)) {
+        setSupplierComboboxOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => document.removeEventListener("mousedown", handleClickOutside)
+  }, [])
+
+  // Abrir Ficha 360° del Proveedor
+  const openSupplier360 = async (supplier: Supplier) => {
+    setSelectedSupplierFor360(supplier)
+    setShowSupplier360Modal(true)
+    setLoadingSupplier360(true)
+    try {
+      const [perfRes, priceRes] = await Promise.allSettled([
+        api.purchases.getSupplierPerformance(supplier.id),
+        api.purchases.getSupplierPriceHistory(supplier.id),
+      ])
+      if (perfRes.status === "fulfilled") setSupplier360Performance(perfRes.value)
+      else setSupplier360Performance(null)
+
+      if (priceRes.status === "fulfilled") setSupplier360PriceHistory(priceRes.value || [])
+      else setSupplier360PriceHistory([])
+    } catch {
+      toast.error("Error al cargar ficha del proveedor")
+    } finally {
+      setLoadingSupplier360(false)
+    }
   }
 
-  // No hay endpoint real conectado para sugerencias de compra en este modulo
-  // (existe uno bajo demand-forecast, con otro modelo de datos) — antes esto
-  // esperaba 1.5s con un spinner falso y mostraba 6 sugerencias inventadas
-  // como si vinieran de un calculo real de demanda/stock.
-  const handleGenerateSuggestions = async () => {
-    toast.info("No disponible", "El motor de sugerencias de compra todavia no esta conectado en este modulo.")
+  // ---------------------------------------------------------------------------
+  // EJECUCIÓN DEL MOTOR PREDICTIVO IA
+  // ---------------------------------------------------------------------------
+  const runReplenishmentPreview = useCallback(async () => {
+    setLoadingReplenishment(true)
+    try {
+      const res = await api.purchases.smartReplenishmentPreview({
+        supplier_id: selectedSupplierIA || undefined,
+        dias_cobertura: Number(diasCobertura),
+        lead_time_dias: Number(leadTimeDias),
+        dias_historial_ventas: Number(diasHistorialVentas),
+        factor_fin_semana: factorFinSemana,
+        factor_fin_mes: factorFinMes,
+        factor_clima: factorClima,
+        factor_evento: factorEvento,
+        solo_quiebre_o_bajo: soloQuiebreIA,
+        search: searchProductIA || undefined,
+        limit: selectedSupplierIA ? 5000 : 500,
+      })
+      setReplenishmentData(res)
+
+      const initialQty: Record<string, number> = {}
+      const initialSel: Record<string, boolean> = {}
+      res.items.forEach((it: any) => {
+        const numQty = Math.max(0, Math.round(Number(it.cantidad_sugerida) || 0))
+        initialQty[it.product_id] = numQty
+        initialSel[it.product_id] = numQty > 0
+      })
+      setEditedQuantities(initialQty)
+      setSelectedItemsIA(initialSel)
+    } catch (e: any) {
+      toast.error("Error en motor de sugerencia", e.message)
+    } finally {
+      setLoadingReplenishment(false)
+    }
+  }, [
+    selectedSupplierIA,
+    diasCobertura,
+    leadTimeDias,
+    diasHistorialVentas,
+    factorFinSemana,
+    factorFinMes,
+    factorClima,
+    factorEvento,
+    soloQuiebreIA,
+    searchProductIA,
+  ])
+
+  useEffect(() => {
+    if (tab === "asistente_ia") {
+      runReplenishmentPreview()
+    }
+  }, [
+    tab,
+    selectedSupplierIA,
+    diasCobertura,
+    leadTimeDias,
+    diasHistorialVentas,
+    factorFinSemana,
+    factorFinMes,
+    factorClima,
+    factorEvento,
+    soloQuiebreIA,
+  ])
+
+  // ---------------------------------------------------------------------------
+  // ACCIONES OPERATIVAS
+  // ---------------------------------------------------------------------------
+  const handleViewPO = async (po: PurchaseOrder) => {
+    setSelectedPO(po)
+    setLoadingPODetail(true)
+    try {
+      if (po.id) {
+        api.purchases.getOrder(po.id).then((fresh) => {
+          if (fresh && fresh.id) {
+            setSelectedPO((prev: any) => (prev?.id === po.id ? { ...prev, ...fresh, numero: fresh.numero || prev?.numero } : prev))
+          }
+        }).catch(() => {})
+        const items = await api.purchases.getOrderItems(po.id)
+        setPoDetailItems(items || [])
+      }
+    } catch (e: any) {
+      toast.error("Error al cargar detalle", e.message)
+    } finally {
+      setLoadingPODetail(false)
+    }
   }
 
-  const handleApplySuggestion = (s: Suggestion) => {
-    setSuggestions(prev => prev.map(sg => sg.id === s.id ? { ...sg, estado: "aplicada" } : sg))
-    toast.success("Sugerencia aplicada", "PO creada para " + s.product_name)
+  // Exportar listado de órdenes de compra a Excel (.xlsx)
+  const handleExportOrdersToExcel = () => {
+    try {
+      if (filteredOrders.length === 0) {
+        toast.info("Sin datos", "No hay órdenes de compra para exportar.")
+        return
+      }
+      const dataToExport = filteredOrders.map(o => ({
+        "N° Orden": o.numero || "S/N",
+        "Proveedor": o.supplier?.razon_social || "Sin Asignar",
+        "RUC Proveedor": o.supplier?.ruc || "—",
+        "Fecha Emisión": o.fecha ? formatDate(o.fecha) : formatDate(o.created_at || ""),
+        "Fecha Entrega": o.fecha_entrega_estimada ? formatDate(o.fecha_entrega_estimada) : "—",
+        "Estado": poStatusMap[o.estado || ""]?.label || o.estado || "Borrador",
+        "Condición": o.condiciones_pago || "30 Días",
+        "Moneda": o.moneda || "PYG",
+        "Subtotal (Gs.)": Number(o.subtotal || 0),
+        "Total IVA (Gs.)": Number(o.iva_10 || 0) + Number(o.iva_5 || 0),
+        "Total General (Gs.)": Number(o.total || 0),
+        "Observaciones": o.observaciones || "",
+      }))
+      const ws = XLSX.utils.json_to_sheet(dataToExport)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, "OrdenesDeCompra")
+      XLSX.writeFile(wb, `Listado_Ordenes_Compra_${new Date().toISOString().split("T")[0]}.xlsx`)
+      toast.success("Excel Exportado", `Se descargaron ${filteredOrders.length} órdenes de compra en formato .xlsx.`)
+    } catch (e: any) {
+      toast.error("Error al exportar a Excel", e.message)
+    }
   }
-  const handleDiscardSuggestion = (s: Suggestion) => {
-    setSuggestions(prev => prev.map(sg => sg.id === s.id ? { ...sg, estado: "descartada" } : sg))
-    toast.info("Sugerencia descartada", s.product_name)
+
+  // Exportar detalle de una orden de compra individual a Excel (.xlsx)
+  const handleExportSinglePOToExcel = (po: PurchaseOrder, items: any[]) => {
+    try {
+      const headerRows: any[][] = [
+        ["EXTRA SUPERMERCADO MAYORISTA - GRUPO SANTA TERESA E.A.S."],
+        ["RUC: 80150377-9 | Timbrado: 18545636 | Casa Matriz: Alejo Garcia esquina Carlos Antonio López - Pedro Juan Caballero, Amambay"],
+        ["ORDEN DE COMPRA OFICIAL DE ADQUISICIÓN DE MERCADERÍAS"],
+        [],
+        ["N° Orden:", po.numero || "S/N", "", "Fecha Emisión:", po.fecha ? formatDate(po.fecha) : formatDate(po.created_at || "")],
+        ["Proveedor:", po.supplier?.razon_social || "—", "", "Fecha Entrega:", po.fecha_entrega_estimada ? formatDate(po.fecha_entrega_estimada) : "Inmediata / A convenir"],
+        ["RUC Proveedor:", po.supplier?.ruc || "—", "", "Condición Pago:", po.condiciones_pago || "30 Días"],
+        ["Estado:", poStatusMap[po.estado || ""]?.label || po.estado || "Borrador", "", "Comprador:", po.created_by_name || "Departamento de Compras"],
+        [],
+        ["#", "Cód. Interno", "Cód. Barra", "Descripción del Producto", "Cantidad", "Precio Unitario (IVA Inc.)", "IVA %", "Subtotal (IVA Inc.)"]
+      ]
+
+      items.forEach((it, idx) => {
+        const cant = Number(it.cantidad || 0)
+        const precio = Number(it.precio_unitario || 0)
+        const sub = Number(it.total || it.subtotal || (cant * precio))
+        const desc = it.descripcion || it.producto?.nombre || "Ítem"
+        const sku = it.sku || it.producto?.sku || "—"
+        const barcode = it.codigo_barra || it.producto?.codigo_barra || "—"
+        headerRows.push([
+          idx + 1,
+          sku,
+          barcode,
+          desc,
+          cant,
+          precio,
+          Number(it.iva_tasa || 10),
+          sub
+        ])
+      })
+
+      headerRows.push([])
+      headerRows.push(["", "", "", "", "", "", "TOTAL ORDEN (Gs. IVA INCLUIDO):", Number(po.total || 0)])
+
+      const ws = XLSX.utils.aoa_to_sheet(headerRows)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, `OC_${po.numero || "Detalle"}`)
+      XLSX.writeFile(wb, `OC_${po.numero || po.id?.slice(0, 8)}.xlsx`)
+      toast.success("Excel Descargado", `Se generó la planilla de la OC N° ${po.numero || "S/N"}.`)
+    } catch (e: any) {
+      toast.error("Error al exportar Excel", e.message)
+    }
   }
 
+  // Descargar PDF de Orden de Compra desde endpoint oficial
+  const handleDownloadPOAsPdf = async (po: PurchaseOrder) => {
+    if (!po.id) return
+    try {
+      await api.purchases.downloadOrderPdf(po.id, po.numero)
+      toast.success("PDF Descargado", `Se descargó la OC N° ${po.numero || "S/N"} en formato PDF oficial.`)
+    } catch (e: any) {
+      toast.error("Error al descargar PDF", e.message)
+    }
+  }
 
-  const mainTabs: { key: MainTab; label: string; icon: any }[] = [
-    { key: "dashboard", label: "Dashboard", icon: BarChart3 },
-    { key: "ordenes", label: "Ordenes", icon: FileText },
-    { key: "recepciones", label: "Recepciones", icon: Truck },
-    { key: "proveedores", label: "Proveedores", icon: Users },
-    { key: "sugerencias", label: "Sugerencias", icon: TrendingUp },
-    { key: "reportes", label: "Reportes", icon: ClipboardList },
-  ]
+  // Imprimir Orden de Compra membretada (A4)
+  const handlePrintPO = () => {
+    window.print()
+  }
 
-  if (loading && purchaseOrders.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
-      </div>
+  const handleConfirmPO = async (id: string) => {
+    try {
+      await api.purchases.confirmPO(id)
+      toast.success("Orden Confirmada", "La OC pasó a estado confirmada.")
+      fetchAll()
+      if (selectedPO?.id === id) {
+        setSelectedPO((prev: any) => prev ? { ...prev, estado: "confirmado" } : null)
+      }
+    } catch (e: any) {
+      toast.error("Error al confirmar", e.message)
+    }
+  }
+
+  const handleSendPO = async (id: string) => {
+    try {
+      await api.purchases.sendPO(id)
+      toast.success("Orden Enviada", "Se notificó la orden al proveedor.")
+      fetchAll()
+      if (selectedPO?.id === id) {
+        setSelectedPO((prev: any) => prev ? { ...prev, estado: "enviada" } : null)
+      }
+    } catch (e: any) {
+      toast.error("Error al enviar", e.message)
+    }
+  }
+
+  const handleCancelPO = async (id: string) => {
+    const motivo = window.prompt("Motivo de cancelación de la orden:")
+    if (!motivo) return
+    try {
+      await api.purchases.cancelPO(id)
+      toast.success("Orden Cancelada", "Se revirtieron los compromisos de compra.")
+      fetchAll()
+      if (selectedPO?.id === id) {
+        setSelectedPO((prev: any) => prev ? { ...prev, estado: "cancelado" } : null)
+      }
+    } catch (e: any) {
+      toast.error("Error al cancelar", e.message)
+    }
+  }
+
+  const handleDeletePO = async () => {
+    if (!poToDelete?.id) return
+    setDeletingPO(true)
+    try {
+      const res = await api.purchases.deletePO(poToDelete.id, forceDeletePO)
+      toast.success("Orden Eliminada", res.message || `Orden ${poToDelete.numero} eliminada exitosamente.`)
+      setOrders(prev => prev.filter(o => o.id !== poToDelete.id))
+      if (selectedPO?.id === poToDelete.id) {
+        setSelectedPO(null)
+      }
+      setPoToDelete(null)
+      setForceDeletePO(false)
+    } catch (err: any) {
+      toast.error("Error al eliminar orden", err.message || "No se pudo eliminar la orden de compra.")
+    } finally {
+      setDeletingPO(false)
+    }
+  }
+
+  const handleOpenGenerateModal = () => {
+    const itemsToOrder = (replenishmentData?.items || []).filter(
+      (it: any) => selectedItemsIA[it.product_id] && (editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida) > 0
     )
+    if (itemsToOrder.length === 0) {
+      toast.error("Sin ítems seleccionados", "Marcá al menos un producto con cantidad mayor a cero.")
+      return
+    }
+    const defaultDelivery = new Date()
+    defaultDelivery.setDate(defaultDelivery.getDate() + (leadTimeDias || 3))
+    const defaultDeliveryStr = defaultDelivery.toISOString().split("T")[0]
+
+    const initialMap: Record<string, string> = {}
+    const initialIncluded: Record<string, boolean> = {}
+    const initialSettings: Record<string, any> = {}
+
+    itemsToOrder.forEach((it: any) => {
+      // Si se filtró por un proveedor específico, usar ese; de lo contrario su último proveedor, o el primero
+      const assigned = selectedSupplierIA || it.ultimo_proveedor_id || suppliers[0]?.id || ""
+      initialMap[it.product_id] = assigned
+      if (assigned) {
+        initialIncluded[assigned] = true
+        if (!initialSettings[assigned]) {
+          initialSettings[assigned] = {
+            fecha_entrega_estimada: defaultDeliveryStr,
+            condiciones_pago: "30 Días",
+            prioridad: soloQuiebreIA ? "urgente" : "normal",
+            observaciones: `Orden generada mediante Asistente IA (${diasCobertura}d cobertura). Factores: FinSem=${factorFinSemana ? 'SI' : 'NO'}, FinMes=${factorFinMes ? 'SI' : 'NO'}.`,
+          }
+        }
+      }
+    })
+
+    setItemAssignedSupplier(initialMap)
+    setIncludedSuppliers(initialIncluded)
+    setSupplierOrderSettings(initialSettings)
+    setGlobalApplySupplierId(suppliers[0]?.id || "")
+    setShowGenerateModal(true)
+  }
+
+  const handleResetToLastSuppliers = () => {
+    const itemsToOrder = (replenishmentData?.items || []).filter(
+      (it: any) => selectedItemsIA[it.product_id] && (editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida) > 0
+    )
+    const newMap: Record<string, string> = {}
+    const newIncluded: Record<string, boolean> = { ...includedSuppliers }
+    itemsToOrder.forEach((it: any) => {
+      const sup = it.ultimo_proveedor_id || suppliers[0]?.id || ""
+      newMap[it.product_id] = sup
+      if (sup) newIncluded[sup] = true
+    })
+    setItemAssignedSupplier(newMap)
+    setIncludedSuppliers(newIncluded)
+    toast.info("Proveedores restablecidos", "Cada producto fue asignado a su último proveedor habitual.")
+  }
+
+  const handleApplyGlobalSupplier = () => {
+    if (!globalApplySupplierId) return
+    const itemsToOrder = (replenishmentData?.items || []).filter(
+      (it: any) => selectedItemsIA[it.product_id] && (editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida) > 0
+    )
+    const newMap: Record<string, string> = {}
+    itemsToOrder.forEach((it: any) => {
+      newMap[it.product_id] = globalApplySupplierId
+    })
+    setItemAssignedSupplier(newMap)
+    setIncludedSuppliers(prev => ({ ...prev, [globalApplySupplierId]: true }))
+    toast.info("Proveedor unificado", "Todos los productos seleccionados fueron asignados al proveedor elegido.")
+  }
+
+  const handleCreatePOFromReplenishment = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
+    const itemsToOrder = (replenishmentData?.items || []).filter(
+      (it: any) => selectedItemsIA[it.product_id] && (editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida) > 0
+    )
+
+    const groupsBySup: Record<string, any[]> = {}
+    for (const it of itemsToOrder) {
+      const supId = itemAssignedSupplier[it.product_id]
+      if (!supId || supId === "unassigned") {
+        toast.error("Producto sin proveedor", `El producto "${it.nombre}" no tiene proveedor asignado. Seleccioná un proveedor antes de emitir.`)
+        return
+      }
+      if (!groupsBySup[supId]) {
+        groupsBySup[supId] = []
+      }
+      groupsBySup[supId].push({
+        product_id: it.product_id,
+        descripcion: it.nombre,
+        cantidad: Number(editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida),
+        precio_unitario: Number(editedCosts[it.product_id] !== undefined ? editedCosts[it.product_id] : (it.costo_unitario_estimado || 0)),
+        iva_tasa: Number(it.iva_tasa || 10),
+      })
+    }
+
+    const activeSupplierIds = Object.keys(groupsBySup).filter(supId => includedSuppliers[supId] !== false)
+    if (activeSupplierIds.length === 0) {
+      toast.error("Sin órdenes marcadas", "Marcá la casilla de al menos un proveedor para emitir su orden de compra.")
+      return
+    }
+
+    const defaultDelivery = new Date()
+    defaultDelivery.setDate(defaultDelivery.getDate() + (leadTimeDias || 3))
+    const defaultDeliveryStr = defaultDelivery.toISOString().split("T")[0]
+
+    const ordersPayload = activeSupplierIds.map(supId => {
+      const settings = supplierOrderSettings[supId] || {
+        fecha_entrega_estimada: defaultDeliveryStr,
+        condiciones_pago: "30 Días",
+        prioridad: soloQuiebreIA ? "urgente" : "normal",
+        observaciones: `Orden generada mediante Asistente IA de Abastecimiento.`,
+      }
+      return {
+        supplier_id: supId,
+        fecha_entrega_estimada: settings.fecha_entrega_estimada || undefined,
+        condiciones_pago: settings.condiciones_pago || "30 Días",
+        prioridad: settings.prioridad || "normal",
+        observaciones: settings.observaciones || "Generado mediante Emisión Múltiple por Proveedor (Asistente IA)",
+        items: groupsBySup[supId],
+      }
+    })
+
+    setGeneratingPO(true)
+    try {
+      const res = await api.purchases.generateMultiPOFromReplenishment({
+        user_id: user?.id,
+        user_name: user?.nombre || "Comprador",
+        orders: ordersPayload,
+      })
+
+      const totalCreated = res.total_created || res.orders?.length || 0
+      const orderNumbers = (res.orders || []).map((o: any) => o.numero).join(", ")
+      toast.success(
+        `¡${totalCreated} ${totalCreated > 1 ? 'Órdenes de Compra Emitidas' : 'Orden de Compra Emitida'}!`,
+        `Se crearon exitosamente: ${orderNumbers}`
+      )
+      setShowGenerateModal(false)
+      await fetchAll()
+      setTab("ordenes")
+      if (res.orders && res.orders.length === 1) {
+        handleViewPO(res.orders[0])
+      }
+    } catch (e: any) {
+      toast.error("Error al emitir órdenes de compra", e.message)
+    } finally {
+      setGeneratingPO(false)
+    }
+  }
+
+  const handleOpenReceiptModal = async (po?: PurchaseOrder) => {
+    let targetPO = po
+    if (!targetPO && orders.length > 0) {
+      targetPO = orders.find(o => ["confirmado", "enviada", "enviado", "parcial"].includes(o.estado || "")) || orders[0]
+    }
+    if (!targetPO || !targetPO.id) {
+      toast.error("No hay órdenes de compra disponibles para recibir.")
+      return
+    }
+
+    try {
+      const [items, packBarcodes] = await Promise.all([
+        api.purchases.getOrderItems(targetPO.id),
+        api.products.packBarcodes.list().catch(() => [] as PackBarcode[]),
+      ])
+
+      const byProduct = new Map<string, PackBarcode[]>()
+      for (const pb of packBarcodes || []) {
+        if (!pb.activo) continue
+        const list = byProduct.get(pb.product_id) || []
+        list.push(pb)
+        byProduct.set(pb.product_id, list)
+      }
+      setPackBarcodesByProduct(byProduct)
+
+      const sup = suppliers.find(s => s.id === targetPO.supplier_id)
+      const isBr = Boolean(((sup as any)?.pais || "").toUpperCase().includes("BR") || (sup?.razon_social || "").toUpperCase().includes("BRASIL"))
+
+      setReceiptForm({
+        purchase_order_id: targetPO.id,
+        proveedor_ref: "",
+        observaciones: "",
+        es_br: isBr,
+        total_brl: "",
+        tipo_cambio: "1350",
+        items: (items || []).map(it => {
+          const cantidadRecibir = Math.max(0, Number(it.cantidad || 0) - Number(it.recibido || (it as any).cantidad_recibida || 0))
+          return {
+            product_id: (it as any).product_id || (it as any).producto_id || (it as any).id || "",
+            nombre: (it as any).producto?.nombre || (it as any).descripcion || "Producto",
+            sku: (it as any).producto?.sku || "",
+            cantidad_ordenada: Number(it.cantidad || 0),
+            cantidad_recibir: cantidadRecibir,
+            presentacion_id: "",
+            cantidad_presentacion: cantidadRecibir,
+            precio_unitario: Number(it.precio_unitario || 0),
+            lote: "",
+            fecha_vencimiento: "",
+            cantidad_rechazada: 0,
+            motivo_rechazo: "",
+          }
+        })
+      })
+      setShowReceiptModal(true)
+    } catch (e: any) {
+      toast.error("Error al cargar orden para recepción", e.message)
+    }
+  }
+
+  const handleReceiptPresentationChange = (idx: number, presentacionId: string) => {
+    setReceiptForm(prev => {
+      const copy = [...prev.items]
+      const item = copy[idx]
+      const packs = packBarcodesByProduct.get(item.product_id) || []
+      const pack = packs.find(p => p.id === presentacionId)
+      const multiplier = pack ? Number(pack.unidades_por_paquete) : 1
+      copy[idx] = {
+        ...item,
+        presentacion_id: presentacionId,
+        cantidad_recibir: Math.max(0, item.cantidad_presentacion) * multiplier,
+      }
+      return { ...prev, items: copy }
+    })
+  }
+
+  const handleReceiptCantidadPresentacionChange = (idx: number, cantidad: number) => {
+    setReceiptForm(prev => {
+      const copy = [...prev.items]
+      const item = copy[idx]
+      const packs = packBarcodesByProduct.get(item.product_id) || []
+      const pack = packs.find(p => p.id === item.presentacion_id)
+      const multiplier = pack ? Number(pack.unidades_por_paquete) : 1
+      const cantidadPresentacion = Math.max(0, cantidad)
+      copy[idx] = {
+        ...item,
+        cantidad_presentacion: cantidadPresentacion,
+        cantidad_recibir: cantidadPresentacion * multiplier,
+      }
+      return { ...prev, items: copy }
+    })
+  }
+
+  const handleSaveReceipt = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!receiptForm.purchase_order_id) return
+    const validItems = receiptForm.items.filter(it => it.cantidad_recibir > 0 || it.cantidad_rechazada > 0)
+    if (validItems.length === 0) {
+      toast.error("Debe ingresar al menos una cantidad recibida o rechazada.")
+      return
+    }
+
+    // Auditoría de ítems extraordinarios: motivo obligatorio
+    const extraordinaryWithoutReason = validItems.find(it => it.es_extraordinario && !it.autorizacion_motivo?.trim())
+    if (extraordinaryWithoutReason) {
+      toast.error("Motivo obligatorio", `El producto ${extraordinaryWithoutReason.nombre} ingresa fuera de OC. Indique el motivo de autorización.`)
+      return
+    }
+
+    setSavingReceipt(true)
+    try {
+      const created = await api.purchases.createReceipt({
+        purchase_order_id: receiptForm.purchase_order_id,
+        proveedor_ref: receiptForm.proveedor_ref || undefined,
+        observaciones: receiptForm.observaciones || undefined,
+        total_brl: (receiptForm.es_br && receiptForm.total_brl) ? Number(receiptForm.total_brl) : undefined,
+        tipo_cambio: (receiptForm.es_br && receiptForm.tipo_cambio) ? Number(receiptForm.tipo_cambio) : undefined,
+        items: validItems.map(it => ({
+          product_id: it.product_id,
+          cantidad_recibida: Number(it.cantidad_recibir),
+          costo_unitario: Number(it.precio_unitario),
+          cantidad_rechazada: Number(it.cantidad_rechazada || 0),
+          motivo_rechazo: it.motivo_rechazo || undefined,
+          lote: it.lote || undefined,
+          fecha_vencimiento: it.fecha_vencimiento ? `${it.fecha_vencimiento}T00:00:00Z` : undefined,
+          es_extraordinario: it.es_extraordinario || false,
+          autorizado_por: it.autorizado_por || undefined,
+          autorizacion_motivo: it.autorizacion_motivo || undefined,
+        })) as any,
+      })
+      toast.success("¡Mercadería Recibida en Muelle!", "Se actualizó el stock físico y se registraron los lotes.")
+      setShowReceiptModal(false)
+      if (created?.id) setLastReceiptForLabels({ id: created.id, numero: created.numero || "" })
+      fetchAll()
+    } catch (e: any) {
+      toast.error("Error al registrar recepción", e.message)
+    } finally {
+      setSavingReceipt(false)
+    }
+  }
+
+  const handleSaveManualInvoice = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!manualInvoiceForm.supplier_id) {
+      toast.error("Proveedor Requerido", "Debe seleccionar un proveedor.")
+      return
+    }
+    if (!manualInvoiceForm.numero_factura.trim()) {
+      toast.error("Número de Factura", "Debe ingresar el número de comprobante o factura fiscal.")
+      return
+    }
+
+    const isBrl = manualInvoiceForm.moneda === "BRL"
+    const totalBrl = isBrl ? Number(manualInvoiceForm.total_brl) : 0
+    const tc = isBrl ? Number(manualInvoiceForm.tipo_cambio || 1) : 1
+    const totalPyg = isBrl ? Math.round(totalBrl * tc) : Number(manualInvoiceForm.total_pyg)
+
+    if (totalPyg <= 0) {
+      toast.error("Importe Inválido", "El monto de la factura debe ser mayor a 0.")
+      return
+    }
+
+    setSavingManualInvoice(true)
+    try {
+      await api.financial.invoices.create({
+        supplier_id: manualInvoiceForm.supplier_id,
+        numero_factura: manualInvoiceForm.numero_factura.trim(),
+        timbrado: manualInvoiceForm.timbrado.trim() || undefined,
+        fecha_emision: manualInvoiceForm.fecha_emision,
+        fecha_vencimiento: manualInvoiceForm.fecha_vencimiento,
+        condicion: manualInvoiceForm.condicion,
+        moneda: isBrl ? "BRL" : "PYG",
+        tipo_cambio: tc,
+        total: totalPyg,
+        total_brl: isBrl ? totalBrl : undefined,
+        saldo_pendiente: totalPyg,
+        saldo_pendiente_brl: isBrl ? totalBrl : undefined,
+        concepto: manualInvoiceForm.concepto.trim() || undefined,
+      })
+
+      toast.success(
+        "Factura de Compra Registrada",
+        isBrl
+          ? `Factura en Reales registrada por R$ ${totalBrl.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} (Eq. ${formatPYG(totalPyg)}). Disponible para cancelar desde Bóveda.`
+          : `Factura registrada por ${formatPYG(totalPyg)}.`
+      )
+      setShowManualInvoiceModal(false)
+      fetchAll()
+    } catch (err: any) {
+      toast.error("Error al registrar factura", err.message || String(err))
+    } finally {
+      setSavingManualInvoice(false)
+    }
+  }
+
+  const handleSearchExtraordinary = async (q: string) => {
+    setExtraordinarySearch(q)
+    if (!q.trim() || q.trim().length < 2) {
+      setExtraordinaryResults([])
+      return
+    }
+    setSearchingExtraordinary(true)
+    try {
+      const res = await api.products.list({ search: q.trim(), limit: 8 } as any)
+      setExtraordinaryResults(Array.isArray(res) ? res : (res as any)?.items || [])
+    } catch {
+      setExtraordinaryResults([])
+    } finally {
+      setSearchingExtraordinary(false)
+    }
+  }
+
+  const handleAddExtraordinaryItem = (product: Product) => {
+    const exists = receiptForm.items.find(it => it.product_id === product.id)
+    if (exists) {
+      toast.info("Producto ya presente", "Ya está en la lista de recepción.")
+      return
+    }
+    const cost = Number(product.costo_unitario || (product as any).precio_costo || 0)
+    setReceiptForm(prev => ({
+      ...prev,
+      items: [
+        ...prev.items,
+        {
+          product_id: product.id,
+          nombre: product.nombre,
+          sku: product.sku || "",
+          cantidad_ordenada: 0,
+          cantidad_recibir: 1,
+          presentacion_id: "",
+          cantidad_presentacion: 1,
+          precio_unitario: cost,
+          lote: "",
+          fecha_vencimiento: "",
+          cantidad_rechazada: 0,
+          motivo_rechazo: "",
+          es_extraordinario: true,
+          autorizado_por: user?.id,
+          autorizacion_motivo: "Adición extraordinaria aprobada en muelle",
+        },
+      ],
+    }))
+    setExtraordinarySearch("")
+    setExtraordinaryResults([])
+    toast.success("Ítem Extraordinario Agregado", `${product.nombre} añadido para recepción extraordinaria.`)
+  }
+
+  // ── Handlers Creación y Edición Manual de Orden de Compra ────────────────────
+  const handleOpenManualPOModal = () => {
+    setEditingPOId(null)
+    setEditingPO(null)
+    setManualPOSupplierId(suppliers[0]?.id || "")
+    const defDate = new Date()
+    defDate.setDate(defDate.getDate() + 3)
+    setManualPOFechaEntrega(defDate.toISOString().split("T")[0])
+    setManualPOPrioridad("normal")
+    setManualPOCondiciones("30 Días")
+    setManualPOObservaciones("")
+    setManualPOItems([])
+    setSearchProductPO("")
+    setProductSearchResultsPO([])
+    setShowManualPOModal(true)
+  }
+
+  const handleEditPO = async (po: PurchaseOrder) => {
+    if (!po.id) return
+    setEditingPOId(po.id)
+    setEditingPO(po)
+    setManualPOSupplierId(po.supplier_id || "")
+    setManualPOFechaEntrega(po.fecha_entrega_estimada ? po.fecha_entrega_estimada.split("T")[0] : "")
+    setManualPOPrioridad(po.prioridad || "normal")
+    setManualPOCondiciones(po.condiciones_pago || "30 Días")
+    setManualPOObservaciones(po.observaciones || "")
+    setSearchProductPO("")
+    setProductSearchResultsPO([])
+    setShowManualPOModal(true)
+
+    try {
+      const items = await api.purchases.getOrderItems(po.id)
+      setManualPOItems((items || []).map((it: any) => {
+        const cant = Number(it.cantidad || 1)
+        const prec = Number(it.precio_unitario || 0)
+        const um = it.unidad_medida || it.producto?.unidad_medida || "UN"
+        const isPesable = Boolean(um.toUpperCase() === "KG" || it.producto?.es_pesable || it.producto?.tipo_venta === "peso")
+        return {
+          product_id: it.product_id,
+          nombre: it.producto?.nombre || it.descripcion || "Producto",
+          sku: it.producto?.sku || it.sku || "",
+          codigo_barra: it.producto?.codigo_barra || it.codigo_barra || "",
+          unidad_medida: um,
+          es_pesable: isPesable,
+          cantidad: cant,
+          precio_unitario: prec,
+          iva_tasa: Number(it.iva_tasa || 10),
+          subtotal: Number(it.total || (cant * prec)),
+        }
+      }))
+    } catch (e: any) {
+      toast.error("Error al cargar ítems de la orden", e.message)
+    }
+  }
+
+  const handleSearchProductsPO = async (q: string, filterBySupplier = manualPOFilterBySupplier) => {
+    setSearchProductPO(q)
+    if (!q.trim() || q.trim().length < 2) {
+      setProductSearchResultsPO([])
+      return
+    }
+    setSearchingProductsPO(true)
+    try {
+      const res = await api.products.list({
+        search: q.trim(),
+        limit: 15,
+        supplier_id: filterBySupplier && manualPOSupplierId ? manualPOSupplierId : undefined,
+      } as any)
+      setProductSearchResultsPO(Array.isArray(res) ? res : (res as any)?.items || [])
+    } catch {
+      setProductSearchResultsPO([])
+    } finally {
+      setSearchingProductsPO(false)
+    }
+  }
+
+  const handleAddProductToManualPO = (p: Product, customPrice?: number) => {
+    const exists = manualPOItems.find(it => it.product_id === p.id)
+    if (exists) {
+      toast.info("Producto ya agregado", "Modifique la cantidad o el precio en la tabla.")
+      return
+    }
+    const cost = customPrice !== undefined ? customPrice : Number(p.costo_unitario || (p as any).precio_costo || p.ultimo_costo || 0)
+    const supName = (p as any).supplier_nombre || (p as any).supplier?.razon_social || (suppliers.find(s => s.id === p.supplier_id)?.razon_social) || ""
+    const isPesable = Boolean(p.es_pesable || (p as any).tipo_venta === "peso" || (p as any).tipo_venta === "pesable" || p.unidad_medida?.toUpperCase() === "KG")
+    const defCant = isPesable ? 1 : 10
+    setManualPOItems(prev => [
+      ...prev,
+      {
+        product_id: p.id,
+        nombre: p.nombre,
+        sku: p.sku || "",
+        codigo_barra: p.codigo_barra || "",
+        unidad_medida: p.unidad_medida || (isPesable ? "KG" : "UN"),
+        es_pesable: isPesable,
+        cantidad: defCant,
+        precio_unitario: cost,
+        iva_tasa: 10,
+        subtotal: defCant * cost,
+        habitual_supplier_id: p.supplier_id,
+        habitual_supplier_nombre: p.supplier_id ? supName : "Sin asignar",
+        habitual_costo: Number(p.ultimo_costo || p.costo_unitario || cost),
+      }
+    ])
+    setSearchProductPO("")
+    setProductSearchResultsPO([])
+  }
+
+  const handleRemoveItemFromManualPO = (idx: number) => {
+    setManualPOItems(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  const handleManualPOItemChange = (idx: number, field: string, value: any) => {
+    setManualPOItems(prev => {
+      const copy = [...prev]
+      copy[idx] = {
+        ...copy[idx],
+        [field]: value,
+      }
+      if (field === "cantidad" || field === "precio_unitario") {
+        const c = Number(field === "cantidad" ? (value === "" ? 0 : value) : (copy[idx].cantidad || 0))
+        const p = Number(field === "precio_unitario" ? (value === "" ? 0 : value) : (copy[idx].precio_unitario || 0))
+        copy[idx].subtotal = Math.round(c * p)
+      }
+      return copy
+    })
+  }
+
+  const handleSaveManualPO = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!manualPOSupplierId) {
+      toast.error("Seleccione un proveedor")
+      return
+    }
+    if (manualPOItems.length === 0) {
+      toast.error("Debe agregar al menos un producto a la orden.")
+      return
+    }
+
+    setSavingManualPO(true)
+    try {
+      if (editingPOId) {
+        const updated = await api.purchases.updateOrder(editingPOId, {
+          supplier_id: manualPOSupplierId as any,
+          fecha_entrega_estimada: manualPOFechaEntrega ? manualPOFechaEntrega as any : undefined,
+          prioridad: manualPOPrioridad,
+          condiciones_pago: manualPOCondiciones,
+          observaciones: manualPOObservaciones || undefined,
+          update_default_supplier: manualPOUpdateDefaultSupplier,
+          items: manualPOItems.map(it => ({
+            product_id: it.product_id,
+            descripcion: it.nombre,
+            cantidad: Number(it.cantidad),
+            precio_unitario: Number(it.precio_unitario),
+            iva_tasa: Number(it.iva_tasa || 10),
+            total: Number(it.subtotal),
+          })) as any,
+        } as any)
+
+        if (manualPOUpdateDefaultSupplier && manualPOSupplierId) {
+          for (const it of manualPOItems) {
+            api.products.update(it.product_id, {
+              supplier_id: manualPOSupplierId as any,
+              ultimo_costo: Number(it.precio_unitario),
+            } as any).catch(() => {})
+          }
+        }
+
+        toast.success("¡Orden de Compra Actualizada!", `Se guardaron los cambios de la OC N° ${editingPO?.numero || updated.numero}.`)
+        setShowManualPOModal(false)
+        setEditingPOId(null)
+        setEditingPO(null)
+        await fetchAll()
+        setTab("ordenes")
+        handleViewPO(updated)
+      } else {
+        const created = await api.purchases.createOrder({
+          supplier_id: manualPOSupplierId as any,
+          fecha_entrega_estimada: manualPOFechaEntrega ? manualPOFechaEntrega as any : undefined,
+          prioridad: manualPOPrioridad,
+          condiciones_pago: manualPOCondiciones,
+          observaciones: manualPOObservaciones || undefined,
+          user_id: user?.id as any,
+          created_by_name: user?.nombre || "Comprador",
+          update_default_supplier: manualPOUpdateDefaultSupplier,
+          items: manualPOItems.map(it => ({
+            product_id: it.product_id,
+            descripcion: it.nombre,
+            cantidad: Number(it.cantidad),
+            precio_unitario: Number(it.precio_unitario),
+            iva_tasa: Number(it.iva_tasa || 10),
+            total: Number(it.subtotal),
+          })) as any,
+        } as any)
+
+        if (manualPOUpdateDefaultSupplier && manualPOSupplierId) {
+          for (const it of manualPOItems) {
+            api.products.update(it.product_id, {
+              supplier_id: manualPOSupplierId as any,
+              ultimo_costo: Number(it.precio_unitario),
+            } as any).catch(() => {})
+          }
+        }
+
+        toast.success("¡Orden de Compra Emitida!", `Se creó la OC N° ${created.numero} con ${manualPOItems.length} ítems.`)
+        setShowManualPOModal(false)
+        fetchAll()
+        setTab("ordenes")
+        handleViewPO(created)
+      }
+    } catch (e: any) {
+      toast.error(editingPOId ? "Error al modificar orden" : "Error al emitir orden de compra", e.message)
+    } finally {
+      setSavingManualPO(false)
+    }
+  }
+
+  // ── Handlers Inbox IMAP cPanel y XML SIFEN ──────────────────────────────────
+  const handleSaveInboxConfig = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSavingInboxConfig(true)
+    try {
+      const saved = await api.purchases.saveInboxConfig(inboxConfigForm)
+      setInboxConfig(saved)
+      toast.success("Configuración Guardada", "Los datos de conexión IMAP de cPanel fueron actualizados.")
+      setShowInboxConfigModal(false)
+    } catch (e: any) {
+      toast.error("Error al guardar configuración de correo", e.message)
+    } finally {
+      setSavingInboxConfig(false)
+    }
+  }
+
+  const handleSyncInboxNow = async () => {
+    setSyncingInbox(true)
+    try {
+      const res = await api.purchases.syncInbox({ max_emails: 50, only_unseen: false })
+      if (res.success) {
+        toast.success(
+          "¡Sincronización Completada!",
+          `Procesados: ${res.emails_procesados} correos. Nuevas facturas: ${res.facturas_nuevas}. Existentes: ${res.facturas_existentes}.`
+        )
+        fetchAll()
+      } else {
+        toast.error("Fallo al conectar al correo", res.error || "Verifique las credenciales IMAP.")
+      }
+    } catch (e: any) {
+      toast.error("Error al sincronizar correo", e.message)
+    } finally {
+      setSyncingInbox(false)
+    }
+  }
+
+  const handleUploadXmlFile = async (file: File) => {
+    if (!file.name.toLowerCase().endsWith(".xml")) {
+      toast.error("Archivo no soportado", "Por favor seleccione un archivo XML de Factura Electrónica SIFEN.")
+      return
+    }
+    setUploadingXml(true)
+    try {
+      const res = await api.purchases.uploadInvoiceXml(file, user?.id)
+      if (res.success) {
+        toast.success(
+          "¡Factura XML Procesada!",
+          `Factura N° ${res.numero_factura} de ${res.supplier_nombre}. Total: ${formatPYG(res.total || 0)} (${res.items_count} ítems).`
+        )
+        fetchAll()
+      } else {
+        toast.error("Error al procesar XML", res.error || "No se pudo interpretar el archivo.")
+      }
+    } catch (e: any) {
+      toast.error("Error al subir XML", e.message)
+    } finally {
+      setUploadingXml(false)
+    }
+  }
+
+  // ── Handlers 3-Way Match y Solicitudes de NC ────────────────────────────────
+  const handleOpen3WayMatch = async (invoiceId: string) => {
+    setPerformingMatch(true)
+    setShowMatchModal(true)
+    setMatchResult(null)
+    try {
+      const result = await api.purchases.reconcile3WayMatch(invoiceId, user?.id)
+      setMatchResult(result)
+      fetchAll()
+    } catch (e: any) {
+      toast.error("Error al conciliar 3-Way Match", e.message)
+      setShowMatchModal(false)
+    } finally {
+      setPerformingMatch(false)
+    }
+  }
+
+  const handleRevertInvoicePayment = async (inv: any) => {
+    const provName = inv.supplier_nombre || inv.proveedor_nombre || "Proveedor"
+    const nro = inv.numero_factura || inv.id
+    if (!window.confirm(`¿Desea revertir la condición de pagada de la factura N° ${nro} (${provName})?\n\nLa factura volverá a estado 'pendiente' y su saldo pendiente volverá al total original para poder tramitarse o pagarse formalmente.`)) {
+      return
+    }
+    setRevertingInvoiceId(inv.id)
+    try {
+      await api.financial.invoices.revertPayment(inv.id, "Reversión desde panel de compras para inclusión en flujo InteliMarket")
+      toast.success("Factura Revertida", "La factura ha vuelto a estado 'pendiente' con saldo pendiente restablecido.")
+      fetchAll()
+    } catch (err: any) {
+      toast.error("Error al revertir factura", err.message || String(err))
+    } finally {
+      setRevertingInvoiceId(null)
+    }
+  }
+
+  const handleOpenResolveNc = (ncReq: any) => {
+    setSelectedNcRequestForResolve(ncReq)
+    setResolveNcForm({
+      nc_recibida_numero: "",
+      nc_recibida_timbrado: "",
+      nc_recibida_monto: Number(ncReq.monto_reclamado || 0),
+      nc_recibida_fecha: new Date().toISOString().split("T")[0],
+      nc_recibida_cdc: "",
+      observaciones: "",
+    })
+    setShowResolveNcModal(true)
+  }
+
+  const handleSaveResolveNc = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedNcRequestForResolve) return
+    setResolvingNc(true)
+    try {
+      const res = await api.purchases.resolveSupplierNcRequest(selectedNcRequestForResolve.id, {
+        ...resolveNcForm,
+        user_id: user?.id,
+      })
+      toast.success("Nota de Crédito Aplicada", res.mensaje || "Se actualizó el saldo y se liberó la factura para Tesorería.")
+      setShowResolveNcModal(false)
+      fetchAll()
+    } catch (e: any) {
+      toast.error("Error al aplicar Nota de Crédito", e.message)
+    } finally {
+      setResolvingNc(false)
+    }
+  }
+
+  // ── Handlers Recepción de Factura y Matching contra Pedido ─────────────────
+  const handleOpenReceiveInvoiceModal = (po: PurchaseOrder) => {
+    setSelectedPoForInvoiceReceipt(po)
+    setReceivingInvoiceMode("xml")
+    setReceivingInvoiceFile(null)
+    setSelectedExistingInvoiceId("")
+    setReceiptMatchingResult(null)
+    setShowReceiveInvoiceModal(true)
+  }
+
+  const handleProcessReceiveInvoice = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedPoForInvoiceReceipt?.id) return
+    if (receivingInvoiceMode === "xml" && !receivingInvoiceFile) {
+      toast.error("Archivo requerido", "Por favor seleccione un archivo XML de Factura Electrónica.")
+      return
+    }
+    if (receivingInvoiceMode === "existente" && !selectedExistingInvoiceId) {
+      toast.error("Factura requerida", "Por favor seleccione una factura existente de la lista.")
+      return
+    }
+
+    setProcessingInvoiceReceipt(true)
+    try {
+      const res = await api.purchases.receiveInvoiceForOrder(
+        selectedPoForInvoiceReceipt.id,
+        {
+          file: receivingInvoiceFile || undefined,
+          invoice_id: selectedExistingInvoiceId || undefined,
+          user_id: user?.id,
+        }
+      )
+
+      if (res.success) {
+        setReceiptMatchingResult(res.matching)
+        if (res.matching?.estado_matching === "match_perfecto") {
+          toast.success("¡Match Exacto con el Pedido!", res.matching.mensaje || "Los valores y precios coinciden 100%.")
+        } else {
+          toast.warning("Discrepancia Detectada", res.matching?.mensaje || "Se detectaron diferencias y la factura fue bloqueada para pago.")
+        }
+        fetchAll()
+      } else {
+        toast.error("Error al procesar", res.error || "No se pudo procesar la recepción.")
+      }
+    } catch (err: any) {
+      toast.error("Error al recibir factura", err.message)
+    } finally {
+      setProcessingInvoiceReceipt(false)
+    }
+  }
+
+  const handleOpenAssociatePo = (inv: any) => {
+    setInvoiceToAssociatePo(inv)
+    setTargetPoIdForAssociation(inv.purchase_order_id || "")
+    setShowAssociatePoModal(true)
+  }
+
+  const handleSaveAssociatePo = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!invoiceToAssociatePo?.id || !targetPoIdForAssociation) return
+    setAssociatingPo(true)
+    try {
+      const res = await api.purchases.associateInvoiceToPO(invoiceToAssociatePo.id, targetPoIdForAssociation, user?.id)
+      toast.success("Pedido Asociado", res.mensaje || "Se actualizó la vinculación y se ejecutó el matching.")
+      setShowAssociatePoModal(false)
+      fetchAll()
+      setMatchResult(res)
+      setShowMatchModal(true)
+    } catch (err: any) {
+      toast.error("Error al asociar pedido", err.message)
+    } finally {
+      setAssociatingPo(false)
+    }
+  }
+
+  const handleSaveRequisition = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSavingReq(true)
+    try {
+      await api.purchases.requisitions.create({
+        departamento: reqForm.departamento,
+        prioridad: reqForm.prioridad,
+        motivo: reqForm.motivo,
+        observaciones: reqForm.observaciones,
+        items: reqForm.items.map(it => ({
+          product_id: it.product_id || suppliers[0]?.id || "p1",
+          descripcion: it.descripcion || "Insumo de Reposición",
+          cantidad_solicitada: Number(it.cantidad || 10),
+          precio_estimado: Number(it.precio_estimado || 0),
+        })),
+        solicitante_nombre: user?.nombre || "Encargado de Sector",
+      })
+      toast.success("Requisición Creada", "La solicitud fue enviada a Compras para aprobación.")
+      setShowReqModal(false)
+      fetchAll()
+    } catch (e: any) {
+      toast.error("Error al crear requisición", e.message)
+    } finally {
+      setSavingReq(false)
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // KPIS HERO (TIPOGRAFÍA UNIFICADA MONOSPACE EXTRABOLD)
+  // ---------------------------------------------------------------------------
+  const now = new Date()
+  const currentYear = now.getFullYear()
+  const currentMonth = now.getMonth()
+
+  const ordersEsteMes = useMemo(() => {
+    return orders.filter(o => {
+      if (!o.fecha) return false
+      const d = new Date(o.fecha)
+      return d.getFullYear() === currentYear && d.getMonth() === currentMonth
+    })
+  }, [orders, currentYear, currentMonth])
+
+  const totalComprasEsteMes = useMemo(() => {
+    return ordersEsteMes.reduce((acc, o) => acc + Number(o.total || 0), 0)
+  }, [ordersEsteMes])
+
+  // Tránsito verificado: órdenes enviadas/confirmadas/parciales de los últimos 45 días
+  const ordenesEnTransito = useMemo(() => {
+    const cutoff = new Date(now.getTime() - 45 * 24 * 60 * 60 * 1000)
+    return orders.filter(o => {
+      if (!["enviada", "enviado", "parcial", "confirmado", "confirmada"].includes(o.estado || "")) return false
+      if (!o.fecha) return false
+      const d = new Date(o.fecha)
+      return d >= cutoff
+    })
+  }, [orders, now])
+
+  const montoEnTransito = useMemo(() => {
+    return ordenesEnTransito.reduce((acc: number, o: any) => acc + Number(o.total || 0), 0)
+  }, [ordenesEnTransito])
+
+  const totalQuiebresInminentes = replenishmentData?.total_quiebres || 0
+  const totalBajosStock = replenishmentData?.total_bajos || 0
+
+  const totalOrdenIASugerida = useMemo(() => {
+    if (!replenishmentData) return 0
+    return replenishmentData.items
+      .filter((it: any) => selectedItemsIA[it.product_id])
+      .reduce((acc: number, it: any) => {
+        const rawQty = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida
+        const qty = Math.max(0, Number(rawQty) || 0)
+        const cost = editedCosts[it.product_id] !== undefined ? Number(editedCosts[it.product_id]) : (Number(it.costo_unitario_estimado) || 0)
+        return acc + (qty * cost)
+      }, 0)
+  }, [replenishmentData, selectedItemsIA, editedQuantities, editedCosts])
+
+  const totalUnidadesIASugerida = useMemo(() => {
+    if (!replenishmentData) return 0
+    return replenishmentData.items
+      .filter((it: any) => selectedItemsIA[it.product_id])
+      .reduce((acc: number, it: any) => {
+        const rawQty = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida
+        const qty = Math.max(0, Number(rawQty) || 0)
+        return acc + qty
+      }, 0)
+  }, [replenishmentData, selectedItemsIA, editedQuantities])
+
+  // Filtrado reactivo de Proveedores para el Asistente IA
+  const filteredSuppliersForIA = useMemo(() => {
+    if (!filterSupplierSearchIA) return suppliers
+    const q = filterSupplierSearchIA.toLowerCase()
+    return suppliers.filter((s: any) =>
+      s.razon_social?.toLowerCase().includes(q) ||
+      s.ruc?.toLowerCase().includes(q)
+    )
+  }, [suppliers, filterSupplierSearchIA])
+
+  // Filtrado y Ordenamiento reactivo de la Matriz de Sugerencia IA (sin recargar API)
+  const displayedReplenishmentItems = useMemo(() => {
+    if (!replenishmentData?.items) return []
+    const filtered = replenishmentData.items.filter((it: any) => {
+      const matchSearch = !searchProductIA ||
+        it.nombre?.toLowerCase().includes(searchProductIA.toLowerCase()) ||
+        it.sku?.toLowerCase().includes(searchProductIA.toLowerCase()) ||
+        it.codigo_barra?.toLowerCase().includes(searchProductIA.toLowerCase())
+
+      if (!matchSearch) return false
+
+      if (filterEstadoIA === "quiebres") return it.autonomia_estado === "critico"
+      if (filterEstadoIA === "bajos") return it.autonomia_estado === "bajo"
+      if (filterEstadoIA === "sugeridos") {
+        const qty = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida
+        return Number(qty) > 0 || Number(it.cantidad_sugerida) > 0
+      }
+      return true
+    })
+
+    if (!sortColumnIA) return filtered
+
+    return [...filtered].sort((a: any, b: any) => {
+      let valA: any
+      let valB: any
+
+      switch (sortColumnIA) {
+        case "producto":
+          valA = (a.nombre || "").toLowerCase()
+          valB = (b.nombre || "").toLowerCase()
+          break
+        case "proveedor":
+          valA = (a.ultimo_proveedor_nombre || "").toLowerCase()
+          valB = (b.ultimo_proveedor_nombre || "").toLowerCase()
+          break
+        case "stock":
+          valA = Number(a.stock_actual) || 0
+          valB = Number(b.stock_actual) || 0
+          break
+        case "m4":
+          valA = Number(a.ventas_mes_4) || 0
+          valB = Number(b.ventas_mes_4) || 0
+          break
+        case "m3":
+          valA = Number(a.ventas_mes_3) || 0
+          valB = Number(b.ventas_mes_3) || 0
+          break
+        case "m2":
+          valA = Number(a.ventas_mes_2) || 0
+          valB = Number(b.ventas_mes_2) || 0
+          break
+        case "m1":
+          valA = Number(a.ventas_mes_1) || 0
+          valB = Number(b.ventas_mes_1) || 0
+          break
+        case "mes_actual":
+          valA = Number(a.ventas_mes_actual) || 0
+          valB = Number(b.ventas_mes_actual) || 0
+          break
+        case "pulso": {
+          const rank = (p: string) => (p === "acelerando" ? 3 : p === "estable" ? 2 : 1)
+          valA = rank(a.pulso_tendencia)
+          valB = rank(b.pulso_tendencia)
+          break
+        }
+        case "costo_ppp":
+          valA = Number(a.costo_promedio) || 0
+          valB = Number(b.costo_promedio) || 0
+          break
+        case "ultimo_costo":
+          valA = Number(a.ultimo_costo || a.costo_promedio) || 0
+          valB = Number(b.ultimo_costo || b.costo_promedio) || 0
+          break
+        case "autonomia":
+          valA = Number(a.dias_stock_restantes) || 0
+          valB = Number(b.dias_stock_restantes) || 0
+          break
+        case "sugerencia":
+          valA = Number(a.cantidad_sugerida) || 0
+          valB = Number(b.cantidad_sugerida) || 0
+          break
+        case "pedido":
+          valA = editedQuantities[a.product_id] !== undefined ? editedQuantities[a.product_id] : Math.max(0, Math.round(Number(a.cantidad_sugerida) || 0))
+          valB = editedQuantities[b.product_id] !== undefined ? editedQuantities[b.product_id] : Math.max(0, Math.round(Number(b.cantidad_sugerida) || 0))
+          break
+        case "costo_unit":
+          valA = editedCosts[a.product_id] !== undefined ? editedCosts[a.product_id] : (Number(a.costo_unitario_estimado) || 0)
+          valB = editedCosts[b.product_id] !== undefined ? editedCosts[b.product_id] : (Number(b.costo_unitario_estimado) || 0)
+          break
+        case "subtotal": {
+          const qtyA = editedQuantities[a.product_id] !== undefined ? editedQuantities[a.product_id] : Math.max(0, Math.round(Number(a.cantidad_sugerida) || 0))
+          const costA = editedCosts[a.product_id] !== undefined ? editedCosts[a.product_id] : (Number(a.costo_unitario_estimado) || 0)
+          const qtyB = editedQuantities[b.product_id] !== undefined ? editedQuantities[b.product_id] : Math.max(0, Math.round(Number(b.cantidad_sugerida) || 0))
+          const costB = editedCosts[b.product_id] !== undefined ? editedCosts[b.product_id] : (Number(b.costo_unitario_estimado) || 0)
+          valA = qtyA * costA
+          valB = qtyB * costB
+          break
+        }
+        default:
+          return 0
+      }
+
+      if (typeof valA === "string" && typeof valB === "string") {
+        return sortDirectionIA === "asc"
+          ? valA.localeCompare(valB)
+          : valB.localeCompare(valA)
+      }
+
+      return sortDirectionIA === "asc" ? valA - valB : valB - valA
+    })
+  }, [replenishmentData, searchProductIA, filterEstadoIA, editedQuantities, editedCosts, sortColumnIA, sortDirectionIA])
+
+  // Filtrado y Paginación de Órdenes
+  const filteredOrders = useMemo(() => {
+    return orders.filter(o => {
+      const matchSearch = !searchPO ||
+        (o.numero && o.numero.toLowerCase().includes(searchPO.toLowerCase())) ||
+        (o.supplier?.razon_social && o.supplier.razon_social.toLowerCase().includes(searchPO.toLowerCase()))
+      const matchStatus = filterPOStatus === "todos" || o.estado === filterPOStatus
+      const matchSupplier = !filterPOSupplier || o.supplier_id === filterPOSupplier
+      return matchSearch && matchStatus && matchSupplier
+    })
+  }, [orders, searchPO, filterPOStatus, filterPOSupplier])
+
+  const paginatedOrders = useMemo(() => {
+    const start = (pagePO - 1) * pageSizePO
+    return filteredOrders.slice(start, start + pageSizePO)
+  }, [filteredOrders, pagePO, pageSizePO])
+
+  const totalPagesPO = Math.max(1, Math.ceil(filteredOrders.length / pageSizePO))
+
+  // Filtrado y Paginación de Proveedores
+  const filteredSuppliers = useMemo(() => {
+    return suppliers.filter(s => {
+      const q = searchSupplier.trim().toLowerCase()
+      const matchSearch = !q ||
+        (s.razon_social && s.razon_social.toLowerCase().includes(q)) ||
+        (s.nombre_fantasia && s.nombre_fantasia.toLowerCase().includes(q)) ||
+        (s.ruc && s.ruc.toLowerCase().includes(q)) ||
+        ((s as any).rubro && (s as any).rubro.toLowerCase().includes(q)) ||
+        (s.contacto_nombre && s.contacto_nombre.toLowerCase().includes(q)) ||
+        (s.telefono && s.telefono.toLowerCase().includes(q)) ||
+        (s.ciudad && s.ciudad.toLowerCase().includes(q))
+
+      const isBr = s.tipo_proveedor === "brasilero" || s.tipo_proveedor === "br" || (s as any).moneda_default === "BRL"
+      const matchType = supplierFilterType === "todos"
+        ? true
+        : supplierFilterType === "brasilero"
+        ? isBr
+        : !isBr
+
+      const provision = ((s as any).tipo_provision || "bienes").toLowerCase()
+      const matchProvision = supplierFilterProvision === "todos"
+        ? true
+        : supplierFilterProvision === "bienes"
+        ? provision === "bienes"
+        : supplierFilterProvision === "servicios"
+        ? provision === "servicios"
+        : provision === "mixto"
+
+      return matchSearch && matchType && matchProvision
+    })
+  }, [suppliers, searchSupplier, supplierFilterType, supplierFilterProvision])
+
+  const paginatedSuppliers = useMemo(() => {
+    const start = (pageSupplier - 1) * pageSizeSupplier
+    return filteredSuppliers.slice(start, start + pageSizeSupplier)
+  }, [filteredSuppliers, pageSupplier, pageSizeSupplier])
+
+  const totalPagesSupplier = Math.max(1, Math.ceil(filteredSuppliers.length / pageSizeSupplier))
+
+  // Filtrado y Paginación de Facturas Proveedores (Procure-to-Pay)
+  const filteredInvoicesP2P = useMemo(() => {
+    return allSupplierInvoices.filter(inv => {
+      const matchSearch = !searchInvoices || 
+        (inv.numero_factura?.toLowerCase().includes(searchInvoices.toLowerCase())) ||
+        (inv.supplier_nombre?.toLowerCase().includes(searchInvoices.toLowerCase())) ||
+        (inv.concepto?.toLowerCase().includes(searchInvoices.toLowerCase()))
+      const matchStatus = filterInvoiceStatus === "todos" || inv.estado === filterInvoiceStatus
+      return matchSearch && matchStatus
+    })
+  }, [allSupplierInvoices, searchInvoices, filterInvoiceStatus])
+
+  const totalPagesInvoicesP2P = Math.max(1, Math.ceil(filteredInvoicesP2P.length / pageSizeInvoices))
+  const paginatedInvoicesP2P = useMemo(() => {
+    const start = (pageInvoices - 1) * pageSizeInvoices
+    return filteredInvoicesP2P.slice(start, start + pageSizeInvoices)
+  }, [filteredInvoicesP2P, pageInvoices, pageSizeInvoices])
+
+  // Filtrado y Paginación de Devoluciones y Notas de Crédito (Gestionadas + Legacy)
+  const filteredReturnsAndNC = useMemo(() => {
+    // 1. Devoluciones gestionadas (con circuito de aprobación e impacto stock/finanzas)
+    const managed = managedReturns.map(r => ({
+      id: r.id,
+      codigo: r.codigo,
+      numero_nota_credito: r.nota_credito_numero || r.codigo,
+      tipo_registro: "devolucion_gestionada",
+      supplier_id: r.proveedor_id,
+      supplier_nombre: r.proveedor_nombre,
+      fecha: r.fecha_creacion,
+      created_at: r.fecha_creacion,
+      monto: r.valor_total_estimado,
+      numero_factura_origen: r.items?.map((it: any) => it.factura_numero).filter(Boolean).join(", ") || "—",
+      observaciones: r.observaciones || "Devolución física a proveedor",
+      estado: r.estado || "pendiente",
+      almacen_nombre: r.almacen_nombre,
+      total_items: r.total_items,
+      motivo_rechazo: r.motivo_rechazo,
+      raw: r,
+    }))
+
+    // 2. Devoluciones Legacy (evitar duplicar si ya figura por código o id)
+    const managedCodes = new Set(managed.map(m => m.codigo))
+    const legacy = supplierReturns
+      .filter(sr => !managedCodes.has(sr.numero_nota_credito))
+      .map(r => ({
+        ...r,
+        tipo_registro: "devolucion",
+        estado: "completado",
+      }))
+
+    // 3. Notas de Crédito
+    const ncs = supplierCreditNotes.map(nc => ({
+      ...nc,
+      tipo_registro: "nota_credito",
+      numero_nota_credito: nc.numero,
+      estado: "completado",
+    }))
+
+    const combined = [...managed, ...legacy, ...ncs]
+    return combined.filter(item => {
+      const matchSearch = !searchReturns ||
+        (item.numero_nota_credito?.toLowerCase().includes(searchReturns.toLowerCase())) ||
+        (item.numero_factura_origen?.toLowerCase().includes(searchReturns.toLowerCase())) ||
+        (item.supplier_nombre?.toLowerCase().includes(searchReturns.toLowerCase())) ||
+        (item.observaciones?.toLowerCase().includes(searchReturns.toLowerCase()))
+      return matchSearch
+    }).sort((a, b) => new Date(b.fecha || b.created_at || "").getTime() - new Date(a.fecha || a.created_at || "").getTime())
+  }, [managedReturns, supplierReturns, supplierCreditNotes, searchReturns])
+
+  const totalPagesReturns = Math.max(1, Math.ceil(filteredReturnsAndNC.length / pageSizeReturns))
+  const paginatedReturns = useMemo(() => {
+    const start = (pageReturns - 1) * pageSizeReturns
+    return filteredReturnsAndNC.slice(start, start + pageSizeReturns)
+  }, [filteredReturnsAndNC, pageReturns, pageSizeReturns])
+
+  // ── Handlers Interactivos para Circuito de Devoluciones a Proveedor ──
+
+  // Filtro reactivo de proveedores para el selector interactivo
+  const filteredSuppliersForReturn = useMemo(() => {
+    if (!supplierSearchForReturn.trim()) return suppliers.slice(0, 30)
+    const q = supplierSearchForReturn.toLowerCase().trim()
+    return suppliers.filter(s =>
+      (s.razon_social || "").toLowerCase().includes(q) ||
+      (s.ruc || "").toLowerCase().includes(q) ||
+      ((s as any).nombre_fantasia || "").toLowerCase().includes(q)
+    ).slice(0, 30)
+  }, [suppliers, supplierSearchForReturn])
+
+  const handleSelectSupplierForReturn = async (supplierId: string) => {
+    setSelectedSupplierForReturn(supplierId)
+    setShowSupplierPickerForReturn(false)
+    setSupplierSearchForReturn("")
+    setSelectedProductForReturn("")
+    setSelectedProductDetails(null)
+    setProductStockInfo(null)
+    setProductInvoices([])
+    setSelectedInvoiceForReturn("")
+    setSupplierProducts([])
+    if (!supplierId) return
+
+    setLoadingSupplierProducts(true)
+    try {
+      const res = await api.purchases.supplierProducts(supplierId)
+      setSupplierProducts(res || [])
+    } catch (err: any) {
+      toast.error("Error al cargar productos del proveedor", err.message)
+    } finally {
+      setLoadingSupplierProducts(false)
+    }
+  }
+
+  // Búsqueda global en todo el catálogo de supermercado (11.000+ items)
+  const searchGlobalProductsForReturn = async (term: string) => {
+    const clean = term.trim()
+    if (!clean || clean.length < 2) {
+      setGlobalProductResults([])
+      return
+    }
+    setLoadingGlobalProducts(true)
+    try {
+      const res = await api.products.list({ search: clean, limit: 30 })
+      setGlobalProductResults(res || [])
+    } catch (err: any) {
+      setGlobalProductResults([])
+    } finally {
+      setLoadingGlobalProducts(false)
+    }
+  }
+
+  // Filtro reactivo de productos del proveedor
+  const filteredSupplierProducts = useMemo(() => {
+    if (!productSearchForReturn.trim()) return supplierProducts.slice(0, 30)
+    const q = productSearchForReturn.toLowerCase().trim()
+    return supplierProducts.filter(p =>
+      (p.nombre || "").toLowerCase().includes(q) ||
+      (p.sku || "").toLowerCase().includes(q) ||
+      (p.codigo_barra || "").toLowerCase().includes(q)
+    ).slice(0, 30)
+  }, [supplierProducts, productSearchForReturn])
+
+  // Selección directa de objeto producto (sea del proveedor o global)
+  const handleSelectProductObjectForReturn = async (prod: any) => {
+    if (!prod) return
+    setSelectedProductForReturn(prod.id)
+    setSelectedProductDetails(prod)
+    setShowProductPickerForReturn(false)
+    setProductSearchForReturn("")
+    setSelectedInvoiceForReturn("")
+    setProductInvoices([])
+
+    // Costo sugerido
+    const costo = prod.costo_promedio || prod.ultimo_costo || prod.costo_unitario || 0
+    setReturnUnitPrice(String(costo))
+
+    // Consultar stock disponible en depósito
+    setLoadingProductStock(true)
+    try {
+      const stk = await api.inventory.getProductStock(prod.id)
+      setProductStockInfo(stk ? {
+        cantidad_disponible: stk.cantidad_disponible ?? stk.cantidad_total ?? 0,
+        cantidad_total: stk.cantidad_total ?? 0
+      } : null)
+    } catch {
+      setProductStockInfo(null)
+    } finally {
+      setLoadingProductStock(false)
+    }
+
+    // Consultar facturas de compra del proveedor donde se adquirió este producto
+    if (selectedSupplierForReturn) {
+      setLoadingProductInvoices(true)
+      try {
+        const invoices = await api.purchases.productInvoices(selectedSupplierForReturn, prod.id)
+        setProductInvoices(invoices || [])
+        if (invoices && invoices.length > 0) {
+          const first = invoices[0]
+          if (first.precio_unitario) {
+            setReturnUnitPrice(String(first.precio_unitario))
+          }
+        }
+      } catch {
+        setProductInvoices([])
+      } finally {
+        setLoadingProductInvoices(false)
+      }
+    }
+  }
+
+  // Lector de código de barras (con pistola lectora o tecla Enter)
+  const handleBarcodeOrEnterProductSearch = async (term: string) => {
+    const clean = term.trim()
+    if (!clean) return
+
+    // 1. Buscar coincidencia exacta en catálogo de proveedor
+    const matchSupplier = supplierProducts.find(
+      p => (p.codigo_barra && p.codigo_barra.toLowerCase() === clean.toLowerCase()) ||
+           (p.sku && p.sku.toLowerCase() === clean.toLowerCase())
+    )
+    if (matchSupplier) {
+      // Si ya está en la lista de items, incrementar cantidad directamente
+      const inList = returnItemsList.find(it => it.producto_id === matchSupplier.id)
+      if (inList) {
+        setReturnItemsList(prev => prev.map(it => {
+          if (it.producto_id === matchSupplier.id) {
+            const nCant = Number(it.cantidad || 0) + 1
+            return {
+              ...it,
+              cantidad: nCant,
+              valor_total: nCant * Number(it.valor_unitario || 0),
+            }
+          }
+          return it
+        }))
+        toast.success("Línea Incrementada (+1)", `${matchSupplier.nombre} — Total: ${Number(inList.cantidad || 0) + 1} un.`)
+        setProductSearchForReturn("")
+        return
+      }
+      toast.success("Producto Detectado", `${matchSupplier.nombre}`)
+      await handleSelectProductObjectForReturn(matchSupplier)
+      return
+    }
+
+    // 2. Buscar en catálogo general del supermercado
+    setLoadingGlobalProducts(true)
+    try {
+      const res = await api.products.list({ search: clean, limit: 10 })
+      if (res && res.length > 0) {
+        const exact = res.find(
+          p => (p.codigo_barra && p.codigo_barra.toLowerCase() === clean.toLowerCase()) ||
+               (p.sku && p.sku.toLowerCase() === clean.toLowerCase())
+        ) || res[0]
+
+        // Si ya está en la lista de items, incrementar cantidad directamente
+        const inList = returnItemsList.find(it => it.producto_id === exact.id)
+        if (inList) {
+          setReturnItemsList(prev => prev.map(it => {
+            if (it.producto_id === exact.id) {
+              const nCant = Number(it.cantidad || 0) + 1
+              return {
+                ...it,
+                cantidad: nCant,
+                valor_total: nCant * Number(it.valor_unitario || 0),
+              }
+            }
+            return it
+          }))
+          toast.success("Línea Incrementada (+1)", `${exact.nombre} — Total: ${Number(inList.cantidad || 0) + 1} un.`)
+          setProductSearchForReturn("")
+          return
+        }
+
+        toast.success("Producto Encontrado", `${exact.nombre}`)
+        await handleSelectProductObjectForReturn(exact)
+      } else {
+        toast.error("No Encontrado", `No se encontró ningún producto con código "${clean}"`)
+      }
+    } catch (e: any) {
+      toast.error("Error al buscar producto", e.message)
+    } finally {
+      setLoadingGlobalProducts(false)
+    }
+  }
+
+  const handleSelectProductForReturn = async (productId: string) => {
+    const prod = supplierProducts.find(p => p.id === productId) || globalProductResults.find(p => p.id === productId)
+    if (prod) {
+      await handleSelectProductObjectForReturn(prod)
+    } else {
+      setSelectedProductForReturn(productId)
+    }
+  }
+
+  const handleSelectInvoiceForReturn = (invoiceId: string) => {
+    setSelectedInvoiceForReturn(invoiceId)
+    if (!invoiceId) {
+      const prod = selectedProductDetails || supplierProducts.find(p => p.id === selectedProductForReturn)
+      if (prod) setReturnUnitPrice(String(prod.costo_promedio || prod.ultimo_costo || 0))
+      return
+    }
+    const inv = productInvoices.find(i => i.invoice_id === invoiceId)
+    if (inv && inv.precio_unitario) {
+      setReturnUnitPrice(String(inv.precio_unitario))
+    }
+  }
+
+  const handleAddReturnItem = () => {
+    if (!selectedProductForReturn) {
+      toast.error("Seleccione un producto a devolver")
+      return
+    }
+    const qty = parseFloat(returnQuantity)
+    if (isNaN(qty) || qty <= 0) {
+      toast.error("Ingrese una cantidad válida mayor a 0")
+      return
+    }
+    const price = parseFloat(returnUnitPrice)
+    if (isNaN(price) || price < 0) {
+      toast.error("Ingrese un valor unitario válido")
+      return
+    }
+
+    const prod = selectedProductDetails || supplierProducts.find(p => p.id === selectedProductForReturn)
+    const inv = productInvoices.find(i => i.invoice_id === selectedInvoiceForReturn)
+
+    // Advertencia preventiva si la cantidad a devolver supera el stock disponible
+    if (productStockInfo && qty > productStockInfo.cantidad_disponible) {
+      toast.warning(
+        "Alerta de Stock Físico",
+        `La cantidad a devolver (${qty}) supera las existencias registradas (${productStockInfo.cantidad_disponible} un.). Se registrará igualmente para revisión.`
+      )
+    }
+
+    const newItem = {
+      producto_id: selectedProductForReturn,
+      producto_nombre: prod?.nombre || "Producto",
+      sku: prod?.sku,
+      codigo_barra: prod?.codigo_barra,
+      factura_id: inv ? inv.invoice_id : undefined,
+      factura_numero: inv ? inv.numero_factura : undefined,
+      cantidad: qty,
+      valor_unitario: price,
+      valor_total: qty * price,
+      motivo: returnReason,
+      lote: returnLot || undefined,
+      fecha_vencimiento: returnExpiryDate || undefined,
+      detalle: returnDetailNotes || undefined,
+    }
+
+    // Unificación de líneas: si el producto ya existe en la lista, se incrementa su cantidad
+    setReturnItemsList(prev => {
+      const existingIdx = prev.findIndex(it => it.producto_id === newItem.producto_id)
+      if (existingIdx >= 0) {
+        const updated = [...prev]
+        const existing = updated[existingIdx]
+        const nuevaCantidad = Number(existing.cantidad || 0) + Number(newItem.cantidad || 0)
+        const unitPrice = newItem.valor_unitario > 0 ? newItem.valor_unitario : (existing.valor_unitario || 0)
+        updated[existingIdx] = {
+          ...existing,
+          cantidad: nuevaCantidad,
+          valor_unitario: unitPrice,
+          valor_total: nuevaCantidad * unitPrice,
+          motivo: newItem.motivo || existing.motivo,
+          lote: [existing.lote, newItem.lote].filter(Boolean).join(", ") || undefined,
+          fecha_vencimiento: newItem.fecha_vencimiento || existing.fecha_vencimiento,
+          factura_id: newItem.factura_id || existing.factura_id,
+          factura_numero: newItem.factura_numero || existing.factura_numero,
+          detalle: [existing.detalle, newItem.detalle].filter(Boolean).join(" | ") || undefined,
+        }
+        toast.success("Línea Incrementada", `Se sumaron ${qty} unidades a ${existing.producto_nombre} (Total: ${nuevaCantidad} un.)`)
+        return updated
+      }
+      toast.success("Producto agregado a la lista de devolución")
+      return [...prev, newItem]
+    })
+
+    setSelectedProductForReturn("")
+    setSelectedProductDetails(null)
+    setProductStockInfo(null)
+    setSelectedInvoiceForReturn("")
+    setProductInvoices([])
+    setReturnQuantity("1")
+    setReturnLot("")
+    setReturnExpiryDate("")
+    setReturnDetailNotes("")
+  }
+
+  const handleRemoveReturnItem = (index: number) => {
+    setReturnItemsList(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const handleEditReturn = async (item: any) => {
+    const raw = item.raw || item
+    const supId = raw.proveedor_id || item.proveedor_id || item.supplier_id || ""
+    setEditingReturnId(item.id)
+    setSelectedSupplierForReturn(supId)
+    setSelectedWarehouseForReturn(raw.warehouse_id || item.warehouse_id || "")
+    setGeneralReturnNotes(raw.observaciones || item.observaciones || "")
+
+    if (supId) {
+      setLoadingSupplierProducts(true)
+      try {
+        const prods = await api.purchases.supplierProducts(supId)
+        setSupplierProducts(prods || [])
+      } catch {
+        setSupplierProducts([])
+      } finally {
+        setLoadingSupplierProducts(false)
+      }
+    }
+
+    // Unificar items existentes por producto_id para visualización limpia y consolidada
+    const rawItems = raw.items || item.items || []
+    const map = new Map<string, any>()
+    for (const it of rawItems) {
+      const key = String(it.producto_id || it.id)
+      const cant = Number(it.cantidad || 0)
+      const valU = Number(it.valor_unitario || it.costo_promedio || 0)
+      const valTot = Number(it.valor_total != null ? it.valor_total : cant * valU)
+      if (map.has(key)) {
+        const ex = map.get(key)
+        const nCant = ex.cantidad + cant
+        const nTot = ex.valor_total + valTot
+        map.set(key, {
+          ...ex,
+          cantidad: nCant,
+          valor_total: nTot,
+          valor_unitario: nCant > 0 ? Math.round(nTot / nCant) : valU,
+          lote: [ex.lote, it.lote].filter(Boolean).join(", ") || undefined,
+          fecha_vencimiento: ex.fecha_vencimiento || it.fecha_vencimiento,
+          factura_numero: [ex.factura_numero, it.factura_numero].filter(Boolean).join(", ") || undefined,
+          detalle: [ex.detalle, it.detalle].filter(Boolean).join(" | ") || undefined,
+        })
+      } else {
+        map.set(key, {
+          producto_id: it.producto_id,
+          producto_nombre: it.producto_nombre || "Producto",
+          sku: it.sku,
+          codigo_barra: it.codigo_barra || it.codigo_barras,
+          factura_id: it.factura_id,
+          factura_numero: it.factura_numero,
+          cantidad: cant,
+          valor_unitario: valU,
+          valor_total: valTot,
+          motivo: it.motivo || "vencido",
+          lote: it.lote,
+          fecha_vencimiento: it.fecha_vencimiento,
+          detalle: it.detalle,
+        })
+      }
+    }
+    setReturnItemsList(Array.from(map.values()))
+    setShowCreateReturnModal(true)
+  }
+
+  const handleSaveSupplierReturn = async () => {
+    if (!selectedSupplierForReturn) {
+      toast.error("Seleccione un proveedor")
+      return
+    }
+    if (returnItemsList.length === 0) {
+      toast.error("Debe agregar al menos un producto a la devolución")
+      return
+    }
+
+    setSavingReturn(true)
+    try {
+      const payload = {
+        proveedor_id: selectedSupplierForReturn,
+        warehouse_id: selectedWarehouseForReturn || (warehousesList[0]?.id || undefined),
+        observaciones: generalReturnNotes || undefined,
+        items: returnItemsList.map(it => ({
+          producto_id: it.producto_id,
+          factura_id: it.factura_id,
+          factura_numero: it.factura_numero,
+          cantidad: it.cantidad,
+          valor_unitario: it.valor_unitario,
+          motivo: it.motivo,
+          lote: it.lote,
+          fecha_vencimiento: it.fecha_vencimiento,
+          detalle: it.detalle,
+        })),
+      }
+
+      if (editingReturnId) {
+        await api.purchases.returns.update(editingReturnId, payload)
+        toast.success("Devolución actualizada", "Los cambios y líneas unificadas fueron guardados")
+      } else {
+        await api.purchases.returns.create(payload)
+        toast.success("Devolución creada", "La solicitud fue registrada en estado Pendiente de Aprobación")
+      }
+
+      setEditingReturnId(null)
+      setShowCreateReturnModal(false)
+      setReturnItemsList([])
+      setSelectedSupplierForReturn("")
+      setSupplierProducts([])
+      setProductInvoices([])
+      const updated = await api.purchases.returns.list()
+      setManagedReturns(updated || [])
+    } catch (err: any) {
+      toast.error("Error al guardar devolución", err.message)
+    } finally {
+      setSavingReturn(false)
+    }
+  }
+
+  const handleApproveReturn = async (returnId: string) => {
+    setProcessingReturnAction(true)
+    try {
+      await api.purchases.returns.approve(returnId)
+      toast.success("Devolución Aprobada", "La solicitud fue aprobada. Ahora está lista para salida física.")
+      const updated = await api.purchases.returns.list()
+      setManagedReturns(updated || [])
+    } catch (err: any) {
+      toast.error("Error al aprobar devolución", err.message)
+    } finally {
+      setProcessingReturnAction(false)
+    }
+  }
+
+  const handleRejectReturn = async (returnId: string) => {
+    if (!rejectReasonInput.trim()) {
+      toast.error("Debe ingresar el motivo del rechazo")
+      return
+    }
+    setProcessingReturnAction(true)
+    try {
+      await api.purchases.returns.reject(returnId, rejectReasonInput)
+      toast.success("Devolución Rechazada", "La solicitud fue marcada como rechazada.")
+      setRejectingReturnId(null)
+      setRejectReasonInput("")
+      const updated = await api.purchases.returns.list()
+      setManagedReturns(updated || [])
+    } catch (err: any) {
+      toast.error("Error al rechazar devolución", err.message)
+    } finally {
+      setProcessingReturnAction(false)
+    }
+  }
+
+  const handleCompleteReturn = async (returnId: string) => {
+    setProcessingReturnAction(true)
+    try {
+      await api.purchases.returns.complete(returnId, ncNumberInput || undefined)
+      toast.success("Devolución Completada", "Se descontó la existencia de inventario y se actualizó la cuenta del proveedor.")
+      setCompletingReturnId(null)
+      setNcNumberInput("")
+      const [updatedReturns, updatedInvoices] = await Promise.all([
+        api.purchases.returns.list(),
+        api.financial.invoices.list({ limit: 300 }),
+      ])
+      setManagedReturns(updatedReturns || [])
+      if (updatedInvoices) {
+        setInvoices(updatedInvoices)
+        setAllSupplierInvoices(updatedInvoices)
+      }
+    } catch (err: any) {
+      toast.error("Error al completar devolución", err.message)
+    } finally {
+      setProcessingReturnAction(false)
+    }
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-in-up pb-16 max-w-full overflow-hidden">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/90 text-white p-7 border border-indigo-500/20 shadow-2xl shadow-indigo-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
 
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-            <ShoppingCart className="w-6 h-6 text-primary" />Compras
-          </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            {purchaseOrders.length} ordenes &middot; {formatPYG(totalPOValue)} en compras
-          </p>
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-blue-500 border border-indigo-400/30 text-white flex items-center justify-center shadow-lg shadow-indigo-500/25">
+                  <ShoppingCart className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-indigo-500 border-2 border-slate-950"></span>
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-indigo-400 uppercase bg-indigo-500/10 px-2.5 py-0.5 rounded-md border border-indigo-500/20">
+                    ABASTECIMIENTO ESTRATÉGICO · CONECTOR REAL NEMUHA
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                    {orders.length.toLocaleString()} Órdenes de Compra
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Gestión de Compras & Abastecimiento
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Asistente IA por días de stock, demanda predictiva sobre 11.250 productos y 441 proveedores sincronizados
+                </p>
+              </div>
+            </div>
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-indigo-300">
+                📦 {suppliers.length} proveedores homologados
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                💰 {formatPYG(totalComprasEsteMes)} compras del mes
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={() => handleOpenReceiptModal()}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
+            >
+              <Truck className="w-3.5 h-3.5 text-slate-400" />
+              Recepción en Muelle
+            </button>
+
+            <button
+              onClick={() => {
+                setTab("asistente_ia")
+                setSoloQuiebreIA(false)
+              }}
+              className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-indigo-600 to-blue-500 hover:from-indigo-500 hover:to-blue-400 transition shadow-lg shadow-indigo-500/25 flex items-center gap-2"
+            >
+              <Sparkles className="w-4 h-4" />
+              Nueva Orden IA
+            </button>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <button onClick={fetchAll} className="btn-outline"><RefreshCw className="w-4 h-4" /></button>
+
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Compras del Mes</span>
+              <DollarSign className="w-4 h-4 text-indigo-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-indigo-300">
+              {formatPYG(totalComprasEsteMes)}
+            </p>
+            <p className="text-[11px] text-slate-400">{ordersEsteMes.length.toLocaleString()} órdenes emitidas</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">En Tránsito (30d)</span>
+              <Truck className="w-4 h-4 text-amber-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-amber-400">
+              {formatPYG(montoEnTransito)}
+            </p>
+            <p className="text-[11px] text-slate-400">{ordenesEnTransito.length} OC en camino</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Riesgo Quiebre</span>
+              <AlertTriangle className="w-4 h-4 text-rose-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
+              {totalQuiebresInminentes + totalBajosStock}
+            </p>
+            <p className="text-[11px] text-slate-400">{totalQuiebresInminentes} quiebres + {totalBajosStock} bajo stock</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Proveedores Activos</span>
+              <Building2 className="w-4 h-4 text-emerald-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+              {suppliers.length}
+            </p>
+            <p className="text-[11px] text-slate-400">100% Sincronizados de Nemuha</p>
+          </div>
         </div>
       </div>
 
-      <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-xl p-1 flex-wrap">
-        {mainTabs.map(t => {
+      {/* ──────────────────────────────────────────────────────────────────────────
+          BANNER DE ALERTA DE QUIEBRE PREVENTIVO
+      ────────────────────────────────────────────────────────────────────────── */}
+      {totalQuiebresInminentes > 0 && (
+        <div className="p-4 rounded-3xl bg-rose-500/10 border border-rose-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-rose-500/20 text-rose-500 shrink-0">
+              <ShieldAlert className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-xs font-black text-rose-600 dark:text-rose-300 uppercase tracking-wider">
+                Alerta de Stock Crítico: {totalQuiebresInminentes} producto(s) en quiebre inminente (&lt;3 días de cobertura)
+              </h4>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                La rotación proyectada en góndola superará el stock físico antes de la próxima entrega.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setTab("asistente_ia")
+              setSoloQuiebreIA(true)
+              setDiasCobertura(7)
+            }}
+            className="px-4 py-2 rounded-2xl text-xs font-extrabold bg-rose-600 hover:bg-rose-700 text-white shadow-md shadow-rose-500/20 flex items-center gap-1.5 shrink-0 transition"
+          >
+            <Flame className="w-4 h-4" /> Armar Pedido Emergencia (7 Días)
+          </button>
+        </div>
+      )}
+
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex items-center gap-1.5 overflow-x-auto shadow-sm">
+        {[
+          { id: "asistente_ia", label: "Asistente IA de Abastecimiento", icon: Sparkles, badge: totalQuiebresInminentes > 0 ? `${totalQuiebresInminentes}` : undefined },
+          { id: "ordenes", label: "Órdenes de Compra (OC)", icon: ShoppingCart, count: orders.length },
+          { id: "recepciones", label: "Recepción en Muelle", icon: Truck, count: receipts.length },
+          { id: "facturas_p2p", label: "Facturas Proveedor (P2P)", icon: Receipt, count: allSupplierInvoices.length },
+          { id: "devoluciones", label: "Devoluciones & NC", icon: Undo2, count: supplierReturns.length + supplierCreditNotes.length },
+          { id: "matching", label: "3-Way Matching", icon: Scale, count: invoices.length },
+          { id: "proveedores", label: "Proveedores & Scorecard", icon: Building2, count: suppliers.length },
+          { id: "requisiciones", label: "Requisiciones Internas", icon: ClipboardList, count: requisitions.length },
+          { id: "cotizaciones", label: "Cotizaciones (RFQ)", icon: FileSpreadsheet, count: rfqs.length },
+          { id: "presupuestos", label: "Presupuestos", icon: BarChart3, count: budgets.length },
+          { id: "reportes", label: "Reportes & Precios", icon: PieChart },
+        ].map((t) => {
           const Icon = t.icon
+          const active = tab === t.id
           return (
-            <button key={t.key} onClick={() => setMainTab(t.key)}
-              className={"flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold transition-all " + (mainTab === t.key ? "bg-white dark:bg-slate-700 shadow-sm text-gray-900 dark:text-white" : "text-gray-500 hover:text-gray-700 dark:hover:text-gray-300")}>
-              <Icon className="w-4 h-4" />{t.label}
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id as MainTab)}
+              className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              }`}
+            >
+              <Icon className={`w-4 h-4 shrink-0 ${active ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400"}`} />
+              <span>{t.label}</span>
+              {t.count !== undefined && (
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  active ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                }`}>
+                  {t.count}
+                </span>
+              )}
+              {t.badge && (
+                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-black bg-rose-500 text-white animate-pulse">
+                  {t.badge}
+                </span>
+              )}
             </button>
           )
         })}
       </div>
 
-      {mainTab === "dashboard" && <DashboardTab
-        purchaseOrders={purchaseOrders} activePOs={activePOs} totalPOValue={totalPOValue}
-        suppliers={suppliers} activeSuppliers={activeSuppliers} poByStatus={poByStatus}
-        topSuppliers={topSuppliers} receipts={receipts}
-      />}
-
-      {mainTab === "ordenes" && <OrdenesTab
-        purchaseOrders={purchaseOrders} filteredPOs={filteredPOs}
-        poSearch={poSearch} setPoSearch={setPoSearch}
-        poStatusFilter={poStatusFilter} setPoStatusFilter={setPoStatusFilter}
-        poSupplierFilter={poSupplierFilter} setPoSupplierFilter={setPoSupplierFilter}
-        poDateFrom={poDateFrom} setPoDateFrom={setPoDateFrom}
-        poDateTo={poDateTo} setPoDateTo={setPoDateTo}
-        suppliers={suppliers} loading={loading}
-        onConfirm={handleConfirmPO} onCancel={handleCancelPO}
-        onChangeStatus={handleChangeStatus}
-        onViewDetail={setShowDetailPO}
-      />}
-
-      {mainTab === "recepciones" && <RecepcionesTab
-        receipts={receipts} loading={loading}
-        onNewReceipt={() => setShowReceiptModal(true)}
-      />}
-
-      {mainTab === "proveedores" && <ProveedoresTab
-        suppliers={suppliers} filteredSuppliers={filteredSuppliers}
-        supplierSearch={supplierSearch} setSupplierSearch={setSupplierSearch}
-        supplierFilter={supplierFilter} setSupplierFilter={setSupplierFilter}
-        proveedorTab={proveedorTab} setProveedorTab={setProveedorTab}
-        onNewSupplier={() => { resetSupplierForm(); setEditingSupplier(null); setShowSupplierModal(true) }}
-        onEditSupplier={openEditSupplier}
-        onToggleSupplier={handleToggleSupplier}
-        contracts={[]} evals={[]}
-        onNewContract={() => setShowContractModal(true)}
-        onNewEval={() => setShowEvalModal(true)}
-      />}
-
-      {mainTab === "sugerencias" && <SugerenciasTab
-        suggestions={suggestions}
-        generating={generatingSuggestions}
-        onGenerate={handleGenerateSuggestions}
-        onApply={handleApplySuggestion}
-        onDiscard={handleDiscardSuggestion}
-      />}
-
-      {mainTab === "reportes" && <ReportesTab
-        purchaseOrders={purchaseOrders} suppliers={suppliers}
-        products={products} reportTab={reportTab}
-        setReportTab={setReportTab} reportPeriod={reportPeriod}
-        setReportPeriod={setReportPeriod}
-      />}
-
-      <Modal open={showPOModal} onClose={() => setShowPOModal(false)} title="Nueva orden de compra" size="xl">
-        <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="label-field">Proveedor</label>
-              <select className="input-field" value={poFormSupplier} onChange={(e) => setPoFormSupplier(e.target.value)}>
-                <option value="">Seleccionar...</option>
-                {suppliers.map(s => <option key={s.id} value={s.id}>{s.razon_social}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="label-field">Tipo de compra</label>
-              <select className="input-field" value={poFormTipo} onChange={(e) => setPoFormTipo(e.target.value as any)}>
-                <option value="local">Local</option>
-                <option value="importacion">Importacion</option>
-              </select>
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="label-field">Prioridad</label>
-              <select className="input-field" value={poFormPrioridad} onChange={(e) => setPoFormPrioridad(e.target.value as any)}>
-                <option value="normal">Normal</option>
-                <option value="alta">Alta</option>
-                <option value="urgente">Urgente</option>
-              </select>
-            </div>
-            <div>
-              <label className="label-field">Moneda</label>
-              <select className="input-field" value={poFormMoneda} onChange={(e) => { setPoFormMoneda(e.target.value as any); setPoFormTipoCambio(1) }}>
-                <option value="PYG">PYG (Guaranies)</option>
-                <option value="USD">USD (Dolares)</option>
-              </select>
-            </div>
-            <div>
-              <label className="label-field">Tipo de cambio</label>
-              <input className="input-field" type="number" min="0" step="0.01" value={poFormTipoCambio} onChange={(e) => setPoFormTipoCambio(parseFloat(e.target.value) || 1)} />
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="label-field">Condiciones de pago</label>
-              <input className="input-field" placeholder="Ej: 30 dias" value={poFormCondiciones} onChange={(e) => setPoFormCondiciones(e.target.value)} />
-            </div>
-            <div>
-              <label className="label-field">Validez (dias)</label>
-              <input className="input-field" type="number" min="1" value={poFormValidez} onChange={(e) => setPoFormValidez(parseInt(e.target.value) || 30)} />
-            </div>
-            <div>
-              <label className="label-field">Fecha entrega estimada</label>
-              <input className="input-field" type="date" value={poFormFecEntrega} onChange={(e) => setPoFormFecEntrega(e.target.value)} />
-            </div>
-          </div>
-
-          <div>
-            <label className="label-field">Agregar productos</label>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input className="input-field pl-10" placeholder="Buscar por nombre o SKU..." value={poProductSearch} onChange={(e) => setPoProductSearch(e.target.value)} />
-            </div>
-            {poProductSearch && (
-              <div className="mt-1 max-h-36 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg">
-                {filteredProducts.slice(0, 8).map(p => (
-                  <button key={p.id} type="button"
-                    className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 flex justify-between items-center border-b border-gray-100 dark:border-gray-800 last:border-0"
-                    onClick={() => handleAddItemToPO(p)}>
-                    <span className="font-medium">{p.nombre}</span>
-                    <span className="text-xs text-gray-400 font-mono">{p.sku} &middot; {formatPYG(p.precio || 0)}</span>
-                  </button>
-                ))}
-                {filteredProducts.length === 0 && <p className="px-3 py-2 text-sm text-gray-400">Sin resultados</p>}
+      {/* ──────────────────────────────────────────────────────────────────────────
+          TAB 1: ASISTENTE IA DE ABASTECIMIENTO POR DÍAS DE STOCK
+      ────────────────────────────────────────────────────────────────────────── */}
+      {tab === "asistente_ia" && (
+        <div className="space-y-6">
+          <div className="card p-6 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 space-y-5">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-700/60 pb-4">
+              <div>
+                <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-indigo-500" />
+                  Parámetros de Reabastecimiento & Proyección de Stock
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  Ajustá los días de cobertura deseados y activá los multiplicadores de contexto estacional para calcular la orden ideal.
+                </p>
               </div>
-            )}
-          </div>
 
-          {poFormItems.length > 0 && (
-            <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 dark:bg-gray-800">
-                  <tr>
-                    <th className="px-2 py-1.5 text-left font-semibold text-gray-600 dark:text-gray-400">Producto</th>
-                    <th className="px-2 py-1.5 text-center font-semibold text-gray-600 dark:text-gray-400 w-20">Cant</th>
-                    <th className="px-2 py-1.5 text-right font-semibold text-gray-600 dark:text-gray-400 w-24">P.Unit</th>
-                    <th className="px-2 py-1.5 text-center font-semibold text-gray-600 dark:text-gray-400 w-16">Desc%</th>
-                    <th className="px-2 py-1.5 text-center font-semibold text-gray-600 dark:text-gray-400 w-16">IVA</th>
-                    <th className="px-2 py-1.5 text-right font-semibold text-gray-600 dark:text-gray-400 w-24">Subtotal</th>
-                    <th className="px-2 py-1.5 w-8"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {poFormItems.map((item, i) => (
-                    <tr key={i} className="border-t border-gray-100 dark:border-gray-800">
-                      <td className="px-2 py-1">
-                        <p className="font-medium text-xs">{item.nombre}</p>
-                        <p className="text-[10px] text-gray-400 font-mono">{item.sku}</p>
-                      </td>
-                      <td className="px-2 py-1">
-                        <div className="flex items-center justify-center gap-0.5">
-                          <button className="p-0.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded" onClick={() => handleUpdatePOItem(i, "cantidad", Math.max(1, item.cantidad - 1))}><Minus className="w-3 h-3" /></button>
-                          <input type="number" className="w-12 text-center input-field py-0.5 text-xs" value={item.cantidad} min={1} onChange={(e) => handleUpdatePOItem(i, "cantidad", parseInt(e.target.value) || 1)} />
-                          <button className="p-0.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded" onClick={() => handleUpdatePOItem(i, "cantidad", item.cantidad + 1)}><Plus className="w-3 h-3" /></button>
+              <button
+                onClick={handleOpenGenerateModal}
+                disabled={loadingReplenishment || totalUnidadesIASugerida === 0}
+                className="btn-primary text-xs flex items-center gap-2 px-5 py-2.5 shadow-md shrink-0 disabled:opacity-50"
+              >
+                <ShoppingCart className="w-4 h-4" />
+                Generar Orden ({totalUnidadesIASugerida.toLocaleString()} un. — {formatPYG(totalOrdenIASugerida)})
+              </button>
+            </div>
+
+            {/* SECCIÓN 1: CONTROLES PRINCIPALES */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div ref={supplierComboboxRef} className="relative">
+                <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1.5 flex items-center justify-between">
+                  <span>Proveedor a Comprar</span>
+                  {selectedSupplierIA && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedSupplierIA("")
+                        setFilterSupplierSearchIA("")
+                        setSupplierComboboxOpen(false)
+                      }}
+                      className="text-[10px] text-red-500 hover:text-red-700 font-bold flex items-center gap-1"
+                    >
+                      <X className="w-3 h-3" /> Limpiar
+                    </button>
+                  )}
+                </label>
+
+                {/* CAMPO COMBOMBOX BUSCADOR ÚNICO */}
+                <div className="relative">
+                  <div className="absolute left-3 top-1/2 -translate-y-1/2 text-indigo-500 pointer-events-none">
+                    <Search className="w-4 h-4" />
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Escribí el nombre o RUC del proveedor..."
+                    value={filterSupplierSearchIA}
+                    onFocus={() => setSupplierComboboxOpen(true)}
+                    onChange={(e) => {
+                      setFilterSupplierSearchIA(e.target.value)
+                      setSupplierComboboxOpen(true)
+                    }}
+                    className={`input-field pl-9 pr-10 w-full text-xs font-semibold py-2 bg-white dark:bg-slate-900 border-2 transition-all ${
+                      selectedSupplierIA
+                        ? "border-indigo-500 ring-2 ring-indigo-100 dark:ring-indigo-950/50 text-indigo-900 dark:text-indigo-200"
+                        : "border-slate-300 dark:border-slate-700"
+                    }`}
+                  />
+                  {selectedSupplierIA ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedSupplierIA("")
+                        setFilterSupplierSearchIA("")
+                        setSupplierComboboxOpen(false)
+                      }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-red-500 rounded-full"
+                      title="Quitar filtro de proveedor"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setSupplierComboboxOpen(prev => !prev)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-indigo-500"
+                    >
+                      <ChevronDown className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                {/* DROPDOWN FLOTANTE DE RESULTADOS */}
+                {supplierComboboxOpen && (
+                  <div className="absolute z-50 left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-72 flex flex-col animate-in fade-in zoom-in-95 duration-100">
+                    <div className="p-2 border-b border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/50 text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>Seleccionar Proveedor</span>
+                      <span>{filteredSuppliersForIA.length} proveedores</span>
+                    </div>
+
+                    <div className="overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/60 p-1">
+                      {/* Opción Todos los Proveedores */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedSupplierIA("")
+                          setFilterSupplierSearchIA("")
+                          setSupplierComboboxOpen(false)
+                        }}
+                        className={`w-full text-left p-2 rounded-lg text-xs flex items-center justify-between transition-colors ${
+                          !selectedSupplierIA
+                            ? "bg-indigo-50 dark:bg-indigo-950/50 text-indigo-900 dark:text-indigo-200 font-bold"
+                            : "hover:bg-slate-50 dark:hover:bg-slate-800 text-gray-700 dark:text-gray-300"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-md bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-[10px]">
+                            <Building2 className="w-3.5 h-3.5" />
+                          </div>
+                          <div>
+                            <div className="font-bold">Todos los Proveedores (Matriz Global)</div>
+                            <div className="text-[10px] text-gray-400">Evaluar catálogo completo</div>
+                          </div>
                         </div>
-                      </td>
-                      <td className="px-2 py-1">
-                        <input type="number" className="w-full text-right input-field py-0.5 text-xs" value={item.precio_unitario} min={0} onChange={(e) => handleUpdatePOItem(i, "precio_unitario", parseFloat(e.target.value) || 0)} />
-                      </td>
-                      <td className="px-2 py-1">
-                        <input type="number" className="w-full text-center input-field py-0.5 text-xs" value={item.descuento_pct} min={0} max={100} onChange={(e) => handleUpdatePOItem(i, "descuento_pct", parseFloat(e.target.value) || 0)} />
-                      </td>
-                      <td className="px-2 py-1">
-                        <select className="input-field py-0.5 text-xs" value={item.iva_tasa} onChange={(e) => handleUpdatePOItem(i, "iva_tasa", parseInt(e.target.value))}>
-                          <option value={10}>10%</option>
-                          <option value={5}>5%</option>
-                          <option value={0}>0%</option>
-                        </select>
-                      </td>
-                      <td className="px-2 py-1 text-right font-mono font-bold text-xs">{formatCurrency(item.cantidad * item.precio_unitario * (1 - item.descuento_pct / 100), poFormMoneda)}</td>
-                      <td className="px-2 py-1">
-                        <button className="p-0.5 text-red-400 hover:text-red-500" onClick={() => handleRemovePOItem(i)}><Trash2 className="w-3.5 h-3.5" /></button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                        {!selectedSupplierIA && <CheckCircle2 className="w-4 h-4 text-indigo-600" />}
+                      </button>
 
-          {poFormTipo === "importacion" && (
-            <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-3">
-              <h4 className="text-sm font-bold mb-2 text-gray-900 dark:text-white">Costos de importacion</h4>
-              <div className="grid grid-cols-4 gap-3">
-                <div>
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Flete</label>
-                  <input className="input-field py-1 text-sm" type="number" min="0" value={poFormShipping} onChange={(e) => setPoFormShipping(parseFloat(e.target.value) || 0)} />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Seguro</label>
-                  <input className="input-field py-1 text-sm" type="number" min="0" value={poFormInsurance} onChange={(e) => setPoFormInsurance(parseFloat(e.target.value) || 0)} />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Aduana</label>
-                  <input className="input-field py-1 text-sm" type="number" min="0" value={poFormCustoms} onChange={(e) => setPoFormCustoms(parseFloat(e.target.value) || 0)} />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Otros</label>
-                  <input className="input-field py-1 text-sm" type="number" min="0" value={poFormOther} onChange={(e) => setPoFormOther(parseFloat(e.target.value) || 0)} />
-                </div>
-              </div>
-              <p className="text-right text-sm font-bold mt-2">Costo landed: {formatCurrency(poFormLanded, poFormMoneda)}</p>
-            </div>
-          )}
+                      {/* Lista Filtrada de Proveedores */}
+                      {filteredSuppliersForIA.map(s => {
+                        const isSelected = selectedSupplierIA === s.id
+                        const rSocial = s.razon_social || "Proveedor"
+                        return (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedSupplierIA(s.id)
+                              setFilterSupplierSearchIA(rSocial)
+                              setSupplierComboboxOpen(false)
+                            }}
+                            className={`w-full text-left p-2 rounded-lg text-xs flex items-center justify-between transition-colors ${
+                              isSelected
+                                ? "bg-indigo-50 dark:bg-indigo-950/50 text-indigo-900 dark:text-indigo-200 font-bold"
+                                : "hover:bg-slate-50 dark:hover:bg-slate-800 text-gray-700 dark:text-gray-300"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div className="w-6 h-6 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center font-black text-[9px] shrink-0">
+                                {rSocial.substring(0, 2).toUpperCase()}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="font-bold truncate">{rSocial}</div>
+                                <div className="text-[10px] text-gray-400 flex items-center gap-2">
+                                  {s.ruc && <span>RUC: {s.ruc}</span>}
+                                  {s.plazo_pago_dias ? <span className="text-emerald-600 font-bold">Plazo: {s.plazo_pago_dias}d</span> : null}
+                                </div>
+                              </div>
+                            </div>
+                            {isSelected && <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />}
+                          </button>
+                        )
+                      })}
 
-          <div className="border-t border-gray-200 dark:border-gray-700 pt-3 space-y-1 text-sm">
-            <div className="flex justify-between"><span>Subtotal</span><span className="font-mono font-bold">{formatCurrency(poFormSubtotal, poFormMoneda)}</span></div>
-            <div className="flex justify-between"><span>Descuento total</span><span className="font-mono text-red-500">-{formatCurrency(poFormDescTotal, poFormMoneda)}</span></div>
-            <div className="flex justify-between"><span>IVA 10%</span><span className="font-mono">{formatCurrency(poFormIva10, poFormMoneda)}</span></div>
-            <div className="flex justify-between"><span>IVA 5%</span><span className="font-mono">{formatCurrency(poFormIva5, poFormMoneda)}</span></div>
-            {poFormTipo === "importacion" && <div className="flex justify-between"><span>Costo landed</span><span className="font-mono">{formatCurrency(poFormLanded, poFormMoneda)}</span></div>}
-            <div className="flex justify-between pt-2 border-t border-gray-300 dark:border-gray-600 text-base font-bold"><span>Total</span><span>{formatCurrency(poFormTotal, poFormMoneda)}</span></div>
-          </div>
-
-          <div>
-            <label className="label-field">Observaciones</label>
-            <textarea className="input-field" rows={2} placeholder="Notas internas..." value={poFormObs} onChange={(e) => setPoFormObs(e.target.value)} />
-          </div>
-
-          <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
-            <button className="btn-outline" onClick={() => setShowPOModal(false)}>Cancelar</button>
-            <button className="btn-primary" onClick={handleCreatePO} disabled={poCreating || poFormItems.length === 0 || !poFormSupplier}>
-              {poCreating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              {poCreating ? "Guardando..." : "Crear orden"}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal open={!!showDetailPO} onClose={() => setShowDetailPO(null)} title={showDetailPO ? "Detalle: " + showDetailPO.numero : ""} size="lg">
-        {showDetailPO && (() => {
-          const po = showDetailPO
-          return (
-            <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div><span className="text-gray-500">Proveedor</span><p className="font-bold">{po.supplier?.razon_social || "-"}</p></div>
-                <div><span className="text-gray-500">Estado</span><p><StatusBadge status={po.estado ?? ""} map={poStatusMap} /></p></div>
-                <div><span className="text-gray-500">Moneda</span><p className="font-bold">{po.moneda}</p></div>
-                <div><span className="text-gray-500">Tipo de cambio</span><p className="font-mono">{(po.tipo_cambio ?? 0).toFixed(2)}</p></div>
-                <div><span className="text-gray-500">Fecha</span><p>{formatDate(po.fecha)}</p></div>
-                <div><span className="text-gray-500">Entrega estimada</span><p>{po.fecha_entrega_estimada ? formatDate(po.fecha_entrega_estimada) : "-"}</p></div>
-              </div>
-
-              <div className="border-t pt-3">
-                <h4 className="text-sm font-bold mb-2">Cost Breakdown</h4>
-                <div className="space-y-1 text-sm">
-                  <div className="flex justify-between"><span>Subtotal</span><span className="font-mono">{formatCurrency(po.subtotal || 0, po.moneda)}</span></div>
-                  <div className="flex justify-between"><span>Descuento</span><span className="font-mono text-red-500">-{formatCurrency(po.descuento_total || 0, po.moneda)}</span></div>
-                  <div className="flex justify-between"><span>IVA 10%</span><span className="font-mono">{formatCurrency(po.iva_10 || 0, po.moneda)}</span></div>
-                  <div className="flex justify-between"><span>IVA 5%</span><span className="font-mono">{formatCurrency(po.iva_5 || 0, po.moneda)}</span></div>
-                  <div className="flex justify-between pt-2 border-t font-bold text-base"><span>Total</span><span>{formatCurrency(po.total || 0, po.moneda)}</span></div>
-                </div>
-              </div>
-
-              <div className="border-t pt-3 flex gap-2 flex-wrap">
-                {po.estado === "borrador" && (<><button className="btn-primary text-sm" onClick={() => { handleConfirmPO(po); setShowDetailPO(null) }}><Check className="w-3.5 h-3.5" /> Confirmar</button><button className="btn-ghost text-red-400 text-sm" onClick={() => { handleCancelPO(po); setShowDetailPO(null) }}><X className="w-3.5 h-3.5" /> Cancelar</button></>)}
-                {po.estado === "confirmado" && (<><button className="btn-primary text-sm" onClick={() => { handleChangeStatus(po, "enviado"); setShowDetailPO(null) }}><Send className="w-3.5 h-3.5" /> Enviar</button><button className="btn-ghost text-red-400 text-sm" onClick={() => { handleCancelPO(po); setShowDetailPO(null) }}><Ban className="w-3.5 h-3.5" /> Cancelar</button></>)}
-                {po.estado === "enviado" && <button className="btn-primary text-sm" onClick={() => { handleChangeStatus(po, "parcial"); setShowDetailPO(null) }}><Package className="w-3.5 h-3.5" /> Recibir parcial</button>}
-                {(po.estado === "completado" || po.estado === "cancelado") && <span className="text-xs text-gray-400 italic">Orden {po.estado === "completado" ? "completada" : "cancelada"} &mdash; solo lectura</span>}
-              </div>
-            </div>
-          )
-        })()}
-      </Modal>
-
-      <Modal open={showReceiptModal} onClose={() => { setShowReceiptModal(false); resetReceiptForm() }} title="Nueva recepcion" size="lg">
-        <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={receiptDirect} onChange={(e) => setReceiptDirect(e.target.checked)} />
-              Recepcion directa (sin PO)
-            </label>
-          </div>
-
-          {!receiptDirect ? (
-            <div>
-              <label className="label-field">Orden de compra</label>
-              <select className="input-field" value={receiptPO} onChange={(e) => handleSelectPOforReceipt(e.target.value)}>
-                <option value="">Seleccionar PO...</option>
-                {pendingReceiptPOs.map(p => <option key={p.id} value={p.id}>{p.numero} &mdash; {p.supplier?.razon_social} ({p.estado})</option>)}
-              </select>
-            </div>
-          ) : (
-            <div>
-              <label className="label-field">Proveedor</label>
-              <select className="input-field" value={receiptSupplier} onChange={(e) => setReceiptSupplier(e.target.value)}>
-                <option value="">Seleccionar...</option>
-                {suppliers.map(s => <option key={s.id} value={s.id}>{s.razon_social}</option>)}
-              </select>
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="label-field">Almacen destino</label>
-              <select className="input-field" value={receiptWarehouse} onChange={(e) => setReceiptWarehouse(e.target.value)}>
-                <option value="">Seleccionar...</option>
-                {warehouses.map((w: any) => <option key={w.id} value={w.id}>{w.nombre}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="label-field">Ref. proveedor</label>
-              <input className="input-field" placeholder="Factura/Remito..." value={receiptRef} onChange={(e) => setReceiptRef(e.target.value)} />
-            </div>
-          </div>
-
-          {receiptItems.length > 0 && (
-            <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 dark:bg-gray-800">
-                  <tr>
-                    <th className="px-2 py-1.5 text-left font-semibold text-gray-600 dark:text-gray-400">Producto</th>
-                    <th className="px-2 py-1.5 text-center font-semibold text-gray-600 dark:text-gray-400 w-16">Ord.</th>
-                    <th className="px-2 py-1.5 text-center font-semibold text-gray-600 dark:text-gray-400 w-20">Recibir</th>
-                    <th className="px-2 py-1.5 text-right font-semibold text-gray-600 dark:text-gray-400 w-24">Costo U.</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {receiptItems.map((item, i) => (
-                    <tr key={i} className="border-t border-gray-100 dark:border-gray-800">
-                      <td className="px-2 py-1">
-                        <p className="font-medium text-xs">{item.nombre}</p>
-                        <p className="text-[10px] text-gray-400 font-mono">{item.sku}</p>
-                      </td>
-                      <td className="px-2 py-1 text-center text-xs">{item.cantidad_ordenada}</td>
-                      <td className="px-2 py-1">
-                        <input type="number" className="w-full text-center input-field py-0.5 text-xs" value={item.cantidad_recibir} min={0} onChange={(e) => { const u = [...receiptItems]; u[i] = { ...u[i], cantidad_recibir: parseInt(e.target.value) || 0 }; setReceiptItems(u) }} />
-                      </td>
-                      <td className="px-2 py-1">
-                        <input type="number" className="w-full text-right input-field py-0.5 text-xs" value={item.costo_unitario} min={0} onChange={(e) => { const u = [...receiptItems]; u[i] = { ...u[i], costo_unitario: parseFloat(e.target.value) || 0 }; setReceiptItems(u) }} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <div>
-            <label className="label-field">Observaciones</label>
-            <textarea className="input-field" rows={2} placeholder="Notas..." value={receiptObs} onChange={(e) => setReceiptObs(e.target.value)} />
-          </div>
-
-          <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
-            <button className="btn-outline" onClick={() => { setShowReceiptModal(false); resetReceiptForm() }}>Cancelar</button>
-            <button className="btn-primary" onClick={handleCreateReceipt} disabled={receiptCreating || receiptItems.length === 0 || !receiptWarehouse}>
-              {receiptCreating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Truck className="w-4 h-4" />}
-              {receiptCreating ? "Procesando..." : "Recibir productos"}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal open={showSupplierModal} onClose={() => { setShowSupplierModal(false); resetSupplierForm(); setEditingSupplier(null) }}
-        title={editingSupplier ? "Editar proveedor" : "Nuevo proveedor"} size="xl">
-        <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="label-field">RUC</label>
-              <input className="input-field" placeholder="80012345-6" value={supRuc} onChange={(e) => setSupRuc(e.target.value)} />
-            </div>
-            <div>
-              <label className="label-field">Razon social *</label>
-              <input className="input-field" placeholder="Razon social" value={supRazonSocial} onChange={(e) => setSupRazonSocial(e.target.value)} />
-            </div>
-            <div>
-              <label className="label-field">Telefono</label>
-              <input className="input-field" placeholder="021 123 456" value={supTelefono} onChange={(e) => setSupTelefono(e.target.value)} />
-            </div>
-            <div>
-              <label className="label-field">Email</label>
-              <input className="input-field" placeholder="proveedor@ejemplo.com" value={supEmail} onChange={(e) => setSupEmail(e.target.value)} />
-            </div>
-            <div>
-              <label className="label-field">Direccion</label>
-              <input className="input-field" placeholder="Direccion" value={supDireccion} onChange={(e) => setSupDireccion(e.target.value)} />
-            </div>
-            <div>
-              <label className="label-field">Contacto</label>
-              <input className="input-field" placeholder="Nombre contacto" value={supContacto} onChange={(e) => setSupContacto(e.target.value)} />
-            </div>
-            <div>
-              <label className="label-field">Tipo</label>
-              <select className="input-field" value={supTipo} onChange={(e) => setSupTipo(e.target.value as any)}>
-                <option value="nacional">Nacional</option>
-                <option value="import">Importacion</option>
-              </select>
-            </div>
-            <div>
-              <label className="label-field">Plazo pago (dias)</label>
-              <input className="input-field" type="number" min="0" value={supPlazoPago} onChange={(e) => setSupPlazoPago(parseInt(e.target.value) || 0)} />
-            </div>
-          </div>
-
-          <div>
-            <label className="label-field">Notas</label>
-            <textarea className="input-field" rows={2} placeholder="Notas internas..." value={supNotas} onChange={(e) => setSupNotas(e.target.value)} />
-          </div>
-
-          <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
-            <button className="btn-outline" onClick={() => { setShowSupplierModal(false); resetSupplierForm(); setEditingSupplier(null) }}>Cancelar</button>
-            <button className="btn-primary" onClick={handleSaveSupplier} disabled={!supRazonSocial}>
-              <Save className="w-4 h-4" /> {editingSupplier ? "Actualizar" : "Crear proveedor"}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal open={showContractModal} onClose={() => setShowContractModal(false)} title="Nuevo contrato" size="md">
-        <div className="space-y-4">
-          <div>
-            <label className="label-field">Proveedor</label>
-            <select className="input-field" value={contractSupplier} onChange={(e) => setContractSupplier(e.target.value)}>
-              <option value="">Seleccionar...</option>
-              {suppliers.map(s => <option key={s.id} value={s.id}>{s.razon_social}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label-field">Nombre del contrato</label>
-            <input className="input-field" placeholder="Ej: Contrato anual 2025" value={contractNombre} onChange={(e) => setContractNombre(e.target.value)} />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="label-field">Fecha inicio</label>
-              <input className="input-field" type="date" value={contractInicio} onChange={(e) => setContractInicio(e.target.value)} />
-            </div>
-            <div>
-              <label className="label-field">Fecha fin</label>
-              <input className="input-field" type="date" value={contractFin} onChange={(e) => setContractFin(e.target.value)} />
-            </div>
-          </div>
-          <div>
-              <label className="label-field">Monto total</label>
-              <input className="input-field" type="number" min="0" value={contractMonto} onChange={(e) => setContractMonto(parseInt(e.target.value) || 0)} />
-          </div>
-          <div className="flex justify-end gap-3 pt-4 border-t">
-            <button className="btn-outline" onClick={() => setShowContractModal(false)}>Cancelar</button>
-            <button className="btn-primary" onClick={() => { setShowContractModal(false); toast.success("Contrato creado (demo)", contractNombre) }}>Guardar</button>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal open={showEvalModal} onClose={() => setShowEvalModal(false)} title="Evaluar proveedor" size="md">
-        <div className="space-y-4">
-          <div>
-            <label className="label-field">Proveedor</label>
-            <select className="input-field" value={evalSupplier} onChange={(e) => setEvalSupplier(e.target.value)}>
-              <option value="">Seleccionar...</option>
-              {suppliers.map(s => <option key={s.id} value={s.id}>{s.razon_social}</option>)}
-            </select>
-          </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="label-field">Calidad (1-10)</label>
-              <input className="input-field" type="number" min="1" max="10" value={evalCalidad} onChange={(e) => setEvalCalidad(parseInt(e.target.value) || 10)} />
-            </div>
-            <div>
-              <label className="label-field">Entrega (1-10)</label>
-              <input className="input-field" type="number" min="1" max="10" value={evalEntrega} onChange={(e) => setEvalEntrega(parseInt(e.target.value) || 10)} />
-            </div>
-            <div>
-              <label className="label-field">Precio (1-10)</label>
-              <input className="input-field" type="number" min="1" max="10" value={evalPrecio} onChange={(e) => setEvalPrecio(parseInt(e.target.value) || 10)} />
-            </div>
-          </div>
-          <p className="text-sm font-bold">Promedio: {((evalCalidad + evalEntrega + evalPrecio) / 3).toFixed(1)} / 10</p>
-          <div>
-            <label className="label-field">Comentarios</label>
-            <textarea className="input-field" rows={3} placeholder="Observaciones..." value={evalComentarios} onChange={(e) => setEvalComentarios(e.target.value)} />
-          </div>
-          <div className="flex justify-end gap-3 pt-4 border-t">
-            <button className="btn-outline" onClick={() => setShowEvalModal(false)}>Cancelar</button>
-            <button className="btn-primary" onClick={() => { setShowEvalModal(false); toast.success("Evaluacion guardada (demo)") }}>Guardar</button>
-          </div>
-        </div>
-      </Modal>
-    </div>
-  )
-}
-function DashboardTab({ purchaseOrders, activePOs, totalPOValue, suppliers, activeSuppliers, poByStatus, topSuppliers, receipts }: {
-  purchaseOrders: PurchaseOrder[]; activePOs: PurchaseOrder[]; totalPOValue: number; suppliers: Supplier[]; activeSuppliers: Supplier[]; poByStatus: any[]; topSuppliers: any[]; receipts: PurchaseReceipt[]
-}) {
-  const pendingReceipt = purchaseOrders.filter(p => p.estado === "enviado" || p.estado === "parcial").length
-  const completedPOs = purchaseOrders.filter(p => p.estado === "completado").length
-  const totalPOs = purchaseOrders.filter(p => p.estado !== "cancelado").length
-  const cumplimiento = totalPOs > 0 ? Math.round((completedPOs / totalPOs) * 100) : 0
-  const monthlySpend = activePOs.reduce((a, b) => a + (b.total || 0), 0)
-  const prevMonthSpend = Math.round(monthlySpend * 0.85)
-
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-        <KPICard icon={ShoppingCart} label="Ordenes activas" value={activePOs.length} color="blue" />
-        <KPICard icon={Package} label="Pendientes de recibir" value={pendingReceipt} color="amber" />
-        <KPICard icon={DollarSign} label="Valor total POs" value={formatPYG(totalPOValue)} color="green" />
-        <KPICard icon={TrendingDown} label="Ahorro estimado" value={formatPYG(Math.round(totalPOValue * 0.08))} color="primary" trend={{ direction: "down", value: "8%" }} />
-        <KPICard icon={Users} label="Proveedores activos" value={activeSuppliers.length} color="purple" sublabel={"de " + suppliers.length + " totales"} />
-        <KPICard icon={CheckCircle} label="Cumplimiento" value={cumplimiento + "%"} color="green" />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-        <Widget title="Ordenes por estado" size="md" subtitle="Distribucion de POs">
-          <BarChart data={poByStatus.map((s: any) => ({ ...s, label: s.estado, value: s.count }))} maxKey="value" labelKey="label" colorKey="color" />
-        </Widget>
-
-        <Widget title="Top Proveedores" subtitle="Por monto total" size="sm">
-          <div className="space-y-3">
-            {topSuppliers.map((s: any, i: number) => {
-              const maxVal = topSuppliers.length > 0 ? topSuppliers[0].total : 1
-              return (
-                <div key={s.name}>
-                  <div className="flex justify-between text-xs mb-0.5">
-                    <span className="font-medium truncate">{s.name}</span>
-                    <span className="font-mono">{formatPYG(s.total)}</span>
+                      {filteredSuppliersForIA.length === 0 && (
+                        <div className="p-4 text-center text-xs text-gray-400">
+                          No se encontró ningún proveedor con "{filterSupplierSearchIA}"
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div className="bg-gray-100 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
-                    <div className="h-full rounded-full bg-primary" style={{ width: (s.total / maxVal) * 100 + "%" }} />
+                )}
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1.5 flex items-center justify-between">
+                  <span>Días de Cobertura Deseados</span>
+                  <span className="font-bold text-indigo-600 font-mono">{diasCobertura} Días</span>
+                </label>
+                <div className="flex gap-1.5">
+                  {[7, 15, 30, 45, 60].map(d => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => {
+                        setDiasCobertura(d)
+                        setEditedQuantities({})
+                      }}
+                      className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                        diasCobertura === d
+                          ? "bg-indigo-600 text-white shadow-sm"
+                          : "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200"
+                      }`}
+                    >
+                      {d}d
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1.5">
+                    Lead Time
+                  </label>
+                  <select
+                    value={leadTimeDias}
+                    onChange={(e) => setLeadTimeDias(Number(e.target.value))}
+                    className="input-field w-full text-xs"
+                  >
+                    <option value={1}>1 Día</option>
+                    <option value={2}>2 Días</option>
+                    <option value={3}>3 Días</option>
+                    <option value={7}>7 Días</option>
+                    <option value={15}>15 Días</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1.5">
+                    Historial Ventas
+                  </label>
+                  <select
+                    value={diasHistorialVentas}
+                    onChange={(e) => setDiasHistorialVentas(Number(e.target.value))}
+                    className="input-field w-full text-xs"
+                  >
+                    <option value={15}>15 Días</option>
+                    <option value={30}>30 Días</option>
+                    <option value={60}>60 Días</option>
+                    <option value={90}>90 Días</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* SECCIÓN 2: MULTIPLICADORES ESTACIONALES */}
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/60 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-500" />
+                  Factores Predictivos de Demanda de Supermercado (IA)
+                </span>
+                <span className="text-[11px] text-gray-400">Ajuste automático de rotación por sector</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <label className={`flex items-center gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-all ${
+                  factorFinSemana
+                    ? "bg-indigo-50/80 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-800 text-indigo-900 dark:text-indigo-200"
+                    : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+                }`}>
+                  <input
+                    type="checkbox"
+                    checked={factorFinSemana}
+                    onChange={(e) => setFactorFinSemana(e.target.checked)}
+                    className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4"
+                  />
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold flex items-center gap-1 truncate">
+                      <Calendar className="w-3.5 h-3.5 text-indigo-500 shrink-0" /> Fin de Semana (+40%)
+                    </div>
+                    <div className="text-[10px] text-gray-400 truncate">Carnes, bebidas, carbón, snacks</div>
+                  </div>
+                </label>
+
+                <label className={`flex items-center gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-all ${
+                  factorFinMes
+                    ? "bg-emerald-50/80 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200"
+                    : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+                }`}>
+                  <input
+                    type="checkbox"
+                    checked={factorFinMes}
+                    onChange={(e) => setFactorFinMes(e.target.checked)}
+                    className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
+                  />
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold flex items-center gap-1 truncate">
+                      <DollarSign className="w-3.5 h-3.5 text-emerald-500 shrink-0" /> Fin de Mes (+35%)
+                    </div>
+                    <div className="text-[10px] text-gray-400 truncate">Canasta básica, lácteos, limpieza</div>
+                  </div>
+                </label>
+
+                <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+                    {factorClima === "calor" && <Sun className="w-3 h-3 text-amber-500" />}
+                    {factorClima === "frio" && <Snowflake className="w-3 h-3 text-blue-500" />}
+                    {factorClima === "lluvia" && <CloudRain className="w-3 h-3 text-cyan-500" />}
+                    {factorClima === "normal" && <Sun className="w-3 h-3 text-slate-400" />}
+                    Previsión Climática
+                  </div>
+                  <select
+                    value={factorClima}
+                    onChange={(e) => setFactorClima(e.target.value as any)}
+                    className="w-full text-xs font-bold bg-transparent border-0 p-0 text-gray-800 dark:text-gray-200 focus:ring-0 cursor-pointer truncate"
+                  >
+                    <option value="normal">Clima Normal / Templado</option>
+                    <option value="calor">☀️ Ola de Calor (+30% Bebidas/Hielo)</option>
+                    <option value="frio">❄️ Frente Frío (+35% Café/Sopas/Harinas)</option>
+                    <option value="lluvia">🌧️ Días de Lluvia (+25% Panificados)</option>
+                  </select>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-purple-500" />
+                    Evento / Calendario
+                  </div>
+                  <select
+                    value={factorEvento}
+                    onChange={(e) => setFactorEvento(e.target.value as any)}
+                    className="w-full text-xs font-bold bg-transparent border-0 p-0 text-gray-800 dark:text-gray-200 focus:ring-0 cursor-pointer truncate"
+                  >
+                    <option value="normal">Calendario Regular</option>
+                    <option value="feriado">🎉 Feriado Largo (+35% Carnes/Bebidas)</option>
+                    <option value="semana_santa">🐟 Semana Santa (+60% Pescados)</option>
+                    <option value="fin_de_ano">🎄 Fiestas Fin de Año (+50% Sidras)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* SECCIÓN 3: BÚSQUEDA Y RECALCULAR */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+              <div className="relative flex-1 max-w-md">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Buscar producto por nombre o SKU en la matriz..."
+                  value={searchProductIA}
+                  onChange={(e) => setSearchProductIA(e.target.value)}
+                  className="input-field pl-9 w-full text-xs"
+                />
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={runReplenishmentPreview}
+                  disabled={loadingReplenishment}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 flex items-center gap-1.5 transition-colors shadow-xs"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingReplenishment ? "animate-spin" : ""}`} />
+                  Recalcular IA
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* TABLA PREDICTIVA RESPONSIVA */}
+          <div className="card overflow-hidden bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm">
+            <div className="p-4 bg-slate-50/90 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-700/60 flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="space-y-2">
+                <h4 className="text-xs font-extrabold uppercase tracking-wider text-gray-700 dark:text-gray-200 flex items-center gap-2">
+                  <Box className="w-4 h-4 text-indigo-500" />
+                  Matriz de Sugerencia ({displayedReplenishmentItems.length} de {replenishmentData?.items?.length || 0} Productos Evaluados)
+                </h4>
+                
+                {/* FILTROS DE ESTADO CLICKEABLES CON INDICADORES EN VIVO */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setFilterEstadoIA("todos")}
+                    className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer select-none ${
+                      filterEstadoIA === "todos"
+                        ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-md ring-2 ring-slate-400 scale-[1.02]"
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 border border-slate-200 dark:border-slate-700"
+                    }`}
+                  >
+                    <span>Todos</span>
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-200 dark:bg-slate-700 font-mono font-black">
+                      {replenishmentData?.items?.length || 0}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setFilterEstadoIA("quiebres")}
+                    className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer select-none ${
+                      filterEstadoIA === "quiebres"
+                        ? "bg-red-600 text-white shadow-md ring-2 ring-red-300 scale-[1.02]"
+                        : "bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 hover:bg-red-100"
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+                    <span>Quiebres Inminentes</span>
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-red-200 dark:bg-red-900/60 font-mono font-black">
+                      {replenishmentData?.total_quiebres || 0}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setFilterEstadoIA("bajos")}
+                    className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer select-none ${
+                      filterEstadoIA === "bajos"
+                        ? "bg-amber-500 text-white shadow-md ring-2 ring-amber-300 scale-[1.02]"
+                        : "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 hover:bg-amber-100"
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                    <span>Stock Bajo (ROP)</span>
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-amber-200 dark:bg-amber-900/60 font-mono font-black">
+                      {replenishmentData?.total_bajos || 0}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setFilterEstadoIA("sugeridos")}
+                    className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer select-none ${
+                      filterEstadoIA === "sugeridos"
+                        ? "bg-indigo-600 text-white shadow-md ring-2 ring-indigo-300 scale-[1.02]"
+                        : "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100"
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Con Sugerencia IA</span>
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-indigo-200 dark:bg-indigo-900/60 font-mono font-black">
+                      {replenishmentData?.total_sugeridos || 0}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 bg-white dark:bg-slate-800 px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 shadow-xs shrink-0">
+                <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
+                  <ShoppingCart className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Total Seleccionado</div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-base font-black font-mono text-indigo-600 dark:text-indigo-400">
+                      {formatPYG(totalOrdenIASugerida)}
+                    </span>
+                    <span className="text-xs font-mono font-bold text-gray-500">
+                      ({Math.round(totalUnidadesIASugerida).toLocaleString()} un.)
+                    </span>
                   </div>
                 </div>
-              )
-            })}
-            {topSuppliers.length === 0 && <p className="text-sm text-gray-400 text-center py-4">Sin datos</p>}
-          </div>
-        </Widget>
-
-        <Widget title="Gasto mensual" subtitle="Mes actual vs anterior" size="sm">
-          <div className="space-y-4">
-            <div>
-              <div className="flex justify-between text-xs mb-1"><span className="text-gray-500">Este mes</span><span className="font-bold">{formatPYG(monthlySpend)}</span></div>
-              <div className="bg-gray-100 dark:bg-gray-700 rounded-full h-3 overflow-hidden"><div className="h-full rounded-full bg-primary" style={{ width: "100%" }} /></div>
-            </div>
-            <div>
-              <div className="flex justify-between text-xs mb-1"><span className="text-gray-500">Mes anterior</span><span className="font-bold">{formatPYG(prevMonthSpend)}</span></div>
-              <div className="bg-gray-100 dark:bg-gray-700 rounded-full h-3 overflow-hidden"><div className="h-full rounded-full bg-gray-400" style={{ width: (prevMonthSpend / Math.max(monthlySpend, 1)) * 100 + "%" }} /></div>
-            </div>
-            <div className="text-center text-sm">
-              {monthlySpend > prevMonthSpend ?
-                <span className="text-red-500 flex items-center justify-center gap-1"><ArrowUp className="w-3.5 h-3.5" />{((monthlySpend / prevMonthSpend - 1) * 100).toFixed(0) + "% vs mes anterior"}</span>
-              :
-                <span className="text-green-500 flex items-center justify-center gap-1"><ArrowDown className="w-3.5 h-3.5" />{((1 - monthlySpend / prevMonthSpend) * 100).toFixed(0) + "% vs mes anterior"}</span>
-              }
-            </div>
-          </div>
-        </Widget>
-
-        <Widget title="Ordenes recientes" size="md" subtitle="Ultimas 5 ordenes">
-          <div className="space-y-2">
-            {purchaseOrders.slice(0, 5).map(po => (
-              <div key={po.id} className="flex items-center justify-between py-1.5 border-b border-gray-100 dark:border-gray-800 last:border-0">
-                <div>
-                  <p className="text-xs font-bold">{po.numero}</p>
-                  <p className="text-[10px] text-gray-400">{po.supplier?.razon_social || "-"}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-xs font-mono font-bold">{formatPYG(po.total || 0)}</p>
-                  <StatusBadge status={po.estado ?? ""} map={poStatusMap} className="text-[10px]" />
-                </div>
               </div>
-            ))}
-            {purchaseOrders.length === 0 && <p className="text-sm text-gray-400 text-center py-4">Sin ordenes</p>}
-          </div>
-        </Widget>
+            </div>
 
-        <Widget title="Stock en transito" subtitle="Productos pendientes" size="sm">
-          <div className="space-y-2">
-            {receipts.filter(r => r.order_id).length > 0 ? receipts.slice(0, 5).map(r => (
-              <div key={r.id} className="flex items-center gap-2 py-1.5 border-b border-gray-100 dark:border-gray-800 last:border-0">
-                <Package className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium truncate">{r.supplier?.razon_social || "-"}</p>
-                  <p className="text-[10px] text-gray-400">{r.numero}</p>
+            {/* BARRA DE ESTADO DE ORDENAMIENTO ACTIVO */}
+            {sortColumnIA && (
+              <div className="flex items-center justify-between px-4 py-2 bg-indigo-50/80 dark:bg-indigo-950/40 border-b border-indigo-100 dark:border-indigo-900/60 text-xs text-indigo-800 dark:text-indigo-200 animate-in fade-in duration-150">
+                <div className="flex items-center gap-2">
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <span>
+                    Ordenado por: <strong className="font-extrabold">{
+                      sortColumnIA === "producto" ? "Producto & SKU" :
+                      sortColumnIA === "proveedor" ? "Último Proveedor" :
+                      sortColumnIA === "stock" ? "Stock Físico" :
+                      sortColumnIA === "m4" ? (replenishmentData?.meses_labels?.[0] || "M-4") :
+                      sortColumnIA === "m3" ? (replenishmentData?.meses_labels?.[1] || "M-3") :
+                      sortColumnIA === "m2" ? (replenishmentData?.meses_labels?.[2] || "M-2") :
+                      sortColumnIA === "m1" ? (replenishmentData?.meses_labels?.[3] || "M-1") :
+                      sortColumnIA === "mes_actual" ? `${replenishmentData?.mes_actual_label || "Mes"} (En Curso)` :
+                      sortColumnIA === "pulso" ? "Pulso Venta" :
+                      sortColumnIA === "costo_ppp" ? "Costo PPP" :
+                      sortColumnIA === "ultimo_costo" ? "Última Compra" :
+                      sortColumnIA === "autonomia" ? "Autonomía" :
+                      sortColumnIA === "sugerencia" ? "Sugerencia IA" :
+                      sortColumnIA === "pedido" ? "Tu Pedido" :
+                      sortColumnIA === "costo_unit" ? "Costo Unitario" :
+                      sortColumnIA === "subtotal" ? "Subtotal" : sortColumnIA
+                    }</strong> ({sortDirectionIA === "asc" ? "Menor a Mayor / A-Z" : "Mayor a Menor / Z-A"})
+                  </span>
                 </div>
-                <span className="text-xs font-mono font-bold">{formatPYG(r.total)}</span>
+                <button
+                  type="button"
+                  onClick={() => setSortColumnIA(null)}
+                  className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-100 font-bold text-[11px] underline cursor-pointer flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" /> Quitar ordenamiento
+                </button>
               </div>
-            )) : (
-              <p className="text-sm text-gray-400 text-center py-4">Sin stock en transito</p>
+            )}
+
+            {loadingReplenishment ? (
+              <div className="flex flex-col items-center justify-center py-20 gap-3">
+                <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+                <p className="text-xs text-gray-400 font-medium">Analizando ventas reales, stock y factores de estacionalidad...</p>
+              </div>
+            ) : !replenishmentData || displayedReplenishmentItems.length === 0 ? (
+              <div className="p-12 text-center text-xs text-gray-400">
+                <Package className="w-8 h-8 mx-auto mb-2 opacity-40 text-indigo-500" />
+                No se encontraron productos con los filtros seleccionados.
+              </div>
+            ) : (
+              <div className="overflow-auto w-full max-h-[calc(100vh-230px)] min-h-[420px] rounded-2xl border border-slate-200 dark:border-slate-700/80 shadow-inner relative">
+                {(() => {
+                  const labels4m = (replenishmentData?.meses_labels && replenishmentData.meses_labels.length === 4)
+                    ? replenishmentData.meses_labels
+                    : ["M-4", "M-3", "M-2", "M-1"]
+                  const mesActualLabel = replenishmentData?.mes_actual_label || "Mes"
+
+                  const renderSortHeader = (
+                    col: IASortColumn,
+                    label: string,
+                    align: "left" | "center" | "right" = "left",
+                    title?: string,
+                    extraClass = ""
+                  ) => {
+                    const isSorted = sortColumnIA === col
+                    return (
+                      <th
+                        onClick={() => handleSortIA(col)}
+                        title={title || `Ordenar por ${label} (clic para alternar)`}
+                        className={`p-2.5 select-none cursor-pointer group transition-colors sticky top-0 z-30 bg-slate-100 dark:bg-slate-900 hover:bg-slate-200/90 dark:hover:bg-slate-800/90 ${
+                          isSorted ? "bg-indigo-100/90 dark:bg-indigo-950/90 text-indigo-700 dark:text-indigo-300" : ""
+                        } ${align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left"} ${extraClass}`}
+                      >
+                        <div className={`inline-flex items-center gap-1.5 ${
+                          align === "right" ? "justify-end w-full" : align === "center" ? "justify-center w-full" : "justify-start"
+                        }`}>
+                          <span>{label}</span>
+                          <span className={`inline-flex items-center transition-all ${
+                            isSorted ? "opacity-100 text-indigo-600 dark:text-indigo-400 scale-110" : "opacity-30 group-hover:opacity-80"
+                          }`}>
+                            {isSorted ? (
+                              sortDirectionIA === "asc" ? (
+                                <ArrowUp className="w-3.5 h-3.5 stroke-[2.5]" />
+                              ) : (
+                                <ArrowDown className="w-3.5 h-3.5 stroke-[2.5]" />
+                              )
+                            ) : (
+                              <ArrowUpDown className="w-3 h-3" />
+                            )}
+                          </span>
+                        </div>
+                      </th>
+                    )
+                  }
+
+                  return (
+                    <table className="w-full text-left text-xs min-w-[1450px]">
+                      <thead className="bg-slate-100 dark:bg-slate-900 text-gray-600 dark:text-gray-300 font-bold uppercase text-[10px] tracking-wider border-b-2 border-slate-200 dark:border-slate-700 sticky top-0 z-30 shadow-xs">
+                        <tr>
+                          <th className="p-3 w-10 text-center sticky top-0 z-30 bg-slate-100 dark:bg-slate-900">
+                            <input
+                              type="checkbox"
+                              checked={displayedReplenishmentItems.length > 0 && displayedReplenishmentItems.every((it: any) => selectedItemsIA[it.product_id])}
+                              onChange={(e) => {
+                                const checked = e.target.checked
+                                const newSel = { ...selectedItemsIA }
+                                displayedReplenishmentItems.forEach((it: any) => { newSel[it.product_id] = checked })
+                                setSelectedItemsIA(newSel)
+                              }}
+                              className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                            />
+                          </th>
+                          {renderSortHeader("producto", "Producto & SKU", "left", undefined, "min-w-[200px]")}
+                          {renderSortHeader("proveedor", "Último Proveedor", "left", "Último proveedor registrado para este producto", "min-w-[150px] max-w-[210px]")}
+                          {renderSortHeader("stock", "Stock Físico", "right", "Stock actual físico registrado en góndola/depósito")}
+                          {renderSortHeader("m4", labels4m[0], "right", `Ventas mensuales registradas en ${labels4m[0]}`, "font-mono")}
+                          {renderSortHeader("m3", labels4m[1], "right", `Ventas mensuales registradas en ${labels4m[1]}`, "font-mono")}
+                          {renderSortHeader("m2", labels4m[2], "right", `Ventas mensuales registradas en ${labels4m[2]}`, "font-mono")}
+                          {renderSortHeader("m1", labels4m[3], "right", `Ventas mensuales registradas en ${labels4m[3]}`, "font-mono font-bold text-indigo-700 dark:text-indigo-300")}
+                          {renderSortHeader("mes_actual", `${mesActualLabel} (En Curso)`, "right", `Ventas acumuladas en ${mesActualLabel} (mes en curso)`, "font-mono !bg-amber-100 dark:!bg-amber-950/80 text-amber-900 dark:text-amber-200 border-x-2 border-amber-300 dark:border-amber-700/80 font-black shadow-xs")}
+                          {renderSortHeader("pulso", "Pulso Venta", "center", "Tendencia / Pulso de Venta reciente", "min-w-[95px]")}
+                          {renderSortHeader("costo_ppp", "Costo PPP", "right", "Costo Promedio Ponderado de Inventario (PPP)", "min-w-[100px]")}
+                          {renderSortHeader("ultimo_costo", "Última Compra", "right", "Último Costo de Compra facturado por el proveedor", "min-w-[110px]")}
+                          {renderSortHeader("autonomia", "Autonomía", "center", "Días de stock restantes con stock físico real = Stock / Demanda Diaria")}
+                          {renderSortHeader("sugerencia", "Sugerencia IA", "center", "Cantidad óptima sugerida por la IA")}
+                          {renderSortHeader("pedido", "Tu Pedido (Un.)", "center", "Modificá esta cantidad libremente.", "min-w-[140px]")}
+                          {renderSortHeader("costo_unit", "Costo Unit. (Gs.)", "right", "Modificá el precio de compra acordado con el proveedor", "min-w-[125px]")}
+                          {renderSortHeader("subtotal", "Subtotal (Gs.)", "right", undefined, "min-w-[115px]")}
+                          <th className="p-3 min-w-[210px] sticky top-0 z-30 bg-slate-100 dark:bg-slate-900">Justificación & Alertas</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                        {displayedReplenishmentItems.map((it: any, idx: number) => {
+                          const isSelected = !!selectedItemsIA[it.product_id]
+                          const isEven = idx % 2 === 0
+                          const qty = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : Math.max(0, Math.round(Number(it.cantidad_sugerida) || 0))
+                          const unitCost = editedCosts[it.product_id] !== undefined ? editedCosts[it.product_id] : (Number(it.costo_unitario_estimado) || 0)
+                          const subtotal = Number(qty) * unitCost
+
+                          const stockActual = Number(it.stock_actual) || 0
+                          const demandaD = Number(it.demanda_diaria_ajustada) || 0
+                          const nuevaAutonomia = demandaD > 0 ? ((stockActual + Number(qty)) / demandaD) : 999
+
+                          return (
+                            <tr
+                              key={it.product_id}
+                              className={`transition-all duration-150 border-b border-slate-100 dark:border-slate-800/60 ${
+                                isSelected
+                                  ? "bg-indigo-50/80 dark:bg-indigo-950/40"
+                                  : it.autonomia_estado === "critico"
+                                  ? "bg-red-50/40 dark:bg-red-950/20"
+                                  : it.autonomia_estado === "bajo"
+                                  ? "bg-amber-50/30 dark:bg-amber-950/15"
+                                  : isEven
+                                  ? "bg-white dark:bg-slate-900"
+                                  : "bg-slate-100/60 dark:bg-slate-800/40"
+                              } hover:!bg-slate-200 dark:hover:!bg-slate-700 hover:shadow-md cursor-pointer`}
+                            >
+                              <td className="p-3 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={(e) => {
+                                    setSelectedItemsIA(prev => ({ ...prev, [it.product_id]: e.target.checked }))
+                                  }}
+                                  className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                />
+                              </td>
+                              <td className="p-3 min-w-[220px] max-w-[340px]">
+                                <div className="font-black text-sm text-slate-900 dark:text-white line-clamp-2 leading-snug tracking-tight" title={it.nombre}>
+                                  {it.nombre}
+                                </div>
+                                <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono flex items-center gap-1.5 mt-1 flex-wrap">
+                                  <span className="inline-flex items-center gap-1 font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 shadow-2xs" title={`Código de barras: ${it.codigo_barra || it.sku || "Sin código"}`}>
+                                    <Barcode className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                                    <span>{it.codigo_barra || it.sku || "—"}</span>
+                                  </span>
+                                  <span className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded text-[10px] font-bold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                                    {it.unidad_medida}
+                                  </span>
+                                  {it.punto_reorden !== undefined && (
+                                    <span className="px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-[10px] text-amber-700 dark:text-amber-300 font-bold border border-amber-200 dark:border-amber-800/50" title="Punto de Reorden (ROP)">
+                                      ROP: {Math.round(it.punto_reorden).toLocaleString()}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+
+                              {/* Último Proveedor Habitual */}
+                              <td className="p-2.5 min-w-[150px] max-w-[210px]">
+                                {it.ultimo_proveedor_nombre ? (
+                                  <div className="flex items-start gap-1.5 text-slate-700 dark:text-slate-200" title={`Último Proveedor: ${it.ultimo_proveedor_nombre}`}>
+                                    <Building2 className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" />
+                                    <span className="text-[11px] font-semibold leading-snug line-clamp-2 break-words">
+                                      {it.ultimo_proveedor_nombre}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] text-gray-400 italic">Sin asignar</span>
+                                )}
+                              </td>
+
+                              {/* Stock Físico */}
+                              <td className="p-3 text-right font-mono font-bold text-gray-800 dark:text-gray-200">
+                                {stockActual.toLocaleString()}
+                              </td>
+
+                              {/* Columnas de Ventas Históricas */}
+                              <td className="p-2.5 text-right font-mono text-gray-500 dark:text-gray-400">
+                                {Number(it.ventas_mes_4 || 0).toLocaleString()}
+                              </td>
+                              <td className="p-2.5 text-right font-mono text-gray-500 dark:text-gray-400">
+                                {Number(it.ventas_mes_3 || 0).toLocaleString()}
+                              </td>
+                              <td className="p-2.5 text-right font-mono text-gray-600 dark:text-gray-300 font-semibold">
+                                {Number(it.ventas_mes_2 || 0).toLocaleString()}
+                              </td>
+                              <td className="p-2.5 text-right font-mono text-slate-700 dark:text-slate-200 font-bold">
+                                {Number(it.ventas_mes_1 || 0).toLocaleString()}
+                              </td>
+                              {/* Columna destacada: Ventas del Mes en Curso */}
+                              <td
+                                className="p-2.5 text-right font-mono font-black text-amber-800 dark:text-amber-200 bg-amber-50/90 dark:bg-amber-950/40 border-x-2 border-amber-300/80 dark:border-amber-700/60 shadow-xs"
+                                title={`Ventas acumuladas en ${mesActualLabel} (mes en curso)`}
+                              >
+                                {Number(it.ventas_mes_actual || 0).toLocaleString()}
+                              </td>
+
+                              {/* Pulso de Venta */}
+                              <td className="p-2.5 text-center">
+                                {it.pulso_tendencia === "acelerando" ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800" title="Rotación acelerando (+25% vs meses previos)">
+                                    <TrendingUp className="w-3 h-3 text-emerald-600" /> Acelera
+                                  </span>
+                                ) : it.pulso_tendencia === "desacelerando" ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800" title="Demanda cayendo (-25% vs meses previos)">
+                                    <TrendingDown className="w-3 h-3 text-red-600" /> En baja
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                                    Estable
+                                  </span>
+                                )}
+                              </td>
+
+                              {/* Costo Promedio (PPP) */}
+                              <td className="p-2.5 text-right font-mono text-gray-600 dark:text-gray-300">
+                                {formatPYG(it.costo_promedio || 0)}
+                              </td>
+
+                              {/* Último Costo con indicador de variación */}
+                              <td className="p-2.5 text-right font-mono">
+                                <div className="font-bold text-gray-900 dark:text-white">
+                                  {formatPYG(it.ultimo_costo || it.costo_promedio || 0)}
+                                </div>
+                                {it.variacion_costo_pct !== undefined && Math.abs(it.variacion_costo_pct) > 0.5 && (
+                                  <span className={`text-[10px] font-extrabold inline-flex items-center gap-0.5 justify-end ${
+                                    it.variacion_costo_pct > 0 ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"
+                                  }`} title={`Variación vs Costo PPP: ${it.variacion_costo_pct > 0 ? '+' : ''}${it.variacion_costo_pct}%`}>
+                                    {it.variacion_costo_pct > 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                                    {Math.abs(it.variacion_costo_pct)}%
+                                  </span>
+                                )}
+                              </td>
+
+                              {/* Autonomía Actual */}
+                              <td className="p-3 text-center">
+                                <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[11px] font-bold font-mono border whitespace-nowrap ${
+                                  it.autonomia_estado === "critico"
+                                    ? "bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800/80"
+                                    : it.autonomia_estado === "bajo"
+                                    ? "bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/80"
+                                    : it.autonomia_estado === "optimo"
+                                    ? "bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/80"
+                                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700"
+                                }`}>
+                                  <span className={`w-1.5 h-1.5 rounded-full ${
+                                    it.autonomia_estado === "critico" ? "bg-red-500 animate-pulse" :
+                                    it.autonomia_estado === "bajo" ? "bg-amber-500" :
+                                    it.autonomia_estado === "optimo" ? "bg-emerald-500" : "bg-slate-400"
+                                  }`} />
+                                  <span>{Number(it.dias_stock_restantes) > 900 ? "Sin Venta" : `${Number(it.dias_stock_restantes).toFixed(1)}d`}</span>
+                                </span>
+                              </td>
+
+                              {/* Sugerencia IA */}
+                              <td className="p-3 text-center">
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                                  <Sparkles className="w-3 h-3 text-indigo-500" />
+                                  {Math.round(Number(it.cantidad_sugerida) || 0).toLocaleString()} un.
+                                </span>
+                              </td>
+
+                              {/* Tu Pedido (Un.) */}
+                              <td className="p-3 text-center">
+                                <div className="flex items-center justify-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const cur = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : Math.round(Number(it.cantidad_sugerida) || 0)
+                                      const nxt = Math.max(0, cur - 1)
+                                      setEditedQuantities(prev => ({ ...prev, [it.product_id]: nxt }))
+                                      if (nxt > 0) setSelectedItemsIA(prev => ({ ...prev, [it.product_id]: true }))
+                                    }}
+                                    className="w-6 h-6 rounded bg-slate-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-slate-200 flex items-center justify-center font-bold text-xs"
+                                  >
+                                    -
+                                  </button>
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    min={0}
+                                    value={qty}
+                                    onChange={(e) => {
+                                      const val = Math.max(0, Number(e.target.value))
+                                      setEditedQuantities(prev => ({ ...prev, [it.product_id]: val }))
+                                      if (val > 0) setSelectedItemsIA(prev => ({ ...prev, [it.product_id]: true }))
+                                    }}
+                                    className="w-20 p-1 text-center font-mono font-black text-xs input-field bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-700"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const cur = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : Math.round(Number(it.cantidad_sugerida) || 0)
+                                      const nxt = cur + 1
+                                      setEditedQuantities(prev => ({ ...prev, [it.product_id]: nxt }))
+                                      setSelectedItemsIA(prev => ({ ...prev, [it.product_id]: true }))
+                                    }}
+                                    className="w-6 h-6 rounded bg-slate-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-slate-200 flex items-center justify-center font-bold text-xs"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </td>
+
+                              {/* Costo Unitario EDITABLE */}
+                              <td className="p-3 text-right">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={50}
+                                  value={unitCost}
+                                  onChange={(e) => {
+                                    const val = Math.max(0, Number(e.target.value))
+                                    setEditedCosts(prev => ({ ...prev, [it.product_id]: val }))
+                                    if (Number(qty) > 0) setSelectedItemsIA(prev => ({ ...prev, [it.product_id]: true }))
+                                  }}
+                                  className="w-28 p-1 text-right font-mono font-bold text-xs input-field bg-white dark:bg-slate-900 border-indigo-300 dark:border-indigo-700 text-indigo-900 dark:text-indigo-200 focus:ring-1 focus:ring-indigo-500"
+                                  title="Precio de compra negociado para la orden de compra"
+                                />
+                              </td>
+
+                              {/* Subtotal */}
+                              <td className="p-3 text-right font-mono font-extrabold text-gray-900 dark:text-white">
+                                {formatPYG(subtotal)}
+                              </td>
+
+                              {/* Justificación IA y Alertas de Promos */}
+                              <td className="p-3 text-[11px] text-gray-500 dark:text-gray-400">
+                                {it.tiene_promocion_detectada && (
+                                  <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-[10px] font-bold text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 mb-1" title={it.promocion_info || "Promoción detectada"}>
+                                    <Flame className="w-3 h-3 text-amber-500 shrink-0" />
+                                    <span>Promo Pasada Detectada</span>
+                                  </div>
+                                )}
+                                <div className="line-clamp-2" title={it.explicacion_ia}>
+                                  {it.explicacion_ia}
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  )
+                })()}
+              </div>
             )}
           </div>
-        </Widget>
-      </div>
-    </div>
-  )
-}
-
-function OrdenesTab({ purchaseOrders, filteredPOs, poSearch, setPoSearch, poStatusFilter, setPoStatusFilter, poSupplierFilter, setPoSupplierFilter, poDateFrom, setPoDateFrom, poDateTo, setPoDateTo, suppliers, loading, onConfirm, onCancel, onChangeStatus, onViewDetail }: {
-  purchaseOrders: PurchaseOrder[]; filteredPOs: PurchaseOrder[]; poSearch: string; setPoSearch: (v: string) => void; poStatusFilter: string; setPoStatusFilter: (v: string) => void; poSupplierFilter: string; setPoSupplierFilter: (v: string) => void; poDateFrom: string; setPoDateFrom: (v: string) => void; poDateTo: string; setPoDateTo: (v: string) => void; suppliers: Supplier[]; loading: boolean; onConfirm: (po: PurchaseOrder) => void; onCancel: (po: PurchaseOrder) => void; onChangeStatus: (po: PurchaseOrder, s: string) => void; onViewDetail: (po: PurchaseOrder) => void
-}) {
-  const total = purchaseOrders.length
-  const borrador = purchaseOrders.filter(p => p.estado === "borrador").length
-  const confirmadas = purchaseOrders.filter(p => p.estado === "confirmado").length
-  const enviadas = purchaseOrders.filter(p => p.estado === "enviado").length
-  const completadas = purchaseOrders.filter(p => p.estado === "completado").length
-  const canceladas = purchaseOrders.filter(p => p.estado === "cancelado").length
-
-  return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <div className="card p-3"><p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Total</p><p className="text-lg font-bold">{total}</p></div>
-        <div className="card p-3"><p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Borrador</p><p className="text-lg font-bold text-gray-500">{borrador}</p></div>
-        <div className="card p-3"><p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Confirmadas</p><p className="text-lg font-bold text-blue-500">{confirmadas}</p></div>
-        <div className="card p-3"><p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Enviadas</p><p className="text-lg font-bold text-indigo-500">{enviadas}</p></div>
-        <div className="card p-3"><p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Completadas</p><p className="text-lg font-bold text-green-500">{completadas}</p></div>
-        <div className="card p-3"><p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Canceladas</p><p className="text-lg font-bold text-red-500">{canceladas}</p></div>
-      </div>
-
-      <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input className="input-field pl-10" placeholder="Buscar por numero o proveedor..." value={poSearch} onChange={(e) => setPoSearch(e.target.value)} />
         </div>
-        <select className="input-field w-36" value={poStatusFilter} onChange={(e) => setPoStatusFilter(e.target.value)}>
-          <option value="">Todos los estados</option>
-          {["borrador", "confirmado", "enviado", "parcial", "completado", "cancelado"].map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <select className="input-field w-44" value={poSupplierFilter} onChange={(e) => setPoSupplierFilter(e.target.value)}>
-          <option value="">Todos los proveedores</option>
-          {suppliers.map(s => <option key={s.id} value={s.id}>{s.razon_social}</option>)}
-        </select>
-        <input type="date" className="input-field w-32" value={poDateFrom} onChange={(e) => setPoDateFrom(e.target.value)} />
-        <input type="date" className="input-field w-32" value={poDateTo} onChange={(e) => setPoDateTo(e.target.value)} />
-        {(poSearch || poStatusFilter || poSupplierFilter || poDateFrom || poDateTo) && (
-          <button className="btn-ghost text-red-500" onClick={() => { setPoSearch(""); setPoStatusFilter(""); setPoSupplierFilter(""); setPoDateFrom(""); setPoDateTo("") }}><X className="w-4 h-4" /></button>
-        )}
-      </div>
+      )}
 
-      <div className="card overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="table-header">
-              <th className="table-cell">Numero</th>
-              <th className="table-cell">Proveedor</th>
-              <th className="table-cell text-right">Total</th>
-              <th className="table-cell">Estado</th>
-              <th className="table-cell">Prioridad</th>
-              <th className="table-cell">Fecha</th>
-              <th className="table-cell">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={7} className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></td></tr>
-            ) : filteredPOs.length === 0 ? (
-              <tr><td colSpan={7} className="text-center py-12 text-gray-400">No se encontraron ordenes</td></tr>
-            ) : filteredPOs.map(po => (
-              <tr key={po.id} className="table-row">
-                <td className="table-td font-mono text-xs font-bold text-primary">{po.numero}</td>
-                <td className="table-td"><p className="text-sm font-medium">{po.supplier?.razon_social || "-"}</p></td>
-                <td className="table-td text-right font-mono font-bold">{formatCurrency(po.total || 0, po.moneda)}</td>
-                <td className="table-td"><StatusBadge status={po.estado ?? ""} map={poStatusMap} /></td>
-                <td className="table-td"><span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold capitalize badge-info">Normal</span></td>
-                <td className="table-td text-sm text-gray-500">{formatDate(po.fecha)}</td>
-                <td className="table-td">
-                  <div className="flex items-center gap-1">
-                    <button className="btn-ghost" title="Ver detalle" onClick={() => onViewDetail(po)}><Eye className="w-4 h-4" /></button>
-                    {po.estado === "borrador" && (<>
-                      <button className="btn-ghost text-green-500" title="Confirmar" onClick={() => onConfirm(po)}><Check className="w-4 h-4" /></button>
-                      <button className="btn-ghost text-red-400" title="Cancelar" onClick={() => onCancel(po)}><Ban className="w-4 h-4" /></button>
-                    </>)}
-                    {po.estado === "confirmado" && (<>
-                      <button className="btn-ghost text-indigo-500" title="Enviar" onClick={() => onChangeStatus(po, "enviado")}><Send className="w-4 h-4" /></button>
-                      <button className="btn-ghost text-red-400" title="Cancelar" onClick={() => onCancel(po)}><Ban className="w-4 h-4" /></button>
-                    </>)}
-                    {po.estado === "enviado" && <button className="btn-ghost text-green-500" title="Recibir parcial" onClick={() => onChangeStatus(po, "parcial")}><Package className="w-4 h-4" /></button>}
-                    {po.estado === "parcial" && <button className="btn-ghost text-green-500" title="Completar" onClick={() => onChangeStatus(po, "completado")}><Check className="w-4 h-4" /></button>}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
+      {/* ──────────────────────────────────────────────────────────────────────────
+          TAB 2: ÓRDENES DE COMPRA (OC) - CONECTADAS A 4.447 OC DE NEMUHA
+      ────────────────────────────────────────────────────────────────────────── */}
+      {tab === "ordenes" && (
+        <div className="space-y-5">
+          <div className="card p-4 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3 flex-1">
+              <div className="relative w-full sm:w-64">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Buscar por N° orden o proveedor..."
+                  value={searchPO}
+                  onChange={(e) => { setSearchPO(e.target.value); setPagePO(1); }}
+                  className="input-field pl-9 w-full text-xs"
+                />
+              </div>
 
-function RecepcionesTab({ receipts, loading, onNewReceipt }: { receipts: PurchaseReceipt[]; loading: boolean; onNewReceipt: () => void }) {
-  const total = receipts.length
-  const pendientesQC = receipts.filter(r => !r.order_id).length
-  const completadas = receipts.length
-  const totalUnits = receipts.reduce((a, b) => a + Math.round((b.total || 0) / 10000), 0)
+              <select
+                value={filterPOStatus}
+                onChange={(e) => { setFilterPOStatus(e.target.value); setPagePO(1); }}
+                className="input-field text-xs w-44"
+              >
+                <option value="todos">Todos los Estados</option>
+                <option value="borrador">Borrador</option>
+                <option value="confirmado">Confirmada</option>
+                <option value="enviada">Enviada a Proveedor</option>
+                <option value="parcial">Entrega Parcial</option>
+                <option value="completado">Completada</option>
+                <option value="cancelado">Cancelada</option>
+              </select>
 
-  return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="card p-3"><p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Total recepciones</p><p className="text-lg font-bold">{total}</p></div>
-        <div className="card p-3"><p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Pendientes QC</p><p className="text-lg font-bold text-amber-500">{pendientesQC}</p></div>
-        <div className="card p-3"><p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Completadas</p><p className="text-lg font-bold text-green-500">{completadas}</p></div>
-        <div className="card p-3"><p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Productos recibidos</p><p className="text-lg font-bold text-primary">{totalUnits.toLocaleString()}</p></div>
-      </div>
-
-      <div className="flex justify-end">
-        <button className="btn-primary" onClick={onNewReceipt}><Plus className="w-4 h-4" />Nueva recepcion</button>
-      </div>
-
-      <div className="card overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="table-header">
-              <th className="table-cell">Numero</th>
-              <th className="table-cell">PO origen</th>
-              <th className="table-cell">Proveedor</th>
-              <th className="table-cell">Fecha</th>
-              <th className="table-cell text-right">Total</th>
-              <th className="table-cell">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={6} className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></td></tr>
-            ) : receipts.length === 0 ? (
-              <tr><td colSpan={6} className="text-center py-12 text-gray-400">No hay recepciones registradas</td></tr>
-            ) : receipts.map(r => (
-              <tr key={r.id} className="table-row">
-                <td className="table-td font-mono text-xs font-bold text-primary">{r.numero}</td>
-                <td className="table-td text-sm">{r.order_id ? <span className="font-mono text-xs text-primary">PO vinculada</span> : <span className="text-xs text-gray-400">Directa</span>}</td>
-                <td className="table-td font-medium">{r.supplier?.razon_social || "-"}</td>
-                <td className="table-td text-sm text-gray-500">{formatDate(r.fecha)}</td>
-                <td className="table-td text-right font-mono font-bold">{formatPYG(r.total)}</td>
-                <td className="table-td"><button className="btn-ghost"><Eye className="w-4 h-4" /></button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
-
-function ProveedoresTab({ suppliers, filteredSuppliers, supplierSearch, setSupplierSearch, supplierFilter, setSupplierFilter, proveedorTab, setProveedorTab, onNewSupplier, onEditSupplier, onToggleSupplier, contracts, evals, onNewContract, onNewEval }: {
-  suppliers: Supplier[]; filteredSuppliers: Supplier[]; supplierSearch: string; setSupplierSearch: (v: string) => void; supplierFilter: SupplierStatus; setSupplierFilter: (v: SupplierStatus) => void; proveedorTab: SubTab; setProveedorTab: (v: SubTab) => void; onNewSupplier: () => void; onEditSupplier: (s: Supplier) => void; onToggleSupplier: (s: Supplier) => void; contracts: ContractItem[]; evals: SupplierEval[]; onNewContract: () => void; onNewEval: () => void
-}) {
-  const activos = suppliers.filter(s => s.activo).length
-  const conContrato = contracts.filter(c => c.activo).length
-  const avgRating = evals.length > 0 ? (evals.reduce((a, b) => a + b.total, 0) / evals.length) : 0
-
-  return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <KPICard icon={Users} label="Total proveedores" value={suppliers.length} color="blue" />
-        <KPICard icon={CheckCircle} label="Activos" value={activos} color="green" />
-        <KPICard icon={FileText} label="Con contrato" value={conContrato} color="purple" />
-        <KPICard icon={Star} label="Rating promedio" value={avgRating.toFixed(1)} color="amber" />
-      </div>
-
-      <div className="flex items-center justify-between">
-        <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
-          {(["lista", "contratos", "evaluaciones"] as SubTab[]).map(st => (
-            <button key={st} onClick={() => setProveedorTab(st)}
-              className={"px-3 py-1.5 rounded-lg text-xs font-bold transition-all " + (proveedorTab === st ? "bg-white dark:bg-slate-700 shadow-sm text-gray-900 dark:text-white" : "text-gray-500 hover:text-gray-700")}>{st.charAt(0).toUpperCase() + st.slice(1)}</button>
-          ))}
-        </div>
-        {proveedorTab === "lista" && <button className="btn-primary" onClick={onNewSupplier}><UserPlus className="w-4 h-4" />Nuevo proveedor</button>}
-        {proveedorTab === "contratos" && <button className="btn-primary" onClick={onNewContract}><Plus className="w-4 h-4" />Nuevo contrato</button>}
-        {proveedorTab === "evaluaciones" && <button className="btn-primary" onClick={onNewEval}><Star className="w-4 h-4" />Evaluar</button>}
-      </div>
-
-      {proveedorTab === "lista" && (
-        <>
-          <div className="flex gap-3 flex-wrap">
-            <div className="relative flex-1 min-w-[200px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input className="input-field pl-10" placeholder="Buscar por nombre o RUC..." value={supplierSearch} onChange={(e) => setSupplierSearch(e.target.value)} />
-            </div>
-            <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
-              {(["todos", "activos", "inactivos"] as SupplierStatus[]).map(f => (
-                <button key={f} onClick={() => setSupplierFilter(f)}
-                  className={"px-3 py-1.5 rounded-lg text-xs font-bold transition-all " + (supplierFilter === f ? "bg-white dark:bg-slate-700 shadow-sm" : "text-gray-500")}>{f.charAt(0).toUpperCase() + f.slice(1)}</button>
-              ))}
-            </div>
-          </div>
-
-          <div className="card overflow-hidden">
-            <table className="w-full">
-              <thead><tr className="table-header">
-                <th className="table-cell">Razon social</th>
-                <th className="table-cell">RUC</th>
-                <th className="table-cell">Telefono</th>
-                <th className="table-cell">Email</th>
-                <th className="table-cell">Activo</th>
-                <th className="table-cell">Acciones</th>
-              </tr></thead>
-              <tbody>
-                {filteredSuppliers.length === 0 ? (
-                  <tr><td colSpan={6} className="text-center py-12 text-gray-400">No se encontraron proveedores</td></tr>
-                ) : filteredSuppliers.map(s => (
-                  <tr key={s.id} className="table-row">
-                    <td className="table-td font-medium">{s.razon_social}</td>
-                    <td className="table-td font-mono text-xs">{s.ruc || "-"}</td>
-                    <td className="table-td text-sm">{s.telefono || "-"}</td>
-                    <td className="table-td text-sm">{s.email || "-"}</td>
-                    <td className="table-td"><StatusBadge status={s.activo ? "activo" : "inactivo"} /></td>
-                    <td className="table-td">
-                      <div className="flex gap-1">
-                        <button className="btn-ghost" onClick={() => onEditSupplier(s)} title="Editar"><Edit3 className="w-4 h-4" /></button>
-                        <button className={"btn-ghost " + (s.activo ? "text-red-400" : "text-green-500")} onClick={() => onToggleSupplier(s)}>{s.activo ? <X className="w-4 h-4" /> : <Check className="w-4 h-4" />}</button>
-                      </div>
-                    </td>
-                  </tr>
+              <select
+                value={filterPOSupplier}
+                onChange={(e) => { setFilterPOSupplier(e.target.value); setPagePO(1); }}
+                className="input-field text-xs w-52"
+              >
+                <option value="">Todos los Proveedores</option>
+                {suppliers.map(s => (
+                  <option key={s.id} value={s.id}>{s.razon_social}</option>
                 ))}
-              </tbody>
-            </table>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleExportOrdersToExcel}
+                className="btn-secondary text-xs flex items-center gap-1.5 px-3 py-2 shrink-0 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 font-bold"
+                title="Descargar listado filtrado de órdenes de compra en formato .xlsx"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-600" /> Exportar a Excel
+              </button>
+              <button
+                onClick={handleOpenManualPOModal}
+                className="btn-primary text-xs flex items-center gap-1.5 px-3.5 py-2 shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
+              >
+                <Plus className="w-4 h-4" /> Crear Orden Manual
+              </button>
+              <button
+                onClick={() => setTab("asistente_ia")}
+                className="btn-secondary text-xs flex items-center gap-1.5 px-3.5 py-2 shrink-0"
+              >
+                <Sparkles className="w-4 h-4 text-amber-500" /> Con Asistente IA
+              </button>
+            </div>
           </div>
-        </>
-      )}
 
-      {proveedorTab === "contratos" && (
-        <div className="card overflow-hidden">
-          <table className="w-full">
-            <thead><tr className="table-header">
-              <th className="table-cell">Numero</th>
-              <th className="table-cell">Nombre</th>
-              <th className="table-cell">Proveedor</th>
-              <th className="table-cell">Inicio</th>
-              <th className="table-cell">Fin</th>
-              <th className="table-cell text-right">Monto</th>
-              <th className="table-cell">Activo</th>
-            </tr></thead>
-            <tbody>
-              {contracts.length === 0 ? (
-                <tr><td colSpan={8} className="text-center py-12 text-gray-400">Sin contratos registrados</td></tr>
-              ) : contracts.map(c => (
-                <tr key={c.id} className="table-row">
-                  <td className="table-td font-mono text-xs font-bold text-primary">{c.numero}</td>
-                  <td className="table-td font-medium">{c.nombre}</td>
-                  <td className="table-td">{c.proveedor}</td>
-                  <td className="table-td text-sm">{formatDate(c.fecha_inicio)}</td>
-                  <td className="table-td text-sm">{formatDate(c.fecha_fin)}</td>
-                  <td className="table-td text-right font-mono font-bold">{formatPYG(c.monto)}</td>
-                  <td className="table-td"><StatusBadge status={c.activo ? "activo" : "inactivo"} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="card overflow-hidden bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm">
+            {paginatedOrders.length === 0 ? (
+              <div className="p-12 text-center text-xs text-gray-400">
+                <ShoppingCart className="w-8 h-8 mx-auto mb-2 opacity-40 text-indigo-500" />
+                No se encontraron órdenes de compra con los filtros especificados.
+              </div>
+            ) : (
+              <div className="overflow-x-auto w-full">
+                <table className="w-full text-left text-xs min-w-[850px]">
+                  <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700/60">
+                    <tr>
+                      <th className="p-3">N° Orden</th>
+                      <th className="p-3">Proveedor</th>
+                      <th className="p-3">Fecha Emisión</th>
+                      <th className="p-3">Entrega Esperada</th>
+                      <th className="p-3">Estado</th>
+                      <th className="p-3 text-right">Subtotal</th>
+                      <th className="p-3 text-right">Total IVA</th>
+                      <th className="p-3 text-right">Total (Gs.)</th>
+                      <th className="p-3 text-center">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                    {paginatedOrders.map((po, idx) => {
+                      const st = (po.estado && poStatusMap[po.estado]) ? poStatusMap[po.estado] : { label: po.estado || "Borrador", bg: "bg-slate-100", text: "text-slate-600" }
+                      const isEven = idx % 2 === 0
+                      return (
+                        <tr
+                          key={po.id}
+                          className={`transition-colors duration-150 border-b border-slate-100 dark:border-slate-800/60 ${
+                            isEven ? "bg-white dark:bg-slate-900" : "bg-slate-100/60 dark:bg-slate-800/40"
+                          } hover:!bg-slate-200 dark:hover:!bg-slate-700 hover:shadow-sm`}
+                        >
+                          <td className="p-3 font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                            {po.numero}
+                          </td>
+                          <td className="p-3">
+                            <div className="font-bold text-gray-900 dark:text-white line-clamp-1" title={po.supplier?.razon_social}>
+                              {po.supplier?.razon_social || "Proveedor sin asignar"}
+                            </div>
+                            <div className="text-[11px] text-gray-400">
+                              {po.supplier?.ruc ? `RUC: ${po.supplier.ruc}` : ""}
+                            </div>
+                          </td>
+                          <td className="p-3 text-gray-500">
+                            {po.fecha ? formatDate(po.fecha) : formatDate(po.created_at || "")}
+                          </td>
+                          <td className="p-3 font-mono text-gray-700 dark:text-gray-300">
+                            {po.fecha_entrega_estimada ? formatDate(po.fecha_entrega_estimada) : "—"}
+                          </td>
+                          <td className="p-3">
+                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${st.bg} ${st.text}`}>
+                              {st.label}
+                            </span>
+                          </td>
+                          <td className="p-3 text-right font-mono text-gray-600 dark:text-gray-300">
+                            {formatPYG(po.subtotal || 0)}
+                          </td>
+                          <td className="p-3 text-right font-mono text-gray-500">
+                            {formatPYG((Number(po.iva_10 || 0) + Number(po.iva_5 || 0)))}
+                          </td>
+                          <td className="p-3 text-right font-mono font-extrabold text-gray-900 dark:text-white">
+                            {formatPYG(po.total || 0)}
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                onClick={() => handleViewPO(po)}
+                                className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-400 hover:bg-indigo-100 transition-colors flex items-center gap-1"
+                                title="Reporte Premium / Vista Oficial A4"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                              </button>
+
+                              {["borrador", "confirmado", "enviada", "enviado"].includes(po.estado || "") && po.id && (
+                                <button
+                                  onClick={() => handleEditPO(po)}
+                                  className="p-1.5 rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400 hover:bg-blue-100 transition-colors"
+                                  title="Modificar Orden de Compra"
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+
+                              <button
+                                onClick={() => handleDownloadPOAsPdf(po)}
+                                className="p-1.5 rounded-lg bg-red-50 text-red-600 dark:bg-red-950/50 dark:text-red-400 hover:bg-red-100 transition-colors"
+                                title="Descargar PDF Oficial"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                              </button>
+
+                              <button
+                                onClick={async () => {
+                                  if (!po.id) return
+                                  try {
+                                    const items = await api.purchases.getOrderItems(po.id)
+                                    handleExportSinglePOToExcel(po, items || [])
+                                  } catch (e: any) {
+                                    toast.error("Error al obtener ítems", e.message)
+                                  }
+                                }}
+                                className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400 hover:bg-emerald-100 transition-colors"
+                                title="Descargar Planilla Excel (.xlsx)"
+                              >
+                                <FileSpreadsheet className="w-3.5 h-3.5" />
+                              </button>
+
+                              {po.estado === "borrador" && po.id && (
+                                <button
+                                  onClick={() => handleConfirmPO(po.id!)}
+                                  className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors font-bold text-[10px] flex items-center gap-1"
+                                  title="Confirmar Orden"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+
+                              {po.estado === "confirmado" && po.id && (
+                                <button
+                                  onClick={() => handleSendPO(po.id!)}
+                                  className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors font-bold text-[10px] flex items-center gap-1"
+                                  title="Enviar a Proveedor"
+                                >
+                                  <Send className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+
+                              {["confirmado", "enviada", "enviado", "parcial"].includes(po.estado || "") && (
+                                <button
+                                  onClick={() => handleOpenReceiptModal(po)}
+                                  className="p-1.5 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors font-bold text-[10px] flex items-center gap-1"
+                                  title="Recibir en Muelle"
+                                >
+                                  <Truck className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+
+                              {["confirmado", "enviada", "enviado", "parcial"].includes(po.estado || "") && (
+                                <button
+                                  onClick={() => handleOpenReceiveInvoiceModal(po)}
+                                  className="p-1.5 rounded-lg bg-teal-50 text-teal-600 dark:bg-teal-950/50 dark:text-teal-400 hover:bg-teal-100 transition-colors font-bold text-[10px] flex items-center gap-1"
+                                  title="Recibir Factura y Validar Match con Pedido"
+                                >
+                                  <Receipt className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+
+                              {po.estado === "borrador" && po.id && (
+                                <button
+                                  onClick={() => handleCancelPO(po.id!)}
+                                  className="p-1.5 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors"
+                                  title="Cancelar Orden"
+                                >
+                                  <Ban className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+
+                              {po.id && (
+                                <button
+                                  onClick={() => { setPoToDelete(po); setForceDeletePO(false); }}
+                                  className="p-1.5 rounded-lg bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors"
+                                  title="Eliminar Orden de Compra"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Paginador */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-t border-slate-200 dark:border-slate-700/60 flex items-center justify-between text-xs">
+              <span className="text-gray-500 font-mono">
+                Mostrando {(pagePO - 1) * pageSizePO + 1} a {Math.min(pagePO * pageSizePO, filteredOrders.length)} de <strong>{filteredOrders.length}</strong> órdenes
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  disabled={pagePO <= 1}
+                  onClick={() => setPagePO(p => Math.max(1, p - 1))}
+                  className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="font-bold text-gray-700 dark:text-gray-300 font-mono">
+                  Página {pagePO} de {totalPagesPO}
+                </span>
+                <button
+                  disabled={pagePO >= totalPagesPO}
+                  onClick={() => setPagePO(p => Math.min(totalPagesPO, p + 1))}
+                  className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
-      {proveedorTab === "evaluaciones" && (
-        <div className="card overflow-hidden">
-          <table className="w-full">
-            <thead><tr className="table-header">
-              <th className="table-cell">Proveedor</th>
-              <th className="table-cell">Fecha</th>
-              <th className="table-cell text-center">Calidad</th>
-              <th className="table-cell text-center">Entrega</th>
-              <th className="table-cell text-center">Precio</th>
-              <th className="table-cell text-center">Promedio</th>
-            </tr></thead>
-            <tbody>
-              {evals.length === 0 ? (
-                <tr><td colSpan={7} className="text-center py-12 text-gray-400">Sin evaluaciones</td></tr>
-              ) : evals.map(e => (
-                <tr key={e.id} className="table-row">
-                  <td className="table-td font-medium">{e.proveedor}</td>
-                  <td className="table-td text-sm">{formatDate(e.fecha)}</td>
-                  <td className="table-td text-center"><span className={"inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold " + (e.calidad >= 8 ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : e.calidad >= 5 ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400")}>{e.calidad}</span></td>
-                  <td className="table-td text-center"><span className={"inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold " + (e.entrega >= 8 ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : e.entrega >= 5 ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400")}>{e.entrega}</span></td>
-                  <td className="table-td text-center"><span className={"inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold " + (e.precio >= 8 ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : e.precio >= 5 ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400")}>{e.precio}</span></td>
-                  <td className="table-td text-center"><span className="font-bold">{e.total.toFixed(1)}</span></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* ──────────────────────────────────────────────────────────────────────────
+          TAB 3: RECEPCIÓN EN MUELLE
+      ────────────────────────────────────────────────────────────────────────── */}
+      {tab === "recepciones" && (
+        <div className="space-y-5">
+          {lastReceiptForLabels && (
+            <div className="card p-4 bg-indigo-50 dark:bg-indigo-950/30 border-indigo-200 dark:border-indigo-800 flex items-center justify-between gap-3">
+              <span className="text-xs font-bold text-indigo-800 dark:text-indigo-300">
+                Recepción {lastReceiptForLabels.numero} registrada -- ¿imprimir las etiquetas de los productos recibidos?
+              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => navigate(`/etiquetas?receipt_id=${lastReceiptForLabels.id}`)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer"
+                >
+                  Imprimir Etiquetas de esta Recepción
+                </button>
+                <button onClick={() => setLastReceiptForLabels(null)} className="text-xs text-indigo-500 hover:text-indigo-700 cursor-pointer">✕</button>
+              </div>
+            </div>
+          )}
+          <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <Truck className="w-5 h-5 text-indigo-500" />
+                Control de Recepción Física en Muelle & Lotes
+              </h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                Historial de remisiones descargadas, verificación contra la orden de compra y control de vencimientos.
+              </p>
+            </div>
+            <button
+              onClick={() => handleOpenReceiptModal()}
+              className="btn-primary text-xs flex items-center gap-2 px-4 py-2 shrink-0 shadow-sm"
+            >
+              <Plus className="w-4 h-4" /> Nueva Recepción
+            </button>
+          </div>
+
+          <div className="card overflow-hidden bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm">
+            {receipts.length === 0 ? (
+              <div className="p-12 text-center text-xs text-gray-400">
+                <Truck className="w-8 h-8 mx-auto mb-2 opacity-40 text-indigo-500" />
+                No hay recepciones físicas registradas aún.
+              </div>
+            ) : (
+              <div className="overflow-x-auto w-full">
+                <table className="w-full text-left text-xs min-w-[800px]">
+                  <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700/60">
+                    <tr>
+                      <th className="p-3">N° Recepción</th>
+                      <th className="p-3">Proveedor</th>
+                      <th className="p-3">N° Orden Compra</th>
+                      <th className="p-3">Fecha Recepción</th>
+                      <th className="p-3">N° Remisión / Factura</th>
+                      <th className="p-3">Estado</th>
+                      <th className="p-3 text-right">Total Recibido</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                    {receipts.map((r) => (
+                      <tr key={r.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/30 transition-colors">
+                        <td className="p-3 font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                          {r.numero || r.id.slice(0, 8)}
+                        </td>
+                        <td className="p-3 font-bold text-gray-900 dark:text-white">
+                          {r.supplier?.razon_social || r.orden?.supplier?.razon_social || "Proveedor"}
+                        </td>
+                        <td className="p-3 font-mono text-gray-700 dark:text-gray-300">
+                          {r.orden?.numero || "—"}
+                        </td>
+                        <td className="p-3 text-gray-500">
+                          {r.fecha ? formatDate(r.fecha) : formatDate(r.created_at || "")}
+                        </td>
+                        <td className="p-3 font-mono text-gray-600 dark:text-gray-300">
+                          {r.proveedor_ref || "—"}
+                        </td>
+                        <td className="p-3">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                            {r.estado || "recibido"}
+                          </span>
+                        </td>
+                        <td className="p-3 text-right font-mono font-extrabold text-gray-900 dark:text-white">
+                          {formatPYG(r.total || 0)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
-    </div>
-  )
-}
 
-function SugerenciasTab({ suggestions, generating, onGenerate, onApply, onDiscard }: {
-  suggestions: Suggestion[]; generating: boolean; onGenerate: () => void; onApply: (s: Suggestion) => void; onDiscard: (s: Suggestion) => void
-}) {
-  const pendientes = suggestions.filter(s => s.estado === "pendiente").length
-  const aplicadas = suggestions.filter(s => s.estado === "aplicada").length
-  const descartadas = suggestions.filter(s => s.estado === "descartada").length
-  const ahorroPotencial = suggestions.filter(s => s.estado === "pendiente").reduce((a, b) => a + b.total_estimado, 0)
-
-  return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <KPICard icon={TrendingUp} label="Sugerencias pendientes" value={pendientes} color="amber" />
-        <KPICard icon={CheckCircle} label="Aplicadas" value={aplicadas} color="green" />
-        <KPICard icon={X} label="Descartadas" value={descartadas} color="red" />
-        <KPICard icon={DollarSign} label="Ahorro potencial" value={formatPYG(ahorroPotencial)} color="primary" />
-      </div>
-
-      <div className="flex justify-end">
-        <button className="btn-primary" onClick={onGenerate} disabled={generating}>
-          {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />}
-          {generating ? "Generando..." : "Generar sugerencias"}
-        </button>
-      </div>
-
-      <div className="card overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="table-header">
-              <th className="table-cell">Producto</th>
-              <th className="table-cell text-right">Stock</th>
-              <th className="table-cell text-right">Seguridad</th>
-              <th className="table-cell text-right">Demanda</th>
-              <th className="table-cell text-right">Cobertura</th>
-              <th className="table-cell text-right">Sugerido</th>
-              <th className="table-cell text-right">Total</th>
-              <th className="table-cell">Proveedor</th>
-              <th className="table-cell">Urgencia</th>
-              <th className="table-cell">Confianza</th>
-              <th className="table-cell">Estado</th>
-              <th className="table-cell">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {suggestions.length === 0 ? (
-              <tr><td colSpan={12} className="text-center py-12 text-gray-400">Genera sugerencias para ver resultados</td></tr>
-            ) : suggestions.map(s => (
-              <tr key={s.id} className="table-row">
-                <td className="table-td"><p className="text-sm font-medium">{s.product_name}</p><p className="text-xs text-gray-400 font-mono">{s.sku}</p></td>
-                <td className="table-td text-right">{s.stock_actual}</td>
-                <td className="table-td text-right text-amber-500">{s.stock_seguridad}</td>
-                <td className="table-td text-right">{s.demanda_diaria.toFixed(1)}/d</td>
-                <td className="table-td text-right">{s.dias_cobertura.toFixed(1)}d</td>
-                <td className="table-td text-right font-bold">{s.cantidad_sugerida > 0 ? s.cantidad_sugerida : "-"}</td>
-                <td className="table-td text-right font-mono font-bold">{formatPYG(s.total_estimado)}</td>
-                <td className="table-td text-sm">{s.proveedor_sugerido}</td>
-                <td className="table-td"><StatusBadge status={s.urgencia} map={urgencyMap} /></td>
-                <td className="table-td">
-                  <div className="bg-gray-100 dark:bg-gray-700 rounded-full h-2 w-16 overflow-hidden">
-                    <div className="h-full rounded-full bg-primary" style={{ width: s.confianza + "%" }} />
+      {/* ──────────────────────────────────────────────────────────────────────────
+          TAB: FACTURAS DE PROVEEDORES (PROCURE-TO-PAY)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {tab === "facturas_p2p" && (
+        <div className="space-y-5">
+          {/* BANNER DE INGESTA AUTOMÁTICA DE FACTURAS ELECTRÓNICAS SIFEN */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* Panel de Conexión de Correo IMAP (cPanel) */}
+            <div className="card p-4 bg-gradient-to-br from-indigo-900/10 via-white dark:via-slate-800 to-indigo-900/5 border-indigo-200 dark:border-indigo-800/60 lg:col-span-2 flex flex-col justify-between">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md">
+                    <Mail className="w-5 h-5" />
                   </div>
-                  <span className="text-[10px] text-gray-400">{s.confianza}%</span>
-                </td>
-                <td className="table-td"><StatusBadge status={s.estado} /></td>
-                <td className="table-td">
-                  <div className="flex gap-1">
-                    {s.estado === "pendiente" && (<>
-                      <button className="btn-ghost text-green-500" onClick={() => onApply(s)} title="Aplicar"><Check className="w-4 h-4" /></button>
-                      <button className="btn-ghost text-red-400" onClick={() => onDiscard(s)} title="Descartar"><X className="w-4 h-4" /></button>
-                    </>)}
+                  <div>
+                    <h4 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                      Buzón IMAP cPanel: {inboxConfig?.imap_user || "facturaelectronica@superextra.com.py"}
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        inboxConfig?.activo ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300" : "bg-slate-100 text-slate-600"
+                      }`}>
+                        {inboxConfig?.activo ? "Activo" : "Sin configurar"}
+                      </span>
+                    </h4>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      Ingesta automática y periódica de Facturas Electrónicas XML (SIFEN Paraguay) recibidas desde proveedores.
+                    </p>
                   </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
+                </div>
 
-function ReportesTab({ purchaseOrders, suppliers, products, reportTab, setReportTab, reportPeriod, setReportPeriod }: {
-  purchaseOrders: PurchaseOrder[]; suppliers: Supplier[]; products: Product[]; reportTab: ReportSubTab; setReportTab: (v: ReportSubTab) => void; reportPeriod: string; setReportPeriod: (v: string) => void
-}) {
-  const now = new Date()
-  const cutoff = new Date(now)
-  if (reportPeriod === "1") cutoff.setMonth(cutoff.getMonth() - 1)
-  else if (reportPeriod === "3") cutoff.setMonth(cutoff.getMonth() - 3)
-  else if (reportPeriod === "6") cutoff.setMonth(cutoff.getMonth() - 6)
-  else if (reportPeriod === "12") cutoff.setFullYear(cutoff.getFullYear() - 1)
-  const filtered = purchaseOrders.filter(p => new Date(p.fecha ?? "") >= cutoff && p.estado !== "cancelado")
+                <button
+                  type="button"
+                  onClick={() => setShowInboxConfigModal(true)}
+                  className="btn-secondary text-xs px-3 py-1.5 shrink-0 flex items-center gap-1.5"
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5" /> Ajustes IMAP
+                </button>
+              </div>
 
-  const totalGasto = filtered.reduce((a, b) => a + (b.total || 0), 0)
-  const avgPO = filtered.length > 0 ? totalGasto / filtered.length : 0
-  const supConCompras = new Set(filtered.map(p => p.supplier_id)).size
+              <div className="mt-4 pt-3 border-t border-slate-200/80 dark:border-slate-700/60 flex flex-wrap items-center justify-between gap-3">
+                <div className="text-[11px] text-gray-500 flex items-center gap-2 font-mono">
+                  <span>Último sync: {inboxConfig?.ultimo_sync ? formatDate(inboxConfig.ultimo_sync) : "Nunca"}</span>
+                  {inboxConfig?.ultimo_error && (
+                    <span className="text-red-500 truncate max-w-xs" title={inboxConfig.ultimo_error}>
+                      ⚠️ Error: {inboxConfig.ultimo_error}
+                    </span>
+                  )}
+                </div>
 
-  const gastosPorProveedor = (() => {
-    const map: Record<string, { name: string; count: number; total: number }> = {}
-    filtered.forEach(p => {
-      const name = p.supplier?.razon_social || "-"
-      if (!map[name]) map[name] = { name, count: 0, total: 0 }
-      map[name].count++; map[name].total += p.total || 0
-    })
-    return Object.values(map).sort((a, b) => b.total - a.total)
-  })()
+                <button
+                  type="button"
+                  onClick={handleSyncInboxNow}
+                  disabled={syncingInbox}
+                  className="btn-primary text-xs px-4 py-2 flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${syncingInbox ? "animate-spin" : ""}`} />
+                  {syncingInbox ? "Sincronizando Correo..." : "Sincronizar Correo Ahora"}
+                </button>
+              </div>
+            </div>
 
-  return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="card p-3"><p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Gasto total mes actual</p><p className="text-lg font-bold text-green-500">{formatPYG(totalGasto)}</p></div>
-        <div className="card p-3"><p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Promedio por PO</p><p className="text-lg font-bold">{formatPYG(avgPO)}</p></div>
-        <div className="card p-3"><p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Proveedores c/compras</p><p className="text-lg font-bold text-primary">{supConCompras}</p></div>
-        <div className="card p-3"><p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Periodo</p>
-          <select className="input-field mt-1 text-sm" value={reportPeriod} onChange={(e) => setReportPeriod(e.target.value)}>
-            <option value="1">Ultimo mes</option>
-            <option value="3">3 meses</option>
-            <option value="6">6 meses</option>
-            <option value="12">1 ano</option>
-          </select>
+            {/* Zona de Carga Manual Drag & Drop de XML */}
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDragOverXml(true); }}
+              onDragLeave={() => setDragOverXml(false)}
+              onDrop={(e) => {
+                e.preventDefault()
+                setDragOverXml(false)
+                if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                  handleUploadXmlFile(e.dataTransfer.files[0])
+                }
+              }}
+              className={`card p-4 border-2 border-dashed flex flex-col items-center justify-center text-center transition-all ${
+                dragOverXml
+                  ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40"
+                  : "border-slate-300 dark:border-slate-700 hover:border-indigo-400 bg-white dark:bg-slate-800/90"
+              }`}
+            >
+              <label className="cursor-pointer w-full h-full flex flex-col items-center justify-center p-2">
+                <input
+                  type="file"
+                  accept=".xml"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files[0]) {
+                      handleUploadXmlFile(e.target.files[0])
+                    }
+                  }}
+                  disabled={uploadingXml}
+                />
+                <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center mb-2 text-indigo-600">
+                  {uploadingXml ? <Loader2 className="w-5 h-5 animate-spin" /> : <FileText className="w-5 h-5" />}
+                </div>
+                <span className="text-xs font-bold text-gray-800 dark:text-gray-200">
+                  {uploadingXml ? "Procesando DTE..." : "Cargar Factura XML"}
+                </span>
+                <span className="text-[10px] text-gray-400 mt-0.5">
+                  Arrastra tu archivo XML aquí o haz click para explorar
+                </span>
+              </label>
+            </div>
+          </div>
+
+          {/* BARRA DE BÚSQUEDA Y FILTROS */}
+          <div className="card p-4 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <Receipt className="w-5 h-5 text-indigo-500" />
+                Cartera de Facturas de Proveedores — Procure-to-Pay ({allSupplierInvoices.length} Facturas)
+              </h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                Seguimiento del ciclo P2P: comprobantes recibidos, control estricto de Notas de Crédito y autorización de pago.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setManualInvoiceForm({
+                    supplier_id: suppliers[0]?.id || "",
+                    numero_factura: "",
+                    timbrado: "",
+                    fecha_emision: new Date().toISOString().split("T")[0],
+                    fecha_vencimiento: new Date().toISOString().split("T")[0],
+                    condicion: "credito",
+                    moneda: "PYG",
+                    total_brl: "",
+                    tipo_cambio: "1350",
+                    total_pyg: "",
+                    concepto: "",
+                  })
+                  setShowManualInvoiceModal(true)
+                }}
+                className="btn-primary text-xs px-3.5 py-2 flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5 text-white" />
+                <span>+ Cargar Factura (Nac. / BR)</span>
+              </button>
+
+              <div className="relative w-full sm:w-64">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Buscar por N° factura o proveedor..."
+                  value={searchInvoices}
+                  onChange={(e) => { setSearchInvoices(e.target.value); setPageInvoices(1); }}
+                  className="input-field pl-9 w-full text-xs"
+                />
+              </div>
+
+              <select
+                value={filterInvoiceStatus}
+                onChange={async (e) => {
+                  const val = e.target.value
+                  setFilterInvoiceStatus(val)
+                  setPageInvoices(1)
+                  if (val === "pagada") {
+                    try {
+                      const res = await api.financial.invoices.list({ estado: "pagada", limit: 500 })
+                      if (res && res.length > 0) {
+                        setAllSupplierInvoices(prev => {
+                          const existingIds = new Set(prev.map(i => i.id))
+                          const toAdd = res.filter((r: any) => !existingIds.has(r.id))
+                          return [...prev, ...toAdd]
+                        })
+                      }
+                    } catch (err) {
+                      console.error("Error loading paid invoices in PurchasesPage", err)
+                    }
+                  }
+                }}
+                className="input-field text-xs font-semibold"
+              >
+                <option value="todos">Todos los Estados</option>
+                <option value="aprobada">Aprobadas para Pago</option>
+                <option value="retenida_discrepancia">Retenidas por Discrepancia</option>
+                <option value="pendiente">Pendientes de Conciliación</option>
+                <option value="pagada">Pagadas</option>
+              </select>
+            </div>
+          </div>
+
+          {/* TABLA DE FACTURAS CON SEMÁFORO Y 3-WAY MATCH */}
+          <div className="card overflow-hidden bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm">
+            {paginatedInvoicesP2P.length === 0 ? (
+              <div className="p-12 text-center text-xs text-gray-400">
+                <Receipt className="w-8 h-8 mx-auto mb-2 opacity-40 text-indigo-500" />
+                No se encontraron facturas con los filtros aplicados.
+              </div>
+            ) : (
+              <div className="overflow-x-auto w-full">
+                <table className="w-full text-left text-xs min-w-[950px]">
+                  <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700/60">
+                    <tr>
+                      <th className="p-3">N° Factura Fiscal</th>
+                      <th className="p-3">Proveedor</th>
+                      <th className="p-3">Pedido / OC</th>
+                      <th className="p-3">Emisión</th>
+                      <th className="p-3">Vencimiento</th>
+                      <th className="p-3 text-right">Total Factura</th>
+                      <th className="p-3 text-right">Saldo a Pagar</th>
+                      <th className="p-3 text-center">Control Tesorería</th>
+                      <th className="p-3 text-center">Estado Fiscal</th>
+                      <th className="p-3 text-center">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                    {paginatedInvoicesP2P.map((inv: any) => (
+                      <tr key={inv.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                        <td className="p-3">
+                          <div className="font-mono font-bold text-gray-900 dark:text-white">
+                            {inv.numero_factura || "S/N"}
+                          </div>
+                          {inv.cdc && (
+                            <div className="text-[9px] font-mono text-indigo-500 truncate max-w-[140px]" title={inv.cdc}>
+                              CDC: {inv.cdc}
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-3 font-medium text-gray-700 dark:text-gray-300 line-clamp-1 max-w-[180px]" title={inv.supplier_nombre}>
+                          {inv.supplier_nombre || "Proveedor"}
+                        </td>
+                        <td className="p-3">
+                          {inv.purchase_order_id ? (
+                            <div className="flex flex-col">
+                              <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                                {orders.find(o => o.id === inv.purchase_order_id)?.numero || inv.purchase_order_numero || "OC Vinculada"}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenAssociatePo(inv)}
+                                className="text-[10px] text-gray-400 hover:text-indigo-500 underline text-left"
+                              >
+                                Cambiar
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenAssociatePo(inv)}
+                              className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200"
+                            >
+                              + Vincular Pedido
+                            </button>
+                          )}
+                        </td>
+                        <td className="p-3 text-gray-500 font-mono">
+                          {inv.fecha_emision ? formatDate(inv.fecha_emision) : "—"}
+                        </td>
+                        <td className="p-3 text-gray-500 font-mono">
+                          {inv.fecha_vencimiento ? formatDate(inv.fecha_vencimiento) : "—"}
+                        </td>
+                        <td className="p-3 text-right font-mono font-extrabold text-gray-900 dark:text-white">
+                          <div>{formatPYG(inv.total || 0)}</div>
+                          {Number(inv.total_brl || 0) > 0 && (
+                            <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 font-mono">
+                              R$ {Number(inv.total_brl).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-3 text-right font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                          <div>{formatPYG(inv.saldo_pendiente || 0)}</div>
+                          {Number(inv.saldo_pendiente_brl ?? inv.total_brl ?? 0) > 0 && (
+                            <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 font-mono">
+                              R$ {Number(inv.saldo_pendiente_brl ?? inv.total_brl).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                          )}
+                          {inv.monto_retenido_nc > 0 && (
+                            <div className="text-[10px] text-red-500 font-normal">
+                              Retenido NC: -{formatPYG(inv.monto_retenido_nc)}
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-3 text-center">
+                          {inv.bloqueada_para_pago || inv.estado === "retenida_discrepancia" ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300" title={inv.motivo_bloqueo || "Sin NC no hay pago"}>
+                              <ShieldAlert className="w-3 h-3 text-red-600 shrink-0" /> Bloqueada (Falta NC)
+                            </span>
+                          ) : inv.estado === "aprobada" ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                              <CheckCircle className="w-3 h-3 text-emerald-600 shrink-0" /> Aprobada para Pago
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                              <Clock className="w-3 h-3 text-amber-600 shrink-0" /> Pendiente 3-Way
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 text-center">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold capitalize ${
+                            inv.estado === "pagada"
+                              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                              : inv.estado === "retenida_discrepancia"
+                              ? "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300"
+                              : inv.estado === "aprobada"
+                              ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+                              : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+                          }`}>
+                            {inv.estado || "pendiente"}
+                          </span>
+                        </td>
+                        <td className="p-3 text-center">
+                          <div className="flex flex-col items-center gap-1.5 justify-center">
+                            <button
+                              type="button"
+                              onClick={() => handleOpen3WayMatch(inv.id)}
+                              className="btn-secondary text-xs px-2.5 py-1 inline-flex items-center gap-1 hover:text-indigo-600"
+                              title="Auditar Orden vs Muelle vs Factura"
+                            >
+                              <Scale className="w-3.5 h-3.5 text-indigo-500" />
+                              3-Way Match
+                            </button>
+                            {inv.estado === "pagada" && (
+                              <button
+                                type="button"
+                                onClick={() => handleRevertInvoicePayment(inv)}
+                                disabled={revertingInvoiceId === inv.id}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-300 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-700/60 rounded-md transition-all shadow-xs"
+                                title="Revertir condición de pagada para procesar por InteliMarket"
+                              >
+                                <RotateCcw className={`w-3 h-3 text-amber-600 ${revertingInvoiceId === inv.id ? "animate-spin" : ""}`} />
+                                <span>Revertir</span>
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Paginador Facturas */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-t border-slate-200 dark:border-slate-700/60 flex items-center justify-between text-xs">
+              <span className="text-gray-500 font-mono">
+                Mostrando {(pageInvoices - 1) * pageSizeInvoices + 1} a {Math.min(pageInvoices * pageSizeInvoices, filteredInvoicesP2P.length)} de <strong>{filteredInvoicesP2P.length}</strong> facturas
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  disabled={pageInvoices <= 1}
+                  onClick={() => setPageInvoices(p => Math.max(1, p - 1))}
+                  className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="font-bold text-gray-700 dark:text-gray-300 font-mono">
+                  Página {pageInvoices} de {totalPagesInvoicesP2P}
+                </span>
+                <button
+                  disabled={pageInvoices >= totalPagesInvoicesP2P}
+                  onClick={() => setPageInvoices(p => Math.min(totalPagesInvoicesP2P, p + 1))}
+                  className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5 w-fit">
-        {(["proveedor", "categoria", "varianza"] as ReportSubTab[]).map(rt => (
-          <button key={rt} onClick={() => setReportTab(rt)}
-            className={"px-3 py-1.5 rounded-lg text-xs font-bold transition-all " + (reportTab === rt ? "bg-white dark:bg-slate-700 shadow-sm" : "text-gray-500")}>{rt.charAt(0).toUpperCase() + rt.slice(1)}</button>
-        ))}
-      </div>
+      {/* ──────────────────────────────────────────────────────────────────────────
+          TAB: DEVOLUCIONES Y NOTAS DE CRÉDITO A PROVEEDORES
+      ────────────────────────────────────────────────────────────────────────── */}
+      {tab === "devoluciones" && (
+        <div className="space-y-5">
+          <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <Undo2 className="w-5 h-5 text-indigo-500" />
+                Devoluciones a Proveedor & Notas de Crédito ({filteredReturnsAndNC.length} Registros)
+              </h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                Circuito de devoluciones comerciales por vencimiento, avería o sobrante, con aprobación e impacto en stock y cuentas por pagar.
+              </p>
+            </div>
 
-      {reportTab === "proveedor" && (
-        <div className="card overflow-hidden">
-          <table className="w-full">
-            <thead><tr className="table-header">
-              <th className="table-cell">Proveedor</th>
-              <th className="table-cell text-right">Cant. POs</th>
-              <th className="table-cell text-right">Total Gs</th>
-              <th className="table-cell text-right">% del total</th>
-            </tr></thead>
-            <tbody>
-              {gastosPorProveedor.length === 0 ? (
-                <tr><td colSpan={4} className="text-center py-12 text-gray-400">Sin datos en el periodo</td></tr>
-              ) : gastosPorProveedor.map((g: any, i: number) => (
-                <tr key={g.name} className="table-row">
-                  <td className="table-td font-medium">{g.name}</td>
-                  <td className="table-td text-right">{g.count}</td>
-                  <td className="table-td text-right font-mono font-bold">{formatPYG(g.total)}</td>
-                  <td className="table-td text-right">
-                    <div className="flex items-center gap-2 justify-end">
-                      <span className="text-xs font-bold">{totalGasto > 0 ? ((g.total / totalGasto) * 100).toFixed(1) + "%" : "0%"}</span>
-                      <div className="bg-gray-100 dark:bg-gray-700 rounded-full h-2 w-16 overflow-hidden">
-                        <div className="h-full rounded-full bg-primary" style={{ width: (g.total / Math.max(totalGasto, 1)) * 100 + "%" }} />
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                onClick={() => {
+                  setSelectedSupplierForReturn("")
+                  setSupplierProducts([])
+                  setSelectedProductForReturn("")
+                  setProductInvoices([])
+                  setSelectedInvoiceForReturn("")
+                  setReturnItemsList([])
+                  setGeneralReturnNotes("")
+                  setShowCreateReturnModal(true)
+                }}
+                className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-500/20 flex items-center gap-2 transition"
+              >
+                <Plus className="w-4 h-4" />
+                Nueva Devolución a Proveedor
+              </button>
+
+              <div className="relative w-full sm:w-72">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Buscar por comprobante, proveedor o motivo..."
+                  value={searchReturns}
+                  onChange={(e) => { setSearchReturns(e.target.value); setPageReturns(1); }}
+                  className="input-field pl-9 w-full text-xs"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="card overflow-hidden bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm">
+            {paginatedReturns.length === 0 ? (
+              <div className="p-12 text-center text-xs text-gray-400">
+                <Undo2 className="w-8 h-8 mx-auto mb-2 opacity-40 text-indigo-500" />
+                No hay devoluciones ni notas de crédito registradas.
+              </div>
+            ) : (
+              <div className="overflow-x-auto w-full">
+                <table className="w-full text-left text-xs min-w-[1050px]">
+                  <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700/60">
+                    <tr>
+                      <th className="p-3">Tipo / N° Comprobante</th>
+                      <th className="p-3">Proveedor</th>
+                      <th className="p-3">Fecha</th>
+                      <th className="p-3">Factura Afectada</th>
+                      <th className="p-3 text-right">Monto (Gs.)</th>
+                      <th className="p-3 text-center">Estado Comercial</th>
+                      <th className="p-3 text-center">Impacto en Stock & Etapa</th>
+                      <th className="p-3">Motivo / Observaciones</th>
+                      <th className="p-3 text-center">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                    {paginatedReturns.map((item, idx) => {
+                      const isManaged = item.tipo_registro === "devolucion_gestionada"
+                      const estado = item.estado || "completado"
+
+                      return (
+                        <tr key={item.id || idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                          <td className="p-3">
+                            <div className="flex items-center gap-1.5">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                isManaged
+                                  ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800"
+                                  : item.tipo_registro === "devolucion"
+                                  ? "bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
+                                  : "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+                              }`}>
+                                {isManaged ? "Devolución Compras" : item.tipo_registro === "devolucion" ? "Devolución" : "Nota de Crédito"}
+                              </span>
+                            </div>
+                            <div className="font-mono font-bold text-gray-900 dark:text-white mt-1">
+                              {item.numero_nota_credito || item.codigo || item.numero || "S/N"}
+                            </div>
+                          </td>
+
+                          <td className="p-3 font-medium text-gray-800 dark:text-gray-200 max-w-[180px] truncate">
+                            {item.supplier_nombre || "Proveedor"}
+                          </td>
+
+                          <td className="p-3 text-gray-500 font-mono text-[11px]">
+                            {item.fecha ? formatDate(item.fecha) : formatDate(item.created_at || "")}
+                          </td>
+
+                          <td className="p-3 font-mono text-gray-600 dark:text-gray-400 text-[11px] max-w-[160px] truncate" title={item.numero_factura_origen}>
+                            {item.numero_factura_origen && item.numero_factura_origen !== "—"
+                              ? `Fact. ${item.numero_factura_origen}`
+                              : "Sin factura directa"}
+                          </td>
+
+                          <td className="p-3 text-right font-mono font-extrabold text-indigo-600 dark:text-indigo-400">
+                            {formatPYG(item.monto || 0)}
+                          </td>
+
+                          <td className="p-3 text-center">
+                            {estado === "pendiente" && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                                <Clock className="w-3 h-3" /> Pendiente
+                              </span>
+                            )}
+                            {estado === "autorizado" && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                                <CheckCircle className="w-3 h-3" /> Aprobada
+                              </span>
+                            )}
+                            {estado === "completado" && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                                <CheckCircle2 className="w-3 h-3" /> Completada
+                              </span>
+                            )}
+                            {estado === "rechazado" && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300 border border-rose-200 dark:border-rose-800" title={item.motivo_rechazo}>
+                                <Ban className="w-3 h-3" /> Rechazada
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Nueva Columna: Impacto en Stock & Etapa */}
+                          <td className="p-3 text-center">
+                            {estado === "completado" ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>Stock Descontado</span>
+                              </span>
+                            ) : estado === "autorizado" ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-300 dark:border-blue-700">
+                                <Truck className="w-3.5 h-3.5 text-blue-600" />
+                                <span>Mercadería Separada</span>
+                              </span>
+                            ) : estado === "pendiente" ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                                <Clock className="w-3.5 h-3.5 text-amber-600" />
+                                <span>Sin Egreso (Revisión)</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-300 dark:border-rose-700">
+                                <Ban className="w-3.5 h-3.5 text-rose-600" />
+                                <span>Sin Impacto</span>
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="p-3 text-gray-600 dark:text-gray-400 text-[11px] max-w-[200px] truncate" title={item.observaciones || item.motivo}>
+                            {item.observaciones || item.motivo || "—"}
+                          </td>
+
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              {/* Botón Imprimir Comprobante Oficial Remito */}
+                              <button
+                                onClick={() => setPrintingReturnDoc(item.raw || item)}
+                                className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition"
+                                title="Imprimir Remito Oficial de Devolución"
+                              >
+                                <Printer className="w-4 h-4" />
+                              </button>
+
+                              {isManaged && (
+                                <button
+                                  onClick={() => setViewingReturnDetail(item.raw || item)}
+                                  className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-lg transition"
+                                  title="Ver detalle de productos devueltos"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </button>
+                              )}
+
+                              {isManaged && estado !== "completado" && (
+                                <button
+                                  onClick={() => handleEditReturn(item)}
+                                  className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg transition"
+                                  title="Editar devolución (modificar productos, almacén u observaciones)"
+                                >
+                                  <Edit3 className="w-4 h-4" />
+                                </button>
+                              )}
+
+                              {isManaged && estado === "pendiente" && (
+                                <>
+                                  <button
+                                    onClick={() => handleApproveReturn(item.id)}
+                                    disabled={processingReturnAction}
+                                    className="p-1.5 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg transition"
+                                    title="Aprobar Devolución Comercial"
+                                  >
+                                    <Check className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => setRejectingReturnId(item.id)}
+                                    disabled={processingReturnAction}
+                                    className="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition"
+                                    title="Rechazar Devolución"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                </>
+                              )}
+
+                              {isManaged && (estado === "autorizado" || estado === "pendiente") && (
+                                <button
+                                  onClick={() => {
+                                    setCompletingReturnId(item.id)
+                                    setNcNumberInput("")
+                                  }}
+                                  disabled={processingReturnAction}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm transition"
+                                  title="Registrar Salida Física e Impactar Stock/Cuentas"
+                                >
+                                  <Truck className="w-3 h-3" />
+                                  <span>Salida</span>
+                                </button>
+                              )}
+
+                              {!isManaged && (
+                                <span className="text-gray-400 text-[10px] font-mono">Legacy</span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Paginador Devoluciones */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-t border-slate-200 dark:border-slate-700/60 flex items-center justify-between text-xs">
+              <span className="text-gray-500 font-mono">
+                Mostrando {(pageReturns - 1) * pageSizeReturns + 1} a {Math.min(pageReturns * pageSizeReturns, filteredReturnsAndNC.length)} de <strong>{filteredReturnsAndNC.length}</strong> registros
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  disabled={pageReturns <= 1}
+                  onClick={() => setPageReturns(p => Math.max(1, p - 1))}
+                  className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="font-bold text-gray-700 dark:text-gray-300 font-mono">
+                  Página {pageReturns} de {totalPagesReturns}
+                </span>
+                <button
+                  disabled={pageReturns >= totalPagesReturns}
+                  onClick={() => setPageReturns(p => Math.min(totalPagesReturns, p + 1))}
+                  className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          TAB 4: 3-WAY MATCHING
+      ────────────────────────────────────────────────────────────────────────── */}
+      {tab === "matching" && (
+        <div className="space-y-6">
+          {/* Header Card con Política de Blindaje */}
+          <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <Scale className="w-5 h-5 text-indigo-500" />
+                3-Way Matching: Conciliación Triple de Compras & Control de Pagos
+              </h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                Auditoría cruzada matemática: <strong>Orden de Compra</strong> vs. <strong>Recepción en Muelle</strong> vs. <strong>Factura DTE SIFEN</strong>.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/50">
+                <ShieldAlert className="w-4 h-4 text-amber-600" />
+                Regla Fiscal: Sin NC no hay pago
+              </span>
+            </div>
+          </div>
+
+          {/* KPIs Hero de Matching */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="card p-4 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Facturas Bloqueadas / Discrepancia</span>
+              <p className="text-xl font-black font-mono text-red-600 mt-1 flex items-center gap-2">
+                <Lock className="w-4 h-4" />
+                {allSupplierInvoices.filter(i => (i as any).bloqueada_para_pago || i.estado === "retenida_discrepancia").length}
+              </p>
+              <span className="text-[10px] text-gray-400">Excluidas de órdenes de pago</span>
+            </div>
+
+            <div className="card p-4 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Solicitudes de NC Pendientes</span>
+              <p className="text-xl font-black font-mono text-amber-600 mt-1 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" />
+                {supplierNcRequests.filter(r => r.estado === "pendiente").length}
+              </p>
+              <span className="text-[10px] text-gray-400">Esperando emisión del proveedor</span>
+            </div>
+
+            <div className="card p-4 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Monto Total Reclamado en NC</span>
+              <p className="text-xl font-black font-mono text-indigo-600 mt-1">
+                {formatPYG(supplierNcRequests.filter(r => r.estado === "pendiente").reduce((acc, r) => acc + Number(r.monto_reclamado || 0), 0))}
+              </p>
+              <span className="text-[10px] text-gray-400">Retenido en Tesorería</span>
+            </div>
+
+            <div className="card p-4 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Facturas Aprobadas (Sin Traba)</span>
+              <p className="text-xl font-black font-mono text-emerald-600 mt-1 flex items-center gap-2">
+                <Unlock className="w-4 h-4" />
+                {allSupplierInvoices.filter(i => !(i as any).bloqueada_para_pago && i.estado === "aprobada").length}
+              </p>
+              <span className="text-[10px] text-gray-400">Habilitadas para Tesorería</span>
+            </div>
+          </div>
+
+          {/* TABLA: SOLICITUDES DE NOTA DE CRÉDITO PENDIENTES */}
+          <div className="card overflow-hidden bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm">
+            <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-amber-500" />
+                  Solicitudes de Nota de Crédito Emitidas a Proveedores ({supplierNcRequests.length})
+                </h4>
+                <p className="text-[11px] text-gray-500">
+                  Seguimiento de reclamos por faltante físico, roturas o sobreprecio facturado.
+                </p>
+              </div>
+            </div>
+
+            {supplierNcRequests.length === 0 ? (
+              <div className="p-8 text-center text-xs text-gray-400">
+                <CheckCircle className="w-8 h-8 mx-auto mb-2 text-emerald-400 opacity-60" />
+                No hay solicitudes de Nota de Crédito pendientes ni discrepancias registradas.
+              </div>
+            ) : (
+              <div className="overflow-x-auto w-full">
+                <table className="w-full text-left text-xs min-w-[800px]">
+                  <thead className="bg-slate-100/70 dark:bg-slate-900/40 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
+                    <tr>
+                      <th className="p-3">N° Solicitud</th>
+                      <th className="p-3">Proveedor</th>
+                      <th className="p-3">Factura Relacionada</th>
+                      <th className="p-3">Motivo Reclamo</th>
+                      <th className="p-3 text-right">Monto Reclamado</th>
+                      <th className="p-3">Estado</th>
+                      <th className="p-3 text-right">Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                    {supplierNcRequests.map(req => (
+                      <tr key={req.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/30 transition-colors">
+                        <td className="p-3 font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                          {req.numero_solicitud}
+                        </td>
+                        <td className="p-3 font-bold text-gray-900 dark:text-white">
+                          {req.supplier?.razon_social || req.supplier?.nombre_fantasia || "Proveedor"}
+                        </td>
+                        <td className="p-3 font-mono text-gray-600 dark:text-gray-300">
+                          {req.invoice?.numero_factura || "—"}
+                        </td>
+                        <td className="p-3">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                            {req.tipo_motivo?.replace("_", " ").toUpperCase()}
+                          </span>
+                          {req.observaciones && (
+                            <p className="text-[10px] text-gray-400 mt-0.5 truncate max-w-xs">{req.observaciones}</p>
+                          )}
+                        </td>
+                        <td className="p-3 text-right font-mono font-black text-red-600 dark:text-red-400">
+                          {formatPYG(req.monto_reclamado || 0)}
+                        </td>
+                        <td className="p-3">
+                          {req.estado === "recibida_aplicada" ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                              <CheckCircle className="w-3 h-3 text-emerald-500" /> NC Recibida & Aplicada
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300">
+                              <Clock className="w-3 h-3 text-rose-500" /> Pendiente NC Proveedor
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 text-right">
+                          {req.estado === "pendiente" ? (
+                            <button
+                              onClick={() => handleOpenResolveNc(req)}
+                              className="px-3 py-1 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5 ml-auto shadow-sm"
+                            >
+                              <FileCheck className="w-3.5 h-3.5" /> Registrar NC Recibida
+                            </button>
+                          ) : (
+                            <span className="text-[11px] font-mono text-gray-400">
+                              NC N° {req.nc_recibida_numero || "—"}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* TABLA: FACTURAS FISCALES Y ESTADO 3-WAY MATCH */}
+          <div className="card overflow-hidden bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm">
+            <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-700/60 flex justify-between items-center">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300">
+                Auditoría Cruzada de Facturas ({allSupplierInvoices.length} Comprobantes Registrados)
+              </h4>
+            </div>
+
+            <div className="overflow-x-auto w-full">
+              <table className="w-full text-left text-xs min-w-[850px]">
+                <thead className="bg-slate-100/70 dark:bg-slate-900/40 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
+                  <tr>
+                    <th className="p-3">N° Factura Fiscal</th>
+                    <th className="p-3">Proveedor</th>
+                    <th className="p-3">Fecha Emisión</th>
+                    <th className="p-3 text-right">Total Factura</th>
+                    <th className="p-3 text-right">Saldo Pendiente</th>
+                    <th className="p-3">Control de Tesorería</th>
+                    <th className="p-3 text-center">Acción 3-Way Match</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                  {allSupplierInvoices.slice(0, 20).map(inv => {
+                    const isBlocked = (inv as any).bloqueada_para_pago || inv.estado === "retenida_discrepancia"
+                    return (
+                      <tr key={inv.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/30 transition-colors">
+                        <td className="p-3">
+                          <div className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                            {inv.numero_factura}
+                          </div>
+                          {(inv as any).xml_sifen_url && (
+                            <span className="text-[10px] text-teal-600 font-mono flex items-center gap-1">
+                              <CheckCircle className="w-2.5 h-2.5" /> DTE SIFEN XML
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 font-bold text-gray-900 dark:text-white">
+                          {inv.supplier_nombre || "Proveedor"}
+                        </td>
+                        <td className="p-3 text-gray-500">
+                          {inv.fecha_emision ? formatDate(inv.fecha_emision) : "—"}
+                        </td>
+                        <td className="p-3 text-right font-mono font-extrabold text-gray-900 dark:text-white">
+                          {formatPYG(inv.total || 0)}
+                        </td>
+                        <td className="p-3 text-right font-mono text-red-600 dark:text-red-400">
+                          {formatPYG(inv.saldo_pendiente || 0)}
+                        </td>
+                        <td className="p-3">
+                          {isBlocked ? (
+                            <div className="flex flex-col gap-0.5">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300">
+                                <Lock className="w-3 h-3 text-rose-500" /> PAGO BLOQUEADO
+                              </span>
+                              {(inv as any).motivo_bloqueo && (
+                                <span className="text-[10px] text-rose-500 max-w-[200px] truncate">
+                                  {(inv as any).motivo_bloqueo}
+                                </span>
+                              )}
+                            </div>
+                          ) : inv.estado === "aprobada" ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                              <Unlock className="w-3 h-3 text-emerald-500" /> Habilitada Pago
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                              <Clock className="w-3 h-3 text-amber-500" /> Pendiente Conciliación
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 text-center">
+                          <button
+                            onClick={() => handleOpen3WayMatch(inv.id)}
+                            className="px-3 py-1 rounded-lg text-xs font-bold border border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 inline-flex items-center gap-1.5 transition-colors"
+                          >
+                            <Scale className="w-3.5 h-3.5" /> Auditar Match
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          TAB 5: PROVEEDORES & SCORECARD
+      ────────────────────────────────────────────────────────────────────────── */}
+      {tab === "proveedores" && (
+        <div className="space-y-5">
+          {/* HEADER Y ESTADÍSTICAS DEL DIRECTORIO */}
+          <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
+                  <Building2 className="w-4 h-4" />
+                </div>
+                <h3 className="text-base font-extrabold text-gray-900 dark:text-white">
+                  Directorio de Proveedores & Clasificación ({suppliers.length})
+                </h3>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-2xl">
+                Administración integral de proveedores de <strong>Bienes (Mercaderías)</strong> y <strong>Prestadores de Servicios</strong>, con condiciones comerciales, cuentas bancarias y retenciones fiscales.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={handleOpenCreateSupplier}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition active:scale-95"
+              >
+                <Plus className="w-4 h-4" />
+                <span>+ Registrar Proveedor</span>
+              </button>
+            </div>
+          </div>
+
+          {/* BARRA DE FILTROS AVANZADOS Y VISTA */}
+          <div className="card p-4 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* FILTRO: BIENES VS SERVICIOS */}
+              <div className="flex items-center bg-slate-100 dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => { setSupplierFilterProvision("todos"); setPageSupplier(1); }}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition ${
+                    supplierFilterProvision === "todos"
+                      ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm"
+                      : "text-slate-500 hover:text-slate-900"
+                  }`}
+                >
+                  Todos ({suppliers.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSupplierFilterProvision("bienes"); setPageSupplier(1); }}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 ${
+                    supplierFilterProvision === "bienes"
+                      ? "bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm"
+                      : "text-slate-500 hover:text-slate-900"
+                  }`}
+                >
+                  <Package className="w-3.5 h-3.5 text-blue-500" />
+                  <span>Bienes ({suppliers.filter(s => ((s as any).tipo_provision || "bienes") === "bienes").length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSupplierFilterProvision("servicios"); setPageSupplier(1); }}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 ${
+                    supplierFilterProvision === "servicios"
+                      ? "bg-white dark:bg-slate-800 text-amber-600 dark:text-amber-400 shadow-sm"
+                      : "text-slate-500 hover:text-slate-900"
+                  }`}
+                >
+                  <Wrench className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Servicios ({suppliers.filter(s => (s as any).tipo_provision === "servicios").length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSupplierFilterProvision("mixto"); setPageSupplier(1); }}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 ${
+                    supplierFilterProvision === "mixto"
+                      ? "bg-white dark:bg-slate-800 text-purple-600 dark:text-purple-400 shadow-sm"
+                      : "text-slate-500 hover:text-slate-900"
+                  }`}
+                >
+                  <span>🔄 Mixto ({suppliers.filter(s => (s as any).tipo_provision === "mixto").length})</span>
+                </button>
+              </div>
+
+              {/* FILTRO: NACIONAL VS BRASIL */}
+              <div className="flex items-center bg-slate-100 dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => { setSupplierFilterType("todos"); setPageSupplier(1); }}
+                  className={`px-2.5 py-1.5 rounded-lg font-bold transition ${
+                    supplierFilterType === "todos"
+                      ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm"
+                      : "text-slate-500 hover:text-slate-900"
+                  }`}
+                >
+                  Origen: Todos
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSupplierFilterType("nacional"); setPageSupplier(1); }}
+                  className={`px-2.5 py-1.5 rounded-lg font-bold transition flex items-center gap-1 ${
+                    supplierFilterType === "nacional"
+                      ? "bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                      : "text-slate-500 hover:text-slate-900"
+                  }`}
+                >
+                  <span>🇵🇾 PY</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSupplierFilterType("brasilero"); setPageSupplier(1); }}
+                  className={`px-2.5 py-1.5 rounded-lg font-bold transition flex items-center gap-1 ${
+                    supplierFilterType === "brasilero"
+                      ? "bg-emerald-600 text-white shadow-sm"
+                      : "text-slate-500 hover:text-slate-900"
+                  }`}
+                >
+                  <span>🇧🇷 BR</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1 md:w-64">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Buscar por nombre, RUC, rubro o contacto..."
+                  value={searchSupplier}
+                  onChange={(e) => { setSearchSupplier(e.target.value); setPageSupplier(1); }}
+                  className="input-field pl-9 pr-7 w-full text-xs"
+                />
+                {searchSupplier && (
+                  <button
+                    onClick={() => { setSearchSupplier(""); setPageSupplier(1); }}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* TOGGLE VISTA CUADRÍCULA / TABLA */}
+              <div className="flex items-center bg-slate-100 dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setSupplierViewMode("grid")}
+                  className={`p-1.5 rounded-lg transition ${
+                    supplierViewMode === "grid"
+                      ? "bg-white dark:bg-slate-800 text-indigo-600 shadow-sm"
+                      : "text-slate-400 hover:text-slate-700"
+                  }`}
+                  title="Vista Cuadrícula de Tarjetas"
+                >
+                  <LayoutGrid className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSupplierViewMode("table")}
+                  className={`p-1.5 rounded-lg transition ${
+                    supplierViewMode === "table"
+                      ? "bg-white dark:bg-slate-800 text-indigo-600 shadow-sm"
+                      : "text-slate-400 hover:text-slate-700"
+                  }`}
+                  title="Vista Tabla Completa"
+                >
+                  <Table className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* VISTA CUADRÍCULA O VISTA TABLA */}
+          {supplierViewMode === "grid" ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {paginatedSuppliers.map(s => {
+                const isBr = s.tipo_proveedor === "brasilero" || s.tipo_proveedor === "br" || (s as any).moneda_default === "BRL"
+                const provision = (s as any).tipo_provision || "bienes"
+                const rubro = (s as any).rubro || (s as any).grupo || "General"
+
+                return (
+                  <div key={s.id} className="card p-5 hover:shadow-md transition-shadow space-y-3 flex flex-col justify-between border-slate-200/80 dark:border-slate-800">
+                    <div>
+                      {/* Cabecera de la tarjeta con badges */}
+                      <div className="flex items-start justify-between gap-2 mb-1.5">
+                        <div className="min-w-0 pr-1">
+                          <h4 className="font-extrabold text-sm text-gray-900 dark:text-white line-clamp-1" title={s.razon_social}>
+                            {s.razon_social}
+                          </h4>
+                          {s.nombre_fantasia && s.nombre_fantasia !== s.razon_social && (
+                            <p className="text-[11px] text-gray-500 italic truncate font-medium">
+                              "{s.nombre_fantasia}"
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {/* Badge Bienes vs Servicios */}
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black tracking-wide flex items-center gap-1 ${
+                            provision === "servicios"
+                              ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30"
+                              : provision === "mixto"
+                              ? "bg-purple-500/10 text-purple-700 dark:text-purple-400 border border-purple-500/30"
+                              : "bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/30"
+                          }`}>
+                            {provision === "servicios" ? "🛠️ Servicios" : provision === "mixto" ? "🔄 Mixto" : "📦 Bienes"}
+                          </span>
+                          {/* Badge Origen */}
+                          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                            isBr ? "bg-emerald-500/10 text-emerald-600" : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+                          }`}>
+                            {isBr ? "🇧🇷 BR" : "🇵🇾 PY"}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Rubro comercial */}
+                      <div className="inline-block mb-2">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                          🏷️ {rubro}
+                        </span>
+                      </div>
+
+                      {/* Datos y condiciones comerciales */}
+                      <div className="text-xs text-gray-400 space-y-1.5 font-mono bg-slate-50 dark:bg-slate-850/50 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800">
+                        <div className="flex items-center justify-between">
+                          <span>{isBr ? "CNPJ / Doc:" : "RUC / Doc:"}</span>
+                          <strong className="text-gray-800 dark:text-gray-200">{s.ruc || s.ci || "—"}</strong>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span>Condición de Pago:</span>
+                          <strong className="text-indigo-600 dark:text-indigo-400">
+                            {s.plazo_pago_dias === 0 ? "Contado" : `${s.plazo_pago_dias || 30} Días`} ({s.moneda_default || (isBr ? "BRL" : "PYG")})
+                          </strong>
+                        </div>
+                        {Number((s as any).limite_credito || 0) > 0 && (
+                          <div className="flex items-center justify-between">
+                            <span>Límite de Crédito:</span>
+                            <strong className="text-emerald-600 dark:text-emerald-400">
+                              {s.moneda_default === "BRL" ? `R$ ${(s as any).limite_credito.toLocaleString()}` : `₲ ${formatPYG((s as any).limite_credito)}`}
+                            </strong>
+                          </div>
+                        )}
+                        {(s.contacto_nombre || s.contacto || s.telefono) && (
+                          <div className="flex items-center justify-between pt-1 border-t border-slate-200/60 dark:border-slate-800 text-[11px]">
+                            <span className="truncate max-w-[120px]">👤 {s.contacto_nombre || s.contacto || "Contacto"}</span>
+                            {s.telefono && (
+                              <a
+                                href={`tel:${s.telefono}`}
+                                className="text-emerald-600 dark:text-emerald-400 font-bold hover:underline flex items-center gap-1"
+                              >
+                                <Phone className="w-3 h-3" /> {s.telefono}
+                              </a>
+                            )}
+                          </div>
+                        )}
+                        {(s as any).banco && (
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate pt-0.5">
+                            🏛️ {(s as any).banco} {(s as any).cuenta_bancaria ? `· N° ${(s as any).cuenta_bancaria}` : ""}
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+                    {/* Botones de acción del proveedor */}
+                    <div className="pt-3 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between gap-2">
+                      <div>
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Scorecard</span>
+                        <span className="font-extrabold font-mono text-emerald-600 text-xs flex items-center gap-0.5">
+                          <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                          {s.rating ? `${Number(s.rating).toFixed(1)}` : "4.8"}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditSupplier(s)}
+                          className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/30 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/40 transition flex items-center gap-1"
+                          title="Editar todos los campos de este proveedor"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                          <span>Editar</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => openSupplier360(s)}
+                          className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/40 transition flex items-center gap-1"
+                          title="Ver Ficha 360°, compras y scorecard"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Ficha 360°</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            /* VISTA TABLA COMPLETA */
+            <div className="card overflow-hidden bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-slate-50 dark:bg-slate-900/80 text-slate-500 font-extrabold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
+                    <tr>
+                      <th className="p-3">Proveedor / Razón Social</th>
+                      <th className="p-3">RUC / Doc</th>
+                      <th className="p-3">Provisión</th>
+                      <th className="p-3">Rubro</th>
+                      <th className="p-3">Origen & Moneda</th>
+                      <th className="p-3">Plazo Pago</th>
+                      <th className="p-3">Límite Crédito</th>
+                      <th className="p-3">Contacto / Tel</th>
+                      <th className="p-3">Banco / Cuenta</th>
+                      <th className="p-3 text-center">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
+                    {paginatedSuppliers.map(s => {
+                      const isBr = s.tipo_proveedor === "brasilero" || s.tipo_proveedor === "br" || (s as any).moneda_default === "BRL"
+                      const provision = (s as any).tipo_provision || "bienes"
+                      return (
+                        <tr key={s.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-850/50 transition">
+                          <td className="p-3">
+                            <div className="font-extrabold text-slate-900 dark:text-white">{s.razon_social}</div>
+                            {s.nombre_fantasia && s.nombre_fantasia !== s.razon_social && (
+                              <div className="text-[10px] text-slate-400 italic">"{s.nombre_fantasia}"</div>
+                            )}
+                          </td>
+                          <td className="p-3 font-mono font-bold text-slate-700 dark:text-slate-300">
+                            {s.ruc || s.ci || "—"}
+                          </td>
+                          <td className="p-3">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                              provision === "servicios"
+                                ? "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300"
+                                : provision === "mixto"
+                                ? "bg-purple-100 text-purple-800 dark:bg-purple-950/50 dark:text-purple-300"
+                                : "bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-300"
+                            }`}>
+                              {provision === "servicios" ? "🛠️ Servicios" : provision === "mixto" ? "🔄 Mixto" : "📦 Bienes"}
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                              {(s as any).rubro || (s as any).grupo || "General"}
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              isBr ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300" : "bg-indigo-100 text-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-300"
+                            }`}>
+                              {isBr ? "🇧🇷 BRL (R$)" : "🇵🇾 PYG (₲)"}
+                            </span>
+                          </td>
+                          <td className="p-3 font-mono font-bold text-slate-700 dark:text-slate-300">
+                            {s.plazo_pago_dias === 0 ? "Contado" : `${s.plazo_pago_dias || 30}d`}
+                          </td>
+                          <td className="p-3 font-mono">
+                            {Number((s as any).limite_credito || 0) > 0 ? (
+                              <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                                {s.moneda_default === "BRL" ? `R$ ${(s as any).limite_credito.toLocaleString()}` : `₲ ${formatPYG((s as any).limite_credito)}`}
+                              </span>
+                            ) : "—"}
+                          </td>
+                          <td className="p-3 text-[11px]">
+                            <div>{s.contacto_nombre || s.contacto || "—"}</div>
+                            {s.telefono && <div className="text-emerald-600 dark:text-emerald-400 font-mono font-bold">{s.telefono}</div>}
+                          </td>
+                          <td className="p-3 text-[11px] text-slate-500">
+                            {(s as any).banco ? (
+                              <div>
+                                <span className="font-bold text-slate-700 dark:text-slate-300">{(s as any).banco}</span>
+                                {(s as any).cuenta_bancaria && <div className="font-mono text-[10px]">{(s as any).cuenta_bancaria}</div>}
+                              </div>
+                            ) : "—"}
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditSupplier(s)}
+                                className="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 transition"
+                                title="Editar Proveedor"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openSupplier360(s)}
+                                className="p-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-300 transition"
+                                title="Ver Ficha 360°"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* PAGINACIÓN */}
+          <div className="card p-4 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 flex items-center justify-between text-xs">
+            <span className="text-gray-500 font-mono">
+              Mostrando {(pageSupplier - 1) * pageSizeSupplier + 1} a {Math.min(pageSupplier * pageSizeSupplier, filteredSuppliers.length)} de <strong>{filteredSuppliers.length}</strong> proveedores
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                disabled={pageSupplier <= 1}
+                onClick={() => setPageSupplier(p => Math.max(1, p - 1))}
+                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="font-bold text-gray-700 dark:text-gray-300 font-mono">
+                Página {pageSupplier} de {totalPagesSupplier}
+              </span>
+              <button
+                disabled={pageSupplier >= totalPagesSupplier}
+                onClick={() => setPageSupplier(p => Math.min(totalPagesSupplier, p + 1))}
+                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
-      {reportTab === "categoria" && (
-        <div className="card p-5">
-          <p className="text-sm text-gray-400 text-center py-8">Reporte por categoria - proximamente</p>
+      {/* ──────────────────────────────────────────────────────────────────────────
+          TAB 6: REQUISICIONES INTERNAS
+      ────────────────────────────────────────────────────────────────────────── */}
+      {tab === "requisiciones" && (
+        <div className="space-y-5">
+          <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <ClipboardList className="w-5 h-5 text-indigo-500" />
+                Requisiciones Internas de Reposición por Sector
+              </h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                Solicitudes de compra generadas desde Carnicería, Fiambrería, Panadería, Verdulería y Salón.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowReqModal(true)}
+              className="btn-primary text-xs flex items-center gap-2 px-4 py-2 shrink-0 shadow-sm"
+            >
+              <Plus className="w-4 h-4" /> + Nueva Requisición
+            </button>
+          </div>
+
+          <div className="card overflow-hidden bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm">
+            {requisitions.length === 0 ? (
+              <div className="p-12 text-center text-xs text-gray-400">
+                <ClipboardList className="w-8 h-8 mx-auto mb-2 opacity-40 text-indigo-500" />
+                No hay requisiciones internas pendientes.
+              </div>
+            ) : (
+              <div className="overflow-x-auto w-full">
+                <table className="w-full text-left text-xs min-w-[700px]">
+                  <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
+                    <tr>
+                      <th className="p-3">N° Requisición</th>
+                      <th className="p-3">Departamento / Sector</th>
+                      <th className="p-3">Solicitante</th>
+                      <th className="p-3">Fecha Solicitud</th>
+                      <th className="p-3">Prioridad</th>
+                      <th className="p-3">Estado</th>
+                      <th className="p-3 text-right">Total Estimado</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                    {requisitions.map(r => (
+                      <tr key={r.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/30 transition-colors">
+                        <td className="p-3 font-mono font-bold text-indigo-600 dark:text-indigo-400">{r.numero}</td>
+                        <td className="p-3 font-bold text-gray-900 dark:text-white">{r.departamento || "Supermercado"}</td>
+                        <td className="p-3 text-gray-600 dark:text-gray-300">{r.solicitante_nombre || "Encargado"}</td>
+                        <td className="p-3 text-gray-500">{formatDate(r.fecha)}</td>
+                        <td className="p-3">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            r.prioridad === "urgente" ? "bg-red-50 text-red-600" : "bg-blue-50 text-blue-600"
+                          }`}>
+                            {r.prioridad || "normal"}
+                          </span>
+                        </td>
+                        <td className="p-3">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700">
+                            {r.estado}
+                          </span>
+                        </td>
+                        <td className="p-3 text-right font-mono font-extrabold text-gray-900 dark:text-white">
+                          {formatPYG(r.total || 0)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {reportTab === "varianza" && (
-        <div className="card p-5">
-          <p className="text-sm text-gray-400 text-center py-8">Reporte de varianza de precios - proximamente</p>
+      {/* ──────────────────────────────────────────────────────────────────────────
+          TAB 7: COTIZACIONES (RFQ)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {tab === "cotizaciones" && (
+        <div className="space-y-5">
+          <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60">
+            <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <FileSpreadsheet className="w-5 h-5 text-indigo-500" />
+              Cotizaciones Comparativas (RFQ)
+            </h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              Comparación de listas de precios entre distribuidores y adjudicación por menor costo.
+            </p>
+          </div>
+
+          <div className="card overflow-hidden bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm">
+            {rfqs.length === 0 ? (
+              <div className="p-12 text-center text-xs text-gray-400">
+                <FileSpreadsheet className="w-8 h-8 mx-auto mb-2 opacity-40 text-indigo-500" />
+                No hay procesos de cotización abiertos en este momento.
+              </div>
+            ) : (
+              <div className="overflow-x-auto w-full">
+                <table className="w-full text-left text-xs min-w-[650px]">
+                  <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
+                    <tr>
+                      <th className="p-3">N° Cotización</th>
+                      <th className="p-3">Fecha Límite</th>
+                      <th className="p-3">Motivo</th>
+                      <th className="p-3">Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                    {rfqs.map(rfq => (
+                      <tr key={rfq.id}>
+                        <td className="p-3 font-mono font-bold text-indigo-600">{rfq.numero}</td>
+                        <td className="p-3 font-mono">{rfq.fecha_limite ? formatDate(rfq.fecha_limite) : "—"}</td>
+                        <td className="p-3">{rfq.motivo || "Cotización de Compras"}</td>
+                        <td className="p-3"><span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700">{rfq.estado}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          TAB 8: PRESUPUESTOS DE COMPRA
+      ────────────────────────────────────────────────────────────────────────── */}
+      {tab === "presupuestos" && (
+        <div className="space-y-5">
+          <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60">
+            <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <BarChart3 className="w-5 h-5 text-indigo-500" />
+              Presupuesto Mensual de Compras vs Gasto Real Ejecutado
+            </h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              Control de ejecución presupuestaria por categoría de Supermercado.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {budgetConsumptions.length > 0 ? (
+              budgetConsumptions.map((b, i) => (
+                <div key={i} className="card p-5 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h4 className="font-bold text-sm text-gray-900 dark:text-white">{b.nombre}</h4>
+                    <span className="font-mono text-xs font-bold text-indigo-600">{b.porcentaje_ejecutado}%</span>
+                  </div>
+                  <div className="w-full bg-slate-100 dark:bg-slate-700 h-2.5 rounded-full overflow-hidden">
+                    <div className="bg-indigo-600 h-full rounded-full" style={{ width: `${Math.min(100, b.porcentaje_ejecutado)}%` }} />
+                  </div>
+                  <div className="flex justify-between text-xs font-mono">
+                    <span className="text-gray-400">Ejecutado: {formatPYG(b.monto_ejecutado)}</span>
+                    <span className="text-gray-600 dark:text-gray-300 font-bold">Total: {formatPYG(b.monto_presupuestado)}</span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              [
+                { cat: "Lácteos & Refrigerados", ejec: 45000000, total: 60000000 },
+                { cat: "Bebidas & Cervezas", ejec: 82000000, total: 100000000 },
+                { cat: "Carnicería & Aves", ejec: 95000000, total: 110000000 },
+                { cat: "Almacén & Canasta Básica", ejec: 120000000, total: 150000000 },
+                { cat: "Frutas & Verdulería", ejec: 28000000, total: 35000000 },
+                { cat: "Artículos de Limpieza", ejec: 34000000, total: 45000000 },
+              ].map((b, idx) => {
+                const pct = Math.round((b.ejec / b.total) * 100)
+                return (
+                  <div key={idx} className="card p-5 space-y-3">
+                    <div className="flex justify-between items-center">
+                      <h4 className="font-bold text-sm text-gray-900 dark:text-white">{b.cat}</h4>
+                      <span className="font-mono text-xs font-bold text-indigo-600">{pct}%</span>
+                    </div>
+                    <div className="w-full bg-slate-100 dark:bg-slate-700 h-2.5 rounded-full overflow-hidden">
+                      <div className="bg-indigo-600 h-full rounded-full" style={{ width: `${pct}%` }} />
+                    </div>
+                    <div className="flex justify-between text-xs font-mono">
+                      <span className="text-gray-400">Ejecutado: {formatPYG(b.ejec)}</span>
+                      <span className="text-gray-600 dark:text-gray-300 font-bold">Límite: {formatPYG(b.total)}</span>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          TAB 9: REPORTES & PRECIOS
+      ────────────────────────────────────────────────────────────────────────── */}
+      {tab === "reportes" && (
+        <div className="space-y-5">
+          <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60">
+            <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <PieChart className="w-5 h-5 text-indigo-500" />
+              Análisis de Varianza de Precios & Concentración de Gasto
+            </h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              Auditoría de variaciones de costo en compras y distribución del volumen por proveedor.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <div className="card p-5 space-y-3">
+              <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500 flex items-center justify-between">
+                <span>Top Proveedores por Gasto Acumulado</span>
+                <Building2 className="w-4 h-4 text-indigo-500" />
+              </h4>
+              <div className="space-y-2">
+                {spendBySupplier.slice(0, 7).map((s, i) => (
+                  <div key={i} className="flex justify-between items-center p-2 rounded-lg bg-slate-50 dark:bg-slate-900/60 text-xs">
+                    <div className="font-bold text-gray-800 dark:text-gray-200 truncate max-w-xs">{s.razon_social}</div>
+                    <div className="font-mono font-extrabold text-indigo-600">{formatPYG(s.total_gastado)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="card p-5 space-y-3">
+              <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500 flex items-center justify-between">
+                <span>Varianza de Costos por Producto</span>
+                <TrendingUp className="w-4 h-4 text-amber-500" />
+              </h4>
+              <div className="space-y-2">
+                {priceVariance.slice(0, 7).map((pv, i) => (
+                  <div key={i} className="flex justify-between items-center p-2 rounded-lg bg-slate-50 dark:bg-slate-900/60 text-xs">
+                    <div className="font-semibold text-gray-800 dark:text-gray-200 truncate max-w-xs">{pv.nombre}</div>
+                    <div className="font-mono font-bold text-amber-600">±{Number(pv.variance_pct).toFixed(1)}%</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: DIVISIÓN Y EMISIÓN DE ÓRDENES DE COMPRA POR PROVEEDOR (MULTI-PROVEEDOR)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showGenerateModal && (() => {
+        const itemsToOrder = (replenishmentData?.items || []).filter(
+          (it: any) => selectedItemsIA[it.product_id] && (editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida) > 0
+        )
+
+        // Agrupación por proveedor asignado
+        const groups: Record<string, { supplier?: Supplier; items: any[]; total: number; totalUnits: number }> = {}
+        itemsToOrder.forEach((it: any) => {
+          const supId = itemAssignedSupplier[it.product_id] || "unassigned"
+          if (!groups[supId]) {
+            const supObj = suppliers.find(s => s.id === supId)
+            groups[supId] = { supplier: supObj, items: [], total: 0, totalUnits: 0 }
+          }
+          const qty = Number(editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida)
+          const cost = Number(editedCosts[it.product_id] !== undefined ? editedCosts[it.product_id] : (it.costo_unitario_estimado || 0))
+          groups[supId].items.push(it)
+          groups[supId].total += qty * cost
+          groups[supId].totalUnits += qty
+        })
+
+        const groupKeys = Object.keys(groups)
+        const validGroupKeys = groupKeys.filter(k => k !== "unassigned")
+        const hasUnassigned = groupKeys.includes("unassigned")
+        const activeGroupKeys = validGroupKeys.filter(k => includedSuppliers[k] !== false)
+
+        const totalActiveAmount = activeGroupKeys.reduce((acc, k) => acc + (groups[k]?.total || 0), 0)
+        const totalActiveItems = activeGroupKeys.reduce((acc, k) => acc + (groups[k]?.items.length || 0), 0)
+        const totalActiveUnits = activeGroupKeys.reduce((acc, k) => acc + (groups[k]?.totalUnits || 0), 0)
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-4xl w-full border border-slate-200 dark:border-slate-700 flex flex-col max-h-[92vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+              {/* Header Modal */}
+              <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between bg-slate-50/70 dark:bg-slate-900/40">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/60">
+                    <Layers className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                      División y Emisión de Órdenes por Proveedor
+                      {validGroupKeys.length > 1 && (
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                          {validGroupKeys.length} Proveedores Detectados
+                        </span>
+                      )}
+                    </h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Revisá la división de productos por proveedor, reasigná ítems según convenga o emití múltiples OC simultáneas.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowGenerateModal(false)}
+                  className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Barra de Herramientas de Asignación Rápida */}
+              <div className="px-4 sm:px-5 py-3 bg-indigo-50/40 dark:bg-indigo-950/20 border-b border-indigo-100 dark:border-indigo-900/30 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-slate-700 dark:text-slate-300">
+                    📦 <strong className="font-mono">{itemsToOrder.length}</strong> productos seleccionados
+                  </span>
+                  <span className="text-gray-300 dark:text-gray-600">|</span>
+                  <button
+                    type="button"
+                    onClick={handleResetToLastSuppliers}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 text-indigo-700 dark:text-indigo-300 font-semibold border border-indigo-200 dark:border-indigo-800 shadow-2xs hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors"
+                    title="Restablece cada producto a su último proveedor habitual de compra"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> Restablecer a últimos proveedores
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-600 dark:text-gray-400 font-medium">Asignar todos a:</span>
+                  <select
+                    value={globalApplySupplierId}
+                    onChange={(e) => setGlobalApplySupplierId(e.target.value)}
+                    className="input-field py-1 px-2 text-xs font-semibold bg-white dark:bg-slate-800 border-indigo-200 dark:border-indigo-800 max-w-[220px]"
+                  >
+                    {suppliers.map(s => (
+                      <option key={s.id} value={s.id}>{s.razon_social}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleApplyGlobalSupplier}
+                    className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-2xs transition-colors"
+                  >
+                    Aplicar a todos
+                  </button>
+                </div>
+              </div>
+
+              {/* Contenido con Scroll: Divisiones por Proveedor */}
+              <div className="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
+                {/* Alerta de productos sin proveedor asignado */}
+                {hasUnassigned && (
+                  <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-amber-800 dark:text-amber-200 text-xs flex items-start gap-2.5">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <strong className="block font-bold">Hay {groups["unassigned"].items.length} productos sin proveedor asignado</strong>
+                      <span>Seleccioná el proveedor destino en cada producto para poder emitir la orden correspondiente.</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Cards por Proveedor */}
+                {groupKeys.map(supId => {
+                  const grp = groups[supId]
+                  const isUnassigned = supId === "unassigned"
+                  const isIncluded = isUnassigned ? false : includedSuppliers[supId] !== false
+                  const supName = isUnassigned ? "Productos Sin Proveedor Asignado" : (grp.supplier?.razon_social || "Proveedor")
+                  const supRuc = grp.supplier?.ruc
+                  const settings = supplierOrderSettings[supId] || {
+                    fecha_entrega_estimada: new Date().toISOString().split("T")[0],
+                    condiciones_pago: "30 Días",
+                    prioridad: "normal",
+                    observaciones: "",
+                  }
+
+                  return (
+                    <div
+                      key={supId}
+                      className={`rounded-2xl border transition-all ${
+                        isUnassigned
+                          ? "border-amber-300 dark:border-amber-700/60 bg-amber-50/20 dark:bg-amber-950/10"
+                          : isIncluded
+                          ? "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 shadow-xs"
+                          : "border-slate-200/60 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 opacity-60"
+                      }`}
+                    >
+                      {/* Cabecera de la División */}
+                      <div className="p-3.5 sm:p-4 border-b border-slate-100 dark:border-slate-700/60 flex flex-wrap items-center justify-between gap-3 bg-slate-50/50 dark:bg-slate-900/30 rounded-t-2xl">
+                        <div className="flex items-center gap-3">
+                          {!isUnassigned ? (
+                            <input
+                              type="checkbox"
+                              checked={isIncluded}
+                              onChange={(e) => setIncludedSuppliers(prev => ({ ...prev, [supId]: e.target.checked }))}
+                              className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer w-4 h-4"
+                              title="Marcar para emitir esta orden"
+                            />
+                          ) : (
+                            <AlertCircle className="w-4 h-4 text-amber-500" />
+                          )}
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-1.5">
+                                <Building2 className="w-4 h-4 text-indigo-500" />
+                                {supName}
+                              </h4>
+                              {supRuc && (
+                                <span className="text-[11px] font-mono text-gray-500 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.2 rounded font-semibold">
+                                  RUC: {supRuc}
+                                </span>
+                              )}
+                              <span className="text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/50 px-2 py-0.2 rounded-full">
+                                {grp.items.length} {grp.items.length === 1 ? "ítem" : "ítems"} ({grp.totalUnits.toLocaleString()} un.)
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <span className="text-[10px] text-gray-400 block uppercase font-bold tracking-wider">Subtotal OC</span>
+                          <span className="font-mono font-extrabold text-sm sm:text-base text-gray-900 dark:text-white">
+                            {formatPYG(grp.total)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Parámetros de la OC para este proveedor */}
+                      {!isUnassigned && isIncluded && (
+                        <div className="p-3 bg-slate-50/70 dark:bg-slate-900/50 border-b border-slate-100 dark:border-slate-700/60 grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-0.5">Entrega Esperada</label>
+                            <input
+                              type="date"
+                              value={settings.fecha_entrega_estimada}
+                              onChange={(e) => {
+                                const val = e.target.value
+                                setSupplierOrderSettings(prev => ({
+                                  ...prev,
+                                  [supId]: { ...(prev[supId] || settings), fecha_entrega_estimada: val }
+                                }))
+                              }}
+                              className="input-field w-full py-1 text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-0.5">Condición de Pago</label>
+                            <select
+                              value={settings.condiciones_pago}
+                              onChange={(e) => {
+                                const val = e.target.value
+                                setSupplierOrderSettings(prev => ({
+                                  ...prev,
+                                  [supId]: { ...(prev[supId] || settings), condiciones_pago: val }
+                                }))
+                              }}
+                              className="input-field w-full py-1 text-xs font-semibold"
+                            >
+                              <option value="Contado">Contado</option>
+                              <option value="15 Días">Crédito 15 Días</option>
+                              <option value="30 Días">Crédito 30 Días</option>
+                              <option value="60 Días">Crédito 60 Días</option>
+                              <option value="90 Días">Crédito 90 Días</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-0.5">Prioridad</label>
+                            <select
+                              value={settings.prioridad}
+                              onChange={(e) => {
+                                const val = e.target.value
+                                setSupplierOrderSettings(prev => ({
+                                  ...prev,
+                                  [supId]: { ...(prev[supId] || settings), prioridad: val }
+                                }))
+                              }}
+                              className="input-field w-full py-1 text-xs font-semibold"
+                            >
+                              <option value="normal">Normal</option>
+                              <option value="urgente">Urgente (Quiebre)</option>
+                              <option value="baja">Baja / Rutinaria</option>
+                            </select>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Lista de Productos en esta OC */}
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-50/90 dark:bg-slate-900/60 text-gray-400 font-bold uppercase text-[9px] tracking-wider border-b border-slate-100 dark:border-slate-700/60">
+                            <tr>
+                              <th className="p-2.5 min-w-[200px]">Producto</th>
+                              <th className="p-2.5 text-right">Cantidad</th>
+                              <th className="p-2.5 text-right">Costo Unit.</th>
+                              <th className="p-2.5 text-right">Subtotal</th>
+                              <th className="p-2.5 min-w-[190px]">Reasignar Proveedor</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-700/40 font-mono">
+                            {grp.items.map((it: any) => {
+                              const qty = Number(editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida)
+                              const cost = Number(editedCosts[it.product_id] !== undefined ? editedCosts[it.product_id] : (it.costo_unitario_estimado || 0))
+                              const subtotal = qty * cost
+
+                              return (
+                                <tr key={it.product_id} className="hover:bg-slate-50/60 dark:hover:bg-slate-700/20">
+                                  <td className="p-2.5 font-sans font-medium text-gray-800 dark:text-gray-200">
+                                    <div className="font-bold text-sm text-slate-900 dark:text-white truncate max-w-[260px]" title={it.nombre}>
+                                      {it.nombre}
+                                    </div>
+                                    <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono flex items-center gap-1 mt-0.5">
+                                      <Barcode className="w-3 h-3 text-indigo-500 shrink-0" />
+                                      <span>{it.codigo_barra || it.sku || "—"}</span>
+                                      <span className="text-gray-400">| {it.unidad_medida}</span>
+                                    </div>
+                                  </td>
+                                  <td className="p-2.5 text-right font-bold text-indigo-600 dark:text-indigo-400">
+                                    {qty.toLocaleString()}
+                                  </td>
+                                  <td className="p-2.5 text-right text-gray-600 dark:text-gray-300">
+                                    {formatPYG(cost)}
+                                  </td>
+                                  <td className="p-2.5 text-right font-extrabold text-gray-900 dark:text-white">
+                                    {formatPYG(subtotal)}
+                                  </td>
+                                  <td className="p-2 font-sans">
+                                    <select
+                                      value={itemAssignedSupplier[it.product_id] || ""}
+                                      onChange={(e) => {
+                                        const newSup = e.target.value
+                                        setItemAssignedSupplier(prev => ({ ...prev, [it.product_id]: newSup }))
+                                        if (newSup && !includedSuppliers[newSup]) {
+                                          setIncludedSuppliers(prev => ({ ...prev, [newSup]: true }))
+                                        }
+                                      }}
+                                      className="input-field py-1 px-2 text-[11px] font-semibold w-full bg-white dark:bg-slate-800"
+                                    >
+                                      <option value="">Seleccione Proveedor...</option>
+                                      {suppliers.map(s => (
+                                        <option key={s.id} value={s.id}>
+                                          {s.razon_social} {s.id === it.ultimo_proveedor_id ? "★ (Último)" : ""}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Footer Modal con Totales y Acción */}
+              <div className="p-4 sm:p-5 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-4 text-xs">
+                  <div>
+                    <span className="text-gray-400 block text-[10px] uppercase font-bold">Órdenes a Generar</span>
+                    <span className="font-extrabold font-mono text-indigo-600 dark:text-indigo-400 text-sm">
+                      {activeGroupKeys.length} {activeGroupKeys.length === 1 ? "Orden" : "Órdenes"}
+                    </span>
+                  </div>
+                  <div className="border-l border-slate-200 dark:border-slate-700 pl-4">
+                    <span className="text-gray-400 block text-[10px] uppercase font-bold">Total Ítems</span>
+                    <span className="font-bold font-mono text-gray-700 dark:text-gray-300 text-sm">
+                      {totalActiveItems} prod. ({totalActiveUnits.toLocaleString()} un.)
+                    </span>
+                  </div>
+                  <div className="border-l border-slate-200 dark:border-slate-700 pl-4">
+                    <span className="text-gray-400 block text-[10px] uppercase font-bold">Monto Global</span>
+                    <span className="font-extrabold font-mono text-gray-900 dark:text-white text-base">
+                      {formatPYG(totalActiveAmount)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowGenerateModal(false)}
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCreatePOFromReplenishment}
+                    disabled={generatingPO || activeGroupKeys.length === 0 || hasUnassigned}
+                    className="btn-primary text-xs flex items-center gap-2 px-6 py-2.5 font-bold shadow-md disabled:opacity-50"
+                  >
+                    {generatingPO ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <ShoppingCart className="w-4 h-4" />
+                    )}
+                    {generatingPO
+                      ? "Emitiendo Órdenes..."
+                      : activeGroupKeys.length > 1
+                      ? `🚀 Emitir ${activeGroupKeys.length} Órdenes de Compra Separadas`
+                      : "Emitir Orden de Compra"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: DETALLE DE ORDEN DE COMPRA
+      ────────────────────────────────────────────────────────────────────────── */}
+      {selectedPO && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <style>{`
+            @page {
+              size: A4 portrait;
+              margin: 10mm 12mm;
+            }
+            @media print {
+              body * {
+                visibility: hidden !important;
+              }
+              #po-premium-sheet, #po-premium-sheet * {
+                visibility: visible !important;
+              }
+              #po-premium-sheet {
+                position: absolute !important;
+                left: 0 !important;
+                top: 0 !important;
+                width: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: white !important;
+                color: #111827 !important;
+                box-shadow: none !important;
+                border: none !important;
+                z-index: 999999 !important;
+                overflow: visible !important;
+              }
+              #po-premium-sheet table {
+                page-break-inside: auto !important;
+              }
+              #po-premium-sheet tr {
+                page-break-inside: avoid !important;
+                page-break-after: auto !important;
+              }
+              .no-print {
+                display: none !important;
+              }
+            }
+          `}</style>
+
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-4xl w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[92vh] overflow-y-auto">
+            {/* Barra de herramientas superior del modal (no-print) */}
+            <div className="no-print flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-1 rounded-lg text-xs font-black bg-indigo-600 text-white tracking-wider uppercase">
+                  Reporte Premium de Orden de Compra
+                </span>
+                <span className="text-xs font-mono font-bold text-gray-500">
+                  #{selectedPO.numero}
+                </span>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handlePrintPO}
+                  className="btn-secondary text-xs flex items-center gap-1.5 px-3 py-1.5 font-bold shadow-xs hover:bg-slate-100"
+                  title="Imprimir documento en formato A4 membretado"
+                >
+                  <Printer className="w-4 h-4 text-indigo-600" /> Imprimir A4
+                </button>
+
+                <button
+                  onClick={() => handleDownloadPOAsPdf(selectedPO)}
+                  className="btn-secondary text-xs flex items-center gap-1.5 px-3 py-1.5 font-bold text-red-700 dark:text-red-400 border-red-200 dark:border-red-800/60 hover:bg-red-50"
+                  title="Descargar archivo PDF oficial con timbrado"
+                >
+                  <Download className="w-4 h-4 text-red-600" /> Descargar PDF
+                </button>
+
+                <button
+                  onClick={() => handleExportSinglePOToExcel(selectedPO, poDetailItems)}
+                  className="btn-secondary text-xs flex items-center gap-1.5 px-3 py-1.5 font-bold text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/60 hover:bg-emerald-50"
+                  title="Descargar planilla en formato Excel (.xlsx)"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" /> Exportar Excel
+                </button>
+
+                <button
+                  onClick={() => setSelectedPO(null)}
+                  className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400 ml-2"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {loadingPODetail ? (
+              <div className="flex justify-center py-16">
+                <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* ── HOJA MEMBRETADA PREMIUM DE LA ORDEN DE COMPRA (#po-premium-sheet) ── */}
+                <div id="po-premium-sheet" className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-5 text-gray-900 dark:text-gray-100 shadow-sm print:shadow-none print:border-0 print:p-0">
+                  {/* Encabezado Institucional Oficial */}
+                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b-2 border-indigo-600 pb-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-black text-sm tracking-wider">
+                          EX
+                        </div>
+                        <div>
+                          <h2 className="text-base font-black uppercase tracking-tight text-gray-900 dark:text-white leading-tight">
+                            Extra Supermercado Mayorista
+                          </h2>
+                          <p className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400">
+                            GRUPO SANTA TERESA E.A.S.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-[11px] text-gray-500 dark:text-gray-400 space-y-0.5 pt-1">
+                        <div><strong>RUC:</strong> 80150377-9 | <strong>Timbrado:</strong> 18545636</div>
+                        <div>Alejo Garcia esquina Carlos Antonio López — Pedro Juan Caballero, Amambay, Paraguay</div>
+                        <div>Tel: +595992052200 | Email: contacto@superextra.com.py</div>
+                      </div>
+                    </div>
+
+                    <div className="sm:text-right space-y-1 bg-slate-50 dark:bg-slate-800/80 p-3 rounded-xl border border-slate-200 dark:border-slate-700 min-w-[220px]">
+                      <span className="inline-block px-2.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-indigo-100 dark:bg-indigo-900/60 text-indigo-800 dark:text-indigo-300">
+                        Orden de Compra Oficial
+                      </span>
+                      <div className="text-xl font-black font-mono text-indigo-600 dark:text-indigo-400">
+                        N° {selectedPO.numero || selectedPO.id?.slice(0, 8) || "S/N"}
+                      </div>
+                      <div className="text-[11px] text-gray-500">
+                        Fecha: <strong>{selectedPO.fecha ? formatDate(selectedPO.fecha) : formatDate(selectedPO.created_at || "")}</strong>
+                      </div>
+                      <div className="text-[11px]">
+                        Estado: <strong className="uppercase font-bold">{poStatusMap[selectedPO.estado || ""]?.label || selectedPO.estado}</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Ficha Proveedor & Ficha de la Orden en 2 Columnas */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-1.5">
+                      <div className="font-bold uppercase tracking-wider text-[10px] text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 border-b border-slate-200 dark:border-slate-700 pb-1">
+                        <Building2 className="w-3.5 h-3.5" /> Datos del Proveedor
+                      </div>
+                      <div><strong>Razón Social:</strong> {selectedPO.supplier?.razon_social || "Sin Asignar"}</div>
+                      <div><strong>RUC:</strong> {selectedPO.supplier?.ruc || "—"}</div>
+                      <div><strong>Teléfono:</strong> {selectedPO.supplier?.telefono || "—"}</div>
+                      <div><strong>Contacto / Email:</strong> {selectedPO.supplier?.email || selectedPO.supplier?.contacto_nombre || "—"}</div>
+                      <div><strong>Dirección:</strong> {selectedPO.supplier?.direccion || "—"}</div>
+                    </div>
+
+                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-1.5">
+                      <div className="font-bold uppercase tracking-wider text-[10px] text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 border-b border-slate-200 dark:border-slate-700 pb-1">
+                        <FileCheck className="w-3.5 h-3.5" /> Condiciones de Adquisición
+                      </div>
+                      <div><strong>Fecha de Entrega:</strong> {selectedPO.fecha_entrega_estimada ? formatDate(selectedPO.fecha_entrega_estimada) : "Inmediata / A convenir"}</div>
+                      <div><strong>Condición de Pago:</strong> {selectedPO.condiciones_pago || "30 Días"}</div>
+                      <div><strong>Moneda:</strong> {selectedPO.moneda || "PYG"} (Guaraníes)</div>
+                      <div><strong>Comprador Responsable:</strong> {selectedPO.created_by_name || "Departamento de Compras"}</div>
+                      <div><strong>Prioridad:</strong> <span className="capitalize font-bold">{selectedPO.prioridad || "Normal"}</span></div>
+                    </div>
+                  </div>
+
+                  {/* Tabla Itemizada de Productos */}
+                  <div className="overflow-x-auto print:overflow-visible w-full border border-slate-200 dark:border-slate-700 rounded-xl">
+                    <table className="w-full text-left text-xs min-w-[650px] print:min-w-0">
+                      <thead className="bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
+                        <tr>
+                          <th className="p-2.5 text-center w-8">#</th>
+                          <th className="p-2.5 w-24">Cód. Interno</th>
+                          <th className="p-2.5 w-32">Cód. Barra</th>
+                          <th className="p-2.5">Descripción del Producto</th>
+                          <th className="p-2.5 text-right w-20">Cantidad</th>
+                          <th className="p-2.5 text-right w-20">Recibido</th>
+                          <th className="p-2.5 text-right w-28">Precio Unit. (IVA Inc.)</th>
+                          <th className="p-2.5 text-center w-16">IVA %</th>
+                          <th className="p-2.5 text-right w-32">Subtotal (IVA Inc.)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {poDetailItems.map((it: any, idx) => {
+                          const cant = Number(it.cantidad || 0)
+                          const prec = Number(it.precio_unitario || 0)
+                          const sub = Number(it.total || it.subtotal || (cant * prec))
+                          const isEven = idx % 2 === 0
+                          return (
+                            <tr
+                              key={idx}
+                              className={`transition-colors duration-150 border-b border-slate-100 dark:border-slate-800/60 ${
+                                isEven ? "bg-white dark:bg-slate-900" : "bg-slate-100/70 dark:bg-slate-800/50"
+                              } hover:!bg-slate-200 dark:hover:!bg-slate-700 hover:shadow-sm`}
+                            >
+                              <td className="p-2.5 text-center font-mono text-gray-400">{idx + 1}</td>
+                              <td className="p-2.5 font-mono text-gray-700 dark:text-gray-300 font-semibold">
+                                {it.sku || it.producto?.sku || "—"}
+                              </td>
+                              <td className="p-2.5 font-mono text-gray-500">
+                                {it.codigo_barra || it.producto?.codigo_barra || "—"}
+                              </td>
+                              <td className="p-2.5 font-semibold text-gray-900 dark:text-white">
+                                {it.producto?.nombre || it.descripcion || "Ítem"}
+                              </td>
+                              <td className="p-2.5 text-right font-mono font-bold">
+                                {cant % 1 !== 0 ? cant.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 3 }) : cant.toLocaleString()} {it.unidad_medida || it.producto?.unidad_medida || ""}
+                              </td>
+                              <td className="p-2.5 text-right font-mono text-emerald-600 font-bold">
+                                {Number(it.recibido || it.cantidad_recibida || 0).toLocaleString()}
+                              </td>
+                              <td className="p-2.5 text-right font-mono">
+                                {formatPYG(prec)}
+                              </td>
+                              <td className="p-2.5 text-center font-mono text-gray-500">
+                                {it.iva_tasa || 10}%
+                              </td>
+                              <td className="p-2.5 text-right font-mono font-black text-gray-900 dark:text-white">
+                                {formatPYG(sub)}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Liquidación Impositiva & Total de la Orden */}
+                  {(() => {
+                    let sub10 = 0
+                    let sub5 = 0
+                    let subEx = 0
+                    poDetailItems.forEach((it: any) => {
+                      const sub = Number(it.total || it.subtotal || (Number(it.cantidad || 0) * Number(it.precio_unitario || 0)))
+                      const tasa = Number(it.iva_tasa || 10)
+                      if (tasa === 10) sub10 += sub
+                      else if (tasa === 5) sub5 += sub
+                      else subEx += sub
+                    })
+                    const iva10 = Math.round(sub10 / 11)
+                    const iva5 = Math.round(sub5 / 21)
+
+                    return (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs">
+                        <div className="space-y-1 text-gray-600 dark:text-gray-400">
+                          <div className="font-bold text-[10px] uppercase tracking-wider text-gray-700 dark:text-gray-300">
+                            Liquidación Impositiva del IVA (Incluido en Total)
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
+                            <div>Gravadas 10%: <strong className="font-mono text-gray-800 dark:text-gray-200">{formatPYG(sub10 - iva10)}</strong></div>
+                            <div>IVA 10% (Incluido): <strong className="font-mono text-gray-800 dark:text-gray-200">{formatPYG(iva10)}</strong></div>
+                            <div>Gravadas 5%: <strong className="font-mono text-gray-800 dark:text-gray-200">{formatPYG(sub5 - iva5)}</strong></div>
+                            <div>IVA 5% (Incluido): <strong className="font-mono text-gray-800 dark:text-gray-200">{formatPYG(iva5)}</strong></div>
+                            <div>Exentas: <strong className="font-mono text-gray-800 dark:text-gray-200">{formatPYG(subEx)}</strong></div>
+                          </div>
+                          {selectedPO.observaciones && (
+                            <div className="text-[11px] pt-2 border-t border-slate-200 dark:border-slate-700 text-gray-600">
+                              <strong>Instrucciones:</strong> {selectedPO.observaciones}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex flex-col justify-center sm:text-right border-t md:border-t-0 md:border-l border-slate-200 dark:border-slate-700 md:pl-4 space-y-1">
+                          <div className="text-gray-500 font-bold uppercase tracking-wider text-[10px]">
+                            Monto Total de la Orden de Compra (IVA Incluido)
+                          </div>
+                          <div className="text-2xl font-black font-mono text-indigo-600 dark:text-indigo-400">
+                            {formatPYG(selectedPO.total || 0)}
+                          </div>
+                          <div className="text-[11px] text-gray-400 font-mono">
+                            {poDetailItems.length} ítems adjudicados | Condición: {selectedPO.condiciones_pago || "30 Días"}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })()}
+
+                  {/* Firmas y Autorizaciones Institucionales */}
+                  <div className="pt-8 grid grid-cols-3 gap-6 text-center text-[11px] text-gray-500">
+                    <div>
+                      <div className="border-t border-slate-400 dark:border-slate-600 pt-1.5 font-bold text-gray-800 dark:text-gray-200">
+                        {selectedPO.created_by_name || "Departamento de Compras"}
+                      </div>
+                      <div className="text-[10px] text-gray-400">Elaborado por (Comprador)</div>
+                    </div>
+                    <div>
+                      <div className="border-t border-slate-400 dark:border-slate-600 pt-1.5 font-bold text-gray-800 dark:text-gray-200">
+                        Gerencia de Compras & Finanzas
+                      </div>
+                      <div className="text-[10px] text-gray-400">Aprobado y Autorizado</div>
+                    </div>
+                    <div>
+                      <div className="border-t border-slate-400 dark:border-slate-600 pt-1.5 font-bold text-gray-800 dark:text-gray-200">
+                        {selectedPO.supplier?.razon_social || "Proveedor"}
+                      </div>
+                      <div className="text-[10px] text-gray-400">Recibido Conforme (Firma y Sello)</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Acciones operativas inferiores del modal (no-print) */}
+                <div className="no-print flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-700/60">
+                  {selectedPO.id && (
+                    <button
+                      onClick={() => {
+                        const target = selectedPO
+                        setPoToDelete(target)
+                        setForceDeletePO(false)
+                      }}
+                      className="px-3.5 py-2 rounded-xl text-xs font-bold bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 flex items-center gap-1.5 transition-colors"
+                      title="Eliminar esta Orden"
+                    >
+                      <Trash2 className="w-4 h-4" /> Eliminar Orden
+                    </button>
+                  )}
+                  <div className="flex items-center gap-2 ml-auto">
+                    {["borrador", "confirmado", "enviada", "enviado"].includes(selectedPO.estado || "") && selectedPO.id && (
+                      <button
+                        onClick={() => {
+                          const target = selectedPO
+                          setSelectedPO(null)
+                          handleEditPO(target)
+                        }}
+                        className="px-3.5 py-2 rounded-xl text-xs font-bold bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 flex items-center gap-1.5 transition-colors border border-blue-200 dark:border-blue-800/60"
+                        title="Modificar ítems, cantidades o costos de esta Orden"
+                      >
+                        <Edit className="w-4 h-4" /> Modificar Orden
+                      </button>
+                    )}
+                    {selectedPO.estado === "borrador" && selectedPO.id && (
+                      <button
+                        onClick={() => handleConfirmPO(selectedPO.id!)}
+                        className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5"
+                      >
+                        <Check className="w-4 h-4" /> Confirmar Orden
+                      </button>
+                    )}
+                    {selectedPO.estado === "confirmado" && selectedPO.id && (
+                      <button
+                        onClick={() => handleSendPO(selectedPO.id!)}
+                        className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5"
+                      >
+                        <Send className="w-4 h-4" /> Enviar a Proveedor
+                      </button>
+                    )}
+                    {["confirmado", "enviada", "enviado", "parcial"].includes(selectedPO.estado || "") && (
+                      <button
+                        onClick={() => {
+                          const target = selectedPO
+                          setSelectedPO(null)
+                          handleOpenReceiptModal(target)
+                        }}
+                        className="btn-primary text-xs flex items-center gap-1.5 px-4 py-2 shadow-sm"
+                      >
+                        <Truck className="w-4 h-4" /> Recibir en Muelle
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setSelectedPO(null)}
+                      className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-gray-700 dark:text-gray-300"
+                    >
+                      Cerrar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: RECEPCIÓN EN MUELLE CON LOTES Y VENCIMIENTOS
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showReceiptModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-4xl w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
+              <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                <Truck className="w-5 h-5 text-indigo-500" /> Registro de Recepción Física en Muelle
+              </h3>
+              <button
+                onClick={() => setShowReceiptModal(false)}
+                className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveReceipt} className="space-y-4">
+              {/* Selector de Orden de Compra que arriba al muelle */}
+              <div className="p-3.5 bg-slate-50 dark:bg-slate-850 rounded-2xl border border-slate-200 dark:border-slate-700/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <FileText className="w-4 h-4 text-indigo-500" />
+                    <span>Orden de Compra a Recepcionar en Muelle *</span>
+                  </label>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    Cambiar la OC recarga automáticamente los renglones pendientes
+                  </span>
+                </div>
+                <select
+                  value={receiptForm.purchase_order_id}
+                  onChange={async (e) => {
+                    const selId = e.target.value
+                    const target = orders.find(o => o.id === selId)
+                    if (target) {
+                      await handleOpenReceiptModal(target)
+                    }
+                  }}
+                  className="input-field w-full text-xs font-mono font-bold bg-white dark:bg-slate-800"
+                  required
+                >
+                  <option value="">-- Seleccionar Orden de Compra arribada --</option>
+                  {orders.filter(o => !["cancelado"].includes(o.estado || "")).map(o => (
+                    <option key={o.id} value={o.id}>
+                      OC #{o.numero} — {o.supplier?.razon_social || (suppliers.find(s => s.id === o.supplier_id)?.razon_social) || "Proveedor"} ({o.fecha ? formatDate(o.fecha) : "Sin fecha"}) [{o.estado?.toUpperCase()}]
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    N° de Remisión / Factura Chofer
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ej. 001-001-0045892"
+                    value={receiptForm.proveedor_ref}
+                    onChange={(e) => setReceiptForm(prev => ({ ...prev, proveedor_ref: e.target.value }))}
+                    className="input-field w-full text-xs font-mono"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    Notas de Muelle / Estado Camión
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ej. Descarga completa, temperatura óptima (4°C)..."
+                    value={receiptForm.observaciones}
+                    onChange={(e) => setReceiptForm(prev => ({ ...prev, observaciones: e.target.value }))}
+                    className="input-field w-full text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Sección Proveedor Brasileño / Importación R$ */}
+              <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 rounded-xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(receiptForm.es_br)}
+                      onChange={(e) => setReceiptForm(prev => ({ ...prev, es_br: e.target.checked }))}
+                      className="rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span>🇧🇷 Compra de Proveedor Brasileño (Registro en Reales - R$)</span>
+                  </label>
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                    Registra la deuda en Reales para cancelación en Bóveda
+                  </span>
+                </div>
+
+                {receiptForm.es_br && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-emerald-200/60 dark:border-emerald-800/40">
+                    <div>
+                      <label className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 block mb-1">
+                        Monto Final Alcanzado en Reales (R$) *
+                      </label>
+                      <CurrencyInput
+                        currency="BRL"
+                        required={receiptForm.es_br}
+                        placeholder="0,00"
+                        value={receiptForm.total_brl || ""}
+                        onChangeValue={(numVal) => setReceiptForm(prev => ({ ...prev, total_brl: String(numVal) }))}
+                        className="input-field w-full text-xs font-mono font-bold text-right border-emerald-400 text-emerald-600"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Cotización R$ (₲ / R$) *
+                      </label>
+                      <CurrencyInput
+                        currency="PYG"
+                        required={receiptForm.es_br}
+                        value={receiptForm.tipo_cambio || "1350"}
+                        onChangeValue={(tc) => setReceiptForm(prev => ({ ...prev, tipo_cambio: String(tc || 1) }))}
+                        className="input-field w-full text-xs font-mono font-bold text-right"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Equivalente Estimado (₲)
+                      </label>
+                      <div className="input-field w-full text-xs font-mono font-black text-right bg-white dark:bg-slate-800 flex items-center justify-end px-3">
+                        {formatPYG(Math.round((Number(receiptForm.total_brl) || 0) * (Number(receiptForm.tipo_cambio) || 1)))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Barra de Adición Extraordinaria en Muelle */}
+              <div className="p-3 bg-amber-50/80 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/60 rounded-xl space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                  <span className="text-xs font-bold text-amber-900 dark:text-amber-300 flex items-center gap-1.5">
+                    <Plus className="w-4 h-4 text-amber-600" />
+                    ¿Llegó mercadería física fuera de la Orden de Compra? (Adición Extraordinaria)
+                  </span>
+                  <span className="text-[10px] text-amber-700 dark:text-amber-400">
+                    Requiere motivo de autorización explícito para auditoría
+                  </span>
+                </div>
+
+                <div className="relative">
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      placeholder="Buscar producto por nombre o código de barra para agregar al muelle..."
+                      value={extraordinarySearch}
+                      onChange={(e) => handleSearchExtraordinary(e.target.value)}
+                      className="input-field w-full pl-9 text-xs bg-white dark:bg-slate-900"
+                    />
+                    {searchingExtraordinary && (
+                      <Loader2 className="w-4 h-4 text-indigo-500 animate-spin absolute right-3 top-1/2 -translate-y-1/2" />
+                    )}
+                  </div>
+
+                  {extraordinaryResults.length > 0 && (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-20 max-h-48 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                      {extraordinaryResults.map(p => (
+                        <div
+                          key={p.id}
+                          onClick={() => handleAddExtraordinaryItem(p)}
+                          className="p-2.5 hover:bg-amber-50 dark:hover:bg-amber-950/40 cursor-pointer flex items-center justify-between text-xs transition-colors"
+                        >
+                          <div>
+                            <span className="font-bold text-gray-900 dark:text-white">{p.nombre}</span>
+                            <span className="text-[10px] text-gray-400 ml-2 font-mono">{p.codigo_barra || p.sku}</span>
+                          </div>
+                          <span className="text-amber-600 font-bold text-xs flex items-center gap-1">
+                            <Plus className="w-3.5 h-3.5" /> Agregar
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="overflow-x-auto w-full border border-slate-200 dark:border-slate-700 rounded-xl">
+                <table className="w-full text-left text-xs min-w-[750px]">
+                  <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
+                    <tr>
+                      <th className="p-2.5">Producto</th>
+                      <th className="p-2.5 text-right w-20">Pedido</th>
+                      <th className="p-2.5 w-40">Presentación</th>
+                      <th className="p-2.5 text-right w-24">Cantidad</th>
+                      <th className="p-2.5 text-right w-24">Total (Un.)</th>
+                      <th className="p-2.5 w-28">N° Lote</th>
+                      <th className="p-2.5 w-32">Vencimiento</th>
+                      <th className="p-2.5 text-right w-24">Rechazo</th>
+                      <th className="p-2.5 w-32">Motivo Rechazo</th>
+                      <th className="p-2.5 text-center w-10"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                    {receiptForm.items.map((it, idx) => (
+                      <tr key={idx} className={it.es_extraordinario ? "bg-amber-50/40 dark:bg-amber-950/10" : ""}>
+                        <td className="p-2.5">
+                          <div className="flex items-center gap-1.5">
+                            <div className="font-bold text-gray-800 dark:text-gray-200">{it.nombre}</div>
+                            {it.es_extraordinario && (
+                              <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-200 text-amber-900 dark:bg-amber-800 dark:text-amber-100">
+                                EXTRAORDINARIO
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-gray-400 font-mono">SKU: {it.sku || "—"}</div>
+                          {it.es_extraordinario && (
+                            <div className="mt-1">
+                              <input
+                                type="text"
+                                placeholder="Motivo de autorización de ingreso fuera de OC *"
+                                value={it.autorizacion_motivo || ""}
+                                onChange={(e) => {
+                                  const val = e.target.value
+                                  setReceiptForm(prev => {
+                                    const copy = [...prev.items]
+                                    copy[idx].autorizacion_motivo = val
+                                    return { ...prev, items: copy }
+                                  })
+                                }}
+                                className="input-field w-full p-1 text-[11px] border-amber-300 dark:border-amber-700 bg-amber-50/60 text-amber-900 dark:text-amber-200"
+                                required
+                              />
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-2.5 text-right font-mono font-bold text-gray-600 dark:text-gray-300">
+                          {it.cantidad_ordenada.toLocaleString()}
+                        </td>
+                        <td className="p-2.5">
+                          <select
+                            value={it.presentacion_id}
+                            onChange={(e) => handleReceiptPresentationChange(idx, e.target.value)}
+                            className="input-field w-full p-1 text-xs"
+                          >
+                            <option value="">Unidad suelta</option>
+                            {(packBarcodesByProduct.get(it.product_id) || []).map(pb => (
+                              <option key={pb.id} value={pb.id}>
+                                {pb.etiqueta} (x{pb.unidades_por_paquete})
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="p-2.5 text-right">
+                          <input
+                            type="number"
+                            step="any"
+                            min={0}
+                            value={it.cantidad_presentacion}
+                            onChange={(e) => handleReceiptCantidadPresentacionChange(idx, Number(e.target.value))}
+                            className="input-field w-20 p-1 text-right font-mono font-bold text-xs"
+                            required
+                          />
+                        </td>
+                        <td className="p-2.5 text-right font-mono font-bold text-gray-600 dark:text-gray-300">
+                          {it.cantidad_recibir.toLocaleString()}
+                        </td>
+                        <td className="p-2.5">
+                          <input
+                            type="text"
+                            placeholder="LOT-2026"
+                            value={it.lote}
+                            onChange={(e) => {
+                              const val = e.target.value
+                              setReceiptForm(prev => {
+                                const copy = [...prev.items]
+                                copy[idx].lote = val
+                                return { ...prev, items: copy }
+                              })
+                            }}
+                            className="input-field w-24 p-1 text-xs font-mono"
+                          />
+                        </td>
+                        <td className="p-2.5">
+                          <input
+                            type="date"
+                            value={it.fecha_vencimiento}
+                            onChange={(e) => {
+                              const val = e.target.value
+                              setReceiptForm(prev => {
+                                const copy = [...prev.items]
+                                copy[idx].fecha_vencimiento = val
+                                return { ...prev, items: copy }
+                              })
+                            }}
+                            className="input-field w-28 p-1 text-xs"
+                          />
+                        </td>
+                        <td className="p-2.5 text-right">
+                          <input
+                            type="number"
+                            step="any"
+                            min={0}
+                            value={it.cantidad_rechazada}
+                            onChange={(e) => {
+                              const val = Math.max(0, Number(e.target.value))
+                              setReceiptForm(prev => {
+                                const copy = [...prev.items]
+                                copy[idx].cantidad_rechazada = val
+                                return { ...prev, items: copy }
+                              })
+                            }}
+                            className="input-field w-20 p-1 text-right font-mono text-red-600 font-bold text-xs"
+                          />
+                        </td>
+                        <td className="p-2.5">
+                          <input
+                            type="text"
+                            placeholder="Ej. Roto, Vencido..."
+                            value={it.motivo_rechazo}
+                            onChange={(e) => {
+                              const val = e.target.value
+                              setReceiptForm(prev => {
+                                const copy = [...prev.items]
+                                copy[idx].motivo_rechazo = val
+                                return { ...prev, items: copy }
+                              })
+                            }}
+                            className="input-field w-full p-1 text-xs"
+                          />
+                        </td>
+                        <td className="p-2.5 text-center">
+                          {it.es_extraordinario && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReceiptForm(prev => ({
+                                  ...prev,
+                                  items: prev.items.filter((_, i) => i !== idx)
+                                }))
+                              }}
+                              className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30 rounded"
+                              title="Eliminar ítem extraordinario"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setShowReceiptModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingReceipt}
+                  className="btn-primary text-xs flex items-center gap-2 px-5 py-2"
+                >
+                  {savingReceipt ? <Loader2 className="w-4 h-4 animate-spin" /> : <Truck className="w-4 h-4" />}
+                  {savingReceipt ? "Registrando..." : "Confirmar Recepción & Actualizar Stock"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: CARGAR FACTURA DE COMPRA MANUAL (NACIONAL / PROVEEDOR BR)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showManualInvoiceModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-2xl w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
+              <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                <Receipt className="w-5 h-5 text-emerald-600" /> Cargar Factura de Compra (Nacional / Proveedor BR)
+              </h3>
+              <button
+                onClick={() => setShowManualInvoiceModal(false)}
+                className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveManualInvoice} className="space-y-4 text-xs">
+              {/* Selector de Proveedor */}
+              <div>
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase block mb-1">
+                  Proveedor *
+                </label>
+                <select
+                  required
+                  value={manualInvoiceForm.supplier_id}
+                  onChange={(e) => {
+                    const sId = e.target.value
+                    const sup = suppliers.find(s => s.id === sId)
+                    const isBr = Boolean((sup?.pais || "").toUpperCase().includes("BR") || (sup?.razon_social || "").toUpperCase().includes("BRASIL"))
+                    setManualInvoiceForm(prev => ({
+                      ...prev,
+                      supplier_id: sId,
+                      moneda: isBr ? "BRL" : prev.moneda,
+                    }))
+                  }}
+                  className="input-field w-full text-xs font-semibold"
+                >
+                  <option value="">-- Seleccione Proveedor --</option>
+                  {suppliers.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.razon_social || s.nombre} {s.ruc ? `(RUC: ${s.ruc})` : ""} {s.pais ? `[${s.pais}]` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Nro Factura, Timbrado y Condición */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="sm:col-span-1">
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                    N° Factura Fiscal *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej: 001-001-0045892 o NF 1204"
+                    value={manualInvoiceForm.numero_factura}
+                    onChange={(e) => setManualInvoiceForm(prev => ({ ...prev, numero_factura: e.target.value }))}
+                    className="input-field w-full font-mono font-bold text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                    Timbrado (Opcional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ej: 18545636"
+                    value={manualInvoiceForm.timbrado}
+                    onChange={(e) => setManualInvoiceForm(prev => ({ ...prev, timbrado: e.target.value }))}
+                    className="input-field w-full font-mono text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                    Condición de Pago
+                  </label>
+                  <select
+                    value={manualInvoiceForm.condicion}
+                    onChange={(e) => setManualInvoiceForm(prev => ({ ...prev, condicion: e.target.value }))}
+                    className="input-field w-full text-xs font-semibold"
+                  >
+                    <option value="credito">Crédito (A Pagar)</option>
+                    <option value="contado">Contado</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Fechas */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                    Fecha de Emisión *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={manualInvoiceForm.fecha_emision}
+                    onChange={(e) => setManualInvoiceForm(prev => ({ ...prev, fecha_emision: e.target.value }))}
+                    className="input-field w-full text-xs font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                    Fecha de Vencimiento *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={manualInvoiceForm.fecha_vencimiento}
+                    onChange={(e) => setManualInvoiceForm(prev => ({ ...prev, fecha_vencimiento: e.target.value }))}
+                    className="input-field w-full text-xs font-mono font-bold"
+                  />
+                </div>
+              </div>
+
+              {/* Moneda y Montos */}
+              <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-extrabold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+                    Moneda de la Factura
+                  </label>
+                  <div className="flex items-center bg-slate-200 dark:bg-slate-800 p-0.5 rounded-lg text-xs font-bold">
+                    <button
+                      type="button"
+                      onClick={() => setManualInvoiceForm(prev => ({ ...prev, moneda: "PYG", total_brl: "" }))}
+                      className={`px-3 py-1 rounded transition ${
+                        manualInvoiceForm.moneda === "PYG"
+                          ? "bg-white dark:bg-slate-900 shadow-xs text-slate-900 dark:text-white"
+                          : "text-slate-500"
+                      }`}
+                    >
+                      🇵🇾 Guaraníes (₲)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setManualInvoiceForm(prev => ({ ...prev, moneda: "BRL" }))}
+                      className={`px-3 py-1 rounded transition ${
+                        manualInvoiceForm.moneda === "BRL"
+                          ? "bg-emerald-600 text-white shadow-xs"
+                          : "text-slate-500"
+                      }`}
+                    >
+                      🇧🇷 Reales (R$)
+                    </button>
+                  </div>
+                </div>
+
+                {manualInvoiceForm.moneda === "BRL" ? (
+                  <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 block mb-1">
+                          Monto Total Reales (R$) *
+                        </label>
+                        <CurrencyInput
+                          currency="BRL"
+                          required
+                          placeholder="0,00"
+                          value={manualInvoiceForm.total_brl}
+                          onChangeValue={(numVal) => {
+                            const brl = numVal
+                            const tc = Number(manualInvoiceForm.tipo_cambio || 1350)
+                            const pyg = Math.round(brl * tc)
+                            setManualInvoiceForm(prev => ({ ...prev, total_brl: String(brl), total_pyg: String(pyg) }))
+                          }}
+                          className="input-field w-full text-xs font-mono font-bold text-right border-emerald-400 text-emerald-600 dark:text-emerald-400"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                          Cotización R$ (₲ / R$) *
+                        </label>
+                        <CurrencyInput
+                          currency="PYG"
+                          required
+                          value={manualInvoiceForm.tipo_cambio}
+                          onChangeValue={(tc) => {
+                            const validTc = tc || 1
+                            const pyg = Math.round(Number(manualInvoiceForm.total_brl || 0) * validTc)
+                            setManualInvoiceForm(prev => ({ ...prev, tipo_cambio: String(validTc), total_pyg: String(pyg) }))
+                          }}
+                          className="input-field w-full text-xs font-mono font-bold text-right"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                          Eq. Fiscal en Guaraníes (₲)
+                        </label>
+                        <div className="input-field w-full text-xs font-mono font-black text-right bg-white dark:bg-slate-800 flex items-center justify-end px-3">
+                          {formatPYG(Math.round((Number(manualInvoiceForm.total_brl) || 0) * (Number(manualInvoiceForm.tipo_cambio) || 1)))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <p className="text-[10px] text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 p-2 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                      ℹ️ La factura quedará registrada con su saldo en Reales (R$) para poder liquidarse directamente desde el efectivo en R$ de Bóveda Central o amortizarse por Orden de Pago.
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                      Monto Total en Guaraníes (₲) *
+                    </label>
+                    <CurrencyInput
+                      currency="PYG"
+                      required
+                      placeholder="Ej: 1.500.000"
+                      value={manualInvoiceForm.total_pyg}
+                      onChangeValue={(val) => setManualInvoiceForm(prev => ({ ...prev, total_pyg: String(val) }))}
+                      className="input-field w-full text-xs font-mono font-bold text-right"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Concepto */}
+              <div>
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                  Concepto / Observaciones
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ej: Compra de frutas y verduras frescas de Foz / CDE"
+                  value={manualInvoiceForm.concepto}
+                  onChange={(e) => setManualInvoiceForm(prev => ({ ...prev, concepto: e.target.value }))}
+                  className="input-field w-full text-xs"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setShowManualInvoiceModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingManualInvoice}
+                  className="btn-primary text-xs flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                >
+                  {savingManualInvoice ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  {savingManualInvoice ? "Guardando..." : "Guardar Factura en Cartera"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: NUEVA REQUISICIÓN INTERNA
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showReqModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-lg w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
+              <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                <ClipboardList className="w-5 h-5 text-indigo-500" /> Nueva Requisición Interna
+              </h3>
+              <button
+                onClick={() => setShowReqModal(false)}
+                className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveRequisition} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Sector / Departamento</label>
+                <select
+                  value={reqForm.departamento}
+                  onChange={(e) => setReqForm(prev => ({ ...prev, departamento: e.target.value }))}
+                  className="input-field w-full text-xs font-semibold"
+                >
+                  <option value="Salón / Góndola">Salón / Góndola</option>
+                  <option value="Carnicería">Carnicería</option>
+                  <option value="Fiambrería">Fiambrería</option>
+                  <option value="Panadería & Confitería">Panadería & Confitería</option>
+                  <option value="Verdulería & Frutas">Verdulería & Frutas</option>
+                  <option value="Rotisería / Cocina">Rotisería / Cocina</option>
+                  <option value="Limpieza & Mantenimiento">Limpieza & Mantenimiento</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Prioridad</label>
+                  <select
+                    value={reqForm.prioridad}
+                    onChange={(e) => setReqForm(prev => ({ ...prev, prioridad: e.target.value }))}
+                    className="input-field w-full text-xs"
+                  >
+                    <option value="normal">Normal</option>
+                    <option value="alta">Alta</option>
+                    <option value="urgente">Urgente (Quiebre)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Motivo</label>
+                  <input
+                    type="text"
+                    value={reqForm.motivo}
+                    onChange={(e) => setReqForm(prev => ({ ...prev, motivo: e.target.value }))}
+                    className="input-field w-full text-xs"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Ítem Solicitado</label>
+                <input
+                  type="text"
+                  placeholder="Descripción del producto o insumo..."
+                  value={reqForm.items[0].descripcion}
+                  onChange={(e) => setReqForm(prev => {
+                    const copy = [...prev.items]
+                    copy[0].descripcion = e.target.value
+                    return { ...prev, items: copy }
+                  })}
+                  className="input-field w-full text-xs"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Cantidad</label>
+                  <input
+                    type="number"
+                    step="any"
+                    min="0.001"
+                    value={reqForm.items[0].cantidad}
+                    onChange={(e) => setReqForm(prev => {
+                      const copy = [...prev.items]
+                      copy[0].cantidad = Number(e.target.value)
+                      return { ...prev, items: copy }
+                    })}
+                    className="input-field w-full text-xs font-mono font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Precio Estimado (Gs.)</label>
+                  <CurrencyInput
+                    currency="PYG"
+                    value={reqForm.items[0].precio_estimado}
+                    onChangeValue={(val) => setReqForm(prev => {
+                      const copy = [...prev.items]
+                      copy[0].precio_estimado = val
+                      return { ...prev, items: copy }
+                    })}
+                    className="input-field w-full text-xs font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowReqModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-slate-100"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingReq}
+                  className="btn-primary text-xs flex items-center gap-2 px-5 py-2"
+                >
+                  {savingReq ? <Loader2 className="w-4 h-4 animate-spin" /> : <ClipboardList className="w-4 h-4" />}
+                  {savingReq ? "Guardando..." : "Crear Requisición"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: VISIÓN 360° DEL PROVEEDOR (SCORECARD, DEUDAS, CHEQUES DIFERIDOS, STOCK & SELL-OUT)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showSupplier360Modal && selectedSupplierFor360 && (
+        <Supplier360Modal
+          supplierId={selectedSupplierFor360.id}
+          supplierNombre={selectedSupplierFor360.razon_social}
+          onClose={() => {
+            setShowSupplier360Modal(false)
+            setSelectedSupplierFor360(null)
+          }}
+        />
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: EMISIÓN DE ORDEN DE COMPRA MANUAL
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showManualPOModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-4xl w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
+              <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                {editingPOId ? <Edit className="w-5 h-5 text-blue-500" /> : <ShoppingCart className="w-5 h-5 text-indigo-500" />}
+                {editingPOId ? `Modificar Orden de Compra N° ${editingPO?.numero}` : "Emisión Manual de Orden de Compra"}
+              </h3>
+              <button
+                onClick={() => setShowManualPOModal(false)}
+                className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveManualPO} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    Proveedor *
+                  </label>
+                  <select
+                    value={manualPOSupplierId}
+                    onChange={(e) => setManualPOSupplierId(e.target.value)}
+                    className="input-field w-full text-xs font-semibold"
+                    required
+                  >
+                    <option value="">Seleccione un proveedor...</option>
+                    {suppliers.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.razon_social || s.nombre_fantasia} (RUC: {s.ruc || "—"})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    Fecha Entrega Est.
+                  </label>
+                  <input
+                    type="date"
+                    value={manualPOFechaEntrega}
+                    onChange={(e) => setManualPOFechaEntrega(e.target.value)}
+                    className="input-field w-full text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    Condición de Pago
+                  </label>
+                  <select
+                    value={manualPOCondiciones}
+                    onChange={(e) => setManualPOCondiciones(e.target.value)}
+                    className="input-field w-full text-xs"
+                  >
+                    <option value="Contado">Contado</option>
+                    <option value="15 Días">15 Días</option>
+                    <option value="30 Días">30 Días</option>
+                    <option value="45 Días">45 Días</option>
+                    <option value="60 Días">60 Días</option>
+                    <option value="Consignación">Consignación</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                  Observaciones / Instrucciones de Entrega
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ej. Entregar en rampa de descarga de 07:00 a 11:00..."
+                  value={manualPOObservaciones}
+                  onChange={(e) => setManualPOObservaciones(e.target.value)}
+                  className="input-field w-full text-xs"
+                />
+              </div>
+
+              {/* Buscador reactivo de productos */}
+              <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2.5">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block">
+                      Buscar y Agregar Productos a la Orden
+                    </label>
+                    <span className="text-[11px] text-gray-500">
+                      Podés comprar cualquier producto del supermercado al proveedor que venda más barato.
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 bg-white dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualPOFilterBySupplier(false)
+                        if (searchProductPO) handleSearchProductsPO(searchProductPO, false)
+                      }}
+                      className={`px-2.5 py-1 rounded-md font-bold transition-all flex items-center gap-1.5 ${
+                        !manualPOFilterBySupplier
+                          ? "bg-indigo-600 text-white shadow-sm"
+                          : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                      }`}
+                    >
+                      <Globe className="w-3 h-3" /> Catálogo Completo (Cualquier Proveedor)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualPOFilterBySupplier(true)
+                        if (searchProductPO) handleSearchProductsPO(searchProductPO, true)
+                      }}
+                      className={`px-2.5 py-1 rounded-md font-bold transition-all flex items-center gap-1.5 ${
+                        manualPOFilterBySupplier
+                          ? "bg-indigo-600 text-white shadow-sm"
+                          : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                      }`}
+                    >
+                      <Building2 className="w-3 h-3" /> Solo de este Proveedor
+                    </button>
+                  </div>
+                </div>
+
+                <div className="relative">
+                  <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder={
+                      manualPOFilterBySupplier
+                        ? "Buscar productos habitualmente comprados a este proveedor..."
+                        : "Buscar en TODO el catálogo del supermercado (nombre, código de barras o SKU)..."
+                    }
+                    value={searchProductPO}
+                    onChange={(e) => handleSearchProductsPO(e.target.value)}
+                    className="input-field w-full pl-9 text-xs bg-white dark:bg-slate-900"
+                  />
+                  {searchingProductsPO && (
+                    <Loader2 className="w-4 h-4 text-indigo-500 animate-spin absolute right-3 top-1/2 -translate-y-1/2" />
+                  )}
+
+                  {productSearchResultsPO.length > 0 && (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-20 max-h-64 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                      {productSearchResultsPO.map(p => {
+                        const supHabitual = (p as any).supplier_nombre || (p as any).supplier?.razon_social || (suppliers.find(s => s.id === p.supplier_id)?.razon_social)
+                        const costHabitual = Number(p.ultimo_costo || p.costo_unitario || (p as any).precio_costo || 0)
+
+                        return (
+                          <div
+                            key={p.id}
+                            className="p-2.5 hover:bg-indigo-50/70 dark:hover:bg-indigo-950/40 cursor-pointer flex items-center justify-between text-xs transition-colors"
+                          >
+                            <div className="space-y-0.5 flex-1 pr-3" onClick={() => handleAddProductToManualPO(p)}>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-bold text-gray-900 dark:text-white">{p.nombre}</span>
+                                {supHabitual ? (
+                                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold border border-slate-200 dark:border-slate-700">
+                                    Habitual: {supHabitual}
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 font-semibold border border-amber-200 dark:border-amber-800">
+                                    Sin proveedor habitual
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-gray-400 font-mono">
+                                SKU: {p.sku || "—"} | Barra: {p.codigo_barra || "—"}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="font-mono text-gray-600 dark:text-gray-300 text-xs">
+                                Costo Ref: <strong>{formatPYG(costHabitual)}</strong>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setComparisonProductId(p.id)
+                                  setComparisonProductNombre(p.nombre)
+                                }}
+                                className="px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 font-bold text-[11px] flex items-center gap-1 border border-slate-200 dark:border-slate-700 transition-colors"
+                                title="Ver comparativa de precios entre todos los proveedores"
+                              >
+                                <DollarSign className="w-3 h-3 text-emerald-600" /> Comparar Precios
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleAddProductToManualPO(p)}
+                                className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] flex items-center gap-1 shadow-sm transition-colors"
+                              >
+                                <Plus className="w-3.5 h-3.5" /> Agregar
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Tabla de ítems de la orden manual */}
+              <div className="overflow-x-auto w-full border border-slate-200 dark:border-slate-700 rounded-xl">
+                <table className="w-full text-left text-xs min-w-[700px]">
+                  <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
+                    <tr>
+                      <th className="p-2.5">Producto & Ref. Habitual</th>
+                      <th className="p-2.5 text-right w-24">Cantidad</th>
+                      <th className="p-2.5 text-right w-36">Precio Compra (Gs.)</th>
+                      <th className="p-2.5 text-right w-16">IVA %</th>
+                      <th className="p-2.5 text-right w-32">Subtotal</th>
+                      <th className="p-2.5 text-center w-24">Comparar</th>
+                      <th className="p-2.5 text-center w-10"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                    {manualPOItems.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="p-6 text-center text-gray-400">
+                          Utilice el buscador para añadir productos a la orden. Podés comprar de cualquier proveedor existente.
+                        </td>
+                      </tr>
+                    ) : (
+                      manualPOItems.map((it, idx) => {
+                        const isEven = idx % 2 === 0
+                        const habitualCost = Number(it.habitual_costo || 0)
+                        const currentCost = Number(it.precio_unitario || 0)
+                        const ahorro = habitualCost > 0 && currentCost < habitualCost ? habitualCost - currentCost : 0
+
+                        return (
+                          <tr
+                            key={idx}
+                            className={`transition-colors duration-150 border-b border-slate-100 dark:border-slate-700/60 ${
+                              isEven
+                                ? "bg-white dark:bg-slate-900"
+                                : "bg-slate-100/70 dark:bg-slate-800/50"
+                            } hover:!bg-slate-200 dark:hover:!bg-slate-700 hover:shadow-sm`}
+                          >
+                            <td className="p-2.5">
+                              <div className="font-bold text-gray-900 dark:text-white">{it.nombre}</div>
+                              <div className="text-[10px] text-gray-400 font-mono">
+                                SKU: {it.sku || "—"} | Barra: {it.codigo_barra || "—"}
+                              </div>
+                              {it.habitual_supplier_nombre && (
+                                <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                                  <span>Habitual: <strong>{it.habitual_supplier_nombre}</strong> ({formatPYG(habitualCost)})</span>
+                                  {ahorro > 0 && (
+                                    <span className="text-emerald-700 dark:text-emerald-300 font-bold bg-emerald-100 dark:bg-emerald-950/60 px-1.5 py-0.2 rounded text-[9px] border border-emerald-200 dark:border-emerald-800">
+                                      ¡Ahorro {formatPYG(ahorro)}/un!
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                            <td className="p-2.5 text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                <input
+                                  type="number"
+                                  step="any"
+                                  min="0.001"
+                                  value={it.cantidad}
+                                  onChange={(e) => handleManualPOItemChange(idx, "cantidad", e.target.value === "" ? "" : Number(e.target.value))}
+                                  className="input-field w-20 p-1 text-right font-mono font-bold text-xs"
+                                  placeholder="0.00"
+                                  required
+                                />
+                                <span className="text-[10px] font-bold text-slate-500 uppercase w-6 text-left shrink-0">
+                                  {it.unidad_medida || "UN"}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="p-2.5 text-right">
+                              <CurrencyInput
+                                currency={(suppliers.find(s => s.id === manualPOSupplierId)?.moneda_default as any) || "PYG"}
+                                value={it.precio_unitario}
+                                onChangeValue={(val) => handleManualPOItemChange(idx, "precio_unitario", Math.max(0, val))}
+                                className="input-field w-32 p-1 text-right font-mono font-bold text-xs"
+                                required
+                              />
+                            </td>
+                            <td className="p-2.5 text-right font-mono text-gray-500">
+                              {it.iva_tasa || 10}%
+                            </td>
+                            <td className="p-2.5 text-right font-mono font-extrabold text-gray-900 dark:text-white">
+                              {formatPYG(it.subtotal || 0)}
+                            </td>
+                            <td className="p-2.5 text-center">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setComparisonProductId(it.product_id)
+                                  setComparisonProductNombre(it.nombre)
+                                }}
+                                className="px-2 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 font-bold text-[10px] flex items-center gap-1 mx-auto border border-emerald-200 dark:border-emerald-800/60 transition-colors"
+                                title="Ver precios de todos los proveedores para este producto"
+                              >
+                                <DollarSign className="w-3 h-3 text-emerald-600" /> Precios
+                              </button>
+                            </td>
+                            <td className="p-2.5 text-center">
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveItemFromManualPO(idx)}
+                                className="p-1 text-red-500 hover:text-red-700 rounded hover:bg-red-50 dark:hover:bg-red-950/30"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Checkbox para actualizar proveedor habitual */}
+              <label className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={manualPOUpdateDefaultSupplier}
+                  onChange={(e) => setManualPOUpdateDefaultSupplier(e.target.checked)}
+                  className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"
+                />
+                <div>
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                    Actualizar este proveedor como nuevo Proveedor Habitual de los productos agregados
+                  </span>
+                  <span className="text-[11px] text-slate-500 block">
+                    Si se marca, el sistema recordará a este proveedor como el preferido para futuras reposiciones automáticas y actualizará su último costo de compra en el catálogo.
+                  </span>
+                </div>
+              </label>
+
+              {/* Barra de Totales */}
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 flex justify-between items-center text-xs">
+                <span className="text-gray-500 font-bold">
+                  Total de Ítems: <strong>{manualPOItems.length}</strong>
+                </span>
+                <div className="text-right font-mono">
+                  <span className="text-gray-500 font-bold mr-2">Total Estimado:</span>
+                  <span className="text-base font-extrabold text-indigo-600 dark:text-indigo-400">
+                    {formatPYG(manualPOItems.reduce((acc, it) => acc + (it.subtotal || 0), 0))}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setShowManualPOModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingManualPO || manualPOItems.length === 0}
+                  className="btn-primary text-xs flex items-center gap-2 px-5 py-2"
+                >
+                  {savingManualPO ? <Loader2 className="w-4 h-4 animate-spin" /> : editingPOId ? <Check className="w-4 h-4" /> : <ShoppingCart className="w-4 h-4" />}
+                  {savingManualPO ? "Guardando..." : editingPOId ? "Guardar Cambios en la Orden" : "Emitir Orden de Compra"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: CONFIGURACIÓN DE BUZÓN DE FACTURAS ELECTRÓNICAS (cPanel IMAP)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showInboxConfigModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-lg w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
+              <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                <Mail className="w-5 h-5 text-indigo-500" /> Configuración de Buzón de Facturas (cPanel IMAP)
+              </h3>
+              <button
+                onClick={() => setShowInboxConfigModal(false)}
+                className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-500">
+              Configure la cuenta de correo donde los proveedores envían los archivos XML de Facturas Electrónicas (SIFEN e-Kuatia). El sistema descargará e interpretará las facturas automáticamente.
+            </p>
+
+            <form onSubmit={handleSaveInboxConfig} className="space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    Servidor IMAP *
+                  </label>
+                  <input
+                    type="text"
+                    value={inboxConfigForm.imap_host}
+                    onChange={(e) => setInboxConfigForm(prev => ({ ...prev, imap_host: e.target.value }))}
+                    className="input-field w-full text-xs font-mono"
+                    placeholder="mail.superextra.com.py"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    Puerto *
+                  </label>
+                  <input
+                    type="number"
+                    value={inboxConfigForm.imap_port}
+                    onChange={(e) => setInboxConfigForm(prev => ({ ...prev, imap_port: Number(e.target.value) }))}
+                    className="input-field w-full text-xs font-mono"
+                    placeholder="993"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                  Usuario de Correo *
+                </label>
+                <input
+                  type="email"
+                  value={inboxConfigForm.imap_user}
+                  onChange={(e) => setInboxConfigForm(prev => ({ ...prev, imap_user: e.target.value }))}
+                  className="input-field w-full text-xs font-mono"
+                  placeholder="facturaelectronica@superextra.com.py"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                  Contraseña de Correo
+                </label>
+                <input
+                  type="password"
+                  value={inboxConfigForm.imap_password}
+                  onChange={(e) => setInboxConfigForm(prev => ({ ...prev, imap_password: e.target.value }))}
+                  className="input-field w-full text-xs"
+                  placeholder={inboxConfig?.imap_user ? "Dejar en blanco para mantener la actual" : "Contraseña de la casilla cPanel"}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    Carpeta IMAP
+                  </label>
+                  <input
+                    type="text"
+                    value={inboxConfigForm.imap_folder}
+                    onChange={(e) => setInboxConfigForm(prev => ({ ...prev, imap_folder: e.target.value }))}
+                    className="input-field w-full text-xs font-mono"
+                    placeholder="INBOX"
+                  />
+                </div>
+                <div className="flex items-center gap-3 pt-6">
+                  <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={inboxConfigForm.imap_ssl}
+                      onChange={(e) => setInboxConfigForm(prev => ({ ...prev, imap_ssl: e.target.checked }))}
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    Usar SSL / TLS
+                  </label>
+                </div>
+              </div>
+
+              {inboxConfig?.ultimo_sync && (
+                <div className="p-3 bg-slate-50 dark:bg-slate-900/40 rounded-xl text-xs text-gray-500 space-y-1 font-mono">
+                  <div>Última Sincronización: {formatDate(inboxConfig.ultimo_sync)}</div>
+                  {inboxConfig.ultimo_error && (
+                    <div className="text-red-500">Último Error: {inboxConfig.ultimo_error}</div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setShowInboxConfigModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingInboxConfig}
+                  className="btn-primary text-xs flex items-center gap-2 px-5 py-2"
+                >
+                  {savingInboxConfig ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  {savingInboxConfig ? "Guardando..." : "Guardar Configuración"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: AUDITORÍA DETALLADA 3-WAY MATCH
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showMatchModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-3xl w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
+              <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                <Scale className="w-5 h-5 text-indigo-500" /> Auditoría Cruzada 3-Way Match
+              </h3>
+              <button
+                onClick={() => setShowMatchModal(false)}
+                className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {performingMatch ? (
+              <div className="py-16 text-center text-xs text-gray-400">
+                <Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin text-indigo-500" />
+                Ejecutando conciliación matemática (OC vs Muelle vs Factura)...
+              </div>
+            ) : matchResult ? (
+              <div className="space-y-4">
+                {/* Banner de Estado del Match */}
+                <div className={`p-4 rounded-xl border ${
+                  matchResult.estado_matching === "match_perfecto"
+                    ? "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/60"
+                    : "bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800/60"
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      {matchResult.estado_matching === "match_perfecto" ? (
+                        <CheckCircle className="w-6 h-6 text-emerald-600" />
+                      ) : (
+                        <Lock className="w-6 h-6 text-rose-600" />
+                      )}
+                      <div>
+                        <h4 className="font-bold text-sm text-gray-900 dark:text-white">
+                          {matchResult.estado_matching === "match_perfecto"
+                            ? "¡Conciliación Exitosa: Match Perfecto (100%)!"
+                            : "Discrepancia Detectada — Factura Retenida para Pago"}
+                        </h4>
+                        <p className="text-xs text-gray-600 dark:text-gray-300">
+                          {matchResult.mensaje}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Métricas del Match */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] text-gray-400 font-bold uppercase block">Total Facturado</span>
+                    <p className="text-base font-extrabold font-mono text-gray-900 dark:text-white mt-1">
+                      {formatPYG(matchResult.total_factura || 0)}
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] text-gray-400 font-bold uppercase block">Total Recibido Muelle</span>
+                    <p className="text-base font-extrabold font-mono text-indigo-600 mt-1">
+                      {formatPYG(matchResult.total_calculado_recepcion || 0)}
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] text-gray-400 font-bold uppercase block">Diferencia / Reclamo NC</span>
+                    <p className="text-base font-extrabold font-mono text-red-600 mt-1">
+                      {formatPYG(matchResult.diferencia_total || 0)}
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] text-gray-400 font-bold uppercase block">Estado en Tesorería</span>
+                    <p className={`text-xs font-bold mt-1 ${
+                      matchResult.bloqueada_para_pago ? "text-rose-600" : "text-emerald-600"
+                    }`}>
+                      {matchResult.bloqueada_para_pago ? "BLOQUEADA (Sin NC)" : "HABILITADA PAGO"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Si se generó Solicitud de NC */}
+                {matchResult.nc_request_generada && (
+                  <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                        <FileText className="w-4 h-4 text-amber-600" />
+                        Solicitud de Nota de Crédito Generada Automáticamente
+                      </span>
+                      <span className="font-mono text-xs font-bold text-amber-900 dark:text-amber-200">
+                        {matchResult.nc_request_generada.numero_solicitud}
+                      </span>
+                    </div>
+                    <p className="text-xs text-amber-800 dark:text-amber-300">
+                      Monto Reclamado: <strong>{formatPYG(matchResult.nc_request_generada.monto_reclamado || 0)}</strong>.
+                      La factura no constituye obligación exigible hasta que el proveedor remita la Nota de Crédito correspondiente.
+                    </p>
+                  </div>
+                )}
+
+                {/* Tabla de discrepancias ítem por ítem */}
+                {matchResult.discrepancias && matchResult.discrepancias.length > 0 && (
+                  <div className="space-y-2">
+                    <h5 className="text-xs font-bold uppercase tracking-wider text-gray-500">
+                      Detalle de Discrepancias por Producto
+                    </h5>
+                    <div className="overflow-x-auto border border-slate-200 dark:border-slate-700 rounded-xl">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px]">
+                          <tr>
+                            <th className="p-2.5">Producto</th>
+                            <th className="p-2.5 text-center">Tipo Discrepancia</th>
+                            <th className="p-2.5 text-right">Cant. Recibida</th>
+                            <th className="p-2.5 text-right">Cant. Facturada</th>
+                            <th className="p-2.5 text-right">Diferencia (Gs.)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                          {matchResult.discrepancias.map((d: any, idx: number) => (
+                            <tr key={idx}>
+                              <td className="p-2.5 font-bold text-gray-900 dark:text-white">
+                                {d.descripcion}
+                              </td>
+                              <td className="p-2.5 text-center">
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300">
+                                  {d.tipo?.replace("_", " ").toUpperCase()}
+                                </span>
+                              </td>
+                              <td className="p-2.5 text-right font-mono">
+                                {d.cantidad_recibida}
+                              </td>
+                              <td className="p-2.5 text-right font-mono font-bold text-red-600">
+                                {d.cantidad_facturada}
+                              </td>
+                              <td className="p-2.5 text-right font-mono font-black text-red-600">
+                                {formatPYG(d.diferencia_monto || 0)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            <div className="flex justify-end pt-3 border-t border-slate-100 dark:border-slate-700">
+              <button
+                type="button"
+                onClick={() => setShowMatchModal(false)}
+                className="btn-primary text-xs px-6 py-2"
+              >
+                Cerrar Auditoría
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: RECIBIR Y VALIDAR FACTURA CONTRA PEDIDO
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showReceiveInvoiceModal && selectedPoForInvoiceReceipt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-4xl w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[92vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
+              <div>
+                <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                  <Receipt className="w-5 h-5 text-indigo-600" />
+                  Recibir Factura & Validar Match con Pedido
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  Pedido <strong>{selectedPoForInvoiceReceipt.numero}</strong> • Proveedor: <strong>{selectedPoForInvoiceReceipt.supplier?.razon_social}</strong>
+                </p>
+              </div>
+              <button
+                onClick={() => { setShowReceiveInvoiceModal(false); setReceiptMatchingResult(null); }}
+                className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Resumen del Pedido Pactado */}
+            <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap items-center justify-between gap-4 text-xs">
+              <div>
+                <span className="text-[10px] text-gray-400 uppercase font-bold block">Proveedor</span>
+                <span className="font-bold text-gray-800 dark:text-gray-200">
+                  {selectedPoForInvoiceReceipt.supplier?.razon_social} ({selectedPoForInvoiceReceipt.supplier?.ruc || "Sin RUC"})
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] text-gray-400 uppercase font-bold block">Total Pactado en Pedido</span>
+                <span className="font-mono font-extrabold text-base text-indigo-600 dark:text-indigo-400">
+                  {formatPYG(selectedPoForInvoiceReceipt.total || 0)}
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] text-gray-400 uppercase font-bold block">Estado Actual Pedido</span>
+                <span className="font-bold capitalize text-slate-700 dark:text-slate-300">
+                  {selectedPoForInvoiceReceipt.estado}
+                </span>
+              </div>
+            </div>
+
+            {receiptMatchingResult ? (
+              /* RESULTADO DEL MATCHING EN TIEMPO REAL */
+              <div className="space-y-4">
+                {/* Banner Semáforo */}
+                <div className={`p-4 rounded-xl border flex items-center justify-between ${
+                  receiptMatchingResult.estado_matching === "match_perfecto"
+                    ? "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-800/60 text-emerald-900 dark:text-emerald-200"
+                    : "bg-rose-50 dark:bg-rose-950/20 border-rose-300 dark:border-rose-800/60 text-rose-900 dark:text-rose-200"
+                }`}>
+                  <div className="flex items-center gap-3">
+                    {receiptMatchingResult.estado_matching === "match_perfecto" ? (
+                      <CheckCircle2 className="w-7 h-7 text-emerald-600 shrink-0" />
+                    ) : (
+                      <ShieldAlert className="w-7 h-7 text-rose-600 shrink-0" />
+                    )}
+                    <div>
+                      <h4 className="font-bold text-sm">
+                        {receiptMatchingResult.estado_matching === "match_perfecto"
+                          ? "¡Match Conforme! El valor de la factura coincide con el Pedido"
+                          : "Discrepancia con el Pedido — Factura Bloqueada para Tesorería"}
+                      </h4>
+                      <p className="text-xs opacity-90 mt-0.5">
+                        {receiptMatchingResult.mensaje}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Métricas clave */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] text-gray-400 font-bold uppercase block">Total Pedido Pactado</span>
+                    <p className="text-base font-extrabold font-mono text-gray-900 dark:text-white mt-1">
+                      {formatPYG(receiptMatchingResult.purchase_order_total ?? selectedPoForInvoiceReceipt.total ?? 0)}
+                    </p>
+                  </div>
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] text-gray-400 font-bold uppercase block">Total Factura Recibida</span>
+                    <p className="text-base font-extrabold font-mono text-indigo-600 mt-1">
+                      {formatPYG(receiptMatchingResult.total_factura || receiptMatchingResult.total_facturado || 0)}
+                    </p>
+                  </div>
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] text-gray-400 font-bold uppercase block">Diferencia con Pedido</span>
+                    <p className={`text-base font-extrabold font-mono mt-1 ${
+                      Math.abs(receiptMatchingResult.diferencia_total || receiptMatchingResult.diferencia_pedido_monto || 0) <= 10
+                        ? "text-emerald-600"
+                        : "text-rose-600"
+                    }`}>
+                      {formatPYG(receiptMatchingResult.diferencia_total || receiptMatchingResult.diferencia_pedido_monto || 0)}
+                    </p>
+                  </div>
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] text-gray-400 font-bold uppercase block">Control Tesorería</span>
+                    <p className={`text-xs font-bold mt-1 ${
+                      receiptMatchingResult.bloqueada_para_pago ? "text-rose-600" : "text-emerald-600"
+                    }`}>
+                      {receiptMatchingResult.bloqueada_para_pago ? "PAGO RETENIDO" : "HABILITADA PAGO"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Banner de Solicitud de NC emitida */}
+                {receiptMatchingResult.solicitud_nc && (
+                  <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800 space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                        <FileText className="w-4 h-4 text-amber-600" />
+                        Solicitud de Nota de Crédito Emitida Automáticamente
+                      </span>
+                      <span className="font-mono font-bold text-amber-900 dark:text-amber-200">
+                        {receiptMatchingResult.solicitud_nc.numero_solicitud}
+                      </span>
+                    </div>
+                    <p className="text-amber-800 dark:text-amber-300">
+                      Monto Reclamado: <strong>{formatPYG(receiptMatchingResult.solicitud_nc.monto_reclamado || 0)}</strong>.
+                      Regla Supermercado: <em>Sin entrega de Nota de Crédito por el sobreprecio/faltante, no se procesa ningún pago.</em>
+                    </p>
+                  </div>
+                )}
+
+                {/* Tabla de Comparación Ítem por Ítem */}
+                <div className="space-y-2">
+                  <h5 className="text-xs font-bold uppercase tracking-wider text-gray-500">
+                    Auditoría Ítem por Ítem: Factura vs Pedido
+                  </h5>
+                  <div className="overflow-x-auto border border-slate-200 dark:border-slate-700 rounded-xl">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px]">
+                        <tr>
+                          <th className="p-2.5">Producto</th>
+                          <th className="p-2.5 text-right">Precio Pedido</th>
+                          <th className="p-2.5 text-right">Precio Factura</th>
+                          <th className="p-2.5 text-right">Cant. Pedida</th>
+                          <th className="p-2.5 text-right">Cant. Facturada</th>
+                          <th className="p-2.5 text-right">Diferencia</th>
+                          <th className="p-2.5">Estado / Motivo</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                        {(receiptMatchingResult.items || receiptMatchingResult.discrepancias || []).map((it: any, idx: number) => {
+                          const isOk = it.estado === "conforme"
+                          return (
+                            <tr key={idx} className={isOk ? "" : "bg-rose-50/40 dark:bg-rose-950/10"}>
+                              <td className="p-2.5 font-medium text-gray-900 dark:text-white">
+                                {it.descripcion}
+                                {it.codigo_proveedor && (
+                                  <span className="text-[10px] text-gray-400 block font-mono">Cód: {it.codigo_proveedor}</span>
+                                )}
+                              </td>
+                              <td className="p-2.5 text-right font-mono text-gray-600 dark:text-gray-300">
+                                {it.precio_orden !== null && it.precio_orden !== undefined ? formatPYG(it.precio_orden) : "—"}
+                              </td>
+                              <td className="p-2.5 text-right font-mono font-bold text-gray-900 dark:text-white">
+                                {formatPYG(it.precio_facturado || 0)}
+                              </td>
+                              <td className="p-2.5 text-right font-mono text-gray-600 dark:text-gray-300">
+                                {it.cantidad_ordenada !== null && it.cantidad_ordenada !== undefined ? it.cantidad_ordenada : "—"}
+                              </td>
+                              <td className="p-2.5 text-right font-mono font-bold">
+                                {it.cantidad_facturada}
+                              </td>
+                              <td className={`p-2.5 text-right font-mono font-black ${it.diferencia_monto > 0 ? "text-rose-600" : "text-emerald-600"}`}>
+                                {formatPYG(it.diferencia_monto || 0)}
+                              </td>
+                              <td className="p-2.5">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  isOk
+                                    ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                                    : "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"
+                                }`}>
+                                  {it.motivos || (isOk ? "Conforme" : it.estado)}
+                                </span>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => setReceiptMatchingResult(null)}
+                    className="btn-secondary text-xs px-4 py-2"
+                  >
+                    Recibir Otra Factura
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setShowReceiveInvoiceModal(false); setReceiptMatchingResult(null); }}
+                    className="btn-primary text-xs px-6 py-2"
+                  >
+                    Finalizar y Cerrar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* FORMULARIO DE CARGA / RECEPCIÓN */
+              <form onSubmit={handleProcessReceiveInvoice} className="space-y-4">
+                <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setReceivingInvoiceMode("xml")}
+                    className={`pb-2 font-bold px-3 transition-colors ${
+                      receivingInvoiceMode === "xml"
+                        ? "border-b-2 border-indigo-600 text-indigo-600 dark:text-indigo-400"
+                        : "text-gray-500 hover:text-gray-800"
+                    }`}
+                  >
+                    Subir Archivo XML SIFEN
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReceivingInvoiceMode("existente")}
+                    className={`pb-2 font-bold px-3 transition-colors ${
+                      receivingInvoiceMode === "existente"
+                        ? "border-b-2 border-indigo-600 text-indigo-600 dark:text-indigo-400"
+                        : "text-gray-500 hover:text-gray-800"
+                    }`}
+                  >
+                    Seleccionar Factura Existente de Bandeja
+                  </button>
+                </div>
+
+                {receivingInvoiceMode === "xml" ? (
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); setDragOverOrderXml(true); }}
+                    onDragLeave={() => setDragOverOrderXml(false)}
+                    onDrop={(e) => {
+                      e.preventDefault()
+                      setDragOverOrderXml(false)
+                      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                        setReceivingInvoiceFile(e.dataTransfer.files[0])
+                      }
+                    }}
+                    className={`p-6 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center text-center transition-all ${
+                      dragOverOrderXml
+                        ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40"
+                        : "border-slate-300 dark:border-slate-700 hover:border-indigo-400 bg-white dark:bg-slate-800/90"
+                    }`}
+                  >
+                    <label className="cursor-pointer w-full flex flex-col items-center justify-center">
+                      <input
+                        type="file"
+                        accept=".xml"
+                        className="hidden"
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files[0]) {
+                            setReceivingInvoiceFile(e.target.files[0])
+                          }
+                        }}
+                      />
+                      <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 flex items-center justify-center mb-3 text-indigo-600">
+                        <FileText className="w-6 h-6" />
+                      </div>
+                      {receivingInvoiceFile ? (
+                        <div className="space-y-1">
+                          <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                            <CheckCircle2 className="w-4 h-4" /> {receivingInvoiceFile.name}
+                          </span>
+                          <span className="text-[10px] text-gray-400 block">
+                            {(receivingInvoiceFile.size / 1024).toFixed(1)} KB — Listo para procesar y validar
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          <span className="text-xs font-bold text-gray-800 dark:text-gray-200">
+                            Arrastra el archivo XML de la factura aquí o haz click para buscar
+                          </span>
+                          <span className="text-[10px] text-gray-400 block">
+                            Formato estándar SIFEN (Paraguay)
+                          </span>
+                        </div>
+                      )}
+                    </label>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                      Seleccione una factura de este proveedor ingresada en el sistema:
+                    </label>
+                    <select
+                      value={selectedExistingInvoiceId}
+                      onChange={(e) => setSelectedExistingInvoiceId(e.target.value)}
+                      className="input-field text-xs w-full"
+                    >
+                      <option value="">-- Seleccione un comprobante --</option>
+                      {allSupplierInvoices
+                        .filter(i => !selectedPoForInvoiceReceipt.supplier_id || i.supplier_id === selectedPoForInvoiceReceipt.supplier_id)
+                        .map(inv => (
+                          <option key={inv.id} value={inv.id}>
+                            Factura {inv.numero_factura} ({inv.fecha_emision ? formatDate(inv.fecha_emision) : "S/F"}) — Total: {formatPYG(inv.total || 0)} {inv.purchase_order_id ? "(Ya vinculada a otra OC)" : ""}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => setShowReceiveInvoiceModal(false)}
+                    className="btn-secondary text-xs px-4 py-2"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={processingInvoiceReceipt || (receivingInvoiceMode === "xml" && !receivingInvoiceFile) || (receivingInvoiceMode === "existente" && !selectedExistingInvoiceId)}
+                    className="btn-primary text-xs px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {processingInvoiceReceipt ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Validando Match con Pedido...
+                      </>
+                    ) : (
+                      <>
+                        <Scale className="w-4 h-4" />
+                        Procesar y Validar Match
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: VINCULAR FACTURA EXISTENTE A PEDIDO
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showAssociatePoModal && invoiceToAssociatePo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-md w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
+              <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                <Link2 className="w-5 h-5 text-indigo-600" /> Vincular a Pedido / OC
+              </h3>
+              <button
+                onClick={() => setShowAssociatePoModal(false)}
+                className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl text-xs space-y-1 border border-slate-200 dark:border-slate-700">
+              <p>Factura: <strong className="font-mono">{invoiceToAssociatePo.numero_factura}</strong></p>
+              <p>Proveedor: <strong>{invoiceToAssociatePo.supplier_nombre}</strong></p>
+              <p>Total Factura: <strong className="font-mono text-indigo-600">{formatPYG(invoiceToAssociatePo.total || 0)}</strong></p>
+            </div>
+
+            <form onSubmit={handleSaveAssociatePo} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                  Seleccione el Pedido (Orden de Compra):
+                </label>
+                <select
+                  value={targetPoIdForAssociation}
+                  onChange={(e) => setTargetPoIdForAssociation(e.target.value)}
+                  className="input-field text-xs w-full"
+                  required
+                >
+                  <option value="">-- Seleccionar Pedido --</option>
+                  {orders
+                    .filter(o => !invoiceToAssociatePo.supplier_id || o.supplier_id === invoiceToAssociatePo.supplier_id)
+                    .map(o => (
+                      <option key={o.id} value={o.id}>
+                        {o.numero} — Total: {formatPYG(o.total || 0)} ({o.estado})
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setShowAssociatePoModal(false)}
+                  className="btn-secondary text-xs px-4 py-2"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={associatingPo || !targetPoIdForAssociation}
+                  className="btn-primary text-xs px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold flex items-center gap-2 disabled:opacity-50"
+                >
+                  {associatingPo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Scale className="w-4 h-4" />}
+                  Vincular y Auditar Match
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: REGISTRAR NOTA DE CRÉDITO RECIBIDA DEL PROVEEDOR
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showResolveNcModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-lg w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
+              <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                <FileCheck className="w-5 h-5 text-emerald-500" /> Registrar Nota de Crédito Recibida
+              </h3>
+              <button
+                onClick={() => setShowResolveNcModal(false)}
+                className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-500">
+              Al cargar la Nota de Crédito emitida por el proveedor, se aplica el descuento formal sobre la factura, se reduce el saldo en Cuentas por Pagar y se habilita para pago en Tesorería.
+            </p>
+
+            <form onSubmit={handleSaveResolveNc} className="space-y-4">
+              <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl space-y-1 text-xs font-mono">
+                <div>Proveedor: <strong className="text-gray-900 dark:text-white">{selectedNcRequestForResolve?.supplier?.razon_social}</strong></div>
+                <div>Factura: <strong className="text-indigo-600">{selectedNcRequestForResolve?.invoice?.numero_factura}</strong></div>
+                <div>Monto Reclamado Original: <strong className="text-red-600">{formatPYG(selectedNcRequestForResolve?.monto_reclamado || 0)}</strong></div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    N° Nota de Crédito *
+                  </label>
+                  <input
+                    type="text"
+                    value={resolveNcForm.nc_recibida_numero}
+                    onChange={(e) => setResolveNcForm(prev => ({ ...prev, nc_recibida_numero: e.target.value }))}
+                    className="input-field w-full text-xs font-mono"
+                    placeholder="001-001-0004512"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    Timbrado NC *
+                  </label>
+                  <input
+                    type="text"
+                    value={resolveNcForm.nc_recibida_timbrado}
+                    onChange={(e) => setResolveNcForm(prev => ({ ...prev, nc_recibida_timbrado: e.target.value }))}
+                    className="input-field w-full text-xs font-mono"
+                    placeholder="18545636"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    Monto Real de la NC (Gs.) *
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={resolveNcForm.nc_recibida_monto}
+                    onChange={(e) => setResolveNcForm(prev => ({ ...prev, nc_recibida_monto: Number(e.target.value) }))}
+                    className="input-field w-full text-xs font-mono font-bold"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    Fecha Emisión NC *
+                  </label>
+                  <input
+                    type="date"
+                    value={resolveNcForm.nc_recibida_fecha}
+                    onChange={(e) => setResolveNcForm(prev => ({ ...prev, nc_recibida_fecha: e.target.value }))}
+                    className="input-field w-full text-xs"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                  CDC SIFEN de la Nota de Crédito (44 dígitos, opcional)
+                </label>
+                <input
+                  type="text"
+                  value={resolveNcForm.nc_recibida_cdc}
+                  onChange={(e) => setResolveNcForm(prev => ({ ...prev, nc_recibida_cdc: e.target.value }))}
+                  className="input-field w-full text-xs font-mono"
+                  placeholder="01801503779001001000451212026090412345678901"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                  Observaciones
+                </label>
+                <input
+                  type="text"
+                  value={resolveNcForm.observaciones}
+                  onChange={(e) => setResolveNcForm(prev => ({ ...prev, observaciones: e.target.value }))}
+                  className="input-field w-full text-xs"
+                  placeholder="Ej. NC aplicada por reposición de 10 paquetes de fideos vencidos"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setShowResolveNcModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={resolvingNc}
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-2 shadow-sm"
+                >
+                  {resolvingNc ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                  {resolvingNc ? "Aplicando NC..." : "Aplicar NC y Habilitar Factura"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL DE CONFIRMACIÓN DE ELIMINACIÓN DE OC ──────────────────────── */}
+      {poToDelete && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-md w-full p-6 border border-red-100 dark:border-red-900/40 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-3 rounded-full bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-400 shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-extrabold text-base text-gray-900 dark:text-white">
+                  ¿Eliminar Orden de Compra?
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Estás por eliminar la orden <strong className="font-mono text-gray-800 dark:text-gray-200">{poToDelete.numero}</strong> de <strong className="text-gray-800 dark:text-gray-200">{poToDelete.supplier?.razon_social || "Proveedor"}</strong> por un total de <strong>{formatPYG(poToDelete.total || 0)}</strong>.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/40 rounded-xl p-3 text-xs text-amber-800 dark:text-amber-300">
+              <p className="font-bold flex items-center gap-1">
+                <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0" />
+                Regla de seguridad operativa:
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed">
+                Si la orden ya cuenta con recepciones de mercadería en muelle, el sistema bloqueará la eliminación para proteger el inventario, a menos que marques la casilla de eliminación forzada.
+              </p>
+            </div>
+
+            <label className="flex items-start gap-2.5 p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-750 cursor-pointer transition-colors">
+              <input
+                type="checkbox"
+                checked={forceDeletePO}
+                onChange={(e) => setForceDeletePO(e.target.checked)}
+                className="mt-0.5 rounded text-red-600 focus:ring-red-500"
+              />
+              <div className="text-xs">
+                <span className="font-bold text-gray-800 dark:text-gray-200">
+                  Forzar eliminación
+                </span>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                  Desvincular y limpiar recepciones y solicitudes asociadas a esta orden.
+                </p>
+              </div>
+            </label>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-700">
+              <button
+                type="button"
+                onClick={() => { setPoToDelete(null); setForceDeletePO(false); }}
+                disabled={deletingPO}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-gray-700 dark:text-gray-300 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleDeletePO}
+                disabled={deletingPO}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+              >
+                {deletingPO ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" /> Eliminando...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" /> Confirmar Eliminación
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: NUEVA DEVOLUCIÓN A PROVEEDOR (CIRCUITO CON APROBACIÓN, STOCK Y FINANZAS)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showCreateReturnModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-4xl w-full max-h-[92vh] overflow-hidden flex flex-col shadow-2xl border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex items-start justify-between gap-4 bg-slate-50/70 dark:bg-slate-800/40">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                    editingReturnId
+                      ? "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800"
+                      : "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
+                  }`}>
+                    {editingReturnId ? "Modo Edición" : "Circuito de Devolución"}
+                  </span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    {editingReturnId ? "Actualización de ítems y condiciones de devolución" : "Paso 1: Solicitud e imputación de productos"}
+                  </span>
+                </div>
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <Truck className="w-6 h-6 text-amber-600 dark:text-amber-400" />
+                  {editingReturnId ? "Editar Devolución a Proveedor" : "Nueva Devolución a Proveedor"}
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  {editingReturnId
+                    ? "Modifique los productos, cantidades, almacén u observaciones. Al agregar productos existentes las líneas se unificarán automáticamente."
+                    : "Seleccione el proveedor para consultar su catálogo de productos y vincular las facturas correspondientes."}
+                </p>
+              </div>
+
+              <button
+                onClick={() => {
+                  setShowCreateReturnModal(false)
+                  setEditingReturnId(null)
+                  setReturnItemsList([])
+                  setSelectedSupplierForReturn("")
+                  setSupplierProducts([])
+                  setProductInvoices([])
+                }}
+                className="p-2 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Contenido Scrollable */}
+            <div className="p-6 overflow-y-auto space-y-6 flex-1 text-xs">
+              {/* Sección Proveedor y Depósito */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
+                {/* Selector Inteligente de Proveedor */}
+                <div className="relative">
+                  <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                    Proveedor Destinatario <span className="text-red-500">*</span>
+                  </label>
+
+                  {selectedSupplierForReturn ? (
+                    <div className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-slate-800 border-2 border-amber-500/40 shadow-xs">
+                      <div className="flex items-center gap-2.5 overflow-hidden">
+                        <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 flex items-center justify-center shrink-0">
+                          <Building2 className="w-4 h-4" />
+                        </div>
+                        <div className="truncate">
+                          <span className="font-extrabold text-xs text-gray-900 dark:text-white block truncate">
+                            {suppliers.find(s => s.id === selectedSupplierForReturn)?.razon_social || "Proveedor Seleccionado"}
+                          </span>
+                          <span className="text-[10px] text-gray-500 font-mono">
+                            RUC: {suppliers.find(s => s.id === selectedSupplierForReturn)?.ruc || "—"} · {supplierProducts.length} productos vinculados
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedSupplierForReturn("")
+                          setSupplierProducts([])
+                          setSelectedProductForReturn("")
+                          setSelectedProductDetails(null)
+                          setProductStockInfo(null)
+                          setProductInvoices([])
+                        }}
+                        className="px-2 py-1 rounded-lg text-[10px] font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors shrink-0"
+                      >
+                        Cambiar
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <div className="relative">
+                        <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
+                        <input
+                          type="text"
+                          value={supplierSearchForReturn}
+                          onChange={(e) => {
+                            setSupplierSearchForReturn(e.target.value)
+                            setShowSupplierPickerForReturn(true)
+                          }}
+                          onFocus={() => setShowSupplierPickerForReturn(true)}
+                          placeholder="Buscar proveedor por Razón Social o RUC..."
+                          className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none text-xs"
+                        />
+                      </div>
+
+                      {showSupplierPickerForReturn && (
+                        <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl z-30 max-h-52 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700">
+                          {filteredSuppliersForReturn.length === 0 ? (
+                            <div className="p-3 text-center text-gray-400 text-xs">
+                              No se encontraron proveedores que coincidan con la búsqueda.
+                            </div>
+                          ) : (
+                            filteredSuppliersForReturn.map(s => (
+                              <button
+                                key={s.id}
+                                type="button"
+                                onClick={() => handleSelectSupplierForReturn(s.id)}
+                                className="w-full p-2.5 text-left hover:bg-amber-50 dark:hover:bg-slate-700 flex items-center justify-between transition-colors"
+                              >
+                                <div className="truncate">
+                                  <p className="font-bold text-xs text-gray-900 dark:text-white truncate">
+                                    {s.razon_social}
+                                  </p>
+                                  <p className="text-[10px] text-gray-500 font-mono">
+                                    RUC: {s.ruc || "—"} {(s as any).nombre_fantasia ? `· ${(s as any).nombre_fantasia}` : ""}
+                                  </p>
+                                </div>
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-600 text-gray-600 dark:text-gray-300 font-mono shrink-0">
+                                  Seleccionar
+                                </span>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                    Depósito de Salida Físico
+                  </label>
+                  <select
+                    value={selectedWarehouseForReturn}
+                    onChange={(e) => setSelectedWarehouseForReturn(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  >
+                    <option value="">Depósito Principal (Por defecto)</option>
+                    {warehousesList.map(w => (
+                      <option key={w.id} value={w.id}>{w.nombre || w.codigo}</option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    Depósito desde el cual egresará físicamente la mercadería devuelta.
+                  </p>
+                </div>
+              </div>
+
+              {/* Selector Dinámico e Integral de Productos (Lector de Barras, SKU y Nombre) */}
+              {selectedSupplierForReturn && (
+                <div className="p-4 rounded-2xl border border-amber-200 dark:border-amber-800/40 bg-amber-50/40 dark:bg-amber-950/20 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-200/60 dark:border-amber-800/40 pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <Box className="w-4 h-4 text-amber-600" />
+                      <span className="font-extrabold text-amber-950 dark:text-amber-300 text-sm">
+                        Búsqueda y Carga de Mercadería a Devolver
+                      </span>
+                    </div>
+
+                    {/* Scope Switch: Catálogo del Proveedor vs Catálogo General del Supermercado */}
+                    <div className="flex items-center gap-1 bg-white dark:bg-slate-800 p-1 rounded-xl border border-amber-200 dark:border-slate-700 text-[10px] font-bold">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProductSearchScope("proveedor")
+                          setShowProductPickerForReturn(false)
+                        }}
+                        className={`px-2.5 py-1 rounded-lg transition-colors ${
+                          productSearchScope === "proveedor"
+                            ? "bg-amber-600 text-white shadow-xs"
+                            : "text-gray-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        }`}
+                      >
+                        Catálogo Proveedor ({supplierProducts.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProductSearchScope("todos")
+                          setShowProductPickerForReturn(false)
+                          if (productSearchForReturn.length >= 2) {
+                            searchGlobalProductsForReturn(productSearchForReturn)
+                          }
+                        }}
+                        className={`px-2.5 py-1 rounded-lg transition-colors ${
+                          productSearchScope === "todos"
+                            ? "bg-amber-600 text-white shadow-xs"
+                            : "text-gray-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        }`}
+                      >
+                        Todo el Supermercado (11.000+)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Input de Búsqueda con Soporte de Pistola de Código de Barras / SKU */}
+                  {!selectedProductForReturn ? (
+                    <div className="relative">
+                      <div className="relative flex items-center">
+                        <Barcode className="w-5 h-5 absolute left-3 text-amber-600 dark:text-amber-400" />
+                        <input
+                          type="text"
+                          value={productSearchForReturn}
+                          onChange={(e) => {
+                            const val = e.target.value
+                            setProductSearchForReturn(val)
+                            setShowProductPickerForReturn(true)
+                            if (productSearchScope === "todos" && val.trim().length >= 2) {
+                              searchGlobalProductsForReturn(val)
+                            }
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault()
+                              handleBarcodeOrEnterProductSearch(productSearchForReturn)
+                            }
+                          }}
+                          onFocus={() => setShowProductPickerForReturn(true)}
+                          placeholder="Pistolear código de barras, ingresar SKU interno o escribir nombre del producto... [Enter para autoseleccionar]"
+                          className="w-full pl-10 pr-24 py-2.5 rounded-xl border border-amber-300 dark:border-amber-800 bg-white dark:bg-slate-800 text-gray-900 dark:text-white font-medium focus:ring-2 focus:ring-amber-500 focus:outline-none text-xs shadow-xs"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleBarcodeOrEnterProductSearch(productSearchForReturn)}
+                          className="absolute right-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold rounded-lg transition-colors"
+                        >
+                          Buscar
+                        </button>
+                      </div>
+
+                      {/* Dropdown de Resultados de Búsqueda */}
+                      {showProductPickerForReturn && (
+                        <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl z-30 max-h-60 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700">
+                          {loadingSupplierProducts || loadingGlobalProducts ? (
+                            <div className="p-4 text-center text-gray-400 text-xs flex items-center justify-center gap-2">
+                              <Loader2 className="w-4 h-4 animate-spin text-amber-600" />
+                              <span>Buscando artículos en catálogo...</span>
+                            </div>
+                          ) : (productSearchScope === "proveedor" ? filteredSupplierProducts : globalProductResults).length === 0 ? (
+                            <div className="p-4 text-center text-gray-400 text-xs">
+                              <p className="font-bold">No se encontraron artículos con esa búsqueda.</p>
+                              {productSearchScope === "proveedor" && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setProductSearchScope("todos")
+                                    searchGlobalProductsForReturn(productSearchForReturn)
+                                  }}
+                                  className="mt-2 px-3 py-1 bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 font-bold rounded-lg text-[10px] hover:bg-amber-200"
+                                >
+                                  Buscar en todo el catálogo de 11.000+ productos
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            (productSearchScope === "proveedor" ? filteredSupplierProducts : globalProductResults).map(p => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => handleSelectProductObjectForReturn(p)}
+                                className="w-full p-2.5 text-left hover:bg-amber-50 dark:hover:bg-slate-700 flex items-center justify-between gap-3 transition-colors"
+                              >
+                                <div className="truncate">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-bold text-xs text-gray-900 dark:text-white">
+                                      {p.nombre}
+                                    </span>
+                                    {p.codigo_barra && (
+                                      <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 font-mono text-[9px] text-gray-600 dark:text-gray-300 flex items-center gap-1">
+                                        <Barcode className="w-3 h-3" /> {p.codigo_barra}
+                                      </span>
+                                    )}
+                                    {p.sku && (
+                                      <span className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950/50 font-mono text-[9px] text-amber-800 dark:text-amber-300 font-bold">
+                                        SKU: {p.sku}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[10px] text-gray-500 mt-0.5">
+                                    Costo Referencial: <strong>{formatPYG(p.costo_promedio || p.ultimo_costo || p.costo_unitario || 0)}</strong> · Unidad: {p.unidad_medida || "UN"}
+                                  </p>
+                                </div>
+                                <span className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[10px] font-bold shrink-0">
+                                  Elegir
+                                </span>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* Tarjeta del Producto Seleccionado */
+                    <div className="p-3.5 rounded-xl bg-white dark:bg-slate-800 border-2 border-amber-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-black text-sm text-gray-900 dark:text-white">
+                            {selectedProductDetails?.nombre || "Producto Seleccionado"}
+                          </span>
+                          {selectedProductDetails?.codigo_barra && (
+                            <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-700 font-mono text-[10px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                              <Barcode className="w-3.5 h-3.5 text-amber-600" /> {selectedProductDetails.codigo_barra}
+                            </span>
+                          )}
+                          {selectedProductDetails?.sku && (
+                            <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/60 font-mono text-[10px] font-bold text-amber-800 dark:text-amber-300">
+                              SKU: {selectedProductDetails.sku}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-3 text-[11px] text-gray-600 dark:text-gray-300 font-mono">
+                          <span>
+                            Stock en Depósito:{" "}
+                            {loadingProductStock ? (
+                              <Loader2 className="w-3 h-3 inline animate-spin" />
+                            ) : (
+                              <strong className={productStockInfo && productStockInfo.cantidad_disponible > 0 ? "text-emerald-600" : "text-amber-600"}>
+                                {productStockInfo ? `${productStockInfo.cantidad_disponible} UN` : "Consultando..."}
+                              </strong>
+                            )}
+                          </span>
+                          <span>·</span>
+                          <span>
+                            Costo Sugerido: <strong>{formatPYG(returnUnitPrice)}</strong>
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedProductForReturn("")
+                          setSelectedProductDetails(null)
+                          setProductStockInfo(null)
+                          setSelectedInvoiceForReturn("")
+                          setProductInvoices([])
+                        }}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-800 shrink-0"
+                      >
+                        Cambiar Producto
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Factura Afectada y Formulario de Carga del Ítem */}
+                  {selectedProductForReturn && (
+                    <div className="space-y-4 pt-2">
+                      {/* Factura Afectada */}
+                      <div>
+                        <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                          Factura de Compra Afectada (P2P)
+                        </label>
+                        <select
+                          value={selectedInvoiceForReturn}
+                          onChange={(e) => handleSelectInvoiceForReturn(e.target.value)}
+                          disabled={loadingProductInvoices}
+                          className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none disabled:opacity-50"
+                        >
+                          <option value="">Sin factura específica (Ajuste directo)</option>
+                          {productInvoices.map(inv => (
+                            <option key={inv.invoice_id} value={inv.invoice_id}>
+                              Fact. #{inv.numero_factura} — {formatDate(inv.fecha_emision)} — Costo: {formatPYG(inv.precio_unitario)} (Comprado: {inv.cantidad_comprada ?? (inv as any).cantidad_facturada} un.)
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-[10px] text-gray-400 mt-0.5">
+                          {productInvoices.length > 0
+                            ? `Se encontraron ${productInvoices.length} facturas previas de compra de este producto con este proveedor.`
+                            : "Este producto no registra facturas de compra previas con este proveedor (se procesará como ajuste directo)."}
+                        </p>
+                      </div>
+
+                      {/* Parámetros del Ítem */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div>
+                          <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                            Motivo <span className="text-red-500">*</span>
+                          </label>
+                          <select
+                            value={returnReason}
+                            onChange={(e) => setReturnReason(e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                          >
+                            <option value="vencido">Vencido / Próximo a vencer</option>
+                            <option value="danado">Dañado / Defectuoso</option>
+                            <option value="sobrestock">Exceso de stock / Acordado</option>
+                            <option value="error_envio">Error en envío de mercadería</option>
+                            <option value="otro">Otro motivo</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                            Cantidad a Devolver <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="number"
+                            step="any"
+                            min="0.001"
+                            value={returnQuantity}
+                            onChange={(e) => setReturnQuantity(e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono font-bold"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                            Valor Unitario (Gs.) <span className="text-red-500">*</span>
+                          </label>
+                          <CurrencyInput
+                            currency="PYG"
+                            required
+                            value={returnUnitPrice}
+                            onChangeValue={(val) => setReturnUnitPrice(String(val))}
+                            className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono font-bold text-right"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                            Lote (Opcional)
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Ej: L-9821"
+                            value={returnLot}
+                            onChange={(e) => setReturnLot(e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                            Fecha Vencimiento (Opcional)
+                          </label>
+                          <input
+                            type="date"
+                            value={returnExpiryDate}
+                            onChange={(e) => setReturnExpiryDate(e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                            Detalle / Observación del ítem
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Ej: Empaque roto al desembalar"
+                            value={returnDetailNotes}
+                            onChange={(e) => setReturnDetailNotes(e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end pt-1">
+                        <button
+                          type="button"
+                          onClick={handleAddReturnItem}
+                          className="px-5 py-2.5 rounded-xl font-bold bg-amber-600 hover:bg-amber-700 text-white flex items-center gap-2 shadow-sm transition-colors"
+                        >
+                          <Plus className="w-4 h-4" /> Agregar Ítem a la Devolución
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Tabla de Ítems Cargados */}
+              <div>
+                <h4 className="font-bold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
+                  <Package className="w-4 h-4 text-amber-600" />
+                  Productos en la Solicitud ({returnItemsList.length})
+                </h4>
+
+                {returnItemsList.length === 0 ? (
+                  <div className="p-6 text-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl text-gray-400">
+                    No hay productos agregados a la devolución todavía.
+                  </div>
+                ) : (
+                  <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-sm">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 font-bold">
+                        <tr>
+                          <th className="py-2.5 px-3">Producto / SKU</th>
+                          <th className="py-2.5 px-3">Cód. Barras</th>
+                          <th className="py-2.5 px-3">Factura Afectada</th>
+                          <th className="py-2.5 px-3">Motivo</th>
+                          <th className="py-2.5 px-3 text-right">Cant.</th>
+                          <th className="py-2.5 px-3 text-right">Valor Unit.</th>
+                          <th className="py-2.5 px-3 text-right">Subtotal</th>
+                          <th className="py-2.5 px-3 text-center">Acción</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {returnItemsList.map((it, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                            <td className="py-2.5 px-3">
+                              <span className="font-semibold text-gray-900 dark:text-white">{it.producto_nombre}</span>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                {it.sku && <span className="text-[10px] text-amber-700 dark:text-amber-400 font-mono font-bold">SKU: {it.sku}</span>}
+                                {it.lote && <span className="text-[10px] text-gray-500 font-mono">Lote: {it.lote}</span>}
+                                {it.fecha_vencimiento && <span className="text-[10px] text-rose-600 font-mono">Vto: {it.fecha_vencimiento}</span>}
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-3 font-mono text-[11px] text-gray-700 dark:text-gray-300">
+                              {it.codigo_barra || "—"}
+                            </td>
+                            <td className="py-2.5 px-3 font-mono text-gray-600 dark:text-gray-300">
+                              {it.factura_numero ? `#${it.factura_numero}` : "Ajuste directo"}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300">
+                                {it.motivo}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-bold text-gray-900 dark:text-white font-mono">
+                              {it.cantidad}
+                            </td>
+                            <td className="py-2.5 px-3 text-right text-gray-700 dark:text-gray-300 font-mono">
+                              {formatPYG(it.valor_unitario)}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-bold text-amber-600 dark:text-amber-400 font-mono">
+                              {formatPYG(it.valor_total)}
+                            </td>
+                            <td className="py-2.5 px-3 text-center">
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveReturnItem(idx)}
+                                className="p-1 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="bg-slate-50 dark:bg-slate-800/80 font-bold border-t border-slate-200 dark:border-slate-700">
+                        <tr>
+                          <td colSpan={6} className="py-2.5 px-3 text-right text-gray-700 dark:text-gray-300">
+                            Total Estimado Devolución:
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-sm text-amber-600 dark:text-amber-400 font-mono">
+                            {formatPYG(returnItemsList.reduce((acc, curr) => acc + curr.valor_total, 0))}
+                          </td>
+                          <td></td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Observaciones generales */}
+              <div>
+                <label className="block font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                  Observaciones Generales de la Solicitud
+                </label>
+                <textarea
+                  rows={2}
+                  value={generalReturnNotes}
+                  onChange={(e) => setGeneralReturnNotes(e.target.value)}
+                  placeholder="Instrucciones especiales para logística o compras..."
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Nota de circuito */}
+              <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/40 rounded-xl p-3 text-xs text-blue-800 dark:text-blue-300 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-blue-600 dark:text-blue-400 mt-0.5" />
+                <div>
+                  <strong className="font-semibold">Circuito de Aprobación e Impacto:</strong>
+                  <p className="mt-0.5 text-[11px] leading-relaxed">
+                    Al guardar, la solicitud queda en estado <strong>Pendiente</strong>. Una vez revisada y aprobada por el área responsable, al ejecutarse la salida física se descontará el stock en el depósito asignado y se registrará la Nota de Crédito/impacto en la cuenta a pagar del proveedor.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-2 bg-slate-50/50 dark:bg-slate-800/40">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCreateReturnModal(false)
+                  setEditingReturnId(null)
+                  setReturnItemsList([])
+                  setSelectedSupplierForReturn("")
+                  setSupplierProducts([])
+                  setProductInvoices([])
+                }}
+                disabled={savingReturn}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-gray-700 dark:text-gray-300 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveSupplierReturn}
+                disabled={savingReturn || returnItemsList.length === 0 || !selectedSupplierForReturn}
+                className="px-5 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white flex items-center gap-1.5 shadow-sm disabled:opacity-50 transition-colors"
+              >
+                {savingReturn ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" /> {editingReturnId ? "Guardando..." : "Registrando..."}
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" /> {editingReturnId ? "Guardar Modificaciones" : "Guardar Solicitud de Devolución"}
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: DETALLE DE DEVOLUCIÓN GESTIONADA
+      ────────────────────────────────────────────────────────────────────────── */}
+      {viewingReturnDetail && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex items-start justify-between gap-4 bg-slate-50/70 dark:bg-slate-800/40">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                    {viewingReturnDetail.estado?.toUpperCase()}
+                  </span>
+                  <span className="text-xs text-gray-400 font-mono">Código: {viewingReturnDetail.codigo}</span>
+                </div>
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <Truck className="w-5 h-5 text-amber-600" />
+                  Devolución a {viewingReturnDetail.raw?.proveedor_nombre || viewingReturnDetail.supplier_nombre}
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Fecha: {formatDate(viewingReturnDetail.fecha)} | Depósito: {viewingReturnDetail.almacen_nombre || "Principal"}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {viewingReturnDetail.estado !== "completado" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const itm = viewingReturnDetail
+                      setViewingReturnDetail(null)
+                      handleEditReturn(itm)
+                    }}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white flex items-center gap-1.5 shadow-sm transition-colors"
+                    title="Editar esta devolución"
+                  >
+                    <Edit3 className="w-4 h-4" /> Editar Devolución
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setPrintingReturnDoc(viewingReturnDetail.raw || viewingReturnDetail)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 shadow-sm transition-colors"
+                >
+                  <Printer className="w-4 h-4" /> Imprimir Remito
+                </button>
+                <button
+                  onClick={() => setViewingReturnDetail(null)}
+                  className="p-2 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Contenido */}
+            <div className="p-6 overflow-y-auto space-y-4 flex-1 text-xs">
+              {/* Banner de Impacto en Stock */}
+              {viewingReturnDetail.estado === "completado" && (
+                <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50 flex items-start gap-3">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold text-emerald-900 dark:text-emerald-200">
+                      Impacto en Stock: Egresado y Confirmado
+                    </div>
+                    <div className="text-[11px] text-emerald-700 dark:text-emerald-300 mt-0.5">
+                      Las unidades salieron físicamente del inventario bajo el movimiento Kardex <code>devolucion_proveedor</code>. El saldo de compra fue afectado.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {viewingReturnDetail.estado === "autorizado" && (
+                <div className="p-3.5 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/50 flex items-start gap-3">
+                  <Clock className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold text-blue-900 dark:text-blue-200">
+                      Impacto en Stock: Salida Autorizada (Pendiente de Retiro)
+                    </div>
+                    <div className="text-[11px] text-blue-700 dark:text-blue-300 mt-0.5">
+                      Devolución aprobada comercialmente. La mercadería debe prepararse para el transportista. El egreso de stock definitivo se consolidará al marcar la devolución como completada.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {viewingReturnDetail.estado === "pendiente" && (
+                <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold text-amber-900 dark:text-amber-200">
+                      Impacto en Stock: En Trámite (Sin Egreso de Inventario)
+                    </div>
+                    <div className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5">
+                      La solicitud está en espera de aprobación del proveedor. No se ha realizado aún ningún descuento contable ni físico de mercadería.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {viewingReturnDetail.motivo_rechazo && (
+                <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800/50 text-red-800 dark:text-red-300">
+                  <strong className="block font-bold mb-0.5">Motivo del Rechazo:</strong>
+                  <span>{viewingReturnDetail.motivo_rechazo}</span>
+                </div>
+              )}
+
+              {viewingReturnDetail.observaciones && (
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 text-gray-700 dark:text-gray-300">
+                  <strong className="block font-semibold mb-0.5">Observaciones:</strong>
+                  <span>{viewingReturnDetail.observaciones}</span>
+                </div>
+              )}
+
+              {/* Items */}
+              <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 font-bold">
+                    <tr>
+                      <th className="py-2.5 px-3">Producto / Código</th>
+                      <th className="py-2.5 px-3">Factura</th>
+                      <th className="py-2.5 px-3">Motivo</th>
+                      <th className="py-2.5 px-3 text-right">Cant.</th>
+                      <th className="py-2.5 px-3 text-right">Unitario</th>
+                      <th className="py-2.5 px-3 text-right">Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {(() => {
+                      const rawItems = viewingReturnDetail.raw?.items || viewingReturnDetail.items || []
+                      const map = new Map<string, any>()
+                      for (const it of rawItems) {
+                        const key = String(it.producto_id || it.id || it.producto_nombre)
+                        const cant = Number(it.cantidad || 0)
+                        const valU = Number(it.valor_unitario || it.costo_promedio || 0)
+                        const valTot = Number(it.valor_total != null ? it.valor_total : cant * valU)
+                        if (map.has(key)) {
+                          const ex = map.get(key)
+                          const nCant = ex.cantidad + cant
+                          const nTot = ex.valor_total + valTot
+                          map.set(key, {
+                            ...ex,
+                            cantidad: nCant,
+                            valor_total: nTot,
+                            valor_unitario: nCant > 0 ? Math.round(nTot / nCant) : valU,
+                            lote: [ex.lote, it.lote].filter(Boolean).join(", ") || undefined,
+                            fecha_vencimiento: ex.fecha_vencimiento || it.fecha_vencimiento,
+                            factura_numero: [ex.factura_numero, it.factura_numero].filter(Boolean).join(", ") || undefined,
+                          })
+                        } else {
+                          map.set(key, { ...it, cantidad: cant, valor_unitario: valU, valor_total: valTot })
+                        }
+                      }
+                      return Array.from(map.values()).map((it: any, idx: number) => (
+                        <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                          <td className="py-2.5 px-3">
+                            <span className="font-semibold text-gray-900 dark:text-white block">{it.producto_nombre}</span>
+                            <div className="flex items-center gap-2 mt-0.5 text-[10px] text-gray-400 font-mono">
+                              {it.codigo_barras && <span>CB: {it.codigo_barras}</span>}
+                              {it.codigo_barra && !it.codigo_barras && <span>CB: {it.codigo_barra}</span>}
+                              {it.codigo_interno && <span>SKU: {it.codigo_interno}</span>}
+                              {it.sku && !it.codigo_interno && <span>SKU: {it.sku}</span>}
+                              {it.lote && <span>Lote: {it.lote}</span>}
+                              {it.fecha_vencimiento && <span>Vto: {it.fecha_vencimiento}</span>}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3 font-mono text-gray-600 dark:text-gray-300">
+                            {it.factura_numero || "Ajuste directo"}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300">
+                              {it.motivo}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-bold text-gray-900 dark:text-white font-mono">
+                            {it.cantidad}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-gray-700 dark:text-gray-300 font-mono">
+                            {formatPYG(it.valor_unitario)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-bold text-amber-600 dark:text-amber-400 font-mono">
+                            {formatPYG(it.valor_total)}
+                          </td>
+                        </tr>
+                      ))
+                    })()}
+                  </tbody>
+                  <tfoot className="bg-slate-50 dark:bg-slate-800/80 font-bold border-t border-slate-200 dark:border-slate-700">
+                    <tr>
+                      <td colSpan={5} className="py-2.5 px-3 text-right text-gray-700 dark:text-gray-300">
+                        Total Devolución:
+                      </td>
+                      <td className="py-2.5 px-3 text-right text-sm text-amber-600 dark:text-amber-400">
+                        {formatPYG(viewingReturnDetail.monto || 0)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 bg-slate-50/50 dark:bg-slate-800/40">
+              <button
+                type="button"
+                onClick={() => setPrintingReturnDoc(viewingReturnDetail.raw || viewingReturnDetail)}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 shadow-sm transition-colors"
+              >
+                <Printer className="w-4 h-4" /> Imprimir Remito Oficial
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewingReturnDetail(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-gray-700 dark:text-gray-300"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: RECHAZAR DEVOLUCIÓN A PROVEEDOR
+      ────────────────────────────────────────────────────────────────────────── */}
+      {rejectingReturnId && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-xl bg-red-50 dark:bg-red-950/40 text-red-600 shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                  Rechazar Solicitud de Devolución
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Indique el motivo o justificación por la cual se desestima esta devolución de mercadería.
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                Motivo del Rechazo <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                rows={3}
+                value={rejectReasonInput}
+                onChange={(e) => setRejectReasonInput(e.target.value)}
+                placeholder="Ej: El proveedor no aceptó el reclamo por estar fuera de plazo contractual..."
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-red-500 focus:outline-none"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => { setRejectingReturnId(null); setRejectReasonInput("") }}
+                disabled={processingReturnAction}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-gray-700 dark:text-gray-300 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => handleRejectReturn(rejectingReturnId)}
+                disabled={processingReturnAction || !rejectReasonInput.trim()}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white flex items-center gap-1.5 shadow-sm disabled:opacity-50 transition-colors"
+              >
+                {processingReturnAction ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" /> Procesando...
+                  </>
+                ) : (
+                  <>
+                    <Ban className="w-4 h-4" /> Confirmar Rechazo
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: CONFIRMAR SALIDA FÍSICA E IMPACTO DE DEVOLUCIÓN
+      ────────────────────────────────────────────────────────────────────────── */}
+      {completingReturnId && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-purple-600 shrink-0">
+                <Truck className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                  Confirmar Salida Física e Impactos
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Se completará la devolución, efectuando el egreso de inventario y el ajuste financiero con el proveedor.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/40 rounded-xl p-3 text-xs text-amber-800 dark:text-amber-300 space-y-1">
+              <strong className="block font-semibold">Impactos inmediatos que se ejecutarán:</strong>
+              <p className="text-[11px] leading-relaxed">
+                1. <strong>Inventario:</strong> Descuento físico de stock en depósito y asiento de movimiento <code className="font-mono text-[10px]">devolucion_proveedor</code>.
+              </p>
+              <p className="text-[11px] leading-relaxed">
+                2. <strong>Financiero:</strong> Amortización automática del saldo pendiente en la factura del proveedor vinculada y registro en cuenta corriente.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                Número de Nota de Crédito / Recibo Proveedor (Opcional)
+              </label>
+              <input
+                type="text"
+                value={ncNumberInput}
+                onChange={(e) => setNcNumberInput(e.target.value)}
+                placeholder="Ej: NC-001-002-0098124"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-purple-500 focus:outline-none font-mono"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => { setCompletingReturnId(null); setNcNumberInput("") }}
+                disabled={processingReturnAction}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-gray-700 dark:text-gray-300 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => handleCompleteReturn(completingReturnId)}
+                disabled={processingReturnAction}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white flex items-center gap-1.5 shadow-sm disabled:opacity-50 transition-colors"
+              >
+                {processingReturnAction ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" /> Procesando Impactos...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className="w-4 h-4" /> Confirmar y Ejecutar
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: ALTA Y EDICIÓN INTEGRAL DE PROVEEDOR (BIENES, SERVICIOS, BANCARIO)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showSupplierModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-3xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-5 animate-in fade-in zoom-in-95 duration-200 max-h-[92vh] flex flex-col">
+            
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className={`w-11 h-11 rounded-2xl flex items-center justify-center font-bold shadow-sm ${
+                  editingSupplier 
+                    ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20" 
+                    : "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20"
+                }`}>
+                  {editingSupplier ? <Edit className="w-5 h-5" /> : <Building2 className="w-5 h-5" />}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                      {editingSupplier ? `Editar Proveedor: ${editingSupplier.nombre_fantasia || editingSupplier.razon_social}` : "Registrar Nuevo Proveedor"}
+                    </h3>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide ${
+                      supplierForm.tipo_provision === "bienes" 
+                        ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+                        : supplierForm.tipo_provision === "servicios"
+                        ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                        : "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300"
+                    }`}>
+                      {supplierForm.tipo_provision === "bienes" ? "📦 Bienes" : supplierForm.tipo_provision === "servicios" ? "🛠️ Servicios" : "🔄 Mixto"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {editingSupplier ? "Actualización de clasificación, rubro, condiciones comerciales y datos bancarios" : "Alta maestra de proveedor con clasificación fiscal y condiciones comerciales"}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowSupplierModal(false)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Pestañas de Navegación del Modal */}
+            <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-2xl overflow-x-auto shrink-0 border border-slate-200/60 dark:border-slate-700/60">
+              <button
+                type="button"
+                onClick={() => setSupplierModalTab("general")}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
+                  supplierModalTab === "general"
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <Building2 className="w-3.5 h-3.5" />
+                <span>1. Identificación</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSupplierModalTab("clasificacion")}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
+                  supplierModalTab === "clasificacion"
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <Briefcase className="w-3.5 h-3.5" />
+                <span>2. Provisión & Rubro</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSupplierModalTab("comercial")}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
+                  supplierModalTab === "comercial"
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <DollarSign className="w-3.5 h-3.5" />
+                <span>3. Comercial</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSupplierModalTab("bancario")}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
+                  supplierModalTab === "bancario"
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <CreditCard className="w-3.5 h-3.5" />
+                <span>4. Bancario & Fiscal</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSupplierModalTab("contacto")}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
+                  supplierModalTab === "contacto"
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <Phone className="w-3.5 h-3.5" />
+                <span>5. Contacto</span>
+              </button>
+            </div>
+
+            {/* Contenido scrolleable del formulario */}
+            <form onSubmit={handleSaveSupplier} className="space-y-4 overflow-y-auto pr-1 flex-1">
+              
+              {/* TAB 1: IDENTIFICACIÓN & ORIGEN */}
+              {supplierModalTab === "general" && (
+                <div className="space-y-4">
+                  {/* Origen del Proveedor */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
+                      Origen y Territorio Fiscal *
+                    </label>
+                    <div className="grid grid-cols-2 gap-3 p-1.5 bg-slate-100 dark:bg-slate-850 rounded-2xl border border-slate-200 dark:border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setSupplierForm(prev => ({
+                          ...prev,
+                          tipo_proveedor: "nacional",
+                          pais: "Paraguay",
+                          moneda_default: prev.moneda_default === "BRL" ? "PYG" : prev.moneda_default,
+                        }))}
+                        className={`p-3 rounded-xl flex items-center gap-3 transition text-left border ${
+                          supplierForm.tipo_proveedor === "nacional"
+                            ? "bg-white dark:bg-slate-800 border-indigo-500 shadow-md"
+                            : "border-transparent opacity-60 hover:opacity-100"
+                        }`}
+                      >
+                        <span className="text-2xl">🇵🇾</span>
+                        <div>
+                          <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                            <span>Nacional (Paraguay)</span>
+                            {supplierForm.tipo_proveedor === "nacional" && (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                            )}
+                          </div>
+                          <div className="text-[10px] text-slate-500 font-mono">
+                            RUC DNIT · Moneda PYG (Guaraní)
+                          </div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSupplierForm(prev => ({
+                          ...prev,
+                          tipo_proveedor: "brasilero",
+                          pais: "Brasil",
+                          moneda_default: prev.moneda_default === "PYG" ? "BRL" : prev.moneda_default,
+                        }))}
+                        className={`p-3 rounded-xl flex items-center gap-3 transition text-left border ${
+                          supplierForm.tipo_proveedor === "brasilero"
+                            ? "bg-emerald-500/10 dark:bg-emerald-950/40 border-emerald-500 shadow-md"
+                            : "border-transparent opacity-60 hover:opacity-100"
+                        }`}
+                      >
+                        <span className="text-2xl">🇧🇷</span>
+                        <div>
+                          <div className="text-xs font-bold text-emerald-900 dark:text-emerald-300 flex items-center gap-1.5">
+                            <span>Brasil (Frontera / Importación)</span>
+                            {supplierForm.tipo_proveedor === "brasilero" && (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            )}
+                          </div>
+                          <div className="text-[10px] text-emerald-700 dark:text-emerald-400 font-mono">
+                            CNPJ Receita Federal · Liquidación en Reales (R$)
+                          </div>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Razón Social y Nombre Fantasía */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Razón Social / Razón Legal *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={supplierForm.razon_social}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, razon_social: e.target.value }))}
+                        placeholder={supplierForm.tipo_proveedor === "brasilero" ? "Ej: JBS Aves do Brasil Ltda." : "Ej: Frigorífico Concepción S.A."}
+                        className="input-field w-full text-xs font-bold"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Nombre Fantasía / Marca Comercial
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.nombre_fantasia}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, nombre_fantasia: e.target.value }))}
+                        placeholder="Ej: Friboi / Lactolanda / Coca-Cola"
+                        className="input-field w-full text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Documento Fiscal y Tipo de Persona */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Tipo de Persona
+                      </label>
+                      <select
+                        value={supplierForm.tipo_persona}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, tipo_persona: e.target.value as any }))}
+                        className="input-field w-full text-xs font-medium"
+                      >
+                        <option value="juridica">Persona Jurídica (S.A. / EAS / SRL / Ltda.)</option>
+                        <option value="fisica">Persona Física (Unipersonal / Profesional)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        {supplierForm.tipo_proveedor === "brasilero" ? "CNPJ / CPF Brasil *" : "RUC con Dígito Verificador (DV) *"}
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.ruc}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, ruc: e.target.value }))}
+                        placeholder={supplierForm.tipo_proveedor === "brasilero" ? "Ej: 02.916.265/0001-60" : "Ej: 80012345-6"}
+                        className="input-field w-full text-xs font-mono font-bold"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        C.I. / Documento Identidad
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.ci}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, ci: e.target.value }))}
+                        placeholder="Cédula (si aplica)"
+                        className="input-field w-full text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Estado Activo / País */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        País de Radicación
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.pais}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, pais: e.target.value }))}
+                        className="input-field w-full text-xs"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-3 pt-4">
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={supplierForm.activo}
+                          onChange={(e) => setSupplierForm(prev => ({ ...prev, activo: e.target.checked }))}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                      </label>
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                        {supplierForm.activo ? "Proveedor Habilitado (Activo)" : "Proveedor Inactivo / Bloqueado"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: PROVISIÓN & RUBRO (SUPERMERCADO) */}
+              {supplierModalTab === "clasificacion" && (
+                <div className="space-y-4">
+                  {/* Selector Clave de Provisión: BIENES vs SERVICIOS vs MIXTO */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-extrabold text-slate-800 dark:text-slate-200 block">
+                      Tipo de Provisión Comercial *
+                    </label>
+                    <p className="text-xs text-slate-500">
+                      Define el impacto contable y operativo: control de inventario/recepción física vs órdenes de gasto y servicios.
+                    </p>
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setSupplierForm(prev => ({ ...prev, tipo_provision: "bienes" }))}
+                        className={`p-3.5 rounded-2xl border text-left transition flex flex-col justify-between gap-2 ${
+                          supplierForm.tipo_provision === "bienes"
+                            ? "bg-blue-50/80 dark:bg-blue-950/40 border-blue-500 ring-2 ring-blue-500/20 shadow-sm"
+                            : "bg-white dark:bg-slate-850 border-slate-200 dark:border-slate-800 opacity-70 hover:opacity-100"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-2xl">📦</span>
+                          {supplierForm.tipo_provision === "bienes" && <CheckCircle2 className="w-4 h-4 text-blue-600" />}
+                        </div>
+                        <div>
+                          <div className="text-xs font-extrabold text-slate-900 dark:text-white">
+                            Bienes & Mercaderías
+                          </div>
+                          <div className="text-[11px] text-slate-500 leading-snug mt-0.5">
+                            Productos físicos, abarrotes, carnes, bebidas. Manejan stock, inventario y recepciones con remito.
+                          </div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSupplierForm(prev => ({ ...prev, tipo_provision: "servicios" }))}
+                        className={`p-3.5 rounded-2xl border text-left transition flex flex-col justify-between gap-2 ${
+                          supplierForm.tipo_provision === "servicios"
+                            ? "bg-amber-50/80 dark:bg-amber-950/40 border-amber-500 ring-2 ring-amber-500/20 shadow-sm"
+                            : "bg-white dark:bg-slate-850 border-slate-200 dark:border-slate-800 opacity-70 hover:opacity-100"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-2xl">🛠️</span>
+                          {supplierForm.tipo_provision === "servicios" && <CheckCircle2 className="w-4 h-4 text-amber-600" />}
+                        </div>
+                        <div>
+                          <div className="text-xs font-extrabold text-slate-900 dark:text-white">
+                            Servicios Operativos
+                          </div>
+                          <div className="text-[11px] text-slate-500 leading-snug mt-0.5">
+                            Mantenimiento de frío, limpieza, vigilancia, software, asesorías, fletes, servicios públicos.
+                          </div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSupplierForm(prev => ({ ...prev, tipo_provision: "mixto" }))}
+                        className={`p-3.5 rounded-2xl border text-left transition flex flex-col justify-between gap-2 ${
+                          supplierForm.tipo_provision === "mixto"
+                            ? "bg-purple-50/80 dark:bg-purple-950/40 border-purple-500 ring-2 ring-purple-500/20 shadow-sm"
+                            : "bg-white dark:bg-slate-850 border-slate-200 dark:border-slate-800 opacity-70 hover:opacity-100"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-2xl">🔄</span>
+                          {supplierForm.tipo_provision === "mixto" && <CheckCircle2 className="w-4 h-4 text-purple-600" />}
+                        </div>
+                        <div>
+                          <div className="text-xs font-extrabold text-slate-900 dark:text-white">
+                            Mixto (Bienes y Servicios)
+                          </div>
+                          <div className="text-[11px] text-slate-500 leading-snug mt-0.5">
+                            Proveedores con entrega de equipos o insumos y contratos asociados de soporte/reparación.
+                          </div>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Rubro Comercial Especializado */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
+                      Rubro Comercial en Supermercado *
+                    </label>
+                    <select
+                      value={supplierForm.rubro}
+                      onChange={(e) => setSupplierForm(prev => ({ ...prev, rubro: e.target.value }))}
+                      className="input-field w-full text-xs font-bold"
+                    >
+                      {RUBROS_PROVEEDORES.map((rub) => (
+                        <option key={rub} value={rub}>{rub}</option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-slate-400">
+                      Permite agrupar las compras por sectores de retail (Carnicería, Lácteos, Fletes, Informática, etc.)
+                    </p>
+                  </div>
+
+                  {/* Notas internas / Clasificación */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                      Descripción de Mercaderías o Prestación
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={supplierForm.notas}
+                      onChange={(e) => setSupplierForm(prev => ({ ...prev, notas: e.target.value }))}
+                      placeholder="Ej: Distribuidor oficial de lácteos en sachet y queso mozzarella. Proveedor crítico para fin de semana."
+                      className="input-field w-full text-xs"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: CONDICIONES COMERCIALES */}
+              {supplierModalTab === "comercial" && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Moneda de Compra *
+                      </label>
+                      <select
+                        value={supplierForm.moneda_default}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, moneda_default: e.target.value }))}
+                        className="input-field w-full text-xs font-bold font-mono"
+                      >
+                        <option value="PYG">₲ PYG (Guaraní Paraguayo)</option>
+                        <option value="BRL">R$ BRL (Real Brasileño)</option>
+                        <option value="USD">US$ USD (Dólar Americano)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Plazo de Pago (Días)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={supplierForm.plazo_pago_dias}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, plazo_pago_dias: Number(e.target.value) || 0 }))}
+                        placeholder="0 = Contado, 30, 45, 60..."
+                        className="input-field w-full text-xs font-mono font-bold"
+                      />
+                      <span className="text-[10px] text-slate-400">
+                        {supplierForm.plazo_pago_dias === 0 ? "Pago al contado contraentrega" : `Crédito a ${supplierForm.plazo_pago_dias} días`}
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Límite de Crédito ({supplierForm.moneda_default})
+                      </label>
+                      <CurrencyInput
+                        currency={supplierForm.moneda_default === "BRL" ? "BRL" : supplierForm.moneda_default === "USD" ? "USD" : "PYG"}
+                        value={supplierForm.limite_credito}
+                        onChangeValue={(val) => setSupplierForm(prev => ({ ...prev, limite_credito: val }))}
+                        placeholder="0 = Sin límite fijado"
+                        className="input-field w-full text-xs font-mono font-bold"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Día Habitual de Visita / Preventista
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.dia_visita}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, dia_visita: e.target.value }))}
+                        placeholder="Ej: Lunes y Jueves por la mañana"
+                        className="input-field w-full text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Frecuencia de Reposición / Entrega
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.frecuencia_entrega}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, frecuencia_entrega: e.target.value }))}
+                        placeholder="Ej: Semanal / 48hs post-pedido / Diario"
+                        className="input-field w-full text-xs"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 4: BANCARIO & RETENCIONES FISCALES */}
+              {supplierModalTab === "bancario" && (
+                <div className="space-y-4">
+                  <div className="p-3 bg-amber-50 dark:bg-amber-950/30 rounded-2xl border border-amber-200 dark:border-amber-900/50 flex items-start gap-2.5">
+                    <CreditCard className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="text-xs text-amber-900 dark:text-amber-200">
+                      <strong>Información para Pagos y Liquidaciones:</strong> Estos datos se utilizan para generar transferencias SIPAP, pagos con PIX en Brasil y retenciones automáticas de IVA en comprobantes de retención.
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Entidad Bancaria
+                      </label>
+                      <input
+                        type="text"
+                        list="bancos-proveedores-list"
+                        value={supplierForm.banco}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, banco: e.target.value }))}
+                        placeholder="Seleccione o escriba el banco"
+                        className="input-field w-full text-xs font-bold"
+                      />
+                      <datalist id="bancos-proveedores-list">
+                        {BANCOS_PROVEEDORES.map((b) => (
+                          <option key={b} value={b} />
+                        ))}
+                      </datalist>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Tipo de Cuenta
+                      </label>
+                      <select
+                        value={supplierForm.tipo_cuenta_bancaria}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, tipo_cuenta_bancaria: e.target.value }))}
+                        className="input-field w-full text-xs font-medium"
+                      >
+                        <option value="cuenta_corriente">Cuenta Corriente</option>
+                        <option value="caja_ahorro">Caja de Ahorro</option>
+                        <option value="pix">Llave PIX (Brasil)</option>
+                        <option value="otro">Otro</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="sm:col-span-2">
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        N° de Cuenta Bancaria / Llave PIX
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.cuenta_bancaria}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, cuenta_bancaria: e.target.value }))}
+                        placeholder="Ej: 12-345678-9 o correo/teléfono PIX"
+                        className="input-field w-full text-xs font-mono font-bold"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        RUC / Documento del Titular
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.identificacion_bancaria}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, identificacion_bancaria: e.target.value }))}
+                        placeholder="Documento asociado"
+                        className="input-field w-full text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                      Titular Oficial de la Cuenta
+                    </label>
+                    <input
+                      type="text"
+                      value={supplierForm.titular_cuenta_bancaria}
+                      onChange={(e) => setSupplierForm(prev => ({ ...prev, titular_cuenta_bancaria: e.target.value }))}
+                      placeholder="Nombre exacto del titular en el banco"
+                      className="input-field w-full text-xs"
+                    />
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-200 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Condición IVA Fiscal
+                      </label>
+                      <select
+                        value={supplierForm.condicion_iva}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, condicion_iva: e.target.value }))}
+                        className="input-field w-full text-xs font-bold"
+                      >
+                        <option value="10">IVA 10% (General)</option>
+                        <option value="5">IVA 5% (Canasta / Agrícola)</option>
+                        <option value="exento">Exento de IVA</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Porcentaje Retención IVA (%)
+                      </label>
+                      <select
+                        value={supplierForm.porcentaje_retencion_iva}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, porcentaje_retencion_iva: Number(e.target.value) || 0 }))}
+                        className="input-field w-full text-xs font-bold font-mono"
+                      >
+                        <option value="0">0% (Sin retención)</option>
+                        <option value="30">30% (Estándar B2B)</option>
+                        <option value="50">50%</option>
+                        <option value="70">70%</option>
+                        <option value="100">100% (Servicios / Especial)</option>
+                      </select>
+                    </div>
+
+                    <div className="flex flex-col justify-center space-y-1.5 pt-2">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700 dark:text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={supplierForm.retencion_iva}
+                          onChange={(e) => setSupplierForm(prev => ({ ...prev, retencion_iva: e.target.checked }))}
+                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span>Aplica Retención de IVA</span>
+                      </label>
+
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700 dark:text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={supplierForm.agente_retencion}
+                          onChange={(e) => setSupplierForm(prev => ({ ...prev, agente_retencion: e.target.checked }))}
+                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span>Es Agente de Retención DNIT</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 5: CONTACTO & LOCALIZACIÓN */}
+              {supplierModalTab === "contacto" && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Nombre de Contacto / Vendedor Asignado
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.contacto_nombre}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, contacto_nombre: e.target.value }))}
+                        placeholder="Ej: Lic. Carlos Mendoza (Ventas)"
+                        className="input-field w-full text-xs font-bold"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Celular / WhatsApp del Vendedor
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.contacto_telefono}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, contacto_telefono: e.target.value }))}
+                        placeholder="Ej: 0981 987 654"
+                        className="input-field w-full text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Teléfono Central de la Empresa
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.telefono}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, telefono: e.target.value }))}
+                        placeholder="Ej: 061 500 123 / +55 45 3522-0000"
+                        className="input-field w-full text-xs font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Correo Electrónico (Pedidos / Facturas)
+                      </label>
+                      <input
+                        type="email"
+                        value={supplierForm.email}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, email: e.target.value }))}
+                        placeholder="pedidos@proveedor.com"
+                        className="input-field w-full text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="sm:col-span-2">
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Dirección del Depósito / Sede
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.direccion}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, direccion: e.target.value }))}
+                        placeholder="Ej: Av. San Blas Km 4.5, Parque Industrial"
+                        className="input-field w-full text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                        Ciudad
+                      </label>
+                      <input
+                        type="text"
+                        value={supplierForm.ciudad}
+                        onChange={(e) => setSupplierForm(prev => ({ ...prev, ciudad: e.target.value }))}
+                        placeholder="Ej: Ciudad del Este / Foz"
+                        className="input-field w-full text-xs font-bold"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Botonera de Acciones del Modal */}
+              <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-slate-800 shrink-0">
+                <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                  <span>Paso {
+                    supplierModalTab === "general" ? "1 de 5" :
+                    supplierModalTab === "clasificacion" ? "2 de 5" :
+                    supplierModalTab === "comercial" ? "3 de 5" :
+                    supplierModalTab === "bancario" ? "4 de 5" : "5 de 5"
+                  }</span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowSupplierModal(false)}
+                    className="px-4 py-2 rounded-xl text-xs font-bold border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                  >
+                    Cancelar
+                  </button>
+
+                  {supplierModalTab !== "contacto" ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (supplierModalTab === "general") setSupplierModalTab("clasificacion")
+                        else if (supplierModalTab === "clasificacion") setSupplierModalTab("comercial")
+                        else if (supplierModalTab === "comercial") setSupplierModalTab("bancario")
+                        else if (supplierModalTab === "bancario") setSupplierModalTab("contacto")
+                      }}
+                      className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition flex items-center gap-1"
+                    >
+                      <span>Siguiente</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  ) : null}
+
+                  <button
+                    type="submit"
+                    disabled={savingSupplier}
+                    className={`px-5 py-2 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 shadow-md disabled:opacity-50 transition ${
+                      editingSupplier 
+                        ? "bg-amber-600 hover:bg-amber-500 shadow-amber-600/20" 
+                        : "bg-indigo-600 hover:bg-indigo-500 shadow-indigo-600/20"
+                    }`}
+                  >
+                    {savingSupplier ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Guardando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>{editingSupplier ? "Actualizar Proveedor" : "Guardar Proveedor"}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: REMITO OFICIAL DE IMPRESIÓN DE DEVOLUCIÓN A PROVEEDOR
+      ────────────────────────────────────────────────────────────────────────── */}
+      {printingReturnDoc && (
+        <DevolucionProveedorPrintModal
+          devolucion={printingReturnDoc}
+          onClose={() => setPrintingReturnDoc(null)}
+        />
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: COMPARATIVA DE PRECIOS ENTRE PROVEEDORES (QUIÉN VENDE MÁS BARATO)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {comparisonProductId && (
+        <ProductPriceComparisonModal
+          productId={comparisonProductId}
+          productNombre={comparisonProductNombre}
+          onClose={() => {
+            setComparisonProductId(null)
+            setComparisonProductNombre("")
+          }}
+          onSelectSupplierPrice={(supId, supName, price) => {
+            setManualPOItems(prev => {
+              const exists = prev.some(it => it.product_id === comparisonProductId)
+              if (exists) {
+                return prev.map(it => {
+                  if (it.product_id === comparisonProductId) {
+                    return {
+                      ...it,
+                      precio_unitario: price,
+                      subtotal: (it.cantidad || 1) * price,
+                    }
+                  }
+                  return it
+                })
+              }
+              return prev
+            })
+            if (!manualPOSupplierId) {
+              setManualPOSupplierId(supId)
+            }
+            toast.info("Precio Aplicado", `Se configuró el precio de ${formatPYG(price)} de "${supName}".`)
+          }}
+          onProductUpdated={() => {
+            fetchAll()
+          }}
+        />
       )}
     </div>
   )

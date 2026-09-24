@@ -8,7 +8,7 @@ from decimal import Decimal
 class CommissionRuleCreate(BaseModel):
     company_id: UUID
     nombre: str
-    tipo: str
+    tipo: str = "porcentaje"
     vendedor_id: Optional[UUID] = None
     porcentaje: Decimal = Field(ge=0, le=100)
     aplica_a: str = "total"
@@ -22,6 +22,7 @@ class CommissionRuleCreate(BaseModel):
 
 class CommissionRuleUpdate(BaseModel):
     nombre: Optional[str] = None
+    tipo: Optional[str] = None
     porcentaje: Optional[Decimal] = None
     aplica_a: Optional[str] = None
     vendedor_id: Optional[UUID] = None
@@ -40,6 +41,7 @@ class CommissionRuleResponse(BaseModel):
     nombre: str
     tipo: str
     vendedor_id: Optional[UUID] = None
+    vendedor_nombre: Optional[str] = None
     porcentaje: Decimal
     aplica_a: str
     categoria_ids: Optional[list[UUID]] = None
@@ -59,8 +61,11 @@ class SalesCommissionResponse(BaseModel):
     id: UUID
     company_id: UUID
     rule_id: Optional[UUID] = None
+    rule_nombre: Optional[str] = None
     sale_id: Optional[UUID] = None
+    sale_numero: Optional[str] = None
     vendedor_id: Optional[UUID] = None
+    vendedor_nombre: Optional[str] = None
     base_calculo: Decimal
     porcentaje: Decimal
     monto_comision: Decimal
@@ -75,7 +80,8 @@ class SalesCommissionResponse(BaseModel):
 
 
 class CommissionSummary(BaseModel):
-    vendedor_id: UUID
+    vendedor_id: Optional[str] = None
+    vendedor_nombre: Optional[str] = None
     total_ventas: Decimal
     total_comisiones: Decimal
     cantidad_operaciones: int

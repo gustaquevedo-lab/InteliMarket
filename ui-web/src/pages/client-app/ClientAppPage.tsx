@@ -61,7 +61,7 @@ export default function ClientAppPage() {
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState("")
   const [platformFilter, setPlatformFilter] = useState("")
-  const { toast } = useToast()
+  const toast = useToast()
 
   useEffect(() => {
     const t = setTimeout(() => setLoading(false), 600)
@@ -97,7 +97,7 @@ export default function ClientAppPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate flex items-center gap-2">
             <Smartphone className="w-6 h-6 text-violet-500" />
             App Clientes — Marketplace B2B
           </h1>

@@ -1,3 +1,4 @@
+import { useEntityLookup, getCustomerName } from "../../hooks/useEntityLookup"
 import { useState, useEffect } from "react"
 import {
   BarChart3, Users, TrendingUp, Gift, Tag, Ticket, Plus, Search, Loader2,
@@ -8,36 +9,102 @@ import { api } from "../../api/index"
 
 const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
+
 export default function ClientesPage() {
+  useEntityLookup()
+  const [custMap, setCustMap] = useState<Record<string, string>>({})
+  useEffect(() => {
+    api.customers.list({ limit: 500 }).then((res: any) => {
+      const list = Array.isArray(res) ? res : res?.data || []
+      const map: Record<string, string> = {}
+      list.forEach((c: any) => { if (c.id) map[c.id] = c.razon_social || c.nombre || c.ruc })
+      setCustMap(map)
+    }).catch(() => {})
+  }, [])
+
   const [tab, setTab] = useState("dashboard")
 
   return (
-    <div className="space-y-6 animate-fade-in-up">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Clientes — Fidelización & Segmentación</h1>
-          <p className="text-sm text-gray-500 mt-1">RFM scoring, segmentación conductual, programa de lealtad, ofertas personalizadas, cupones</p>
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/90 text-white p-7 border border-indigo-500/20 shadow-2xl shadow-indigo-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-blue-600 border border-indigo-400/30 text-white flex items-center justify-center shadow-lg shadow-indigo-500/25">
+                  <Users className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-indigo-500 border-2 border-slate-950"></span>
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-indigo-400 uppercase bg-indigo-500/10 px-2.5 py-0.5 rounded-md border border-indigo-500/20">
+                    MARKETING & CLIENTES · CRM & FIDELIZACIÓN RETAIL
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                    Segmentación RFM Inteligente
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Clientes — CRM & Fidelización
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Scoring RFM conductual, segmentación de compradores, programa de lealtad, ofertas personalizadas y cupones
+                </p>
+              </div>
+            </div>
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-indigo-300">
+                👥 {Object.keys(custMap).length} clientes en base
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-300">
+                🎯 Scoring RFM Activo
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
-        <div className="flex gap-1 overflow-x-auto px-4 border-b border-gray-100 dark:border-gray-700">
-          {[
-            { key: "dashboard",  label: "Dashboard",     icon: BarChart3 },
-            { key: "rfm",        label: "RFM Scoring",   icon: Target },
-            { key: "segmentos",  label: "Segmentos",     icon: Layers },
-            { key: "lealtad",    label: "Lealtad",       icon: Gift },
-            { key: "ofertas",    label: "Ofertas",       icon: Tag },
-            { key: "cupones",    label: "Cupones",       icon: Ticket },
-          ].map((t) => (
-            <button key={t.key} onClick={() => setTab(t.key)}
-              className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition
-                ${tab === t.key ? "border-blue-500 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+        {[
+          { key: "dashboard",  label: "Dashboard",     icon: BarChart3 },
+          { key: "rfm",        label: "RFM Scoring",   icon: Target },
+          { key: "segmentos",  label: "Segmentos",     icon: Layers },
+          { key: "lealtad",    label: "Lealtad",       icon: Gift },
+          { key: "ofertas",    label: "Ofertas",       icon: Tag },
+          { key: "cupones",    label: "Cupones",       icon: Ticket },
+        ].map((t) => {
+          const Icon = t.icon
+          const active = tab === t.key
+          return (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              }`}
             >
-              <t.icon className="w-4 h-4" />{t.label}
+              <Icon className="w-4 h-4" />
+              <span>{t.label}</span>
             </button>
-          ))}
-        </div>
+          )
+        })}
       </div>
 
       {tab === "dashboard"  && <DashboardTab />}
@@ -209,7 +276,7 @@ function RfmTab() {
             <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
               {scores.map((s: any) => (
                 <tr key={s.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
-                  <td className="px-4 py-2">{s.customer_id?.slice(0, 8)}...</td>
+                  <td className="px-4 py-2">{getCustomerName(s.customer_id)}</td>
                   <td className="px-4 py-2">{s.recency_score}</td>
                   <td className="px-4 py-2">{s.frequency_score}</td>
                   <td className="px-4 py-2">{s.monetary_score}</td>
@@ -439,7 +506,7 @@ function LealtadTab() {
             <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
               {txns.map((t: any) => (
                 <tr key={t.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
-                  <td className="px-4 py-2">{t.customer_id?.slice(0, 8)}...</td>
+                  <td className="px-4 py-2">{getCustomerName(t.customer_id)}</td>
                   <td className="px-4 py-2">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${t.tipo === "acumulacion" ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"}`}>
                       {t.tipo === "acumulacion" ? "+" : "-"}

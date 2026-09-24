@@ -5,7 +5,7 @@ import { useAuth } from "../../context/AuthContext"
 
 export default function RutasPage() {
   const { user } = useAuth()
-  const companyId = user?.company_id || "00000000-0000-0000-0000-000000000010"
+  const companyId = (user as any)?.company_id || "00000000-0000-0000-0000-000000000010"
   const [instances, setInstances] = useState<any[]>([])
   const [sellers, setSellers] = useState<any[]>([])
   const [routes, setRoutes] = useState<any[]>([])
@@ -71,7 +71,7 @@ export default function RutasPage() {
     <div className="p-4 md:p-6 space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Rutas de Venta</h1>
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">Rutas de Venta</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{instances.length} ejecuciones de ruta</p>
         </div>
         <button onClick={() => setShowForm(true)} className="btn-primary flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">

@@ -24,7 +24,6 @@ export class ResilientTelemetryQueue {
       try {
         fs.mkdirSync(storageDir, { recursive: true });
       } catch {
-        // Fallback to current directory
         storageDir = path.join(process.cwd(), '.telemetry');
         if (!fs.existsSync(storageDir)) fs.mkdirSync(storageDir, { recursive: true });
       }
@@ -66,7 +65,6 @@ export class ResilientTelemetryQueue {
     queue.push(event);
     this.writeQueue(queue);
 
-    // Trigger immediate async flush without blocking caller
     setImmediate(() => this.flush());
     return event;
   }
@@ -87,6 +85,12 @@ export class ResilientTelemetryQueue {
         evt.lastAttempt = new Date().toISOString();
         evt.retryCount += 1;
 
+        // El RUC del emisor viaja dentro del payload de cada evento (armado
+        // por el backend desde la config real del tenant) en vez de un header
+        // fijo -- asi un mismo microservicio puede eventualmente procesar
+        // eventos de mas de un tenant sin mezclar identidades.
+        const emitterRuc = evt.payload?.emitterRuc || evt.payload?.rucEmitter || 'desconocido';
+
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 4000);
 
@@ -94,8 +98,8 @@ export class ResilientTelemetryQueue {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Source-Node': 'casa-gonzalito-local-engine',
-            'X-Company-RUC': '80005427-0',
+            'X-Source-Node': 'intelifact-engine',
+            'X-Company-RUC': emitterRuc,
           },
           body: JSON.stringify(evt),
           signal: controller.signal,
@@ -111,21 +115,15 @@ export class ResilientTelemetryQueue {
         }
       } catch (err: any) {
         evt.lastError = err.message || 'Network unreachable';
-        // Still pending for next retry - resilience guaranteed
       }
     }
 
-    // Keep sent events for audit (cap at 200 recent sent) and all pending
     const remainingSent = queue.filter(e => e.status === 'sent').slice(-200);
     const remainingPending = queue.filter(e => e.status === 'pending');
     this.writeQueue([...remainingPending, ...remainingSent]);
 
     this.isFlushing = false;
-    return {
-      processed: pendingEvents.length,
-      sent: sentCount,
-      pending: remainingPending.length,
-    };
+    return { processed: pendingEvents.length, sent: sentCount, pending: remainingPending.length };
   }
 
   public getStatus() {

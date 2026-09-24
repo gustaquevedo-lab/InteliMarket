@@ -15,7 +15,7 @@ from api.src.supermer.models import (
     ButcheryTemplate, ButcheryTemplateCut,
     BakeryDailyPlan, BakeryPlanItem,
     ReceiveBatch, FreshnessAudit, SupplierScorecard,
-    ProductionOrderStatus, WasteType, ForecastStatus,
+    ProductionOrderStatus, WasteType, WasteStatus, ForecastStatus,
     ReceiveQualityGrade, FreshnessGrade,
 )
 from api.src.supermer.schemas import (
@@ -23,8 +23,10 @@ from api.src.supermer.schemas import (
     ProductionBatchCreate, WasteLogCreate, PerishableConfigCreate,
     MarkdownLogCreate, PurchaseSuggestionCreate, PurchaseSuggestionUpdate,
     ReceiveBatchCreate, FreshnessAuditCreate, ForecastEnhanceInput,
+    ButcheryTemplateUpdate, ProduceDirectInput,
 )
 from api.src.products.models import Product
+from api.src.inventory.models import Warehouse, Stock, InventoryMovement
 
 
 # ============================================================
@@ -37,16 +39,42 @@ async def _get_product_name(db: AsyncSession, product_id: UUID) -> Optional[str]
     return str(row) if row else None
 
 
+async def _get_product_info(db: AsyncSession, product_id: UUID) -> dict:
+    r = await db.execute(select(Product).where(Product.id == product_id))
+    p = r.scalar_one_or_none()
+    if not p:
+        return {}
+    return {
+        "producto_nombre": p.nombre,
+        "producto_sku": p.sku,
+        "producto_codigo_barra": p.codigo_barra,
+        "plu_balanza": p.plu_balanza,
+        "precio_venta": p.precio_venta,
+    }
+
+
 async def _get_user_name(db: AsyncSession, user_id: UUID) -> Optional[str]:
-    from api.src.users.models import User
+    from api.src.auth.models import User
     r = await db.execute(select(User.nombre).where(User.id == user_id))
     row = r.scalar_one_or_none()
     return str(row) if row else None
 
 
+def _end_of_day(hasta: Optional[datetime]) -> Optional[datetime]:
+    """Un filtro de rango "hasta" que llega como fecha pura (sin hora, ej.
+    "2026-09-14" desde un <input type=date>) se parsea a medianoche -- un
+    `fecha <= hasta` con eso excluye todo lo cargado ese mismo día después de
+    las 00:00. Si no trae hora, se empuja al último instante del día."""
+    if hasta is None:
+        return None
+    if hasta.time() == datetime.min.time():
+        return hasta + timedelta(days=1) - timedelta(microseconds=1)
+    return hasta
+
+
 async def _get_supplier_name(db: AsyncSession, supplier_id: UUID) -> Optional[str]:
-    from api.src.suppliers.models import Supplier
-    r = await db.execute(select(Supplier.nombre).where(Supplier.id == supplier_id))
+    from api.src.purchases.models import Supplier
+    r = await db.execute(select(Supplier.razon_social).where(Supplier.id == supplier_id))
     row = r.scalar_one_or_none()
     return str(row) if row else None
 
@@ -54,6 +82,96 @@ async def _get_supplier_name(db: AsyncSession, supplier_id: UUID) -> Optional[st
 # ============================================================
 # RECIPES (BOM)
 # ============================================================
+
+async def _build_recipe_dict(db: AsyncSession, rec: ProductionRecipe) -> dict:
+    pt_r = await db.execute(select(Product).where(Product.id == rec.producto_terminado_id))
+    pt = pt_r.scalar_one_or_none()
+
+    dep_orig_nombre = None
+    if rec.deposito_origen_id:
+        w_orig = await db.get(Warehouse, rec.deposito_origen_id)
+        if w_orig:
+            dep_orig_nombre = w_orig.nombre
+
+    dep_dest_nombre = None
+    if rec.deposito_destino_id:
+        w_dest = await db.get(Warehouse, rec.deposito_destino_id)
+        if w_dest:
+            dep_dest_nombre = w_dest.nombre
+
+    items_q = select(ProductionRecipeItem).where(ProductionRecipeItem.receta_id == rec.id)
+    items_r = await db.execute(items_q)
+    items = items_r.scalars().all()
+
+    items_res = []
+    costo_total_acumulado = Decimal("0")
+
+    for it in items:
+        p_r = await db.execute(select(Product).where(Product.id == it.producto_id))
+        p = p_r.scalar_one_or_none()
+
+        costo_unit = Decimal("0")
+        p_nombre = "Desconocido"
+        p_sku = ""
+        stock_disp = Decimal("0")
+
+        if p:
+            p_nombre = p.nombre
+            p_sku = p.sku or ""
+            costo_unit = Decimal(str(p.costo_promedio or p.ultimo_costo or 0))
+
+        subtotal = Decimal(str(it.cantidad)) * costo_unit
+        costo_total_acumulado += subtotal
+
+        if rec.deposito_origen_id:
+            stk_r = await db.execute(
+                select(Stock.cantidad).where(
+                    Stock.warehouse_id == rec.deposito_origen_id,
+                    Stock.product_id == it.producto_id
+                )
+            )
+            val = stk_r.scalar_one_or_none()
+            if val is not None:
+                stock_disp = Decimal(str(val))
+
+        items_res.append({
+            "id": it.id,
+            "receta_id": it.receta_id,
+            "producto_id": it.producto_id,
+            "cantidad": it.cantidad,
+            "unidad_medida": it.unidad_medida,
+            "es_opcional": it.es_opcional,
+            "producto_nombre": p_nombre,
+            "producto_sku": p_sku,
+            "costo_unitario": costo_unit,
+            "subtotal_costo": subtotal,
+            "stock_disponible": stock_disp,
+        })
+
+    pt_precio_venta = Decimal(str(pt.precio_venta or 0)) if pt else Decimal("0")
+    costo_unitario_estimado = Decimal("0")
+    if rec.cantidad_esperada and Decimal(str(rec.cantidad_esperada)) > 0:
+        costo_unitario_estimado = costo_total_acumulado / Decimal(str(rec.cantidad_esperada))
+
+    margen_monto = pt_precio_venta - costo_unitario_estimado
+    margen_pct = Decimal("0")
+    if pt_precio_venta > 0:
+        margen_pct = (margen_monto / pt_precio_venta) * 100
+
+    return {
+        **{c.name: getattr(rec, c.name) for c in rec.__table__.columns},
+        "deposito_origen_nombre": dep_orig_nombre,
+        "deposito_destino_nombre": dep_dest_nombre,
+        "producto_terminado_nombre": pt.nombre if pt else None,
+        "producto_terminado_sku": pt.sku if pt else None,
+        "producto_terminado_precio_venta": pt_precio_venta,
+        "costo_total_estimado": costo_total_acumulado,
+        "costo_unitario_estimado": costo_unitario_estimado,
+        "margen_estimado_monto": margen_monto,
+        "margen_estimado_pct": round(margen_pct, 1),
+        "items": items_res,
+    }
+
 
 async def list_recipes(
     db: AsyncSession, company_id: str, area: Optional[str] = None,
@@ -68,24 +186,7 @@ async def list_recipes(
     r = await db.execute(q)
     recipes = r.scalars().all()
 
-    result = []
-    for rec in recipes:
-        items_q = select(ProductionRecipeItem).where(ProductionRecipeItem.receta_id == rec.id)
-        items_r = await db.execute(items_q)
-        items = items_r.scalars().all()
-        prod_nombre = await _get_product_name(db, rec.producto_terminado_id)
-        result.append({
-            **{c.name: getattr(rec, c.name) for c in rec.__table__.columns},
-            "items": [
-                {
-                    **{c.name: getattr(it, c.name) for c in it.__table__.columns},
-                    "producto_nombre": await _get_product_name(db, it.producto_id),
-                }
-                for it in items
-            ],
-            "producto_terminado_nombre": prod_nombre,
-        })
-    return result
+    return [await _build_recipe_dict(db, rec) for rec in recipes]
 
 
 async def get_recipe(db: AsyncSession, recipe_id: str) -> Optional[dict]:
@@ -93,21 +194,7 @@ async def get_recipe(db: AsyncSession, recipe_id: str) -> Optional[dict]:
     rec = r.scalar_one_or_none()
     if not rec:
         return None
-    items_q = select(ProductionRecipeItem).where(ProductionRecipeItem.receta_id == rec.id)
-    items_r = await db.execute(items_q)
-    items = items_r.scalars().all()
-    prod_nombre = await _get_product_name(db, rec.producto_terminado_id)
-    return {
-        **{c.name: getattr(rec, c.name) for c in rec.__table__.columns},
-        "items": [
-            {
-                **{c.name: getattr(it, c.name) for c in it.__table__.columns},
-                "producto_nombre": await _get_product_name(db, it.producto_id),
-            }
-            for it in items
-        ],
-        "producto_terminado_nombre": prod_nombre,
-    }
+    return await _build_recipe_dict(db, rec)
 
 
 async def create_recipe(db: AsyncSession, company_id: str, data: RecipeCreate) -> dict:
@@ -120,6 +207,8 @@ async def create_recipe(db: AsyncSession, company_id: str, data: RecipeCreate) -
         cantidad_esperada=data.cantidad_esperada,
         unidad_medida=data.unidad_medida,
         rendimiento_esperado=data.rendimiento_esperado,
+        deposito_origen_id=data.deposito_origen_id,
+        deposito_destino_id=data.deposito_destino_id,
     )
     db.add(rec)
     await db.flush()
@@ -171,8 +260,44 @@ async def delete_recipe(db: AsyncSession, recipe_id: str) -> bool:
 
 
 # ============================================================
-# PRODUCTION ORDERS
+# PRODUCTION ORDERS & EXECUTION
 # ============================================================
+
+async def _build_order_dict(db: AsyncSession, o: ProductionOrder) -> dict:
+    rec_nombre = None
+    pt_nombre = None
+    if o.receta_id:
+        rec = await db.get(ProductionRecipe, o.receta_id)
+        if rec:
+            rec_nombre = rec.nombre
+            if rec.producto_terminado_id:
+                pt_nombre = await _get_product_name(db, rec.producto_terminado_id)
+
+    resp_nombre = None
+    if o.responsable_id:
+        resp_nombre = await _get_user_name(db, o.responsable_id)
+
+    dep_orig_nombre = None
+    if o.deposito_origen_id:
+        w_orig = await db.get(Warehouse, o.deposito_origen_id)
+        if w_orig:
+            dep_orig_nombre = w_orig.nombre
+
+    dep_dest_nombre = None
+    if o.deposito_destino_id:
+        w_dest = await db.get(Warehouse, o.deposito_destino_id)
+        if w_dest:
+            dep_dest_nombre = w_dest.nombre
+
+    return {
+        **{c.name: getattr(o, c.name) for c in o.__table__.columns},
+        "receta_nombre": rec_nombre,
+        "producto_terminado_nombre": pt_nombre,
+        "responsable_nombre": resp_nombre,
+        "deposito_origen_nombre": dep_orig_nombre,
+        "deposito_destino_nombre": dep_dest_nombre,
+    }
+
 
 async def list_orders(
     db: AsyncSession, company_id: str, area: Optional[str] = None,
@@ -187,26 +312,12 @@ async def list_orders(
     if desde:
         q = q.where(ProductionOrder.created_at >= desde)
     if hasta:
-        q = q.where(ProductionOrder.created_at <= hasta)
+        q = q.where(ProductionOrder.created_at <= _end_of_day(hasta))
     q = q.order_by(ProductionOrder.created_at.desc()).limit(limit).offset(offset)
     r = await db.execute(q)
     orders = r.scalars().all()
 
-    result = []
-    for o in orders:
-        rec_nombre = None
-        if o.receta_id:
-            rec_r = await db.execute(select(ProductionRecipe.nombre).where(ProductionRecipe.id == o.receta_id))
-            rec_nombre = rec_r.scalar_one_or_none()
-        resp_nombre = None
-        if o.responsable_id:
-            resp_nombre = await _get_user_name(db, o.responsable_id)
-        result.append({
-            **{c.name: getattr(o, c.name) for c in o.__table__.columns},
-            "receta_nombre": rec_nombre,
-            "responsable_nombre": resp_nombre,
-        })
-    return result
+    return [await _build_order_dict(db, o) for o in orders]
 
 
 async def get_order(db: AsyncSession, order_id: str) -> Optional[dict]:
@@ -214,18 +325,7 @@ async def get_order(db: AsyncSession, order_id: str) -> Optional[dict]:
     o = r.scalar_one_or_none()
     if not o:
         return None
-    rec_nombre = None
-    if o.receta_id:
-        rec_r = await db.execute(select(ProductionRecipe.nombre).where(ProductionRecipe.id == o.receta_id))
-        rec_nombre = rec_r.scalar_one_or_none()
-    resp_nombre = None
-    if o.responsable_id:
-        resp_nombre = await _get_user_name(db, o.responsable_id)
-    return {
-        **{c.name: getattr(o, c.name) for c in o.__table__.columns},
-        "receta_nombre": rec_nombre,
-        "responsable_nombre": resp_nombre,
-    }
+    return await _build_order_dict(db, o)
 
 
 async def create_order(db: AsyncSession, company_id: str, data: ProductionOrderCreate) -> dict:
@@ -239,7 +339,10 @@ async def create_order(db: AsyncSession, company_id: str, data: ProductionOrderC
         area=rec.area,
         cantidad_objetivo=data.cantidad_objetivo,
         estado="planificada",
-        fecha_inicio=data.fecha_inicio,
+        deposito_origen_id=data.deposito_origen_id or rec.deposito_origen_id,
+        deposito_destino_id=data.deposito_destino_id or rec.deposito_destino_id,
+        lote_codigo=data.lote_codigo,
+        fecha_inicio=data.fecha_inicio or datetime.utcnow(),
         fecha_vencimiento=data.fecha_vencimiento,
         responsable_id=data.responsable_id,
         notas=data.notas,
@@ -265,34 +368,172 @@ async def complete_order(
     db: AsyncSession, order_id: str, producto_obtenido: Decimal,
     insumos_usados: Optional[dict] = None, costo_unitario: Optional[Decimal] = None,
     fecha_vencimiento: Optional[date] = None, lote_codigo: Optional[str] = None,
+    user_id: Optional[UUID] = None,
 ) -> Optional[dict]:
     r = await db.execute(select(ProductionOrder).where(ProductionOrder.id == order_id))
     o = r.scalar_one_or_none()
     if not o:
         return None
+
+    rec = await db.get(ProductionRecipe, o.receta_id) if o.receta_id else None
+    target_product_id = rec.producto_terminado_id if rec else None
+
     o.estado = "completada"
     o.fecha_fin = datetime.utcnow()
     o.producto_obtenido = producto_obtenido
-    if insumos_usados is not None:
-        o.insumos_usados = insumos_usados
+    if lote_codigo:
+        o.lote_codigo = lote_codigo
+    if fecha_vencimiento:
+        o.fecha_vencimiento = fecha_vencimiento
+
     if o.cantidad_objetivo and producto_obtenido > 0:
         o.rendimiento_real = (producto_obtenido / o.cantidad_objetivo) * 100
-    await db.flush()
 
-    rec = await db.get(ProductionRecipe, o.receta_id)
-    target_product_id = rec.producto_terminado_id if rec else None
+    # 1. Deduct raw materials from source warehouse
+    dep_origen = o.deposito_origen_id or (rec.deposito_origen_id if rec else None)
+    costo_total_insumos = Decimal("0")
+
+    if rec and dep_origen:
+        items_q = select(ProductionRecipeItem).where(ProductionRecipeItem.receta_id == rec.id)
+        items_r = await db.execute(items_q)
+        recipe_items = items_r.scalars().all()
+
+        ratio = (Decimal(str(producto_obtenido)) / Decimal(str(rec.cantidad_esperada))) if (rec.cantidad_esperada and Decimal(str(rec.cantidad_esperada)) > 0) else Decimal("1")
+
+        for it in recipe_items:
+            cant_usada = Decimal(str(it.cantidad)) * ratio
+            if insumos_usados and str(it.producto_id) in insumos_usados:
+                cant_usada = Decimal(str(insumos_usados[str(it.producto_id)]))
+
+            p = await db.get(Product, it.producto_id)
+            c_unit = Decimal(str((p.costo_promedio or p.ultimo_costo or 0) if p else 0))
+            costo_total_insumos += cant_usada * c_unit
+
+            # Stock update
+            stk_r = await db.execute(
+                select(Stock).where(
+                    Stock.warehouse_id == dep_origen,
+                    Stock.product_id == it.producto_id
+                )
+            )
+            stock_row = stk_r.scalar_one_or_none()
+            stk_actual = Decimal(str(stock_row.cantidad)) if stock_row else Decimal("0")
+            nuevo_stk = max(Decimal("0"), stk_actual - cant_usada)
+
+            if stock_row:
+                stock_row.cantidad = int(round(nuevo_stk))
+            else:
+                stock_row = Stock(warehouse_id=dep_origen, product_id=it.producto_id, cantidad=int(round(nuevo_stk)), costo_unitario=c_unit)
+                db.add(stock_row)
+
+            mov = InventoryMovement(
+                company_id=o.company_id,
+                warehouse_id=dep_origen,
+                product_id=it.producto_id,
+                tipo="salida_produccion",
+                cantidad=-int(round(cant_usada)),
+                costo_unitario=c_unit,
+                referencia_type="supermer_production_order",
+                referencia_id=o.id,
+                motivo=f"Consumo producción: {rec.nombre} (Orden #{str(o.id)[:8]})",
+                user_id=user_id or o.responsable_id,
+            )
+            db.add(mov)
+
+    # 2. Calculate final unit cost
+    calculated_costo_unit = costo_unitario
+    if not calculated_costo_unit and producto_obtenido > 0 and costo_total_insumos > 0:
+        calculated_costo_unit = costo_total_insumos / Decimal(str(producto_obtenido))
+
+    # 3. Add finished product to destination warehouse
+    dep_destino = o.deposito_destino_id or (rec.deposito_destino_id if rec else None)
+    if target_product_id and dep_destino and producto_obtenido > 0:
+        stk_dest_r = await db.execute(
+            select(Stock).where(
+                Stock.warehouse_id == dep_destino,
+                Stock.product_id == target_product_id
+            )
+        )
+        stock_dest = stk_dest_r.scalar_one_or_none()
+        stk_dest_actual = Decimal(str(stock_dest.cantidad)) if stock_dest else Decimal("0")
+        nuevo_stk_dest = stk_dest_actual + Decimal(str(producto_obtenido))
+
+        if stock_dest:
+            stock_dest.cantidad = int(round(nuevo_stk_dest))
+            if calculated_costo_unit:
+                stock_dest.costo_unitario = calculated_costo_unit
+        else:
+            stock_dest = Stock(
+                warehouse_id=dep_destino,
+                product_id=target_product_id,
+                cantidad=int(round(nuevo_stk_dest)),
+                costo_unitario=calculated_costo_unit or Decimal("0")
+            )
+            db.add(stock_dest)
+
+        mov_dest = InventoryMovement(
+            company_id=o.company_id,
+            warehouse_id=dep_destino,
+            product_id=target_product_id,
+            tipo="entrada_produccion",
+            cantidad=int(round(producto_obtenido)),
+            costo_unitario=calculated_costo_unit or Decimal("0"),
+            referencia_type="supermer_production_order",
+            referencia_id=o.id,
+            motivo=f"Alta producto terminado: {rec.nombre if rec else ''} (Orden #{str(o.id)[:8]})",
+            user_id=user_id or o.responsable_id,
+        )
+        db.add(mov_dest)
+
+    # 4. Create batch
     batch = ProductionBatch(
         company_id=o.company_id,
         orden_id=o.id,
         producto_id=target_product_id,
         cantidad_obtenida=producto_obtenido,
-        fecha_vencimiento=fecha_vencimiento or date.today() + timedelta(days=7),
-        lote_codigo=lote_codigo,
-        costo_unitario=costo_unitario,
+        fecha_vencimiento=fecha_vencimiento or (date.today() + timedelta(days=7)),
+        lote_codigo=lote_codigo or o.lote_codigo or f"LOT-{datetime.utcnow().strftime('%Y%m%d%H%M')}",
+        costo_unitario=calculated_costo_unit,
     )
     db.add(batch)
+
     await db.commit()
     return await get_order(db, order_id)
+
+
+async def produce_batch_direct(
+    db: AsyncSession, company_id: str, data: ProduceDirectInput, user_id: Optional[UUID] = None
+) -> dict:
+    rec_r = await db.execute(select(ProductionRecipe).where(ProductionRecipe.id == data.receta_id))
+    rec = rec_r.scalar_one_or_none()
+    if not rec:
+        raise ValueError("Receta no encontrada")
+
+    o = ProductionOrder(
+        company_id=company_id,
+        receta_id=rec.id,
+        area=rec.area,
+        cantidad_objetivo=data.cantidad_producir,
+        estado="planificada",
+        deposito_origen_id=data.deposito_origen_id or rec.deposito_origen_id,
+        deposito_destino_id=data.deposito_destino_id or rec.deposito_destino_id,
+        lote_codigo=data.lote_codigo,
+        fecha_inicio=datetime.utcnow(),
+        fecha_vencimiento=data.fecha_vencimiento,
+        responsable_id=user_id,
+        notas=data.notas,
+    )
+    db.add(o)
+    await db.flush()
+
+    return await complete_order(
+        db=db,
+        order_id=str(o.id),
+        producto_obtenido=data.cantidad_producir,
+        fecha_vencimiento=data.fecha_vencimiento,
+        lote_codigo=data.lote_codigo,
+        user_id=user_id,
+    )
 
 
 # ============================================================
@@ -301,7 +542,8 @@ async def complete_order(
 
 async def list_waste(
     db: AsyncSession, company_id: str, area: Optional[str] = None,
-    tipo_merma: Optional[str] = None, desde: Optional[datetime] = None,
+    tipo_merma: Optional[str] = None, estado: Optional[str] = None,
+    desde: Optional[datetime] = None,
     hasta: Optional[datetime] = None, limit: int = 100, offset: int = 0,
 ) -> list[dict]:
     q = select(WasteLog).where(WasteLog.company_id == company_id)
@@ -309,10 +551,12 @@ async def list_waste(
         q = q.where(WasteLog.area == area)
     if tipo_merma:
         q = q.where(WasteLog.tipo_merma == tipo_merma)
+    if estado:
+        q = q.where(WasteLog.estado == estado)
     if desde:
         q = q.where(WasteLog.fecha >= desde)
     if hasta:
-        q = q.where(WasteLog.fecha <= hasta)
+        q = q.where(WasteLog.fecha <= _end_of_day(hasta))
     q = q.order_by(WasteLog.fecha.desc()).limit(limit).offset(offset)
     r = await db.execute(q)
     logs = r.scalars().all()
@@ -320,24 +564,36 @@ async def list_waste(
     result = []
     for w in logs:
         prod_nombre = await _get_product_name(db, w.producto_id)
+        registrado_nombre = await _get_user_name(db, w.registrado_por) if w.registrado_por else None
+        aprobado_nombre = await _get_user_name(db, w.aprobado_por) if w.aprobado_por else None
         result.append({
             **{c.name: getattr(w, c.name) for c in w.__table__.columns},
             "producto_nombre": prod_nombre,
+            "registrado_por_nombre": registrado_nombre,
+            "aprobado_por_nombre": aprobado_nombre,
         })
     return result
 
 
-async def get_waste_by_area(db: AsyncSession, company_id: str, desde: Optional[datetime] = None, hasta: Optional[datetime] = None) -> list[dict]:
+async def get_waste_by_area(
+    db: AsyncSession, company_id: str, desde: Optional[datetime] = None,
+    hasta: Optional[datetime] = None, estado: Optional[str] = "aprobada",
+) -> list[dict]:
+    # Por default solo cuenta mermas ya aprobadas: son las únicas que
+    # representan una pérdida real y confirmada (una "pendiente" todavía
+    # puede ser rechazada por el Gerente y nunca salir de stock).
     q = select(
         WasteLog.area,
         sa_func.sum(WasteLog.cantidad).label("total_cantidad"),
         sa_func.sum(WasteLog.costo_total).label("total_costo"),
         sa_func.count(WasteLog.id).label("cantidad_ordenes"),
     ).where(WasteLog.company_id == company_id)
+    if estado:
+        q = q.where(WasteLog.estado == estado)
     if desde:
         q = q.where(WasteLog.fecha >= desde)
     if hasta:
-        q = q.where(WasteLog.fecha <= hasta)
+        q = q.where(WasteLog.fecha <= _end_of_day(hasta))
     q = q.group_by(WasteLog.area)
     r = await db.execute(q)
     rows = r.all()
@@ -349,11 +605,14 @@ async def get_waste_by_area(db: AsyncSession, company_id: str, desde: Optional[d
 
 
 async def create_waste(db: AsyncSession, company_id: str, data: WasteLogCreate, user_id: str) -> dict:
+    from api.src.inteliaudit.service import record_audit_event
+
     costo_total = None
     if data.costo_unitario and data.cantidad:
         costo_total = data.costo_unitario * data.cantidad
     w = WasteLog(
         company_id=company_id,
+        warehouse_id=data.warehouse_id,
         area=data.area,
         producto_id=data.producto_id,
         cantidad=data.cantidad,
@@ -362,13 +621,186 @@ async def create_waste(db: AsyncSession, company_id: str, data: WasteLogCreate, 
         tipo_merma=data.tipo_merma,
         motivo=data.motivo,
         registrado_por=user_id,
+        estado=WasteStatus.pendiente,
     )
     db.add(w)
+    await db.flush()
+    await record_audit_event(db, {
+        "company_id": company_id,
+        "user_id": user_id,
+        "accion": "merma_registrada",
+        "entidad": "supermer_waste_log",
+        "entidad_id": str(w.id),
+        "datos_nuevos": {
+            "area": data.area, "producto_id": str(data.producto_id),
+            "cantidad": float(data.cantidad), "tipo_merma": data.tipo_merma,
+            "costo_total": float(costo_total) if costo_total else None,
+        },
+    })
     await db.commit()
+    prod_nombre = await _get_product_name(db, w.producto_id)
+    registrado_nombre = await _get_user_name(db, w.registrado_por)
+    return {
+        **{c.name: getattr(w, c.name) for c in w.__table__.columns},
+        "producto_nombre": prod_nombre,
+        "registrado_por_nombre": registrado_nombre,
+        "aprobado_por_nombre": None,
+    }
+
+
+async def update_waste(db: AsyncSession, company_id: str, waste_id: str, data, user_id: str) -> dict:
+    """Corrige cantidad/motivo de una merma mientras sigue pendiente -- una
+    vez aprobada o rechazada queda fija (el ajuste de una merma ya aprobada
+    es otra merma o una devolución, no una edición del registro original)."""
+    from api.src.inteliaudit.service import record_audit_event
+    from fastapi import HTTPException
+
+    r = await db.execute(select(WasteLog).where(WasteLog.id == waste_id, WasteLog.company_id == company_id))
+    w = r.scalar_one_or_none()
+    if not w:
+        raise HTTPException(404, "Merma no encontrada")
+    if w.estado != WasteStatus.pendiente:
+        raise HTTPException(400, "Solo se puede editar una merma pendiente")
+
+    cambios = {}
+    if data.cantidad is not None and data.cantidad != w.cantidad:
+        cambios["cantidad"] = {"antes": float(w.cantidad), "despues": float(data.cantidad)}
+        w.cantidad = data.cantidad
+        if w.costo_unitario:
+            w.costo_total = w.costo_unitario * w.cantidad
+    if data.motivo is not None and data.motivo != w.motivo:
+        cambios["motivo"] = {"antes": w.motivo, "despues": data.motivo}
+        w.motivo = data.motivo
+
+    if cambios:
+        await record_audit_event(db, {
+            "company_id": company_id,
+            "user_id": user_id,
+            "accion": "merma_editada",
+            "entidad": "supermer_waste_log",
+            "entidad_id": str(w.id),
+            "datos_anteriores": {k: v["antes"] for k, v in cambios.items()},
+            "datos_nuevos": {k: v["despues"] for k, v in cambios.items()},
+        })
+    await db.commit()
+
     prod_nombre = await _get_product_name(db, w.producto_id)
     return {
         **{c.name: getattr(w, c.name) for c in w.__table__.columns},
         "producto_nombre": prod_nombre,
+        "registrado_por_nombre": await _get_user_name(db, w.registrado_por) if w.registrado_por else None,
+        "aprobado_por_nombre": None,
+    }
+
+
+async def approve_waste(db: AsyncSession, company_id: str, waste_id: str, approver_user_id: str) -> dict:
+    """Aprueba una merma pendiente: recién en este momento sale del stock.
+
+    Reusa el mismo patrón de descuento con SELECT ... FOR UPDATE que
+    inventory.service.record_quick_merma, para no introducir una segunda
+    forma de tocar Stock.cantidad con distinta protección de concurrencia.
+    """
+    from api.src.inventory.service import get_stock
+    from api.src.inventory.models import InventoryMovement, Stock
+    from api.src.inteliaudit.service import record_audit_event
+    from fastapi import HTTPException
+
+    r = await db.execute(select(WasteLog).where(WasteLog.id == waste_id, WasteLog.company_id == company_id))
+    w = r.scalar_one_or_none()
+    if not w:
+        raise HTTPException(404, "Merma no encontrada")
+    if w.estado != WasteStatus.pendiente:
+        raise HTTPException(400, f"La merma ya fue {w.estado.value if hasattr(w.estado, 'value') else w.estado}")
+    if not w.warehouse_id:
+        raise HTTPException(400, "La merma no tiene depósito asociado")
+
+    product = await db.get(Product, w.producto_id)
+    costo = float(w.costo_unitario or (product.costo_promedio if product else None) or (product.ultimo_costo if product else None) or 0)
+
+    stock = await get_stock(db, str(w.warehouse_id), str(w.producto_id))
+    stock_actual = float(stock.cantidad) if stock else 0.0
+    cantidad_merma = float(w.cantidad)
+    nuevo_stock = max(0.0, stock_actual - cantidad_merma)
+
+    movement = InventoryMovement(
+        company_id=company_id,
+        warehouse_id=w.warehouse_id,
+        product_id=w.producto_id,
+        tipo="merma",
+        cantidad=-cantidad_merma,
+        costo_unitario=costo,
+        referencia_type="supermer_waste_log",
+        referencia_id=w.id,
+        motivo=f"Merma {w.area.value if hasattr(w.area, 'value') else w.area} ({w.tipo_merma.value if hasattr(w.tipo_merma, 'value') else w.tipo_merma}): {w.motivo or ''}",
+        user_id=approver_user_id,
+    )
+    db.add(movement)
+
+    if stock:
+        stock.cantidad = nuevo_stock
+    else:
+        stock = Stock(warehouse_id=w.warehouse_id, product_id=w.producto_id, cantidad=nuevo_stock, costo_unitario=costo)
+        db.add(stock)
+
+    await db.flush()
+
+    w.estado = WasteStatus.aprobada
+    w.aprobado_por = approver_user_id
+    w.aprobado_at = datetime.utcnow()
+    w.movimiento_id = movement.id
+
+    await record_audit_event(db, {
+        "company_id": company_id,
+        "user_id": approver_user_id,
+        "accion": "merma_aprobada",
+        "entidad": "supermer_waste_log",
+        "entidad_id": str(w.id),
+        "datos_anteriores": {"estado": "pendiente", "stock_antes": stock_actual},
+        "datos_nuevos": {"estado": "aprobada", "stock_despues": nuevo_stock, "cantidad_descontada": cantidad_merma},
+    })
+    await db.commit()
+
+    prod_nombre = await _get_product_name(db, w.producto_id)
+    return {
+        **{c.name: getattr(w, c.name) for c in w.__table__.columns},
+        "producto_nombre": prod_nombre,
+        "registrado_por_nombre": await _get_user_name(db, w.registrado_por) if w.registrado_por else None,
+        "aprobado_por_nombre": await _get_user_name(db, w.aprobado_por),
+    }
+
+
+async def reject_waste(db: AsyncSession, company_id: str, waste_id: str, approver_user_id: str, motivo_rechazo: str) -> dict:
+    from api.src.inteliaudit.service import record_audit_event
+    from fastapi import HTTPException
+
+    r = await db.execute(select(WasteLog).where(WasteLog.id == waste_id, WasteLog.company_id == company_id))
+    w = r.scalar_one_or_none()
+    if not w:
+        raise HTTPException(404, "Merma no encontrada")
+    if w.estado != WasteStatus.pendiente:
+        raise HTTPException(400, f"La merma ya fue {w.estado.value if hasattr(w.estado, 'value') else w.estado}")
+
+    w.estado = WasteStatus.rechazada
+    w.aprobado_por = approver_user_id
+    w.aprobado_at = datetime.utcnow()
+    w.motivo_rechazo = motivo_rechazo
+
+    await record_audit_event(db, {
+        "company_id": company_id,
+        "user_id": approver_user_id,
+        "accion": "merma_rechazada",
+        "entidad": "supermer_waste_log",
+        "entidad_id": str(w.id),
+        "datos_nuevos": {"estado": "rechazada", "motivo_rechazo": motivo_rechazo},
+    })
+    await db.commit()
+
+    prod_nombre = await _get_product_name(db, w.producto_id)
+    return {
+        **{c.name: getattr(w, c.name) for c in w.__table__.columns},
+        "producto_nombre": prod_nombre,
+        "registrado_por_nombre": await _get_user_name(db, w.registrado_por) if w.registrado_por else None,
+        "aprobado_por_nombre": await _get_user_name(db, w.aprobado_por),
     }
 
 
@@ -561,7 +993,7 @@ async def generate_forecast(db: AsyncSession, company_id: str, lookback_days: in
             sa_func.sum(SaleItem.cantidad).label("total_qty"),
         ).select_from(SaleItem).join(Sale).where(
             Sale.company_id == company_id,
-            SaleItem.producto_id == pid,
+            SaleItem.product_id == pid,
             cast(Sale.created_at, Date) >= cutoff,
         ).group_by(cast(Sale.created_at, Date))
         hist_r = await db.execute(hist_q)
@@ -884,7 +1316,7 @@ async def get_production_by_area(db: AsyncSession, company_id: str, desde: Optio
     if desde:
         q = q.where(ProductionOrder.fecha_fin >= desde)
     if hasta:
-        q = q.where(ProductionOrder.fecha_fin <= hasta)
+        q = q.where(ProductionOrder.fecha_fin <= _end_of_day(hasta))
     q = q.group_by(ProductionOrder.area)
     r = await db.execute(q)
     prod_rows = r.all()
@@ -897,7 +1329,7 @@ async def get_production_by_area(db: AsyncSession, company_id: str, desde: Optio
     if desde:
         waste_q = waste_q.where(WasteLog.fecha >= desde)
     if hasta:
-        waste_q = waste_q.where(WasteLog.fecha <= hasta)
+        waste_q = waste_q.where(WasteLog.fecha <= _end_of_day(hasta))
     waste_q = waste_q.group_by(WasteLog.area)
     waste_r = await db.execute(waste_q)
     waste_map = {row.area: row for row in waste_r.all()}
@@ -933,15 +1365,16 @@ async def list_butchery_templates(db: AsyncSession, company_id: str, activa: Opt
         cuts_q = select(ButcheryTemplateCut).where(ButcheryTemplateCut.template_id == t.id).order_by(ButcheryTemplateCut.orden)
         cuts_r = await db.execute(cuts_q)
         cuts = cuts_r.scalars().all()
+        cuts_data = []
+        for cut in cuts:
+            pinfo = await _get_product_info(db, cut.producto_id)
+            cuts_data.append({
+                **{c.name: getattr(cut, c.name) for c in cut.__table__.columns},
+                **pinfo,
+            })
         result.append({
             **{c.name: getattr(t, c.name) for c in t.__table__.columns},
-            "cuts": [
-                {
-                    **{c.name: getattr(cut, c.name) for c in cut.__table__.columns},
-                    "producto_nombre": await _get_product_name(db, cut.producto_id),
-                }
-                for cut in cuts
-            ],
+            "cuts": cuts_data,
         })
     return result
 
@@ -954,15 +1387,16 @@ async def get_butchery_template(db: AsyncSession, template_id: str) -> Optional[
     cuts_q = select(ButcheryTemplateCut).where(ButcheryTemplateCut.template_id == t.id).order_by(ButcheryTemplateCut.orden)
     cuts_r = await db.execute(cuts_q)
     cuts = cuts_r.scalars().all()
+    cuts_data = []
+    for cut in cuts:
+        pinfo = await _get_product_info(db, cut.producto_id)
+        cuts_data.append({
+            **{c.name: getattr(cut, c.name) for c in cut.__table__.columns},
+            **pinfo,
+        })
     return {
         **{c.name: getattr(t, c.name) for c in t.__table__.columns},
-        "cuts": [
-            {
-                **{c.name: getattr(cut, c.name) for c in cut.__table__.columns},
-                "producto_nombre": await _get_product_name(db, cut.producto_id),
-            }
-            for cut in cuts
-        ],
+        "cuts": cuts_data,
     }
 
 
@@ -993,6 +1427,55 @@ async def create_butchery_template(db: AsyncSession, company_id: str, data) -> d
         db.add(tc)
     await db.commit()
     return await get_butchery_template(db, str(t.id))
+
+
+async def update_butchery_template(db: AsyncSession, company_id: str, template_id: str, data: ButcheryTemplateUpdate) -> dict:
+    r = await db.execute(select(ButcheryTemplate).where(ButcheryTemplate.id == template_id, ButcheryTemplate.company_id == company_id))
+    t = r.scalar_one_or_none()
+    if not t:
+        raise ValueError("Plantilla de desposte no encontrada")
+
+    if data.nombre is not None:
+        t.nombre = data.nombre
+    if data.especie is not None:
+        t.especie = data.especie
+    if data.peso_promedio_kg is not None:
+        t.peso_promedio_kg = data.peso_promedio_kg
+    if data.descripcion is not None:
+        t.descripcion = data.descripcion
+    if data.activa is not None:
+        t.activa = data.activa
+
+    if data.cuts is not None:
+        await db.execute(delete(ButcheryTemplateCut).where(ButcheryTemplateCut.template_id == t.id))
+        total_ponderado = sum(float(c.precio_ponderado) for c in data.cuts)
+        for i, cut in enumerate(data.cuts):
+            ponderado = float(cut.precio_ponderado)
+            if total_ponderado > 0 and i == len(data.cuts) - 1 and total_ponderado != 100:
+                ponderado = 100 - sum(float(c.precio_ponderado) for c in data.cuts[:i])
+            tc = ButcheryTemplateCut(
+                template_id=t.id,
+                producto_id=cut.producto_id,
+                rendimiento_porcentual=cut.rendimiento_porcentual,
+                precio_ponderado=Decimal(str(ponderado)),
+                orden=cut.orden if cut.orden else i,
+                es_subproducto=cut.es_subproducto,
+            )
+            db.add(tc)
+
+    await db.commit()
+    return await get_butchery_template(db, str(t.id))
+
+
+async def delete_butchery_template(db: AsyncSession, company_id: str, template_id: str) -> bool:
+    r = await db.execute(select(ButcheryTemplate).where(ButcheryTemplate.id == template_id, ButcheryTemplate.company_id == company_id))
+    t = r.scalar_one_or_none()
+    if not t:
+        return False
+    await db.execute(delete(ButcheryTemplateCut).where(ButcheryTemplateCut.template_id == t.id))
+    await db.delete(t)
+    await db.commit()
+    return True
 
 
 async def execute_desposte(db: AsyncSession, company_id: str, data) -> dict:
@@ -1150,7 +1633,7 @@ async def get_butchery_yield_report(
     if desde:
         q = q.where(ProductionOrder.fecha_fin >= desde)
     if hasta:
-        q = q.where(ProductionOrder.fecha_fin <= hasta)
+        q = q.where(ProductionOrder.fecha_fin <= _end_of_day(hasta))
     q = q.order_by(ProductionOrder.fecha_fin.desc())
     r = await db.execute(q)
     orders = r.scalars().all()

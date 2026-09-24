@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 
 router = APIRouter(prefix="/api/public/v1", tags=["public"])
 
@@ -10,7 +11,7 @@ async def public_health():
     return {"status": "ok", "version": "0.2.0", "name": "InteliMarket API"}
 
 
-@router.get("/companies/{company_id}/products")
+@router.get("/companies/{company_id}/products", dependencies=[Depends(require_auth)])
 async def public_products(
     company_id: str,
     limit: int = 20,
@@ -28,7 +29,7 @@ async def public_products(
     return [dict(r._mapping) for r in result.fetchall()]
 
 
-@router.get("/companies/{company_id}/products/{product_id}/price")
+@router.get("/companies/{company_id}/products/{product_id}/price", dependencies=[Depends(require_auth)])
 async def public_product_price(
     company_id: str,
     product_id: str,
@@ -72,7 +73,7 @@ async def public_product_price(
     return result
 
 
-@router.get("/companies/{company_id}/stock")
+@router.get("/companies/{company_id}/stock", dependencies=[Depends(require_auth)])
 async def public_stock(
     company_id: str,
     product_ids: str | None = None,

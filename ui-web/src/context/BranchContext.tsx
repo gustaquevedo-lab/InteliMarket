@@ -100,11 +100,11 @@ export function BranchProvider({ children }: { children: React.ReactNode }) {
     return localStorage.getItem("intelimarket_selected_branch_id") || "all"
   })
   const [loading, setLoading] = useState(false)
+
   const { user } = useAuth()
 
   const refreshBranches = useCallback(async () => {
-    const token = localStorage.getItem("access_token")
-    if (!token || !user) return
+    if (!user) return
     setLoading(true)
     try {
       const res = await api.branches.list()
@@ -112,7 +112,7 @@ export function BranchProvider({ children }: { children: React.ReactNode }) {
         setBranches(res)
       }
     } catch {
-      // Use default branches fallback
+      // Use fallback
     } finally {
       setLoading(false)
     }

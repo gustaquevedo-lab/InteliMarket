@@ -1,23 +1,59 @@
 """Financial API router — AP, banking, cash flow, budgets, payment runs, dashboards"""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import logging
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date
 
 from api.src.db import get_db
+from sqlalchemy import text
+from fastapi.responses import StreamingResponse
+from api.src.integrated_finance import pdf_reports
+from api.src.financial import pdf_reports as bancos_pdf_reports
+from api.src.financial import ap_pdf_reports
+from api.src.financial import payment_order_pdf
+from api.src.auth.middleware import require_auth
 from api.src.financial.schemas import (
     SupplierInvoiceCreate, SupplierInvoiceResponse, SupplierInvoiceWithPayments,
     SupplierInvoicePaymentCreate, SupplierInvoicePaymentResponse,
+    PaidInvoicesListResponse, SupplierInvoiceBatchRevertRequest,
     BankAccountCreate, BankAccountUpdate, BankAccountResponse,
-    BankTransactionCreate, BankTransactionImport, BankTransactionResponse,
+    BankTransactionCreate, BankTransferCreate, BankTransactionImport, BankTransactionResponse,
     ReconcileRequest,
+    BulkReconcileRequest,
+    BalanceCorrectionCreate, BalanceCorrectionDecision, BankBalanceCorrectionResponse,
     CashFlowProjectionResponse, CashFlowProjectionUpdate,
     BudgetCreate, BudgetUpdate, BudgetResponse, BudgetVsActual,
     PaymentRunCreate, PaymentRunResponse, PaymentRunWithItems, PaymentRunItemResponse,
+    APPaymentRejectRequest,
+    CashFlowAlertConfig,
+    SupplierCreditNoteCreate, SupplierCreditNoteApply,
+    SupplierPaymentOrderCreate, SupplierPaymentOrderDisburse,
+    MultiSupplierPaymentBatchCreate,
+    SettleValesAndPayRequest,
 )
 from api.src.financial import service
 
-router = APIRouter(prefix="/api/v1/financial", tags=["financial"])
+
+logger = logging.getLogger(__name__)
+DEFAULT_COMPANY_ID = "00000000-0000-0000-0000-000000000010"
+
+
+def _resolve_company_id(company_id: str | None = None, user: dict | None = None) -> str:
+    if company_id and str(company_id).strip() and str(company_id).strip() != "None":
+        return str(company_id).strip()
+    if user and isinstance(user, dict):
+        return user.get("company_id") or DEFAULT_COMPANY_ID
+    return DEFAULT_COMPANY_ID
+
+
+router = APIRouter(prefix="/api/v1/financial", tags=["financial"], dependencies=[Depends(require_auth)])
+
+
+async def _get_company_info(db: AsyncSession, company_id: str) -> dict:
+    r = await db.execute(text("SELECT razon_social, ruc, logo_url FROM companies WHERE id = :cid"), {"cid": company_id})
+    row = r.first()
+    return {"razon_social": row.razon_social, "ruc": row.ruc, "logo_url": row.logo_url} if row else {"razon_social": "Empresa", "ruc": "N/A"}
 
 
 # ── AP: Supplier Invoices ──────────────────────────────────────────────────────
@@ -35,11 +71,37 @@ async def list_invoices(
     vencidas: bool | None = Query(None),
     desde: date | None = Query(None),
     hasta: date | None = Query(None),
-    limit: int = Query(50, ge=1, le=500),
+    limit: int = Query(50, ge=1, le=5000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
     return await service.list_invoices(db, company_id, estado, supplier_id, vencidas, desde, hasta, limit, offset)
+
+
+@router.get("/invoices/paid", response_model=PaidInvoicesListResponse)
+async def list_paid_invoices(
+    company_id: str | None = Query(None),
+    supplier_id: str | None = Query(None),
+    search: str | None = Query(None),
+    desde: date | None = Query(None),
+    hasta: date | None = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Lista facturas en estado 'pagada' con paginación, filtros avanzados y resumen monetario."""
+    cid = _resolve_company_id(company_id, user)
+    return await service.list_paid_invoices(
+        db=db,
+        company_id=cid,
+        supplier_id=supplier_id,
+        search=search,
+        desde=desde,
+        hasta=hasta,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/invoices/{invoice_id}", response_model=SupplierInvoiceWithPayments)
@@ -50,6 +112,14 @@ async def get_invoice(invoice_id: str, db: AsyncSession = Depends(get_db)):
     return invoice
 
 
+@router.get("/invoices/by-receipt/{receipt_id}", response_model=dict)
+async def get_invoice_by_receipt(receipt_id: str, db: AsyncSession = Depends(get_db)):
+    invoice = await service.get_invoice_by_receipt(db, receipt_id)
+    if not invoice:
+        return {"found": False}
+    return {"found": True, "id": str(invoice.id), "numero_factura": invoice.numero_factura, "total": float(invoice.total), "estado": invoice.estado}
+
+
 @router.post("/invoices/{invoice_id}/approve", response_model=SupplierInvoiceResponse)
 async def approve_invoice(invoice_id: str, user_id: str | None = Query(None), db: AsyncSession = Depends(get_db)):
     result = await service.approve_invoice(db, invoice_id, user_id)
@@ -58,13 +128,51 @@ async def approve_invoice(invoice_id: str, user_id: str | None = Query(None), db
     return result
 
 
-@router.post("/invoices/{invoice_id}/pay", response_model=SupplierInvoicePaymentResponse)
-async def pay_invoice(invoice_id: str, body: SupplierInvoicePaymentCreate, db: AsyncSession = Depends(get_db)):
-    result = await service.register_payment(db, invoice_id, body)
-    if not result:
-        raise HTTPException(status_code=400, detail="No se pudo registrar el pago")
-    payment, _ = result
-    return payment
+@router.post("/invoices/{invoice_id}/pay", response_model=dict)
+async def pay_invoice(invoice_id: str, body: SupplierInvoicePaymentCreate, user_id: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    result = await service.register_payment_gated(db, invoice_id, body, user_id)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    if result["pending_approval"]:
+        return {"pending_approval": True, "request_id": str(result["request"].id), "monto": float(result["request"].monto)}
+    payment = result["payment"]
+    return {"pending_approval": False, "id": str(payment.id), "invoice_id": str(payment.invoice_id), "monto": float(payment.monto), "estado": payment.estado}
+
+
+@router.post("/invoices/{invoice_id}/revert-payment", response_model=SupplierInvoiceResponse)
+async def revert_invoice_payment(
+    invoice_id: str,
+    motivo: str | None = Query(None),
+    company_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = _resolve_company_id(company_id, user)
+    return await service.revert_supplier_invoice_payment(
+        db=db,
+        company_id=cid,
+        invoice_id=invoice_id,
+        user_id=user.get("id"),
+        motivo=motivo,
+    )
+
+
+@router.post("/invoices/batch-revert-payments")
+async def batch_revert_supplier_invoices(
+    body: SupplierInvoiceBatchRevertRequest,
+    company_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Revierte múltiples facturas de proveedor en bloque para devolverlas a 'pendiente'."""
+    cid = _resolve_company_id(company_id, user)
+    return await service.batch_revert_supplier_invoices(
+        db=db,
+        company_id=cid,
+        invoice_ids=body.invoice_ids,
+        user_id=user.get("id"),
+        motivo=body.motivo,
+    )
 
 
 @router.get("/aging", response_model=dict)
@@ -77,6 +185,59 @@ async def get_ap_dashboard(company_id: str = Query("00000000-0000-0000-0000-0000
     return await service.get_ap_dashboard(db, company_id)
 
 
+@router.get("/ap/payment-queue", response_model=dict)
+async def get_payment_queue(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+    return await service.get_payment_queue(db, company_id)
+
+
+@router.get("/suppliers/{supplier_id}/statement.pdf")
+async def supplier_statement_pdf(supplier_id: str, company_id: str = Query(...), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    sup_r = await db.execute(text("SELECT razon_social, ruc FROM suppliers WHERE id = :id"), {"id": supplier_id})
+    sup = sup_r.first()
+    if not sup:
+        raise HTTPException(404, "Proveedor no encontrado")
+
+    docs_r = await db.execute(
+        text("""
+            SELECT numero_factura, fecha_emision, fecha_vencimiento, total, saldo_pendiente
+            FROM supplier_invoices
+            WHERE company_id = :cid AND supplier_id = :sup_id AND estado IN ('pendiente', 'aprobada', 'parcial')
+            ORDER BY fecha_vencimiento
+        """),
+        {"cid": company_id, "sup_id": supplier_id},
+    )
+    from datetime import date as _date
+    today = _date.today()
+    documentos = []
+    for r in docs_r.all():
+        dias_mora = (today - r.fecha_vencimiento).days if r.fecha_vencimiento and r.fecha_vencimiento < today else None
+        documentos.append({
+            "numero": r.numero_factura or "-",
+            "fecha_emision": r.fecha_emision.strftime("%d/%m/%Y") if r.fecha_emision else "-",
+            "fecha_vencimiento": r.fecha_vencimiento.strftime("%d/%m/%Y") if r.fecha_vencimiento else "-",
+            "monto_original": float(r.total or 0),
+            "saldo_pendiente": float(r.saldo_pendiente or 0),
+            "dias_mora": dias_mora,
+        })
+
+    comp_r = await db.execute(text("SELECT razon_social, ruc, logo_url FROM companies WHERE id = :cid"), {"cid": company_id})
+    comp = comp_r.first()
+    company = {"razon_social": comp.razon_social, "ruc": comp.ruc, "logo_url": comp.logo_url} if comp else {"razon_social": "Empresa", "ruc": "N/A"}
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+
+    pdf_bytes = pdf_reports.generate_account_statement_pdf(
+        company, {"nombre": sup.razon_social, "ruc": sup.ruc}, "proveedor", documentos, generated_by
+    )
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=estado_cuenta_proveedor_{supplier_id[:8]}.pdf",
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )
+
+
 # ── Banking ────────────────────────────────────────────────────────────────────
 
 @router.post("/banks", response_model=BankAccountResponse, status_code=status.HTTP_201_CREATED)
@@ -85,13 +246,123 @@ async def create_bank_account(body: BankAccountCreate, db: AsyncSession = Depend
 
 
 @router.get("/banks", response_model=list[BankAccountResponse])
-async def list_bank_accounts(company_id: str = Query("00000000-0000-0000-0000-000000000010"), db: AsyncSession = Depends(get_db)):
-    return await service.list_bank_accounts(db, company_id)
+async def list_bank_accounts(company_id: str | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    cid = _resolve_company_id(company_id, user)
+    return await service.list_bank_accounts(db, cid)
 
 
 @router.get("/banks/dashboard", response_model=dict)
-async def get_bank_dashboard(company_id: str = Query("00000000-0000-0000-0000-000000000010"), db: AsyncSession = Depends(get_db)):
-    return await service.get_bank_dashboard(db, company_id)
+async def get_bank_dashboard(company_id: str | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    cid = _resolve_company_id(company_id, user)
+    return await service.get_bank_dashboard(db, cid)
+
+
+@router.get("/banks/cash-position", response_model=dict)
+async def get_cash_position(company_id: str | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    cid = _resolve_company_id(company_id, user)
+    return await service.get_cash_position(db, cid)
+
+
+@router.get("/banks/outstanding-items", response_model=dict)
+async def get_outstanding_items(company_id: str | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    cid = _resolve_company_id(company_id, user)
+    return await service.get_outstanding_items(db, cid)
+
+
+# ── Reportes PDF (Bancos Fase 7) ────────────────────────────────────────────
+
+@router.get("/banks/{account_id}/export/reconciliation.pdf")
+async def export_reconciliation_pdf(
+    account_id: str, company_id: str = Query(), desde: date | None = Query(None), hasta: date | None = Query(None),
+    db: AsyncSession = Depends(get_db), user=Depends(require_auth),
+):
+    try:
+        reporte = await service.get_reconciliation_report(db, company_id, account_id, desde, hasta)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = bancos_pdf_reports.generate_reconciliation_pdf(company, reporte["account"], reporte, desde, hasta, generated_by)
+    return StreamingResponse(
+        iter([pdf_bytes]), media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=conciliacion_bancaria_{account_id[:8]}.pdf", "Content-Length": str(len(pdf_bytes))},
+    )
+
+
+@router.get("/banks/export/cash-position.pdf")
+async def export_cash_position_pdf(company_id: str = Query(), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    cash_position = await service.get_cash_position(db, company_id)
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = bancos_pdf_reports.generate_cash_position_pdf(company, cash_position, generated_by)
+    return StreamingResponse(
+        iter([pdf_bytes]), media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=posicion_de_caja.pdf", "Content-Length": str(len(pdf_bytes))},
+    )
+
+
+@router.get("/ap/export/aging.pdf")
+async def export_ap_aging_pdf(company_id: str = Query(), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    aging = await service.get_ap_aging(db, company_id)
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = ap_pdf_reports.generate_ap_aging_pdf(company, aging, generated_by)
+    return StreamingResponse(
+        iter([pdf_bytes]), media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=antiguedad_saldos_ap.pdf", "Content-Length": str(len(pdf_bytes))},
+    )
+
+
+@router.get("/ap/export/top-suppliers.pdf")
+async def export_top_suppliers_pdf(
+    company_id: str = Query(), desde: date | None = Query(None), hasta: date | None = Query(None),
+    db: AsyncSession = Depends(get_db), user=Depends(require_auth),
+):
+    report = await service.get_top_suppliers_report(db, company_id, desde, hasta)
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = ap_pdf_reports.generate_top_suppliers_pdf(company, report, desde, hasta, generated_by)
+    return StreamingResponse(
+        iter([pdf_bytes]), media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=top_proveedores_dpo.pdf", "Content-Length": str(len(pdf_bytes))},
+    )
+
+
+@router.get("/banks/transactions", response_model=list[BankTransactionResponse])
+async def list_all_bank_transactions(
+    company_id: str | None = Query(None),
+    categoria: str | None = Query(None),
+    conciliado: bool | None = Query(None),
+    desde: date | None = Query(None),
+    hasta: date | None = Query(None),
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Movimientos bancarios de todas las cuentas de la empresa, sin filtrar por cuenta.
+
+    Registrada antes de /banks/{account_id} — Starlette resuelve rutas en orden
+    de registro, y "transactions" caía en ese account_id (ValueError: badly
+    formed hexadecimal UUID string) cuando este endpoint estaba más abajo.
+    """
+    cid = _resolve_company_id(company_id, user)
+    return await service.list_bank_transactions(db, cid, None, conciliado, desde, hasta, categoria, limit, offset)
+
+
+@router.get("/banks/balance-corrections", response_model=list[BankBalanceCorrectionResponse])
+async def list_balance_corrections(
+    company_id: str | None = Query(None),
+    estado: str | None = Query("pendiente"),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Registrada antes de /banks/{account_id} — mismo problema de orden de
+    rutas que /banks/transactions: "balance-corrections" caía en account_id
+    (ValueError: badly formed hexadecimal UUID string) cuando este endpoint
+    estaba más abajo, junto con los otros endpoints de Bancos Fase 5."""
+    cid = _resolve_company_id(company_id, user)
+    return await service.list_balance_corrections(db, cid, estado)
 
 
 @router.get("/banks/transactions", response_model=list[BankTransactionResponse])
@@ -141,7 +412,7 @@ async def delete_bank_account(account_id: str, db: AsyncSession = Depends(get_db
 @router.get("/banks/{account_id}/transactions", response_model=list[BankTransactionResponse])
 async def list_bank_transactions(
     account_id: str,
-    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    company_id: str | None = Query(None),
     conciliado: bool | None = Query(None),
     desde: date | None = Query(None),
     hasta: date | None = Query(None),
@@ -149,23 +420,177 @@ async def list_bank_transactions(
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
 ):
-    return await service.list_bank_transactions(db, company_id, account_id, conciliado, desde, hasta, categoria, limit, offset)
+    cid = _resolve_company_id(company_id, user)
+    return await service.list_bank_transactions(db, cid, account_id, conciliado, desde, hasta, categoria, limit, offset)
 
 
 @router.post("/banks/{account_id}/import", response_model=list[BankTransactionResponse])
 async def import_bank_statement(
     account_id: str,
-    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     body: BankTransactionImport = ...,
+    company_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = _resolve_company_id(company_id, user)
+    return await service.import_bank_statement(db, cid, account_id, body.transactions)
+
+
+@router.post("/banks/{account_id}/transactions", response_model=BankTransactionResponse, status_code=status.HTTP_201_CREATED)
+async def create_bank_transaction(
+    account_id: str,
+    body: BankTransactionCreate,
+    company_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = _resolve_company_id(company_id or (str(body.company_id) if body.company_id else None), user)
+    try:
+        return await service.create_bank_transaction(db, cid, account_id, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error al registrar movimiento bancario: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/banks/transfer", status_code=status.HTTP_201_CREATED)
+async def create_bank_transfer(
+    body: BankTransferCreate,
+    company_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = _resolve_company_id(company_id or (str(body.company_id) if body.company_id else None), user)
+    try:
+        return await service.create_bank_transfer(db, cid, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error al registrar transferencia bancaria: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/banks/transactions/{transaction_id}")
+async def delete_bank_transaction(
+    transaction_id: str,
+    company_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = _resolve_company_id(company_id, user)
+    try:
+        success = await service.delete_bank_transaction(db, cid, transaction_id)
+        return {"success": success, "mensaje": "Movimiento bancario eliminado y saldo revertido."}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error al eliminar movimiento bancario: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Carga real de extractos bancarios (Bancos Fase 6) ──────────────────────────
+
+@router.post("/banks/{account_id}/import-file/preview")
+async def preview_import_bank_statement_file(
+    account_id: str,
+    mes: int = Form(...),
+    anio: int = Form(...),
+    file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.import_bank_statement(db, company_id, account_id, body.transactions)
+    if not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Solo se aceptan archivos Excel (.xlsx/.xls)")
+    content = await file.read()
+    try:
+        return await service.preview_bank_statement_file(db, account_id, content, mes, anio)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/banks/{account_id}/import-file")
+async def import_bank_statement_file(
+    account_id: str,
+    company_id: str = Form(...),
+    mes: int = Form(...),
+    anio: int = Form(...),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    if not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Solo se aceptan archivos Excel (.xlsx/.xls)")
+    content = await file.read()
+    try:
+        return await service.import_bank_statement_file(db, company_id, account_id, content, mes, anio)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── Verificación de saldo y correcciones (Bancos Fase 5) ───────────────────────
+
+@router.post("/banks/{account_id}/verify-balance", response_model=BankAccountResponse)
+async def verify_balance(account_id: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.verify_bank_balance(db, account_id, user["id"])
+    if not result:
+        raise HTTPException(status_code=404, detail="Cuenta bancaria no encontrada")
+    return result
+
+
+@router.post("/banks/{account_id}/request-correction", status_code=status.HTTP_201_CREATED)
+async def request_balance_correction(account_id: str, body: BalanceCorrectionCreate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.request_balance_correction(db, account_id, body.saldo_propuesto, body.motivo, str(user["id"]))
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return {"success": True, "request_id": str(result["request"].id)}
+
+
+@router.post("/banks/balance-corrections/{request_id}/approve")
+async def approve_balance_correction(request_id: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.approve_balance_correction(db, request_id, user["id"], user["tenant_id"])
+    if "error" in result:
+        raise HTTPException(status_code=403 if "No autorizado" in result["error"] else 400, detail=result["error"])
+    return {"success": True, "completo": result["completo"]}
+
+
+@router.post("/banks/balance-corrections/{request_id}/reject")
+async def reject_balance_correction(request_id: str, body: BalanceCorrectionDecision, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.reject_balance_correction(db, request_id, user["id"], user["tenant_id"], body.motivo)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "No autorizado" in result["error"] else 400, detail=result["error"])
+    return {"success": True}
+
+
+@router.get("/transactions/{transaction_id}/suggestions")
+async def suggest_matches(transaction_id: str, company_id: str = Query(...), db: AsyncSession = Depends(get_db)):
+    return await service.suggest_reconciliation_matches(db, company_id, transaction_id)
 
 
 @router.post("/transactions/{transaction_id}/reconcile", response_model=BankTransactionResponse)
-async def reconcile_transaction(transaction_id: str, body: ReconcileRequest, db: AsyncSession = Depends(get_db)):
-    result = await service.reconcile_transaction(db, transaction_id, str(body.invoice_id))
+async def reconcile_transaction(transaction_id: str, body: ReconcileRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    matched_id = str(body.matched_id) if body.matched_id else None
+    result = await service.reconcile_transaction(
+        db, transaction_id, body.matched_type, matched_id,
+        user.get("id") or user.get("sub"), user.get("user_nombre"),
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Transacción no encontrada")
+    return result
+
+
+@router.post("/transactions/bulk-reconcile")
+async def bulk_reconcile(body: BulkReconcileRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    matches = [
+        {"transaction_id": str(m.transaction_id), "matched_type": m.matched_type, "matched_id": str(m.matched_id) if m.matched_id else None}
+        for m in body.matches
+    ]
+    return await service.bulk_reconcile(db, matches, user.get("id") or user.get("sub"), user.get("user_nombre"))
+
+
+@router.post("/transactions/{transaction_id}/unreconcile", response_model=BankTransactionResponse)
+async def unreconcile_transaction(transaction_id: str, db: AsyncSession = Depends(get_db)):
+    result = await service.unreconcile_transaction(db, transaction_id)
     if not result:
         raise HTTPException(status_code=404, detail="Transacción no encontrada")
     return result
@@ -203,6 +628,21 @@ async def update_projection(projection_id: str, body: CashFlowProjectionUpdate, 
 @router.get("/cash-flow/dashboard", response_model=dict)
 async def get_cash_flow_dashboard(company_id: str = Query("00000000-0000-0000-0000-000000000010"), db: AsyncSession = Depends(get_db)):
     return await service.get_cash_flow_dashboard(db, company_id)
+
+
+@router.get("/cash-flow/alert-config", response_model=CashFlowAlertConfig)
+async def get_cash_flow_alert_config(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+    return await service.get_cash_flow_alert_config(db, company_id)
+
+
+@router.put("/cash-flow/alert-config", response_model=CashFlowAlertConfig)
+async def update_cash_flow_alert_config(body: CashFlowAlertConfig, company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+    return await service.update_cash_flow_alert_config(db, company_id, body)
+
+
+@router.post("/cash-flow/alert-check", response_model=dict)
+async def trigger_cash_flow_alert_check(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+    return await service.check_negative_cash_flow_alert(db, company_id)
 
 
 # ── Budgets ────────────────────────────────────────────────────────────────────
@@ -245,9 +685,20 @@ async def get_budget_vs_actual(company_id: str = Query("00000000-0000-0000-0000-
 
 # ── Payment Runs ───────────────────────────────────────────────────────────────
 
+@router.get("/ap/payable-invoices", response_model=list[dict])
+async def get_payable_invoices(
+    company_id: str = Query(), supplier_id: str | None = Query(None), hasta: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    return await service.get_payable_invoices(db, company_id, supplier_id, hasta)
+
+
 @router.post("/payment-runs", response_model=PaymentRunResponse, status_code=status.HTTP_201_CREATED)
 async def create_payment_run(body: PaymentRunCreate, db: AsyncSession = Depends(get_db)):
-    return await service.create_payment_run(db, body)
+    result = await service.create_payment_run(db, body)
+    if isinstance(result, dict) and "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
 
 
 @router.get("/payment-runs", response_model=list[PaymentRunResponse])
@@ -263,16 +714,52 @@ async def get_payment_run(run_id: str, db: AsyncSession = Depends(get_db)):
     return run
 
 
-@router.post("/payment-runs/{run_id}/execute", response_model=PaymentRunResponse)
+@router.post("/payment-runs/{run_id}/execute", response_model=dict)
 async def execute_payment_run(
     run_id: str,
     user_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await service.execute_payment_run(db, run_id, user_id)
-    if not result:
-        raise HTTPException(status_code=400, detail="No se pudo ejecutar. El lote debe estar en borrador")
-    return result
+    result = await service.execute_payment_run_gated(db, run_id, user_id)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    if result["pending_approval"]:
+        return {"pending_approval": True, "request_id": str(result["request"].id), "monto": float(result["request"].monto)}
+    run = result["run"]
+    return {"pending_approval": False, "id": str(run.id), "estado": run.estado, "total_monto": float(run.total_monto)}
+
+
+# ── Aprobación de pagos grandes (Cuentas por Pagar Fase 3) ──────────────────────
+
+@router.get("/ap/approvals", response_model=list[dict])
+async def list_ap_approvals(company_id: str = Query(), estado: str | None = Query("pendiente"), db: AsyncSession = Depends(get_db)):
+    requests = await service.list_ap_approvals(db, company_id, estado)
+    return [
+        {
+            "id": str(r.id), "entidad_tipo": r.entidad_tipo, "entidad_id": str(r.entidad_id),
+            "monto": float(r.monto), "estado": r.estado,
+            "aprobado_supervisor_id": str(r.aprobado_supervisor_id) if r.aprobado_supervisor_id else None,
+            "aprobado_gerente_id": str(r.aprobado_gerente_id) if r.aprobado_gerente_id else None,
+            "created_at": r.created_at,
+        }
+        for r in requests
+    ]
+
+
+@router.post("/ap/approvals/{request_id}/approve")
+async def approve_ap_payment(request_id: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.approve_ap_payment(db, request_id, user["id"], user["tenant_id"])
+    if "error" in result:
+        raise HTTPException(status_code=403 if "No autorizado" in result["error"] else 400, detail=result["error"])
+    return {"success": True, "completo": result["completo"]}
+
+
+@router.post("/ap/approvals/{request_id}/reject")
+async def reject_ap_payment(request_id: str, body: APPaymentRejectRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.reject_ap_payment(db, request_id, user["id"], user["tenant_id"], body.motivo)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "No autorizado" in result["error"] else 400, detail=result["error"])
+    return {"success": True}
 
 
 # ── Consolidated ───────────────────────────────────────────────────────────────
@@ -287,6 +774,265 @@ async def get_financial_ratios(company_id: str = Query("00000000-0000-0000-0000-
     return await service.get_financial_ratios(db, company_id)
 
 
-@router.get("/pnl")
-async def get_pnl(company_id: str = "00000000-0000-0000-0000-000000000010", db: AsyncSession = Depends(get_db)):
-    return await service.get_financial_pnl(db, company_id)
+# ── Supplier Credit Notes ────────────────────────────────────────────────────
+
+@router.get("/supplier-credit-notes")
+async def list_supplier_credit_notes(company_id: str = Query(), supplier_id: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    return await service.list_supplier_credit_notes(db, company_id, supplier_id)
+
+
+@router.post("/supplier-credit-notes/upload-attachment")
+async def upload_credit_note_attachment(
+    file: UploadFile = File(...),
+):
+    try:
+        content = await file.read()
+        saved_path = service.save_credit_note_attachment(content, file.filename or "comprobante.pdf")
+        return {"url": saved_path, "filename": file.filename}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/supplier-credit-notes", status_code=status.HTTP_201_CREATED)
+async def create_supplier_credit_note(
+    body: SupplierCreditNoteCreate,
+    company_id: str = Query(),
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        return await service.create_supplier_credit_note(db, company_id, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/supplier-credit-notes/{credit_note_id}/apply")
+async def apply_supplier_credit_note(
+    credit_note_id: str,
+    body: SupplierCreditNoteApply,
+    company_id: str = Query(),
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        return await service.apply_supplier_credit_note(db, company_id, credit_note_id, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/supplier-credit-notes/{credit_note_id}/applications")
+async def list_credit_note_applications(
+    credit_note_id: str,
+    company_id: str = Query(),
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.list_credit_note_applications(db, company_id, credit_note_id)
+
+
+@router.get("/credit-note-applications")
+async def list_all_credit_note_applications(
+    company_id: str = Query(),
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.list_credit_note_applications(db, company_id)
+
+
+# ── Supplier Returns (devoluciones a proveedor) ─────────────────────────────
+
+@router.get("/supplier-returns")
+async def list_supplier_returns(company_id: str = Query(), supplier_id: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    return await service.list_supplier_returns(db, company_id, supplier_id)
+
+
+# ── Nomina (rh_movimento) ────────────────────────────────────────────────────
+
+@router.get("/payroll/by-concepto")
+async def payroll_by_concepto(
+    company_id: str = Query(),
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    return await service.get_payroll_by_concepto(db, company_id, fecha_desde, fecha_hasta)
+
+
+@router.get("/payroll-movements")
+async def list_payroll_movements(company_id: str = Query(), empleado_nombre: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    return await service.list_payroll_movements(db, company_id, empleado_nombre)
+
+
+# ── Órdenes de Pago a Proveedores (AP) & PDF Oficial ─────────────────────────
+
+@router.post("/payment-orders", status_code=status.HTTP_201_CREATED)
+async def create_payment_order(
+    body: SupplierPaymentOrderCreate,
+    company_id: str = Query(),
+    user_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.create_supplier_payment_order(db, company_id, body, user_id)
+
+
+@router.get("/payment-orders")
+async def list_payment_orders(
+    company_id: str = Query(),
+    supplier_id: str | None = Query(None),
+    estado: str | None = Query(None),
+    forma_pago: str | None = Query(None),
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.list_supplier_payment_orders(
+        db, company_id, supplier_id, estado, forma_pago, fecha_desde, fecha_hasta, limit, offset
+    )
+
+
+@router.get("/payment-orders/export/report.pdf")
+async def export_payment_orders_pdf(
+    company_id: str = Query(),
+    supplier_id: str | None = Query(None),
+    estado: str | None = Query(None),
+    forma_pago: str | None = Query(None),
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    res = await service.list_supplier_payment_orders(
+        db, company_id, supplier_id, estado, forma_pago, fecha_desde, fecha_hasta, limit=500
+    )
+    company = await _get_company_info(db, company_id)
+    pdf_bytes = payment_order_pdf.generate_supplier_payments_report_pdf(
+        company=company,
+        orders=res.get("items", []),
+        filters={
+            "fecha_desde": fecha_desde.isoformat() if fecha_desde else None,
+            "fecha_hasta": fecha_hasta.isoformat() if fecha_hasta else None,
+        }
+    )
+    filename = f"reporte_pagos_proveedores_{fecha_desde or 'inicio'}_{fecha_hasta or 'hoy'}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename={filename}", "Content-Length": str(len(pdf_bytes))}
+    )
+
+
+@router.get("/payment-orders/cheques-disponibles")
+async def list_available_cheques_for_payment_orders(
+    company_id: str = Query(),
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.get_cheques_available_for_disbursement(db, company_id)
+
+
+@router.post("/payment-orders/batch-multi-supplier", status_code=status.HTTP_201_CREATED)
+async def create_multi_supplier_payment_batch(
+    body: MultiSupplierPaymentBatchCreate,
+    company_id: str = Query(),
+    user_id: str | None = Query(None),
+    user_nombre: str | None = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.create_multi_supplier_payment_batch(
+        db, company_id, body, user_id, user_nombre
+    )
+
+
+@router.get("/receptions/unbilled")
+async def list_unbilled_receptions(
+    company_id: str = Query(),
+    supplier_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.list_unbilled_purchase_receipts(db, company_id, supplier_id)
+
+
+@router.post("/receptions/settle-and-pay", status_code=status.HTTP_201_CREATED)
+async def settle_vales_and_pay(
+    body: SettleValesAndPayRequest,
+    company_id: str = Query(),
+    user_id: str | None = Query(None),
+    user_nombre: str | None = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.settle_vales_and_pay(db, company_id, body, user_id, user_nombre)
+
+
+@router.get("/payment-orders/batch/report.pdf")
+async def get_batch_payment_order_report_pdf(
+    company_id: str = Query(...),
+    order_ids: str | None = Query(None, description="IDs de órdenes separadas por coma"),
+    cheque_id: str | None = Query(None, description="ID del cheque emitido"),
+    user_nombre: str | None = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    ids_list = [i.strip() for i in order_ids.split(",")] if order_ids else None
+    batch_data = await service.get_batch_payment_report_data(
+        db, company_id, order_ids=ids_list, cheque_id=cheque_id
+    )
+    company = await _get_company_info(db, company_id)
+    pdf_bytes = payment_order_pdf.generate_batch_payment_report_pdf(
+        company=company,
+        batch_data=batch_data,
+        generated_by=user_nombre or "",
+    )
+    raw_id = batch_data.get("identificador", "operacion")
+    clean_id = "".join(c for c in raw_id if c.isalnum() or c in ("-", "_")).strip()
+    filename = f"reporte_lote_{clean_id}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename={filename}", "Content-Length": str(len(pdf_bytes))}
+    )
+
+
+@router.get("/payment-orders/{order_id}")
+async def get_payment_order(
+    order_id: str,
+    company_id: str = Query(),
+    db: AsyncSession = Depends(get_db)
+):
+    detail = await service.get_supplier_payment_order_detail(db, company_id, order_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail="Orden de Pago no encontrada.")
+    return detail
+
+
+@router.post("/payment-orders/{order_id}/disburse")
+async def disburse_payment_order(
+    order_id: str,
+    body: SupplierPaymentOrderDisburse,
+    company_id: str = Query(),
+    user_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.disburse_supplier_payment_order(
+        db, company_id, order_id, body, user_id=user_id
+    )
+
+
+@router.get("/payment-orders/{order_id}/pdf")
+async def get_payment_order_pdf(
+    order_id: str,
+    company_id: str = Query(),
+    db: AsyncSession = Depends(get_db)
+):
+    detail = await service.get_supplier_payment_order_detail(db, company_id, order_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail="Orden de Pago no encontrada.")
+
+    company = await _get_company_info(db, company_id)
+    pdf_bytes = payment_order_pdf.generate_payment_order_receipt_pdf(
+        company=company,
+        order=detail,
+        allocations=detail.get("allocations", []),
+        disbursements=detail.get("disbursements", []),
+    )
+    filename = f"recibo_orden_pago_{detail.get('numero_orden', order_id[:8])}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename={filename}", "Content-Length": str(len(pdf_bytes))}
+    )
+

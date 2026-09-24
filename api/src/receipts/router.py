@@ -3,10 +3,27 @@ from fastapi.responses import Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import io
+import qrcode
+
 from api.src.db import get_db
 from api.src.sifen.client import sifen_client
 
 router = APIRouter(prefix="/api/v1/receipts", tags=["receipts"])
+
+
+@router.get("/qr")
+async def get_generic_qr(data: str = Query(..., min_length=1, max_length=500), size: int = Query(180, ge=64, le=512)):
+    """QR generico para cualquier texto/URL (ej. el enlace de registro al
+    club de fidelidad en el ticket) -- separado del QR de verificacion SIFEN,
+    que siempre apunta a la URL de ekuatia.set.gov.py con el CDC."""
+    qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=2)
+    qr.add_data(data)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white").resize((size, size))
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    return StreamingResponse(io.BytesIO(buffer.getvalue()), media_type="image/png")
 
 
 @router.get("/sales/{sale_id}/pdf")
@@ -30,18 +47,22 @@ async def get_sale_receipt_pdf(
             raise HTTPException(status_code=404, detail="Venta no encontrada")
 
         items_result = await db.execute(text("""
-            SELECT si.cantidad, si.precio_unitario, p.nombre as product_name, p.iva_tasa
+            SELECT si.cantidad, si.precio_unitario,
+                   COALESCE(si.descripcion, p.nombre, 'Producto') as product_name,
+                   p.sku as product_sku, p.codigo_barra, p.iva_tasa
             FROM sale_items si
             LEFT JOIN products p ON si.product_id = p.id
             WHERE si.sale_id = :sale_id
+            ORDER BY si.created_at ASC
         """), {"sale_id": sale_id})
         items = [dict(r._mapping) for r in items_result.fetchall()]
 
-        company_dict = {
-            "razon_social": row.razon_social or "Casa Gonzalito",
-            "ruc": row.ruc or "N/A",
-            "direccion": row.direccion or "Asuncion",
-            "telefono": row.telefono or "",
+        company = {
+            "razon_social": row.razon_social or "GRUPO SANTA TERESA E.A.S.",
+            "nombre_fantasia": "Extra Supermercado Mayorista",
+            "ruc": row.ruc or "80150377-9",
+            "direccion": row.direccion or "Alejo Garcia esquina Carlos Antonio López, Pedro Juan Caballero, Amambay",
+            "telefono": row.telefono or "+595992052200",
         }
 
         customer_dict = {

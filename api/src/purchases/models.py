@@ -16,6 +16,14 @@ class Supplier(Base):
     ruc = Column(String(15), index=True)
     ci = Column(String(20))
     razon_social = Column(String(255), nullable=False)
+    nombre_fantasia = Column(String(200))
+    contacto = Column(String(200))
+    tipo_provision = Column(String(30), default="bienes")  # bienes | servicios | mixto
+    rubro = Column(String(100))
+    pais = Column(String(50), default="Paraguay")
+    limite_credito = Column(Numeric(14, 2), default=0)
+    dia_visita = Column(String(50))
+    frecuencia_entrega = Column(String(50))
     condicion_iva = Column(String(20))
     direccion = Column(Text)
     ciudad = Column(String(100))
@@ -35,9 +43,14 @@ class Supplier(Base):
     contacto_email = Column(String(255))
     banco = Column(String(100))
     cuenta_bancaria = Column(String(50))
+    titular_cuenta_bancaria = Column(String(200))
+    tipo_cuenta_bancaria = Column(String(50))
+    identificacion_bancaria = Column(String(50))
     tipo_contribuyente = Column(String(30))
     retencion_irp = Column(Boolean, default=False)
     retencion_iva = Column(Boolean, default=False)
+    porcentaje_retencion_iva = Column(Integer, default=30)
+    agente_retencion = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -103,7 +116,6 @@ class PurchaseOrderItem(Base):
     descripcion = Column(String(300))
     cantidad = Column(Numeric(10, 3), nullable=False)
     cantidad_recibida = Column(Numeric(10, 3), default=0)
-    cantidad_bonificada = Column(Numeric(10, 3), default=0)  # bonificacion por volumen recibida junto con el pedido
     precio_unitario = Column(Numeric(15, 0), nullable=False)
     descuento_pct = Column(Numeric(5, 2), default=0)
     iva_tasa = Column(Numeric(5, 2))
@@ -147,6 +159,8 @@ class PurchaseReceipt(Base):
     estado = Column(String(20), default="completado")
     observaciones = Column(Text)
     user_id = Column(UUID(as_uuid=True))
+    requiere_revision = Column(Boolean, default=False)
+    motivo_revision = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     items = relationship("PurchaseReceiptItem", back_populates="receipt", cascade="all, delete-orphan")
@@ -166,6 +180,11 @@ class PurchaseReceiptItem(Base):
     costo_unitario = Column(Numeric(15, 0), nullable=False)
     total = Column(Numeric(15, 0))
     batch_id = Column(UUID(as_uuid=True))
+    cantidad_rechazada = Column(Numeric(10, 3))
+    motivo_rechazo = Column(Text)
+    es_extraordinario = Column(Boolean, default=False)
+    autorizado_por = Column(UUID(as_uuid=True))
+    autorizacion_motivo = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     receipt = relationship("PurchaseReceipt", back_populates="items")
@@ -389,3 +408,140 @@ class PurchaseBudget(Base):
     user_id = Column(UUID(as_uuid=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PurchaseRfq(Base):
+    __tablename__ = "purchase_rfqs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    requisition_id = Column(UUID(as_uuid=True))
+    numero = Column(String(20), nullable=False, unique=True)
+    fecha = Column(DateTime(timezone=True), server_default=func.now())
+    fecha_limite = Column(Date)
+    estado = Column(String(20), nullable=False, default="enviada")  # enviada, evaluando, adjudicada, cancelada
+    motivo = Column(Text)
+    observaciones = Column(Text)
+    ganador_supplier_id = Column(UUID(as_uuid=True))
+    purchase_order_id = Column(UUID(as_uuid=True))
+    user_id = Column(UUID(as_uuid=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    items = relationship("PurchaseRfqItem", back_populates="rfq", cascade="all, delete-orphan")
+    responses = relationship("PurchaseRfqResponse", back_populates="rfq", cascade="all, delete-orphan")
+
+
+class PurchaseRfqItem(Base):
+    __tablename__ = "purchase_rfq_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    rfq_id = Column(UUID(as_uuid=True), ForeignKey("purchase_rfqs.id"), nullable=False)
+    product_id = Column(UUID(as_uuid=True), nullable=False)
+    variant_id = Column(UUID(as_uuid=True))
+    descripcion = Column(String(300))
+    cantidad_solicitada = Column(Numeric(10, 3), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    rfq = relationship("PurchaseRfq", back_populates="items")
+
+
+class PurchaseRfqResponse(Base):
+    __tablename__ = "purchase_rfq_responses"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    rfq_id = Column(UUID(as_uuid=True), ForeignKey("purchase_rfqs.id"), nullable=False)
+    supplier_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    estado = Column(String(20), nullable=False, default="invitada")  # invitada, respondida, ganadora, descartada
+    fecha_respuesta = Column(DateTime(timezone=True))
+    plazo_entrega_dias = Column(Integer)
+    observaciones = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    rfq = relationship("PurchaseRfq", back_populates="responses")
+    items = relationship("PurchaseRfqResponseItem", back_populates="response", cascade="all, delete-orphan")
+
+
+class PurchaseRfqResponseItem(Base):
+    __tablename__ = "purchase_rfq_response_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    response_id = Column(UUID(as_uuid=True), ForeignKey("purchase_rfq_responses.id"), nullable=False)
+    rfq_item_id = Column(UUID(as_uuid=True), ForeignKey("purchase_rfq_items.id"), nullable=False)
+    product_id = Column(UUID(as_uuid=True), nullable=False)
+    precio_unitario = Column(Numeric(15, 0), nullable=False)
+    plazo_entrega_dias = Column(Integer)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    response = relationship("PurchaseRfqResponse", back_populates="items")
+
+
+class CustomerLostDemand(Base):
+    __tablename__ = "customer_lost_demands"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    producto_nombre = Column(String(255), nullable=False)
+    categoria = Column(String(100))
+    marca = Column(String(100))
+    notas = Column(Text)
+    cliente_nombre = Column(String(255))
+    cliente_contacto = Column(String(100))
+    # Cliente real de la base (si se lo encontro/registro desde el buscador
+    # del modal) -- antes solo se guardaba texto libre, asi que no habia
+    # forma de asociar el aviso a la ficha real del cliente ni de avisarle
+    # por su telefono guardado.
+    customer_id = Column(UUID(as_uuid=True), ForeignKey("customers.id"), nullable=True)
+    urgencia = Column(String(20), nullable=False, default="normal")  # normal, urgente
+    cajero_id = Column(UUID(as_uuid=True))
+    cajero_nombre = Column(String(255))
+    caja_id = Column(String(50))
+    estado = Column(String(30), nullable=False, default="PENDIENTE")  # PENDIENTE, EN_EVALUACION, COMPRADO, DESCARTADO
+    orden_compra_id = Column(UUID(as_uuid=True), ForeignKey("purchase_orders.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PurchaseInboxConfig(Base):
+    __tablename__ = "purchase_inbox_configs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, unique=True, index=True)
+    imap_host = Column(String(100), nullable=False)
+    imap_port = Column(Integer, nullable=False, default=993)
+    imap_user = Column(String(150), nullable=False)
+    imap_password = Column(String(255), nullable=False)
+    imap_ssl = Column(Boolean, default=True)
+    imap_folder = Column(String(50), default="INBOX")
+    activo = Column(Boolean, default=True)
+    ultimo_sync = Column(DateTime(timezone=True))
+    ultimo_error = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SupplierNcRequest(Base):
+    __tablename__ = "supplier_nc_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=False, index=True)
+    invoice_id = Column(UUID(as_uuid=True), ForeignKey("supplier_invoices.id"), nullable=False, index=True)
+    receipt_id = Column(UUID(as_uuid=True), ForeignKey("purchase_receipts.id"), nullable=True)
+    purchase_order_id = Column(UUID(as_uuid=True), ForeignKey("purchase_orders.id"), nullable=True)
+    numero_solicitud = Column(String(30), nullable=False, unique=True)
+    tipo_motivo = Column(String(50), nullable=False)  # faltante_fisico, diferencia_precio, producto_danado, acuerdo_promocional, otro
+    monto_reclamado = Column(Numeric(15, 0), nullable=False)
+    estado = Column(String(30), nullable=False, default="pendiente_entrega")  # pendiente_entrega, entregada_parcial, resuelta, rechazada
+    nc_recibida_numero = Column(String(50))
+    nc_recibida_timbrado = Column(String(20))
+    nc_recibida_cdc = Column(String(64))
+    nc_recibida_monto = Column(Numeric(15, 0))
+    nc_recibida_fecha = Column(Date)
+    observaciones = Column(Text)
+    created_by = Column(UUID(as_uuid=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    resolved_at = Column(DateTime(timezone=True))
+

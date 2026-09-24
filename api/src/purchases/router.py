@@ -1,9 +1,20 @@
 """Purchases API router — suppliers, orders, receipts, requisitions, contracts, forecasting, suggestions, budgets, reports"""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import logging
+import uuid
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+logger = logging.getLogger(__name__)
+
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth, get_current_user
+from api.src.rbac.deps import require_permission
+from api.src.purchases import pdf_reports as purchases_pdf_reports
 from api.src.purchases.schemas import (
     SupplierCreate, SupplierUpdate, SupplierResponse,
     POItemInput, POCreate, POUpdate, POResponse, POWithItems, POItemResponse, POHistoryResponse,
@@ -15,26 +26,43 @@ from api.src.purchases.schemas import (
     PurchaseSuggestionResponse,
     BudgetCreate, BudgetUpdate, BudgetResponse, BudgetConsumptionResponse,
     SpendBySupplierResponse, SpendByCategoryResponse, PriceVarianceResponse, PurchaseKPIsResponse,
+    RfqCreate, RfqResponse, RfqWithDetail, RfqResponseSubmit, RfqAwardRequest,
+    SmartReplenishmentRequest, SmartReplenishmentResponse, CreatePOFromReplenishmentRequest,
+    GenerateMultiPORequest, GenerateMultiPOResponse,
+    LostDemandCreate, LostDemandResponse, LostDemandUpdate,
+    PurchaseInboxConfigCreate, PurchaseInboxConfigUpdate, PurchaseInboxConfigResponse,
+    SyncInboxResponse, UploadXmlResponse,
+    Perform3WayMatchRequest, Perform3WayMatchResponse, AssociatePurchaseOrderRequest,
+    SupplierNcRequestResponse, ResolveSupplierNcRequest,
+    SupplierProductItemResponse, ProductInvoiceOptionResponse,
+    SupplierReturnCreateInput, SupplierReturnUpdateInput, SupplierReturnRejectInput, SupplierReturnCompleteInput,
+    ProductSupplierComparisonResponse, SupplierPriceComparisonItem,
 )
 from api.src.purchases import service
+from api.src.purchases import imap_service
+from api.src.purchases import matching_service
+from api.src.purchases import sifen_xml_parser
+from api.src.purchases import returns_service
 
-router = APIRouter(prefix="/api/v1", tags=["purchases"])
+
+router = APIRouter(prefix="/api/v1", tags=["purchases"], dependencies=[Depends(require_auth)])
 
 
 # ── Suppliers ─────────────────────────────────────────────────────────────────
 
 @router.post("/suppliers", response_model=SupplierResponse, status_code=status.HTTP_201_CREATED)
-async def create_supplier(body: SupplierCreate, db: AsyncSession = Depends(get_db)):
+async def create_supplier(body: SupplierCreate, db: AsyncSession = Depends(get_db), _=Depends(require_permission("suppliers:create"))):
     return await service.create_supplier(db, body)
 
 
-@router.get("/suppliers", response_model=list[SupplierResponse])
-async def list_all_suppliers(company_id: str = Query("00000000-0000-0000-0000-000000000010"), search: str | None = Query(None), activo: bool | None = Query(None), db: AsyncSession = Depends(get_db)):
-    return await service.list_suppliers(db, company_id, search)
-
 @router.get("/companies/{company_id}/suppliers", response_model=list[SupplierResponse])
-async def list_suppliers(company_id: str, search: str | None = Query(None), db: AsyncSession = Depends(get_db)):
-    return await service.list_suppliers(db, company_id, search)
+async def list_suppliers(
+    company_id: str,
+    search: str | None = Query(None),
+    solo_mercaderia: bool = Query(False),
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.list_suppliers(db, company_id, search, solo_mercaderia=solo_mercaderia)
 
 
 @router.get("/suppliers/{supplier_id}", response_model=SupplierResponse)
@@ -45,12 +73,21 @@ async def get_supplier(supplier_id: str, db: AsyncSession = Depends(get_db)):
     return supplier
 
 
+@router.put("/suppliers/{supplier_id}", response_model=SupplierResponse)
 @router.patch("/suppliers/{supplier_id}", response_model=SupplierResponse)
-async def update_supplier(supplier_id: str, body: SupplierUpdate, db: AsyncSession = Depends(get_db)):
+async def update_supplier(supplier_id: str, body: SupplierUpdate, db: AsyncSession = Depends(get_db), _=Depends(require_permission("suppliers:update"))):
     result = await service.update_supplier(db, supplier_id, body)
     if not result:
         raise HTTPException(status_code=404, detail="Proveedor no encontrado")
     return result
+
+
+@router.delete("/suppliers/{supplier_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_supplier(supplier_id: str, db: AsyncSession = Depends(get_db), _=Depends(require_permission("suppliers:delete"))):
+    success = await service.delete_supplier(db, supplier_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Proveedor no encontrado")
+
 
 
 # ── Supplier Intelligence ─────────────────────────────────────────────────────
@@ -73,6 +110,19 @@ async def get_supplier_price_history(
     db: AsyncSession = Depends(get_db),
 ):
     return await service.get_supplier_price_history(db, supplier_id, product_id)
+
+
+@router.get("/purchases/products/{product_id}/supplier-comparison", response_model=ProductSupplierComparisonResponse)
+@router.get("/products/{product_id}/supplier-comparison", response_model=ProductSupplierComparisonResponse)
+async def get_product_supplier_comparison(
+    product_id: str,
+    company_id: str = Query("f0000000-0000-0000-0000-000000000001"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_auth),
+):
+    cid = user.get("company_id") or company_id
+    return await service.get_product_supplier_comparison(db, cid, product_id)
+
 
 
 @router.get("/suppliers/{supplier_id}/performance", response_model=SupplierPerformanceResponse)
@@ -123,11 +173,9 @@ async def list_purchase_orders(
     company_id: str,
     supplier_id: str | None = Query(None),
     estado: str | None = Query(None),
-    limit: int = Query(50, le=500),
-    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_purchase_orders(db, company_id, supplier_id, estado, limit=limit, offset=offset)
+    return await service.list_purchase_orders(db, company_id, supplier_id, estado)
 
 
 @router.get("/purchase-orders/{po_id}", response_model=POWithItems)
@@ -142,8 +190,18 @@ async def get_purchase_order(po_id: str, db: AsyncSession = Depends(get_db)):
 async def update_purchase_order(po_id: str, body: POUpdate, db: AsyncSession = Depends(get_db)):
     result = await service.update_purchase_order(db, po_id, body)
     if not result:
-        raise HTTPException(status_code=400, detail="No se pudo actualizar. Solo se permite en estado borrador")
+        raise HTTPException(status_code=404, detail="Orden de compra no encontrada")
     return result
+
+
+@router.delete("/purchase-orders/{po_id}")
+async def delete_purchase_order(
+    po_id: str,
+    force: bool = Query(False, description="Forzar eliminación desvinculando recepciones y solicitudes"),
+    db: AsyncSession = Depends(get_db),
+):
+    return await service.delete_purchase_order(db, po_id, force=force)
+
 
 
 @router.post("/purchase-orders/{po_id}/confirm", response_model=POResponse)
@@ -234,6 +292,7 @@ async def approve_requisition(
     req_id: str,
     aprobado_por: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_permission("purchases:approve")),
 ):
     result = await service.approve_requisition(db, req_id, aprobado_por)
     if not result:
@@ -246,6 +305,7 @@ async def reject_requisition(
     req_id: str,
     motivo: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_permission("purchases:approve")),
 ):
     result = await service.reject_requisition(db, req_id, motivo)
     if not result:
@@ -270,8 +330,16 @@ async def convert_requisition_to_po(
 # ── Purchase Receipts ─────────────────────────────────────────────────────────
 
 @router.post("/purchase-receipts", response_model=ReceiptResponse, status_code=status.HTTP_201_CREATED)
-async def create_receipt(body: ReceiptCreate, db: AsyncSession = Depends(get_db)):
-    return await service.create_receipt(db, body)
+async def create_receipt(body: ReceiptCreate, db: AsyncSession = Depends(get_db), _=Depends(require_permission("purchases:receive"))):
+    receipt = await service.create_receipt(db, body)
+    if receipt.purchase_order_id and not receipt.requiere_revision:
+        try:
+            async with db.begin_nested():
+                from api.src.financial.service import auto_create_invoice_from_receipt
+                await auto_create_invoice_from_receipt(db, str(receipt.id))
+        except Exception:
+            logger.exception("No se pudo auto-generar la factura de proveedor para la recepción %s", receipt.id)
+    return receipt
 
 
 @router.get("/companies/{company_id}/purchase-receipts", response_model=list[ReceiptResponse])
@@ -284,14 +352,20 @@ async def get_receipt(receipt_id: str, db: AsyncSession = Depends(get_db)):
     receipt = await service.get_receipt(db, receipt_id)
     if not receipt:
         raise HTTPException(status_code=404, detail="Recepción no encontrada")
-    items = await service.get_receipt_items(db, receipt_id)
-    receipt.items = items
     return receipt
 
 
 @router.get("/purchase-receipts/{receipt_id}/items", response_model=list[ReceiptItemResponse])
 async def get_receipt_items(receipt_id: str, db: AsyncSession = Depends(get_db)):
     return await service.get_receipt_items(db, receipt_id)
+
+
+@router.post("/purchase-receipts/{receipt_id}/cancel", response_model=ReceiptResponse)
+async def cancel_receipt(receipt_id: str, db: AsyncSession = Depends(get_db), _=Depends(require_permission("purchases:receive"))):
+    try:
+        return await service.cancel_receipt(db, receipt_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ── Forecasting ───────────────────────────────────────────────────────────────
@@ -399,6 +473,13 @@ async def update_budget(budget_id: str, body: BudgetUpdate, db: AsyncSession = D
     return result
 
 
+@router.delete("/purchase-budgets/{budget_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_budget(budget_id: str, db: AsyncSession = Depends(get_db)):
+    deleted = await service.delete_budget(db, budget_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Presupuesto no encontrado")
+
+
 @router.get("/companies/{company_id}/purchase-budgets/consumption", response_model=list[BudgetConsumptionResponse])
 async def get_budget_consumption(
     company_id: str,
@@ -428,3 +509,620 @@ async def price_variance(company_id: str, db: AsyncSession = Depends(get_db)):
 @router.get("/companies/{company_id}/purchase-reports/kpis", response_model=PurchaseKPIsResponse)
 async def purchase_kpis(company_id: str, db: AsyncSession = Depends(get_db)):
     return await service.get_purchase_kpis(db, company_id)
+
+
+async def _get_company_info(db: AsyncSession, company_id: str) -> dict:
+    r = await db.execute(text("SELECT razon_social, ruc, logo_url FROM companies WHERE id = :cid"), {"cid": company_id})
+    row = r.first()
+    return {"razon_social": row.razon_social, "ruc": row.ruc, "logo_url": row.logo_url} if row else {"razon_social": "Empresa", "ruc": "N/A"}
+
+
+@router.get("/companies/{company_id}/purchase-reports/export/spend-by-supplier.pdf")
+async def export_spend_by_supplier_pdf(company_id: str, db: AsyncSession = Depends(get_db)):
+    kpis = await service.get_purchase_kpis(db, company_id)
+    spend_rows = await service.get_spend_by_supplier(db, company_id)
+    company = await _get_company_info(db, company_id)
+    pdf_bytes = purchases_pdf_reports.generate_spend_by_supplier_pdf(company, kpis, spend_rows)
+    return StreamingResponse(
+        iter([pdf_bytes]), media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=gasto_por_proveedor.pdf", "Content-Length": str(len(pdf_bytes))},
+    )
+
+
+@router.get("/companies/{company_id}/purchase-reports/export/price-variance.pdf")
+async def export_price_variance_pdf(company_id: str, db: AsyncSession = Depends(get_db)):
+    variance_rows = await service.get_price_variance(db, company_id)
+    company = await _get_company_info(db, company_id)
+    pdf_bytes = purchases_pdf_reports.generate_price_variance_pdf(company, variance_rows)
+    return StreamingResponse(
+        iter([pdf_bytes]), media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=varianza_de_precios.pdf", "Content-Length": str(len(pdf_bytes))},
+    )
+
+
+@router.get("/purchases/orders/{order_id}/pdf")
+async def export_purchase_order_pdf(order_id: str, db: AsyncSession = Depends(get_db)):
+    order = await service.get_purchase_order_with_items(db, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Orden de compra no encontrada")
+    
+    items = await service.get_po_items(db, order_id)
+    company = await _get_company_info(db, str(order.company_id))
+    
+    order_dict = {
+        "id": str(order.id),
+        "numero": order.numero,
+        "fecha": order.fecha,
+        "created_at": order.created_at,
+        "fecha_entrega_estimada": order.fecha_entrega_estimada,
+        "condiciones_pago": order.condiciones_pago,
+        "moneda": order.moneda,
+        "created_by_name": order.created_by_name,
+        "observaciones": order.observaciones,
+        "total": float(order.total or 0),
+        "supplier": {
+            "razon_social": order.supplier.razon_social if order.supplier else None,
+            "ruc": order.supplier.ruc if order.supplier else None,
+            "telefono": order.supplier.telefono if order.supplier else None,
+            "email": order.supplier.email if order.supplier else None,
+            "direccion": order.supplier.direccion if order.supplier else None,
+        } if order.supplier else {}
+    }
+    
+    items_list = []
+    for it in items:
+        items_list.append({
+            "descripcion": it.get("descripcion") or "Ítem",
+            "sku": it.get("sku") or "—",
+            "codigo_barra": it.get("codigo_barra") or "—",
+            "unidad_medida": it.get("unidad_medida") or "UN",
+            "cantidad": float(it.get("cantidad") or 0),
+            "precio_unitario": float(it.get("precio_unitario") or 0),
+            "iva_tasa": float(it.get("iva_tasa") or 10),
+            "total": float(it.get("total") or 0),
+        })
+        
+    pdf_bytes = purchases_pdf_reports.generate_purchase_order_pdf(company, order_dict, items_list)
+    filename = f"OC_{order.numero or order_id[:8]}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]), media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "Content-Length": str(len(pdf_bytes))},
+    )
+
+
+# ── RFQ / Cotizacion comparativa ────────────────────────────────────────────────
+
+@router.post("/purchase-rfqs", response_model=RfqWithDetail, status_code=status.HTTP_201_CREATED)
+async def create_rfq(body: RfqCreate, db: AsyncSession = Depends(get_db)):
+    result = await service.create_rfq(db, body)
+    if not result:
+        raise HTTPException(status_code=400, detail="Se requieren al menos 2 proveedores y al menos un producto (desde una requisicion o una lista de items)")
+    return result
+
+
+@router.get("/companies/{company_id}/purchase-rfqs", response_model=list[RfqResponse])
+async def list_rfqs(company_id: str, estado: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    return await service.list_rfqs(db, company_id, estado)
+
+
+@router.get("/purchase-rfqs/{rfq_id}", response_model=RfqWithDetail)
+async def get_rfq(rfq_id: str, db: AsyncSession = Depends(get_db)):
+    rfq = await service.get_rfq(db, rfq_id)
+    if not rfq:
+        raise HTTPException(status_code=404, detail="Cotizacion no encontrada")
+    return rfq
+
+
+@router.post("/purchase-rfqs/{rfq_id}/responses/{supplier_id}", response_model=RfqWithDetail)
+async def submit_rfq_response(rfq_id: str, supplier_id: str, body: RfqResponseSubmit, db: AsyncSession = Depends(get_db)):
+    result = await service.submit_rfq_response(db, rfq_id, supplier_id, body)
+    if not result:
+        raise HTTPException(status_code=400, detail="No se pudo registrar la respuesta. Verifique que la cotizacion siga abierta y el proveedor este invitado")
+    return result
+
+
+@router.post("/purchase-rfqs/{rfq_id}/award", response_model=POResponse)
+async def award_rfq(rfq_id: str, body: RfqAwardRequest, db: AsyncSession = Depends(get_db)):
+    result = await service.award_rfq(db, rfq_id, str(body.supplier_id), str(body.user_id) if body.user_id else None, body.user_name)
+    if not result:
+        raise HTTPException(status_code=400, detail="No se pudo adjudicar. El proveedor debe tener una respuesta cargada y la cotizacion debe seguir abierta")
+    return result
+
+
+# ── Smart Replenishment & AI Purchase Assistant ───────────────────────────────
+
+@router.post("/purchases/smart-replenishment-preview", response_model=SmartReplenishmentResponse)
+async def smart_replenishment_preview(body: SmartReplenishmentRequest, db: AsyncSession = Depends(get_db)):
+    return await service.calculate_smart_replenishment_preview(
+        db=db,
+        company_id=str(body.company_id),
+        supplier_id=str(body.supplier_id) if body.supplier_id else None,
+        categoria_id=str(body.categoria_id) if body.categoria_id else None,
+        dias_cobertura=body.dias_cobertura,
+        lead_time_dias=body.lead_time_dias,
+        dias_historial_ventas=body.dias_historial_ventas,
+        factor_fin_semana=body.factor_fin_semana,
+        factor_fin_mes=body.factor_fin_mes,
+        factor_clima=body.factor_clima,
+        factor_evento=body.factor_evento,
+        solo_quiebre_o_bajo=body.solo_quiebre_o_bajo,
+        search=body.search,
+        limit=body.limit,
+    )
+
+
+@router.post("/purchases/generate-po-from-replenishment", response_model=POResponse, status_code=status.HTTP_201_CREATED)
+async def generate_po_from_replenishment(body: CreatePOFromReplenishmentRequest, db: AsyncSession = Depends(get_db)):
+    return await service.create_po_from_replenishment(db, body)
+
+
+@router.post("/purchases/generate-multi-po-from-replenishment", response_model=GenerateMultiPOResponse, status_code=status.HTTP_201_CREATED)
+async def generate_multi_po_from_replenishment(body: GenerateMultiPORequest, db: AsyncSession = Depends(get_db)):
+    return await service.create_multi_po_from_replenishment(db, body)
+
+
+
+# ── Demandas de Clientes / Productos No Encontrados ──────────────────────────
+
+@router.get("/purchases/lost-demand", response_model=list[LostDemandResponse])
+async def list_lost_demand(
+    company_id: str | None = None,
+    estado: str | None = None,
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.list_lost_demand(db, company_id, estado)
+
+
+@router.post("/purchases/lost-demand", response_model=LostDemandResponse, status_code=status.HTTP_201_CREATED)
+async def create_lost_demand(
+    body: LostDemandCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.create_lost_demand(db, body)
+
+
+@router.patch("/purchases/lost-demand/{demand_id}", response_model=LostDemandResponse)
+async def update_lost_demand(
+    demand_id: str,
+    body: LostDemandUpdate,
+    db: AsyncSession = Depends(get_db)
+):
+    result = await service.update_lost_demand(db, demand_id, body)
+    if not result:
+        raise HTTPException(status_code=404, detail="Demanda no encontrada")
+    return result
+
+
+# ── INBOX IMAP (cPanel) Y FACTURAS ELECTRÓNICAS SIFEN ────────────────────────
+
+@router.get("/companies/{company_id}/purchase-inbox-config", response_model=Optional[PurchaseInboxConfigResponse])
+async def get_inbox_config(company_id: str, db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import select
+    from api.src.purchases.models import PurchaseInboxConfig
+    import uuid
+    res = await db.execute(select(PurchaseInboxConfig).where(PurchaseInboxConfig.company_id == uuid.UUID(company_id)))
+    return res.scalar_one_or_none()
+
+
+@router.post("/companies/{company_id}/purchase-inbox-config", response_model=PurchaseInboxConfigResponse)
+async def save_inbox_config(company_id: str, body: PurchaseInboxConfigCreate, db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import select
+    from api.src.purchases.models import PurchaseInboxConfig
+    import uuid
+    cid = uuid.UUID(company_id)
+    res = await db.execute(select(PurchaseInboxConfig).where(PurchaseInboxConfig.company_id == cid))
+    cfg = res.scalar_one_or_none()
+    if cfg:
+        cfg.imap_host = body.imap_host
+        cfg.imap_port = body.imap_port
+        cfg.imap_user = body.imap_user
+        if body.imap_password and body.imap_password.strip():
+            cfg.imap_password = body.imap_password
+        cfg.imap_ssl = body.imap_ssl
+        cfg.imap_folder = body.imap_folder
+        cfg.activo = body.activo
+    else:
+        cfg = PurchaseInboxConfig(
+            company_id=cid,
+            imap_host=body.imap_host,
+            imap_port=body.imap_port,
+            imap_user=body.imap_user,
+            imap_password=body.imap_password,
+            imap_ssl=body.imap_ssl,
+            imap_folder=body.imap_folder,
+            activo=body.activo
+        )
+        db.add(cfg)
+    await db.commit()
+    await db.refresh(cfg)
+    return cfg
+
+
+@router.post("/companies/{company_id}/purchase-inbox/sync", response_model=SyncInboxResponse)
+async def sync_inbox(company_id: str, max_emails: int = 30, only_unseen: bool = False, db: AsyncSession = Depends(get_db)):
+    res = await imap_service.sync_inbox_emails(db, company_id, max_emails=max_emails, only_unseen=only_unseen)
+    return res
+
+
+@router.post("/companies/{company_id}/purchase-inbox/upload-xml", response_model=UploadXmlResponse)
+async def upload_invoice_xml(
+    company_id: str,
+    file: UploadFile = File(...),
+    user_id: Optional[str] = Form(None),
+    purchase_order_id: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        content = await file.read()
+        dte_data = sifen_xml_parser.parse_sifen_xml(content)
+        xml_str = content.decode("utf-8", errors="replace")
+        res = await imap_service.ingest_parsed_dte(
+            db=db,
+            company_id=company_id,
+            dte_data=dte_data,
+            xml_raw=xml_str,
+            origen="upload_manual",
+            origen_info=f"Archivo: {file.filename}",
+            user_id=user_id,
+            purchase_order_id=purchase_order_id,
+        )
+        await db.commit()
+        return {
+            "success": True,
+            "factura_id": res.get("id"),
+            "numero_factura": res.get("numero_factura"),
+            "timbrado": res.get("timbrado"),
+            "cdc": res.get("cdc"),
+            "supplier_id": res.get("supplier_id"),
+            "supplier_nombre": res.get("supplier_nombre"),
+            "total": res.get("total"),
+            "items_count": res.get("items_count", 0),
+            "items_mapeados": res.get("items_mapeados", 0),
+            "purchase_order_id": res.get("purchase_order_id"),
+            "purchase_order_numero": res.get("purchase_order_numero"),
+            "matching": res.get("matching"),
+            "mensaje": res.get("mensaje") or "Factura electrónica y sus ítems procesados exitosamente."
+        }
+    except Exception as e:
+        logger.error(f"Error al procesar XML de factura: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+# ── 3-WAY MATCHING Y CONCILIACIÓN ─────────────────────────────────────────────
+
+@router.post("/purchases/matching/reconcile", response_model=Perform3WayMatchResponse)
+async def reconcile_invoice(body: Perform3WayMatchRequest, db: AsyncSession = Depends(get_db)):
+    try:
+        return await matching_service.perform_3way_match(
+            db=db,
+            invoice_id=str(body.invoice_id),
+            user_id=str(body.user_id) if body.user_id else None
+        )
+    except Exception as e:
+        logger.error(f"Error en 3-Way Match: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/purchases/invoices/{invoice_id}/associate-po", response_model=Perform3WayMatchResponse)
+async def associate_po_to_invoice(
+    invoice_id: str,
+    body: AssociatePurchaseOrderRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        from api.src.financial.models import SupplierInvoice
+        from sqlalchemy import select
+        import uuid
+
+        inv_uuid = uuid.UUID(invoice_id)
+        po_uuid = body.purchase_order_id
+
+        inv_q = select(SupplierInvoice).where(SupplierInvoice.id == inv_uuid)
+        inv_res = await db.execute(inv_q)
+        invoice = inv_res.scalar_one_or_none()
+        if not invoice:
+            raise HTTPException(status_code=404, detail="Factura no encontrada.")
+
+        invoice.purchase_order_id = po_uuid
+        await db.commit()
+
+        return await matching_service.perform_3way_match(
+            db=db,
+            invoice_id=invoice_id,
+            user_id=str(body.user_id) if body.user_id else None
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al asociar Pedido a Factura: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/companies/{company_id}/purchase-orders/{order_id}/receive-invoice")
+async def receive_invoice_for_order(
+    company_id: str,
+    order_id: str,
+    file: Optional[UploadFile] = File(None),
+    invoice_id: Optional[str] = Form(None),
+    user_id: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        import uuid
+        from api.src.financial.models import SupplierInvoice
+        from sqlalchemy import select
+
+        po_uuid = uuid.UUID(order_id)
+
+        if file:
+            content = await file.read()
+            dte_data = sifen_xml_parser.parse_sifen_xml(content)
+            xml_str = content.decode("utf-8", errors="replace")
+            res = await imap_service.ingest_parsed_dte(
+                db=db,
+                company_id=company_id,
+                dte_data=dte_data,
+                xml_raw=xml_str,
+                origen="recepcion_orden",
+                origen_info=f"Recibido para Pedido {order_id} - Archivo: {file.filename}",
+                user_id=user_id,
+                purchase_order_id=order_id
+            )
+            await db.commit()
+            match_res = await matching_service.perform_3way_match(db, res["id"], user_id)
+            return {
+                "success": True,
+                "factura_id": res["id"],
+                "numero_factura": res.get("numero_factura"),
+                "total": res.get("total"),
+                "matching": match_res
+            }
+        elif invoice_id:
+            inv_uuid = uuid.UUID(invoice_id)
+            inv_q = select(SupplierInvoice).where(SupplierInvoice.id == inv_uuid)
+            inv_res = await db.execute(inv_q)
+            invoice = inv_res.scalar_one_or_none()
+            if not invoice:
+                raise HTTPException(status_code=404, detail="Factura no encontrada.")
+            invoice.purchase_order_id = po_uuid
+            await db.commit()
+            match_res = await matching_service.perform_3way_match(db, invoice_id, user_id)
+            return {
+                "success": True,
+                "factura_id": str(invoice.id),
+                "numero_factura": invoice.numero_factura,
+                "total": float(invoice.total),
+                "matching": match_res
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Debe proporcionar un archivo XML o seleccionar una factura existente.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al recibir factura para pedido: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/purchases/invoices/{invoice_id}/3way-match", response_model=Perform3WayMatchResponse)
+async def get_invoice_match(invoice_id: str, db: AsyncSession = Depends(get_db)):
+    try:
+        return await matching_service.perform_3way_match(db=db, invoice_id=invoice_id)
+    except Exception as e:
+        logger.error(f"Error al consultar 3-Way Match: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── SOLICITUDES Y RESOLUCIÓN DE NOTAS DE CRÉDITO ("Sin NC no hay pago") ───────
+
+@router.get("/companies/{company_id}/supplier-nc-requests", response_model=list[SupplierNcRequestResponse])
+async def list_supplier_nc_requests(
+    company_id: str,
+    estado: Optional[str] = Query(None),
+    supplier_id: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    from sqlalchemy import select
+    from api.src.purchases.models import SupplierNcRequest
+    import uuid
+    q = select(SupplierNcRequest).where(SupplierNcRequest.company_id == uuid.UUID(company_id))
+    if estado and estado != "todos":
+        q = q.where(SupplierNcRequest.estado == estado)
+    if supplier_id:
+        q = q.where(SupplierNcRequest.supplier_id == uuid.UUID(supplier_id))
+    q = q.order_by(SupplierNcRequest.created_at.desc())
+    res = await db.execute(q)
+    return list(res.scalars().all())
+
+
+@router.post("/purchases/supplier-nc-requests/{request_id}/resolve")
+async def resolve_supplier_nc_request(
+    request_id: str,
+    body: ResolveSupplierNcRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        return await matching_service.resolve_supplier_nc(
+            db=db,
+            request_id=request_id,
+            nc_recibida_numero=body.nc_recibida_numero,
+            nc_recibida_timbrado=body.nc_recibida_timbrado,
+            nc_recibida_monto=body.nc_recibida_monto,
+            nc_recibida_fecha=body.nc_recibida_fecha,
+            nc_recibida_cdc=body.nc_recibida_cdc,
+            observaciones=body.observaciones,
+            user_id=str(body.user_id) if body.user_id else None
+        )
+    except Exception as e:
+        logger.error(f"Error al registrar NC del proveedor: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── Devoluciones a Proveedores en Compras ──────────────────────────────────────
+
+@router.get("/purchases/suppliers/{supplier_id}/products", response_model=list[SupplierProductItemResponse])
+async def get_supplier_products(
+    supplier_id: str,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Retorna el catálogo de productos que vende el proveedor (directo e historial de facturas)."""
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    sid = uuid.UUID(supplier_id)
+    return await returns_service.list_supplier_products(db, cid, sid)
+
+
+@router.get("/purchases/suppliers/{supplier_id}/products/{product_id}/invoices", response_model=list[ProductInvoiceOptionResponse])
+async def get_product_invoices(
+    supplier_id: str,
+    product_id: str,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Retorna las facturas de compra del proveedor donde figura un producto determinado."""
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    sid = uuid.UUID(supplier_id)
+    pid = uuid.UUID(product_id)
+    return await returns_service.list_product_invoices(db, cid, sid, pid)
+
+
+@router.post("/purchases/returns", status_code=201)
+async def create_purchase_supplier_return(
+    body: SupplierReturnCreateInput,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Crea una devolución a proveedor en estado inicial 'pendiente'."""
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    uid = uuid.UUID(str(user.get("id")))
+    return await returns_service.create_supplier_return(db, cid, uid, body)
+
+
+@router.put("/purchases/returns/{return_id}")
+async def update_purchase_supplier_return(
+    return_id: str,
+    body: SupplierReturnUpdateInput,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Edita una devolución a proveedor mientras no esté completamente aprobada."""
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    uid = uuid.UUID(str(user.get("id")))
+    return await returns_service.update_supplier_return(db, cid, uuid.UUID(return_id), uid, body)
+
+
+@router.get("/purchases/returns")
+async def list_purchase_supplier_returns(
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    estado: Optional[str] = Query(None),
+    supplier_id: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Lista las devoluciones a proveedores enriquecidas con detalle de ítems, productos y facturas."""
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    sid = uuid.UUID(supplier_id) if supplier_id else None
+    return await returns_service.list_supplier_returns(db, cid, estado=estado, supplier_id=sid)
+
+
+@router.post("/purchases/returns/{return_id}/approve")
+async def approve_purchase_supplier_return(
+    return_id: str,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Aprueba la devolución para autorizar el retiro por el proveedor."""
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    uid = uuid.UUID(str(user.get("id")))
+    return await returns_service.approve_supplier_return(db, cid, uuid.UUID(return_id), uid)
+
+
+@router.post("/purchases/returns/{return_id}/reject")
+async def reject_purchase_supplier_return(
+    return_id: str,
+    body: SupplierReturnRejectInput,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Rechaza la solicitud de devolución."""
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    uid = uuid.UUID(str(user.get("id")))
+    return await returns_service.reject_supplier_return(db, cid, uuid.UUID(return_id), uid, body.motivo_rechazo)
+
+
+@router.post("/purchases/returns/{return_id}/complete")
+async def complete_purchase_supplier_return(
+    return_id: str,
+    body: SupplierReturnCompleteInput = None,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """
+    Completa la devolución:
+    - Descuenta existencias en stock de inventario (genera movimiento negativo).
+    - Descuenta saldo de la factura afectada en cuentas por pagar (si aplica).
+    - Genera crédito a favor en cuenta corriente del proveedor.
+    """
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    uid = uuid.UUID(str(user.get("id")))
+    nc_num = body.nota_credito_numero if body else None
+    return await returns_service.complete_supplier_return(db, cid, uuid.UUID(return_id), uid, nc_num)
+
+
+
+# ── Visión 360° Integral del Proveedor (Cuentas por Pagar & Comercial) ────────
+
+from api.src.purchases import supplier_360_service
+from api.src.purchases import supplier_360_pdf
+
+
+@router.get("/purchases/suppliers/{supplier_id}/360")
+@router.get("/suppliers/{supplier_id}/360")
+async def get_supplier_360_endpoint(
+    supplier_id: str,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Retorna la Visión 360° Integral del Proveedor con todas sus dimensiones financieras, operativas y de sell-out."""
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    sid = uuid.UUID(supplier_id)
+    return await supplier_360_service.get_supplier_360(db, cid, sid)
+
+
+@router.get("/purchases/suppliers/{supplier_id}/360/pdf")
+@router.get("/suppliers/{supplier_id}/360/pdf")
+async def export_supplier_360_pdf_endpoint(
+    supplier_id: str,
+    tab: Optional[str] = Query(None, description="Pestaña específica a exportar en PDF (deudas, nc_reclamos, cheques, pagos, compras, stock, informe) o todas si es None"),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Genera y descarga el Informe Gerencial 360° del Proveedor en PDF editorial de alta fidelidad, con soporte por pestaña."""
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    sid = uuid.UUID(supplier_id)
+    data = await supplier_360_service.get_supplier_360(db, cid, sid)
+    company = await _get_company_info(db, str(cid))
+    user_name = user.get("nombre") or user.get("email") or "Auditoría Financiera"
+    pdf_bytes = supplier_360_pdf.generate_supplier_360_pdf(company, data, generated_by=user_name, tab=tab)
+    rz_clean = (data.get("supplier", {}).get("razon_social") or "proveedor").replace(" ", "_")
+    tab_suffix = f"_{tab}" if tab else ""
+    filename = f"Informe_360_{rz_clean}{tab_suffix}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )

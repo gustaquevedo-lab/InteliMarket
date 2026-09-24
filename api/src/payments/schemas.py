@@ -11,8 +11,6 @@ class PaymentMethodCreate(BaseModel):
     company_id: UUID
     tipo: str
     nombre: str = Field(min_length=1, max_length=100)
-    moneda: str = "PYG"
-    config: Optional[dict] = None
 
 
 class PaymentMethodResponse(BaseModel):
@@ -20,9 +18,7 @@ class PaymentMethodResponse(BaseModel):
     company_id: UUID
     tipo: str
     nombre: str
-    moneda: str
     activo: bool
-    config: Optional[dict] = None
     created_at: datetime
 
     class Config:

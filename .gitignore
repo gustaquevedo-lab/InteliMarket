@@ -26,6 +26,9 @@ build/
 .DS_Store
 Thumbs.db
 
+# Scratch
+scratch/
+
 # Environment files
 .env
 .env.local
@@ -34,6 +37,18 @@ Thumbs.db
 # Node modules
 node_modules/
 ui-web/node_modules/
+mobile-apps/*/node_modules
+tests-pos/node_modules/
+tests-pos/playwright-report/
+tests-pos/test-results/
+
+# Apps nativas (mobile-apps/* y ui-web/android deprecado): cada proyecto Android genera esto localmente,
+# no es portable entre maquinas (rutas de SDK, cache de Gradle).
+ui-web/android/
+mobile-apps/*/android/local.properties
+mobile-apps/*/android/.gradle/
+mobile-apps/*/android/**/build/
+mobile-apps/*/android/captures/
 
 # Build output
 ui-web-dist/
@@ -70,3 +85,35 @@ certs/
 
 # Docker
 docker-compose.override.yml
+
+# Build artifacts / distributables (GB-scale, nunca a git)
+dist-electron/
+downloads/
+ui-web/public/*.zip
+*.AppImage
+
+# Archivos subidos por usuarios en runtime
+uploads/
+api/uploads/
+api/static/
+
+# Variantes de .env
+.env.*
+
+# Backups locales de edicion manual
+*.bak-*
+
+# Build info de TS
+ui-web/tsconfig.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# Datos locales / extractos bancarios / zips temporales
+/Bancos/
+*.xlsx
+*.zip
+.claude/
+BALANZA_ELECTRON_DIAGNOSTICO.md
+
+
+# Certificados/claves de firma (QZ Tray, etc.) -- nunca al repo
+secrets/

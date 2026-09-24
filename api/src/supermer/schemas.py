@@ -25,6 +25,10 @@ class RecipeItemResponse(BaseModel):
     unidad_medida: str
     es_opcional: bool
     producto_nombre: Optional[str] = None
+    producto_sku: Optional[str] = None
+    costo_unitario: Optional[Decimal] = None
+    subtotal_costo: Optional[Decimal] = None
+    stock_disponible: Optional[Decimal] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -37,6 +41,8 @@ class RecipeCreate(BaseModel):
     cantidad_esperada: Decimal
     unidad_medida: str = "UN"
     rendimiento_esperado: Decimal = Field(Decimal("100"), ge=0, le=100)
+    deposito_origen_id: Optional[str] = None
+    deposito_destino_id: Optional[str] = None
     items: list[RecipeItemCreate]
 
 
@@ -44,7 +50,10 @@ class RecipeUpdate(BaseModel):
     nombre: Optional[str] = None
     descripcion: Optional[str] = None
     cantidad_esperada: Optional[Decimal] = None
+    unidad_medida: Optional[str] = None
     rendimiento_esperado: Optional[Decimal] = None
+    deposito_origen_id: Optional[str] = None
+    deposito_destino_id: Optional[str] = None
     activa: Optional[bool] = None
     items: Optional[list[RecipeItemCreate]] = None
 
@@ -53,14 +62,24 @@ class RecipeResponse(BaseModel):
     id: UUID
     area: str
     nombre: str
-    descripcion: Optional[str]
+    descripcion: Optional[str] = None
     producto_terminado_id: UUID
     cantidad_esperada: Decimal
     unidad_medida: str
     rendimiento_esperado: Decimal
+    deposito_origen_id: Optional[UUID] = None
+    deposito_destino_id: Optional[UUID] = None
+    deposito_origen_nombre: Optional[str] = None
+    deposito_destino_nombre: Optional[str] = None
     activa: bool
     items: list[RecipeItemResponse] = []
     producto_terminado_nombre: Optional[str] = None
+    producto_terminado_sku: Optional[str] = None
+    producto_terminado_precio_venta: Optional[Decimal] = None
+    costo_total_estimado: Optional[Decimal] = None
+    costo_unitario_estimado: Optional[Decimal] = None
+    margen_estimado_monto: Optional[Decimal] = None
+    margen_estimado_pct: Optional[Decimal] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -73,8 +92,11 @@ class RecipeResponse(BaseModel):
 class ProductionOrderCreate(BaseModel):
     receta_id: str
     cantidad_objetivo: Decimal
+    deposito_origen_id: Optional[str] = None
+    deposito_destino_id: Optional[str] = None
     fecha_inicio: Optional[datetime] = None
     fecha_vencimiento: Optional[date] = None
+    lote_codigo: Optional[str] = None
     responsable_id: Optional[str] = None
     notas: Optional[str] = None
 
@@ -82,6 +104,9 @@ class ProductionOrderCreate(BaseModel):
 class ProductionOrderUpdate(BaseModel):
     cantidad_objetivo: Optional[Decimal] = None
     estado: Optional[str] = None
+    deposito_origen_id: Optional[str] = None
+    deposito_destino_id: Optional[str] = None
+    lote_codigo: Optional[str] = None
     fecha_inicio: Optional[datetime] = None
     fecha_fin: Optional[datetime] = None
     fecha_vencimiento: Optional[date] = None
@@ -98,6 +123,11 @@ class ProductionOrderResponse(BaseModel):
     area: str
     cantidad_objetivo: Decimal
     estado: str
+    deposito_origen_id: Optional[UUID] = None
+    deposito_destino_id: Optional[UUID] = None
+    deposito_origen_nombre: Optional[str] = None
+    deposito_destino_nombre: Optional[str] = None
+    lote_codigo: Optional[str] = None
     fecha_inicio: Optional[datetime]
     fecha_fin: Optional[datetime]
     fecha_vencimiento: Optional[date]
@@ -107,10 +137,21 @@ class ProductionOrderResponse(BaseModel):
     producto_obtenido: Optional[Decimal]
     rendimiento_real: Optional[Decimal]
     receta_nombre: Optional[str] = None
+    producto_terminado_nombre: Optional[str] = None
     responsable_nombre: Optional[str] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ProduceDirectInput(BaseModel):
+    receta_id: str
+    cantidad_producir: Decimal
+    deposito_origen_id: Optional[str] = None
+    deposito_destino_id: Optional[str] = None
+    fecha_vencimiento: Optional[date] = None
+    lote_codigo: Optional[str] = None
+    notas: Optional[str] = None
 
 
 # ============================================================
@@ -146,6 +187,7 @@ class ProductionBatchResponse(BaseModel):
 
 class WasteLogCreate(BaseModel):
     area: str
+    warehouse_id: str
     producto_id: str
     cantidad: Decimal
     costo_unitario: Optional[Decimal] = None
@@ -153,9 +195,19 @@ class WasteLogCreate(BaseModel):
     motivo: Optional[str] = None
 
 
+class WasteLogRejectRequest(BaseModel):
+    motivo_rechazo: str
+
+
+class WasteLogUpdate(BaseModel):
+    cantidad: Optional[Decimal] = None
+    motivo: Optional[str] = None
+
+
 class WasteLogResponse(BaseModel):
     id: UUID
     area: str
+    warehouse_id: Optional[UUID]
     producto_id: UUID
     cantidad: Decimal
     costo_unitario: Optional[Decimal]
@@ -165,6 +217,12 @@ class WasteLogResponse(BaseModel):
     fecha: datetime
     registrado_por: Optional[UUID]
     producto_nombre: Optional[str] = None
+    registrado_por_nombre: Optional[str] = None
+    estado: str
+    aprobado_por: Optional[UUID]
+    aprobado_por_nombre: Optional[str] = None
+    aprobado_at: Optional[datetime]
+    motivo_rechazo: Optional[str]
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -329,6 +387,10 @@ class ButcheryTemplateCutResponse(BaseModel):
     orden: int
     es_subproducto: bool
     producto_nombre: Optional[str] = None
+    producto_sku: Optional[str] = None
+    producto_codigo_barra: Optional[str] = None
+    plu_balanza: Optional[int] = None
+    precio_venta: Optional[Decimal] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -339,6 +401,15 @@ class ButcheryTemplateCreate(BaseModel):
     peso_promedio_kg: Decimal
     descripcion: Optional[str] = None
     cuts: list[ButcheryTemplateCutCreate]
+
+
+class ButcheryTemplateUpdate(BaseModel):
+    nombre: Optional[str] = None
+    especie: Optional[str] = None
+    peso_promedio_kg: Optional[Decimal] = None
+    descripcion: Optional[str] = None
+    activa: Optional[bool] = None
+    cuts: Optional[list[ButcheryTemplateCutCreate]] = None
 
 
 class ButcheryTemplateResponse(BaseModel):

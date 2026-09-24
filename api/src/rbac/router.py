@@ -17,14 +17,39 @@ from api.src.rbac.schemas import (
 router = APIRouter(prefix="/api/v1/rbac", tags=["RBAC"])
 
 
+def _is_tenant_admin(user: dict) -> bool:
+    # Admin de plataforma (is_superadmin real) o admin del propio tenant
+    # (rol="admin" en users, el rol con el que se crean las cuentas admin de cada cliente).
+    return bool(user.get("is_superadmin", False) or user.get("rol") == "admin")
+
+
+@router.get("/me/permissions")
+async def get_my_permissions(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Permisos reales del usuario logueado -- el frontend lo usa una vez al
+    entrar para decidir que mostrar en el menu y que rutas permitir, en vez
+    de repetir un check_permission por cada item de pantalla."""
+    is_admin = bool(user.get("is_superadmin", False))
+    if not is_admin:
+        is_admin = await service.is_administrador(db, uuid.UUID(user["id"]), uuid.UUID(user["tenant_id"]))
+    permissions = [] if is_admin else await service.get_effective_permissions(
+        db, uuid.UUID(user["id"]), uuid.UUID(user["tenant_id"])
+    )
+    return {"is_administrador": is_admin, "permissions": permissions}
+
+
 @router.get("/permissions", response_model=List[PermissionResponse])
 async def list_permissions(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    if not user.get("is_superadmin", False):
-        raise HTTPException(status_code=403, detail="Solo administradores pueden ver permisos")
-    return await service.get_permissions(db)
+    perms = await service.get_permissions(db)
+    return [
+        PermissionResponse(id=str(p.id), name=p.name, description=p.description, module=p.module, created_at=p.created_at)
+        for p in perms
+    ]
 
 
 @router.post("/permissions", response_model=PermissionResponse)
@@ -35,7 +60,8 @@ async def create_permission(
 ):
     if not user.get("is_superadmin", False):
         raise HTTPException(status_code=403, detail="Solo administradores pueden crear permisos")
-    return await service.create_permission(db, data)
+    p = await service.create_permission(db, data)
+    return PermissionResponse(id=str(p.id), name=p.name, description=p.description, module=p.module, created_at=p.created_at)
 
 
 @router.get("/roles", response_model=List[RoleResponse])
@@ -69,7 +95,7 @@ async def create_role(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    if not user.get("is_superadmin", False):
+    if not _is_tenant_admin(user):
         raise HTTPException(status_code=403, detail="Solo administradores pueden crear roles")
     tenant_id = uuid.UUID(user["tenant_id"])
     role = await service.create_role(db, data, tenant_id)
@@ -95,7 +121,7 @@ async def update_role(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    if not user.get("is_superadmin", False):
+    if not _is_tenant_admin(user):
         raise HTTPException(status_code=403, detail="Solo administradores pueden modificar roles")
     tenant_id = uuid.UUID(user["tenant_id"])
     role = await service.update_role(db, uuid.UUID(role_id), data, tenant_id)
@@ -122,7 +148,7 @@ async def delete_role(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    if not user.get("is_superadmin", False):
+    if not _is_tenant_admin(user):
         raise HTTPException(status_code=403, detail="Solo administradores pueden eliminar roles")
     role = await service.get_role(db, uuid.UUID(role_id))
     if not role:
@@ -142,7 +168,7 @@ async def set_role_permissions(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    if not user.get("is_superadmin", False):
+    if not _is_tenant_admin(user):
         raise HTTPException(status_code=403, detail="Solo administradores pueden asignar permisos")
     tenant_id = uuid.UUID(user["tenant_id"])
     success = await service.set_role_permissions(db, uuid.UUID(role_id), data.permission_ids, tenant_id)
@@ -169,7 +195,7 @@ async def assign_user_role(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    if not user.get("is_superadmin", False):
+    if not _is_tenant_admin(user):
         raise HTTPException(status_code=403, detail="Solo administradores pueden asignar roles")
     tenant_id = uuid.UUID(user["tenant_id"])
     success = await service.assign_user_role(db, uuid.UUID(user_id), tenant_id, data.role_id)
@@ -185,7 +211,7 @@ async def remove_user_role(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    if not user.get("is_superadmin", False):
+    if not _is_tenant_admin(user):
         raise HTTPException(status_code=403, detail="Solo administradores pueden remover roles")
     tenant_id = uuid.UUID(user["tenant_id"])
     success = await service.remove_user_role(db, uuid.UUID(user_id), tenant_id, uuid.UUID(role_id))
@@ -199,7 +225,7 @@ async def seed_default_roles(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    if not user.get("is_superadmin", False):
+    if not _is_tenant_admin(user):
         raise HTTPException(status_code=403, detail="Solo administradores pueden ejecutar seeding")
     tenant_id = uuid.UUID(user["tenant_id"])
     await service.seed_default_roles(db, tenant_id)

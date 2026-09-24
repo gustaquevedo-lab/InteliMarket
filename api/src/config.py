@@ -1,6 +1,9 @@
+from __future__ import annotations
 """Configuration settings for InteliMarket API"""
 
+from typing import Optional
 from pydantic_settings import BaseSettings
+
 from functools import lru_cache
 
 
@@ -12,7 +15,12 @@ class Settings(BaseSettings):
     app_secret_key: str = "dev-secret-key-change-in-production"
 
     # Database
-    database_url: str = "postgresql+asyncpg://intelimarket:intelimarket_dev@localhost:5432/intelimarket"
+    database_url: str = "postgresql+asyncpg://intelimarket:password@localhost:5432/intelimarket"
+    # Search path opcional (ej. "sandbox,public") para levantar un entorno
+    # sandbox contra el mismo Postgres sin tocar el DATABASE_URL -- asyncpg
+    # exige server_settings como dict, no como query param de la URL.
+    db_search_path: Optional[str] = None
+
     db_pool_size: int = 20
     db_max_overflow: int = 10
 
@@ -21,9 +29,12 @@ class Settings(BaseSettings):
 
     # JWT
     jwt_secret_key: str = "dev-jwt-secret-key-change-in-production"
+    # Clave para cifrar credenciales guardadas en la base. Independiente del secreto JWT para poder rotar
+    # las sesiones sin dejar ilegibles las credenciales. Si falta, cae al JWT (comportamiento anterior).
+    encryption_key: Optional[str] = None
     jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 60 * 24 * 7  # 7 días para ERP operativo
-    jwt_refresh_token_expire_days: int = 30
+    jwt_access_token_expire_minutes: int = 720  # 12 horas para turnos de POS y PWA de supervisión
+    jwt_refresh_token_expire_days: int = 7
 
     # SIFEN
     sifen_api_url: str = "https://ekuatia.set.gov.py/ekuatia/api"
@@ -57,9 +68,10 @@ class Settings(BaseSettings):
     sueldok_api_url: str = "https://api.sueldok.com"
     sueldok_api_key: str = ""
 
-    # AI / LLM
-    gemini_api_key: str = ""
+    # LLM del Gerente Financiero IA — "gemini" (default, más económico) o "anthropic"
+    llm_provider: str = "gemini"
     anthropic_api_key: str = ""
+    gemini_api_key: str = ""
 
     # Conector Ñemuha (ConceptoComercial/FlexPDV) — legacy MySQL del cliente, vía VM puente
     nemuha_mysql_host: str = ""
@@ -67,6 +79,18 @@ class Settings(BaseSettings):
     nemuha_mysql_user: str = ""
     nemuha_mysql_password: str = ""
     nemuha_mysql_database: str = ""
+
+    # Consulta de tickets para IntelliZapp (segmentación de marketing)
+    intellizapp_api_key: str = ""
+
+    # Evolution API / IntelliZapp Gateway (WhatsApp)
+    evolution_api_url: str = "http://100.72.38.119:8085"
+    evolution_api_key: str = "c616d81834c74317ad473380a10d35d84d6eacd08a7c467a6e7d79f29c0340d4"
+    evolution_instance_name: str = "extra_supermercado"
+
+    # Ollama Local LLM (Servidor IntelliZapp dev-server)
+    ollama_base_url: str = "http://100.72.38.119:11434/v1"
+    ollama_model: str = "qwen2.5:7b"
 
     # Email
     smtp_host: str = ""
@@ -81,9 +105,21 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
 
+    # Zona horaria del negocio (Paraguay). Se declara aca porque el .env la
+    # define y pydantic-settings rechaza variables que el modelo no conoce:
+    # agregarla al entorno sin declararla acá deja el API sin arrancar.
+    tz: str = "America/Asuncion"
+
+    # Deploy sin corte: con 2 instancias de uvicorn detras de nginx, el
+    # scheduler en proceso (backups, recordatorios WhatsApp, depreciacion...)
+    # NO debe correr en ambas o cada job se dispara duplicado. Por defecto
+    # corre (instancia principal); la segunda instancia arranca con
+    # RUN_SCHEDULER=false en su propio entorno de systemd, sin tocar el
+    # .env compartido.
+    run_scheduler: bool = True
+
     class Config:
-        env_file = [".env", "/home/intellihouse/intelimarket/.env", "../.env"]
-        extra = "ignore"
+        env_file = ".env"
 
 
 @lru_cache()

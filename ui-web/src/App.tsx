@@ -1,9 +1,9 @@
-import { lazy, Suspense, useEffect } from "react"
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom"
+import { lazy, Suspense } from "react"
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
 import { ThemeProvider } from "./context/ThemeContext"
 import { AuthProvider, useAuth } from "./context/AuthContext"
 import { FeatureProvider, useFeatures } from "./context/FeatureContext"
-import { BranchProvider } from "./context/BranchContext"
+import { PermissionsProvider, usePermissions } from "./context/PermissionsContext"
 import { OfflineProvider } from "./context/OfflineContext"
 import { PWAUpdatePrompt } from "./components/PWAUpdatePrompt"
 import Layout from "./components/Layout"
@@ -11,49 +11,47 @@ import ErrorBoundary from "./components/ErrorBoundary"
 
 const Login = lazy(() => import("./pages/Login"))
 const Dashboard = lazy(() => import("./pages/Dashboard"))
+const DepositoDashboard = lazy(() => import("./pages/RoleDashboards").then(m => ({ default: m.DepositoDashboard })))
+const AtencionClienteDashboard = lazy(() => import("./pages/RoleDashboards").then(m => ({ default: m.AtencionClienteDashboard })))
+const SalonDashboard = lazy(() => import("./pages/RoleDashboards").then(m => ({ default: m.SalonDashboard })))
 const MarketingPage = lazy(() => import("./pages/marketing/MarketingPage"))
-const SifenPage = lazy(() => import("./pages/SifenPage"))
+const SifenPage = lazy(() => import("./pages/sifen/SifenPage"))
+const InteliFactPage = lazy(() => import("./pages/sifen/InteliFactPage"))
 const ProductsPage = lazy(() => import("./pages/products/ProductsPage"))
 const InventoryPage = lazy(() => import("./pages/inventory/InventoryPage"))
 const CustomersPage = lazy(() => import("./pages/customers/CustomersPage"))
 const SalesPage = lazy(() => import("./pages/sales/SalesPage"))
 const PurchasesPage = lazy(() => import("./pages/purchases/PurchasesPage"))
-const PaymentsPage = lazy(() => import("./pages/payments/PaymentsPage"))
 const ReportsPage = lazy(() => import("./pages/reports/ReportsPage"))
+const ExecutiveReportPage = lazy(() => import("./pages/gerencial/ExecutiveReportPage"))
 const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"))
+const AppsMovilesPage = lazy(() => import("./pages/apps/AppsMovilesPage"))
 const POSPage = lazy(() => import("./pages/pos/POSPage"))
+const SupervisorPage = lazy(() => import("./pages/pos/SupervisorPage"))
 const CajaPage = lazy(() => import("./pages/caja/CajaPage"))
-const RouteCashSettlementsPage = lazy(() => import("./pages/route-cash-settlements/RouteCashSettlementsPage"))
-const SalesTargetsPage = lazy(() => import("./pages/sales-targets/SalesTargetsPage"))
-const ChangePasswordPage = lazy(() => import("./pages/ChangePasswordPage"))
 const AdminPage = lazy(() => import("./pages/admin/AdminPage"))
 const VerticalsPage = lazy(() => import("./pages/admin/VerticalsPage"))
-const PagoparPage = lazy(() => import("./pages/pagopar/PagoparPage"))
-const KuapayPage = lazy(() => import("./pages/kuapay/KuapayPage"))
+const SaludSistemaPage = lazy(() => import("./pages/salud/SaludSistemaPage"))
+const PlataformaPage = lazy(() => import("./pages/plataforma/PlataformaPage"))
+// const PagoparPage = lazy(() => import("./pages/pagopar/PagoparPage"))  // DESACTIVADO: sin credenciales reales, ver auditoria 2026-09-02
+// const KuapayPage = lazy(() => import("./pages/kuapay/KuapayPage"))  // DESACTIVADO: sin credenciales reales, ver auditoria 2026-09-02
 const SpiPage = lazy(() => import("./pages/spi/SpiPage"))
 const BranchesPage = lazy(() => import("./pages/branches/BranchesPage"))
 const CreditAccountsPage = lazy(() => import("./pages/credit-accounts/CreditAccountsPage"))
-const ChecksPage = lazy(() => import("./pages/checks/ChecksPage"))
-const DepositoPage = lazy(() => import("./pages/deposito/DepositoPage"))
-const SupplierReturnsPage = lazy(() => import("./pages/supplier-returns/SupplierReturnsPage"))
-const PurchaseBonusesPage = lazy(() => import("./pages/purchase-bonuses/PurchaseBonusesPage"))
-const SupplierKpisPage = lazy(() => import("./pages/supplier-kpis/SupplierKpisPage"))
 const LogisticsPage = lazy(() => import("./pages/logistics/LogisticsPage"))
-const AuditPage = lazy(() => import("./pages/audit/AuditPage"))
+const RiskAgentPage = lazy(() => import("./pages/risk-agent/RiskAgentPage"))
 const SueldokPage = lazy(() => import("./pages/sueldok/SueldokPage"))
 const ScalesPage = lazy(() => import("./pages/scales/ScalesPage"))
-const QuotesPage = lazy(() => import("./pages/quotes/QuotesPage"))
-const SalesOrdersPage = lazy(() => import("./pages/sales-orders/SalesOrdersPage"))
+const PedidosCotizacionesPage = lazy(() => import("./pages/sales-orders/PedidosCotizacionesPage"))
 const ReturnsPage = lazy(() => import("./pages/returns/ReturnsPage"))
 const DiscountsPage = lazy(() => import("./pages/discounts/DiscountsPage"))
 const CommissionsPage = lazy(() => import("./pages/commissions/CommissionsPage"))
 const AccountsReceivablePage = lazy(() => import("./pages/accounts-receivable/AccountsReceivablePage"))
-const AccountsPayablePage = lazy(() => import("./pages/accounts-payable/AccountsPayablePage"))
-const ConsolidatedDebtsPage = lazy(() => import("./pages/customers/ConsolidatedDebtsPage"))
-const TreasuryExecutiveSuitePage = lazy(() => import("./pages/financial/TreasuryExecutiveSuitePage"))
 const FinanceAgentPage = lazy(() => import("./pages/finance-agent/FinanceAgentPage"))
-const CommercialAgentPage = lazy(() => import("./pages/commercial-agent/CommercialAgentPage"))
+const SalesAgentPage = lazy(() => import("./pages/sales-agent/SalesAgentPage"))
+const MarketingAgentPage = lazy(() => import("./pages/marketing-agent/MarketingAgentPage"))
 const RbacPage = lazy(() => import("./pages/rbac/RbacPage"))
+const UsuariosPage = lazy(() => import("./pages/usuarios/UsuariosPage"))
 const CrmPage = lazy(() => import("./pages/crm/CrmPage"))
 const WhatsAppPage = lazy(() => import("./pages/whatsapp/WhatsAppPage"))
 const NotificationsPage = lazy(() => import("./pages/notifications/NotificationsPage"))
@@ -65,24 +63,39 @@ const BoutiquePage = lazy(() => import("./pages/boutique/BoutiquePage"))
 const ServiciosPage = lazy(() => import("./pages/servicios/ServiciosPage"))
 const InteliContPage = lazy(() => import("./pages/intelicont/InteliContPage"))
 const IntegrationsPage = lazy(() => import("./pages/integrations/IntegrationsPage"))
-const PromotionsPage = lazy(() => import("./pages/promotions/PromotionsPage"))
+const GondolaPage = lazy(() => import("./pages/gondola/GondolaPage"))
+const LabelsPage = lazy(() => import("./pages/labels/LabelsPage"))
+const PromotionsPage = lazy(() => import("./pages/marketing/PromocionesPage"))
+const CapturaCuponesPage = lazy(() => import("./pages/cupones/CapturaCuponesPage"))
 const IntelliZappPage = lazy(() => import("./pages/intellizapp/IntelliZappPage"))
 const ExpensesPage = lazy(() => import("./pages/expenses/ExpensesPage"))
 const FinancialPage = lazy(() => import("./pages/financial/FinancialPage"))
-const GerencialPage = lazy(() => import("./pages/gerencial/GerencialPage"))
+const BancosPage = lazy(() => import("./pages/bancos/BancosPage"))
 const SupplierContractsPage = lazy(() => import("./pages/supplier-contracts/SupplierContractsPage"))
+const ChequesPage = lazy(() => import("./pages/cheques/ChequesPage"))
+const PaymentsPage = lazy(() => import("./pages/payments/PaymentsPage"))
 const SupplierLogin = lazy(() => import("./pages/supplier-portal/SupplierLogin"))
 const SupplierDashboard = lazy(() => import("./pages/supplier-portal/SupplierDashboard"))
 const CustomerAgreementsPage = lazy(() => import("./pages/customer-agreements/CustomerAgreementsPage"))
 const DistribuidoraPage = lazy(() => import("./pages/distribuidora/DistribuidoraPage"))
-const InteliforcePage = lazy(() => import("./pages/inteliforce/InteliforcePage"))
 const SupermerPage = lazy(() => import("./pages/supermer/SupermerPage"))
-const CajaRapidaPage = lazy(() => import("./pages/pos/CajaRapidaPage"))
+const CarniceriaDespostePage = lazy(() => import("./pages/operations/CarniceriaDespostePage"))
+const VerduleriaFrescosPage = lazy(() => import("./pages/operations/VerduleriaFrescosPage"))
+const PanaderiaRotiseriaPage = lazy(() => import("./pages/operations/PanaderiaRotiseriaPage"))
+const HaccpPage = lazy(() => import("./pages/operations/HaccpPage"))
+const EquipmentPage = lazy(() => import("./pages/operations/EquipmentPage"))
+const SalonOperacionesPwaPage = lazy(() => import("./pages/operations/SalonOperacionesPwaPage"))
+const ConteoVencimientosPage = lazy(() => import("./pages/inventory-count/ConteoVencimientosPage"))
+const DepositoRecepcionPage = lazy(() => import("./pages/operations/DepositoRecepcionPage"))
+const CarniceriaTvDigitalPage = lazy(() => import("./pages/kiosk/CarniceriaTvDigitalPage"))
+const DsdPage = lazy(() => import("./pages/operations/DsdPage"))
+const EslPage = lazy(() => import("./pages/operations/EslPage"))
+const PriceCheckerKioskPage = lazy(() => import("./pages/kiosk/PriceCheckerKioskPage"))
 const SelfCheckoutPage = lazy(() => import("./pages/pos/SelfCheckoutPage"))
 const TransferenciasPage = lazy(() => import("./pages/inventory/TransferenciasPage"))
 const BovedaPage = lazy(() => import("./pages/caja/BovedaPage"))
+const VouchersPage = lazy(() => import("./pages/vouchers/VouchersPage"))
 const EdgeAgentPage = lazy(() => import("./pages/pos/EdgeAgentPage"))
-const AutoReplenishPage = lazy(() => import("./pages/inventory/AutoReplenishPage"))
 const SellersPage = lazy(() => import("./pages/sellers/SellersPage"))
 const MapaPage = lazy(() => import("./pages/mapa-tiempo-real/MapaPage"))
 const RutasPage = lazy(() => import("./pages/rutas/RutasPage"))
@@ -91,16 +104,16 @@ const GeocercasPage = lazy(() => import("./pages/geocercas/GeocercasPage"))
 const RendimientoPage = lazy(() => import("./pages/rendimiento/RendimientoPage"))
 const InventoryAdvancedPage = lazy(() => import("./pages/inventory/InventoryAdvancedPage"))
 const IntegratedFinancePage = lazy(() => import("./pages/integrated-finance/IntegratedFinancePage"))
-const SmartPricingPage = lazy(() => import("./pages/smart-pricing/SmartPricingPage"))
 const DemandForecastPage = lazy(() => import("./pages/demand-forecast/DemandForecastPage"))
+const AutoReplenishPage = lazy(() => import("./pages/inventory/AutoReplenishPage"))
 const IntelligentRoutingPage = lazy(() => import("./pages/intelligent-routing/IntelligentRoutingPage"))
-const CreditScoringPage = lazy(() => import("./pages/credit-scoring/CreditScoringPage"))
 const OportunidadesPage = lazy(() => import("./pages/comerciales/OportunidadesPage"))
 const ColdChainPage = lazy(() => import("./pages/cold-chain/ColdChainPage"))
 const AsistenteVirtualPage = lazy(() => import("./pages/asistente-virtual/AsistenteVirtualPage"))
 const ClientesPage = lazy(() => import("./pages/clientes/ClientesPage"))
 const ScanAndGoPage = lazy(() => import("./pages/scanandgo/ScanAndGoPage"))
 const Customer360Page = lazy(() => import("./pages/customer360/Customer360Page"))
+const CreditScoringPage = lazy(() => import("./pages/credit-scoring/CreditScoringPage"))
 const SchedulePage = lazy(() => import("./pages/schedule/SchedulePage"))
 const ProductividadPage = lazy(() => import("./pages/productividad/ProductividadPage"))
 const CapacitacionPage = lazy(() => import("./pages/capacitacion/CapacitacionPage"))
@@ -120,28 +133,21 @@ const EcommerceCart = lazy(() => import("./pages/ecommerce/EcommerceCart"))
 const EcommerceCheckout = lazy(() => import("./pages/ecommerce/EcommerceCheckout"))
 const EcommerceOrders = lazy(() => import("./pages/ecommerce/EcommerceOrders"))
 const EcommerceOrderDetail = lazy(() => import("./pages/ecommerce/EcommerceOrderDetail"))
+const VerificarReciboPage = lazy(() => import("./pages/public/VerificarReciboPage"))
+
 const VariantsPage = lazy(() => import("./pages/variants/VariantsPage"))
 const KitsPage = lazy(() => import("./pages/kits/KitsPage"))
 const PriceListsPage = lazy(() => import("./pages/price-lists/PriceListsPage"))
 const ImportsPage = lazy(() => import("./pages/imports/ImportsPage"))
 const EmailPage = lazy(() => import("./pages/email/EmailPage"))
 const BancardPage = lazy(() => import("./pages/bancard/BancardPage"))
-const DinelcoPage = lazy(() => import("./pages/dinelco/DinelcoPage"))
+// const DinelcoPage = lazy(() => import("./pages/dinelco/DinelcoPage"))  // DESACTIVADO: checkout viejo apuntando a un host fantasma -- el terminal fisico real de Dinelco va por electron/dinelco-client.cjs, no toca esta pagina. Ver auditoria 2026-09-02
 const LoyaltyPage = lazy(() => import("./pages/loyalty/LoyaltyPage"))
 const PortalPage = lazy(() => import("./pages/portal/PortalPage"))
 const ClientAppPage = lazy(() => import("./pages/client-app/ClientAppPage"))
 const SifenAvanzadoPage = lazy(() => import("./pages/sifen-avanzado/SifenAvanzadoPage"))
-
-/** Resetea el scroll del contenedor principal (<main>) en cada navegación */
-function ScrollToTop() {
-  const { pathname } = useLocation()
-  useEffect(() => {
-    // El Layout usa <main class="flex-1 overflow-y-auto"> como scroll host
-    const main = document.querySelector('main') as HTMLElement | null
-    if (main) main.scrollTop = 0
-  }, [pathname])
-  return null
-}
+const SupplierPortalHubPage = lazy(() => import("./pages/supplier-portal/SupplierPortalHubPage"))
+const ManualPage = lazy(() => import("./pages/manual/ManualPage"))
 
 function PageLoader() {
   return (
@@ -154,19 +160,35 @@ function PageLoader() {
   )
 }
 
+// Roles que existen para una sola pantalla. El menu del ERP no filtra por rol
+// --solo lo muestra como etiqueta-- asi que sin esto un etiquetador entraria y
+// veria todo el sistema. Se lo manda a su estacion y no sale de ahi.
+const ROL_A_ESTACION: Record<string, string> = {
+  etiquetador: "/etiquetas-gondola",
+}
+
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading, mustChangePassword } = useAuth()
+  const { user, loading } = useAuth()
   if (loading) return <PageLoader />
   if (!user) return <Navigate to="/login" replace />
-  if (mustChangePassword) return <Navigate to="/change-password" replace />
+  const estacion = ROL_A_ESTACION[(user as any)?.rol]
+  if (estacion && window.location.pathname !== estacion) {
+    return <Navigate to={estacion} replace />
+  }
+  return <>{children}</>
+}
+
+function SuperadminRoute({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth()
+  if (loading) return <PageLoader />
+  if (!user?.is_superadmin) return <Navigate to="/" replace />
   return <>{children}</>
 }
 
 function FeatureRoute({ feature, children }: { feature: string; children: React.ReactNode }) {
   const { hasFeature, loading } = useFeatures()
   if (loading) return <PageLoader />
-  const isSupermerBypass = localStorage.getItem('demo_mode') === 'supermercado' && (feature === "crm" || feature === "whatsapp");
-  if (!hasFeature(feature) && !isSupermerBypass) {
+  if (!hasFeature(feature)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-body-light dark:bg-body-dark">
         <div className="text-center p-8 animate-fade-in">
@@ -184,12 +206,50 @@ function FeatureRoute({ feature, children }: { feature: string; children: React.
   return <>{children}</>
 }
 
+function PermissionRoute({ permission, anyPermission, children }: { permission?: string; anyPermission?: string[]; children: React.ReactNode }) {
+  const { hasPermission, hasAnyPermission, loading } = usePermissions()
+  if (loading) return <PageLoader />
+  const allowed = permission ? hasPermission(permission) : anyPermission ? hasAnyPermission(...anyPermission) : true
+  if (!allowed) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-body-light dark:bg-body-dark">
+        <div className="text-center p-8 animate-fade-in">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
+            <span className="text-2xl">🔒</span>
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">No tenés acceso a este módulo</h2>
+          <p className="text-gray-500 dark:text-gray-400 max-w-xs mx-auto">
+            Tu rol no incluye permiso para esta pantalla. Si creés que deberías tenerlo, pedile a un administrador que te lo asigne desde Permisos & Roles.
+          </p>
+        </div>
+      </div>
+    )
+  }
+  return <>{children}</>
+}
+
+// Fase 4 del plan de roles: cada rol operativo nuevo aterriza en un panel
+// con los KPI de su propio trabajo, en vez del Panel de Control Estrategico
+// completo (ventas/margen/caja consolidados) que no es su tarea diaria.
+// Administrador y cualquier rol sin match especifico siguen viendo el panel
+// completo de siempre -- esto no le saca nada a nadie, solo agrega vistas
+// mas utiles para los 3 roles nuevos.
+function DashboardRouter() {
+  const { isAdministrador, hasPermission, hasAnyPermission, loading } = usePermissions()
+  if (loading) return <PageLoader />
+  if (!isAdministrador) {
+    if (hasPermission("salon:manage")) return <Suspense fallback={<PageLoader />}><SalonDashboard /></Suspense>
+    if (hasPermission("inventory:adjust")) return <Suspense fallback={<PageLoader />}><DepositoDashboard /></Suspense>
+    if (hasAnyPermission("crm:update", "crm:campaigns")) return <Suspense fallback={<PageLoader />}><AtencionClienteDashboard /></Suspense>
+  }
+  return <Suspense fallback={<PageLoader />}><Dashboard /></Suspense>
+}
+
 function AppRoutes() {
   const isElectron = typeof window !== "undefined" && !!(window as any).electronAPI
   return (
     <Routes>
       <Route path="/login" element={<Suspense fallback={<PageLoader />}><Login /></Suspense>} />
-      <Route path="/change-password" element={<Suspense fallback={<PageLoader />}><ChangePasswordPage /></Suspense>} />
       <Route path="/portal/proveedores/login" element={<Suspense fallback={<PageLoader />}><SupplierLogin /></Suspense>} />
       <Route path="/portal/proveedores/dashboard" element={<Suspense fallback={<PageLoader />}><SupplierDashboard /></Suspense>} />
       <Route path="/driver-app" element={<Suspense fallback={<PageLoader />}><DriverAppPage /></Suspense>} />
@@ -202,6 +262,20 @@ function AppRoutes() {
       <Route path="/tienda/pedidos" element={<Suspense fallback={<PageLoader />}><EcommerceOrders /></Suspense>} />
       <Route path="/tienda/pedido/:id" element={<Suspense fallback={<PageLoader />}><EcommerceOrderDetail /></Suspense>} />
       <Route path="/tienda/dashboard" element={<Suspense fallback={<PageLoader />}><EcommerceOrders /></Suspense>} />
+      <Route path="/verificador" element={<Suspense fallback={<PageLoader />}><PriceCheckerKioskPage /></Suspense>} />
+      <Route path="/consulta-precios" element={<Suspense fallback={<PageLoader />}><PriceCheckerKioskPage /></Suspense>} />
+      <Route path="/verificar-recibo/:paymentId" element={<Suspense fallback={<PageLoader />}><VerificarReciboPage /></Suspense>} />
+      <Route path="/tv/carniceria" element={<Suspense fallback={<PageLoader />}><CarniceriaTvDigitalPage /></Suspense>} />
+
+      <Route path="/operaciones-salon" element={<Suspense fallback={<PageLoader />}><SalonOperacionesPwaPage /></Suspense>} />
+      <Route path="/conteo-vencimientos" element={<Suspense fallback={<PageLoader />}><ConteoVencimientosPage /></Suspense>} />
+      <Route path="/deposito" element={<Suspense fallback={<PageLoader />}><DepositoRecepcionPage /></Suspense>} />
+      <Route path="/dock" element={<Navigate to="/deposito" replace />} />
+      <Route path="/pos" element={<ProtectedRoute><Suspense fallback={<PageLoader />}><POSPage /></Suspense></ProtectedRoute>} />
+      {/* Estacion dedicada: pantalla completa, sin el menu del ERP */}
+      <Route path="/etiquetas-gondola" element={<ProtectedRoute><Suspense fallback={<PageLoader />}><GondolaPage /></Suspense></ProtectedRoute>} />
+      <Route path="/supervisor" element={<Suspense fallback={<PageLoader />}><SupervisorPage /></Suspense>} />
+      <Route path="/pos/supervisor" element={<Navigate to="/supervisor" replace />} />
       <Route
         path="/"
         element={
@@ -212,126 +286,132 @@ function AppRoutes() {
       >
         <Route index element={<Navigate to={isElectron ? "/pos" : "/dashboard"} replace />} />
         {[
-          ["dashboard", <Dashboard />],
-          ["sales", <SifenPage />],
+          ["dashboard", <DashboardRouter />],
+          ["self-checkout", <SelfCheckoutPage />],
+          ["boveda", <BovedaPage />],
+          ["vales", <VouchersPage />],
+          ["convenios", <VouchersPage />],
+          ["edge-agent", <EdgeAgentPage />],
+          ["sales", <SalesPage />],
           ["products", <ProductsPage />],
-          ["inventory", <InventoryPage />],
           ["purchases", <PurchasesPage />],
+          ["etiquetas", <LabelsPage />],
           ["customers", <CustomersPage />],
-          ["payments", <PaymentsPage />],
           ["reports", <ReportsPage />],
+          ["gerencial", <ExecutiveReportPage />],
           ["settings", <SettingsPage />],
+          ["apps-moviles", <AppsMovilesPage />],
+          ["apps", <Navigate to="/apps-moviles" replace />],
+          ["sifen", <SifenPage />],
+          ["facturacion-electronica", <InteliFactPage />],
           ["caja", <CajaPage />],
-          ["route-cash-settlements", <CajaPage />],
-          ["sales-targets", <SalesTargetsPage />],
           ["admin", <AdminPage />],
           ["admin/verticals", <VerticalsPage />],
-          ["audit", <AuditPage />],
-          ["quotes", <QuotesPage />],
-          ["sales-orders", <SalesOrdersPage />],
+          ["salud-sistema", <SaludSistemaPage />],
+          ["plataforma", <SuperadminRoute><PlataformaPage /></SuperadminRoute>],
+          ["audit", <RiskAgentPage />],
+          ["quotes", <PedidosCotizacionesPage />],
+          ["sales-orders", <PedidosCotizacionesPage />],
           ["returns", <ReturnsPage />],
           ["discounts", <DiscountsPage />],
           ["commissions", <CommissionsPage />],
           ["accounts-receivable", <AccountsReceivablePage />],
-          ["accounts-payable", <AccountsPayablePage />],
-          ["deudas-consolidadas", <ConsolidatedDebtsPage />],
-          ["tesoreria", <FinanceAgentPage />],
-          ["finanzas-executive", <FinanceAgentPage />],
           ["finance-agent", <FinanceAgentPage />],
-          ["commercial-agent", <CommercialAgentPage />],
-          ["sales-agent", <CommercialAgentPage />],
-          ["marketing-agent", <MarketingPage />],
-          ["marketing", <MarketingPage />],
+          ["sales-agent", <SalesAgentPage />],
+          ["marketing-agent", <MarketingAgentPage />],
           ["notifications", <NotificationsPage />],
           ["intelicont", <InteliContPage />],
-          ["integrations", <IntegrationsPage />],
+          ["integrations", <Navigate to="/reports?tab=medios_pago" replace />],
           ["sueldok", <SueldokPage />],
-          ["gerencial", <GerencialPage />],
           ["promociones", <PromotionsPage />],
+          ["cupones", <CapturaCuponesPage />],
+          ["marketing/cupones", <CapturaCuponesPage />],
+          ["intellizapp", <WhatsAppPage />],
+          ["whatsapp", <WhatsAppPage />],
           ["gastos", <ExpensesPage />],
-          ["contabilidad", <IntegratedFinancePage />],
-          ["integrated-finance", <IntegratedFinancePage />],
-          ["financiero", <IntegratedFinancePage />],
+          ["financiero", <FinancialPage />],
+          ["bancos", <BancosPage />],
+          ["cheques", <ChequesPage />],
+          ["payments", <PaymentsPage />],
           ["contratos-proveedores", <SupplierContractsPage />],
+          ["portal/proveedores", <SupplierPortalHubPage />],
           ["acuerdos-clientes", <CustomerAgreementsPage />],
+          ["distribuidora", <DistribuidoraPage />],
+          ["sellers", <SellersPage />],
+          ["mapa-tiempo-real", <MapaPage />],
+          ["rutas", <RutasPage />],
+          ["visitas", <VisitasPage />],
+          ["geocercas", <GeocercasPage />],
+          ["rendimiento", <RendimientoPage />],
         ].map(([path, el]) => (
           <Route key={path as string} path={path as string} element={<Suspense fallback={<PageLoader />}>{el as React.ReactNode}</Suspense>} />
         ))}
-        {/* Rutas que Layout.tsx gatea por feature en el menu pero antes no
-            estaban protegidas a nivel de URL — cualquiera que adivinara/tipeara
-            la ruta entraba igual, sin pasar por FeatureRoute. */}
-        <Route path="pos" element={<Suspense fallback={<PageLoader />}><CajaRapidaPage /></Suspense>} />
-        <Route path="self-checkout" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><SelfCheckoutPage /></FeatureRoute></Suspense>} />
-        <Route path="transferencias" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="advanced_inventory"><TransferenciasPage /></FeatureRoute></Suspense>} />
-        <Route path="boveda" element={<Suspense fallback={<PageLoader />}><BovedaPage /></Suspense>} />
-        <Route path="edge-agent" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><EdgeAgentPage /></FeatureRoute></Suspense>} />
-        <Route path="auto-replenish" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="advanced_inventory"><AutoReplenishPage /></FeatureRoute></Suspense>} />
-        <Route path="sifen" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="sifen"><SifenPage /></FeatureRoute></Suspense>} />
-        <Route path="sellers" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="seller_tracking"><SellersPage /></FeatureRoute></Suspense>} />
-        <Route path="mapa-tiempo-real" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="real_time_map"><MapaPage /></FeatureRoute></Suspense>} />
-        <Route path="rutas" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="sales_routes"><RutasPage /></FeatureRoute></Suspense>} />
-        <Route path="visitas" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="seller_tracking"><VisitasPage /></FeatureRoute></Suspense>} />
-        <Route path="geocercas" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="geofence_zones"><GeocercasPage /></FeatureRoute></Suspense>} />
-        <Route path="rendimiento" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="seller_performance"><RendimientoPage /></FeatureRoute></Suspense>} />
-        <Route path="pagopar" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="pagopar"><PagoparPage /></FeatureRoute></Suspense>} />
-        <Route path="kuapay" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="kuapay"><KuapayPage /></FeatureRoute></Suspense>} />
+        <Route path="inventory" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="inventory:adjust"><InventoryPage /></PermissionRoute></Suspense>} />
+        <Route path="transferencias" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="inventory:transfer"><TransferenciasPage /></PermissionRoute></Suspense>} />
+        <Route path="crm" element={<Suspense fallback={<PageLoader />}><PermissionRoute anyPermission={["crm:update", "crm:campaigns"]}><CrmPage /></PermissionRoute></Suspense>} />
+        {/* <Route path="pagopar" .../> DESACTIVADO: sin credenciales reales, un typo en enabled_features podia exponer un checkout que parece real y no lo es. Ver auditoria 2026-09-02 */}
+        {/* <Route path="kuapay" .../> DESACTIVADO: sin credenciales reales. Ver auditoria 2026-09-02 */}
         <Route path="spi" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="spi"><SpiPage /></FeatureRoute></Suspense>} />
         <Route path="branches" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="branches"><BranchesPage /></FeatureRoute></Suspense>} />
-        <Route path="credit-accounts" element={<Suspense fallback={<PageLoader />}><CreditAccountsPage /></Suspense>} />
-        <Route path="checks" element={<Suspense fallback={<PageLoader />}><ChecksPage /></Suspense>} />
-        <Route path="proveedor-kpis" element={<Suspense fallback={<PageLoader />}><SupplierKpisPage /></Suspense>} />
-        <Route path="deposito" element={<Suspense fallback={<PageLoader />}><DepositoPage /></Suspense>} />
-        <Route path="devoluciones-proveedores" element={<Suspense fallback={<PageLoader />}><SupplierReturnsPage /></Suspense>} />
-        <Route path="bonificaciones-compra" element={<Suspense fallback={<PageLoader />}><PurchaseBonusesPage /></Suspense>} />
+        <Route path="credit-accounts" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="credit_accounts"><CreditAccountsPage /></FeatureRoute></Suspense>} />
         <Route path="logistics" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="logistics"><LogisticsPage /></FeatureRoute></Suspense>} />
         <Route path="rbac" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="rbac"><RbacPage /></FeatureRoute></Suspense>} />
-        <Route path="crm" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="crm"><CrmPage /></FeatureRoute></Suspense>} />
-        <Route path="whatsapp" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="whatsapp"><WhatsAppPage /></FeatureRoute></Suspense>} />
-        <Route path="intellizapp" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="intellizapp"><IntelliZappPage /></FeatureRoute></Suspense>} />
-        <Route path="marketing" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="marketing_automation"><MarketingPage /></FeatureRoute></Suspense>} />
+        <Route path="usuarios" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="rbac"><UsuariosPage /></FeatureRoute></Suspense>} />
         <Route path="pharma" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="pharma"><PharmaPage /></FeatureRoute></Suspense>} />
         <Route path="pharma-pos" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="pharma"><PharmaPOSPage /></FeatureRoute></Suspense>} />
         <Route path="intelientregas" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="intelientregas"><InteliEntregasPage /></FeatureRoute></Suspense>} />
         <Route path="boutique" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="boutique_pedidos"><BoutiquePage /></FeatureRoute></Suspense>} />
         <Route path="servicios" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="servicios"><ServiciosPage /></FeatureRoute></Suspense>} />
         <Route path="supermer" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><SupermerPage /></FeatureRoute></Suspense>} />
-        <Route path="escalas" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><ScalesPage /></FeatureRoute></Suspense>} />
+        <Route path="operaciones-salon" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><SalonOperacionesPwaPage /></PermissionRoute></Suspense>} />
+        <Route path="conteo-vencimientos" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><ConteoVencimientosPage /></PermissionRoute></Suspense>} />
+        <Route path="deposito" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="purchases:receive"><DepositoRecepcionPage /></PermissionRoute></Suspense>} />
+        <Route path="desposte" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><CarniceriaDespostePage /></PermissionRoute></Suspense>} />
+        <Route path="frescos" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><VerduleriaFrescosPage /></PermissionRoute></Suspense>} />
+        <Route path="panaderia-rotiseria" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><PanaderiaRotiseriaPage /></PermissionRoute></Suspense>} />
+        <Route path="haccp" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><HaccpPage /></PermissionRoute></Suspense>} />
+        <Route path="equipos-mantenimiento" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><EquipmentPage /></PermissionRoute></Suspense>} />
+        <Route path="dsd" element={<Suspense fallback={<PageLoader />}><DsdPage /></Suspense>} />
+        <Route path="esl" element={<Suspense fallback={<PageLoader />}><EslPage /></Suspense>} />
+        <Route path="escalas" element={<Suspense fallback={<PageLoader />}><ScalesPage /></Suspense>} />
         <Route path="distribuidora" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="distribuidora"><DistribuidoraPage /></FeatureRoute></Suspense>} />
-        <Route path="inteliforce" element={<Suspense fallback={<PageLoader />}><InteliforcePage /></Suspense>} />
-        <Route path="advanced-inventory" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="advanced_inventory"><InventoryAdvancedPage /></FeatureRoute></Suspense>} />
+        <Route path="advanced-inventory" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="advanced_inventory"><PermissionRoute permission="inventory:cycle_count"><InventoryAdvancedPage /></PermissionRoute></FeatureRoute></Suspense>} />
         <Route path="integrated-finance" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="integrated_finance"><IntegratedFinancePage /></FeatureRoute></Suspense>} />
-        <Route path="smart-pricing" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="smart_pricing"><SmartPricingPage /></FeatureRoute></Suspense>} />
-        <Route path="demand-forecast" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="demand_forecast"><DemandForecastPage /></FeatureRoute></Suspense>} />
+        <Route path="smart-pricing" element={<Navigate to="/price-lists" replace />} />
+        <Route path="demand-forecast" element={<Suspense fallback={<PageLoader />}><DemandForecastPage /></Suspense>} />
+        <Route path="auto-replenish" element={<Suspense fallback={<PageLoader />}><AutoReplenishPage /></Suspense>} />
         <Route path="intelligent-routing" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="intelligent_routing"><IntelligentRoutingPage /></FeatureRoute></Suspense>} />
-        <Route path="credit-scoring" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="credit_scoring"><CreditScoringPage /></FeatureRoute></Suspense>} />
-        <Route path="oportunidades" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="comerciales"><OportunidadesPage /></FeatureRoute></Suspense>} />
+        <Route path="oportunidades" element={<Suspense fallback={<PageLoader />}><OportunidadesPage /></Suspense>} />
         <Route path="cold-chain" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="cold_chain"><ColdChainPage /></FeatureRoute></Suspense>} />
         <Route path="asistente-virtual" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="asistente_virtual"><AsistenteVirtualPage /></FeatureRoute></Suspense>} />
-        <Route path="clientes" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="clientes_fidelizacion"><ClientesPage /></FeatureRoute></Suspense>} />
+        <Route path="clientes" element={<Suspense fallback={<PageLoader />}><ClientesPage /></Suspense>} />
         <Route path="scanandgo" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="scanandgo"><ScanAndGoPage /></FeatureRoute></Suspense>} />
-        <Route path="customer360" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="customer360"><Customer360Page /></FeatureRoute></Suspense>} />
-        <Route path="schedule" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="schedule"><SchedulePage /></FeatureRoute></Suspense>} />
-        <Route path="productividad" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="productividad"><ProductividadPage /></FeatureRoute></Suspense>} />
+        <Route path="customer360" element={<Suspense fallback={<PageLoader />}><Customer360Page /></Suspense>} />
+        <Route path="credit-scoring" element={<Suspense fallback={<PageLoader />}><CreditScoringPage /></Suspense>} />
+        <Route path="schedule" element={<Suspense fallback={<PageLoader />}><SchedulePage /></Suspense>} />
+        <Route path="productividad" element={<Suspense fallback={<PageLoader />}><ProductividadPage /></Suspense>} />
         <Route path="capacitacion" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="capacitacion"><CapacitacionPage /></FeatureRoute></Suspense>} />
-        <Route path="pyg-diario" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="pyg_diario"><PyGDiarioPage /></FeatureRoute></Suspense>} />
-        <Route path="shrinkage" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="shrinkage"><ShrinkagePage /></FeatureRoute></Suspense>} />
-        <Route path="forecast-avanzado" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="forecast_avanzado"><ForecastAvanzadoPage /></FeatureRoute></Suspense>} />
-        <Route path="benchmarking" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="benchmarking"><BenchmarkingPage /></FeatureRoute></Suspense>} />
-        <Route path="ecommerce-sm" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="ecommerce_sm"><EcommerceSmPage /></FeatureRoute></Suspense>} />
-        <Route path="delivery-integrations" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="delivery_integrations"><DeliveryIntegrationsPage /></FeatureRoute></Suspense>} />
+        <Route path="pyg-diario" element={<Suspense fallback={<PageLoader />}><PyGDiarioPage /></Suspense>} />
+        <Route path="shrinkage" element={<Suspense fallback={<PageLoader />}><ShrinkagePage /></Suspense>} />
+        <Route path="forecast-avanzado" element={<Suspense fallback={<PageLoader />}><ForecastAvanzadoPage /></Suspense>} />
+        <Route path="benchmarking" element={<Suspense fallback={<PageLoader />}><BenchmarkingPage /></Suspense>} />
+        <Route path="ecommerce-sm" element={<Suspense fallback={<PageLoader />}><EcommerceSmPage /></Suspense>} />
+        <Route path="delivery-integrations" element={<Suspense fallback={<PageLoader />}><DeliveryIntegrationsPage /></Suspense>} />
         <Route path="suscripciones" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="suscripciones"><SuscripcionesPage /></FeatureRoute></Suspense>} />
         <Route path="retail" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="retail"><RetailPage /></FeatureRoute></Suspense>} />
         <Route path="sifen-avanzado" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="sifen_avanzado"><SifenAvanzadoPage /></FeatureRoute></Suspense>} />
-        <Route path="variants" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="variants"><VariantsPage /></FeatureRoute></Suspense>} />
-        <Route path="kits" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="kits"><KitsPage /></FeatureRoute></Suspense>} />
-        <Route path="price-lists" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="price_lists"><PriceListsPage /></FeatureRoute></Suspense>} />
+        <Route path="variants" element={<Suspense fallback={<PageLoader />}><VariantsPage /></Suspense>} />
+        <Route path="kits" element={<Suspense fallback={<PageLoader />}><KitsPage /></Suspense>} />
+        <Route path="price-lists" element={<Suspense fallback={<PageLoader />}><PriceListsPage /></Suspense>} />
         <Route path="imports" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="imports"><ImportsPage /></FeatureRoute></Suspense>} />
         <Route path="email" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="email"><EmailPage /></FeatureRoute></Suspense>} />
         <Route path="bancard" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="bancard"><BancardPage /></FeatureRoute></Suspense>} />
-        <Route path="dinelco" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="dinelco"><DinelcoPage /></FeatureRoute></Suspense>} />
+        {/* <Route path="dinelco" .../> DESACTIVADO: checkout viejo sin credenciales, distinto del terminal fisico real (electron/dinelco-client.cjs). Ver auditoria 2026-09-02 */}
         <Route path="loyalty" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="loyalty"><LoyaltyPage /></FeatureRoute></Suspense>} />
+        <Route path="tarjetas-extra-club" element={<Navigate to="/crm?tab=tarjetas" replace />} />
         <Route path="portal" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="portal"><PortalPage /></FeatureRoute></Suspense>} />
         <Route path="client-app" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="client_app"><ClientAppPage /></FeatureRoute></Suspense>} />
+        <Route path="manual" element={<Suspense fallback={<PageLoader />}><ManualPage /></Suspense>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
@@ -343,17 +423,16 @@ export default function App() {
     <ThemeProvider>
       <AuthProvider>
         <FeatureProvider>
-          <BranchProvider>
+          <PermissionsProvider>
             <OfflineProvider>
               <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-                <ScrollToTop />
                 <PWAUpdatePrompt />
                 <ErrorBoundary>
                   <AppRoutes />
                 </ErrorBoundary>
               </BrowserRouter>
             </OfflineProvider>
-          </BranchProvider>
+          </PermissionsProvider>
         </FeatureProvider>
       </AuthProvider>
     </ThemeProvider>

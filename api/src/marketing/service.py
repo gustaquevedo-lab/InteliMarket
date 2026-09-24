@@ -202,16 +202,40 @@ async def execute_campaign(db: AsyncSession, camp_id: str, company_id: str) -> d
 
     camp.estado = "enviando"
     camp.total_recipients = len(recipients)
-    camp.sent_count = len(recipients)
     camp.sent_at = datetime.now(timezone.utc)
-    for rcp in recipients:
-        rcp.estado = "enviado"
-        rcp.sent_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    sent_ok = 0
+    if camp.canal == "whatsapp" and recipients:
+        from api.src.whatsapp.evolution_client import evolution_client
+        import asyncio
+
+        for rcp in recipients:
+            try:
+                # Personalizar mensaje si tiene variable {nombre}
+                msg_text = (camp.contenido or "").replace("{nombre}", rcp.customer_nombre or "Cliente")
+                evo_res = await evolution_client.send_text_message(rcp.customer_telefono, msg_text, delay_ms=1000)
+                if evo_res.get("success"):
+                    rcp.estado = "enviado"
+                    rcp.sent_at = datetime.now(timezone.utc)
+                    sent_ok += 1
+                else:
+                    rcp.estado = "fallido"
+                await asyncio.sleep(1.0)
+            except Exception:
+                rcp.estado = "fallido"
+    else:
+        for rcp in recipients:
+            rcp.estado = "enviado"
+            rcp.sent_at = datetime.now(timezone.utc)
+            sent_ok += 1
+
+    camp.sent_count = sent_ok
     camp.estado = "completada"
     camp.completed_at = datetime.now(timezone.utc)
     await db.commit()
 
-    return {"sent": len(recipients)}
+    return {"sent": sent_ok, "total": len(recipients)}
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -345,7 +369,7 @@ async def generate_personalized_offers(db: AsyncSession, company_id: str) -> lis
             continue
         # Get categories of bought products
         cat_r = await db.execute(
-            select(Product.category_id).where(Product.company_id == UUID(company_id), Product.id.in_([UUID(p) for p in bought_pids[:50]]))
+            select(Product.categoria_id).where(Product.company_id == UUID(company_id), Product.id.in_([UUID(p) for p in bought_pids[:50]]))
         )
         cat_ids = list(set(str(r[0]) for r in cat_r.all() if r[0]))
 
@@ -356,7 +380,7 @@ async def generate_personalized_offers(db: AsyncSession, company_id: str) -> lis
         cross_r = await db.execute(
             select(Product).where(
                 Product.company_id == UUID(company_id),
-                Product.category_id.in_([UUID(c) for c in cat_ids]),
+                Product.categoria_id.in_([UUID(c) for c in cat_ids]),
                 Product.activo == True,
                 ~Product.id.in_([UUID(p) for p in bought_pids]),
             ).limit(3)

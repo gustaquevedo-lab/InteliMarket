@@ -17,13 +17,8 @@ export default function AsistenteVirtualPage() {
     <div className="space-y-6 animate-fade-in-up">
       <div className="flex items-center justify-between">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Marco — El Cerebro de Casa Gonzalito</h1>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-700 flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Minisforum Local
-            </span>
-          </div>
-          <p className="text-sm text-gray-500 mt-1">Compañero y mano derecha inteligente para todos los sectores: Ventas, Depósito, Cobranzas, Reparto y Compras.</p>
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">Asistente Virtual IA</h1>
+          <p className="text-sm text-gray-500 mt-1">Chatbot IA + WhatsApp — pedidos, consultas, reclamos, derivación a humano</p>
         </div>
       </div>
 

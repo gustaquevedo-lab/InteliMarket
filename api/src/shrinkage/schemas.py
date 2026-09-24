@@ -116,3 +116,5 @@ class ShrinkageDashboardResponse(BaseModel):
     pending_recommendations: list[ShrinkageRecommendationResponse]
     trends_7d: list[dict]
     anomaly_categories: list[str]
+    data_status: str = "ok"
+    message: Optional[str] = None

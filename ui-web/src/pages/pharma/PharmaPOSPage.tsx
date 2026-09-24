@@ -448,7 +448,7 @@ export default function PharmaPOSPage() {
             </div>
             <div className="text-center py-4">
               <p className="text-sm text-gray-500">Total a cobrar</p>
-              <p className="text-3xl font-bold text-gray-900 dark:text-white mt-1">{formatPYG(total)}</p>
+              <p className="text-lg sm:text-xl xl:text-xl 2xl:text-2xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white mt-1">{formatPYG(total)}</p>
               <p className="text-sm text-primary mt-2 capitalize">Método: {paymentMethod}</p>
               {selectedCustomer && <p className="text-xs text-gray-400 mt-1">Cliente: {selectedCustomer.razon_social}</p>}
             </div>

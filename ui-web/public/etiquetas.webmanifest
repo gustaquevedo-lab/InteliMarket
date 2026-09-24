@@ -1,0 +1,19 @@
+{
+  "id": "/etiquetas-gondola",
+  "name": "Extra — Etiquetas de Góndola",
+  "short_name": "Etiquetas",
+  "description": "Estación de impresión de etiquetas de góndola: escanear, armar la cola e imprimir el diseño aprobado.",
+  "start_url": "/etiquetas-gondola",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#020617",
+  "theme_color": "#0F172A",
+  "lang": "es",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "/etiquetas-icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/etiquetas-icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/etiquetas-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
@@ -8,6 +8,10 @@ from api.src.promotions import service
 from api.src.promotions.schemas import (
     PromotionCreate, PromotionUpdate, PromotionResponse,
     ValidateCartInput, CalculatePromoResponse,
+    ProductDualPriceResponse, ReactivatePromoInput, RecordVendorCreditNoteInput,
+    VendorClaimResponse, ApproveLossPromoInput,
+    AuthorizeFlashGraceInput, AuthorizeFlashGraceResponse,
+    ExpiringPromotionAlert, PromotionAnalytics360Response
 )
 
 router = APIRouter(
@@ -20,10 +24,63 @@ router = APIRouter(
 async def list_promotions(
     activo: Optional[bool] = Query(None),
     tipo: Optional[str] = Query(None),
+    estado: Optional[str] = Query(None),
+    origen_fuente: Optional[str] = Query(None),
+    limit: int = Query(100, le=5000),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service.list_promotions(db, user["company_id"], activo, tipo)
+    return await service.list_promotions(
+        db, user["company_id"], activo, tipo, estado, origen_fuente, limit, offset
+    )
+
+
+@router.get("/expiring-alerts")
+async def get_expiring_alerts(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Alertas preventivas de vencimiento de lotes en promoción (15, 10, 5 días y vencidos)."""
+    return await service.get_expiring_promotions_alerts(db, user["company_id"])
+
+
+@router.post("/authorize-flash-grace", response_model=AuthorizeFlashGraceResponse)
+async def authorize_flash_grace(
+    data: AuthorizeFlashGraceInput,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Autorización supervisada para excepciones de tolerancia de 60 min en promociones relámpago con registro de auditoría."""
+    try:
+        return await service.authorize_flash_grace_override(
+            db, user["company_id"], data, user.get("sub") or user.get("id")
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/resolve-product/{product_id}", response_model=ProductDualPriceResponse)
+async def resolve_product_price(
+    product_id: str,
+    precio: float = Query(..., description="Precio regular de lista"),
+    cantidad: float = Query(1.0, description="Cantidad a consultar"),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Consulta de precio dual en tiempo real para cualquier producto."""
+    return await service.resolve_product_promotions(
+        db, user["company_id"], product_id, precio, cantidad
+    )
+
+
+@router.post("/sync-nemuha", response_model=dict)
+async def trigger_nemuha_sync(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Sincroniza todas las promociones activas e históricas de ven_promocao de Nemuha."""
+    return await service.sync_nemuha_promotions(db, user["company_id"])
 
 
 @router.get("/{promo_id}", response_model=PromotionResponse)
@@ -44,7 +101,8 @@ async def create_promotion(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service.create_promotion(db, user["company_id"], data)
+    nombre_usuario = user.get("nombre") or user.get("username") or user.get("email") or "Usuario"
+    return await service.create_promotion(db, user["company_id"], data, usuario_registro=nombre_usuario)
 
 
 @router.put("/{promo_id}", response_model=PromotionResponse)
@@ -54,7 +112,70 @@ async def update_promotion(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    result = await service.update_promotion(db, promo_id, data)
+    result = await service.update_promotion(db, promo_id, data, user["company_id"])
+    if not result:
+        raise HTTPException(status_code=404, detail="Promoción no encontrada")
+    return result
+
+
+@router.post("/{promo_id}/toggle", response_model=PromotionResponse)
+async def toggle_promotion(
+    promo_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    result = await service.toggle_promotion_status(db, user["company_id"], promo_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Promoción no encontrada")
+    return result
+
+
+@router.post("/{promo_id}/reactivate", response_model=PromotionResponse)
+async def reactivate_promotion(
+    promo_id: str,
+    data: ReactivatePromoInput,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    result = await service.reactivate_promotion(db, user["company_id"], promo_id, data)
+    if not result:
+        raise HTTPException(status_code=404, detail="Promoción no encontrada")
+    return result
+
+
+@router.post("/{promo_id}/approve-loss", response_model=PromotionResponse)
+async def approve_loss_promotion(
+    promo_id: str,
+    data: ApproveLossPromoInput,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    result = await service.approve_promotion_loss(db, user["company_id"], promo_id, user.get("sub") or user.get("id"))
+    if not result:
+        raise HTTPException(status_code=404, detail="Promoción no encontrada")
+    return result
+
+
+@router.get("/{promo_id}/sell-out-claim", response_model=VendorClaimResponse)
+async def get_sell_out_claim(
+    promo_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        return await service.generate_sell_out_claim(db, user["company_id"], promo_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/{promo_id}/vendor-credit-note", response_model=PromotionResponse)
+async def record_vendor_credit_note(
+    promo_id: str,
+    data: RecordVendorCreditNoteInput,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    result = await service.record_vendor_credit_note(db, user["company_id"], promo_id, data)
     if not result:
         raise HTTPException(status_code=404, detail="Promoción no encontrada")
     return result
@@ -88,4 +209,79 @@ async def list_promotion_usage(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service.list_usage(db, user["company_id"], promo_id, limit, offset)
+    import uuid
+    try:
+        pid = uuid.UUID(promo_id)
+        cid = uuid.UUID(str(user["company_id"]))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ID de promoción inválido")
+    return await service.list_usage(db, cid, pid, limit, offset)
+
+
+@router.get("/{promo_id}/analytics-360", response_model=PromotionAnalytics360Response)
+async def get_promotion_analytics_360(
+    promo_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Retorna visión 360° de la promoción: KPIs financieros, series de desempeño, ranking de productos y Trade Intelligence."""
+    import uuid
+    try:
+        pid = uuid.UUID(promo_id)
+        cid = uuid.UUID(str(user["company_id"]))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ID de promoción inválido")
+    return await service.get_promotion_analytics_360(db, cid, pid)
+
+
+@router.get("/{promo_id}/report-pdf")
+async def get_promotion_report_pdf(
+    promo_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Genera y descarga el Informe Oficial de la Promoción para Encargados de Salón y Cajas en formato PDF."""
+    import uuid
+    try:
+        pid = uuid.UUID(promo_id)
+        cid = uuid.UUID(str(user["company_id"]))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ID de promoción inválido")
+
+    user_name = user.get("nombre") or user.get("email") or "Encargado de Salón"
+    pdf_bytes = await service.generate_promotion_report_pdf(db, cid, pid, user_name)
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="informe_oficial_promocion_{promo_id[:8]}.pdf"'
+        }
+    )
+
+
+@router.get("/{promo_id}/products-report-pdf")
+async def get_promotion_products_report_pdf(
+    promo_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Genera el PDF horizontal A4 (landscape) con el listado premium de productos participantes en la promoción."""
+    import uuid
+    try:
+        pid = uuid.UUID(promo_id)
+        cid = uuid.UUID(str(user["company_id"]))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ID de promoción inválido")
+
+    user_name = user.get("nombre") or user.get("email") or "Comercial"
+    pdf_bytes = await service.generate_promotion_products_report_pdf(db, cid, pid, user_name)
+
+    nombre_safe = promo_id[:8]
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="productos_promo_{nombre_safe}.pdf"'
+        }
+    )

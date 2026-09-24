@@ -1,26 +1,189 @@
-export const API_BASE = import.meta.env.VITE_API_URL || "/api"
-export const API_ORIGIN = typeof window !== "undefined" ? window.location.origin : ""
+
+export interface CustomerLostDemand {
+  id: string
+  company_id: string
+  producto_nombre: string
+  categoria?: string | null
+  marca?: string | null
+  notas?: string | null
+  cliente_nombre?: string | null
+  cliente_contacto?: string | null
+  cajero_id?: string | null
+  cajero_nombre?: string | null
+  caja_id?: string | null
+  estado: "PENDIENTE" | "EN_EVALUACION" | "COMPRADO" | "DESCARTADO"
+  orden_compra_id?: string | null
+  created_at: string
+  updated_at: string
+}
+
+const rawApiUrl = import.meta.env.VITE_API_URL || ""
+const isLocalhostOrRelative = !rawApiUrl || rawApiUrl.startsWith("/") || rawApiUrl.includes("intelimarket-ia")
+export const API_BASE = isLocalhostOrRelative ? "/api" : rawApiUrl
+export const API_ORIGIN = API_BASE.startsWith("http") ? API_BASE.replace(/\/api\/?$/, "") : (typeof window !== "undefined" ? window.location.origin : "")
+export const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
+
+/**
+ * Ejecuta una promesa con un timeout estricto. Si expira y se proveyó un fallbackValue,
+ * devuelve el fallback. Si no, rechaza con Error de timeout.
+ */
+export function withTimeout<T>(promise: Promise<T>, ms: number, fallbackValue?: T): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (fallbackValue !== undefined) {
+        resolve(fallbackValue)
+      } else {
+        reject(new Error(`Timeout tras ${ms}ms sin respuesta del servidor central`))
+      }
+    }, ms)
+    promise
+      .then((val) => {
+        clearTimeout(timer)
+        resolve(val)
+      })
+      .catch((err) => {
+        clearTimeout(timer)
+        reject(err)
+      })
+  })
+}
+
+let isRefreshing = false
+let refreshPromise: Promise<string | null> | null = null
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = localStorage.getItem("access_token")
-  const isFormData = options.body instanceof FormData
+  let token = localStorage.getItem("access_token")
   const headers: Record<string, string> = {
-    ...(isFormData ? {} : { "Content-Type": "application/json" }),
+    "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),
   }
   if (token) headers["Authorization"] = `Bearer ${token}`
   const cleanEndpoint = endpoint.startsWith("/api") ? endpoint.substring(4) : endpoint
-  const response = await fetch(`${API_BASE}${cleanEndpoint}`, { ...options, headers })
-  if (!response.ok) {
-    if (response.status === 401) {
-      localStorage.removeItem("access_token")
-      localStorage.removeItem("user_email")
-      window.dispatchEvent(new CustomEvent("auth:unauthorized"))
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE}${cleanEndpoint}`, { ...options, headers })
+  } catch (err: any) {
+    if (err?.name === "TypeError" || String(err?.message || "").toLowerCase().includes("failed to fetch")) {
+      throw new Error("Error de conexión con el servidor central. Verifique su red local.")
     }
+    throw err
+  }
+
+  // Manejo de expiración de sesión (401)
+  if (response.status === 401 && !cleanEndpoint.includes("/auth/")) {
+    const refreshToken = localStorage.getItem("refresh_token")
+    if (refreshToken) {
+      if (!isRefreshing) {
+        isRefreshing = true
+        refreshPromise = (async () => {
+          try {
+            // Sin timeout propio, este fetch hereda el default de nginx
+            // (60s) cuando la API esta reiniciando -- y como isRefreshing/
+            // refreshPromise son singleton de modulo, ESE fetch colgado
+            // bloqueaba cualquier otra peticion autenticada de la caja
+            // durante ese minuto entero (verify-supervisor, ventas, etc.),
+            // forzando a la cajera a reiniciar la maquina. 6s alcanza de
+            // sobra en la LAN local cuando el servidor esta arriba.
+            const refreshRes = await withTimeout(
+              fetch(`${API_BASE}/v1/auth/refresh`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ refresh_token: refreshToken }),
+              }),
+              6000,
+            )
+            if (refreshRes.ok) {
+              const refreshData = await refreshRes.json()
+              localStorage.setItem("access_token", refreshData.access_token)
+              if (refreshData.refresh_token) localStorage.setItem("refresh_token", refreshData.refresh_token)
+              return refreshData.access_token as string
+            } else if (refreshRes.status === 401 || refreshRes.status === 403) {
+              // Solo borrar credenciales ante 401/403 legítimo de sesión vencida
+              if (!localStorage.getItem("station_token")) {
+                localStorage.removeItem("access_token")
+                localStorage.removeItem("refresh_token")
+                localStorage.removeItem("user_email")
+              }
+              return null
+            } else {
+              // 502, 503, 504 o reinicio del backend: conservar credenciales locales
+              console.warn(`[API Auth] Servidor central no disponible (${refreshRes.status}). Conservando sesión local offline.`)
+              return null
+            }
+          } catch (e) {
+            // Caída de red o reinicio: conservar credenciales locales
+            console.warn("[API Auth] Fallo de conexión en refresh. Conservando sesión local offline.", e)
+            return null
+          } finally {
+            isRefreshing = false
+          }
+        })()
+      }
+
+      const newToken = await refreshPromise
+      if (newToken) {
+        headers["Authorization"] = `Bearer ${newToken}`
+        response = await fetch(`${API_BASE}${cleanEndpoint}`, { ...options, headers })
+      }
+    } else {
+      // Estacion de etiquetas: no tiene refresh_token y su credencial dura
+      // anios. Borrarla ante un 401 pasajero la deja pidiendo contrasena a
+      // alguien que no tiene ninguna. Se reintenta una vez con la credencial
+      // guardada y, si tampoco va, se conserva: preferimos un error visible
+      // a una estacion inutilizable.
+      const estacion = localStorage.getItem("station_token")
+      if (estacion) {
+        localStorage.setItem("access_token", estacion)
+        headers["Authorization"] = `Bearer ${estacion}`
+        response = await fetch(`${API_BASE}${cleanEndpoint}`, { ...options, headers })
+      } else if (response.status === 401 || response.status === 403) {
+        localStorage.removeItem("access_token")
+        localStorage.removeItem("refresh_token")
+        localStorage.removeItem("user_email")
+      }
+    }
+  }
+
+  if (!response.ok) {
+    let fallbackDetail = `Error en el servidor (HTTP ${response.status})`
+    if (response.status === 502 || response.status === 503 || response.status === 504) {
+      fallbackDetail = `El servidor se está reiniciando o no está disponible temporalmente (HTTP ${response.status}). Por favor reintente en unos segundos.`
+    }
+    const error = await response.json().catch(() => ({ detail: fallbackDetail }))
+    const detailMsg = Array.isArray(error.detail)
+      ? error.detail
+          .map((d: any) => {
+            const loc = Array.isArray(d.loc) ? d.loc.filter((x: any) => x !== "body").join(".") : ""
+            const msg = d.msg || d.type || "Error de validación"
+            return loc ? `${loc}: ${msg}` : msg
+          })
+          .join(", ")
+      : typeof error.detail === "string"
+      ? error.detail
+      : typeof error.message === "string"
+      ? error.message
+      : JSON.stringify(error.detail || error)
+    throw new Error(detailMsg || `HTTP ${response.status}`)
+  }
+  if (response.status === 204) return undefined as T
+  return response.json()
+}
+
+// No fija Content-Type -- con body FormData, fetch tiene que poner el
+// boundary del multipart solo. request() de arriba fuerza siempre
+// "application/json" salvo que el caller lo pise, lo cual rompe cualquier
+// subida de archivo real que pase por ahi (ver migration.preview/import,
+// que tienen el mismo problema sin usar).
+async function requestMultipart<T>(endpoint: string, formData: FormData): Promise<T> {
+  const token = localStorage.getItem("access_token")
+  const headers: Record<string, string> = {}
+  if (token) headers["Authorization"] = `Bearer ${token}`
+  const cleanEndpoint = endpoint.startsWith("/api") ? endpoint.substring(4) : endpoint
+  const response = await fetch(`${API_BASE}${cleanEndpoint}`, { method: "POST", headers, body: formData })
+  if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Error desconocido" }))
     throw new Error(error.detail || `HTTP ${response.status}`)
   }
-  if (response.status === 204) return undefined as T
   return response.json()
 }
 
@@ -29,75 +192,138 @@ export const client = {
     const url = params ? `${endpoint}?${new URLSearchParams(Object.entries(params).filter(([_, v]) => v !== undefined) as [string, string][])}` : endpoint
     return request<T>(url)
   },
-  post: <T>(endpoint: string, data?: unknown) =>
-    request<T>(endpoint, {
-      method: "POST",
-      body: data instanceof FormData ? data : JSON.stringify(data),
-    }),
-  put: <T>(endpoint: string, data?: unknown) =>
-    request<T>(endpoint, {
-      method: "PUT",
-      body: data instanceof FormData ? data : JSON.stringify(data),
-    }),
-  patch: <T>(endpoint: string, data?: unknown) =>
-    request<T>(endpoint, {
-      method: "PATCH",
-      body: data instanceof FormData ? data : JSON.stringify(data),
-    }),
+  post: <T>(endpoint: string, data?: unknown) => request<T>(endpoint, { method: "POST", body: JSON.stringify(data) }),
+  put: <T>(endpoint: string, data?: unknown) => request<T>(endpoint, { method: "PUT", body: JSON.stringify(data) }),
+  patch: <T>(endpoint: string, data?: unknown) => request<T>(endpoint, { method: "PATCH", body: JSON.stringify(data) }),
   delete: <T>(endpoint: string) => request<T>(endpoint, { method: "DELETE" }),
 }
 
-export const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
+export async function downloadAuthenticated(path: string, params: Record<string, any> | undefined, filename: string) {
+  const token = localStorage.getItem("access_token")
+  const normalizedPath = path.startsWith("/api") ? path.substring(4) : path
+  const cleanPath = normalizedPath.startsWith("/") ? normalizedPath : `/${normalizedPath}`
+  const qs = params ? new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => [k, String(v)]))).toString() : ""
+  const sep = cleanPath.includes("?") ? "&" : "?"
+  const url = `${API_BASE}${cleanPath}${qs ? `${sep}${qs}` : ""}`
+  let res: Response
+  try {
+    res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  } catch (err: any) {
+    if (err?.name === "TypeError" || String(err?.message || "").toLowerCase().includes("failed to fetch")) {
+      throw new Error("Error de conexión con el servidor central al descargar el archivo. Verifique su red local.")
+    }
+    throw err
+  }
+  if (!res.ok) throw new Error(`No se pudo descargar el archivo (${res.status})`)
+  const blob = await res.blob()
+  const isPdf = filename.toLowerCase().endsWith(".pdf")
+  const fileBlob = new Blob([blob], { type: isPdf ? "application/pdf" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
+  const blobUrl = URL.createObjectURL(fileBlob)
+  const a = document.createElement("a")
+  a.href = blobUrl
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 20000)
+}
 
 // ========== TYPE STUBS ==========
-export interface Product { id: string; sku: string; nombre: string; descripcion?: string | null; categoria_id?: string | null; category_id?: string | null; codigo_barra?: string; unidad_medida?: string; tipo?: string; tipo_venta?: string; iva_tasa?: number; stock_minimo?: number; stock_maximo?: number; peso_kg?: number; precio_venta?: number; costo_promedio?: number; activo?: boolean; created_at?: string; updated_at?: string; precio?: number; category?: Category; categoria?: Category; stock?: number }
+export interface Product { id: string; sku: string; nombre: string; descripcion?: string | null; categoria_id?: string | null; supplier_id?: string; supplier_nombre?: string; codigo_barra?: string; unidad_medida?: string; tipo?: string; tipo_producto?: "producto" | "materia_prima" | "insumo" | "servicio"; tipo_venta?: string; iva_tasa?: number; stock_minimo?: number; stock_maximo?: number; peso_kg?: number; plu_balanza?: number | null; es_pesable?: boolean; tiene_vencimiento?: boolean; tiene_lotes?: boolean; imagen_url?: string | null; precio_venta?: number; precio_regular?: number; precio_promo?: number; en_promocion?: boolean; precio_mayorista?: number | null; precio_mayorista_min_qty?: number | null; precio_promedio_real?: number | null; costo_promedio?: number; ultimo_costo?: number; costo_landed?: number; costo_unitario?: number; precio_costo?: number; activo?: boolean; created_at?: string; updated_at?: string; precio?: number; categoria?: Category; stock?: number }
 export interface Category { id: string; nombre: string; codigo?: string; parent_id?: string; company_id?: string; activo?: boolean; created_at?: string }
-export interface Customer { id: string; nombre: string; email?: string; telefono?: string; ruc?: string; razon_social?: string; ci?: string; direccion?: string; ciudad?: string; tipo?: string; tipo_persona?: string; activo?: boolean; saldo_pendiente?: number; limite_credito?: number; credito_limite?: number; credito_usado?: number; created_at?: string; updated_at?: string }
-export interface CustomerField360 {
-  customer_id: string; razon_social: string; ruc?: string; direccion?: string; telefono?: string;
-  credito_limite: number; credito_usado: number; saldo_disponible: number; dias_plazo?: number;
-  cuentas_por_cobrar_pendiente: number; documentos_vencidos: number; cheques_en_cartera: number;
-  ultimas_compras: { numero: string; fecha: string; total: number; estado: string }[];
-  top_productos: { product_id: string; nombre: string; cantidad_total: number; ultima_compra: string }[];
-  sugerencias: { product_id: string; nombre: string; linea_nombre?: string; precio_venta: number; motivo: string }[];
-}
-export interface SupplierReturnItem { id: string; return_id: string; product_id: string; variant_id?: string; descripcion?: string; cantidad: number; precio_unitario: number; iva_tasa: number; iva_monto: number; total: number; motivo_detalle?: string; condicion: string; created_at: string }
-export interface SupplierReturn { id: string; company_id: string; supplier_id: string; purchase_order_id?: string; numero: string; fecha: string; motivo: string; motivo_detalle?: string; estado: string; moneda: string; tipo_cambio: number; subtotal?: number; iva_10?: number; iva_5?: number; total?: number; supplier_invoice_id?: string; warehouse_id?: string; observaciones?: string; user_id?: string; aprobado_por?: string; created_at: string; updated_at: string }
-export interface SupplierReturnWithItems extends SupplierReturn { items: SupplierReturnItem[] }
-export interface PurchaseBonusScale { id: string; company_id: string; supplier_id: string; product_id: string; cantidad_minima: number; cantidad_bonificada: number; activo: boolean; observaciones?: string; created_at: string; updated_at: string }
-export interface Sale { id: string; company_id?: string; customer_id?: string; customer?: Customer; items?: SaleItem[]; total?: number; subtotal?: number; total_iva?: number; estado?: string; condicion?: string; tipo_comprobante?: string; fecha?: string; caja_session_id?: string; usuario_id?: string; observaciones?: string; numero?: string; total_pagado?: number; saldo?: number; iva_10?: number; iva_5?: number; descuento_total?: number; sifen_estado?: string; cdc?: string; created_at?: string }
-export interface SaleItem { id?: string; sale_id?: string; product_id?: string; producto?: Product; product?: Product; descripcion?: string; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; iva_monto?: number; total?: number; descuento?: number }
+export interface Customer { id: string; nombre: string; email?: string; telefono?: string; ruc?: string; extra_club_numero?: string | null; empresa_vinculada_nombre?: string | null; empresa_vinculada_ruc?: string | null; razon_social?: string; nombre_fantasia?: string | null; ci?: string; direccion?: string; ciudad?: string; departamento?: string | null; condicion_iva?: string | null; pago_default?: string | null; contacto?: string | null; tipo?: string; tipo_persona?: string; activo?: boolean; es_agente_retencion?: boolean; regimen_retencion?: string; porcentaje_retencion_iva?: number; saldo_pendiente?: number; limite_credito?: number; credito_limite?: number; credito_usado?: number; created_at?: string; updated_at?: string }
+export interface Sale { id: string; company_id?: string; customer_id?: string; customer?: Customer; customer_nombre?: string; customer_doc?: string; customer_extra_club?: string; user_id?: string; user?: any; cajero_nombre?: string; caja_nombre?: string; items?: SaleItem[]; total?: number; subtotal?: number; total_iva?: number; estado?: string; condicion?: string; forma_pago?: string; tipo_comprobante?: string; fecha?: string; session_id?: string; caja_session_id?: string; usuario_id?: string; observaciones?: string; numero?: string; numero_interno?: string; recibo_html?: string; recibo_escpos_b64?: string; total_pagado?: number; saldo?: number; iva_10?: number; iva_5?: number; descuento_total?: number; sifen_estado?: string; cdc?: string; created_at?: string }
+export interface SaleItem { id?: string; sale_id?: string; product_id?: string; producto?: Product; product?: Product; descripcion?: string; cantidad?: number; cantidad_devuelta?: number; cantidad_disponible?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; iva_monto?: number; total?: number; descuento?: number }
 export interface PaymentMethod { id: string; nombre: string; codigo?: string; tipo?: string; moneda?: string; activo?: boolean; permite_parcial?: boolean; requiere_autorizacion?: boolean; created_at?: string }
 export interface Payment { id: string; sale_id?: string; metodo_pago_id?: string; payment_method_id?: string; metodo_pago?: PaymentMethod; tipo?: string; monto?: number; moneda?: string; referencia?: string; estado?: string; fecha?: string; created_at?: string }
-export interface Warehouse { id: string; codigo?: string; nombre: string; direccion?: string; ciudad?: string; tipo?: string; activo?: boolean; company_id?: string; created_at?: string }
+
+export interface SmartReplenishmentItem {
+  product_id: string
+  nombre: string
+  sku?: string | null
+  codigo_barra?: string | null
+  unidad_medida: string
+  stock_actual: number
+  stock_en_transito: number
+  ventas_periodo: number
+  ventas_mes_actual?: number
+  ventas_mes_1?: number
+  ventas_mes_2?: number
+  ventas_mes_3?: number
+  ventas_mes_4?: number
+  costo_promedio?: number
+  ultimo_costo?: number
+  variacion_costo_pct?: number
+  pulso_tendencia?: "acelerando" | "estable" | "desacelerando"
+  tiene_promocion_detectada?: boolean
+  promocion_info?: string | null
+  ultimo_proveedor_id?: string | null
+  ultimo_proveedor_nombre?: string | null
+  demanda_diaria_base: number
+  multiplicador_estacional: number
+  demanda_diaria_ajustada: number
+  dias_stock_restantes: number
+  autonomia_estado: "critico" | "bajo" | "optimo" | "sobrestock"
+  stock_seguridad?: number
+  punto_reorden?: number
+  target_stock?: number
+  cantidad_sugerida: number
+  costo_unitario_estimado: number
+  subtotal_estimado: number
+  iva_tasa: number
+  explicacion_ia: string
+  generada_automaticamente?: boolean
+}
+
+export interface SmartReplenishmentResponse {
+  total_evaluados: number
+  total_quiebres: number
+  total_bajos: number
+  total_sugeridos: number
+  monto_total_estimado: number
+  meses_labels?: string[]
+  mes_actual_label?: string
+  items: SmartReplenishmentItem[]
+}
+
+export interface Warehouse {
+  id: string
+  codigo?: string
+  nombre: string
+  direccion?: string
+  ciudad?: string
+  tipo?: string
+  responsable?: string | null
+  descripcion?: string | null
+  parent_id?: string | null
+  parent_nombre?: string | null
+  subdepositos_count?: number
+  activo?: boolean
+  company_id?: string
+  created_at?: string
+}
 export interface StockItem { id?: string; product_id?: string; producto?: Product; product?: Product; nombre?: string; sku?: string; warehouse_id?: string; warehouse?: Warehouse; cantidad?: number; cantidad_reservada?: number; cantidad_disponible?: number; stock_minimo?: number; stock_maximo?: number; costo_promedio?: number; ultimo_costo?: number; costo_unitario?: number; lote?: string; fecha_vencimiento?: string; created_at?: string }
-export interface Company { id: string; nombre: string; ruc?: string; razon_social?: string; direccion?: string; telefono?: string; email?: string; logo_url?: string; activo?: boolean; config?: Record<string, unknown>; iva_condition?: string; regimen_tributario?: string; created_at?: string; updated_at?: string }
-export interface SalesRep { id: string; company_id: string; funcionario_codigo?: string; user_id?: string; nombre: string; cedula?: string; rama?: string; rol: string; supervisor_id?: string; activo: boolean; created_at: string; updated_at: string }
-export interface ProductLine { id: string; company_id: string; codigo_legacy?: string; nombre: string; activo: boolean }
-export interface CascadeConfig { id: string; company_id: string; umbral_pct: number; activo: boolean }
-export interface SalesTarget { id: string; company_id: string; sales_rep_id?: string; periodo_tipo: string; periodo_inicio: string; periodo_fin: string; product_line_id?: string; monto_gs: number; cantidad_unidades: number; origen: string; created_at: string }
-export interface RepProgress { sales_rep_id: string; nombre: string; periodo_inicio: string; periodo_fin: string; venta_gs: number; unidades: number; meta_gs: number; meta_unidades: number; pct_gs: number; pct_unidades: number; cumplido: boolean }
-export interface CascadeStatus { lider_id: string; lider_nombre: string; umbral_pct: number; equipo_total: number; equipo_cumplieron: number; pct_equipo_cumplio: number; cascada_cumplida: boolean; equipo: RepProgress[] }
-export interface Baseline { product_line_id: string; linea_nombre: string; mes: number; promedio_gs: number; promedio_unidades: number; tendencia_pct: number; desvio_gs: number; objetivo_legacy_ref_gs?: number; sugerido_gs: number }
-export interface SuggestedTarget { sales_rep_id: string; nombre: string; rama?: string; monto_gs: number; cantidad_unidades: number; desglose: { linea_nombre: string; monto_gs: number }[] }
-export interface CashRegister { id: string; nombre: string; codigo?: string; tipo?: string; branch_id?: string; sucursal_id?: string; warehouse_id?: string; activo?: boolean; created_at?: string }
+export interface Company { id: string; nombre?: string; nombre_fantasia?: string; ruc?: string; razon_social?: string; direccion?: string; ciudad?: string; departamento?: string; telefono?: string; email?: string; logo_url?: string; activo?: boolean; config?: Record<string, unknown>; iva_condition?: string; regimen_tributario?: string; created_at?: string; updated_at?: string }
+export interface CashRegister { id: string; nombre: string; codigo?: string; tipo?: string; branch_id?: string; sucursal_id?: string; warehouse_id?: string; activo?: boolean; cash_drop_threshold?: number | null; diferencia_maxima_tolerada?: number | null; created_at?: string }
+export interface CashHandoff { id: string; session_id: string; register_nombre: string | null; entregado_por_nombre: string | null; recibido_por_nombre?: string | null; monto_pyg: number; monto_usd: number; monto_brl: number; monto_confirmado_pyg?: number | null; monto_confirmado_usd?: number | null; monto_confirmado_brl?: number | null; discrepancia_confirmacion?: boolean; requiere_revision: boolean; estado: string; created_at: string; fecha_confirmacion?: string | null }
+export interface KioskPriceTier { min_qty: number; max_qty: number | null; precio_unitario: number; moneda: string }
+export interface KioskPackInfo { etiqueta: string; unidades_por_paquete: number; precio_pack: number }
+export interface KioskProductLookup { id: string; nombre: string; sku?: string | null; codigo_barra?: string | null; precio_venta: number; imagen_url?: string | null; categoria_nombre?: string | null; tipo_venta?: string | null; escalas: KioskPriceTier[]; packs: KioskPackInfo[]; pack_escaneado?: KioskPackInfo | null; escaneado_como_pack?: string | null; en_promocion?: boolean; badge_promo?: string; ahorro_unitario?: number; ahorro_porcentaje?: number; precio_regular?: number; limite_por_compra?: number; mensaje_dias?: string; promocion_nombre?: string | null; valido_hasta?: string | null }
+export interface KioskBanner { id: string; company_id: string; titulo: string; subtitulo?: string | null; etiqueta?: string | null; descuento_texto?: string | null; color?: string | null; imagen_url?: string | null; orden: number; activo: boolean; fecha_inicio?: string | null; fecha_fin?: string | null; created_at: string; updated_at?: string | null }
+export interface VaultEntry { id: string; origen: string; monto_pyg: number; monto_usd: number; monto_brl: number; estado: string; bank_transaction_id?: string | null; created_at: string; fecha_deposito?: string | null }
+export interface VaultDashboard { saldo_en_boveda_pyg: number; saldo_en_boveda_usd: number; saldo_en_boveda_brl: number; entradas_en_boveda: number; entregas_pendientes: number; entregas_pendientes_detalle: CashHandoff[]; retiros_pendientes: number; retiros_pendientes_detalle: any[]; movimientos_recientes: VaultEntry[] }
 export interface CashSession { id: string; caja_id?: string; caja?: CashRegister; cash_register?: CashRegister; usuario_id?: string; fecha_apertura?: string; fecha_cierre?: string; monto_apertura?: number; monto_cierre?: number; total_ventas?: number; total_retiros?: number; total_ingresos?: number; estado?: string; observaciones?: string; created_at?: string }
 export interface Branch { id: string; nombre: string; codigo: string; direccion?: string; ciudad?: string; departamento?: string; telefono?: string; email?: string; ruc?: string; punto_emision?: string | number; activo?: boolean; company_id?: string; created_at?: string; updated_at?: string }
-export interface CreditAccount { id: string; customer_id?: string; customer?: Customer; saldo?: number; limite_credito?: number; saldo_utilizado?: number; saldo_disponible?: number; dias_plazo?: number; porcentaje_uso?: number; estado?: string; activo?: boolean; created_at?: string; updated_at?: string }
-
-export interface Check {
-  id: string; company_id: string; customer_id: string; tipo: "cheque" | "pagare"; numero: string;
-  banco?: string; titular?: string; monto: number; moneda: string; fecha_emision?: string;
-  fecha_vencimiento: string; estado: "cartera" | "depositado" | "acreditado" | "rechazado" | "reemplazado" | "endosado";
-  payment_id?: string; accounts_receivable_id?: string; reemplaza_check_id?: string;
-  observaciones?: string; created_at: string; updated_at?: string; customer_name?: string;
-}
-
-export interface CheckEvent {
-  id: string; check_id: string; estado_anterior?: string; estado_nuevo: string;
-  motivo?: string; user_id?: string; created_at: string;
-}
-export interface CreditMovement { id: string; credit_account_id?: string; tipo?: string; monto?: number; saldo_anterior?: number; saldo_nuevo?: number; referencia?: string; observaciones?: string; sale_id?: string; fecha?: string; created_at?: string }
+export interface CreditAccount { id: string; customer_id?: string; customer?: Customer; customer_nombre?: string; customer_ruc?: string; empresa_vinculada_nombre?: string; saldo?: number; limite_credito?: number; saldo_utilizado?: number; saldo_disponible?: number; porcentaje_uso?: number; estado?: string; activo?: boolean; dias_mora_max?: number; en_mora?: boolean; created_at?: string; updated_at?: string }
+export interface CreditMovement { id: string; credit_account_id?: string; tipo?: string; fuente?: string; monto?: number; saldo_anterior?: number; saldo_nuevo?: number; referencia?: string; observaciones?: string; sale_id?: string; fecha?: string; created_at?: string; estado?: string | null; saldo_pendiente?: number | null; dias_mora?: number | null }
+export interface MoraConfig { activo: boolean; porcentaje_mensual: number; dias_gracia: number }
+export interface MoraPreviewItem { credit_account_id: string; customer_id: string; customer_nombre?: string; empresa_vinculada_nombre?: string; documentos_afectados: number; recargo_total: number }
+export interface MoraPreviewResponse { config: MoraConfig; items: MoraPreviewItem[]; total_recargo: number }
+export interface WriteoffRequest { id: string; accounts_receivable_id: string; customer_id: string; customer_nombre?: string; empresa_vinculada_nombre?: string; numero_documento?: string; monto: number; motivo: string; estado: string; aprobado_gerente_id?: string | null; aprobado_finanzas_id?: string | null; created_at: string }
+export interface DunningConfig { activo: boolean; buckets_dias: number[]; mensaje_template: string }
+export interface DunningPreviewItem { customer_id: string; customer_nombre?: string; empresa_vinculada_nombre?: string; telefono?: string; monto_total: number; dias_mora: number; bucket_dias: number; documentos_count: number }
+export interface DunningPreviewResponse { config: DunningConfig; items: DunningPreviewItem[] }
+export interface CustomerAdvance { id: string; company_id: string; customer_id: string; customer_nombre?: string | null; monto_total: number; monto_disponible: number; moneda: string; forma_pago?: string | null; referencia?: string | null; fecha: string; observaciones?: string | null; created_at: string }
 export interface Delivery { id: string; company_id?: string; sale_id?: string; customer_id?: string; customer?: Customer; driver_id?: string; driver?: Driver; driver_name?: string; vehicle_id?: string; direccion_entrega?: string; coordenadas?: string; estado?: string; fecha_programada?: string; fecha_salida?: string; fecha_entrega?: string; observaciones?: string; created_at?: string }
 export interface Driver { id: string; company_id?: string; nombre: string; telefono?: string; email?: string; licencia_numero?: string; estado?: string; activo?: boolean; created_at?: string }
 export interface Vehicle { id: string; company_id?: string; patente?: string; marca?: string; modelo?: string; tipo?: string; capacidad_kg?: number; activo?: boolean; created_at?: string }
@@ -113,44 +339,166 @@ export interface PipelineStats { total?: number; total_valor?: number; by_etapa?
 export interface ActivityStats { total?: number; completadas?: number; pendientes?: number; by_tipo?: Record<string, number>; por_tipo?: Record<string, number> }
 export interface Permission { id: string; name?: string; description?: string | null; module?: string; action?: string; created_at?: string }
 export interface Role { id: string; name?: string; description?: string | null; is_system?: boolean; is_default?: boolean; created_at?: string; permissions?: Permission[] }
-export interface PurchaseOrder { id: string; company_id?: string; supplier_id?: string; supplier?: Supplier; numero?: string; fecha?: string; fecha_entrega?: string; estado?: string; subtotal?: number; total_iva?: number; total?: number; moneda?: string; tipo_cambio?: number; fecha_entrega_estimada?: string | null; descuento_total?: number; iva_10?: number; iva_5?: number; observaciones?: string | null; items?: PurchaseOrderItem[]; created_at?: string; updated_at?: string }
-export interface PurchaseSuggestion { id: string; company_id?: string; product_id: string; variant_id?: string; supplier_id?: string; cantidad_sugerida: number; precio_estimado?: number; total_estimado?: number; moneda?: string; motivo: string; detalle?: string; urgencia?: string; confianza?: number; stock_actual?: number; stock_seguridad?: number; demanda_diaria_promedio?: number; dias_cobertura?: number; lead_time_dias?: number; estado?: string; purchase_order_id?: string }
-export interface PurchaseOrderItem { id?: string; orden_id?: string; producto_id?: string; producto?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; recibido?: number; pendiente?: number; created_at?: string }
-export interface PurchaseReceipt { id: string; company_id?: string; orden_id?: string; order_id?: string | null; orden?: PurchaseOrder; supplier_id?: string; supplier?: Supplier; numero?: string; fecha?: string; estado?: string; subtotal?: number; total_iva?: number; total?: number; user_id?: string | null; observaciones?: string | null; items?: PurchaseReceiptItem[]; created_at?: string; updated_at?: string }
-export interface PurchaseReceiptItem { id?: string; recibo_id?: string; producto_id?: string; producto?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; lote?: string; fecha_vencimiento?: string; created_at?: string }
+// Shape real de GET /rbac/users/{id}/roles -- distinto de Role (no trae description/permissions,
+// trae role_id/role_name porque es la fila de la tabla puente rbac_user_roles, no el rol en si)
+export interface UserRoleAssignment { user_id: string; tenant_id: string; role_id: string; role_name: string; created_at: string }
+export interface TenantUser { id: string; email: string; nombre: string; telefono?: string | null; rol: string; activo: boolean; is_superadmin: boolean; foto_url?: string | null; last_login?: string | null; created_at: string; tenant_rol: string; role_names: string[] }
+export interface PurchaseOrder { id: string; company_id?: string; supplier_id?: string; supplier?: Supplier; numero?: string; fecha?: string; fecha_entrega?: string; estado?: string; subtotal?: number; total_iva?: number; total?: number; moneda?: string; tipo_cambio?: number; fecha_entrega_estimada?: string | null; prioridad?: string; condiciones_pago?: string; created_by_name?: string; user_id?: string; descuento_total?: number; iva_10?: number; iva_5?: number; observaciones?: string | null; items?: PurchaseOrderItem[]; created_at?: string; updated_at?: string }
+export interface PurchaseRequisitionItem { id: string; requisition_id: string; product_id: string; variant_id?: string | null; descripcion?: string | null; cantidad_solicitada: number; cantidad_aprobada?: number | null; precio_estimado?: number | null; total_estimado?: number | null; observaciones?: string | null; created_at: string }
+export interface PurchaseRequisition { id: string; company_id: string; numero: string; fecha: string; fecha_necesidad?: string | null; departamento?: string | null; solicitante_id?: string | null; solicitante_nombre?: string | null; estado: string; prioridad?: string | null; moneda?: string | null; subtotal?: number | null; total?: number | null; motivo?: string | null; observaciones?: string | null; aprobado_por?: string | null; fecha_aprobacion?: string | null; rechazado_motivo?: string | null; purchase_order_id?: string | null; user_id?: string | null; created_at: string; items?: PurchaseRequisitionItem[] }
+export interface PurchaseOrderItem { id?: string; orden_id?: string; producto_id?: string; producto?: Product; sku?: string | null; codigo_barra?: string | null; unidad_medida?: string | null; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; recibido?: number; pendiente?: number; created_at?: string }
+export interface PurchaseRfqItem { id: string; rfq_id: string; product_id: string; variant_id?: string | null; descripcion?: string | null; cantidad_solicitada: number; created_at: string }
+export interface PurchaseRfqResponseItem { id: string; response_id: string; rfq_item_id: string; product_id: string; precio_unitario: number; plazo_entrega_dias?: number | null; created_at: string }
+export interface PurchaseRfqResponse { id: string; rfq_id: string; supplier_id: string; estado: string; fecha_respuesta?: string | null; plazo_entrega_dias?: number | null; observaciones?: string | null; supplier?: Supplier; items: PurchaseRfqResponseItem[]; total_cotizado?: number | null; created_at: string }
+export interface PurchaseRfq { id: string; company_id: string; requisition_id?: string | null; numero: string; fecha: string; fecha_limite?: string | null; estado: string; motivo?: string | null; observaciones?: string | null; ganador_supplier_id?: string | null; purchase_order_id?: string | null; created_at: string }
+export interface PurchaseRfqWithDetail extends PurchaseRfq { items: PurchaseRfqItem[]; responses: PurchaseRfqResponse[] }
+export interface PurchaseBudget { id: string; company_id: string; nombre: string; anio: number; mes?: number | null; tipo?: string | null; moneda?: string | null; monto_presupuestado: number; monto_ejecutado?: number | null; monto_disponible?: number | null; categoria_id?: string | null; departamento?: string | null; activo: boolean; observaciones?: string | null; user_id?: string | null; created_at?: string; updated_at?: string }
+export interface PurchaseBudgetConsumption { budget_id: string; nombre: string; anio: number; mes?: number | null; monto_presupuestado: number; monto_ejecutado: number; monto_disponible: number; porcentaje_ejecutado: number }
+export interface PurchaseReceipt { id: string; company_id?: string; purchase_order_id?: string | null; orden?: PurchaseOrder; supplier_id?: string; supplier?: Supplier; warehouse_id?: string; numero?: string; fecha?: string; estado?: string; proveedor_ref?: string | null; total?: number; total_brl?: number; tipo_cambio?: number; user_id?: string | null; observaciones?: string | null; requiere_revision?: boolean; motivo_revision?: string | null; items?: PurchaseReceiptItem[]; created_at?: string; updated_at?: string }
+export interface PurchaseReceiptItem { id?: string; receipt_id?: string; product_id?: string; producto?: Product; variant_id?: string | null; cantidad_ordenada?: number | null; cantidad_recibida?: number; precio_unitario?: number; costo_unitario?: number; total?: number; batch_id?: string | null; cantidad_rechazada?: number | null; motivo_rechazo?: string | null; created_at?: string }
+
+
+export interface SmartReplenishmentRequest {
+  company_id?: string
+  supplier_id?: string
+  categoria_id?: string
+  dias_cobertura?: number
+  lead_time_dias?: number
+  dias_historial_ventas?: number
+  factor_fin_semana?: boolean
+  factor_fin_mes?: boolean
+  factor_clima?: "normal" | "calor" | "frio" | "lluvia"
+  factor_evento?: "normal" | "feriado" | "semana_santa" | "fin_de_ano"
+  solo_quiebre_o_bajo?: boolean
+  search?: string
+  limit?: number
+}
+
 export interface FinanceAgentRun { id: string; company_id: string; started_at: string; finished_at?: string; model?: string; status: string; diagnostico?: string; error_message?: string }
 export interface FinanceRecommendation { id: string; company_id: string; run_id: string; tipo: string; titulo: string; descripcion: string; entidad_relacionada?: string; monto_relacionado?: string; requested_by: string; approved_by?: string; status: string; comments?: string; created_at: string; updated_at: string }
-export interface Supplier { id: string; company_id?: string; ruc?: string; razon_social?: string; nombre_fantasia?: string; direccion?: string; telefono?: string; email?: string; contacto?: string; contacto_nombre?: string; contacto_telefono?: string; plazo_pago_dias?: number; tipo?: string; activo?: boolean; created_at?: string; updated_at?: string }
-export interface SupplierKpiPeriod { id: string; company_id: string; supplier_id: string; periodo: string; rebate_pct_objetivo: number; estado: string; observaciones?: string | null; created_at: string; updated_at: string }
-export interface SupplierKpiIndicator {
-  id: string; period_id: string; codigo: string; nombre: string; peso_pct: number;
-  meta?: number | null; meta_uc?: number | null; resultado?: number | null; resultado_uc?: number | null;
-  proyeccion_uc?: number | null; proyeccion_pct?: number | null; cumplimiento_pct?: number | null;
-  rebate_ganado_pct?: number | null; piso_minimo_pct?: number | null; orden: number;
-  pct_cumplimiento?: number | null; aporte_ponderado_pct?: number | null;
-  categoria?: string; segmento_paresa?: string; es_foco?: boolean;
-  descripcion_skus?: string; reglas_escala?: any;
-}
-export interface SupplierKpiSummary {
-  period: SupplierKpiPeriod; supplier_razon_social: string; indicadores: SupplierKpiIndicator[];
-  pct_cumplimiento_total: number; meta_alcanzada: boolean; venta_base_sin_iva: number;
-  monto_rebate_calculado: number; monto_compras_sin_iva?: number; total_rebate_pct_ganado?: number;
+export interface SalesAgentRun { id: string; company_id: string; started_at: string; finished_at?: string; model?: string; status: string; diagnostico?: string; error_message?: string }
+export interface SalesRecommendation { id: string; company_id: string; run_id: string; tipo: string; titulo: string; descripcion: string; entidad_relacionada?: string; monto_relacionado?: string; requested_by: string; approved_by?: string; status: string; comments?: string; created_at: string; updated_at: string }
+export interface Supplier {
+  id: string
+  company_id?: string
+  ruc?: string
+  ci?: string
+  razon_social?: string
+  nombre?: string
+  nombre_fantasia?: string
+  tipo_persona?: string
+  tipo_provision?: "bienes" | "servicios" | "mixto" | string
+  rubro?: string
+  pais?: string
+  limite_credito?: number
+  dia_visita?: string
+  frecuencia_entrega?: string
+  condicion_iva?: string
+  direccion?: string
+  ciudad?: string
+  telefono?: string
+  email?: string
+  contacto?: string
+  contacto_nombre?: string
+  contacto_telefono?: string
+  contacto_email?: string
+  plazo_pago_dias?: number
+  plazo_entrega_promedio?: number
+  rating?: number
+  tipo?: string
+  tipo_proveedor?: string
+  grupo?: string
+  categoria_ids?: string[]
+  moneda_default?: string
+  banco?: string
+  cuenta_bancaria?: string
+  titular_cuenta_bancaria?: string
+  tipo_cuenta_bancaria?: string
+  identificacion_bancaria?: string
+  tipo_contribuyente?: string
+  retencion_irp?: boolean
+  retencion_iva?: boolean
+  porcentaje_retencion_iva?: number
+  agente_retencion?: boolean
+  notas?: string
+  activo?: boolean
+  created_at?: string
+  updated_at?: string
 }
 export interface Quote { id: string; company_id?: string; customer_id?: string; customer?: Customer; numero?: string; fecha?: string; fecha_vencimiento?: string; valido_hasta?: string; estado?: string; subtotal?: number; total_iva?: number; total?: number; moneda?: string; observaciones?: string; condiciones_pago?: string; descuento_total?: number; iva_10?: number; iva_5?: number; sale_id?: string; items?: QuoteItem[]; created_at?: string; updated_at?: string }
 export interface QuoteItem { id?: string; cotizacion_id?: string; producto_id?: string; producto?: Product; product?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; descuento?: number; total?: number; descripcion?: string; created_at?: string }
 export interface Discount { id: string; company_id?: string; nombre?: string; descripcion?: string; tipo?: string; valor?: number; aplica_a?: string; monto_minimo?: number; monto_maximo?: number; cantidad_minima?: number; fecha_inicio?: string; fecha_fin?: string; producto_ids?: string[]; categoria_ids?: string[]; cliente_ids?: string[]; activo?: boolean; created_at?: string; updated_at?: string }
-export interface CommissionRule { id: string; company_id?: string; nombre: string; tipo: string; porcentaje?: number; vendedor_id?: string; aplica_a?: string; producto_ids?: string[]; categoria_ids?: string[]; monto_minimo?: number; monto_maximo?: number; valido_desde?: string; valido_hasta?: string; activo?: boolean; created_at?: string; updated_at?: string }
-export interface SalesCommission { id: string; company_id?: string; vendedor_id?: string; vendedor?: Customer; venta_id?: string; venta?: Sale; regla_id?: string; regla?: CommissionRule; monto_venta?: number; porcentaje?: number; comision?: number; monto_comision?: number; base_calculo?: number; estado?: string; fecha_pago?: string; created_at?: string; updated_at?: string }
-export interface Return { id: string; company_id?: string; sale_id?: string; sale?: Sale; customer_id?: string; customer?: Customer; numero?: string; fecha?: string; estado?: string; motivo?: string; motivo_detalle?: string; observaciones?: string; aprobado_por?: string; subtotal?: number; total_iva?: number; total?: number; items?: ReturnItem[]; created_at?: string; updated_at?: string }
+export interface CommissionRule { id: string; company_id?: string; nombre: string; tipo: string; porcentaje?: number; vendedor_id?: string; vendedor_nombre?: string; aplica_a?: string; producto_ids?: string[]; categoria_ids?: string[]; monto_minimo?: number; monto_maximo?: number; valido_desde?: string; valido_hasta?: string; activo?: boolean; created_at?: string; updated_at?: string }
+export interface SalesCommission { id: string; company_id?: string; vendedor_id?: string; vendedor_nombre?: string; vendedor?: Customer; sale_id?: string; sale_numero?: string; venta_id?: string; venta?: Sale; regla_id?: string; rule_id?: string; rule_nombre?: string; regla?: CommissionRule; monto_venta?: number; porcentaje?: number; comision?: number; monto_comision?: number; base_calculo?: number; estado?: string; fecha_pago?: string; created_at?: string; updated_at?: string }
+export interface Return { id: string; company_id?: string; sale_id?: string; sale?: Sale; customer_id?: string; customer?: Customer; numero?: string; sale_numero?: string; nota_credito_numero?: string; nota_credito_error?: string; fecha?: string; estado?: string; motivo?: string; motivo_detalle?: string; observaciones?: string; aprobado_por?: string; subtotal?: number; total_iva?: number; total?: number; items?: ReturnItem[]; created_at?: string; updated_at?: string }
 export interface ReturnItem { id?: string; devolucion_id?: string; producto_id?: string; producto?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; motivo?: string; estado?: string; condicion?: string; descripcion?: string; total?: number; created_at?: string }
 export interface SalesOrder { id: string; company_id?: string; customer_id?: string; customer?: Customer; numero?: string; fecha?: string; fecha_entrega?: string; estado?: string; prioridad?: string; subtotal?: number; total_iva?: number; total?: number; observaciones?: string; condicion?: string; moneda?: string; iva_10?: number; iva_5?: number; descuento_total?: number; fecha_entrega_solicitada?: string; fecha_entrega_estimada?: string; direccion_entrega?: string; items?: SalesOrderItem[]; created_at?: string; updated_at?: string }
 export interface SalesOrderItem { id?: string; pedido_id?: string; producto_id?: string; producto?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; descuento?: number; total?: number; entregado?: number; pendiente?: number; created_at?: string }
 export interface ProductVariant { id: string; product_id?: string; producto?: Product; tipo?: string; valor?: string; sku_variante?: string; codigo_barra?: string; precio_extra?: number; stock?: number; activo?: boolean; created_at?: string }
-export interface SupermerRecipe { id: string; area?: string; nombre?: string; descripcion?: string; producto_terminado_id?: string; producto_terminado_nombre?: string; cantidad_esperada?: number; unidad_medida?: string; rendimiento_esperado?: number; activa?: boolean; items?: SupermerRecipeItem[]; created_at?: string }
-export interface SupermerRecipeItem { id?: string; receta_id?: string; producto_id?: string; producto_nombre?: string; cantidad?: number; unidad_medida?: string; es_opcional?: boolean }
-export interface SupermerOrder { id: string; area?: string; receta_id?: string; receta_nombre?: string; cantidad_objetivo?: number; estado?: string; fecha_inicio?: string; fecha_fin?: string; fecha_vencimiento?: string; responsable_id?: string; responsable_nombre?: string; notas?: string; insumos_usados?: any; producto_obtenido?: number; rendimiento_real?: number; created_at?: string }
+export interface PackBarcode { id: string; product_id: string; company_id: string; codigo_barra: string; etiqueta: string; unidades_por_paquete: number; activo: boolean; created_at?: string; updated_at?: string; product_nombre?: string; product_sku?: string }
+export interface SupermerRecipe {
+  id: string;
+  area?: string;
+  nombre?: string;
+  descripcion?: string;
+  producto_terminado_id?: string;
+  producto_terminado_nombre?: string;
+  producto_terminado_sku?: string;
+  producto_terminado_precio_venta?: number;
+  cantidad_esperada?: number;
+  unidad_medida?: string;
+  rendimiento_esperado?: number;
+  deposito_origen_id?: string;
+  deposito_destino_id?: string;
+  deposito_origen_nombre?: string;
+  deposito_destino_nombre?: string;
+  costo_total_estimado?: number;
+  costo_unitario_estimado?: number;
+  margen_estimado_monto?: number;
+  margen_estimado_pct?: number;
+  activa?: boolean;
+  items?: SupermerRecipeItem[];
+  created_at?: string;
+}
+export interface SupermerRecipeItem {
+  id?: string;
+  receta_id?: string;
+  producto_id?: string;
+  producto_nombre?: string;
+  producto_sku?: string;
+  cantidad?: number;
+  unidad_medida?: string;
+  costo_unitario?: number;
+  subtotal_costo?: number;
+  stock_disponible?: number;
+  es_opcional?: boolean;
+}
+export interface SupermerOrder {
+  id: string;
+  area?: string;
+  receta_id?: string;
+  receta_nombre?: string;
+  producto_terminado_nombre?: string;
+  cantidad_objetivo?: number;
+  estado?: string;
+  deposito_origen_id?: string;
+  deposito_destino_id?: string;
+  deposito_origen_nombre?: string;
+  deposito_destino_nombre?: string;
+  lote_codigo?: string;
+  fecha_inicio?: string;
+  fecha_fin?: string;
+  fecha_vencimiento?: string;
+  responsable_id?: string;
+  responsable_nombre?: string;
+  notas?: string;
+  insumos_usados?: any;
+  producto_obtenido?: number;
+  rendimiento_real?: number;
+  created_at?: string;
+}
 export interface SupermerBatch { id: string; producto_id?: string; producto_nombre?: string; cantidad_obtenida?: number; fecha_produccion?: string; fecha_vencimiento?: string; lote_codigo?: string; costo_unitario?: number; orden_id?: string }
-export interface SupermerWaste { id: string; area?: string; producto_id?: string; producto_nombre?: string; cantidad?: number; costo_unitario?: number; costo_total?: number; tipo_merma?: string; motivo?: string; fecha?: string; registrado_por?: string }
+export interface SupermerWaste { id: string; area?: string; warehouse_id?: string; producto_id?: string; producto_nombre?: string; cantidad?: number; costo_unitario?: number; costo_total?: number; tipo_merma?: string; motivo?: string; fecha?: string; registrado_por?: string; registrado_por_nombre?: string; estado?: "pendiente" | "aprobada" | "rechazada"; aprobado_por?: string; aprobado_por_nombre?: string; aprobado_at?: string; motivo_rechazo?: string }
 export interface SupermerPerishableConfig { id: string; producto_id?: string; producto_nombre?: string; vida_util_dias?: number; requiere_markdown?: boolean; categoria_perecedera?: string }
 export interface SupermerMarkdown { id: string; producto_id?: string; producto_nombre?: string; lote_id?: string; descuento_porcentaje?: number; precio_original?: number; precio_markdown?: number; fecha_inicio?: string; fecha_fin?: string; activo?: boolean; motivo?: string }
 export interface SupermerForecast { id: string; producto_id?: string; producto_nombre?: string; fecha_pronosticada?: string; cantidad_pronosticada?: number; confianza?: number; fecha_generacion?: string }
@@ -159,7 +507,7 @@ export interface SupermerDashboard { ordenes_activas?: number; ordenes_hoy?: num
 export interface SupermerWasteByArea { area?: string; total_cantidad?: number; total_costo?: number; cantidad_ordenes?: number }
 export interface SupermerProductionByArea { area?: string; total_producido?: number; ordenes_completadas?: number; rendimiento_promedio?: number; merma_cantidad?: number; merma_costo?: number }
 export interface ButcheryTemplate { id: string; nombre?: string; especie?: string; peso_promedio_kg?: number; descripcion?: string; activa?: boolean; cuts?: ButcheryTemplateCut[]; created_at?: string }
-export interface ButcheryTemplateCut { id?: string; producto_id?: string; producto_nombre?: string; rendimiento_porcentual?: number; precio_ponderado?: number; orden?: number; es_subproducto?: boolean }
+export interface ButcheryTemplateCut { id?: string; producto_id?: string; producto_nombre?: string; producto_sku?: string; producto_codigo_barra?: string; plu_balanza?: number; precio_venta?: number; rendimiento_porcentual?: number; precio_ponderado?: number; orden?: number; es_subproducto?: boolean }
 export interface DesposteInput { template_id: string; peso_entrada_kg: number; costo_total_gs: number; fecha_vencimiento?: string; responsable_id?: string; notas?: string }
 export interface DesposteCorteResult { producto_id?: string; producto_nombre?: string; rendimiento_esperado?: number; peso_obtenido_kg?: number; costo_unitario_gs?: number; precio_ponderado?: number; es_subproducto?: boolean }
 export interface DesposteResponse { orden_id: string; template_nombre?: string; peso_entrada_kg?: number; costo_total_gs?: number; peso_total_obtenido?: number; merma_kg?: number; merma_porcentaje?: number; cortes?: DesposteCorteResult[]; batches?: SupermerBatch[] }
@@ -175,6 +523,412 @@ export interface AutoApplyMarkdownByBatchInput { dias_verde?: number; dias_amari
 export interface AutoApplyMarkdownResult { procesados?: number; markdowns_creados?: number; errores?: string[]; detalle?: any[] }
 export interface ForecastEnhanceInput { producto_ids?: string[]; lookback_dias?: number; incluir_estacionalidad?: boolean }
 export interface ProduceDashboard { total_recibido_hoy?: number; lotes_activos?: number; lotes_por_vencer?: number; auditorias_pendientes?: number; scorecards_generados?: number; proveedores_activos?: number; calidad_promedio_general?: string }
+export interface ProductsStatsResponse {
+  total_productos: number
+  total_pesables: number
+  margen_promedio_pct: number
+  total_valorizado_costo: number
+  total_quiebres: number
+  total_bajos: number
+}
+
+export interface Product360Response {
+  product: {
+    id: string
+    sku: string
+    nombre: string
+    descripcion?: string | null
+    codigo_barra?: string | null
+    plu_balanza?: number | null
+    unidad_medida: string
+    tipo: string
+    tipo_venta?: string
+    categoria_id?: string | null
+    categoria_nombre?: string | null
+    precio_venta: number
+    precio_regular?: number
+    costo_promedio: number
+    ultimo_costo: number
+    costo_landed?: number
+    stock_minimo: number
+    stock_maximo?: number
+    iva_tasa: number
+    tiene_lotes?: boolean
+    tiene_vencimiento?: boolean
+    peso_kg?: number
+    imagen_url?: string | null
+    activo: boolean
+    created_at?: string | null
+  }
+  stock: {
+    total_fisico: number
+    total_reservado: number
+    total_disponible: number
+    valor_inventario_costo: number
+    por_deposito: Array<{
+      id: string
+      warehouse_id: string
+      warehouse_nombre: string
+      warehouse_codigo: string
+      cantidad: number
+      cantidad_reservada: number
+      costo_unitario: number
+    }>
+  }
+  rotacion: {
+    ventas_ultimos_30d_unidades: number
+    ventas_ultimos_30d_gs: number
+    demanda_diaria_estimada: number
+    autonomia_dias: number
+    estado_stock: "critico" | "bajo" | "optimo"
+  }
+  metricas_financieras: {
+    precio_venta: number
+    precio_regular?: number
+    precio_venta_promedio_real?: number
+    precio_venta_promedio_30d?: number
+    costo_unitario: number
+    costo_promedio?: number
+    ultimo_costo?: number
+    costo_landed?: number
+    margen_bruto_monto: number
+    margen_bruto_pct: number
+    markup_pct: number
+    margen_lista_pct?: number
+    margen_lista_monto?: number
+    descuento_medio_escala_pct?: number
+    diferencial_margen_pct?: number
+    valor_inventario?: number
+  }
+  margen_ponderado_analisis?: {
+    precio_lista: number
+    precio_promedio_real: number
+    precio_promedio_30d: number
+    costo_promedio_ppp: number
+    ultimo_costo: number
+    margen_bruto_real_pct: number
+    margen_bruto_real_monto: number
+    markup_real_pct: number
+    margen_bruto_real_30d_pct: number
+    margen_lista_nominal_pct: number
+    margen_lista_nominal_monto: number
+    markup_lista_pct: number
+    descuento_medio_escala_pct: number
+    diferencial_margen_pct: number
+    unidades_totales_vendidas: number
+    monto_total_vendido: number
+    tickets_totales_count: number
+  }
+  costos_estructura?: {
+    costo_promedio: number
+    ultimo_costo: number
+    costo_landed: number
+    metodo_costeo: string
+    variacion_costo_pct: number
+    margen_sobre_promedio_pct: number
+    margen_sobre_ultimo_pct: number
+    markup_sobre_promedio_pct: number
+    markup_sobre_ultimo_pct: number
+    ganancia_unitaria_promedio: number
+    ganancia_unitaria_ultimo: number
+  }
+  escalas_precio?: Array<{
+    id: string
+    min_qty: number
+    max_qty?: number | null
+    precio_unitario: number
+    moneda: string
+    ahorro_por_unidad: number
+    descuento_pct: number
+    total_minimo: number
+    margen_pct: number
+    markup_pct: number
+  }>
+  historial_ventas_mensual?: Array<{
+    mes: string
+    mes_label: string
+    unidades: number
+    monto: number
+    num_ventas: number
+  }>
+  historial_costos_mensual?: Array<{
+    mes: string
+    mes_label: string
+    costo_promedio_mes: number
+    unidades_compradas: number
+  }>
+  promociones?: Array<{
+    id: string
+    nombre: string
+    descripcion?: string
+    tipo: string
+    valor?: number
+    precio_fijo_promocional?: number
+    estado: string
+    valido_desde: string
+    valido_hasta: string
+    dias_semana?: number[]
+    origen?: string
+    financiamiento?: string
+    activo: boolean
+    es_vigente_hoy: boolean
+    ahorro_por_unidad: number
+    ahorro_pct: number
+    limite_por_compra?: number
+    stock_limite_unidades?: number
+    unidades_vendidas_promo?: number
+    usuario_registro?: string
+    created_at?: string
+  }>
+  codigos_alternativos?: Array<{
+    id: string
+    codigo_barra: string
+    etiqueta: string
+    unidades_por_paquete: number
+    activo: boolean
+    created_at: string
+  }>
+  supplier_info?: {
+    id: string
+    razon_social: string
+    ruc?: string
+    telefono?: string
+    email?: string
+    contacto_nombre?: string
+    contacto_telefono?: string
+    plazo_pago_dias?: number
+    tipo_proveedor?: string
+    rating?: number
+    moneda_default?: string
+    ciudad?: string
+    plazo_entrega_promedio?: number
+    grupo?: string
+  } | null
+  ultimas_compras: Array<{
+    id: string
+    numero: string
+    fecha: string
+    estado: string
+    cantidad: number
+    precio_unitario: number
+    total: number
+    supplier_nombre?: string
+    supplier_ruc?: string
+  }>
+  ultimas_ventas: Array<{
+    id: string
+    numero: string
+    fecha: string
+    venta_total: number
+    cantidad: number
+    precio_unitario: number
+    subtotal: number
+    customer_nombre?: string
+  }>
+  kardex_reciente: Array<{
+    id: string
+    tipo: string
+    tipo_label?: string
+    color_theme?: string
+    es_entrada?: boolean
+    cantidad: number
+    cantidad_abs?: number
+    costo_unitario: number
+    costo_total?: number
+    motivo?: string
+    referencia_type?: string
+    referencia_id?: string
+    comprobante_numero?: string
+    created_at: string
+    warehouse_nombre?: string
+  }>
+  kardex?: Array<{
+    id: string
+    tipo: string
+    tipo_label?: string
+    color_theme?: string
+    es_entrada?: boolean
+    cantidad: number
+    cantidad_abs?: number
+    costo_unitario: number
+    costo_total?: number
+    motivo?: string
+    referencia_type?: string
+    referencia_id?: string
+    comprobante_numero?: string
+    created_at: string
+    warehouse_nombre?: string
+  }>
+  kardex_resumen?: {
+    total_entradas: number
+    total_salidas: number
+    saldo_neto_periodo: number
+    movimientos_count: number
+    total_valorizado_salidas: number
+    total_valorizado_entradas: number
+  }
+}
+
+export interface InventoryStatsResponse {
+  total_skus_almacenados: number
+  total_unidades_fisicas: number
+  total_unidades_reservadas: number
+  valor_total_costo: number
+  valor_total_venta_proyectada: number
+  total_quiebres: number
+  total_bajos: number
+  cant_mermas_mes: number
+  monto_mermas_mes_gs: number
+}
+
+export interface InventoryMovementRecord {
+  id: string
+  company_id: string
+  warehouse_id: string
+  product_id: string
+  variant_id?: string | null
+  tipo: string
+  cantidad: number
+  costo_unitario: number
+  referencia_type?: string
+  referencia_id?: string
+  motivo?: string
+  user_id?: string
+  created_at: string
+  product_nombre?: string
+  product_sku?: string
+  warehouse_nombre?: string
+  warehouse_codigo?: string
+  user_nombre?: string
+  saldo_acumulado?: number
+}
+
+export interface AdjustmentMotivo {
+  codigo: string
+  label: string
+  riesgo: "bajo" | "medio" | "alto" | "severo"
+  requiere_evidencia: boolean
+}
+
+export interface AdjustmentItemCreate {
+  product_id: string
+  variant_id?: string | null
+  cantidad_sistema: number
+  cantidad_fisica: number
+  costo_unitario?: number
+}
+
+export interface AdjustmentCreatePayload {
+  company_id?: string
+  warehouse_id: string
+  motivo_codigo: string
+  motivo_detalle: string
+  items: AdjustmentItemCreate[]
+  evidencia_urls?: string[]
+  observaciones?: string
+}
+
+export interface AdjustmentAuditLog {
+  id: string
+  accion: string
+  user_nombre?: string
+  rol_firmante?: string
+  comentario?: string
+  created_at: string
+}
+
+export interface InventoryAdjustmentItemRecord {
+  id: string
+  product_id: string
+  product_nombre?: string
+  product_sku?: string
+  cantidad_sistema: number
+  cantidad_fisica: number
+  diferencia: number
+  costo_unitario: number
+  impacto_gs: number
+}
+
+export interface InventoryAdjustmentRecord {
+  id: string
+  codigo: string
+  motivo_codigo?: string
+  motivo_label?: string
+  motivo_detalle?: string
+  motivo: string
+  riesgo: "bajo" | "medio" | "alto" | "severo"
+  estado: "pendiente_gerencia" | "pendiente_administracion" | "aprobado" | "rechazado"
+  impacto_financiero_gs: number
+  evidencia_urls?: string[]
+  observaciones?: string
+  created_at: string
+  aprobado_por_gerencia_nombre?: string
+  fecha_aprobacion_gerencia?: string
+  comentario_gerencia?: string
+  aprobado_por_administracion_nombre?: string
+  fecha_aprobacion_administracion?: string
+  comentario_administracion?: string
+  rechazado_por_nombre?: string
+  motivo_rechazo?: string
+  fecha_rechazo?: string
+  warehouse_nombre?: string
+  warehouse_codigo?: string
+  total_items: number
+  diferencia_unidades: number
+  diferencia_valorizada_gs: number
+  items?: InventoryAdjustmentItemRecord[]
+  audit_logs?: AdjustmentAuditLog[]
+}
+
+export interface PhysicalSessionItem {
+  id: string
+  session_id: string
+  product_id: string
+  product_nombre?: string
+  product_sku?: string
+  product_codigo_barra?: string
+  cantidad_sistema: number
+  costo_unitario?: number
+  cantidad_conteo_1?: number | null
+  contado_1_at?: string | null
+  cantidad_conteo_2?: number | null
+  contado_2_at?: string | null
+  cantidad_final?: number | null
+  diferencia?: number | null
+  impacto_gs?: number | null
+  estado: "pendiente" | "conteo_1" | "conteo_2" | "reconciliado"
+  nota_reconciliacion?: string | null
+  created_at: string
+}
+
+export interface PhysicalSession {
+  id: string
+  company_id: string
+  warehouse_id: string
+  warehouse_nombre?: string
+  codigo: string
+  tipo: "total" | "parcial" | "ciclico"
+  estado: "abierta" | "en_conteo" | "cerrada" | "cancelada"
+  categoria_id?: string | null
+  pasillo?: string | null
+  descripcion_alcance?: string | null
+  notas?: string | null
+  creado_por_nombre?: string | null
+  contador_1_nombre?: string | null
+  contador_2_nombre?: string | null
+  cerrado_por_nombre?: string | null
+  total_items?: number
+  items_con_diferencia?: number
+  diferencia_total_unidades?: number
+  diferencia_total_gs?: number
+  adjustment_id?: string | null
+  fecha_inicio?: string | null
+  fecha_cierre?: string | null
+  created_at: string
+  items?: PhysicalSessionItem[]
+}
+
+
 export interface ScaleConfig { id: string; nombre: string; marca: string; modelo?: string; protocolo: string; conexion: string; puerto_com?: string; baudrate: number; data_bits?: number; host?: string; puerto_tcp: number; timeout_segundos: number; vendor_id?: string; product_id?: string; ruta_carga?: string; sync_automatico: boolean; etiqueta_formato: string; etiqueta_cabecera?: string; activa: boolean; created_at: string }
 export interface ScaleWeightResult { scale_id: string; scale_nombre: string; protocolo: string; peso_bruto: number; peso_neto?: number; tara: number; unidad: string; estable: boolean; raw_response?: string; timestamp: string }
 export interface ConnectionTestResult { scale_id: string; scale_nombre: string; conectada: boolean; protocolo_detectado?: string; mensaje: string; latencia_ms?: number; peso_actual?: number }
@@ -216,14 +970,22 @@ export interface GerencialDeptoPyl {
   merma_porcentaje: number
   markdowns_activos: number
 }
+export interface GerencialAlertasNegocio {
+  margen_bajo: { producto_id: string; producto_nombre: string; cantidad_vendida_30d: number; total_ventas_30d: number; margen_porcentaje: number }[]
+  margen_umbral: number
+  cxc_vencidas: { cantidad: number; monto: number; total_pendiente: number }
+  cxp_vencidas: { cantidad: number; monto: number; total_pendiente: number }
+  dias_cobro_promedio: number | null
+  dias_pago_promedio: number | null
+}
 export interface ScalePLUSyncInput { producto_ids?: string[]; modo?: string }
 export interface ScalePLUSyncResult { sync_id: string; scale_nombre: string; total_productos: number; exitosos: number; fallidos: number; archivo_generado?: string; errores?: any[] }
 export interface ScaleLabelTemplate { id: string; nombre: string; ancho_mm: number; alto_mm: number; campos: any[]; incluir_barcode: boolean; incluir_precio: boolean; incluir_peso: boolean; activo: boolean; created_at: string }
 export interface ProtocolDetectInput { conexion?: string; puerto_com?: string; host?: string; puerto_tcp?: number; baudrate?: number; timeout?: number }
 export interface PrintLabelInput { scale_id: string; producto_id: string; peso_kg: number; precio_unitario: number; template_id?: string; fecha_vencimiento?: string; lote?: string; cantidad_copias?: number }
 export interface WhatsAppConfig { id: string; company_id?: string; tenant_id?: string; numero_telefono?: string; phone_number?: string; account_sid?: string; auth_token?: string; webhook_url?: string; webhook_activo?: boolean; plantilla_bienvenida?: string; plantilla_despedida?: string; horario_atencion_inicio?: string; horario_atencion_fin?: string; dias_atencion?: string[]; fuera_horario_mensaje?: string; activo?: boolean; enabled?: boolean; auto_reply?: boolean; created_at?: string; updated_at?: string }
-export interface WhatsAppConversation { id: string; tenant_id?: string; company_id?: string; customer_id?: string; contact_id?: string; customer?: Customer; telefono?: string; nombre_contacto?: string; contact_name?: string; contact_phone?: string; estado?: string; status?: string; ultimo_mensaje?: string; last_message_preview?: string; ultima_respuesta?: string; fecha_ultimo_mensaje?: string; last_message_at?: string; fecha_ultima_respuesta?: string; mensajes_no_leidos?: number; etiquetas?: string[]; asignado_a?: string; session_state?: string; session_data?: Record<string, unknown>; activo?: boolean; created_at?: string; updated_at?: string }
-export interface WhatsAppMessage { id: string; tenant_id?: string; message_id?: string; conversacion_id?: string; conversation_id?: string; conversacion?: WhatsAppConversation; direccion?: string; direction?: string; tipo?: string; contenido?: string; content?: string; media_url?: string; estado?: string; status?: string; error_mensaje?: string; fecha_envio?: string; fecha_entrega?: string; fecha_lectura?: string; metadata?: Record<string, unknown>; created_at?: string }
+export interface WhatsAppConversation { id: string; tenant_id?: string; company_id?: string; customer_id?: string; contact_id?: string; customer?: Customer; telefono?: string; nombre_contacto?: string; contact_name?: string; contact_phone?: string; estado?: string; status?: string; ultimo_mensaje?: string; last_message_preview?: string; ultima_respuesta?: string; fecha_ultimo_mensaje?: string; last_message_at?: string; fecha_ultima_respuesta?: string; mensajes_no_leidos?: number; etiquetas?: string[]; asignado_a?: string; session_state?: string; session_data?: Record<string, unknown>; activo?: boolean; created_at?: string; updated_at?: string; handling_mode?: string; assigned_user_id?: string | null; assigned_user_name?: string | null; department?: string; waiting_since?: string | null; unread_agent_count?: number; is_ai_typing?: boolean; total_messages?: number }
+export interface WhatsAppMessage { id: string; tenant_id?: string; message_id?: string; conversacion_id?: string; conversation_id?: string; conversacion?: WhatsAppConversation; direccion?: string; direction?: string; tipo?: string; contenido?: string; content?: string; media_url?: string; estado?: string; status?: string; error_mensaje?: string; fecha_envio?: string; fecha_entrega?: string; fecha_lectura?: string; metadata?: Record<string, unknown>; created_at?: string; sender_type?: string; sender_user_id?: string | null; sender_name?: string | null; media_type?: string | null; media_filename?: string | null; media_size_bytes?: number | null }
 export interface WhatsAppTemplate { id: string; tenant_id?: string; company_id?: string; nombre?: string; name?: string; tipo?: string; categoria?: string; idioma?: string; contenido?: string; content?: string; variables?: string[]; ejemplo?: string; aprobado?: boolean; estado_aprobacion?: string; activo?: boolean; active?: boolean; created_at?: string; updated_at?: string }
 export interface WhatsAppStats { id?: string; company_id?: string; fecha?: string; total_conversaciones?: number; total_conversations?: number; conversaciones_activas?: number; active_today?: number; mensajes_enviados?: number; messages_today?: number; mensajes_recibidos?: number; tiempo_respuesta_promedio_min?: number; avg_response_time?: number; satisfaccion_promedio?: number; conversiones?: number; ventas_generadas?: number; created_at?: string }
 export interface SifenTimbrado { id: string; company_id?: string; numero?: string; fecha_inicio?: string; fecha_fin?: string; numero_inicio?: number; numero_fin?: number; numero_actual?: number; rango_desde?: number; rango_hasta?: number; estado?: string; activo?: boolean; tipo_comprobante?: string; created_at?: string; updated_at?: string }
@@ -235,15 +997,17 @@ export interface Vertical { id?: string; slug: string; nombre: string; descripci
 export interface CompanyVerticalConfig { vertical_id?: string; features?: string[]; config?: Record<string, unknown> }
 export interface IntegrationConfig { id: string; company_id?: string; destino?: string; tipo?: string; nombre?: string; url?: string; token?: string; headers?: Record<string, string>; activo?: boolean; eventos?: string[]; created_at?: string; updated_at?: string }
 export interface IntegrationDelivery { id: string; config_id?: string; evento?: string; url?: string; payload?: Record<string, unknown>; payload_size?: number; respuesta_status?: number; respuesta_body?: string; exitoso?: boolean; reintentos?: number; fecha_envio?: string; created_at?: string }
-export interface PriceList { id: string; company_id?: string; nombre?: string; descripcion?: string; tipo?: string; descuento_general?: number; activo?: boolean; fecha_inicio?: string; fecha_fin?: string; created_at?: string; updated_at?: string }
-export interface PriceListItem { id: string; lista_id?: string; producto_id?: string; producto?: Product; precio?: number; descuento?: number; margen?: number; activo?: boolean; created_at?: string; updated_at?: string }
+export interface PriceList { id: string; company_id?: string; nombre?: string; tipo?: string; customer_id?: string | null; grupo?: string | null; activo?: boolean; created_at?: string; updated_at?: string }
+export interface PriceListItem { id: string; price_list_id?: string; product_id?: string; variant_id?: string | null; precio?: number; moneda?: string; notas?: string | null; activo?: boolean; created_at?: string; updated_at?: string }
+export interface PosTerminalTransaction { id: string; company_id?: string; sale_id?: string | null; customer_id?: string | null; tipo_operacion: string; terminal_ip?: string | null; punto_emision?: string | null; factura_nro_provisional?: string | null; bin?: string | null; nsu?: string | null; codigo_autorizacion?: string | null; codigo_comercio?: string | null; issuer_id?: string | null; nombre_tarjeta?: string | null; pan?: string | null; mensaje_display?: string | null; nombre_cliente?: string | null; monto?: number | null; monto_vuelto?: number | null; monto_comision?: number | null; monto_extraccion?: number | null; saldo?: number | null; moneda_alt?: string | null; monto_alt?: number | null; exitosa: boolean; verificado_automaticamente: boolean; error_message?: string | null; raw_response?: any; created_at?: string }
+export interface PaymentIntegrationConfig { id: string; company_id: string; provider: string; environment: string; enabled: boolean; config: Record<string, any>; created_at: string; updated_at: string }
 export interface Kit { id: string; company_id?: string; nombre?: string; descripcion?: string; sku?: string; precio?: number; costo?: number; margen?: number; items?: KitItem[]; activo?: boolean; created_at?: string; updated_at?: string }
 export interface KitItem { id: string; kit_id?: string; producto_id?: string; producto?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; created_at?: string }
 export interface Backup { id: string; company_id?: string; tenant_id?: string; tenant_slug?: string | null; schema_name?: string; nombre?: string; filename?: string; file_size?: number; status?: string; backup_type?: string; expires_at?: string; tipo?: string; ruta?: string; tamano_bytes?: number; estado?: string; fecha_inicio?: string; fecha_fin?: string; duracion_seg?: number; error_mensaje?: string; created_at?: string }
 export interface BackupScheduleConfig { id?: string; company_id?: string; frequency?: "hourly" | "daily" | "weekly" | "monthly"; frecuencia?: string; enabled?: boolean; hour?: number; minute?: number; day_of_week?: string | number | null; day_of_month?: number | null; hora?: string; dia_semana?: string; dia_mes?: number; retencion_dias?: number; retention_days?: number; max_backups?: number | null; activo?: boolean; notificar_email?: boolean; email_notificacion?: string; created_at?: string; updated_at?: string }
 export type ReturnType = Return
 export type ReturnItemType = ReturnItem
-export interface AccountsReceivable { id: string; company_id?: string; customer_id?: string; customer?: Customer; customer_name?: string; numero_documento?: string; saldo?: number; saldo_pendiente?: number; limite_credito?: number; porcentaje_uso?: number; monto_original?: number; fecha_emision?: string; fecha_vencimiento?: string; dias_mora?: number; estado?: string; activo?: boolean; created_at?: string; updated_at?: string }
+export interface AccountsReceivable { id: string; company_id?: string; customer_id?: string; customer?: Customer; customer_name?: string; customer_ruc?: string; customer_telefono?: string; empresa_vinculada_nombre?: string; sale_id?: string; numero_documento?: string; saldo?: number; saldo_pendiente?: number; limite_credito?: number; porcentaje_uso?: number; monto_original?: number; fecha_emision?: string; fecha_vencimiento?: string; dias_mora?: number; estado?: string; activo?: boolean; created_at?: string; updated_at?: string }
 export interface BancardTransaction { id: string; company_id: string; order_id: string; amount: number; currency: string; status: string; token?: string; process_id?: string; checkout_url?: string; authorization_code?: string; card_last4?: string; card_brand?: string; terminal_id?: string; payment_type: string; error_message?: string; created_at: string; updated_at: string }
 export interface BancardCheckoutResponse { payment_id: string; process_id: string; checkout_url: string; status: string; amount: number; order_id: string }
 export interface SpiQr { id: string; company_id?: string; monto?: number; moneda?: string; estado?: string; qr_data?: string; qr_image_url?: string; qr_image_base64?: string; referencia?: string; order_id?: string; merchant_name?: string; descripcion?: string; description?: string; customer_email?: string; customer_name?: string; bcp_transaction_id?: string; fecha_expiracion?: string; fecha_pago?: string; payment_id?: string; amount?: number; status?: string; created_at?: string; updated_at?: string }
@@ -253,9 +1017,10 @@ export interface EmailConfig { id: string; company_id?: string; smtp_host?: stri
 export interface EventStream { id: string; tipo?: string; mensaje?: string; datos?: Record<string, unknown>; timestamp?: string }
 export interface ImportTemplate { id: string; company_id?: string; nombre?: string; tipo?: string; columnas?: string[]; mapeo?: Record<string, string>; activo?: boolean; created_at?: string }
 export interface ImportResult { id: string; template_id?: string; estado?: string; total_registros?: number; exitosos?: number; errores?: number; detalle?: Record<string, unknown>[]; created_at?: string }
-export interface LoyaltyConfig { id: string; company_id: string; puntos_por_guarani: number; guarani_por_punto: number; vencimiento_dias: number; canje_minimo_puntos: number; bienvenida_puntos: number; cumpleanos_puntos: number; crear_en_venta: boolean; activo: boolean; created_at: string; updated_at: string }
+export interface LoyaltyConfig { id: string; company_id: string; puntos_por_guarani: number; guarani_por_punto: number; vencimiento_dias: number; canje_minimo_puntos: number; bienvenida_puntos: number; cumpleanos_puntos: number; crear_en_venta: boolean; activo: boolean; multiplicador_bronce?: number; multiplicador_plata?: number; multiplicador_oro?: number; multiplicador_vip?: number; promocion_activa?: boolean; promocion_nombre?: string; multiplicador_promocional?: number; created_at: string; updated_at: string }
 export interface LoyaltyPoints { id: string; company_id: string; customer_id: string; tipo: string; puntos: number; referencia_tipo?: string; referencia_id?: string; descripcion?: string; vence_en?: string; created_at: string }
-export interface LoyaltyReward { id: string; company_id: string; nombre: string; descripcion?: string; puntos_requeridos: number; tipo_recompensa: string; valor_recompensa?: number; stock?: number; imagen_url?: string; activo: boolean; created_at: string; updated_at: string }
+export interface LoyaltyReward { id: string; company_id: string; nombre: string; descripcion?: string; puntos_requeridos: number; tipo_recompensa: string; valor_recompensa?: number; stock?: number; imagen_url?: string; activo: boolean; supplier_id?: string; product_id?: string; warehouse_id?: string; patrocinador_nombre?: string; aporte_tipo?: string; unidades_pactadas?: number; costo_referencial?: number; notas?: string; warehouse_nombre?: string; product_sku?: string; created_at: string; updated_at: string }
+export interface LoyaltyRedemption { id: string; company_id: string; customer_id: string; reward_id: string; warehouse_id?: string; supplier_id?: string; puntos_canjeados: number; cantidad: number; comprobante_numero?: string; entregado_por?: string; notas?: string; created_at: string }
 export interface PortalCustomer { id: string; nombre?: string; email?: string; telefono?: string; saldo?: number; total_compras?: number; ultima_compra?: string; created_at?: string }
 export interface SecurityApiKey { id: string; company_id?: string; nombre?: string; key_hash?: string; scopes?: string[]; ultimo_uso?: string; activo?: boolean; created_at?: string; updated_at?: string }
 export interface Receipt { id: string; sale_id?: string; cdc?: string; numero?: string; fecha?: string; total?: number; moneda?: string; estado?: string; qr_url?: string; pdf_url?: string; created_at?: string }
@@ -276,8 +1041,142 @@ export interface AgreementVolume { id: string; agreement_id?: string; supplier_i
 export interface SupplierNegotiation { id: string; agreement_id?: string; supplier_id?: string; fecha?: string; tema?: string; resultado?: string; compromisos?: string; proxima_reunion?: string; estado?: string; observaciones?: string; created_at?: string }
 export interface InteliContEntry { id: string; company_id?: string; fecha?: string; tipo?: string; numero?: string; concepto?: string; monto_debe?: number; monto_haber?: number; cuenta_codigo?: string; cuenta_nombre?: string; documento_tipo?: string; documento_numero?: string; estado?: string; error_mensaje?: string; created_at?: string; updated_at?: string }
 export interface InteliAuditEvent { id: string; company_id?: string; fecha?: string; tipo?: string; modulo?: string; entidad_id?: string; entidad_tipo?: string; usuario_id?: string; accion?: string; datos_anteriores?: Record<string, unknown>; datos_nuevos?: Record<string, unknown>; ip_address?: string; user_agent?: string; riesgo_score?: number; estado?: string; created_at?: string }
+export interface PaymentOrderAllocation {
+  id: string;
+  invoice_id: string;
+  numero_factura?: string;
+  timbrado?: string;
+  fecha_emision?: string;
+  fecha_vencimiento?: string;
+  monto_aplicado: number;
+  monto_retencion: number;
+  saldo_anterior: number;
+  saldo_restante: number;
+}
+
+export interface PaymentOrderDisbursement {
+  id: string;
+  forma_pago: string;
+  monto: number;
+  moneda: string;
+  tipo_cambio: number;
+  monto_pyg: number;
+  bank_account_id?: string | null;
+  banco_nombre?: string | null;
+  referencia_transferencia?: string | null;
+  cheque_id?: string | null;
+  numero_cheque?: string | null;
+  banco_cheque?: string | null;
+  fecha_cheque_emision?: string | null;
+  fecha_cheque_vencimiento?: string | null;
+  es_cheque_diferido?: boolean;
+  titular_cheque?: string | null;
+  petty_cash_fund_id?: string | null;
+  fondo_nombre?: string | null;
+  credit_note_id?: string | null;
+  numero_nc?: string | null;
+  comprobante_url?: string | null;
+  observaciones?: string | null;
+  created_at?: string;
+}
+
+export interface SupplierPaymentOrder {
+  id: string;
+  company_id: string;
+  supplier_id: string;
+  supplier_nombre?: string;
+  supplier_ruc?: string;
+  numero_orden: string;
+  fecha_emision: string;
+  fecha_pago?: string | null;
+  estado: 'registrado' | 'pagado' | 'anulado' | string;
+  moneda: string;
+  monto_total: number;
+  monto_retenido: number;
+  monto_neto: number;
+  diferencia_cambio?: number;
+  observaciones?: string | null;
+  recibo_proveedor?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  total_facturas?: number;
+  formas_pago_resumen?: string;
+  allocations?: PaymentOrderAllocation[];
+  disbursements?: PaymentOrderDisbursement[];
+}
+
 export interface SueldokPayroll { id: string; company_id?: string; periodo?: string; fecha_inicio?: string; fecha_fin?: string; total_neto?: number; total_bruto?: number; total_descuentos?: number; total_aportes?: number; cantidad_empleados?: number; estado?: string; created_at?: string; updated_at?: string }
-export interface Promotion { id: string; company_id?: string; nombre: string; descripcion?: string; tipo: string; valor?: number; valor_maximo?: number; aplica_a: string; producto_ids?: string[]; categoria_ids?: string[]; monto_minimo_compra?: number; cantidad_minima?: number; cantidad_maxima_items?: number; aplicaciones_por_cliente?: number; combinable?: boolean; valido_desde?: string; valido_hasta?: string; horario_desde?: string; horario_hasta?: string; dias_semana?: number[]; codigo_cupon?: string; requiere_cupon?: boolean; usos_maximos?: number; usos_actuales?: number; activo?: boolean; created_at?: string }
+export interface Promotion {
+
+  id: string
+  company_id?: string
+  nombre: string
+  descripcion?: string
+  tipo: string
+  valor?: number
+  precio_fijo_promocional?: number
+  valor_maximo?: number
+  base_calculo_pct?: string
+  terminacion_psicologica?: number
+  precios_por_producto?: Record<string, number>
+  aplica_a: string
+  producto_ids?: string[]
+  categoria_ids?: string[]
+  
+  origen?: string
+  financiamiento?: string
+  supplier_id?: string
+  purchases_invoices_ids?: string[]
+  
+  costo_unitario_referencia?: number
+  vende_bajo_costo?: boolean
+  estado?: string
+  aprobado_por?: string
+  fecha_aprobacion?: string
+  
+  limite_por_compra?: number
+  limitar_unidades?: boolean
+  stock_limite_unidades?: number
+  unidades_vendidas_promo?: number
+  unidades_disponibles_promo?: number
+  
+  monto_minimo_compra?: number
+  cantidad_minima?: number
+  cantidad_maxima_items?: number
+  aplicaciones_por_cliente?: number
+  combinable?: boolean
+  valido_desde?: string
+  valido_hasta?: string
+  horario_desde?: string
+  horario_hasta?: string
+  dias_semana?: number[]
+  codigo_cupon?: string
+  requiere_cupon?: boolean
+  
+  nc_estado?: string
+  nc_numero_proveedor?: string
+  nc_timbrado_proveedor?: string
+  nc_monto_total?: number
+  
+  porcentaje_aporte_proveedor?: number
+  porcentaje_aporte_tienda?: number
+  monto_aporte_proveedor_pyg?: number
+  monto_aporte_tienda_pyg?: number
+
+  origen_fuente?: string
+  legacy_id?: number
+  
+  usos_maximos?: number
+  usos_actuales?: number
+  activo?: boolean
+  created_at?: string
+  // Campos de NC y lote de vencimiento
+  porcentaje_nc_costo?: number
+  monto_total_nc_comprometido?: number
+  fecha_vencimiento_lote?: string
+  // Productos detalle (enriquecido por el backend tras fetch)
+  productos_detalle?: Array<{ id: string; nombre: string; sku?: string; codigo_barra?: string; precio_venta?: number; costo_promedio?: number }>
+}
 export interface PromotionUsage { id: string; promotion_id?: string; sale_id?: string; customer_id?: string; branch_id?: string; codigo_cupon?: string; descuento_aplicado?: number; items_aplicados?: string[]; created_at?: string }
 export interface MobileDashboard { recepciones_pendientes: number; inventarios_pendientes: number; sugerencias_pendientes: number; entregas_hoy: number }
 export interface InventoryCountItem { product_id: string; cantidad_real: number; lote?: string; fecha_vencimiento?: string }
@@ -292,7 +1191,7 @@ export interface EcommerceSyncResult { sync_id: string; tipo: string; productos_
 export interface MigrationLog { id: string; company_id?: string; tipo: string; origen: string; archivo_nombre?: string | null; estado: string; total_registros: number; importados: number; errores: number; errores_detalle?: string | null; created_at?: string }
 export interface MigrationPreview { columnas: string[]; filas_ejemplo: string[][]; total_filas: number; tipo_detectado: string }
 export interface MigrationImportResult { log_id: string; tipo: string; total: number; importados: number; errores: number; errores_detalle: string[] }
-export interface FiscalConfig { id: string; company_id: string; modo_emision: string; punto_emision: string; timbrado_id?: string; cert_p12_base64?: string; cert_password?: string; sifen_env?: string; created_at?: string; updated_at?: string }
+export interface FiscalConfig { id: string; company_id: string; modo_emision: string; punto_emision: string; timbrado_id?: string; created_at?: string; updated_at?: string }
 export interface TimbradoUsage { id: string; timbrado_id: string; tipo_comprobante: string; numero_utilizado: number; created_at: string }
 export interface NotaCreditoDebito { id: string; company_id: string; sale_id: string; tipo: string; numero_nota: string; motivo: string; total: number; estado: string; cdc?: string; xml_enviado?: string; xml_respuesta?: string; created_at: string }
 export interface ImportContainer { id: string; company_id: string; supplier_id: string; numero_contenedor: string; booking?: string; viaje?: string; puerto_origen: string; puerto_destino: string; incoterm: string; fecha_zarpe?: string; fecha_llegada?: string; fecha_estiba?: string; fecha_nacionalizacion?: string; estado: string; valor_fob_total: number; flete_total: number; seguro_total: number; arancel_total: number; costo_landed_total: number; notas?: string; created_at: string }
@@ -303,11 +1202,145 @@ export interface CustomerCreditLimit { id: string; company_id: string; customer_
 export interface CreditAuthorization { id: string; company_id: string; customer_id: string; monto_solicitado: number; monto_autorizado?: number; motivo?: string; estado: string; created_at: string }
 export interface DistribuidoraDashboard { total_clientes: number; clientes_con_credito: number; clientes_bloqueados: number; ventas_mes: number; margen_promedio: number; facturas_vencidas: number; monto_vencido: number; contenedores_en_transito: number; contenedores_en_aduanas: number; productos_bajo_stock: number; visitas_hoy: number; visitas_completadas_hoy: number }
 export interface ExpenseCategory { id: string; nombre: string; descripcion?: string; presupuesto_mensual?: number; activo?: boolean; created_at?: string }
-export interface Expense { id: string; company_id?: string; branch_id?: string; category_id?: string; monto: number; descripcion: string; proveedor?: string; comprobante_url?: string; tipo_pago?: string; fecha_gasto?: string; registrado_por?: string; aprobado_por?: string; estado?: string; notas?: string; created_at?: string }
+export interface CostCenter { id: string; nombre: string; tipo: "sector" | "global"; peso_prorateo: number; activo?: boolean; created_at?: string }
+export interface Expense {
+  id: string;
+  company_id?: string;
+  branch_id?: string;
+  fund_id?: string;
+  fund_nombre?: string | null;
+  rendicion_id?: string | null;
+  rendicion_numero?: string | null;
+  rendicion_estado?: string | null;
+  rendicion_fecha?: string | null;
+  category_id?: string;
+  cost_center_id?: string;
+  cost_center_nombre?: string;
+  monto: number;
+  monto_brl?: number;
+  descripcion: string;
+  proveedor?: string;
+  comprobante_url?: string;
+  tipo_pago?: string;
+  fecha_gasto?: string;
+  ruc?: string;
+  timbrado?: string;
+  numero_factura?: string;
+  tipo_comprobante?: string;
+  gravado_10?: number;
+  gravado_5?: number;
+  exentas?: number;
+  iva_10?: number;
+  iva_5?: number;
+  es_inversion?: boolean;
+  fixed_asset_id?: string | null;
+  vida_util_meses?: number;
+  categoria_activo?: string;
+  es_pago_proveedor?: boolean;
+  supplier_id?: string | null;
+  supplier_invoice_id?: string | null;
+  es_anticipo_sueldo?: boolean;
+  employee_id?: string | null;
+  employee_nombre?: string | null;
+  employee_ci?: string | null;
+  periodo_nomina?: string | null;
+  cuotas_anticipo?: number;
+  sueldok_sync_status?: string | null;
+  sueldok_sync_id?: string | null;
+  auditoria_estado?: string;
+  auditoria_motivo?: string;
+  registrado_por?: string;
+  aprobado_por?: string;
+  aprobado_at?: string;
+  rechazado_por?: string;
+  rechazado_at?: string;
+  rechazado_motivo?: string;
+  anulado?: boolean;
+  anulado_por?: string;
+  anulado_at?: string;
+  anulado_motivo?: string;
+  estado?: string;
+  notas?: string;
+  fecha_pago?: string;
+  pagado_por?: string;
+  pagado_at?: string;
+  forma_pago_resumen?: string;
+  disbursements?: any[];
+  created_at?: string;
+}
+export interface PettyCashFund {
+  id: string;
+  company_id: string;
+  branch_id?: string | null;
+  branch_nombre?: string | null;
+  nombre: string;
+  custodio_id?: string | null;
+  custodio_nombre?: string | null;
+  cost_center_id?: string | null;
+  cost_center_nombre?: string | null;
+  monto_autorizado: number;
+  saldo_actual: number;
+  monto_maximo_por_gasto?: number;
+  activo: boolean;
+  created_at?: string;
+}
+export interface PettyCashRendicion {
+  id: string;
+  company_id: string;
+  fund_id: string;
+  fund_nombre?: string;
+  numero_rendicion: string;
+  custodio_id: string;
+  custodio_nombre?: string;
+  presentado_por_nombre?: string;
+  auditado_por_id?: string | null;
+  auditado_por_nombre?: string | null;
+  estado: "borrador" | "presentada" | "en_auditoria" | "en_revision" | "aprobada" | "repuesta" | "pagada" | "rechazada";
+  monto_fondo_autorizado: number;
+  efectivo_remanente_contado: number;
+  total_comprobantes_presentados: number;
+  total_comprobantes_aprobados: number;
+  total_comprobantes_rechazados: number;
+  total_presentado?: number;
+  cantidad_comprobantes?: number;
+  diferencia_arqueo: number;
+  total_gravado_10: number;
+  total_gravado_5: number;
+  total_exentas: number;
+  total_iva_10: number;
+  total_iva_5: number;
+  total_inversion_activos: number;
+  total_gasto_operativo: number;
+  monto_repuesto: number;
+  medio_reposicion?: string | null;
+  caja_boveda_id?: string | null;
+  bank_account_id?: string | null;
+  comprobante_pago_ref?: string | null;
+  asiento_contable_id?: string | null;
+  fecha_presentacion?: string | null;
+  fecha_aprobacion?: string | null;
+  fecha_pago?: string | null;
+  observaciones_custodio?: string | null;
+  observaciones_tesoreria?: string | null;
+  created_at?: string;
+}
+export interface PettyCashFundMovement { id: string; fund_id: string; tipo: string; monto: number; saldo_anterior: number; saldo_nuevo: number; referencia_type?: string | null; referencia_id?: string | null; observaciones?: string | null; created_at?: string }
+export interface PettyCashFundCount { id: string; fund_id: string; contado_por: string; contado_por_nombre?: string | null; saldo_esperado: number; monto_contado: number; diferencia: number; requiere_revision: boolean; estado: string; confirmado_por?: string | null; confirmado_por_nombre?: string | null; fecha_confirmacion?: string | null; ajusto_saldo: boolean; observaciones?: string | null; created_at?: string }
 export interface ExpenseSummary { total_dia: number; total_semana: number; total_mes: number; por_categoria: any[]; por_sucursal: any[]; pendientes_aprobacion: number }
-export interface SupplierInvoice { id: string; company_id?: string; supplier_id?: string; supplier_nombre?: string; numero_factura?: string; timbrado?: string; cdc?: string; fecha_emision?: string; fecha_recepcion?: string; fecha_vencimiento?: string; subtotal?: number; descuento?: number; iva_10?: number; iva_5?: number; total?: number; saldo_pendiente?: number; moneda?: string; condicion?: string; tipo_comprobante?: string; estado?: string; concepto?: string; notas?: string; created_by?: string; approved_by?: string; purchase_order_id?: string; created_at?: string }
+export interface ExpenseDashboard {
+  fecha_desde: string; fecha_hasta: string
+  total_periodo: number; total_periodo_anterior: number; variacion_pct: number | null
+  por_categoria: { category_id: string | null; nombre: string; total: number; presupuesto_prorateado: number | null; pct_usado: number | null; sobre_presupuesto: boolean; variacion_pct: number | null }[]
+  por_sector: { cost_center_id: string; nombre: string; directo: number; prorrateado: number; total: number }[]
+  sin_asignar: number
+  tendencia_mensual: { mes: string; total: number }[]
+  top_proveedores: { proveedor: string; total: number }[]
+  sugerencias: { tipo: string; titulo: string; detalle: string }[]
+}
+export interface SupplierInvoice { id: string; company_id?: string; supplier_id?: string; supplier_nombre?: string; supplier_ruc?: string; numero_factura?: string; timbrado?: string; cdc?: string; fecha_emision?: string; fecha_recepcion?: string; fecha_vencimiento?: string; subtotal?: number; descuento?: number; iva_10?: number; iva_5?: number; total?: number; saldo_pendiente?: number; moneda?: string; tipo_cambio?: number; total_brl?: number; saldo_pendiente_brl?: number; condicion?: string; tipo_comprobante?: string; estado?: string; concepto?: string; notas?: string; created_by?: string; approved_by?: string; purchase_order_id?: string; created_at?: string }
 export interface SupplierInvoicePayment { id: string; invoice_id?: string; payment_method?: string; monto?: number; moneda?: string; fecha_pago?: string; referencia?: string; estado?: string; created_at?: string }
-export interface BankAccount { id: string; company_id?: string; banco?: string; tipo?: string; numero_cuenta?: string; moneda?: string; saldo_inicial?: number; saldo_actual?: number; titular?: string; activo?: boolean; created_at?: string }
+export interface BankAccount { id: string; company_id?: string; alias?: string | null; banco?: string; tipo?: string; numero_cuenta?: string; moneda?: string; saldo_inicial?: number; saldo_actual?: number; titular?: string; activo?: boolean; saldo_minimo_alerta?: number | null; saldo_verificado_manualmente?: boolean; saldo_verificado_at?: string | null; saldo_verificado_por?: string | null; created_at?: string }
+export interface BankBalanceCorrection { id: string; company_id?: string; bank_account_id: string; origen: string; saldo_actual: number; saldo_propuesto: number; motivo?: string; estado: string; solicitado_por?: string | null; aprobado_supervisor_id?: string | null; aprobado_supervisor_at?: string | null; aprobado_gerente_id?: string | null; aprobado_gerente_at?: string | null; rechazado_por?: string | null; rechazado_motivo?: string | null; created_at?: string }
 export interface BankTransaction { id: string; company_id?: string; bank_account_id?: string; fecha?: string; tipo?: string; monto?: number; moneda?: string; descripcion?: string; referencia?: string; contraparte?: string; conciliado?: boolean; categoria?: string; invoice_id?: string; created_at?: string }
 export interface CashFlowProjection { id: string; company_id?: string; fecha?: string; saldo_inicial?: number; ingresos_estimados?: number; egresos_estimados?: number; saldo_final_proyectado?: number; ingresos_reales?: number; egresos_reales?: number; saldo_final_real?: number; created_at?: string }
 export interface Budget { id: string; company_id?: string; nombre?: string; periodo?: string; categoria?: string; monto_presupuestado?: number; monto_ejecutado?: number; monto_disponible?: number; area?: string; tipo?: string; created_at?: string }
@@ -331,18 +1364,377 @@ export interface ConsolidatedDashboard { total_branches: number; total_ventas: n
 export type ApiError = { detail: string; code?: string }
 
 // ========== API CLIENT ==========
+
+export interface Supplier360Response {
+  supplier: {
+    id: string
+    razon_social: string
+    ruc: string
+    ci?: string
+    telefono?: string
+    email?: string
+    direccion?: string
+    ciudad?: string
+    contacto_nombre?: string
+    contacto_telefono?: string
+    contacto_email?: string
+    banco?: string
+    cuenta_bancaria?: string
+    plazo_pago_dias: number
+    plazo_entrega_promedio: number
+    rating: number
+    tipo_proveedor: string
+    moneda_default: string
+    condicion_iva: string
+    activo: boolean
+    notas?: string
+  }
+  kpis: {
+    deuda_total_facturas: number
+    deuda_vencida: number
+    deuda_al_dia: number
+    facturas_pendientes_count: number
+    facturas_vencidas_count: number
+    total_facturas_historico: number
+    cheques_diferidos_pendientes_monto: number
+    cheques_diferidos_pendientes_count: number
+    cheques_compensados_monto: number
+    exposicion_financiera_total: number
+    dpo_promedio_dias: number
+    total_compras_historico: number
+    total_ordenes_compra: number
+    otif_rate: number
+    stock_unidades_total: number
+    stock_valorizado_costo: number
+    stock_valorizado_venta: number
+    total_productos_suministrados: number
+    ventas_sellout_monto: number
+    ventas_sellout_unidades: number
+    ganancia_bruta_monto: number
+    margen_bruto_pct: number
+    reclamos_nc_pendientes_monto: number
+    reclamos_nc_resueltos_monto: number
+    reclamos_nc_total_monto: number
+    monedero_nc_saldo_disponible?: number
+    monedero_nc_total_emitido?: number
+    monedero_nc_total_aplicado?: number
+    obligaciones_nc_pendientes_monto?: number
+    credito_total_potencial_nc?: number
+    deuda_neta_efectiva?: number
+  }
+  aging_buckets: {
+    vencido: number
+    dias_1_30: number
+    dias_31_60: number
+    dias_mas_60: number
+  }
+  facturas: Array<{
+    id: string
+    numero_factura: string
+    timbrado?: string
+    fecha_emision: string
+    fecha_vencimiento: string
+    subtotal: number
+    total: number
+    saldo_pendiente: number
+    moneda: string
+    estado: string
+    condicion: string
+    dias_vencido: number
+    es_vencida: boolean
+    bloqueada_para_pago: boolean
+    monto_retenido_nc: number
+    requiere_nc: boolean
+    tiene_nc_vinculada?: boolean
+    ncs_vinculadas?: Array<{
+      id: string
+      credit_note_id: string
+      invoice_id: string
+      numero_nc: string
+      timbrado_nc?: string
+      motivo_nc?: string
+      motivo_categoria?: string
+      monto_aplicado: number
+      fecha: string
+      observaciones?: string
+    }>
+    monto_nc_aplicado?: number
+    saldo_neto_real?: number
+    fase_pago?: string
+    fase_pago_label?: string
+    fase_pago_color?: string
+    lote_pago?: {
+      nombre: string
+      fecha?: string
+      estado?: string
+      monto?: number
+    }
+  }>
+  cheques: Array<{
+    id: string
+    numero: string
+    banco_emisor: string
+    beneficiario: string
+    monto: number
+    moneda: string
+    fecha_emision: string
+    fecha_pago: string
+    diferido: boolean
+    estado: string
+    dias_restantes: number
+    concepto?: string
+  }>
+  pagos_historial: Array<{
+    id: string
+    invoice_id: string
+    invoice_numero: string
+    fecha_pago: string
+    monto: number
+    moneda: string
+    payment_method: string
+    referencia?: string
+    estado: string
+  }>
+  ordenes_compra: Array<{
+    id: string
+    numero: string
+    fecha: string
+    fecha_entrega_estimada?: string
+    estado: string
+    total: number
+    moneda: string
+    condiciones_pago?: string
+    observaciones?: string
+  }>
+  recepciones: Array<{
+    id: string
+    numero: string
+    fecha: string
+    total: number
+    estado: string
+    proveedor_ref?: string
+    requiere_revision: boolean
+    motivo_revision?: string
+    observaciones?: string
+  }>
+  monedero_nc?: {
+    saldo_disponible: number
+    total_emitido: number
+    total_aplicado: number
+    cantidad_ncs: number
+    cantidad_con_saldo: number
+    obligaciones_pendientes_emision: number
+    credito_total_potencial: number
+    items: Array<{
+      id: string
+      numero: string
+      timbrado?: string
+      fecha: string
+      numero_factura_origen?: string
+      motivo?: string
+      motivo_categoria?: string
+      origen_clave: string
+      origen_label: string
+      origen_icono: string
+      monto_original: number
+      monto_aplicado: number
+      saldo_disponible: number
+      estado_monedero: "disponible_total" | "disponible_parcial" | "agotada"
+      etapa_codigo: string
+      etapa_label: string
+      aplicaciones: Array<{
+        id: string
+        invoice_id: string
+        monto_aplicado: number
+        fecha: string
+        observaciones?: string
+      }>
+    }>
+    aplicaciones_historial: Array<{
+      id: string
+      credit_note_id: string
+      invoice_id: string
+      numero_nc: string
+      timbrado_nc?: string
+      motivo_nc?: string
+      motivo_categoria?: string
+      monto_aplicado: number
+      fecha: string
+      observaciones?: string
+    }>
+    devoluciones_fisicas: Array<{
+      id: string
+      codigo: string
+      tipo: string
+      fecha: string
+      valor_estimado: number
+      tiene_nc: boolean
+      nota_credito_numero?: string
+      nota_credito_monto?: number
+      estado: string
+      etapa_codigo: string
+      etapa_label: string
+      origen_clave: string
+      origen_label: string
+      observaciones?: string
+    }>
+    reclamos: Array<{
+      id: string
+      numero_solicitud: string
+      invoice_id?: string
+      invoice_numero?: string
+      receipt_id?: string
+      tipo_motivo: string
+      origen_clave: string
+      origen_label: string
+      origen_icono: string
+      monto_reclamado: number
+      estado: string
+      etapa_codigo: string
+      etapa_label: string
+      nc_recibida_numero?: string
+      nc_recibida_timbrado?: string
+      nc_recibida_monto?: number
+      nc_recibida_fecha?: string
+      observaciones?: string
+      created_at: string
+    }>
+  }
+  reclamos_nc: Array<{
+    id: string
+    numero_solicitud: string
+    invoice_id?: string
+    invoice_numero?: string
+    receipt_id?: string
+    tipo_motivo: string
+    origen_clave?: string
+    origen_label?: string
+    origen_icono?: string
+    monto_reclamado: number
+    estado: string
+    etapa_codigo?: string
+    etapa_label?: string
+    nc_recibida_numero?: string
+    nc_recibida_timbrado?: string
+    nc_recibida_monto: number
+    nc_recibida_fecha?: string
+    observaciones?: string
+    created_at?: string
+  }>
+  productos: Array<{
+    id: string
+    nombre: string
+    sku: string
+    codigo_barra: string
+    costo_promedio: number
+    ultimo_costo: number
+    precio_venta: number
+    stock_actual: number
+    stock_minimo: number
+    estado_stock: "quiebre" | "bajo" | "optimo"
+    valor_stock_costo: number
+    valor_stock_venta: number
+    margen_unitario_pct: number
+    unidades_vendidas: number
+    ventas_gs: number
+    ganancia_bruta_gs: number
+  }>
+  top_vendidos: Array<any>
+  evolucion_mensual: Array<{
+    mes: string
+    label: string
+    compras: number
+    pagos: number
+  }>
+  informe_gerencial: {
+    resumen_ejecutivo: string
+    salud_deuda: string
+    diagnostico_deuda: string
+    evaluacion_operativa: string
+    diagnostico_operativo: string
+    evaluacion_rentabilidad: string
+    diagnostico_rentabilidad: string
+    recomendaciones: string[]
+    fecha_auditoria: string
+  }
+}
+
+export interface SupplierPriceComparisonItem {
+  supplier_id: string
+  razon_social: string
+  nombre_fantasia?: string
+  ruc?: string
+  telefono?: string
+  es_habitual: boolean
+  ultimo_precio: number
+  mejor_precio: number
+  moneda: string
+  fecha_ultima_compra?: string
+  origen: string
+  referencia_doc?: string
+  es_mas_barato: boolean
+  ahorro_vs_habitual: number
+  ahorro_pct: number
+}
+
+export interface ProductSupplierComparisonResponse {
+  product_id: string
+  nombre: string
+  sku?: string
+  codigo_barra?: string
+  costo_unitario_actual: number
+  ultimo_costo: number
+  habitual_supplier_id?: string
+  habitual_supplier_nombre?: string
+  mejor_precio?: number
+  mejor_supplier_id?: string
+  mejor_supplier_nombre?: string
+  ahorro_maximo_gs: number
+  ahorro_maximo_pct: number
+  proveedores: SupplierPriceComparisonItem[]
+}
+
 export const api = {
   auth: {
-    login: (data: { email: string; password: string }) => client.post<{ access_token: string; refresh_token: string; must_change_password?: boolean }>("/v1/auth/login", data),
-    loginCedula: (data: { cedula: string; password: string }) => client.post<{ access_token: string; refresh_token: string; must_change_password?: boolean }>("/v1/auth/login-cedula", data),
-    changePassword: (data: { current_password: string; new_password: string }) => client.post<{ ok: boolean }>("/v1/auth/change-password", data),
+    login: (data: { email: string; password: string }) => client.post<{ access_token: string; refresh_token: string }>("/v1/auth/login", data),
     register: (data: { email: string; password: string; nombre: string; tenant_nombre: string }) => client.post<{ access_token: string; refresh_token: string }>("/v1/auth/register", data),
     me: () => client.get<{ id: string; email: string; nombre: string; rol: string; activo: boolean; tenant_id?: string; tenant_slug?: string }>("/v1/auth/me"),
     myTenants: () => client.get<Array<{ tenant_id: string; tenant_nombre: string; tenant_slug: string; plan: string; rol: string }>>("/v1/auth/me/tenants"),
-    posAuthorizers: () => client.get<{ staff: any[] }>("/v1/auth/pos-authorizers").catch(() => ({ staff: [] })),
-    activeSupervisor: () => client.get<any>("/v1/auth/active-supervisor").catch(() => null),
-    verifySupervisor: (data: any) => client.post<any>("/v1/auth/verify-supervisor", data).catch(() => ({ verified: false })),
-    endPosShift: () => client.post<any>("/v1/auth/end-pos-shift", {}).catch(() => {}),
+    changePassword: (data: { current_password: string; new_password: string }) => client.post<{ message: string }>("/v1/auth/change-password", data),
+    verifySupervisor: (data: { email: string; password: string }) => client.post<{ valid: boolean; id?: string; nombre?: string; rol?: string }>("/v1/auth/verify-supervisor", data),
+    setPosPin: (data: { pin: string }) => client.post<{ ok: boolean }>("/v1/auth/set-pos-pin", data),
+    posSupervisorPins: () => client.get<{ supervisors: { id: string; nombre: string; rol: string; pin_hash: string }[] }>("/v1/auth/pos-supervisor-pins"),
+    users: {
+      list: () => client.get<TenantUser[]>("/v1/auth/users"),
+      create: (data: { email: string; password?: string; nombre: string; telefono?: string; rol?: string; role_id?: string }) =>
+        client.post<{ id: string; email: string; nombre: string; rol: string; temporary_password?: string }>("/v1/auth/users", data),
+      update: (id: string, data: { nombre?: string; telefono?: string; rol?: string; activo?: boolean; foto_url?: string }) =>
+        client.patch<TenantUser>(`/v1/auth/users/${id}`, data),
+      delete: (id: string) => client.delete<{ success: boolean; message: string }>(`/v1/auth/users/${id}`),
+      resetPassword: (id: string, newPassword?: string) =>
+        client.post<{ temporary_password?: string; message: string }>(`/v1/auth/users/${id}/reset-password`, { new_password: newPassword }),
+      uploadPhoto: async (id: string, file: File) => {
+        const formData = new FormData()
+        formData.append("file", file)
+        const token = localStorage.getItem("access_token")
+        const res = await fetch(`${API_BASE}/v1/auth/users/${id}/photo`, {
+          method: "POST",
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: formData,
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: "Error al subir la foto" }))
+          throw new Error(err.detail || "Error al subir la foto")
+        }
+        return res.json() as Promise<{ foto_url: string; message: string }>
+      },
+    },
+    posStaff: () => client.get<any>("/v1/auth/pos-staff"),
+    posSupervisors: () => client.get<any>("/v1/auth/pos-supervisors"),
+    startPosShift: (data?: any) => client.post<any>("/v1/auth/pos-shift/start", data),
+    posAuthorizers: () => client.get<any>("/v1/auth/pos-authorizers"),
+    activeSupervisor: () => client.get<any>("/v1/auth/pos-active-supervisor"),
+    endPosShift: () => client.post<any>("/v1/auth/pos-shift/end"),
   },
   admin: {
     tenants: (params?: { estado?: string; plan?: string; search?: string }) => client.get<Tenant[]>("/v1/admin/tenants", params),
@@ -362,6 +1754,11 @@ export const api = {
     get: (id: string) => client.get<Company>(`/v1/companies/${id}`),
     create: (data: Partial<Company>) => client.post<Company>("/v1/companies", data),
     update: (id: string, data: Partial<Company>) => client.patch<Company>(`/v1/companies/${id}`, data),
+    uploadLogo: (id: string, file: File) => {
+      const formData = new FormData()
+      formData.append("file", file)
+      return requestMultipart<Company>(`/v1/companies/${id}/logo`, formData)
+    },
     delete: (id: string) => client.delete<void>(`/v1/companies/${id}`),
   },
   categories: {
@@ -372,38 +1769,153 @@ export const api = {
     delete: (id: string) => client.delete<void>(`/v1/categories/${id}`),
   },
   products: {
-    list: (params?: { search?: string; category_id?: string; activo?: boolean; limit?: number; offset?: number }) =>
-      client.get<Product[]>(`/v1/companies/${COMPANY_ID}/products`, { search: params?.search, category_id: params?.category_id, activo: params?.activo?.toString(), limit: params?.limit, offset: params?.offset }),
+    list: (params?: { search?: string; categoria_id?: string; supplier_id?: string; activo?: boolean; tipo_producto?: string; include_inactive?: boolean; updated_since?: string; limit?: number; offset?: number }) => client.get<Product[]>(`/v1/companies/${COMPANY_ID}/products`, { search: params?.search, categoria_id: params?.categoria_id, supplier_id: params?.supplier_id, activo: params?.activo !== undefined ? params?.activo.toString() : undefined, tipo_producto: params?.tipo_producto, include_inactive: params?.include_inactive ? "true" : undefined, updated_since: params?.updated_since, limit: params?.limit, offset: params?.offset }),
     get: (id: string) => client.get<Product>(`/v1/products/${id}`),
-    create: (data: Partial<Product> & { sku: string; nombre: string }) => client.post<Product>("/v1/products", { ...data, company_id: COMPANY_ID }),
+    getStats: () => client.get<ProductsStatsResponse>(`/v1/companies/${COMPANY_ID}/products/stats`),
+    get360: (id: string) => client.get<Product360Response>(`/v1/products/${id}/360`),
+    getNextSku: () => client.get<{ next_sku: string }>("/v1/products/next-sku", { company_id: COMPANY_ID }),
+    create: (data: Partial<Product> & { sku?: string; nombre: string }) => client.post<Product>("/v1/products", { ...data, company_id: COMPANY_ID }),
     update: (id: string, data: Partial<Product>) => client.patch<Product>(`/v1/products/${id}`, data),
+    uploadImage: (file: File, productId?: string, sku?: string) => {
+      const formData = new FormData()
+      formData.append("file", file)
+      if (productId) formData.append("product_id", productId)
+      if (sku) formData.append("sku", sku)
+      return requestMultipart<{ url: string; filename: string }>("/v1/products/upload-image", formData)
+    },
     delete: (id: string) => client.delete<void>(`/v1/products/${id}`),
+    variants: {
+      list: (productId?: string) => client.get<ProductVariant[]>(`/v1/companies/${COMPANY_ID}/variants`, { product_id: productId } as any),
+      create: (productId: string, data: { tipo: string; valor: string; sku_variante?: string; codigo_barra?: string; precio_extra?: number; stock?: number }) =>
+        client.post<ProductVariant>(`/v1/products/${productId}/variants`, { ...data, company_id: COMPANY_ID }),
+      delete: (variantId: string) => client.delete<void>(`/v1/variants/${variantId}`),
+    },
+    packBarcodes: {
+      list: (productId?: string) => client.get<PackBarcode[]>(`/v1/companies/${COMPANY_ID}/pack-barcodes`, { product_id: productId } as any),
+      create: (productId: string, data: { codigo_barra: string; etiqueta: string; unidades_por_paquete: number }) =>
+        client.post<PackBarcode>(`/v1/products/${productId}/pack-barcodes`, data),
+      update: (productId: string, packId: string, data: Partial<{ codigo_barra: string; etiqueta: string; unidades_por_paquete: number; activo: boolean }>) =>
+        client.patch<PackBarcode>(`/v1/products/${productId}/pack-barcodes/${packId}`, data),
+      delete: (productId: string, packId: string) => client.delete<void>(`/v1/products/${productId}/pack-barcodes/${packId}`),
+    },
+  },
+  inventory: {
+    getStockMap: () => client.get<Record<string, number>>(`/v1/companies/${COMPANY_ID}/stock-map`),
+    getProductStock: (productId: string) => client.get<any>(`/v1/companies/${COMPANY_ID}/products/${productId}/stock`),
+    getStats: () => client.get<InventoryStatsResponse>(`/v1/companies/${COMPANY_ID}/inventory/stats`),
+    getLotsExpiries: (params?: { warehouse_id?: string; estado?: string; limit?: number; offset?: number }) =>
+      client.get<any>(`/v1/companies/${COMPANY_ID}/inventory/lots/expiries`, params),
+    listMovements: (params?: { product_id?: string; warehouse_id?: string; tipo?: string; search?: string; fecha_desde?: string; fecha_hasta?: string; limit?: number; offset?: number }) =>
+      client.get<InventoryMovementRecord[]>(`/v1/inventory/movements`, { company_id: COMPANY_ID, ...params } as any),
+    getKardexSummary: (params?: { fecha_desde?: string; fecha_hasta?: string }) =>
+      client.get<any>(`/v1/companies/${COMPANY_ID}/inventory/movements/summary`, params as any),
+    downloadKardexExcel: (params?: { fecha_desde?: string; fecha_hasta?: string; tipo?: string; product_id?: string }) =>
+      downloadAuthenticated(`/v1/companies/${COMPANY_ID}/inventory/movements/export.xlsx`, params, "kardex.xlsx"),
+    downloadKardexPdf: (params?: { fecha_desde?: string; fecha_hasta?: string; tipo?: string; product_id?: string }) =>
+      downloadAuthenticated(`/v1/companies/${COMPANY_ID}/inventory/movements/export.pdf`, params, "kardex.pdf"),
+    getAdjustmentMotivos: () => client.get<AdjustmentMotivo[]>("/v1/inventory/adjustment-motivos"),
+    listAdjustments: (params?: { warehouse_id?: string; estado?: string; riesgo?: string; limit?: number; offset?: number }) =>
+      client.get<InventoryAdjustmentRecord[]>(`/v1/companies/${COMPANY_ID}/adjustments`, params as any),
+    getAdjustmentDetail: (id: string) => client.get<InventoryAdjustmentRecord>(`/v1/inventory/adjustments/${id}`),
+    createAdjustment: (data: AdjustmentCreatePayload) => client.post<any>(`/v1/inventory/adjustments`, { ...data, company_id: COMPANY_ID }),
+    approveAdjustmentGerencia: (id: string, body?: { comentario?: string }) =>
+      client.post<{ ok: boolean; estado: string; mensaje: string }>(`/v1/inventory/adjustments/${id}/approve-gerencia`, body || {}),
+    approveAdjustmentAdministracion: (id: string, body?: { comentario?: string }) =>
+      client.post<{ ok: boolean; estado: string; mensaje: string }>(`/v1/inventory/adjustments/${id}/approve-administracion`, body || {}),
+    rejectAdjustment: (id: string, body: { motivo_rechazo: string }) =>
+      client.post<{ ok: boolean; estado: string; mensaje: string }>(`/v1/inventory/adjustments/${id}/reject`, body),
+    uploadEvidencia: (file: File) => {
+      const fd = new FormData()
+      fd.append("file", file)
+      return requestMultipart<{ url: string; filename: string }>("/v1/petty-cash/upload-comprobante", fd)
+    },
+    physicalSessions: {
+      list: (params?: { warehouse_id?: string; estado?: string; limit?: number; offset?: number }) =>
+        client.get<PhysicalSession[]>(`/v1/companies/${COMPANY_ID}/inventory/physical-sessions`, params as any),
+      get: (id: string) => client.get<PhysicalSession>(`/v1/inventory/physical-sessions/${id}`),
+      create: (data: { warehouse_id: string; tipo: string; categoria_id?: string; pasillo?: string; descripcion_alcance?: string; notas?: string; contador_1_nombre?: string; contador_2_nombre?: string }) =>
+        client.post<any>(`/v1/inventory/physical-sessions`, { ...data, company_id: COMPANY_ID }),
+      registerCount: (sessionId: string, itemId: string, data: { cantidad: number; numero_conteo: 1 | 2 }) =>
+        client.put<PhysicalSessionItem>(`/v1/inventory/physical-sessions/${sessionId}/items/${itemId}/count`, data),
+      reconcileItem: (sessionId: string, itemId: string, data: { cantidad_final: number; nota_reconciliacion?: string }) =>
+        client.put<PhysicalSessionItem>(`/v1/inventory/physical-sessions/${sessionId}/items/${itemId}/reconcile`, data),
+      close: (sessionId: string) =>
+        client.post<{ ok: boolean; mensaje: string; adjustment_id?: string; items_con_diferencia: number; diferencia_total_gs: number }>(`/v1/inventory/physical-sessions/${sessionId}/close`),
+    },
+    recordMerma: (data: { warehouse_id: string; product_id: string; cantidad: number; motivo: string; observaciones?: string }) =>
+      client.post<any>(`/v1/inventory/mermas`, { ...data, company_id: COMPANY_ID }),
+    approveAdjustment: (id: string) => client.post<any>(`/v1/inventory/adjustments/${id}/approve`),
+    sessions: {
+      list: (params?: { area?: string; estado?: string }) => client.get<any[]>("/v1/supermer/inventory/sessions", params),
+      get: (id: string) => client.get<any>(`/v1/supermer/inventory/sessions/${id}`),
+      create: (data: any) => client.post<any>("/v1/supermer/inventory/sessions", data),
+      update: (id: string, data: any) => client.put<any>(`/v1/supermer/inventory/sessions/${id}`, data),
+      complete: (id: string) => client.post<any>(`/v1/supermer/inventory/sessions/${id}/complete`),
+      items: {
+        list: (sessionId: string, params?: { requiere_ajuste?: boolean }) => client.get<any[]>(`/v1/supermer/inventory/sessions/${sessionId}/items`, params),
+        create: (sessionId: string, data: any) => client.post<any>(`/v1/supermer/inventory/sessions/${sessionId}/items`, data),
+        batchCreate: (sessionId: string, data: any[]) => client.post<any[]>(`/v1/supermer/inventory/sessions/${sessionId}/items/batch`, data),
+      },
+      adjustments: {
+        list: (sessionId: string, params?: { estado?: string }) => client.get<any[]>(`/v1/supermer/inventory/sessions/${sessionId}/adjustments`, params),
+        create: (sessionId: string, data: any) => client.post<any>(`/v1/supermer/inventory/sessions/${sessionId}/adjustments`, data),
+      },
+    },
+    items: {
+      update: (itemId: string, data: any) => client.put<any>(`/v1/supermer/inventory/items/${itemId}`, data),
+    },
+    uploadEvidenciaConteo: (file: File) => {
+      const fd = new FormData()
+      fd.append("file", file)
+      return requestMultipart<{ url: string; filename: string }>("/v1/supermer/inventory/upload-evidencia", fd)
+    },
+    adjustments: {
+      approve: (adjId: string) => client.post<any>(`/v1/supermer/inventory/adjustments/${adjId}/approve`),
+      reject: (adjId: string) => client.post<any>(`/v1/supermer/inventory/adjustments/${adjId}/reject`),
+    },
+    dashboard: () => client.get<any>("/v1/supermer/inventory/dashboard"),
   },
   customers: {
-    list: (params?: { search?: string; tipo?: string; activo?: boolean }) => client.get<Customer[]>(`/v1/companies/${COMPANY_ID}/customers`, params),
+    list: (params?: { search?: string; tipo?: string; activo?: boolean; exclude_proveedores?: boolean; updated_since?: string; limit?: number; offset?: number }) => client.get<Customer[]>(`/v1/companies/${COMPANY_ID}/customers`, params),
     get: (id: string) => client.get<Customer>(`/v1/customers/${id}`),
+    get360: (id: string) => client.get<any>(`/v1/customer360/profile/${id}`),
+    lookupRuc: (doc: string) => client.get<{ ruc: string; ci: string; dv: string; nombre: string; razon_social: string; telefono?: string; email?: string; encontrado_en_db: boolean; fuente: string }>(`/v1/customers/lookup-ruc/${doc}`),
     create: (data: Partial<Customer>) => client.post<Customer>("/v1/customers", { ...data, company_id: COMPANY_ID }),
     update: (id: string, data: Partial<Customer>) => client.patch<Customer>(`/v1/customers/${id}`, data),
     delete: (id: string) => client.delete<void>(`/v1/customers/${id}`),
-    field360: (id: string) => client.get<CustomerField360>(`/v1/companies/${COMPANY_ID}/customers/${id}/360`),
-    consolidatedDebts: (companyId?: string, params?: { search?: string; solo_con_deuda?: boolean; solo_con_rechazados?: boolean; limit?: number; offset?: number }) => client.get<any>(`/v1/companies/${companyId || COMPANY_ID}/customers/consolidated-debts`, params as any),
-    customerConsolidatedDebt: (companyId: string, customerId: string) => client.get<any>(`/v1/companies/${companyId || COMPANY_ID}/customers/${customerId}/consolidated-debt`),
   },
   sales: {
-    list: (params?: { fecha_desde?: string; fecha_hasta?: string; estado?: string; numero?: string; branch_id?: string; limit?: number; offset?: number }) => client.get<Sale[]>(`/v1/companies/${COMPANY_ID}/sales`, params as any),
+    list: (params?: {
+      fecha_desde?: string
+      fecha_hasta?: string
+      desde?: string
+      hasta?: string
+      estado?: string
+      search?: string
+      punto_emision?: string
+      condicion?: string
+      tipo_comprobante?: string
+      all_dates?: boolean
+      limit?: number
+      offset?: number
+    }) => client.get<Sale[]>(`/v1/companies/${COMPANY_ID}/sales`, params as any),
     get: (id: string) => client.get<Sale>(`/v1/sales/${id}`),
-    create: (data: Partial<Sale> & { items: SaleItem[] }) => client.post<Sale>("/v1/sales", data),
+    create: (data: Partial<Sale> & { items: SaleItem[]; payments?: { forma_pago: string; monto: number; moneda?: string }[]; admin_override_credito?: boolean }) => client.post<Sale>("/v1/sales", data),
     cancel: (id: string) => client.post<void>(`/v1/sales/${id}/cancel`),
     items: (id: string) => client.get<SaleItem[]>(`/v1/sales/${id}/items`),
     getItems: (id: string) => client.get<SaleItem[]>(`/v1/sales/${id}/items`),
-    addPayment: (id: string, data: { monto: number; metodo_pago_id?: string; payment_method_id?: string; referencia?: string; check_numero?: string; check_banco?: string; check_titular?: string; check_fecha_vencimiento?: string }) => client.post<any>(`/v1/sales/${id}/payments`, data),
+    getCustomerOffers: (customerId: string) => client.get<any[]>(`/v1/sales/customer-offers/${customerId}`),
+    addPayment: (id: string, data: { monto: number; metodo_pago_id?: string; payment_method_id?: string; referencia?: string }) => client.post<any>(`/v1/sales/${id}/payments`, data),
     linkQuote: (id: string, quoteId: string) => client.post<any>(`/v1/sales/${id}/link-quote`, { quote_id: quoteId }),
     linkOrder: (id: string, orderId: string) => client.post<any>(`/v1/sales/${id}/link-order`, { order_id: orderId }),
+    attachTicket: (id: string, ticketB64: string) => client.patch<any>(`/v1/sales/${id}/ticket`, { recibo_escpos_b64: ticketB64 }),
+    reopenCustomer: (id: string, data: { customer_id?: string | null; autorizado_por_id: string; autorizado_por_nombre: string }) => client.patch<Sale>(`/v1/sales/${id}/customer`, data),
+    reopenPayment: (id: string, data: { forma_pago: string; motivo: string; autorizado_por_id: string; autorizado_por_nombre: string; customer_id?: string; voucher?: string; lote?: string; tarjeta_marca?: string; terminal_ip?: string; moneda?: string; monto_moneda?: number }) => client.patch<Sale>(`/v1/sales/${id}/payment-method`, data),
     downloadReceipt: (id: string) => client.get<Blob>(`/v1/receipts/${id}`),
   },
   payments: {
     methods: () => client.get<PaymentMethod[]>(`/v1/companies/${COMPANY_ID}/payment-methods`),
-    list: () => client.get<Payment[]>("/v1/payments"),
+    list: () => client.get<Payment[]>(`/v1/companies/${COMPANY_ID}/payments`),
     create: (data: Partial<Payment>) => client.post<Payment>("/v1/payments", data),
   },
   paymentMethods: {
@@ -411,78 +1923,256 @@ export const api = {
     create: (data: Partial<PaymentMethod>) => client.post<PaymentMethod>("/v1/payment-methods", data),
     update: (id: string, data: Partial<PaymentMethod>) => client.patch<PaymentMethod>(`/v1/payment-methods/${id}`, data),
   },
-  advancedInventory: {
-    replenishSuggestions: () => client.get<any[]>("/v1/advanced-inventory/replenish-suggestions"),
-    replenishRules: {
-      list: () => client.get<any[]>("/v1/advanced-inventory/replenish-rules"),
-      create: (data: { product_id: string; warehouse_id: string; stock_minimo: number; stock_seguridad?: number; cantidad_reorden?: number; lead_time_dias?: number; supplier_id?: string }) =>
-        client.post<any>("/v1/advanced-inventory/replenish-rules", data),
-      delete: (id: string) => client.delete<void>(`/v1/advanced-inventory/replenish-rules/${id}`),
-    },
-  },
-  inventory: {
-    warehouses: () => client.get<Warehouse[]>(`/v1/companies/${COMPANY_ID}/warehouses`),
-    stock: (warehouseId?: string) => client.get<StockItem[]>(warehouseId ? `/v1/warehouses/${warehouseId}/stock` : `/v1/companies/${COMPANY_ID}/stock`),
-    transfers: () => client.get<any[]>(`/v1/companies/${COMPANY_ID}/inventory/transfers`),
-    createTransfer: (data: { warehouse_origen_id: string; warehouse_destino_id: string; items: { product_id: string; cantidad: number }[]; observaciones?: string }) =>
-      client.post<any>("/v1/inventory/transfers", { ...data, company_id: COMPANY_ID }),
-    completeTransfer: (id: string) => client.post<any>(`/v1/inventory/transfers/${id}/complete`, {}),
-    getStockMap: async () => {
-      const items = await client.get<any[]>(`/v1/companies/${COMPANY_ID}/stock`).catch(() => [])
-      const map: Record<string, number> = {}
-      if (Array.isArray(items)) {
-        for (const it of items) {
-          if (it && it.product_id) map[it.product_id] = (map[it.product_id] || 0) + Number(it.cantidad || 0)
-        }
-      }
-      return map
-    },
-  },
   warehouses: {
     list: () => client.get<Warehouse[]>(`/v1/companies/${COMPANY_ID}/warehouses`),
-    create: (data: Partial<Warehouse>) => client.post<Warehouse>("/v1/warehouses", data),
+    create: (data: Partial<Warehouse>) => client.post<Warehouse>("/v1/warehouses", { company_id: COMPANY_ID, ...data }),
+    update: (id: string, data: Partial<Warehouse>) => client.put<Warehouse>(`/v1/warehouses/${id}`, data),
+    delete: (id: string) => client.delete<{ ok: boolean; message: string }>(`/v1/warehouses/${id}`),
   },
   stock: {
     lowStock: () => client.get<StockItem[]>(`/v1/companies/${COMPANY_ID}/low-stock`),
-    list: () => client.get<StockItem[]>(`/v1/companies/${COMPANY_ID}/stock`),
-    transfer: (data: { warehouse_origen_id: string; warehouse_destino_id: string; items: { product_id: string; cantidad: number }[] }) => client.post<any>("/v1/stock/transfer", data),
+    listByWarehouse: (warehouseId: string) => client.get<StockItem[]>(`/v1/warehouses/${warehouseId}/stock`),
   },
   caja: {
     registers: {
       list: () => client.get<CashRegister[]>("/v1/cash-registers"),
       create: (data: Partial<CashRegister>) => client.post<CashRegister>("/v1/cash-registers", data),
+      update: (id: string, data: { nombre?: string; codigo?: string; activo?: boolean; cash_drop_threshold?: number; diferencia_maxima_tolerada?: number }) => client.put<CashRegister>(`/v1/cash-registers/${id}`, data),
     },
     sessions: {
-      list: (params?: { estado?: string }) => client.get<CashSession[]>("/v1/cash-sessions", params),
-      create: (data: { cash_register_id?: string; caja_id?: string; user_id?: string; monto_apertura: number }) => client.post<CashSession>("/v1/cash-sessions", data),
-      close: (id: string, data: { monto_cierre_real: number; observaciones?: string }) => client.post<CashSession>(`/v1/cash-sessions/${id}/close`, data),
+      list: (params?: { estado?: string; limit?: number; offset?: number }) => client.get<CashSession[]>("/v1/cash-sessions", { company_id: COMPANY_ID, ...params }),
+      create: (data: { cash_register_id?: string; caja_id?: string; user_id?: string; cajero_nombre?: string; monto_apertura: number; monto_apertura_usd?: number; monto_apertura_brl?: number }) => client.post<CashSession>("/v1/cash-sessions", data),
+      activeUser: () => client.get<{ id: string; register_id: string; register_nombre: string; register_codigo: string; user_id: string; cajero_nombre: string; monto_apertura: number; monto_apertura_usd: number; monto_apertura_brl: number; fecha_apertura: string; estado: string; total_ventas: number; total_cobrado: number } | null>("/v1/cash-sessions/active-user"),
+      pause: (id: string, data?: { motivo?: string }) => client.post<{ success: boolean; id: string; estado: string }>(`/v1/cash-sessions/${id}/pause`, data || {}),
+      resume: (id: string, data?: { cash_register_id?: string; punto_emision?: string }) => client.post<{ success: boolean; id: string; estado: string; register_id: string }>(`/v1/cash-sessions/${id}/resume`, data || {}),
+      close: (id: string, data: { monto_cierre_real: number; monto_cierre_usd?: number; monto_cierre_brl?: number; observaciones?: string }) => client.post<{ session: CashSession; monto_cierre_esperado: number; diferencia: number; diferencia_usd: number; diferencia_brl: number; requiere_revision: boolean; total_cobrado: number; desglose_formas_pago: { forma_pago: string; moneda: string; monto: number }[] }>(`/v1/cash-sessions/${id}/close`, data),
+      preCloseSummary: (sessionId: string) => client.get<{ session_id: string; cajero_nombre: string | null; fecha_apertura: string; monto_apertura: number; total_ventas_count: number; total_cobrado_pyg: number; total_donaciones_pyg: number; efectivo_pyg_esperado: number; efectivo_usd_esperado: number; efectivo_brl_esperado: number; monto_cierre_esperado_pyg: number; efectivo_en_gaveta_esperado_pyg: number; efectivo_en_gaveta_esperado_usd: number; efectivo_en_gaveta_esperado_brl: number; desglose_formas_pago: { forma_pago: string; moneda: string; cantidad: number; monto: number }[]; cash_drops: any[]; total_drops_confirmados_pyg: number; total_drops_confirmados_usd: number; total_drops_confirmados_brl: number; reconciliation?: any; ticket_text?: string; ticket_escpos_b64?: string }>(`/v1/cash-sessions/${sessionId}/pre-close-summary`),
+      ticketEscpos: (sessionId: string) => client.get<{ session_id: string; ticket_text: string; ticket_escpos_b64: string; reconciliation: any }>(`/v1/cash-sessions/${sessionId}/ticket-escpos`),
+      updateFondo: (id: string, data: { monto_apertura: number; monto_apertura_brl?: number; monto_apertura_usd?: number; motivo?: string }) => client.patch<CashSession>(`/v1/cash-sessions/${id}/fondo-inicial`, data),
     },
-    openSession: (data: { caja_id: string; monto_apertura: number }) => client.post<CashSession>("/v1/cash-sessions", data),
+    sessionsSummary: (params?: { estado?: string; register_id?: string; limit?: number; offset?: number; fecha_desde?: string; fecha_hasta?: string; cajero_nombre?: string; user_id?: string; search?: string }) =>
+      client.get<{ id: string; register_id: string; user_id: string; cajero_nombre: string | null; fecha_apertura: string; fecha_cierre: string | null; monto_apertura: number; monto_apertura_brl?: number; monto_apertura_usd?: number; monto_cierre: number | null; monto_cierre_esperado: number | null; diferencia: number | null; diferencia_usd: number | null; diferencia_brl: number | null; monto_cobrado: number; estado: string; cash_drop_alert: boolean; cash_drop_warning: boolean; cash_drop_threshold: number | null; efectivo_acumulado: number; efectivo_usd_acumulado: number; efectivo_brl_acumulado: number; ultimo_cash_drop_at: string | null }[]>(
+        "/v1/cash-sessions-summary", { company_id: COMPANY_ID, ...params } as any
+      ),
+    sessionSales: (sessionId: string) =>
+      client.get<{
+        session: {
+          id: string
+          register_id: string
+          register_nombre: string
+          register_codigo: string
+          cajero_nombre: string
+          user_id: string | null
+          fecha_apertura: string | null
+          fecha_cierre: string | null
+          fecha_apertura_local: string
+          fecha_cierre_local: string
+          estado: string
+          observaciones?: string | null
+        }
+        totales: {
+          total_ventas_gs: number
+          cantidad_ventas: number
+          ticket_promedio_gs: number
+          total_descuentos_gs: number
+          total_donaciones_gs: number
+          total_iva_10_gs: number
+          total_iva_5_gs: number
+          total_exenta_gs: number
+          cantidad_anuladas: number
+          total_anuladas_gs: number
+          fondo_apertura_gs: number
+          fondo_apertura_brl: number
+          fondo_apertura_usd: number
+          ventas_efectivo_gs: number
+          ventas_no_efectivo_gs: number
+          total_drops_gs: number
+          esperado_gaveta_gs: number
+          declarado_gaveta_gs: number
+          diferencia_gs: number
+          tasa_brl: number
+          tasa_usd: number
+        }
+        desglose_medios: { clave: string; label: string; monto_formateado: string; monto_gs: number }[]
+        reconciliation?: any
+        sales: {
+          id: string
+          numero: string
+          numero_interno?: string
+          fecha: string | null
+          fecha_local: string
+          hora_local: string
+          tipo_comprobante: string
+          condicion: string
+          estado: string
+          cliente_nombre: string
+          cliente_ruc: string
+          subtotal: number
+          descuento: number
+          total: number
+          monto_donacion: number
+          iva_10: number
+          iva_5: number
+          base_exenta: number
+          items_count: number
+          pagos: { forma_pago: string; moneda: string; monto: number }[]
+          forma_pago_resumen: string
+        }[]
+      }>(`/v1/cash-sessions/${sessionId}/sales`),
+    paymentBreakdown: (sessionId: string) => client.get<{ pyg: { forma_pago: string; cantidad: number; monto: number; porcentaje: number }[]; otras_monedas: { forma_pago: string; moneda: string; cantidad: number; monto: number }[] }>(`/v1/cash-sessions/${sessionId}/payment-breakdown`),
+    cashDrop: (sessionId: string, data: { monto: number; monto_usd?: number; monto_brl?: number; observaciones?: string }) => client.post<any>(`/v1/cash-sessions/${sessionId}/cash-drop`, data),
+    cashDropRequests: {
+      list: (estado?: string) => client.get<any[]>("/v1/cash-drop-requests", { company_id: COMPANY_ID, estado } as any),
+      confirm: (id: string, data: { confirmado_por: string; confirmado_por_nombre: string; monto_confirmado_pyg?: number; monto_confirmado_usd?: number; monto_confirmado_brl?: number }) => client.post<any>(`/v1/cash-drop-requests/${id}/confirm`, data),
+      reject: (id: string, motivo: string) => client.post<any>(`/v1/cash-drop-requests/${id}/reject`, { motivo }),
+    },
+    openSession: (data: { caja_id: string; monto_apertura: number }) => client.post<CashSession>("/v1/cash-sessions/open", data),
     closeSession: (id: string, data: { monto_cierre: number; observaciones?: string }) => client.post<CashSession>(`/v1/cash-sessions/${id}/close`, data),
     summary: (id: string) => client.get<CashSessionSummary>(`/v1/cash-sessions/${id}/summary`),
-    sessionsSummary: (params?: { register_id?: string; estado?: string }) => client.get<CashSession[]>("/v1/cash-sessions", params as any),
-    cashDrop: (sessionId: string, data: { monto: number; monto_usd?: number; monto_brl?: number; observaciones?: string }) =>
-      client.post<any>(`/v1/companies/${COMPANY_ID}/vault/drop-cash`, { ...data, session_id: sessionId, caja_nombre: "Caja Mostrador" }),
-    vault: {
-      summary: () => client.get<any>(`/v1/companies/${COMPANY_ID}/vault/summary`),
-      movements: (params?: { tipo?: string; limit?: number; offset?: number }) => client.get<any[]>(`/v1/companies/${COMPANY_ID}/vault/movements`, params as any),
-      dropCash: (data: { caja_nombre: string; cajero?: string; supervisor?: string; monto: number; observaciones?: string }) => client.post<any>(`/v1/companies/${COMPANY_ID}/vault/drop-cash`, data),
-      dispatchArmored: (data: { transportadora: string; precinto_bolsa: string; banco_destino?: string; cuenta_banco?: string; supervisor?: string; monto: number; observaciones?: string }) => client.post<any>(`/v1/companies/${COMPANY_ID}/vault/dispatch-armored`, data),
+    registerMovements: (params?: { tipo?: string }) => client.get<{ id: string; register_id: string; tipo: string; monto: number; moneda: string; fecha: string; usuario: string; observaciones: string }[]>("/v1/cash-register-movements", { company_id: COMPANY_ID, ...params } as any),
+    handoffs: {
+      list: (params?: { estado?: string }) => client.get<CashHandoff[]>("/v1/cash-handoffs", params as any),
+      confirm: (id: string, data: { recibido_por: string; recibido_por_nombre: string; monto_confirmado_pyg?: number; monto_confirmado_usd?: number; monto_confirmado_brl?: number }) => client.post<CashHandoff>(`/v1/cash-handoffs/${id}/confirm`, data),
+    },
+    cajeros: {
+      performance: () => client.get<{ cajero_nombre: string; total_cierres: number; monto_total_manejado: number; diferencia_acumulada: number; diferencia_promedio: number; cierres_con_revision: number; pct_con_revision: number; ultimo_cierre: string | null }[]>("/v1/caja/cajeros/performance"),
+    },
+    treasuryRemittances: {
+      pendingSobres: () => client.get<{ id: string; tipo_sobre: string; referencia_id: string; caja_codigo?: string; caja_nombre?: string; cajero_nombre?: string; monto_pyg: number; monto_usd: number; monto_brl: number; ticket_numero?: string; fecha: string }[]>("/v1/caja/supervisor/pending-sobres"),
+      create: (data: { item_ids: string[]; observaciones?: string }) => client.post<any>("/v1/caja/treasury-remittances", data),
+      list: (estado?: string) => client.get<any[]>("/v1/caja/treasury-remittances", estado ? { estado } : undefined),
+      get: (id: string) => client.get<any>(`/v1/caja/treasury-remittances/${id}`),
+      receive: (id: string, data?: { observaciones?: string }) => client.post<any>(`/v1/caja/treasury-remittances/${id}/receive`, data || {}),
+    },
+    downloadArqueoConsolidadoPdf: (fecha_desde: string, fecha_hasta: string) =>
+      downloadAuthenticated("/v1/caja/export/arqueo.pdf", { fecha_desde, fecha_hasta }, `acta_arqueo_consolidado_${fecha_desde}_${fecha_hasta}.pdf`),
+    downloadCierrePdf: (sessionId: string) =>
+      downloadAuthenticated(`/v1/cash-sessions/${sessionId}/export/cierre.pdf`, undefined, `cierre_caja_${sessionId.slice(0, 8)}.pdf`),
+    downloadSessionSalesPdf: (sessionId: string, filename?: string) =>
+      downloadAuthenticated(`/v1/cash-sessions/${sessionId}/sales/export.pdf`, undefined, filename || `ventas_${sessionId.slice(0, 8)}.pdf`),
+    sessionPunteo: (sessionId: string) => client.get<any>(`/v1/cash-sessions/${sessionId}/punteo`),
+    savePunteoAudit: (sessionId: string, data: { items: any[]; observaciones_dictamen?: string; diferencia_vouchers_gs?: number; monto_recibido_pyg?: number; monto_recibido_brl?: number; monto_recibido_usd?: number; observaciones_efectivo?: string }) =>
+      client.post<any>(`/v1/cash-sessions/${sessionId}/punteo/asentar`, data),
+    confirmSessionCash: (sessionId: string, data: { monto_recibido_pyg: number; monto_recibido_brl?: number; monto_recibido_usd?: number; observaciones?: string; ajustar_declarado?: boolean }) =>
+      client.post<any>(`/v1/cash-sessions/${sessionId}/confirm-cash-reception`, data),
+    updateSessionRendicion: (sessionId: string, data: { monto_cierre_real: number; monto_cierre_brl?: number; monto_cierre_usd?: number; motivo?: string }) =>
+      client.patch<any>(`/v1/cash-sessions/${sessionId}/rendicion`, data),
+    downloadSessionPunteoPdf: (sessionId: string) =>
+      downloadAuthenticated(`/v1/cash-sessions/${sessionId}/export/punteo.pdf`, undefined, `planilla_punteo_${sessionId.slice(0, 8)}.pdf`),
+    downloadActaVerificacionPdf: (sessionId: string, filename?: string) =>
+      downloadAuthenticated(`/v1/cash-sessions/${sessionId}/export/acta-verificacion.pdf`, undefined, filename || `acta_verificacion_${sessionId.slice(0, 8)}.pdf`),
+    paymentAdjustments: {
+      create: (sessionId: string, data: {
+        origen_forma_pago?: string
+        destino_canal_key: string
+        monto_gs: number
+        nro_comprobante?: string
+        banco_entidad?: string
+        titular?: string
+        codigo_autorizacion?: string
+        ticket_numero?: string
+        sale_id?: string
+        motivo?: string
+      }) => client.post<any>(`/v1/cash-sessions/${sessionId}/punteo/ajustes`, data),
+      list: (sessionId: string) => client.get<any[]>(`/v1/cash-sessions/${sessionId}/punteo/ajustes`),
+      delete: (sessionId: string, adjustmentId: string) => client.delete<any>(`/v1/cash-sessions/${sessionId}/punteo/ajustes/${adjustmentId}`),
+      listNotasCredito: (params?: { search?: string; session_id?: string; limit?: number }) =>
+        client.get<any[]>(`/v1/cash-sessions/notas-credito-emitidas`, params as any),
+    },
+    bankMappings: {
+      list: () => client.get<{
+        id: string
+        canal_key: string
+        canal_label: string
+        bank_account_id?: string | null
+        banco_nombre?: string | null
+        numero_cuenta?: string | null
+        moneda?: string | null
+        comision_porcentaje?: number
+        comision_fija_gs?: number
+        plazo_acreditacion_dias?: number
+        tipo_plazo?: string
+        activo: boolean
+      }[]>("/v1/caja/config/bank-mappings"),
+      update: (canalKey: string, data: {
+        bank_account_id?: string | null
+        comision_porcentaje?: number
+        comision_fija_gs?: number
+        plazo_acreditacion_dias?: number
+        tipo_plazo?: string
+        activo?: boolean
+      }) => client.put<any>(`/v1/caja/config/bank-mappings/${canalKey}`, data),
+    },
+    shortageConfig: {
+      get: () => client.get<{ umbral_aprobacion_gs: number; requerir_aprobacion_siempre: boolean; permitir_cuotas: boolean; max_cuotas: number }>("/v1/caja/config/shortages"),
+      update: (data: { umbral_aprobacion_gs?: number; requerir_aprobacion_siempre?: boolean; permitir_cuotas?: boolean; max_cuotas?: number }) =>
+        client.put<any>("/v1/caja/config/shortages", data),
+    },
+    incorporateVaultAndBanks: (sessionId: string, data?: { observaciones?: string }) =>
+      client.post<any>(`/v1/cash-sessions/${sessionId}/incorporar-boveda-bancos`, data || {}),
+    shortages: {
+      list: (estado?: string) => client.get<any[]>("/v1/caja/shortages", estado ? { estado } : undefined),
+      resolve: (requestId: string, data: { accion: string; cuotas?: number; periodo_nomina?: string; observaciones?: string }) =>
+        client.post<any>(`/v1/caja/shortages/${requestId}/resolver`, data),
+    },
+    reports: {
+      salesByCashier: (params: { fecha_desde: string; fecha_hasta: string; cajero_nombre?: string }) =>
+        client.get<{
+          fecha_desde: string
+          fecha_hasta: string
+          cajero_filtro?: string
+          totales: {
+            total_ventas: number
+            total_tickets: number
+            total_descuentos: number
+            ticket_promedio_general: number
+            total_cajeros_activos: number
+          }
+          cajeros: {
+            cajero_nombre: string
+            cantidad_tickets: number
+            total_ventas: number
+            total_descuentos: number
+            ticket_promedio: number
+            cantidad_turnos: number
+            primera_venta: string | null
+            ultima_venta: string | null
+          }[]
+        }>("/v1/caja/reports/sales-by-cashier", params as any),
+      downloadSalesByCashierPdf: (fecha_desde: string, fecha_hasta: string, cajero_nombre?: string) =>
+        downloadAuthenticated("/v1/caja/reports/sales-by-cashier/export.pdf", { fecha_desde, fecha_hasta, ...(cajero_nombre ? { cajero_nombre } : {}) }, `ventas_por_cajero_${fecha_desde}_${fecha_hasta}.pdf`),
+      salesByPaymentMethod: (params: { fecha_desde: string; fecha_hasta: string }) =>
+        client.get<{
+          fecha_desde: string
+          fecha_hasta: string
+          total_recaudado_pyg: number
+          total_operaciones: number
+          efectivo_brl_recaudado: number
+          efectivo_usd_recaudado: number
+          medios_pago: {
+            key: string
+            label: string
+            moneda: string
+            monto: number
+            operaciones: number
+            porcentaje: number
+          }[]
+        }>("/v1/caja/reports/sales-by-payment-method", params as any),
+      downloadSalesByPaymentMethodPdf: (fecha_desde: string, fecha_hasta: string) =>
+        downloadAuthenticated("/v1/caja/reports/sales-by-payment-method/export.pdf", { fecha_desde, fecha_hasta }, `ventas_por_medio_pago_${fecha_desde}_${fecha_hasta}.pdf`),
     },
   },
-  routeCashSettlements: {
-    list: (params?: { fecha_desde?: string; fecha_hasta?: string; cobrador_codigo?: string; cerrado?: boolean; search?: string; limit?: number; offset?: number }) =>
-      client.get<any[]>(`/v1/companies/${COMPANY_ID}/route-cash-settlements`, params as any),
-    summary: (params?: { fecha_desde?: string; fecha_hasta?: string }) =>
-      client.get<any>(`/v1/companies/${COMPANY_ID}/route-cash-settlements/summary`, params as any),
-    getDetail: (id: string) =>
-      client.get<any>(`/v1/companies/${COMPANY_ID}/route-cash-settlements/${id}`),
-    open: (data: { cobrador_codigo?: string; funcionario_codigo?: string; a_rendir: number; observaciones?: string }) =>
-      client.post<any>(`/v1/companies/${COMPANY_ID}/route-cash-settlements/open`, data),
-    close: (id: string, data: { efectivo: number; pagares?: number; descuentos?: number; otro_egreso?: number; anticipo?: number; observaciones?: string; usuario?: string }) =>
-      client.post<any>(`/v1/companies/${COMPANY_ID}/route-cash-settlements/${id}/close`, data),
-    authorize: (id: string, data?: { usuario_tesorero?: string; observaciones?: string }) =>
-      client.post<any>(`/v1/companies/${COMPANY_ID}/route-cash-settlements/${id}/authorize`, data || {}),
+  vault: {
+    dashboard: () => client.get<VaultDashboard>("/v1/vault/dashboard"),
+    entries: (params?: { estado?: string }) => client.get<VaultEntry[]>("/v1/vault/entries", params as any),
+    deposit: (data: { entry_ids: string[]; bank_transaction_id?: string }) => client.post<{ deposited?: boolean; depositadas?: number; pending_approval?: boolean; request_id?: string; monto_total_pyg?: number }>("/v1/vault/deposit", data),
+    depositToBank: (data: { entry_ids: string[]; bank_account_id: string; numero_boleta: string; transportadora?: string; fecha_deposito?: string; observaciones?: string }) => client.post<any>("/v1/vault/deposit-to-bank", data),
+    depositAmountToBank: (data: { monto_pyg: number; bank_account_id: string; numero_boleta: string; transportadora?: string; fecha_deposito?: string; observaciones?: string }) => client.post<any>("/v1/vault/deposit-amount-to-bank", data),
+    depositApprovals: {
+      list: (estado?: string) => client.get<{ id: string; entry_ids: string[]; monto_total_pyg: number; estado: string; aprobado_supervisor_id: string | null; aprobado_gerente_id: string | null; created_at: string }[]>("/v1/vault/deposit-approvals", estado ? { estado } : undefined),
+      approve: (id: string) => client.post<{ success: boolean; completo: boolean }>(`/v1/vault/deposit-approvals/${id}/approve`, {}),
+      reject: (id: string, motivo: string) => client.post<{ success: boolean }>(`/v1/vault/deposit-approvals/${id}/reject`, { motivo }),
+    },
   },
   branches: {
     list: () => client.get<Branch[]>("/v1/branches"),
@@ -510,22 +2200,35 @@ export const api = {
     list: (params?: { activo?: boolean }) => client.get<CreditAccount[]>("/v1/credit-accounts", params),
     get: (id: string) => client.get<CreditAccount>(`/v1/credit-accounts/${id}`),
     create: (data: Partial<CreditAccount>) => client.post<CreditAccount>("/v1/credit-accounts", data),
+    update: (id: string, data: { limite_credito?: number; activo?: boolean }) => client.patch<CreditAccount>(`/v1/credit-accounts/${id}`, data),
     getByCustomer: (customerId: string) => client.get<CreditAccount>(`/v1/credit-accounts/customer/${customerId}`),
     movements: (id: string) => client.get<CreditMovement[]>(`/v1/credit-accounts/${id}/movements`),
     payment: (id: string, data: { monto: number; metodo_pago_id?: string; observaciones?: string }) => client.post<CreditAccount>(`/v1/credit-accounts/${id}/payment`, data),
-    authorizeExcess: (id: string, data: { monto: number; motivo: string }) =>
-      client.post<{ authorization_id: string; credit_account_id: string; monto: number; autorizado_por: string }>(`/v1/credit-accounts/${id}/authorize-excess`, data),
+    getMoraConfig: () => client.get<MoraConfig>("/v1/credit-accounts/mora/config"),
+    updateMoraConfig: (data: MoraConfig) => client.patch<MoraConfig>("/v1/credit-accounts/mora/config", data),
+    previewMora: () => client.get<MoraPreviewResponse>("/v1/credit-accounts/mora/preview"),
+    applyMora: () => client.post<{ aplicados: number; total: number }>("/v1/credit-accounts/mora/aplicar"),
+    getDunningConfig: () => client.get<DunningConfig>("/v1/credit-accounts/dunning/config"),
+    updateDunningConfig: (data: DunningConfig) => client.patch<DunningConfig>("/v1/credit-accounts/dunning/config", data),
+    previewDunning: () => client.get<DunningPreviewResponse>("/v1/credit-accounts/dunning/preview"),
+    runDunning: () => client.post<{ enviados: number; omitidos: number }>("/v1/credit-accounts/dunning/run"),
   },
-  checks: {
-    summary: (params?: { vigente_only?: boolean; fecha_desde?: string; fecha_hasta?: string }) =>
-      client.get<any>("/v1/checks/summary", params),
-    list: (params?: { customer_id?: string; estado?: string; tipo?: string; search?: string; vigente_only?: boolean; fecha_desde?: string; fecha_hasta?: string; limit?: number; offset?: number }) =>
-      client.get<Check[]>("/v1/checks", params),
-    get: (id: string) => client.get<Check>(`/v1/checks/${id}`),
-    cartera: (dias?: number) => client.get<Check[]>("/v1/checks/cartera", dias ? { dias } : undefined),
-    events: (id: string) => client.get<CheckEvent[]>(`/v1/checks/${id}/events`),
-    changeStatus: (id: string, data: { estado: string; motivo?: string; user_id?: string }) => client.post<Check>(`/v1/checks/${id}/status`, data),
-    replace: (id: string, data: { numero: string; banco?: string; titular?: string; fecha_vencimiento: string; user_id?: string }) => client.post<Check>(`/v1/checks/${id}/replace`, data),
+  customerAdvances: {
+    list: (params?: { customer_id?: string }) => client.get<CustomerAdvance[]>("/v1/customer-advances", params),
+    create: (data: { customer_id: string; monto: number; forma_pago?: string; referencia?: string; observaciones?: string }) => client.post<CustomerAdvance>("/v1/customer-advances", data),
+    getBalance: (customerId: string) => client.get<{ customer_id: string; monto_disponible: number }>(`/v1/customer-advances/customer/${customerId}/balance`),
+    apply: (advanceId: string, data: { accounts_receivable_id: string; monto: number }) => client.post<{ success: boolean; monto_disponible_restante: number; saldo_pendiente_documento: number; estado_documento: string }>(`/v1/customer-advances/${advanceId}/apply`, data),
+  },
+  creditApprovalRequests: {
+    list: (params?: { estado?: string }) => client.get<any[]>("/v1/credit-approval-requests", params),
+    approve: (id: string) => client.post<{ success: boolean; completo: boolean }>(`/v1/credit-approval-requests/${id}/approve`),
+    reject: (id: string, motivo: string) => client.post<{ success: boolean }>(`/v1/credit-approval-requests/${id}/reject`, { motivo }),
+  },
+  writeoffRequests: {
+    list: (params?: { estado?: string }) => client.get<WriteoffRequest[]>("/v1/receivable-writeoff-requests", params),
+    create: (data: { accounts_receivable_id: string; motivo: string }) => client.post<{ success: boolean }>("/v1/receivable-writeoff-requests", data),
+    approve: (id: string) => client.post<{ success: boolean; completo: boolean }>(`/v1/receivable-writeoff-requests/${id}/approve`),
+    reject: (id: string, motivo: string) => client.post<{ success: boolean }>(`/v1/receivable-writeoff-requests/${id}/reject`, { motivo }),
   },
   logistics: {
     deliveries: {
@@ -551,19 +2254,67 @@ export const api = {
     deleteNotification: (id: string) => client.delete<void>(`/v1/notifications/notifications/${id}`),
   },
   whatsapp: {
+    getStatus: () => client.get<{ success: boolean; state: string; connected: boolean; instance: string; gateway_url: string }>("/v1/whatsapp/status"),
+    connect: () => client.post<{ qrcode?: string; pairing_code?: string; state: string; connected: boolean }>("/v1/whatsapp/connect"),
+    disconnect: () => client.post<{ success: boolean }>("/v1/whatsapp/disconnect"),
+    sendTestMessage: (data: { phone: string; message: string }) => client.post<{ success: boolean; message_id?: string }>("/v1/whatsapp/test", data),
     getConfig: () => client.get<WhatsAppConfig>("/v1/whatsapp/config"),
     saveConfig: (data: Partial<WhatsAppConfig>) => client.put<WhatsAppConfig>("/v1/whatsapp/config", data),
     testMessage: (data: { to: string; message: string }) => client.post<{ message: string }>("/v1/whatsapp/config/test", data),
-    listConversations: () => client.get<WhatsAppConversation[]>("/v1/whatsapp/conversations"),
+    listConversations: (params?: { inbox?: string; department?: string; assigned_user_id?: string; search?: string; status?: string; limit?: number; offset?: number }) =>
+      client.get<WhatsAppConversation[]>("/v1/whatsapp/conversations", params),
     getConversation: (id: string) => client.get<WhatsAppConversation>(`/v1/whatsapp/conversations/${id}`),
     getMessages: (convId: string) => client.get<WhatsAppMessage[]>(`/v1/whatsapp/conversations/${convId}/messages`),
-    sendMessage: (convId: string, data: { content: string; media_url?: string }) => client.post<WhatsAppMessage>(`/v1/whatsapp/conversations/${convId}/messages`, data),
+    uploadMedia: (file: File) => {
+      const formData = new FormData()
+      formData.append("file", file)
+      return requestMultipart<{ url: string; filename: string; media_type: string; size: number }>("/v1/whatsapp/upload-media", formData)
+    },
+    sendMessage: (convId: string, data: { content?: string; media_url?: string }) => client.post<WhatsAppMessage>(`/v1/whatsapp/conversations/${convId}/messages`, data),
+    takeConversation: (convId: string) => client.post<{ status: string; handling_mode: string; assigned_to: string }>(`/v1/whatsapp/conversations/${convId}/take`),
+    assignConversation: (convId: string, data: { assigned_user_id?: string | null; department?: string | null; internal_note?: string }) =>
+      client.post<{ status: string; assigned_user_name?: string; department?: string }>(`/v1/whatsapp/conversations/${convId}/assign`, data),
+    releaseToBot: (convId: string) => client.post<{ status: string; handling_mode: string }>(`/v1/whatsapp/conversations/${convId}/release-to-bot`),
+    resolveConversation: (convId: string) => client.post<{ status: string; handling_mode: string }>(`/v1/whatsapp/conversations/${convId}/resolve`),
+    addInternalNote: (convId: string, content: string) => client.post<WhatsAppMessage>(`/v1/whatsapp/conversations/${convId}/internal-note`, { content }),
+    listAgents: () => client.get<{ id: string; nombre: string; email: string; rol: string; foto_url?: string }[]>("/v1/whatsapp/agents"),
     archiveConversation: (id: string) => client.put<void>(`/v1/whatsapp/conversations/${id}/archive`),
+    deleteConversation: (id: string) => client.delete<{ status: string; deleted: number }>(`/v1/whatsapp/conversations/${id}`),
+    cleanupTests: () => client.delete<{ status: string; deleted_count: number }>("/v1/whatsapp/conversations/cleanup/tests"),
     listTemplates: () => client.get<WhatsAppTemplate[]>("/v1/whatsapp/templates"),
+    seedTemplates: () => client.post<WhatsAppTemplate[]>("/v1/whatsapp/templates/seed"),
     createTemplate: (data: Partial<WhatsAppTemplate>) => client.post<WhatsAppTemplate>("/v1/whatsapp/templates", data),
     updateTemplate: (id: string, data: Partial<WhatsAppTemplate>) => client.put<WhatsAppTemplate>(`/v1/whatsapp/templates/${id}`, data),
     deleteTemplate: (id: string) => client.delete<void>(`/v1/whatsapp/templates/${id}`),
+    craftTemplateWithAi: (data: {
+      tipo: string
+      current_content?: string
+      prompt_instruction?: string
+      available_variables?: string[]
+    }) => client.post<{ status: string; crafted_content: string; model_used: string }>("/v1/whatsapp/templates/craft-ai", data),
     getStats: () => client.get<WhatsAppStats>("/v1/whatsapp/stats"),
+    getChatbotConfig: () => client.get<{
+      bot_name: string
+      auto_reply: boolean
+      welcome_message: string
+      out_of_hours_message: string
+      business_hours_start: string
+      business_hours_end: string
+      business_days: string[]
+      modules_enabled: {
+        catalog_search: boolean
+        extraclub_points: boolean
+        order_tracking: boolean
+        supermarket_info: boolean
+        human_handoff: boolean
+      }
+    }>("/v1/whatsapp/chatbot-config"),
+    saveChatbotConfig: (data: any) => client.put<{ status: string; config: any }>("/v1/whatsapp/chatbot-config", data),
+    toggleAutoReply: (active: boolean) => client.post<{ status: string; auto_reply: boolean }>("/v1/whatsapp/toggle-auto-reply", { active }),
+    getBotFlow: () => client.get<{ status: string; flow: any }>("/v1/whatsapp/flow"),
+    saveBotFlow: (flow: any) => client.put<{ status: string; flow: any }>("/v1/whatsapp/flow", { flow }),
+    resetBotFlow: () => client.post<{ status: string; flow: any }>("/v1/whatsapp/flow/reset"),
+    getAiAgentStatus: () => client.get<{ online: boolean; host: string; latency_ms?: number; models?: string[]; active_model?: string; error?: string }>("/v1/whatsapp/ai-agent/status"),
   },
   crm: {
     listLeads: () => client.get<Lead[]>("/v1/crm/leads"),
@@ -595,49 +2346,244 @@ export const api = {
     roles: () => client.get<Role[]>("/v1/rbac/roles"),
     listRoles: () => client.get<Role[]>("/v1/rbac/roles"),
     createRole: (data: Partial<Role> & { name: string }) => client.post<Role>("/v1/rbac/roles", data),
-    updateRole: (id: string, data: Partial<Role>) => client.patch<Role>(`/v1/rbac/roles/${id}`, data),
+    updateRole: (id: string, data: Partial<Role>) => client.put<Role>(`/v1/rbac/roles/${id}`, data),
     deleteRole: (id: string) => client.delete<void>(`/v1/rbac/roles/${id}`),
     assignRole: (userId: string, roleId: string) => client.post<void>(`/v1/rbac/users/${userId}/roles`, { role_id: roleId }),
     removeRole: (userId: string, roleId: string) => client.delete<void>(`/v1/rbac/users/${userId}/roles/${roleId}`),
-    userRoles: (userId: string) => client.get<Role[]>(`/v1/rbac/users/${userId}/roles`),
-    rolePermissions: (roleId: string) => client.get<Permission[]>(`/v1/rbac/roles/${roleId}/permissions`),
-    setRolePermissions: (roleId: string, permissionIds: string[]) => client.put<void>(`/v1/rbac/roles/${roleId}/permissions`, { permission_ids: permissionIds }),
-    updateRolePermissions: (roleId: string, permissionIds: string[]) => client.put<void>(`/v1/rbac/roles/${roleId}/permissions`, { permission_ids: permissionIds }),
+    userRoles: (userId: string) => client.get<UserRoleAssignment[]>(`/v1/rbac/users/${userId}/roles`),
+    setRolePermissions: (roleId: string, permissionIds: string[]) => client.post<void>(`/v1/rbac/roles/${roleId}/permissions`, { permission_ids: permissionIds }),
+    updateRolePermissions: (roleId: string, permissionIds: string[]) => client.post<void>(`/v1/rbac/roles/${roleId}/permissions`, { permission_ids: permissionIds }),
     seedRoles: () => client.post<void>("/v1/rbac/seed"),
+    myPermissions: () => client.get<{ is_administrador: boolean; permissions: string[] }>("/v1/rbac/me/permissions"),
     seed: () => client.post<void>("/v1/rbac/seed"),
   },
   purchases: {
-    // Los paths reales del backend van bajo /companies/{company_id}/... para
-    // los listados y sin prefijo "/purchases" para el resto — no
-    // "/v1/purchases/*", que no existe (daba 404 en todos estos).
+    lostDemand: {
+      list: (params?: { estado?: string; company_id?: string }) =>
+        client.get<CustomerLostDemand[]>("/v1/purchases/lost-demand", { company_id: COMPANY_ID, ...params } as any),
+      create: (data: { producto_nombre: string; categoria?: string; marca?: string; notas?: string; cliente_nombre?: string; cliente_contacto?: string; customer_id?: string; urgencia?: string; cajero_id?: string; cajero_nombre?: string; caja_id?: string }) =>
+        client.post<CustomerLostDemand>("/v1/purchases/lost-demand", { company_id: COMPANY_ID, ...data }),
+      update: (id: string, data: { estado?: string; notas?: string; orden_compra_id?: string }) =>
+        client.patch<CustomerLostDemand>("/v1/purchases/lost-demand/" + id, data),
+    },
+
     orders: () => client.get<PurchaseOrder[]>(`/v1/companies/${COMPANY_ID}/purchase-orders`),
     listPOs: () => client.get<PurchaseOrder[]>(`/v1/companies/${COMPANY_ID}/purchase-orders`),
-    listPurchaseSuggestions: (estado?: string) => client.get<PurchaseSuggestion[]>(`/v1/companies/${COMPANY_ID}/purchase-suggestions`, estado ? { estado } : undefined),
     getOrder: (id: string) => client.get<PurchaseOrder>(`/v1/purchase-orders/${id}`),
-    createOrder: (data: Partial<PurchaseOrder>) => client.post<PurchaseOrder>("/v1/purchase-orders", data),
-    createPO: (data: Partial<PurchaseOrder>) => client.post<PurchaseOrder>("/v1/purchase-orders", data),
-    updateOrder: (id: string, data: Partial<PurchaseOrder>) => client.patch<PurchaseOrder>(`/v1/purchase-orders/${id}`, data),
+    getOrderItems: (id: string) => client.get<PurchaseOrderItem[]>(`/v1/purchase-orders/${id}/items`),
+    createOrder: (data: Partial<PurchaseOrder>) => client.post<PurchaseOrder>("/v1/purchase-orders", { ...data, company_id: COMPANY_ID }),
+    createPO: (data: Partial<PurchaseOrder>) => client.post<PurchaseOrder>("/v1/purchase-orders", { ...data, company_id: COMPANY_ID }),
+    updateOrder: (id: string, data: Partial<PurchaseOrder>) => client.put<PurchaseOrder>(`/v1/purchase-orders/${id}`, data),
     confirmOrder: (id: string) => client.post<PurchaseOrder>(`/v1/purchase-orders/${id}/confirm`),
     confirmPO: (id: string) => client.post<PurchaseOrder>(`/v1/purchase-orders/${id}/confirm`),
+    sendPO: (id: string) => client.post<PurchaseOrder>(`/v1/purchase-orders/${id}/send`),
+    cancelPO: (id: string) => client.post<PurchaseOrder>(`/v1/purchase-orders/${id}/cancel`),
+    deletePO: (id: string, force: boolean = false) => client.delete<{ ok: boolean; message: string; numero: string }>(`/v1/purchase-orders/${id}${force ? '?force=true' : ''}`),
     receipts: () => client.get<PurchaseReceipt[]>(`/v1/companies/${COMPANY_ID}/purchase-receipts`),
     listReceipts: () => client.get<PurchaseReceipt[]>(`/v1/companies/${COMPANY_ID}/purchase-receipts`),
     getReceipt: (id: string) => client.get<PurchaseReceipt>(`/v1/purchase-receipts/${id}`),
-    createReceipt: (data: Partial<PurchaseReceipt>) => client.post<PurchaseReceipt>("/v1/purchase-receipts", data),
-    suppliers: () => client.get<Supplier[]>(`/v1/companies/${COMPANY_ID}/suppliers`),
-    listSuppliers: () => client.get<Supplier[]>(`/v1/companies/${COMPANY_ID}/suppliers`),
+    cancelReceipt: (id: string) => client.post<PurchaseReceipt>(`/v1/purchase-receipts/${id}/cancel`),
+    createReceipt: (data: Partial<PurchaseReceipt>) => client.post<PurchaseReceipt>("/v1/purchase-receipts", { ...data, company_id: COMPANY_ID }),
+    suppliers: (search?: string, solo_mercaderia?: boolean) => client.get<Supplier[]>(`/v1/companies/${COMPANY_ID}/suppliers`, { search, solo_mercaderia }),
+    listSuppliers: (params?: { search?: string; solo_mercaderia?: boolean }) => client.get<Supplier[]>(`/v1/companies/${COMPANY_ID}/suppliers`, params),
     getSupplier: (id: string) => client.get<Supplier>(`/v1/suppliers/${id}`),
-    createSupplier: (data: Partial<Supplier>) => client.post<Supplier>("/v1/suppliers", data),
+    createSupplier: (data: Partial<Supplier>) => client.post<Supplier>("/v1/suppliers", { ...data, company_id: COMPANY_ID }),
     updateSupplier: (id: string, data: Partial<Supplier>) => client.patch<Supplier>(`/v1/suppliers/${id}`, data),
     deleteSupplier: (id: string) => client.delete<void>(`/v1/suppliers/${id}`),
+    evaluateSupplier: (id: string, data: { company_id: string; puntaje_calidad?: number; puntaje_entrega?: number; puntaje_precio?: number; puntaje_atencion?: number; comentarios?: string }) =>
+      client.post<any>(`/v1/suppliers/${id}/evaluate`, data),
+    getSupplierEvaluations: (id: string) => client.get<any[]>(`/v1/suppliers/${id}/evaluations`),
+    getSupplier360: (supplierId: string) =>
+      client.get<Supplier360Response>(`/v1/purchases/suppliers/${supplierId}/360`, { company_id: COMPANY_ID }),
+    downloadSupplier360Pdf: (supplierId: string, razonSocial?: string, tab?: string) => {
+      const clean = (razonSocial || "proveedor").replace(/\s+/g, "_")
+      const tabParam = tab ? `&tab=${encodeURIComponent(tab)}` : ""
+      const tabSuffix = tab ? `_${tab}` : ""
+      return downloadAuthenticated(`/v1/purchases/suppliers/${supplierId}/360/pdf?company_id=${COMPANY_ID}${tabParam}`, {}, `Informe_360_${clean}${tabSuffix}.pdf`)
+    },
+    getSupplierPerformance: (id: string) => client.get<{ supplier_id: string; razon_social: string; total_orders: number; total_spent: number; on_time_rate: number | null; avg_quality_score: number | null; avg_delivery_score: number | null; avg_price_score: number | null; avg_attention_score: number | null; overall_rating: number | null; last_evaluation_date: string | null }>(`/v1/suppliers/${id}/performance`),
+    getSupplierPriceHistory: (id: string) => client.get<{ product_id: string; product_nombre: string; sku: string; purchase_order_id: string; fecha_orden: string; precio_unitario: number; cantidad: number }[]>(`/v1/suppliers/${id}/price-history`),
+    getProductSupplierComparison: (productId: string) =>
+      client.get<ProductSupplierComparisonResponse>(`/v1/purchases/products/${productId}/supplier-comparison`),
+    requisitions: {
+      list: (estado?: string) => client.get<PurchaseRequisition[]>(`/v1/companies/${COMPANY_ID}/purchase-requisitions`, estado ? { estado } : undefined),
+      get: (id: string) => client.get<PurchaseRequisition & { items: PurchaseRequisitionItem[] }>(`/v1/purchase-requisitions/${id}`),
+      create: (data: { fecha_necesidad?: string; departamento?: string; solicitante_id?: string; solicitante_nombre?: string; prioridad?: string; moneda?: string; items: { product_id: string; variant_id?: string; descripcion?: string; cantidad_solicitada: number; precio_estimado?: number; observaciones?: string }[]; motivo?: string; observaciones?: string; user_id?: string }) =>
+        client.post<PurchaseRequisition>("/v1/purchase-requisitions", { ...data, company_id: COMPANY_ID }),
+      approve: (id: string, aprobadoPor?: string) => client.post<PurchaseRequisition>(`/v1/purchase-requisitions/${id}/approve${aprobadoPor ? `?aprobado_por=${aprobadoPor}` : ""}`),
+      reject: (id: string, motivo?: string) => client.post<PurchaseRequisition>(`/v1/purchase-requisitions/${id}/reject${motivo ? `?motivo=${encodeURIComponent(motivo)}` : ""}`),
+      convertToPO: (id: string, supplierId: string, userId?: string, userName?: string) => {
+        const params = new URLSearchParams({ supplier_id: supplierId })
+        if (userId) params.set("user_id", userId)
+        if (userName) params.set("user_name", userName)
+        return client.post<PurchaseOrder>(`/v1/purchase-requisitions/${id}/convert?${params.toString()}`)
+      },
+    },
+    rfqs: {
+      list: (estado?: string) => client.get<PurchaseRfq[]>(`/v1/companies/${COMPANY_ID}/purchase-rfqs`, estado ? { estado } : undefined),
+      get: (id: string) => client.get<PurchaseRfqWithDetail>(`/v1/purchase-rfqs/${id}`),
+      create: (data: { requisition_id?: string; fecha_limite?: string; motivo?: string; observaciones?: string; items?: { product_id: string; variant_id?: string; descripcion?: string; cantidad_solicitada: number }[]; supplier_ids: string[]; user_id?: string }) =>
+        client.post<PurchaseRfqWithDetail>("/v1/purchase-rfqs", { ...data, company_id: COMPANY_ID }),
+      submitResponse: (rfqId: string, supplierId: string, data: { plazo_entrega_dias?: number; observaciones?: string; items: { product_id: string; precio_unitario: number; plazo_entrega_dias?: number }[] }) =>
+        client.post<PurchaseRfqWithDetail>(`/v1/purchase-rfqs/${rfqId}/responses/${supplierId}`, data),
+      award: (rfqId: string, supplierId: string, userId?: string, userName?: string) =>
+        client.post<PurchaseOrder>(`/v1/purchase-rfqs/${rfqId}/award`, { supplier_id: supplierId, user_id: userId, user_name: userName }),
+    },
+    budgets: {
+      list: (anio?: number) => client.get<PurchaseBudget[]>(`/v1/companies/${COMPANY_ID}/purchase-budgets`, anio ? { anio } : undefined),
+      get: (id: string) => client.get<PurchaseBudget>(`/v1/purchase-budgets/${id}`),
+      create: (data: { nombre: string; anio: number; mes?: number; tipo?: string; moneda?: string; monto_presupuestado: number; categoria_id?: string; departamento?: string; observaciones?: string; user_id?: string }) =>
+        client.post<PurchaseBudget>("/v1/purchase-budgets", { ...data, company_id: COMPANY_ID }),
+      update: (id: string, data: { nombre?: string; monto_presupuestado?: number; activo?: boolean; observaciones?: string }) =>
+        client.put<PurchaseBudget>(`/v1/purchase-budgets/${id}`, data),
+      delete: (id: string) => client.delete<void>(`/v1/purchase-budgets/${id}`),
+      consumption: (anio?: number) => client.get<PurchaseBudgetConsumption[]>(`/v1/companies/${COMPANY_ID}/purchase-budgets/consumption`, anio ? { anio } : undefined),
+    },
+    reports: {
+      kpis: () => client.get<{ total_pos: number; total_gastado: number; total_iva: number; prom_pedido: number; proveedores_activos: number; ordenes_pendientes: number; ordenes_atrasadas: number; ahorro_estimado: number; cumplimiento_rate: number | null }>(`/v1/companies/${COMPANY_ID}/purchase-reports/kpis`),
+      spendBySupplier: () => client.get<{ supplier_id: string; razon_social: string; cantidad_ordenes: number; total_gastado: number; moneda: string }[]>(`/v1/companies/${COMPANY_ID}/purchase-reports/spend-by-supplier`),
+      spendByCategory: () => client.get<{ category_id: string | null; categoria_nombre: string; cantidad_productos: number; total_gastado: number }[]>(`/v1/companies/${COMPANY_ID}/purchase-reports/spend-by-category`),
+      priceVariance: () => client.get<{ product_id: string; nombre: string; average_price: number; min_price: number; max_price: number; variance_pct: number; last_purchase_date: string | null; last_supplier: string | null }[]>(`/v1/companies/${COMPANY_ID}/purchase-reports/price-variance`),
+      downloadSpendBySupplierPdf: () => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/purchase-reports/export/spend-by-supplier.pdf`, undefined, "gasto_por_proveedor.pdf"),
+      downloadPriceVariancePdf: () => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/purchase-reports/export/price-variance.pdf`, undefined, "varianza_de_precios.pdf"),
+    },
+    downloadOrderPdf: (orderId: string, orderNumber?: string) =>
+      downloadAuthenticated(`/v1/purchases/orders/${orderId}/pdf`, undefined, `OC_${orderNumber || orderId.slice(0, 8)}.pdf`),
+    smartReplenishmentPreview: (data: SmartReplenishmentRequest) =>
+      client.post<SmartReplenishmentResponse>("/v1/purchases/smart-replenishment-preview", { ...data, company_id: COMPANY_ID }),
+    generatePOFromReplenishment: (data: {
+      supplier_id: string
+      fecha_entrega_estimada?: string
+      moneda?: string
+      prioridad?: string
+      condiciones_pago?: string
+      observaciones?: string
+      user_id?: string
+      user_name?: string
+      items: {
+        product_id: string
+        variant_id?: string
+        descripcion?: string
+        cantidad: number
+        precio_unitario: number
+        descuento_pct?: number
+        iva_tasa?: number
+      }[]
+    }) => client.post<PurchaseOrder>("/v1/purchases/generate-po-from-replenishment", { ...data, company_id: COMPANY_ID }),
+    generateMultiPOFromReplenishment: (data: {
+      user_id?: string
+      user_name?: string
+      orders: {
+        supplier_id: string
+        fecha_entrega_estimada?: string
+        moneda?: string
+        prioridad?: string
+        condiciones_pago?: string
+        observaciones?: string
+        items: {
+          product_id: string
+          variant_id?: string
+          descripcion?: string
+          cantidad: number
+          precio_unitario: number
+          descuento_pct?: number
+          iva_tasa?: number
+        }[]
+      }[]
+    }) => client.post<{ total_created: number; orders: PurchaseOrder[] }>("/v1/purchases/generate-multi-po-from-replenishment", { ...data, company_id: COMPANY_ID }),
+    getInboxConfig: (companyId?: string) =>
+      client.get<any>(`/v1/companies/${companyId || COMPANY_ID}/purchase-inbox-config`),
+    saveInboxConfig: (data: any, companyId?: string) =>
+      client.post<any>(`/v1/companies/${companyId || COMPANY_ID}/purchase-inbox-config`, { ...data, company_id: companyId || COMPANY_ID }),
+    syncInbox: (params?: { max_emails?: number; only_unseen?: boolean }, companyId?: string) =>
+      client.post<any>(`/v1/companies/${companyId || COMPANY_ID}/purchase-inbox/sync?max_emails=${params?.max_emails || 30}&only_unseen=${params?.only_unseen ?? false}`),
+    uploadInvoiceXml: (file: File, userId?: string, companyId?: string, purchaseOrderId?: string) => {
+      const formData = new FormData()
+      formData.append("file", file)
+      if (userId) formData.append("user_id", userId)
+      if (purchaseOrderId) formData.append("purchase_order_id", purchaseOrderId)
+      return requestMultipart<any>(`/v1/companies/${companyId || COMPANY_ID}/purchase-inbox/upload-xml`, formData)
+    },
+    associateInvoiceToPO: (invoiceId: string, purchaseOrderId: string, userId?: string) =>
+      client.post<any>(`/v1/purchases/invoices/${invoiceId}/associate-po`, { purchase_order_id: purchaseOrderId, user_id: userId }),
+    receiveInvoiceForOrder: (orderId: string, data: { file?: File; invoice_id?: string; user_id?: string }, companyId?: string) => {
+      const formData = new FormData()
+      if (data.file) formData.append("file", data.file)
+      if (data.invoice_id) formData.append("invoice_id", data.invoice_id)
+      if (data.user_id) formData.append("user_id", data.user_id)
+      return requestMultipart<any>(`/v1/companies/${companyId || COMPANY_ID}/purchase-orders/${orderId}/receive-invoice`, formData)
+    },
+    reconcile3WayMatch: (invoiceId: string, userId?: string) =>
+      client.post<any>("/v1/purchases/matching/reconcile", { invoice_id: invoiceId, user_id: userId }),
+    getInvoice3WayMatch: (invoiceId: string) =>
+      client.get<any>(`/v1/purchases/invoices/${invoiceId}/3way-match`),
+    listSupplierNcRequests: (params?: { estado?: string; supplier_id?: string }, companyId?: string) =>
+      client.get<any[]>(`/v1/companies/${companyId || COMPANY_ID}/supplier-nc-requests`, params),
+    resolveSupplierNcRequest: (requestId: string, data: any) =>
+      client.post<any>(`/v1/purchases/supplier-nc-requests/${requestId}/resolve`, data),
+    supplierProducts: (supplierId: string) =>
+      client.get<{ id: string; nombre: string; sku?: string; codigo_barra?: string; costo_promedio: number; unidad_medida: string }[]>(
+        `/v1/purchases/suppliers/${supplierId}/products`
+      ),
+    productInvoices: (supplierId: string, productId: string) =>
+      client.get<{
+        invoice_id: string
+        numero_factura: string
+        timbrado?: string
+        fecha_emision?: string
+        cantidad_comprada: number
+        precio_unitario: number
+        item_total: number
+        saldo_pendiente_factura: number
+      }[]>(`/v1/purchases/suppliers/${supplierId}/products/${productId}/invoices`),
+    returns: {
+      list: (params?: { estado?: string; supplier_id?: string }) =>
+        client.get<any[]>("/v1/purchases/returns", params as any),
+      create: (data: {
+        proveedor_id: string
+        warehouse_id?: string
+        tipo?: string
+        fecha_estimada_retiro?: string
+        observaciones?: string
+        items: {
+          producto_id: string
+          factura_id?: string
+          factura_numero?: string
+          cantidad: number
+          valor_unitario: number
+          motivo: string
+          lote?: string
+          fecha_vencimiento?: string
+          detalle?: string
+        }[]
+      }) => client.post<any>("/v1/purchases/returns", data),
+      update: (returnId: string, data: {
+        proveedor_id?: string
+        warehouse_id?: string
+        tipo?: string
+        fecha_estimada_retiro?: string
+        observaciones?: string
+        items: {
+          producto_id: string
+          factura_id?: string
+          factura_numero?: string
+          cantidad: number
+          valor_unitario: number
+          motivo: string
+          lote?: string
+          fecha_vencimiento?: string
+          detalle?: string
+        }[]
+      }) => client.put<any>(`/v1/purchases/returns/${returnId}`, data),
+      approve: (returnId: string) =>
+        client.post<any>(`/v1/purchases/returns/${returnId}/approve`),
+      reject: (returnId: string, motivo_rechazo: string) =>
+        client.post<any>(`/v1/purchases/returns/${returnId}/reject`, { motivo_rechazo }),
+      complete: (returnId: string, nota_credito_numero?: string) =>
+        client.post<any>(`/v1/purchases/returns/${returnId}/complete`, { nota_credito_numero }),
+    },
   },
   sifen: {
-    invoices: (params?: { search?: string; estado?: string; limit?: number; offset?: number }) =>
-      client.get<{ items: any[]; total: number; limit: number; offset: number }>("/api/v1/sifen/invoices", params as any),
-    creditNotes: (params?: { search?: string; limit?: number; offset?: number }) =>
-      client.get<{ items: any[]; total: number; limit: number; offset: number }>("/api/v1/sifen/credit-notes", params as any),
-    getKude: (identifier: string) => client.get<any>(`/api/v1/sifen/kude/${identifier}`),
-    telemetry: () => client.get<any>("/api/v1/sifen/telemetry"),
-    flushTelemetry: () => client.post<any>("/api/v1/sifen/telemetry/flush"),
     timbrados: {
       list: () => client.get<SifenTimbrado[]>("/api/v1/sifen/timbrados"),
       get: (id: string) => client.get<SifenTimbrado>(`/api/v1/sifen/timbrados/${id}`),
@@ -656,23 +2602,292 @@ export const api = {
     check: (cdc: string) => client.get<any>(`/api/v1/sifen/cdc/${cdc}`),
     qr: (cdc: string) => client.get<{ png?: string; base64: string; qr_data_url?: string }>(`/api/v1/sifen/qr/${cdc}`),
   },
+  sifenAvanzado: {
+    getDashboard: (companyId: string) => client.get<any>("/v1/sifen-avanzado/dashboard", { company_id: companyId }),
+    sendDistribuidoraInvoice: (data: any) => client.post<any>("/v1/sifen-avanzado/invoices/distribuidora", data),
+    getIvaBook: (tipo: string, companyId: string, periodo: string) => client.get<any>(`/v1/sifen-avanzado/iva-books/${tipo}`, { company_id: companyId, periodo }),
+    getRetentionBook: (companyId: string, periodo: string) => client.get<any>("/v1/sifen-avanzado/retention-books", { company_id: companyId, periodo }),
+    listDgrVehicles: (companyId: string) => client.get<any[]>("/v1/sifen-avanzado/dgr/vehicles", { company_id: companyId }),
+    createDgrVehicle: (data: any) => client.post<any>("/v1/sifen-avanzado/dgr/vehicles", data),
+    listDgrReports: (companyId: string) => client.get<any[]>("/v1/sifen-avanzado/dgr/reports", { company_id: companyId }),
+    generateDgrReport: (companyId: string, periodo: string) => client.post<any>("/v1/sifen-avanzado/dgr/reports", { company_id: companyId, periodo }),
+    listEkuatiaDocuments: (companyId: string) => client.get<any[]>("/v1/sifen-avanzado/ekuatia/documents", { company_id: companyId }),
+    verifyEkuatiaDocument: (docId: string) => client.post<any>(`/v1/sifen-avanzado/ekuatia/documents/${docId}/verify`),
+    validateCdc: (companyId: string, saleId: string, cdc: string) => client.post<any>("/v1/sifen-avanzado/cdc/validate", { company_id: companyId, sale_id: saleId, cdc }),
+  },
   reports: {
     salesSummary: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<any>("/api/reports/sales/summary", params),
     salesByPeriod: (params?: { fecha_desde?: string; fecha_hasta?: string; agrupar_por?: string }) => client.get<any>("/api/reports/sales/by-period", params),
+    salesChartComparison: (params?: { fecha_desde?: string; fecha_hasta?: string; agrupar_por?: string }) => client.get<{ series: any[]; totales: any }>("/api/reports/sales/chart-comparison", params),
     salesByCategory: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<any>("/api/reports/sales/by-category", params),
-    salesByProduct: (params?: { fecha_desde?: string; fecha_hasta?: string; limit?: number }) => client.get<any[]>("/api/reports/sales/by-product", params),
-    marginSummary: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<{ monto: number; costo: number; margen_pct: number }>("/api/reports/sales/margin-summary", params),
+    salesByProduct: (params?: { fecha_desde?: string; fecha_hasta?: string; limit?: number }) => client.get<{ producto: string; sku: string; unidad_medida: string; cantidad: number; monto: number; costo: number; margen: number }[]>("/api/reports/sales/by-product", params),
+    salesBySupplier: (params?: { fecha_desde?: string; fecha_hasta?: string; limit?: number; supplier_id?: string }) =>
+      client.get<{
+        supplier_id: string;
+        proveedor: string;
+        ruc: string;
+        skus_vendidos: number;
+        unidades_vendidas: number;
+        total_ventas: number;
+        costo_total: number;
+        utilidad_bruta: number;
+        margen_pct: number;
+        participacion_pct: number;
+      }[]>("/api/reports/sales/by-supplier", params),
+    salesBySupplierProducts: (params: { supplier_id: string; fecha_desde?: string; fecha_hasta?: string; limit?: number }) =>
+      client.get<{
+        product_id: string;
+        producto: string;
+        sku: string;
+        codigo_barra: string;
+        unidades_vendidas: number;
+        total_ventas: number;
+        costo_total: number;
+        utilidad_bruta: number;
+        margen_pct: number;
+        participacion_pct: number;
+      }[]>("/api/reports/sales/by-supplier/products", params),
+    downloadSalesBySupplierPdf: (params?: { fecha_desde?: string; fecha_hasta?: string; supplier_id?: string }) =>
+      downloadAuthenticated("/api/reports/export/sales-by-supplier.pdf", params, `ventas_proveedor_${params?.supplier_id || "general"}_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.pdf`),
+    downloadSalesBySupplierXlsx: (params?: { fecha_desde?: string; fecha_hasta?: string; supplier_id?: string }) =>
+      downloadAuthenticated("/api/reports/export/sales-by-supplier.xlsx", params, `ventas_proveedor_${params?.supplier_id || "general"}_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.xlsx`),
+    salesDetailedDay: (params: { fecha: string; categoria_id?: string; search?: string; branch_id?: string }) =>
+      client.get<{
+        fecha: string;
+        resumen: {
+          fecha: string;
+          total_tickets: number;
+          total_skus: number;
+          total_unidades: number;
+          total_venta: number;
+          total_costo: number;
+          total_descuento: number;
+          margen_bruto_gs: number;
+          margen_bruto_pct: number;
+          ticket_promedio: number;
+          ppp_global: number;
+        };
+        items: Array<{
+          product_id: string;
+          sku: string;
+          codigo_barra: string;
+          producto: string;
+          categoria: string;
+          unidad_medida: string;
+          cantidad: number;
+          pvp: number;
+          ppp: number;
+          ultimo_costo: number;
+          costo_promedio: number;
+          total_venta: number;
+          total_costo: number;
+          total_descuento: number;
+          margen_gs: number;
+          margen_pvp_pct: number;
+          margen_ppp_pct: number;
+          participacion_pct: number;
+        }>;
+      }>("/api/reports/sales/detailed-day", params),
+    salesDailyConsolidation: (params?: { fecha_desde?: string; fecha_hasta?: string; branch_id?: string }) =>
+      client.get<{
+        periodo: { fecha_desde: string | null; fecha_hasta: string | null; total_dias: number };
+        resumen: {
+          total_dias: number;
+          total_tickets: number;
+          total_unidades: number;
+          total_venta: number;
+          total_costo: number;
+          total_descuento: number;
+          margen_bruto_gs: number;
+          margen_bruto_pct: number;
+          ticket_promedio: number;
+          ppp_global: number;
+          promedio_venta_diaria: number;
+        };
+        dias: Array<{
+          dia: string;
+          dia_nombre: string;
+          tickets: number;
+          total_skus: number;
+          unidades_vendidas: number;
+          total_venta: number;
+          total_costo: number;
+          total_descuento: number;
+          margen_bruto_gs: number;
+          margen_bruto_pct: number;
+          ticket_promedio: number;
+          ppp_promedio: number;
+        }>;
+      }>("/api/reports/sales/daily-consolidation", params),
+    downloadSalesDetailedDayXlsx: (params: { fecha: string; categoria_id?: string; search?: string; branch_id?: string }) =>
+      downloadAuthenticated("/api/reports/export/sales-detailed-day.xlsx", params, `ventas_detalladas_${params.fecha}.xlsx`),
+    downloadSalesDetailedDayPdf: (params: { fecha: string; categoria_id?: string; search?: string; branch_id?: string }) =>
+      downloadAuthenticated("/api/reports/export/sales-detailed-day.pdf", params, `ventas_detalladas_${params.fecha}.pdf`),
+    downloadSalesDailyConsolidationXlsx: (params?: { fecha_desde?: string; fecha_hasta?: string; branch_id?: string }) =>
+      downloadAuthenticated("/api/reports/export/sales-daily-consolidation.xlsx", params, `consolidado_diario_ventas_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.xlsx`),
+    downloadSalesDailyConsolidationPdf: (params?: { fecha_desde?: string; fecha_hasta?: string; branch_id?: string }) =>
+      downloadAuthenticated("/api/reports/export/sales-daily-consolidation.pdf", params, `consolidado_diario_ventas_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.pdf`),
+    salesByPaymentMethod: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<{ forma_pago: string; cantidad: number; monto: number; porcentaje: number }[]>("/api/reports/sales/by-payment-method", params),
+    expensesByCategory: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<{ categoria: string; cantidad: number; monto: number; porcentaje: number }[]>("/api/reports/expenses/by-category", params),
+    getDashboardAllKPIs: async (params?: { fecha_desde?: string; fecha_hasta?: string }) => {
+      const [summary, byCat, byProd, period] = await Promise.allSettled([
+        api.reports.salesSummary(params),
+        api.reports.salesByCategory(params),
+        api.reports.salesByProduct(params),
+        api.reports.salesByPeriod(params),
+      ])
+      return {
+        summary: summary.status === "fulfilled" ? summary.value : null,
+        byCat: byCat.status === "fulfilled" ? byCat.value : [],
+        byProd: byProd.status === "fulfilled" ? byProd.value : [],
+        period: period.status === "fulfilled" ? period.value : [],
+      }
+    },
     inventory: () => client.get<any>("/api/reports/inventory/summary"),
     inventorySummary: () => client.get<any>("/api/reports/inventory/summary"),
+    inventoryDetail: () => client.get<any[]>("/api/reports/inventory/detail"),
+    inventoryRotation: () => client.get<any[]>("/api/reports/inventory/rotation"),
     fifo: () => client.get<FifoReport[]>("/api/reports/inventory/fifo"),
     lifo: () => client.get<LifoReport[]>("/api/reports/inventory/lifo"),
     fifoCosting: () => client.get<FifoReport[]>("/api/reports/inventory/fifo"),
     lifoCosting: () => client.get<LifoReport[]>("/api/reports/inventory/lifo"),
     costComparison: () => client.get<CostComparisonReport[]>("/api/reports/inventory/cost-comparison"),
     fiscalBook: (params?: { tipo_libro?: string; fecha_desde?: string; fecha_hasta?: string }) => client.get<any>("/api/reports/fiscal/book", params),
+    fiscalRg90Ventas: (params?: { fecha_desde?: string; fecha_hasta?: string; punto_emision?: string }) =>
+      client.get<{
+        company: { razon_social: string; ruc: string; timbrado: string };
+        periodo: { fecha_desde: string | null; fecha_hasta: string | null; punto_emision: string };
+        totales: {
+          cantidad_facturas: number;
+          cantidad_nc: number;
+          total_gravada_10: number;
+          total_iva_10: number;
+          total_gravada_5: number;
+          total_iva_5: number;
+          total_exenta: number;
+          total_general: number;
+        };
+        registros: Array<{
+          tipo_registro: number;
+          tipo_identificacion: number;
+          numero_identificacion: string;
+          dv: string;
+          nombre_comprador: string;
+          tipo_comprobante: number;
+          tipo_comprobante_label: string;
+          fecha_emision: string;
+          fecha_asuncion: string;
+          timbrado: string;
+          numero_comprobante: string;
+          gravada_10: number;
+          iva_10: number;
+          gravada_5: number;
+          iva_5: number;
+          exenta: number;
+          total: number;
+          condicion: number;
+          condicion_label: string;
+          moneda_extranjera: string;
+          imputa_iva: string;
+          imputa_ire: string;
+          imputa_irp: string;
+          comprobante_asociado_timbrado: string;
+          comprobante_asociado_numero: string;
+        }>;
+      }>("/api/reports/fiscal/rg90/ventas", params),
+    downloadRg90VentasXlsx: (params?: { fecha_desde?: string; fecha_hasta?: string; punto_emision?: string }, filename?: string) =>
+      downloadAuthenticated("/api/reports/export/rg90/ventas.xlsx", params, filename || `libro_ventas_rg90_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.xlsx`),
+    downloadRg90VentasZip: (params?: { fecha_desde?: string; fecha_hasta?: string; punto_emision?: string }, filename?: string) =>
+      downloadAuthenticated("/api/reports/export/rg90/ventas.zip", params, filename || "RG90_MARANGATU_VENTAS.zip"),
     financialSummary: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<any>("/api/reports/financial/summary", params),
-    dashboardAllKpis: (companyId: string = COMPANY_ID, branchId?: string) => client.get<any>(`/api/reports/companies/${companyId}/dashboard-all-kpis`, branchId ? { branch_id: branchId } : undefined),
-    dashboardQuickKpis: (companyId: string = COMPANY_ID, timeframe: string = "mes") => client.get<any>(`/api/reports/companies/${companyId}/dashboard-quick-kpis`, { timeframe }),
+    salesExecutiveProfitability: (params?: { fecha_desde?: string; fecha_hasta?: string; branch_id?: string }) =>
+      client.get<{
+        periodo: { fecha_desde: string | null; fecha_hasta: string | null };
+        resumen: {
+          total_vendido: number;
+          cmv: number;
+          utilidad_bruta: number;
+          margen_bruto_pct: number;
+          descuentos_pos: number;
+          devoluciones_nc: number;
+          resultado_neto: number;
+          resultado_neto_pct: number;
+          total_tickets: number;
+          ticket_promedio: number;
+          total_returns: number;
+        };
+        lineas_ejecutivas: Array<{
+          orden: number;
+          clave: string;
+          concepto: string;
+          monto: number;
+          tipo: string;
+          descripcion: string;
+        }>;
+        medios_pago: Array<{
+          forma_pago_raw: string;
+          moneda: string;
+          etiqueta: string;
+          cantidad: number;
+          monto: number;
+          porcentaje: number;
+        }>;
+        cajeras: Array<{
+          cajera: string;
+          turnos: number;
+          tickets: number;
+          total_ventas: number;
+          descuentos: number;
+          ticket_promedio: number;
+          porcentaje_ventas: number;
+        }>;
+      }>("/api/reports/sales/executive-profitability", params),
+    downloadSalesExecutivePdf: (params?: { fecha_desde?: string; fecha_hasta?: string; branch_id?: string }) =>
+      downloadAuthenticated("/api/reports/export/sales-executive.pdf", params, `informe_ventas_utilidad_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.pdf`),
+    downloadSalesExecutiveXlsx: (params?: { fecha_desde?: string; fecha_hasta?: string; branch_id?: string }) =>
+      downloadAuthenticated("/api/reports/export/sales-executive.xlsx", params, `informe_ventas_utilidad_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.xlsx`),
+    inventoryValuation: (params?: { warehouse_id?: string; supplier_id?: string; fecha_corte?: string }) =>
+      client.get<{
+        fecha_corte: string | null;
+        total_value: number;
+        total_products: number;
+        total_units: number;
+        by_warehouse: Array<{
+          warehouse_id: string;
+          warehouse_name: string;
+          total_products: number;
+          total_units: number;
+          total_value: number;
+          percentage: number;
+        }>;
+        by_supplier: Array<{
+          supplier_id: string | null;
+          supplier_name: string;
+          total_products: number;
+          total_units: number;
+          total_value: number;
+          percentage: number;
+        }>;
+        items: Array<{
+          product_id: string;
+          sku: string;
+          producto: string;
+          unidad_medida: string;
+          supplier_id: string | null;
+          supplier_name: string;
+          warehouse_id: string;
+          warehouse_name: string;
+          costo_unitario: number;
+          stock: number;
+          valor_total: number;
+        }>;
+      }>("/api/reports/inventory/valuation", params),
+    downloadInventoryValuationPdf: (params?: { warehouse_id?: string; supplier_id?: string; fecha_corte?: string }) =>
+      downloadAuthenticated("/api/reports/export/inventory-valuation.pdf", params, `stock_valorizado_${params?.fecha_corte || "actual"}.pdf`),
+    downloadInventoryValuationXlsx: (params?: { warehouse_id?: string; supplier_id?: string; fecha_corte?: string }) =>
+      downloadAuthenticated("/api/reports/export/inventory-valuation.xlsx", params, `stock_valorizado_${params?.fecha_corte || "actual"}.xlsx`),
+    inventoryRotationFiltered: (params?: { supplier_id?: string }) =>
+      client.get<any[]>("/api/reports/inventory/rotation", params),
     exportSalesByPeriod: (params?: { fecha_desde?: string; fecha_hasta?: string; agrupar_por?: string }) => client.get<Blob>("/api/reports/export/sales-by-period", params),
     exportInventory: () => client.get<Blob>("/api/reports/export/inventory"),
     exportFifo: () => client.get<Blob>("/api/reports/export/fifo"),
@@ -722,9 +2937,10 @@ export const api = {
     list: (params?: { vendedor_id?: string; estado?: string }) => client.get<SalesCommission[]>(`/v1/companies/${COMPANY_ID}/commissions`, params),
     pay: (id: string) => client.post<SalesCommission>(`/v1/commissions/${id}/pay`),
     summary: () => client.get<any>(`/v1/companies/${COMPANY_ID}/commissions/summary`),
+    calculateBatch: () => client.post<any>(`/v1/companies/${COMPANY_ID}/commissions/calculate-batch`),
   },
   discounts: {
-    list: () => client.get<Discount[]>(`/v1/companies/${COMPANY_ID}/discounts`),
+    list: () => client.get<Discount[]>("/v1/discounts"),
     get: (id: string) => client.get<Discount>(`/v1/discounts/${id}`),
     create: (data: Partial<Discount>) => client.post<Discount>("/v1/discounts", data),
     update: (id: string, data: Partial<Discount>) => client.patch<Discount>(`/v1/discounts/${id}`, data),
@@ -734,10 +2950,9 @@ export const api = {
     list: (params?: { estado?: string }) => client.get<Quote[]>(`/v1/companies/${COMPANY_ID}/quotes`, params as any),
     get: (id: string) => client.get<Quote>(`/v1/quotes/${id}`),
     create: (data: Partial<Quote>) => client.post<Quote>("/v1/quotes", data),
-    update: (id: string, data: Partial<Quote>) => client.patch<Quote>(`/v1/quotes/${id}`, data),
-    delete: (id: string) => client.delete<void>(`/v1/quotes/${id}`),
+    update: (id: string, data: Partial<Quote>) => client.put<Quote>(`/v1/quotes/${id}`, data),
     convertToSale: (id: string, data?: { branch_id?: string; condicion?: string; tipo_comprobante?: string }) => client.post<{ sale: Sale; quote: Quote }>(`/v1/quotes/${id}/convert`, data),
-    changeStatus: (id: string, estado: string) => client.patch<Quote>(`/v1/quotes/${id}/status`, { estado }),
+    changeStatus: (id: string, estado: string) => client.post<Quote>(`/v1/quotes/${id}/status?estado=${encodeURIComponent(estado)}`),
     expire: () => client.post<{expiradas: number}>("/v1/quotes/expire"),
   },
   returns: {
@@ -755,60 +2970,124 @@ export const api = {
     list: (params?: { estado?: string }) => client.get<SalesOrder[]>(`/v1/companies/${COMPANY_ID}/sales-orders`, params as any),
     get: (id: string) => client.get<SalesOrder>(`/v1/sales-orders/${id}`),
     create: (data: Partial<SalesOrder>) => client.post<SalesOrder>("/v1/sales-orders", data),
-    update: (id: string, data: Partial<SalesOrder>) => client.patch<SalesOrder>(`/v1/sales-orders/${id}`, data),
-    delete: (id: string) => client.delete<void>(`/v1/sales-orders/${id}`),
-    confirm: (id: string) => client.post<SalesOrder>(`/v1/sales-orders/${id}/confirm`),
-    deliver: (id: string) => client.post<SalesOrder>(`/v1/sales-orders/${id}/deliver`),
-    changeStatus: (id: string, estado: string, motivo?: string) => client.patch<SalesOrder>(`/v1/sales-orders/${id}/status`, { estado, motivo }),
-    approve: (id: string, aprobado_por?: string) => client.post<SalesOrder>(`/v1/sales-orders/${id}/approve`, { aprobado_por }),
+    update: (id: string, data: Partial<SalesOrder>) => client.put<SalesOrder>(`/v1/sales-orders/${id}`, data),
+    changeStatus: (id: string, estado: string, motivo?: string) => client.post<SalesOrder>(`/v1/sales-orders/${id}/status?estado=${encodeURIComponent(estado)}${motivo ? `&motivo=${encodeURIComponent(motivo)}` : ""}`),
+    approve: (id: string, aprobado_por: string) => client.post<SalesOrder>(`/v1/sales-orders/${id}/approve?aprobado_por=${encodeURIComponent(aprobado_por)}`),
   },
   verticals: {
     list: () => client.get<Vertical[]>("/v1/admin/verticals"),
     getCompanyConfig: () => client.get<CompanyVerticalConfig>("/v1/companies/current/vertical-config"),
     updateCompanyConfig: (config: { vertical_id?: string; features?: string[]; config?: Record<string, unknown> }) => client.put<CompanyVerticalConfig>("/v1/companies/current/vertical-config", config),
   },
-  currencies: () => client.get<Currency[]>("/v1/currency"),
-  exchangeRates: () => client.get<ExchangeRate[]>("/v1/currency/rates"),
   financeAgent: {
     run: () => client.post<FinanceAgentRun>("/v1/finance-agent/run", { company_id: COMPANY_ID }),
-    summary: () => client.get<any>("/v1/finance-agent/summary", { company_id: COMPANY_ID }),
-    chat: (query: string, user_name?: string) => client.post<any>("/v1/finance-agent/chat", { query, user_name }, { params: { company_id: COMPANY_ID } }),
-    recommendations: (status?: string) => client.get<FinanceRecommendation[]>("/v1/finance-agent/recommendations", { company_id: COMPANY_ID, status }),
-    approve: (id: string, approved_by?: string, comments?: string) => client.post<FinanceRecommendation>(`/v1/finance-agent/recommendations/${id}/approve`, { approved_by_name: approved_by || "Gustavo", comments }),
-    reject: (id: string, approved_by?: string, comments?: string) => client.post<FinanceRecommendation>(`/v1/finance-agent/recommendations/${id}/reject`, { approved_by_name: approved_by || "Gustavo", comments }),
-  },
-  commercialAgent: {
-    run: () => client.post<any>("/v1/commercial-agent/run", { company_id: COMPANY_ID }),
-    recommendations: (status?: string) => client.get<any[]>("/v1/commercial-agent/recommendations", { company_id: COMPANY_ID, status }),
-    approve: (id: string, approved_by: string, comments?: string) => client.post<any>(`/v1/commercial-agent/recommendations/${id}/approve`, { approved_by, comments }),
-    reject: (id: string, approved_by: string, comments?: string) => client.post<any>(`/v1/commercial-agent/recommendations/${id}/reject`, { approved_by, comments }),
-    chat: (query: string, user_name?: string) => client.post<any>("/v1/commercial-agent/chat", { company_id: COMPANY_ID, query, user_name }),
+    getControlTower: (companyId?: string) => client.get<any>("/v1/finance-agent/control-tower", { company_id: companyId || COMPANY_ID }),
+    getInterAgentSync: (companyId?: string) => client.get<any>("/v1/finance-agent/inter-agent/sync", { company_id: companyId || COMPANY_ID }),
+    getCashFlowForecast: (companyId?: string) => client.get<any>("/v1/finance-agent/cash-flow-forecast", { company_id: companyId || COMPANY_ID }),
+    chat: (data: { message: string; conversation_history?: any[]; company_id?: string }) =>
+      client.post<{ response: string; suggestions: string[]; action_proposal?: any }>("/v1/finance-agent/chat", { company_id: data.company_id || COMPANY_ID, ...data }),
+    recommendations: (status?: string, tipo?: string, limit?: number, offset?: number) =>
+      client.get<FinanceRecommendation[]>("/v1/finance-agent/recommendations", { company_id: COMPANY_ID, status, tipo, limit, offset }),
+    countByTipo: (status?: string) => client.get<{ tipo: string; cantidad: number }[]>("/v1/finance-agent/recommendations/count-by-tipo", { company_id: COMPANY_ID, status }),
+    approve: (id: string, approved_by: string, comments?: string) => client.post<FinanceRecommendation>(`/v1/finance-agent/recommendations/${id}/approve`, { approved_by, comments }),
+    reject: (id: string, approved_by: string, comments?: string) => client.post<FinanceRecommendation>(`/v1/finance-agent/recommendations/${id}/reject`, { approved_by, comments }),
+    bulkDecide: (approve: boolean, ids: string[], approved_by: string, comments?: string) =>
+      client.post<{ decididas: number }>(`/v1/finance-agent/recommendations/bulk-decide?approve=${approve}`, { ids, approved_by, comments }),
   },
   marketingAgent: {
-    dashboard: () => client.get<any>("/v1/marketing-agent/dashboard", { params: { company_id: COMPANY_ID } }),
-    summary: () => client.get<any>("/v1/marketing-agent/summary", { params: { company_id: COMPANY_ID } }),
-    chat: (query: string, user_name?: string, use_gemini?: boolean) => client.post<any>("/v1/marketing-agent/chat", { query, user_name, use_gemini }, { params: { company_id: COMPANY_ID } }),
-    activateCampaign: (campaignId: string) => client.post<any>(`/v1/marketing-agent/campaigns/${campaignId}/activate`, {}, { params: { company_id: COMPANY_ID } }),
+    dashboard: (companyId?: string) =>
+      client.get<any>("/v1/marketing-agent/dashboard", { company_id: companyId || COMPANY_ID }),
+    chat: (data: { message: string; conversation_history?: any[]; company_id?: string }) =>
+      client.post<{ reply: string; suggested_prompts?: string[] }>("/v1/marketing-agent/chat", { company_id: data.company_id || COMPANY_ID, ...data }),
+    sendCoupon: (data: { phone: string; message: string; customer_name?: string; cupon?: string }) =>
+      client.post<any>("/v1/marketing-agent/send-coupon", data),
+    launchCampaign: (data: { company_id?: string; campaign_id: string; segmento: string; message?: string }) =>
+      client.post<any>("/v1/marketing-agent/launch-campaign", { company_id: data.company_id || COMPANY_ID, ...data }),
   },
-  
-  accountsPayable: {
-    list: (params?: { estado?: string; search?: string; supplier_id?: string }) => client.get<any[]>(`/v1/companies/${COMPANY_ID}/accounts-payable`, params as any),
-    aging: () => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-payable/aging`),
-    summary: () => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-payable/summary`),
-    documentDetail: (id: string) => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-payable/documents/${id}`),
-    createPaymentOrder: (data: any) => client.post<any>(`/v1/companies/${COMPANY_ID}/accounts-payable/payment`, data),
+  riskAgent: {
+    dashboard: (dias?: number, companyId?: string) =>
+      client.get<any>("/v1/risk-agent/dashboard", { company_id: companyId || COMPANY_ID, dias: dias || 30 }),
+    events: (params?: { dias?: number; nivel?: string; categoria?: string; cajero?: string; limit?: number; offset?: number; companyId?: string }) =>
+      client.get<any[]>("/v1/risk-agent/events", { company_id: params?.companyId || COMPANY_ID, ...params }),
+    chat: (data: { message: string; conversation_history?: any[]; company_id?: string }) =>
+      client.post<{ reply: string; suggested_prompts?: string[] }>("/v1/risk-agent/chat", { company_id: data.company_id || COMPANY_ID, ...data }),
+  },
+  salesAgent: {
+    run: (companyId?: string) => client.post<SalesAgentRun>("/v1/sales-agent/run", { company_id: companyId || COMPANY_ID }),
+    getAnalysis: (companyId?: string) => client.get<any>("/v1/sales-agent/analysis", { company_id: companyId || COMPANY_ID }),
+    chat: (data: { message: string; conversation_history?: any[]; context_tab?: string; company_id?: string }) =>
+      client.post<{ reply: string; action_outcome?: any; suggested_prompts?: string[] }>("/v1/sales-agent/chat", { company_id: data.company_id || COMPANY_ID, ...data }),
+    applyPrice: (data: { product_id: string; nuevo_precio: number; motivo?: string; company_id?: string }) =>
+      client.post<{ success: boolean; mensaje: string }>("/v1/sales-agent/apply-price", { company_id: data.company_id || COMPANY_ID, ...data }),
+    recommendations: (status?: string, companyId?: string) => client.get<SalesRecommendation[]>("/v1/sales-agent/recommendations", { company_id: companyId || COMPANY_ID, status }),
+    approve: (id: string, approved_by: string, comments?: string) => client.post<any>(`/v1/sales-agent/recommendations/${id}/approve`, { approved_by, comments }),
+    reject: (id: string, approved_by: string, comments?: string) => client.post<any>(`/v1/sales-agent/recommendations/${id}/reject`, { approved_by, comments }),
+  },
+  generalAgent: {
+    chat: (message: string, history: { role: "user" | "assistant"; content: string }[]) =>
+      client.post<{ reply: string }>("/v1/general-agent/chat", { company_id: COMPANY_ID, message, history }),
   },
   accountsReceivable: {
-    list: (params?: { estado?: string }) => client.get<AccountsReceivable[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable`, params),
+    list: (params?: { estado?: string; customer_id?: string; search?: string; limit?: number; offset?: number }) => client.get<AccountsReceivable[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable`, params),
+    count: (params?: { estado?: string }) => client.get<{ total: number }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/count`, params),
     get: (id: string) => client.get<AccountsReceivable>(`/v1/accounts-receivable/${id}`),
     create: (data: Partial<AccountsReceivable>) => client.post<AccountsReceivable>("/v1/accounts-receivable", data),
     update: (id: string, data: Partial<AccountsReceivable>) => client.patch<AccountsReceivable>(`/v1/accounts-receivable/${id}`, data),
     delete: (id: string) => client.delete<void>(`/v1/accounts-receivable/${id}`),
     aging: () => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/aging`),
     summary: () => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/summary`),
-    documentDetail: (id: string) => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/documents/${id}`),
-    createReceipt: (data: any) => client.post<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/receipt`, data),
+    downloadStatementPdf: (customerId: string) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/customers/${customerId}/statement.pdf`, undefined, `estado_cuenta_cliente_${customerId.slice(0, 8)}.pdf`),
+    searchEmpresasVinculadas: (search: string) => client.get<string[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/empresas-vinculadas`, { search }),
+    downloadAgingExcel: (params?: { fecha_desde?: string; fecha_hasta?: string; customer_id?: string; empresa_vinculada?: string }) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/export/aging.xlsx`, params, "aging_cuentas_por_cobrar.xlsx"),
+    downloadAgingPdf: (params?: { fecha_desde?: string; fecha_hasta?: string; customer_id?: string; empresa_vinculada?: string }) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/export/aging.pdf`, params, "aging_cuentas_por_cobrar.pdf"),
+    downloadDeudaDetalladaPdf: (params?: { customer_id?: string; empresa_vinculada?: string; solo_con_saldo?: boolean }) =>
+      downloadAuthenticated(
+        `/v1/companies/${COMPANY_ID}/accounts-receivable/export/deuda-detallada.pdf`,
+        params ? {
+          customer_id: params.customer_id,
+          empresa_vinculada: params.empresa_vinculada,
+          solo_con_saldo: params.solo_con_saldo !== undefined ? String(params.solo_con_saldo) : undefined,
+        } : undefined,
+        "deuda_detallada_cuentas_por_cobrar.pdf"
+      ),
+
+    downloadCobranzasExcel: (params?: { fecha_desde?: string; fecha_hasta?: string }) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/export/cobranzas.xlsx`, params, "cobranzas.xlsx"),
+    downloadCobranzasPdf: (params?: { fecha_desde?: string; fecha_hasta?: string }) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/export/cobranzas.pdf`, params, "cobranzas.pdf"),
+    downloadReceiptA6Pdf: (paymentId: string) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/payments/${paymentId}/receipt.pdf`, undefined, `recibo_${paymentId.slice(0, 8)}.pdf`),
+    pendingForCustomer: (customerId: string) => client.get<{ id: string; numero_documento: string; fecha_emision: string; fecha_vencimiento: string | null; moneda: string; monto_original: number; saldo_pendiente: number; dias_mora: number }[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/customers/${customerId}/pending`),
+    registerPayment: (data: { customer_id: string; monto_total: number; moneda?: string; forma_pago?: string; referencia?: string; fecha?: string; observaciones?: string; aplica_retencion?: boolean; monto_retencion?: number; retencion_numero_comprobante?: string; retencion_fecha?: string; retencion_porcentaje?: number; monto_efectivo_recibido?: number; allocations: { accounts_receivable_id: string; monto: number }[] }) =>
+      client.post<{ id: string; monto_total: number; allocations: { accounts_receivable_id: string; monto: number; nuevo_saldo: number; nuevo_estado: string }[] }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/payments`, data),
+    applyGlobalPayment: (data: { customer_id: string; monto_total: number; moneda?: string; forma_pago?: string; referencia?: string; fecha?: string; observaciones?: string; accounts_receivable_ids?: string[]; bank_account_id?: string; destino_fondos?: string; caja_session_id?: string; cheque_numero?: string; cheque_banco?: string; cheque_librador?: string; cheque_ruc?: string; cheque_fecha_emision?: string; cheque_fecha_cobro?: string; aplica_retencion?: boolean; monto_retencion?: number; retencion_numero_comprobante?: string; retencion_fecha?: string; retencion_porcentaje?: number; monto_efectivo_recibido?: number }) =>
+      client.post<{ id: string; payment_id: string; numero_recibo: string; monto_total: number; documentos_afectados: number; allocations: any[]; treasury?: any }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/payments/apply-global`, data),
+    verifyReceipt: (paymentId: string) => client.get<any>(`/v1/accounts-receivable/receipts/${paymentId}/verify`),
+    documentPayments: (id: string) => client.get<{ id: string; fecha: string; forma_pago: string | null; referencia: string | null; observaciones: string | null; monto: number; created_at: string }[]>(`/v1/accounts-receivable/${id}/payments`),
+    customerPayments: (customerId: string) => client.get<{ id: string; fecha: string; monto_total: number; forma_pago: string | null; referencia: string | null; observaciones: string | null; created_at: string; allocations: { accounts_receivable_id: string; numero_documento: string; monto: number }[] }[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/customers/${customerId}/payments`),
+    corporateAgreementsSummary: () => client.get<any[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/summary`),
+    corporateAgreementPendingDocs: (empresa: string) => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/${encodeURIComponent(empresa)}/pending-docs`),
+    downloadExtractosEmpresaPdf: (empresa: string, periodo: string) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/${encodeURIComponent(empresa)}/extractos.pdf`, { periodo }, `extractos_${empresa.replace(/\s+/g, '_')}_${periodo}.pdf`),
+    downloadConsolidadoEmpresaPdf: (empresa: string, periodo: string) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/${encodeURIComponent(empresa)}/consolidado.pdf`, { periodo }, `consolidado_${empresa.replace(/\s+/g, '_')}_${periodo}.pdf`),
+    createCorporateRemission: (data: { empresa_vinculada_nombre: string; periodo_mes: string; fecha_corte?: string; accounts_receivable_ids?: string[]; notas?: string }) => client.post<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/remit`, data),
+    listCorporateRemissions: (empresa?: string) => client.get<any[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions`, empresa ? { empresa_nombre: empresa } : undefined),
+    getCorporateRemissionDetail: (id: string) => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}`),
+    downloadRemisionPdf: (id: string, numero?: string) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}/pdf`, undefined, `remision_${numero || id.slice(0, 8)}.pdf`),
+    payCorporateRemission: (id: string, data: {
+      monto: number;
+      forma_pago?: string;
+      bank_account_id?: string;
+      destino_fondos?: string;
+      referencia?: string;
+      fecha_pago?: string;
+      notas?: string;
+      numero_cheque?: string;
+      banco_cheque?: string;
+      es_cheque_diferido?: boolean;
+      fecha_cheque_emision?: string;
+      fecha_cheque_cobro?: string;
+      titular_cheque?: string;
+    }) => client.post<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}/pay`, data),
+    listBanks: () => client.get<any[]>("/v1/financial/banks", { company_id: COMPANY_ID } as any),
   },
+
   backups: {
     list: () => client.get<Backup[]>("/v1/backups"),
     create: (schema_name?: string, tenant_id?: string, tenant_slug?: string) => {
@@ -828,10 +3107,10 @@ export const api = {
     updateSchedule: (config: Partial<BackupScheduleConfig>) => client.put<BackupScheduleConfig>("/v1/backups/schedule", config),
   },
   variants: {
-    list: (productId: string) => client.get<ProductVariant[]>(`/v1/variants/product/${productId}`),
-    get: (id: string) => client.get<ProductVariant>(`/v1/variants/${id}`),
-    create: (data: Partial<ProductVariant>) => client.post<ProductVariant>("/v1/variants", data),
-    update: (id: string, data: Partial<ProductVariant>) => client.patch<ProductVariant>(`/v1/variants/${id}`, data),
+    list: (productId?: string) => client.get<any[]>("/v1/variants", { product_id: productId } as any),
+    get: (id: string) => client.get<any>(`/v1/variants/${id}`),
+    create: (data: any) => client.post<any>("/v1/variants", { ...data, company_id: COMPANY_ID }),
+    update: (id: string, data: any) => client.patch<any>(`/v1/variants/${id}`, data),
     delete: (id: string) => client.delete<void>(`/v1/variants/${id}`),
   },
   priceLists: {
@@ -844,7 +3123,108 @@ export const api = {
     addItem: (listId: string, data: Partial<PriceListItem>) => client.post<PriceListItem>(`/v1/price-lists/${listId}/items`, data),
     updateItem: (listId: string, itemId: string, data: Partial<PriceListItem>) => client.patch<PriceListItem>(`/v1/price-lists/${listId}/items/${itemId}`, data),
     removeItem: (listId: string, itemId: string) => client.delete<void>(`/v1/price-lists/${listId}/items/${itemId}`),
-    lookup: (customerId: string, productId: string) => client.get<{ precio: number; lista_id: string; descuento: number }>("/v1/price-lists/lookup", { customer_id: customerId, product_id: productId }),
+    resolvePrice: (customerId: string, productId: string, quantity = 1) => client.get<{ precio: number; price_list_id: string; source: string } | null>("/v1/price-lists/lookup", { customer_id: customerId, product_id: productId, quantity }),
+    tiersSummary: () => client.get<{ total_lists: number; active_lists: number; total_tiers: number; total_products_with_tiers: number; breakdown: { min_qty: number; count: number }[] }>("/v1/price-lists/tiers-summary"),
+    productsWithTiers: (params?: { search?: string; min_qty?: number; limit?: number; offset?: number }) => client.get<{ total: number; items: any[]; limit: number; offset: number }>("/v1/price-lists/products-with-tiers", params as any),
+  },
+  posTerminalTransactions: {
+    create: (data: Partial<PosTerminalTransaction>) => client.post<PosTerminalTransaction>("/v1/pos-terminal-transactions", data),
+    update: (id: string, data: Partial<PosTerminalTransaction>) => client.patch<PosTerminalTransaction>(`/v1/pos-terminal-transactions/${id}`, data),
+  },
+  paymentIntegrations: {
+    get: (provider: "bancard" | "plugpay" | "dinelco" | "bancard_qr") => client.get<PaymentIntegrationConfig | null>(`/v1/payment-integrations/${provider}`),
+    update: (provider: "bancard" | "plugpay" | "dinelco" | "bancard_qr", data: { environment?: string; enabled?: boolean; config?: Record<string, any> }) =>
+      client.put<PaymentIntegrationConfig>(`/v1/payment-integrations/${provider}`, data),
+  },
+  bancardQr: {
+    generate: (data: { amount: number; description?: string; punto_emision?: string }) =>
+      client.post<{ hook_alias: string; amount: number; description?: string; qr_url?: string; qr_data?: string; status: string; created_at: string }>("/v1/bancard-qr/generate", data),
+    status: (hookAlias: string) =>
+      client.get<{
+        hook_alias: string; status: string; amount: number
+        response_code?: string; response_description?: string
+        ticket_number?: string; authorization_code?: string
+        account_type?: string; card_last_numbers?: string
+        payer_name?: string; payer_lastname?: string; confirmed_at?: string
+      }>(`/v1/bancard-qr/status/${hookAlias}`),
+    revert: (hookAlias: string) =>
+      client.put<{ hook_alias: string; status: string; response_code?: string; response_description?: string }>(`/v1/bancard-qr/revert/${hookAlias}`, {}),
+  },
+  labelPrinting: {
+    getPrinterConfig: (tipo: "pantum_rollo" | "zebra_zpl" | "zc300_tarjeta") => client.get<any | null>(`/v1/label-printing/printer-config/${tipo}`),
+    updatePrinterConfig: (tipo: "pantum_rollo" | "zebra_zpl" | "zc300_tarjeta", data: Record<string, any>) => client.put<any>(`/v1/label-printing/printer-config/${tipo}`, data),
+    listTemplates: (tipoImpresora?: string) => client.get<any[]>("/v1/label-printing/templates", tipoImpresora ? { tipo_impresora: tipoImpresora } : undefined),
+    createTemplate: (data: Record<string, any>) => client.post<any>("/v1/label-printing/templates", data),
+    aprobarTemplate: (id: string) => client.post<any>(`/v1/label-printing/templates/${id}/aprobar`, {}),
+    getTemplateAprobada: (tipo: "pantum_rollo" | "zebra_zpl") =>
+      client.get<any | null>(`/v1/label-printing/templates/aprobada/${tipo}`),
+    tokenEstacion: () => client.post<{ token: string; ruta: string }>("/v1/label-printing/station-token", {}),
+    deleteTemplate: (id: string) => client.delete<void>(`/v1/label-printing/templates/${id}`),
+    resolve: (filtro: Record<string, any>) => client.post<any[]>("/v1/label-printing/resolve", filtro),
+    printZebra: (data: { items: any[]; template_id?: string }) => client.post<{ zpl: string; enviado_por_red: boolean }>("/v1/label-printing/print/zebra", data),
+    getQzCertificate: () => client.get<{ certificate: string }>("/v1/label-printing/qz-certificate"),
+    signQzRequest: (request: string) => client.post<{ signature: string }>("/v1/label-printing/qz-sign", { request }),
+    printPantum: (data: { items: any[]; campos: Record<string, any> }) =>
+      client.post<{ tspl: string; etiquetas: number }>("/v1/label-printing/print/pantum", data),
+    calibracion: (tipo: "pantum_rollo" | "zebra_zpl", modo: "regla" | "medio" | "config" | "minimo" = "regla") =>
+      client.post<{ comandos: string; printer_name: string | null }>(`/v1/label-printing/calibracion/${tipo}?modo=${modo}`, {}),
+  },
+  intelifact: {
+    getConfig: () => client.get<any | null>("/v1/intelifact/config"),
+    updateConfig: (data: Record<string, any>) => client.put<any>("/v1/intelifact/config", data),
+    previewInvoice: (data: Record<string, any>) => client.post<any>("/v1/intelifact/invoices/preview", data),
+    telemetryStatus: () => client.get<{ disponible: boolean; detalle?: any; error?: string }>("/v1/intelifact/telemetry/status"),
+  },
+  plugpay: {
+    compliance: (cpf: string) => client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/compliance/${cpf}`),
+    createPix: (data: { monto: number; moneda?: string; customer_cpf?: string; customer_cpf_cnpj?: string; sale_id?: string; customer_id?: string }) =>
+      client.post<{ ok: boolean; data?: any; error_message?: string; transaction_log_id?: string }>("/v1/plugpay/pix/create", data),
+    pixStatus: (referenciaInterna: string) =>
+      client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/pix/status/${referenciaInterna}`),
+    getLastPendingPix: () =>
+      client.get<{
+        ok: boolean;
+        transaction_log_id?: string;
+        referencia_interna?: string;
+        id_transacao?: string;
+        monto?: number;
+        value_brl?: number;
+        created_at?: string;
+        live_status?: any;
+        is_approved?: boolean;
+        status_code?: number;
+        error_message?: string;
+      }>("/v1/plugpay/pix/last-pending"),
+    pixQrcode: (referenciaInterna: string) =>
+      client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/pix/qrcode/${referenciaInterna}`),
+    quotePix: (data: { monto: number; moneda?: string }) =>
+      client.post<{ ok: boolean; data?: any; error_message?: string }>("/v1/plugpay/pix/quote", data),
+    calcularParcelado: (data: { monto: number; moneda?: string; cuotas: number }) =>
+      client.post<{ ok: boolean; data?: any; error_message?: string }>("/v1/plugpay/credito-parcelado/calcular", data),
+    startParcelado: (data: { monto: number; moneda?: string; cuotas: number; customer_cpf: string; customer_phone: string; sale_id?: string; customer_id?: string }) =>
+      client.post<{ ok: boolean; data?: any; error_message?: string; transaction_log_id?: string }>("/v1/plugpay/credito-parcelado/start", data),
+    parceladoStatus: (referenciaInterna: string) =>
+      client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/credito-parcelado/${referenciaInterna}`),
+    cancelParcelado: (referenciaInterna: string) =>
+      client.post<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/credito-parcelado/cancel/${referenciaInterna}`, {}),
+    linkSale: (txnId: string, saleId: string) => client.patch<{ message: string }>(`/v1/plugpay/transactions/${txnId}/link-sale/${saleId}`, {}),
+    getTransactions: (params?: { fecha_desde?: string; fecha_hasta?: string; tipo_operacion?: string; exitosa?: boolean; limit?: number; offset?: number }) =>
+      client.get<{ ok: boolean; items: any[]; total: number; limit: number; offset: number }>("/v1/plugpay/transactions", params),
+    getSummary: (params?: { fecha_desde?: string; fecha_hasta?: string }) =>
+      client.get<{
+        ok: boolean;
+        total_transacciones: number;
+        total_exitosas: number;
+        total_fallidas: number;
+        tasa_exito_pct: number;
+        volumen_pix_brl: number;
+        volumen_pix_pyg: number;
+        volumen_parcelado_brl: number;
+        volumen_parcelado_pyg: number;
+        total_volumen_brl: number;
+        total_volumen_pyg: number;
+        transacciones_con_venta: number;
+      }>("/v1/plugpay/summary", params),
   },
   integrations: {
     configs: () => client.get<IntegrationConfig[]>("/api/integrations/configs"),
@@ -856,6 +3236,10 @@ export const api = {
     deliveries: () => client.get<IntegrationDelivery[]>("/api/integrations/deliveries"),
     getDelivery: (id: string) => client.get<IntegrationDelivery>(`/api/integrations/deliveries/${id}`),
     retryDelivery: (id: string) => client.post<IntegrationDelivery>(`/api/integrations/deliveries/${id}/retry`),
+    posKpis: () => client.get<any>("/v1/integrations/pos/kpis"),
+    posTransactions: (params?: { limit?: number; procesador?: string }) => client.get<any[]>("/v1/integrations/pos/transactions", params),
+    posMatch: (data: any) => client.post<any[]>("/v1/integrations/pos/match", data),
+    posClaim: (data: any) => client.post<any>("/v1/integrations/pos/claim", data),
   },
   intelicont: {
     syncConfig: () => client.get<any>("/v1/intelicont/sync-config"),
@@ -877,6 +3261,12 @@ export const api = {
     pushAnomalies: () => client.post<any>("/v1/inteliaudit/push-anomalies"),
   },
   sueldok: {
+    getSSOUrl: (redirect?: string, companyId?: string) => client.get<any>("/v1/sueldok/sso-url", { redirect, company_id: companyId }),
+    getSummary: (companyId?: string) => client.get<any>("/v1/sueldok/summary", { company_id: companyId }),
+    getShifts: (companyId?: string) => client.get<any>("/v1/sueldok/shifts", { company_id: companyId }),
+    syncShifts: (data: any) => client.post<any>("/v1/sueldok/sync-shifts", data),
+    getProductivityBonuses: (companyId?: string) => client.get<any[]>("/v1/sueldok/productivity-bonuses", { company_id: companyId }),
+    exportBonuses: (data: any) => client.post<any>("/v1/sueldok/export-bonuses", data),
     syncConfig: () => client.get<any>("/v1/sueldok/sync-config"),
     createSyncConfig: (data: unknown) => client.post<any>("/v1/sueldok/sync-config", data),
     updateSyncConfig: (data: unknown) => client.put<any>("/v1/sueldok/sync-config", data),
@@ -895,7 +3285,11 @@ export const api = {
     test: (data: { to: string; subject: string; body: string }) => client.post<any>("/v1/email/test", data),
   },
   events: {
-    stream: () => new EventSource(`${API_BASE}/v1/events/stream`),
+    stream: (companyId?: string, token?: string) => {
+      const cid = companyId || COMPANY_ID
+      const tok = token || localStorage.getItem("access_token") || localStorage.getItem("token") || ""
+      return new EventSource(`${API_BASE}/v1/events/stream?company_id=${cid}&token=${encodeURIComponent(tok)}`)
+    },
   },
   bancard: {
     payments: (companyId: string) => client.get<BancardTransaction[]>("/v1/bancard/payments", { company_id: companyId }),
@@ -950,22 +3344,45 @@ export const api = {
     bySupplier: (companyId: string) => client.get<any>(`/v1/companies/${companyId}/agreements/by-supplier`),
   },
   kits: {
-    list: () => client.get<Kit[]>("/v1/kits"),
-    get: (id: string) => client.get<Kit>(`/v1/kits/${id}`),
-    create: (data: Partial<Kit>) => client.post<Kit>("/v1/kits", data),
-    update: (id: string, data: Partial<Kit>) => client.patch<Kit>(`/v1/kits/${id}`, data),
+    list: () => client.get<any[]>("/v1/kits"),
+    get: (id: string) => client.get<any>(`/v1/kits/${id}`),
+    create: (data: any) => client.post<any>("/v1/kits", { ...data, company_id: COMPANY_ID }),
+    update: (id: string, data: any) => client.put<any>(`/v1/kits/${id}`, data),
     delete: (id: string) => client.delete<void>(`/v1/kits/${id}`),
+    calculatePrice: (id: string) => client.get<any>(`/v1/kits/${id}/price`),
+  },
+  // Salud del servidor, reportada por el vigia (solo superadmin)
+  sistema: {
+    salud: () => client.get<any>("/v1/sistema/salud"),
   },
   loyalty: {
     getConfig: (companyId: string) => client.get<LoyaltyConfig>(`/v1/loyalty/config/${companyId}`),
     updateConfig: (companyId: string, data: Partial<LoyaltyConfig>) => client.put<LoyaltyConfig>(`/v1/loyalty/config/${companyId}`, data),
     addPoints: (data: { company_id: string; customer_id: string; tipo: string; puntos: number; referencia_tipo?: string; referencia_id?: string; descripcion?: string }) => client.post<LoyaltyPoints>("/v1/loyalty/points", data),
     balance: (customerId: string, companyId: string) => client.get<{ customer_id: string; total_puntos: number; puntos_por_vencer: number }>(`/v1/loyalty/balance/${customerId}`, { company_id: companyId }),
+    getBalancesMap: (companyId: string) => client.get<Record<string, number>>("/v1/loyalty/balances-map", { company_id: companyId }),
     history: (customerId: string, companyId: string, limit?: number) => client.get<LoyaltyPoints[]>(`/v1/loyalty/history/${customerId}`, { company_id: companyId, limit: limit || 50 }),
     rewards: (companyId: string, activo?: boolean) => client.get<LoyaltyReward[]>("/v1/loyalty/rewards", { company_id: companyId, ...(activo !== undefined ? { activo: String(activo) } : {}) }),
-    createReward: (data: { company_id: string; nombre: string; puntos_requeridos: number; tipo_recompensa: string; descripcion?: string; valor_recompensa?: number; stock?: number; imagen_url?: string }) => client.post<LoyaltyReward>("/v1/loyalty/rewards", data),
+    createReward: (data: Partial<LoyaltyReward>) => client.post<LoyaltyReward>("/v1/loyalty/rewards", data),
     updateReward: (rewardId: string, data: Partial<LoyaltyReward>) => client.put<LoyaltyReward>(`/v1/loyalty/rewards/${rewardId}`, data),
     deleteReward: (rewardId: string) => client.delete<void>(`/v1/loyalty/rewards/${rewardId}`),
+    getPremiosWarehouse: (companyId: string) => client.get<{ id: string; codigo: string; nombre: string; tipo: string; responsable: string; descripcion: string }>("/v1/loyalty/deposito-premios", { company_id: companyId }),
+    addRewardStock: (rewardId: string, data: { cantidad: number; remision_proveedor?: string; costo_unitario?: number; notas?: string }) => client.post<LoyaltyReward>(`/v1/loyalty/rewards/${rewardId}/stock`, data),
+    redeemReward: (rewardId: string, data: { customer_id: string; company_id: string; cantidad?: number; notas?: string }) => client.post<LoyaltyRedemption>(`/v1/loyalty/rewards/${rewardId}/canjear`, data),
+    getRedemptions: (companyId: string, limit?: number) => client.get<LoyaltyRedemption[]>("/v1/loyalty/redemptions", { company_id: companyId, limit: limit || 50 }),
+    solicitudesTarjetas: () => client.get<{ cola: any[] }>("/v1/loyalty/solicitudes-tarjetas"),
+    marcarImpresa: (colaId: number) => client.post<any>(`/v1/loyalty/solicitudes-tarjetas/${colaId}/imprimir`),
+    // Tarjetas Extra Club (Zebra ZC300)
+    tarjetasSocios: (params: { q?: string; solo_con_numero?: boolean; limit?: number }) =>
+      client.get<any[]>("/v1/loyalty/tarjetas/socios", {
+        ...(params.q ? { q: params.q } : {}),
+        solo_con_numero: String(!!params.solo_con_numero),
+        limit: String(params.limit ?? 50),
+      }),
+    asignarNumeroSocio: (customerId: string) =>
+      client.post<{ extra_club_numero: string; asignado_ahora: boolean }>(`/v1/loyalty/tarjetas/socios/${customerId}/numero`),
+    estadoImpresoraTarjetas: () => client.get<any>("/v1/loyalty/tarjetas/impresora/estado"),
+    audit: (dryRun: boolean = true) => client.post<any>(`/v1/loyalty/audit?dry_run=${dryRun}`),
   },
   imports: {
     templates: () => client.get<ImportTemplate[]>("/v1/imports/templates"),
@@ -993,15 +3410,18 @@ export const api = {
       create: (data: any) => client.post<SupermerOrder>("/v1/supermer/orders", data),
       update: (id: string, data: any) => client.put<SupermerOrder>(`/v1/supermer/orders/${id}`, data),
       complete: (id: string, data: { producto_obtenido: number; costo_unitario?: number; fecha_vencimiento?: string; lote_codigo?: string }) => client.post<SupermerOrder>(`/v1/supermer/orders/${id}/complete`, data),
+      produceDirect: (data: { receta_id: string; cantidad_producir: number; deposito_origen_id?: string; deposito_destino_id?: string; fecha_vencimiento?: string; lote_codigo?: string; notas?: string }) => client.post<SupermerOrder>("/v1/supermer/orders/produce-direct", data),
     },
     batches: {
       list: (params?: { producto_id?: string; vencimiento_antes?: string }) => client.get<SupermerBatch[]>("/v1/supermer/batches", params as any),
     },
     waste: {
-      list: (params?: { area?: string; tipo_merma?: string; desde?: string; hasta?: string }) => client.get<SupermerWaste[]>("/v1/supermer/waste", params as any),
-      byArea: (params?: { desde?: string; hasta?: string }) => client.get<SupermerWasteByArea[]>("/v1/supermer/waste/by-area", params as any),
+      list: (params?: { area?: string; tipo_merma?: string; estado?: string; desde?: string; hasta?: string; limit?: number }) => client.get<SupermerWaste[]>("/v1/supermer/waste", params as any),
+      byArea: (params?: { desde?: string; hasta?: string; estado?: string }) => client.get<SupermerWasteByArea[]>("/v1/supermer/waste/by-area", params as any),
       create: (data: any) => client.post<SupermerWaste>("/v1/supermer/waste", data),
       update: (id: string, data: any) => client.put<SupermerWaste>(`/v1/supermer/waste/${id}`, data),
+      approve: (id: string) => client.post<SupermerWaste>(`/v1/supermer/waste/${id}/approve`),
+      reject: (id: string, motivo_rechazo: string) => client.post<SupermerWaste>(`/v1/supermer/waste/${id}/reject`, { motivo_rechazo }),
     },
     perishableConfigs: {
       list: (params?: { categoria?: string }) => client.get<SupermerPerishableConfig[]>("/v1/supermer/perishable-configs", params as any),
@@ -1027,6 +3447,8 @@ export const api = {
         list: (params?: { activa?: boolean }) => client.get<ButcheryTemplate[]>("/v1/supermer/butchery/templates", params as any),
         get: (id: string) => client.get<ButcheryTemplate>(`/v1/supermer/butchery/templates/${id}`),
         create: (data: any) => client.post<ButcheryTemplate>("/v1/supermer/butchery/templates", data),
+        update: (id: string, data: any) => client.put<ButcheryTemplate>(`/v1/supermer/butchery/templates/${id}`, data),
+        delete: (id: string) => client.delete<void>(`/v1/supermer/butchery/templates/${id}`),
       },
       desposte: (data: DesposteInput) => client.post<DesposteResponse>("/v1/supermer/butchery/desposte", data),
       orders: (params?: { limit?: number; offset?: number }) => client.get<SupermerOrder[]>("/v1/supermer/butchery/orders", params as any),
@@ -1060,79 +3482,328 @@ export const api = {
     },
   },
   promotions: {
-    list: (params?: { activo?: boolean; tipo?: string }) => client.get<Promotion[]>("/v1/promotions", params as any),
+    list: (params?: { activo?: boolean; tipo?: string; estado?: string; origen_fuente?: string; limit?: number; offset?: number }) => client.get<Promotion[]>("/v1/promotions", params as any),
     get: (id: string) => client.get<Promotion>(`/v1/promotions/${id}`),
     create: (data: any) => client.post<Promotion>("/v1/promotions", data),
     update: (id: string, data: any) => client.put<Promotion>(`/v1/promotions/${id}`, data),
     delete: (id: string) => client.delete(`/v1/promotions/${id}`),
+    toggle: (id: string) => client.post<Promotion>(`/v1/promotions/${id}/toggle`),
+    reactivate: (id: string, data: any) => client.post<Promotion>(`/v1/promotions/${id}/reactivate`, data),
+    approveLoss: (id: string, data?: any) => client.post<Promotion>(`/v1/promotions/${id}/approve-loss`, data || {}),
+    sellOutClaim: (id: string) => client.get<any>(`/v1/promotions/${id}/sell-out-claim`),
+    recordVendorCreditNote: (id: string, data: any) => client.post<Promotion>(`/v1/promotions/${id}/vendor-credit-note`, data),
+    syncNemuha: () => client.post<any>("/v1/promotions/sync-nemuha"),
+    expiringAlerts: () => client.get<any[]>("/v1/promotions/expiring-alerts"),
+    resolveProduct: (productId: string, precio: number, cantidad?: number) => client.get<any>(`/v1/promotions/resolve-product/${productId}`, { precio, cantidad: cantidad || 1 }),
+    authorizeFlashGrace: (data: any) => client.post<any>("/v1/promotions/authorize-flash-grace", data),
     calculate: (data: any) => client.post<any>("/v1/promotions/calculate", data),
     usage: (id: string, params?: { limit?: number; offset?: number }) => client.get<PromotionUsage[]>(`/v1/promotions/${id}/usage`, params as any),
+    analytics360: (id: string) => client.get<any>(`/v1/promotions/${id}/analytics-360`),
+    downloadReportPdf: (id: string, nombre?: string) => {
+      const cleanName = (nombre || "promocion").toLowerCase().replace(/[^a-z0-9]/gi, "_");
+      return downloadAuthenticated(`/v1/promotions/${id}/report-pdf`, {}, `informe_promocion_${cleanName}.pdf`);
+    },
+    getReportPdfBlob: async (id: string) => {
+      const token = localStorage.getItem("token") || "";
+      const res = await fetch(`/api/v1/promotions/${id}/report-pdf`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error("Error al obtener PDF");
+      return await res.blob();
+    },
+    downloadProductsReportPdf: (id: string, nombre?: string) => {
+      const cleanName = (nombre || "promocion").toLowerCase().replace(/[^a-z0-9]/gi, "_");
+      return downloadAuthenticated(`/v1/promotions/${id}/products-report-pdf`, {}, `lista_productos_${cleanName}.pdf`);
+    },
+    getProductsReportPdfBlob: async (id: string) => {
+      const token = localStorage.getItem("token") || "";
+      const res = await fetch(`/api/v1/promotions/${id}/products-report-pdf`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error("Error al obtener PDF de productos");
+      return await res.blob();
+    },
+  },
+  nemuhaConnector: {
+    sync: (data: { company_id: string; since?: string; modules?: string[] }) =>
+      client.post<any>("/v1/nemuha-connector/sync", data),
+    syncFinance: (data: { company_id: string; since?: string }) =>
+      client.post<any>("/v1/nemuha-connector/sync/finance", data),
+    runs: (company_id: string, limit?: number) =>
+      client.get<any[]>("/v1/nemuha-connector/runs", { company_id, limit: limit || 20 }),
   },
   expenses: {
     categories: {
       list: () => client.get<ExpenseCategory[]>("/v1/expenses/categories"),
       create: (data: any) => client.post<ExpenseCategory>("/v1/expenses/categories", data),
     },
-    list: (params?: { branch_id?: string; category_id?: string; estado?: string; desde?: string; hasta?: string; limit?: number; offset?: number }) => client.get<Expense[]>("/v1/expenses", params as any),
+    costCenters: {
+      list: () => client.get<CostCenter[]>("/v1/expenses/cost-centers"),
+      create: (data: any) => client.post<CostCenter>("/v1/expenses/cost-centers", data),
+    },
+    staffCandidates: (search?: string) => client.get<{ id: string; nombre: string; email?: string; rol?: string; ci?: string; cargo?: string; depto?: string; salario?: number }[]>("/v1/expenses/staff-candidates", { search }),
+    sueldokAdvances: (search?: string) => client.get<{ id: string; employeeId: string; nombre: string; ci: string; cargo: string; depto: string; monto: number; motivo: string; fecha: string; estado: string; ya_desembolsado: boolean; expense_id?: string; expense_estado?: string }[]>("/v1/expenses/sueldok-advances", { search }),
+    list: (params?: { branch_id?: string; fund_id?: string; rendicion_id?: string; sin_rendicion?: boolean; category_id?: string; estado?: string; desde?: string; hasta?: string; search?: string; monto?: number; monto_min?: number; monto_max?: number; limit?: number; offset?: number }) => client.get<Expense[]>("/v1/expenses", params as any),
+    rendiciones: {
+      list: (params?: { fund_id?: string; estado?: string }) => client.get<PettyCashRendicion[]>("/v1/petty-cash-funds/rendiciones", params as any),
+      get: (id: string) => client.get<{ rendicion: PettyCashRendicion; expenses: Expense[]; fund: PettyCashFund }>(`/v1/petty-cash-funds/rendiciones/${id}`),
+      create: (data: { fund_id: string; expense_ids: string[]; efectivo_remanente_contado: number; observaciones?: string }) => client.post<{ success: boolean; rendicion_id: string; numero_rendicion: string; total_presentado: number; diferencia_arqueo: number }>("/v1/petty-cash-funds/rendiciones", data),
+      audit: (id: string, data: { items: { expense_id: string; estado: string; motivo?: string }[]; observaciones?: string }) => client.post<{ success: boolean; rendicion_id: string; total_aprobado: number; total_rechazado: number; estado: string }>(`/v1/petty-cash-funds/rendiciones/${id}/audit`, data),
+      replenish: (id: string, data: { medio_reposicion: string; caja_boveda_id?: string; bank_account_id?: string; comprobante_pago_ref?: string; observaciones?: string }) => client.post<{ success: boolean; rendicion_id: string; monto_repuesto: number; medio_reposicion: string; estado: string }>(`/v1/petty-cash-funds/rendiciones/${id}/replenish`, data),
+      unlinkExpense: (rendicionId: string, expenseId: string) => client.post<{ success: boolean; rendicion_id: string; expense_id: string; message: string }>(`/v1/petty-cash-funds/rendiciones/${rendicionId}/expenses/${expenseId}/unlink`),
+      downloadPdf: (id: string, nro?: string) => downloadAuthenticated(`/v1/petty-cash-funds/rendiciones/${id}/export.pdf`, {}, `expediente_${nro || id.slice(0, 8)}.pdf`),
+    },
     get: (id: string) => client.get<Expense>(`/v1/expenses/${id}`),
     create: (data: any) => client.post<Expense>("/v1/expenses", data),
     update: (id: string, data: any) => client.put<Expense>(`/v1/expenses/${id}`, data),
     delete: (id: string) => client.delete(`/v1/expenses/${id}`),
+    approve: (id: string) => client.post<Expense>(`/v1/expenses/${id}/approve`),
+    reject: (id: string, motivo: string) => client.post<Expense>(`/v1/expenses/${id}/reject`, { motivo }),
+    void: (id: string, motivo: string) => client.post<Expense>(`/v1/expenses/${id}/void`, { motivo }),
+    revertPayment: (id: string, data?: { fund_id?: string; nuevo_estado?: string; motivo?: string }) => client.post<Expense>(`/v1/expenses/${id}/revert-payment`, data || {}),
+    batchRevertPayments: (data: { expense_ids: string[]; fund_id?: string; nuevo_estado?: string; motivo?: string }) => client.post<{ success: boolean; reverted_count: number; reverted_ids: string[]; errors: any[] }>("/v1/expenses/batch-revert-payments", data),
+    disburse: (id: string, data: { fecha_pago?: string; disbursements: any[]; notas?: string }) => client.post<Expense>(`/v1/expenses/${id}/disburse`, data),
+    getDisbursements: (id: string) => client.get<any[]>(`/v1/expenses/${id}/disbursements`),
+    downloadPdf: (id: string) => downloadAuthenticated(`/v1/expenses/${id}/pdf`, {}, `recibo_gasto_${id.slice(0, 8)}.pdf`),
+    downloadReportPdf: (params?: { desde?: string; hasta?: string; estado?: string; fund_id?: string; category_id?: string; branch_id?: string }) =>
+      downloadAuthenticated("/v1/expenses/export/report.pdf", params, `reporte_gastos_${new Date().toISOString().slice(0, 10)}.pdf`),
+    uploadComprobante: (file: File) => {
+      const fd = new FormData()
+      fd.append("file", file)
+      return requestMultipart<{ url: string; filename: string }>("/v1/expenses/upload-comprobante", fd)
+    },
     summary: () => client.get<ExpenseSummary>("/v1/expenses/summary"),
+    dashboard: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<ExpenseDashboard>("/v1/expenses/dashboard", params as any),
+    approvalConfig: {
+      get: () => client.get<{ umbral_aprobacion: number; tolerancia_arqueo: number }>("/v1/expenses/config/approval"),
+      update: (data: { umbral_aprobacion: number; tolerancia_arqueo: number }) => client.patch<{ umbral_aprobacion: number; tolerancia_arqueo: number }>("/v1/expenses/config/approval", data),
+    },
+    funds: {
+      list: (params?: { activo?: boolean }) => client.get<PettyCashFund[]>("/v1/petty-cash-funds", params as any),
+      create: (data: { branch_id?: string; nombre: string; custodio_id?: string; monto_autorizado: number; cost_center_id?: string; monto_maximo_por_gasto?: number; dotacion_inicial?: boolean; medio_dotacion?: string; caja_boveda_id?: string; bank_account_id?: string }) => client.post<PettyCashFund>("/v1/petty-cash-funds", data),
+      update: (id: string, data: { nombre?: string; custodio_id?: string; activo?: boolean }) => client.patch<PettyCashFund>(`/v1/petty-cash-funds/${id}`, data),
+      movements: (id: string, limit?: number) => client.get<PettyCashFundMovement[]>(`/v1/petty-cash-funds/${id}/movements`, limit ? { limit } : undefined),
+      replenish: (id: string, data: { monto: number; bank_account_id?: string; referencia?: string; observaciones?: string }) => client.post<PettyCashFund>(`/v1/petty-cash-funds/${id}/replenish`, data),
+      counts: {
+        pendingAll: () => client.get<PettyCashFundCount[]>("/v1/petty-cash-funds/counts/pending"),
+        create: (fundId: string, data: { monto_contado: number; observaciones?: string }) => client.post<PettyCashFundCount>(`/v1/petty-cash-funds/${fundId}/counts`, data),
+        list: (fundId: string, limit?: number) => client.get<PettyCashFundCount[]>(`/v1/petty-cash-funds/${fundId}/counts`, limit ? { limit } : undefined),
+        confirm: (countId: string, data: { ajustar: boolean; observaciones?: string }) => client.post<PettyCashFundCount>(`/v1/petty-cash-funds/counts/${countId}/confirm`, data),
+      },
+    },
+    reports: {
+      bySector: (params: { fecha_desde: string; fecha_hasta: string }) =>
+        client.get<any>("/v1/expenses/reports/by-sector", params as any),
+      downloadBySectorPdf: (params: { fecha_desde: string; fecha_hasta: string }) =>
+        downloadAuthenticated("/v1/expenses/reports/by-sector.pdf", params, `gastos_por_sector_${params.fecha_desde}_${params.fecha_hasta}.pdf`),
+      fiscalPurchases: (params: { fecha_desde: string; fecha_hasta: string; fund_id?: string }) =>
+        client.get<any>("/v1/expenses/reports/fiscal-purchases", params as any),
+      downloadFiscalPurchasesPdf: (params: { fecha_desde: string; fecha_hasta: string; fund_id?: string }) =>
+        downloadAuthenticated("/v1/expenses/reports/fiscal-purchases.pdf", params, `libro_compras_fiscal_${params.fecha_desde}_${params.fecha_hasta}.pdf`),
+      fundsStatus: () =>
+        client.get<any[]>("/v1/petty-cash-funds/reports/funds-status"),
+      downloadFundsStatusPdf: () =>
+        downloadAuthenticated("/v1/petty-cash-funds/reports/funds-status.pdf", {}, `estado_fondos_fijos.pdf`),
+      downloadRendicionPdf: (fundId: string) =>
+        downloadAuthenticated(`/v1/petty-cash-funds/${fundId}/export/rendicion.pdf`, {}, `acta_rendicion_fondo_${fundId.slice(0, 8)}.pdf`),
+    },
   },
   financial: {
     invoices: {
       list: (params?: { estado?: string; supplier_id?: string; vencidas?: boolean; desde?: string; hasta?: string; limit?: number; offset?: number }) => client.get<SupplierInvoice[]>("/v1/financial/invoices", { company_id: COMPANY_ID, ...params } as any),
       get: (id: string) => client.get<SupplierInvoice>(`/v1/financial/invoices/${id}`),
-      create: (data: any) => client.post<SupplierInvoice>("/v1/financial/invoices", data),
+      create: (data: any) => client.post<SupplierInvoice>("/v1/financial/invoices", { company_id: COMPANY_ID, ...data }),
       approve: (id: string) => client.post<{ detail: string }>(`/v1/financial/invoices/${id}/approve`),
-      pay: (id: string, data: any) => client.post<SupplierInvoice>(`/v1/financial/invoices/${id}/pay`, data),
+      pay: (id: string, data: any) => client.post<{ pending_approval: boolean; request_id?: string; id?: string; monto: number; estado?: string }>(`/v1/financial/invoices/${id}/pay`, data),
+      revertPayment: (id: string, motivo?: string) => {
+        const query = new URLSearchParams({ company_id: COMPANY_ID, ...(motivo ? { motivo } : {}) }).toString()
+        return client.post<SupplierInvoice>(`/v1/financial/invoices/${id}/revert-payment?${query}`)
+      },
+      batchRevertPayments: (data: { invoice_ids: string[]; motivo?: string }) =>
+        client.post<{ success: boolean; reverted_count: number; reverted_ids: string[]; errors: any[] }>(
+          `/v1/financial/invoices/batch-revert-payments?company_id=${COMPANY_ID}`,
+          data
+        ),
+      listPaid: (params?: { supplier_id?: string; search?: string; desde?: string; hasta?: string; limit?: number; offset?: number }) =>
+        client.get<{
+          items: Array<SupplierInvoice & { supplier_nombre?: string; supplier_ruc?: string; ultimo_pago_fecha?: string; ultimo_pago_metodo?: string; pagos_count?: number }>
+          total: number
+          total_monto_pyg: number
+          total_monto_brl: number
+          limit: number
+          offset: number
+        }>("/v1/financial/invoices/paid", { company_id: COMPANY_ID, ...params } as any),
+      byReceipt: (receiptId: string) => client.get<{ found: boolean; id?: string; numero_factura?: string; total?: number; estado?: string }>(`/v1/financial/invoices/by-receipt/${receiptId}`),
+      downloadStatementPdf: (supplierId: string) => downloadAuthenticated(`/v1/financial/suppliers/${supplierId}/statement.pdf`, { company_id: COMPANY_ID }, `estado_cuenta_proveedor_${supplierId.slice(0, 8)}.pdf`),
     },
-    // apDashboard/invoices.list/aging quedaron afuera del fix de company_id
-    // faltante de un commit anterior (4549dc8) — el backend los requiere,
-    // por eso siempre daban 422 y la pagina de Gestion Financiera mostraba
-    // la pestaña de Cuentas por Pagar vacia pese a tener datos reales.
-    aging: () => client.get<any[]>("/v1/financial/aging", { company_id: COMPANY_ID }),
-    apDashboard: () => client.get<APDashboard>("/v1/financial/dashboard", { company_id: COMPANY_ID }),
+    paymentOrders: {
+      list: (params?: { supplier_id?: string; estado?: string; forma_pago?: string; fecha_desde?: string; fecha_hasta?: string; limit?: number; offset?: number }) =>
+        client.get<{ items: SupplierPaymentOrder[]; total: number }>("/v1/financial/payment-orders", { company_id: COMPANY_ID, ...params } as any),
+      get: (orderId: string) =>
+        client.get<SupplierPaymentOrder>(`/v1/financial/payment-orders/${orderId}`, { company_id: COMPANY_ID } as any),
+      create: (data: { supplier_id: string; fecha_emision?: string; observaciones?: string; recibo_proveedor?: string; allocations: any[]; disbursements?: any[] }) =>
+        client.post<SupplierPaymentOrder>(`/v1/financial/payment-orders?company_id=${COMPANY_ID}`, data),
+      disburse: (orderId: string, data: { fecha_pago?: string; recibo_proveedor?: string; observaciones?: string; disbursements: any[] }) =>
+        client.post<SupplierPaymentOrder>(`/v1/financial/payment-orders/${orderId}/disburse?company_id=${COMPANY_ID}`, data),
+      downloadPdf: (orderId: string, numOrden: string) =>
+        downloadAuthenticated(`/v1/financial/payment-orders/${orderId}/pdf`, { company_id: COMPANY_ID }, `recibo_orden_pago_${numOrden}.pdf`),
+      exportReportPdf: (params?: { supplier_id?: string; estado?: string; forma_pago?: string; fecha_desde?: string; fecha_hasta?: string }) =>
+        downloadAuthenticated("/v1/financial/payment-orders/export/report.pdf", { company_id: COMPANY_ID, ...params }, `reporte_pagos_proveedores_${new Date().toISOString().slice(0, 10)}.pdf`),
+      getChequesDisponibles: () =>
+        client.get<any[]>("/v1/financial/payment-orders/cheques-disponibles", { company_id: COMPANY_ID } as any),
+      createMultiSupplierBatch: (data: any) =>
+        client.post<any>(`/v1/financial/payment-orders/batch-multi-supplier?company_id=${COMPANY_ID}`, data),
+      downloadBatchReportPdf: (params: { order_ids?: string[]; cheque_id?: string }, filename?: string) => {
+        const queryParams: Record<string, any> = { company_id: COMPANY_ID }
+        if (params.order_ids && params.order_ids.length > 0) {
+          queryParams.order_ids = params.order_ids.join(",")
+        }
+        if (params.cheque_id) {
+          queryParams.cheque_id = params.cheque_id
+        }
+        const defaultFilename = filename || `reporte_lote_pago_${new Date().toISOString().slice(0, 10)}.pdf`
+        return downloadAuthenticated("/v1/financial/payment-orders/batch/report.pdf", queryParams, defaultFilename)
+      },
+    },
+    receptions: {
+      unbilled: (params?: { supplier_id?: string }) =>
+        client.get<any[]>("/v1/financial/receptions/unbilled", { company_id: COMPANY_ID, ...params } as any),
+      settleAndPay: (data: any) =>
+        client.post<any>(`/v1/financial/receptions/settle-and-pay?company_id=${COMPANY_ID}`, data),
+    },
+    aging: () => client.get<any[]>("/v1/financial/aging", { company_id: COMPANY_ID } as any),
+    apDashboard: () => client.get<APDashboard>("/v1/financial/dashboard", { company_id: COMPANY_ID } as any),
+    paymentQueue: () => client.get<any>("/v1/financial/ap/payment-queue", { company_id: COMPANY_ID } as any),
+    apApprovals: {
+      list: (estado: string = "pendiente") => client.get<any[]>("/v1/financial/ap/approvals", { company_id: COMPANY_ID, estado } as any),
+      approve: (id: string) => client.post<{ success: boolean; completo: boolean }>(`/v1/financial/ap/approvals/${id}/approve`),
+      reject: (id: string, motivo?: string) => client.post<{ success: boolean }>(`/v1/financial/ap/approvals/${id}/reject`, { motivo }),
+    },
+    creditNotes: Object.assign(
+      (params?: { supplier_id?: string }) => client.get<any[]>("/v1/financial/supplier-credit-notes", { company_id: COMPANY_ID, ...params } as any),
+      {
+        list: (params?: { supplier_id?: string }) => client.get<any[]>("/v1/financial/supplier-credit-notes", { company_id: COMPANY_ID, ...params } as any),
+        create: (data: {
+          supplier_id: string;
+          numero: string;
+          numero_factura_origen?: string;
+          timbrado?: string;
+          fecha: string;
+          motivo: string;
+          motivo_categoria?: string;
+          impacto_contable?: string;
+          archivo_adjunto_path?: string;
+          monto: number;
+          moneda?: string;
+          observaciones?: string;
+        }) => client.post<any>(`/v1/financial/supplier-credit-notes?company_id=${COMPANY_ID}`, data),
+        uploadAttachment: (file: File) => {
+          const fd = new FormData();
+          fd.append("file", file);
+          return requestMultipart<{ url: string; filename: string }>("/v1/financial/supplier-credit-notes/upload-attachment", fd);
+        },
+        apply: (creditNoteId: string, data: { invoice_id: string; monto: number; observaciones?: string }) =>
+          client.post<any>(`/v1/financial/supplier-credit-notes/${creditNoteId}/apply?company_id=${COMPANY_ID}`, data),
+        applications: (creditNoteId?: string) =>
+          client.get<any[]>(creditNoteId ? `/v1/financial/supplier-credit-notes/${creditNoteId}/applications` : "/v1/financial/credit-note-applications", { company_id: COMPANY_ID } as any),
+      }
+    ),
+    supplierReturns: (params?: { supplier_id?: string }) => client.get<{ id: string; supplier_id: string; supplier_nombre: string; numero_factura_origen: string; numero_nota_credito: string; fecha: string; monto: number; moneda: string; observaciones: string }[]>("/v1/financial/supplier-returns", { company_id: COMPANY_ID, ...params } as any),
+    payrollByConcepto: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<{ concepto: string; es_credito: boolean; cantidad: number; monto: number; porcentaje: number | null }[]>("/v1/financial/payroll/by-concepto", { company_id: COMPANY_ID, ...params } as any),
+    payrollMovements: (params?: { empleado_nombre?: string }) => client.get<{ id: string; empleado_nombre: string; concepto: string; es_credito: boolean; monto: number; fecha: string; cerrado: boolean; observaciones: string }[]>("/v1/financial/payroll-movements", { company_id: COMPANY_ID, ...params } as any),
     banks: {
-      list: (companyId?: string) => client.get<BankAccount[]>("/v1/financial/banks", { company_id: companyId || COMPANY_ID }),
-      create: (data: any) => client.post<BankAccount>("/v1/financial/banks", data),
+      list: () => client.get<BankAccount[]>("/v1/financial/banks", { company_id: COMPANY_ID } as any),
+      create: (data: any) => client.post<BankAccount>("/v1/financial/banks", { company_id: COMPANY_ID, ...data }),
       update: (id: string, data: any) => client.put<BankAccount>(`/v1/financial/banks/${id}`, data),
       delete: (id: string) => client.delete(`/v1/financial/banks/${id}`),
-      transactions: (id: string, params?: { conciliado?: boolean; desde?: string; hasta?: string }) => client.get<BankTransaction[]>(`/v1/financial/banks/${id}/transactions`, params as any),
-      import: (id: string, data: any) => client.post<{ detail: string }>(`/v1/financial/banks/${id}/import`, data),
+      transactions: (id: string, params?: { conciliado?: boolean; desde?: string; hasta?: string; categoria?: string; limit?: number }) => client.get<BankTransaction[]>(`/v1/financial/banks/${id}/transactions`, { company_id: COMPANY_ID, ...params } as any),
+      allTransactions: (params?: { conciliado?: boolean; desde?: string; hasta?: string; categoria?: string; limit?: number }) => client.get<BankTransaction[]>("/v1/financial/banks/transactions", { company_id: COMPANY_ID, ...params } as any),
+      import: (id: string, data: any) => client.post<{ detail: string }>(`/v1/financial/banks/${id}/import?company_id=${COMPANY_ID}`, data),
+      verifyBalance: (id: string) => client.post<BankAccount>(`/v1/financial/banks/${id}/verify-balance`),
+      requestCorrection: (id: string, data: { saldo_propuesto: number; motivo: string }) => client.post<{ success: boolean; request_id: string }>(`/v1/financial/banks/${id}/request-correction`, data),
+      previewImportFile: (id: string, file: File, mes: number, anio: number) => {
+        const fd = new FormData()
+        fd.append("file", file); fd.append("mes", String(mes)); fd.append("anio", String(anio))
+        return requestMultipart<{ sheet_matched: string; saldo_anterior: number | null; closing_from_totals: number | null; total_detectadas: number; nuevas: number; duplicadas: number; transacciones: any[] }>(`/v1/financial/banks/${id}/import-file/preview`, fd)
+      },
+      importFile: (id: string, file: File, mes: number, anio: number) => {
+        const fd = new FormData()
+        fd.append("file", file); fd.append("mes", String(mes)); fd.append("anio", String(anio)); fd.append("company_id", COMPANY_ID)
+        return requestMultipart<{ sheet_matched: string; total_detectadas: number; nuevas: number; duplicadas: number; saldo_actual: number }>(`/v1/financial/banks/${id}/import-file`, fd)
+      },
+      createTransaction: (bankId: string, data: any) =>
+        client.post<BankTransaction>(`/v1/financial/banks/${bankId}/transactions?company_id=${COMPANY_ID}`, { company_id: COMPANY_ID, ...data }),
+      createTransfer: (data: any) =>
+        client.post<{ success: boolean; origen_tx_id: string; destino_tx_id: string; comision_tx_id?: string; origen_saldo_nuevo: number; destino_saldo_nuevo: number; mensaje: string }>(`/v1/financial/banks/transfer?company_id=${COMPANY_ID}`, { company_id: COMPANY_ID, ...data }),
+      deleteTransaction: (id: string) =>
+        client.delete<{ success: boolean; mensaje: string }>(`/v1/financial/banks/transactions/${id}?company_id=${COMPANY_ID}`),
     },
-    reconcile: (id: string, data: any) => client.post<{ detail: string }>(`/v1/financial/transactions/${id}/reconcile`, data),
-    banksDashboard: (companyId?: string) => client.get<any>("/v1/financial/banks/dashboard", { company_id: companyId || COMPANY_ID }),
+    balanceCorrections: {
+      list: (estado: string = "pendiente") => client.get<BankBalanceCorrection[]>("/v1/financial/banks/balance-corrections", { company_id: COMPANY_ID, estado } as any),
+      approve: (id: string) => client.post<{ success: boolean; completo: boolean }>(`/v1/financial/banks/balance-corrections/${id}/approve`),
+      reject: (id: string, motivo?: string) => client.post<{ success: boolean }>(`/v1/financial/banks/balance-corrections/${id}/reject`, { motivo }),
+    },
+    reconcile: (id: string, data: { matched_type: string; matched_id?: string }) => client.post<any>(`/v1/financial/transactions/${id}/reconcile`, data),
+    unreconcile: (id: string) => client.post<any>(`/v1/financial/transactions/${id}/unreconcile`),
+    bulkReconcile: (matches: { transaction_id: string; matched_type: string; matched_id?: string }[]) => client.post<{ conciliadas: number; fallidas: string[] }>("/v1/financial/transactions/bulk-reconcile", { matches }),
+    suggestions: (id: string) => client.get<any[]>(`/v1/financial/transactions/${id}/suggestions`, { company_id: COMPANY_ID }),
+    banksDashboard: () => client.get<any>("/v1/financial/banks/dashboard", { company_id: COMPANY_ID } as any),
+    cashPosition: () => client.get<any>("/v1/financial/banks/cash-position", { company_id: COMPANY_ID } as any),
+    outstandingItems: () => client.get<any>("/v1/financial/banks/outstanding-items", { company_id: COMPANY_ID } as any),
+    downloadCashPositionPdf: () => downloadAuthenticated("/v1/financial/banks/export/cash-position.pdf", { company_id: COMPANY_ID }, "posicion_de_caja.pdf"),
+    downloadReconciliationPdf: (accountId: string, params?: { desde?: string; hasta?: string }) =>
+      downloadAuthenticated(`/v1/financial/banks/${accountId}/export/reconciliation.pdf`, { company_id: COMPANY_ID, ...params }, `conciliacion_bancaria_${accountId.slice(0, 8)}.pdf`),
+    downloadApAgingPdf: () => downloadAuthenticated("/v1/financial/ap/export/aging.pdf", { company_id: COMPANY_ID }, "antiguedad_saldos_ap.pdf"),
+    downloadTopSuppliersPdf: (params?: { desde?: string; hasta?: string }) =>
+      downloadAuthenticated("/v1/financial/ap/export/top-suppliers.pdf", { company_id: COMPANY_ID, ...params }, "top_proveedores_dpo.pdf"),
     cashFlow: {
-      list: (params?: { desde?: string; hasta?: string }) => client.get<CashFlowProjection[]>("/v1/financial/cash-flow", params as any),
-      generate: () => client.post<{ detail: string }>("/v1/financial/cash-flow/generate"),
+      list: (params?: { desde?: string; hasta?: string }) => client.get<CashFlowProjection[]>("/v1/financial/cash-flow", { company_id: COMPANY_ID, ...params } as any),
+      generate: () => client.post<CashFlowProjection[]>(`/v1/financial/cash-flow/generate?company_id=${COMPANY_ID}`),
       update: (id: string, data: any) => client.post<CashFlowProjection>(`/v1/financial/cash-flow/${id}`, data),
-      dashboard: (companyId?: string) => client.get<CashFlowDashboard>("/v1/financial/cash-flow/dashboard", { company_id: companyId || COMPANY_ID }),
+      dashboard: () => client.get<CashFlowDashboard>("/v1/financial/cash-flow/dashboard", { company_id: COMPANY_ID } as any),
+      alertConfig: {
+        get: () => client.get<{ activo: boolean; dias_horizonte: number; telefono: string | null }>("/v1/financial/cash-flow/alert-config", { company_id: COMPANY_ID } as any),
+        update: (data: { activo: boolean; dias_horizonte: number; telefono?: string | null }) =>
+          client.put<{ activo: boolean; dias_horizonte: number; telefono: string | null }>(`/v1/financial/cash-flow/alert-config?company_id=${COMPANY_ID}`, data),
+      },
     },
     budgets: {
-      list: (params?: { periodo?: string; area?: string }) => client.get<Budget[]>("/v1/financial/budgets", params as any),
-      create: (data: any) => client.post<Budget>("/v1/financial/budgets", data),
+      list: (params?: { periodo?: string; area?: string }) => client.get<Budget[]>("/v1/financial/budgets", { company_id: COMPANY_ID, ...params } as any),
+      create: (data: any) => client.post<Budget>("/v1/financial/budgets", { company_id: COMPANY_ID, ...data }),
       update: (id: string, data: any) => client.put<Budget>(`/v1/financial/budgets/${id}`, data),
       delete: (id: string) => client.delete(`/v1/financial/budgets/${id}`),
-      vsActual: (params?: { periodo?: string }) => client.get<Budget[]>("/v1/financial/budgets/vs-actual", params as any),
+      vsActual: (params?: { periodo?: string }) => client.get<Budget[]>("/v1/financial/budgets/vs-actual", { company_id: COMPANY_ID, ...params } as any),
     },
     paymentRuns: {
-      list: () => client.get<PaymentRun[]>("/v1/financial/payment-runs"),
-      get: (id: string) => client.get<PaymentRun>(`/v1/financial/payment-runs/${id}`),
-      create: (data: any) => client.post<PaymentRun>("/v1/financial/payment-runs", data),
-      execute: (id: string) => client.post<{ detail: string }>(`/v1/financial/payment-runs/${id}/execute`),
+      list: () => client.get<PaymentRun[]>("/v1/financial/payment-runs", { company_id: COMPANY_ID } as any),
+      get: (id: string) => client.get<any>(`/v1/financial/payment-runs/${id}`),
+      create: (data: any) => client.post<PaymentRun>("/v1/financial/payment-runs", { company_id: COMPANY_ID, ...data }),
+      execute: (id: string) => client.post<{ pending_approval: boolean; request_id?: string; id?: string; estado?: string; monto: number }>(`/v1/financial/payment-runs/${id}/execute`),
     },
-    dashboard: () => client.get<FinancialDashboard>("/v1/financial/financial-dashboard"),
-    ratios: () => client.get<FinancialRatios>("/v1/financial/ratios"),
+    payableInvoices: (params?: { supplier_id?: string; hasta?: string }) =>
+      client.get<any[]>("/v1/financial/ap/payable-invoices", { company_id: COMPANY_ID, ...params } as any),
+    dashboard: () => client.get<FinancialDashboard>("/v1/financial/financial-dashboard", { company_id: COMPANY_ID } as any),
+    ratios: () => client.get<FinancialRatios>("/v1/financial/ratios", { company_id: COMPANY_ID } as any),
+  },
+  cheques: {
+    list: (params?: { estado?: string; supplier_id?: string; vencidos?: boolean; fecha_desde?: string; fecha_hasta?: string }) => client.get<any[]>("/v1/cheques", params as any),
+    dashboard: () => client.get<any>("/v1/cheques/dashboard"),
+    create: (data: any) => client.post<any>("/v1/cheques", data),
+    updateEstado: (id: string, data: { estado: string; notas?: string }) => client.patch<any>(`/v1/cheques/${id}/estado`, data),
+    historial: (id: string) => client.get<any[]>(`/v1/cheques/${id}/historial`),
+    downloadExcel: (params?: { estado?: string; fecha_desde?: string; fecha_hasta?: string }) => downloadAuthenticated("/v1/cheques/export/excel", params as any, "cheques.xlsx"),
+    downloadPdf: (params?: { estado?: string; fecha_desde?: string; fecha_hasta?: string }) => downloadAuthenticated("/v1/cheques/export/pdf", params as any, "cheques.pdf"),
   },
   gerencial: {
     dashboard: (params?: { desde?: string; hasta?: string }) => client.get<GerencialDashboard>("/v1/gerencial/dashboard", params as any),
     deptos: (params?: { desde?: string; hasta?: string }) => client.get<GerencialDeptoPyl[]>("/v1/gerencial/deptos", params as any),
     ranking: (params?: { desde?: string; hasta?: string; limit?: number }) => client.get<GerencialProductoRanking[]>("/v1/gerencial/ranking", params as any),
-    exportExcel: (reportType: string, params?: { desde?: string; hasta?: string }) => {
-      const url = `${API_BASE}/v1/gerencial/export/${reportType}?${new URLSearchParams(params as any)}`
-      window.open(url, "_blank")
+    alertasNegocio: (margenUmbral?: number) => client.get<GerencialAlertasNegocio>("/v1/gerencial/alertas-negocio", margenUmbral ? { margen_umbral: margenUmbral } : undefined),
+    exportExcel: async (reportType: string, params?: { desde?: string; hasta?: string }) => {
+      await downloadAuthenticated(`/v1/gerencial/export/${reportType}`, params as any, `${reportType}.xlsx`)
+    },
+    exportPnlPdf: async (params?: { desde?: string; hasta?: string }) => {
+      await downloadAuthenticated("/v1/gerencial/export/pnl.pdf", params as any, "estado_resultados.pdf")
     },
   },
   scales: {
@@ -1176,6 +3847,11 @@ export const api = {
       get: (companyId: string) => client.get<FiscalConfig | null>(`/v1/fiscal/config/${companyId}`),
       upsert: (companyId: string, data: any) => client.put<FiscalConfig>(`/v1/fiscal/config/${companyId}`, data),
     },
+    status: (companyId: string) => client.get<{
+      modo_emision: string
+      punto_emision_default: string | null
+      puntos_emision: { punto_emision: string; establecimiento: string; tipo_documento: string; numero_actual: number; numero_final: number; disponibles: number; timbrado_numero: string; timbrado_fecha_fin: string; timbrado_vencido: boolean }[]
+    }>(`/v1/fiscal/status/${companyId}`),
     timbrados: {
       list: (companyId: string, tipo_comprobante?: string) => client.get<any[]>(`/v1/fiscal/timbrados/${companyId}`, { tipo_comprobante } as any),
       create: (data: any) => client.post<any>("/v1/fiscal/timbrados", data),
@@ -1186,9 +3862,12 @@ export const api = {
       create: (data: { sale_id: string; tipo: string; motivo: string; total?: number }) => client.post<NotaCreditoDebito>("/v1/fiscal/notas", data),
       emitir: (notaId: string) => client.post<NotaCreditoDebito>(`/v1/fiscal/notas/${notaId}/emitir`),
     },
-  },
-  inteliforce: {
-    trackingLogs: (hours?: number) => client.get<{ employee_convex_id: string; lat: number; lng: number; battery: number; recorded_at: string }[]>("/v1/inteliforce/tracking-logs", hours ? { hours: String(hours) } : undefined),
+    secuencias: {
+      list: (companyId?: string) => client.get<any[]>(`/v1/fiscal/secuencias`, { company_id: companyId || COMPANY_ID }),
+      create: (data: any) => client.post<any>("/v1/fiscal/secuencias", { company_id: COMPANY_ID, ...data }),
+      update: (id: string, data: any) => client.put<any>(`/v1/fiscal/secuencias/${id}`, data),
+      delete: (id: string) => client.delete<void>(`/v1/fiscal/secuencias/${id}`),
+    },
   },
   distribuidora: {
     dashboard: (companyId: string) => client.get<DistribuidoraDashboard>(`/v1/distribuidora/dashboard/${companyId}`),
@@ -1270,7 +3949,7 @@ export const api = {
         },
       },
       performance: {
-        calculate: (sellerId: string, periodType?: string) => client.post<any>(`/v1/distribuidora/performance/${sellerId}/calculate`, null, { params: { period_type: periodType } }),
+        calculate: (sellerId: string, periodType?: string) => client.post<any>(`/v1/distribuidora/performance/${sellerId}/calculate?period_type=${periodType || 'monthly'}`),
         history: (sellerId: string, periodType?: string, limit?: number) => client.get<any[]>(`/v1/distribuidora/performance/${sellerId}/history`, { period_type: periodType, limit } as any),
         ranking: (companyId: string, periodType?: string) => client.get<any[]>(`/v1/distribuidora/performance/ranking/${companyId}`, { period_type: periodType } as any),
       },
@@ -1315,6 +3994,13 @@ export const api = {
     },
     logs: () => client.get<MigrationLog[]>("/v1/migration/logs"),
   },
+  fixedAssets: {
+    list: (estado?: string) => client.get<{ id: string; nombre: string; categoria: string | null; fecha_adquisicion: string; valor_adquisicion: number; valor_residual: number; vida_util_meses: number; meses_depreciados: number; depreciacion_acumulada: number; valor_libros: number; estado: string; fecha_baja: string | null; motivo_baja: string | null; created_at: string }[]>("/v1/fixed-assets", estado ? { estado } : undefined),
+    create: (data: { nombre: string; categoria?: string; fecha_adquisicion: string; valor_adquisicion: number; valor_residual?: number; vida_util_meses: number }) =>
+      client.post<any>("/v1/fixed-assets", data),
+    retire: (id: string, motivo: string, fecha_baja?: string) => client.post<any>(`/v1/fixed-assets/${id}/retire`, { motivo, fecha_baja }),
+    postDepreciation: (periodo: string) => client.post<{ periodo: string; posteados: number; omitidos: number; total_activos: number }>(`/v1/fixed-assets/post-depreciation?periodo=${periodo}`),
+  },
   integratedFinance: {
     getDashboard: (companyId: string) => client.get<any>(`/v1/integrated-finance/dashboard`, { company_id: companyId }),
     // Withholding
@@ -1325,15 +4011,19 @@ export const api = {
     listWithholdingDocuments: (companyId: string, params?: any) => client.get<any[]>("/v1/integrated-finance/withholding/documents", { company_id: companyId, ...params }),
     createWithholdingDocument: (data: any) => client.post<any>("/v1/integrated-finance/withholding/documents", data),
     approveWithholdingDocument: (id: string) => client.post<any>(`/v1/integrated-finance/withholding/documents/${id}/approve`),
-    sendWithholdingToSifen: (id: string) => client.post<any>(`/v1/integrated-finance/withholding/documents/${id}/send`),
     // Accounting
     listAccountPlan: (companyId: string) => client.get<any[]>("/v1/integrated-finance/account-plan", { company_id: companyId }),
     createAccountPlan: (data: any) => client.post<any>("/v1/integrated-finance/account-plan", data),
     listAccountingPeriods: (companyId: string) => client.get<any[]>("/v1/integrated-finance/accounting/periods", { company_id: companyId }),
     openAccountingPeriod: (data: any) => client.post<any>("/v1/integrated-finance/accounting/periods", data),
     closeAccountingPeriod: (id: string) => client.post<any>(`/v1/integrated-finance/accounting/periods/${id}/close`),
+    reopenAccountingPeriod: (id: string, motivo: string) => client.post<any>(`/v1/integrated-finance/accounting/periods/${id}/reopen`, { motivo }),
     listAccountingEntries: (companyId: string, periodId: string) => client.get<any[]>("/v1/integrated-finance/accounting/entries", { company_id: companyId, period_id: periodId }),
     postAccountingEntry: (data: any) => client.post<any>("/v1/integrated-finance/accounting/entries", data),
+    createManualEntry: (companyId: string, data: { fecha: string; concepto: string; lines: { account_id: string; tipo: string; monto: number; concepto?: string }[] }) =>
+      client.post<{ asiento_numero: string; fecha: string; concepto: string; total_debe: number; total_haber: number; lines: any[] }>(`/v1/integrated-finance/accounting/entries/manual?company_id=${companyId}`, data),
+    reverseAccountingEntry: (companyId: string, asientoNumero: string, motivo: string) =>
+      client.post<{ asiento_numero_original: string; asiento_numero_reversa: string; fecha: string; motivo: string; lines: any[] }>(`/v1/integrated-finance/accounting/entries/${asientoNumero}/reverse?company_id=${companyId}`, { motivo }),
     getTrialBalance: (companyId: string, periodId: string) => client.get<any>("/v1/integrated-finance/accounting/trial-balance", { company_id: companyId, period_id: periodId }),
     getPnl: (companyId: string, periodId: string) => client.get<any>("/v1/integrated-finance/accounting/pnl", { company_id: companyId, period_id: periodId }),
     // Collections
@@ -1343,12 +4033,14 @@ export const api = {
     // Scoring
     listCustomerScores: (companyId: string, minScore?: number) => client.get<any[]>("/v1/integrated-finance/scoring", { company_id: companyId, min_score: minScore }),
     getCustomerScore: (companyId: string, customerId: string) => client.get<any>("/v1/integrated-finance/scoring", { company_id: companyId, customer_id: customerId }),
-    recalculateScore: (companyId: string, customerId: string) => client.post<any>(`/v1/integrated-finance/scoring/${customerId}/recalculate`, { company_id: companyId, customer_id: customerId }),
+    recalculateScore: (companyId: string, customerId: string) => client.post<any>(`/v1/integrated-finance/scoring/${customerId}/recalculate?company_id=${companyId}`),
+    recalculateAllScores: (companyId: string) => client.post<{ clientes_recalculados: number }>(`/v1/integrated-finance/scoring/recalculate-all?company_id=${companyId}`),
     // EBITDA
     getEbitda: (companyId: string, periodo?: string) => client.get<any>("/v1/integrated-finance/ebitda", { company_id: companyId, periodo }),
-    // Auto Reconciliation & Bank Statement Import
+    // Auto Reconciliation
     autoReconcile: (companyId: string, bankAccountId: string) => client.post<any>("/v1/integrated-finance/reconciliation/auto", { company_id: companyId, bank_account_id: bankAccountId }),
-    importStatement: (data: { company_id: string; bank_account_id?: string; banco_nombre?: string; lineas: any[] }) => client.post<any>("/v1/integrated-finance/reconciliation/import-statement", data),
+    getCashReconciliation: (companyId: string) => client.get<any>("/v1/integrated-finance/reconciliation/cash", { company_id: companyId }),
+    getPnlReconciliation: (companyId: string, periodId: string) => client.get<any>("/v1/integrated-finance/reconciliation/pnl", { company_id: companyId, period_id: periodId }),
   },
 
   // ===== Smart Pricing =====
@@ -1475,8 +4167,6 @@ export const api = {
     listCompliance: (companyId: string) => client.get<any[]>("/v1/cold-chain/compliance", { company_id: companyId }),
     startCompliance: (companyId: string, data: any) => client.post<any>("/v1/cold-chain/compliance/start", { company_id: companyId, ...data }),
     closeCompliance: (companyId: string, logId: string) => client.post<any>(`/v1/cold-chain/compliance/${logId}/close`, { company_id: companyId }),
-
-    simulate: (companyId: string) => client.post<any>("/v1/cold-chain/simulate", { company_id: companyId }),
   },
 
   // ===== Asistente Virtual IA =====
@@ -1494,14 +4184,6 @@ export const api = {
     seedTemplates: (companyId: string) => client.post<any>("/v1/asistente-virtual/templates/seed", { company_id: companyId }),
 
     getDashboard: (companyId: string) => client.get<any>("/v1/asistente-virtual/dashboard", { company_id: companyId }),
-    brainChat: (companyId: string, data: { query: string; user_name?: string; voice_preference?: string; model_preference?: string; generate_voice?: boolean; history?: Array<{ role: string; content: string }> }) =>
-      client.post<any>("/v1/asistente-virtual/brain/chat", { company_id: companyId, ...data }),
-    brainSpeak: (text: string, voice?: string) =>
-      client.post<any>("/v1/asistente-virtual/brain/speak", { text, voice }),
-    brainVoice: (formData: FormData) =>
-      client.post<any>("/v1/asistente-virtual/brain/voice", formData),
-    brainStatus: (companyId: string) =>
-      client.get<any>("/v1/asistente-virtual/brain/status", { company_id: companyId }),
   },
 
   // ===== Clientes — Fidelización & Segmentación =====
@@ -1667,36 +4349,18 @@ export const api = {
     dashboard: () => client.get<any>("/v1/supermer/dsd/dashboard"),
   },
 
-  // ===== FASE 2 SUPERMER — Physical Inventory =====
-  // Renombrado de "inventory" a "supermerInventory": pisaba en silencio la
-  // definicion core de mas arriba (misma clave repetida en el object
-  // literal) — api.inventory.transfers() quedaba undefined para todo el
-  // mundo, no solo supermer.
-  supermerInventory: {
-    sessions: {
-      list: (params?: { area?: string; estado?: string }) => client.get<any[]>("/v1/supermer/inventory/sessions", params),
-      get: (id: string) => client.get<any>(`/v1/supermer/inventory/sessions/${id}`),
-      create: (data: any) => client.post<any>("/v1/supermer/inventory/sessions", data),
-      update: (id: string, data: any) => client.put<any>(`/v1/supermer/inventory/sessions/${id}`, data),
-      complete: (id: string) => client.post<any>(`/v1/supermer/inventory/sessions/${id}/complete`),
-      items: {
-        list: (sessionId: string, params?: { requiere_ajuste?: boolean }) => client.get<any[]>(`/v1/supermer/inventory/sessions/${sessionId}/items`, params),
-        create: (sessionId: string, data: any) => client.post<any>(`/v1/supermer/inventory/sessions/${sessionId}/items`, data),
-        batchCreate: (sessionId: string, data: any[]) => client.post<any[]>(`/v1/supermer/inventory/sessions/${sessionId}/items/batch`, data),
+  // ===== PORTAL DE PROVEEDORES (ADMIN & AUTOSERVICIO) =====
+  supplierPortal: {
+    admin: {
+      users: {
+        list: () => client.get<any[]>("/v1/supplier-portal/admin/users"),
+        create: (data: any) => client.post<any>("/v1/supplier-portal/admin/users", data),
+        toggle: (userId: string) => client.put<any>(`/v1/supplier-portal/admin/users/${userId}/toggle`, {}),
       },
-      adjustments: {
-        list: (sessionId: string, params?: { estado?: string }) => client.get<any[]>(`/v1/supermer/inventory/sessions/${sessionId}/adjustments`, params),
-        create: (sessionId: string, data: any) => client.post<any>(`/v1/supermer/inventory/sessions/${sessionId}/adjustments`, data),
+      documents: {
+        list: (params?: { tipo?: string }) => client.get<any[]>("/v1/supplier-portal/admin/documents", params),
       },
     },
-    items: {
-      update: (itemId: string, data: any) => client.put<any>(`/v1/supermer/inventory/items/${itemId}`, data),
-    },
-    adjustments: {
-      approve: (adjId: string) => client.post<any>(`/v1/supermer/inventory/adjustments/${adjId}/approve`),
-      reject: (adjId: string) => client.post<any>(`/v1/supermer/inventory/adjustments/${adjId}/reject`),
-    },
-    dashboard: () => client.get<any>("/v1/supermer/inventory/dashboard"),
   },
 
   // ===== FASE 2 SUPERMER — Auto Replenishment =====
@@ -1721,9 +4385,6 @@ export const api = {
   },
 
   // ===== FASE 2 SUPERMER — Supplier Returns =====
-  // Renombrado de "returns" a "supplierReturns": pisaba la definicion core
-  // de mas arriba — ReturnsPage.tsx (core, devoluciones de venta) pegaba
-  // sin saberlo a /v1/supermer/returns (devoluciones a proveedor).
   supplierReturns: {
     list: (params?: { estado?: string; proveedor_id?: string }) => client.get<any[]>("/v1/supermer/returns", params),
     get: (id: string) => client.get<any>(`/v1/supermer/returns/${id}`),
@@ -1812,6 +4473,7 @@ export const api = {
   // ===== Customer 360 Analytics =====
   customer360: {
     getDashboard: (companyId: string) => client.get<any>("/v1/customer360/dashboard", { company_id: companyId }),
+    getProfile: (customerId: string) => client.get<any>(`/v1/customer360/profile/${customerId}`),
     computeBasket: (companyId: string, customerId: string) => client.post<any>(`/v1/customer360/basket/compute/${customerId}`, { company_id: companyId }),
     getBasket: (companyId: string, customerId: string) => client.get<any>(`/v1/customer360/basket/${customerId}`, { company_id: companyId }),
     computePenetration: (companyId: string, customerId: string) => client.post<any>(`/v1/customer360/penetration/compute/${customerId}`, { company_id: companyId }),
@@ -1825,6 +4487,11 @@ export const api = {
     notifyRecovery: (companyId: string, campaignId: string) => client.post<any>(`/v1/customer360/recovery/${campaignId}/notify`, { company_id: companyId }),
     redeemRecovery: (companyId: string, campaignId: string, data: any) => client.post<any>(`/v1/customer360/recovery/${campaignId}/redeem`, { ...data, company_id: companyId }),
     bulkCompute: (companyId: string) => client.post<any>("/v1/customer360/bulk-compute", { company_id: companyId }),
+    reanalyzeProfile: (customerId: string) => client.post<any>(`/v1/customer360/profile/${customerId}/reanalyze`),
+    updateTags: (customerId: string, tags: string[]) => client.patch<any>(`/v1/customer360/customers/${customerId}/tags`, { tags }),
+    updateArchetype: (customerId: string, arquetipo: string) => client.patch<any>(`/v1/customer360/customers/${customerId}/archetype`, { arquetipo }),
+    createOffer: (data: any) => client.post<any>("/v1/customer360/offers/create", data),
+    getCustomerOffers: (customerId: string) => client.get<any[]>(`/v1/customer360/customers/${customerId}/offers`),
   },
 
   // ===== Scan&Go =====
@@ -2088,7 +4755,7 @@ export const api = {
       create: (data: any) => client.post<any>("/v1/suscripciones/plans", data),
       get: (planId: string) => client.get<any>(`/v1/suscripciones/plans/${planId}`),
       update: (planId: string, data: any) => client.put<any>(`/v1/suscripciones/plans/${planId}`, data),
-      delete: (planId: string) => client.del<any>(`/v1/suscripciones/plans/${planId}`),
+      delete: (planId: string) => client.delete<any>(`/v1/suscripciones/plans/${planId}`),
       skip: (planId: string) => client.post<any>(`/v1/suscripciones/plans/${planId}/skip`),
       pause: (planId: string, reason?: string) => client.post<any>(`/v1/suscripciones/plans/${planId}/pause${reason ? `?reason=${reason}` : ""}`),
       resume: (planId: string) => client.post<any>(`/v1/suscripciones/plans/${planId}/resume`),
@@ -2149,73 +4816,18 @@ export const api = {
       publicBySlug: (slug: string) => client.get<any>(`/v1/retail/public/storefront/${slug}`),
     },
   },
-  salesTargets: {
-    listReps: () => client.get<SalesRep[]>(`/v1/companies/${COMPANY_ID}/sales-reps`),
-    getRep: (repId: string) => client.get<SalesRep>(`/v1/sales-reps/${repId}`),
-    createRep: (data: { nombre: string; cedula?: string; rama?: string; rol: string; supervisor_id?: string }) =>
-      client.post<SalesRep>(`/v1/companies/${COMPANY_ID}/sales-reps`, data),
-    updateRep: (repId: string, data: Partial<{ nombre: string; rama: string; rol: string; supervisor_id: string | null; activo: boolean }>) =>
-      client.put<SalesRep>(`/v1/sales-reps/${repId}`, data),
-    listProductLines: () => client.get<ProductLine[]>(`/v1/companies/${COMPANY_ID}/product-lines`),
-    getCascadeConfig: () => client.get<CascadeConfig>(`/v1/companies/${COMPANY_ID}/sales-targets/cascade-config`),
-    updateCascadeConfig: (data: { umbral_pct: number; activo?: boolean }) =>
-      client.put<CascadeConfig>(`/v1/companies/${COMPANY_ID}/sales-targets/cascade-config`, data),
-    listTargets: (salesRepId?: string) => client.get<SalesTarget[]>(`/v1/companies/${COMPANY_ID}/sales-targets`, salesRepId ? { sales_rep_id: salesRepId } : undefined),
-    createTarget: (data: { sales_rep_id: string; periodo_tipo: string; periodo_inicio: string; periodo_fin: string; product_line_id?: string; monto_gs: number; cantidad_unidades: number; origen?: string }) =>
-      client.post<SalesTarget>(`/v1/companies/${COMPANY_ID}/sales-targets`, data),
-    updateTarget: (targetId: string, data: Partial<{ monto_gs: number; cantidad_unidades: number; origen: string }>) =>
-      client.put<SalesTarget>(`/v1/sales-targets/${targetId}`, data),
-    getRepProgress: (repId: string, periodoInicio: string, periodoFin: string, productLineId?: string) =>
-      client.get<RepProgress>(`/v1/sales-reps/${repId}/progress`, { periodo_inicio: periodoInicio, periodo_fin: periodoFin, product_line_id: productLineId }),
-    getCascadeStatus: (repId: string, periodoInicio: string, periodoFin: string) =>
-      client.get<CascadeStatus>(`/v1/sales-reps/${repId}/cascade`, { periodo_inicio: periodoInicio, periodo_fin: periodoFin }),
-    getBaseline: (mes?: number) => client.get<Baseline[]>(`/v1/companies/${COMPANY_ID}/sales-targets/baseline`, mes ? { mes } : undefined),
-    recalculateBaseline: () => client.post<{ lineas_procesadas: number }>(`/v1/companies/${COMPANY_ID}/sales-targets/baseline/recalculate`, {}),
-    suggestTargets: (data: { periodo_tipo: string; periodo_inicio: string; periodo_fin: string; mes_referencia: number; ajuste_manual_pct?: number }) =>
-      client.post<SuggestedTarget[]>(`/v1/companies/${COMPANY_ID}/sales-targets/suggest`, data),
-    publishTargets: (data: { periodo_tipo: string; periodo_inicio: string; periodo_fin: string; mes_referencia: number; ajuste_manual_pct?: number }) =>
-      client.post<{ metas_publicadas: number }>(`/v1/companies/${COMPANY_ID}/sales-targets/publish`, data),
-  },
   supplierKpis: {
-    listPeriods: (supplierId?: string) => client.get<SupplierKpiPeriod[]>(`/v1/supplier-kpis/periods${supplierId ? `?supplier_id=${supplierId}` : ""}`),
-    createPeriod: (data: { supplier_id: string; periodo: string; rebate_pct_objetivo?: number; observaciones?: string }) =>
-      client.post<SupplierKpiPeriod>("/v1/supplier-kpis/periods", data),
-    getSummary: (periodId: string, branchId?: string) => client.get<SupplierKpiSummary>(`/v1/supplier-kpis/periods/${periodId}/summary`, { branch_id: branchId }),
-    getDashboard: (companyIdOrMes?: string, branchId?: string) => client.get<any>("/v1/supplier-kpis/dashboard", { company_id: COMPANY_ID, mes: companyIdOrMes, branch_id: branchId }),
-    updateIndicator: (id: string, data: { meta?: number; resultado?: number; peso_pct?: number; meta_uc?: number; resultado_uc?: number }) =>
-      client.put<SupplierKpiIndicator>(`/v1/supplier-kpis/indicators/${id}`, data),
+    listPeriods: (supplierId: string) => client.get<any[]>(`/v1/supplier-kpis/periods?supplier_id=${supplierId}`),
+    createPeriod: (data: any) => client.post<any>("/v1/supplier-kpis/periods", data),
+    getSummary: (periodId: string, branchId?: string) => client.get<any>(`/v1/supplier-kpis/periods/${periodId}/summary`, { branch_id: branchId }),
+    getDashboard: (companyId?: string) => client.get<any>("/v1/supplier-kpis/dashboard", { company_id: companyId || COMPANY_ID }),
+    updateIndicator: (id: string, data: any) => client.put<any>(`/v1/supplier-kpis/indicators/${id}`, data),
     bulkUpdateIndicators: (periodId: string, data: any) => client.put<any>(`/v1/supplier-kpis/periods/${periodId}/indicators/bulk`, data),
     deleteIndicator: (id: string) => client.delete<void>(`/v1/supplier-kpis/indicators/${id}`),
-    addIndicator: (periodId: string, data: { codigo: string; nombre: string; peso_pct: number; meta_uc?: number; resultado_uc?: number }) =>
-      client.post<SupplierKpiIndicator>(`/v1/supplier-kpis/periods/${periodId}/indicators`, data),
+    addIndicator: (periodId: string, data: any) => client.post<any>(`/v1/supplier-kpis/periods/${periodId}/indicators`, data),
   },
   supplierRebates: {
-    getDashboard: (mes?: string, branchId?: string) => client.get<any>("/v1/supplier-kpis/dashboard", { company_id: COMPANY_ID, mes, branch_id: branchId }),
-  },
-  // Distribuidora: devoluciones A proveedores (mercaderia vencida/danada).
-  // NUNCA renombrar esto de vuelta a "supplierReturns" -- esa clave ya la usa
-  // Supermercado (mas arriba, /v1/supermer/returns, Fase 2). Un objeto TS con
-  // dos propiedades iguales no tira error, la segunda pisa a la primera en
-  // silencio -- casi deja inalcanzables los metodos reales de Supermercado.
-  purchaseReturns: {
-    list: (params?: { estado?: string; supplier_id?: string }) => client.get<SupplierReturn[]>(`/v1/companies/${COMPANY_ID}/supplier-returns`, params),
-    get: (id: string) => client.get<SupplierReturnWithItems>(`/v1/supplier-returns/${id}`),
-    create: (data: { supplier_id: string; purchase_order_id?: string; motivo: string; motivo_detalle?: string; warehouse_id?: string; observaciones?: string; items: { product_id: string; descripcion?: string; cantidad: number; precio_unitario: number; iva_tasa?: number; motivo_detalle?: string; condicion?: string }[] }) =>
-      client.post<SupplierReturn>(`/v1/supplier-returns`, { ...data, company_id: COMPANY_ID }),
-    approve: (id: string, aprobadoPor: string, warehouseId?: string) =>
-      client.post<SupplierReturn>(`/v1/supplier-returns/${id}/approve`, { aprobado_por: aprobadoPor, warehouse_id: warehouseId }),
-    reject: (id: string, motivo: string) => client.post<SupplierReturn>(`/v1/supplier-returns/${id}/reject?motivo=${encodeURIComponent(motivo)}`),
-    motivos: () => client.get<string[]>(`/v1/supplier-returns/motivos`),
-  },
-  purchaseBonuses: {
-    list: (params?: { supplier_id?: string; product_id?: string; activo?: boolean }) => client.get<PurchaseBonusScale[]>("/v1/purchase-bonus-scales", params as any),
-    create: (data: { supplier_id: string; product_id: string; cantidad_minima: number; cantidad_bonificada: number; observaciones?: string }) =>
-      client.post<PurchaseBonusScale>("/v1/purchase-bonus-scales", data),
-    update: (id: string, data: Partial<{ cantidad_minima: number; cantidad_bonificada: number; activo: boolean; observaciones: string }>) =>
-      client.patch<PurchaseBonusScale>(`/v1/purchase-bonus-scales/${id}`, data),
-    delete: (id: string) => client.delete<{ ok: boolean }>(`/v1/purchase-bonus-scales/${id}`),
-    suggest: (supplierId: string, productId: string, cantidad: number) =>
-      client.get<{ scale_id: string | null; cantidad_bonificada_sugerida: number }>("/v1/purchase-bonus-scales/suggest", { supplier_id: supplierId, product_id: productId, cantidad: String(cantidad) }),
+    getDashboard: (mes?: string, branchId?: string) => client.get<any>("/v1/supplier-kpis/dashboard", { mes, branch_id: branchId }),
   },
   cupones: {
     registrar: (data: any) => client.post<any>("/v1/cupones/registrar", data),
@@ -2256,34 +4868,21 @@ export const api = {
     create: (data: any) => client.post<any>("/v1/supervisor-requests", { company_id: COMPANY_ID, ...data }),
     resolve: (id: string, data?: any) => client.post<any>(`/v1/supervisor-requests/${id}/resolve`, data),
   },
-  posTerminalTransactions: {
-    create: (data: any) => client.post<any>("/v1/pos-terminal-transactions", data),
-    update: (id: string, data: any) => client.patch<any>(`/v1/pos-terminal-transactions/${id}`, data),
-  },
-  paymentIntegrations: {
-    get: (provider: "bancard" | "plugpay") => client.get<any>(`/v1/payment-integrations/${provider}`),
-    update: (provider: "bancard" | "plugpay", data: { environment?: string; enabled?: boolean; config?: Record<string, any> }) =>
-      client.put<any>(`/v1/payment-integrations/${provider}`, data),
-  },
-  plugpay: {
-    compliance: (cpf: string) => client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/compliance/${cpf}`),
-    createPix: (data: { monto: number; moneda?: string; customer_cpf?: string; customer_cpf_cnpj?: string; sale_id?: string; customer_id?: string }) =>
-      client.post<{ ok: boolean; data?: any; error_message?: string; transaction_log_id?: string }>("/v1/plugpay/pix/create", data),
-    pixStatus: (referenciaInterna: string) =>
-      client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/pix/status/${referenciaInterna}`),
-    pixQrcode: (referenciaInterna: string) =>
-      client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/pix/qrcode/${referenciaInterna}`),
-    quotePix: (data: { monto: number; moneda?: string }) =>
-      client.post<{ ok: boolean; data?: any; error_message?: string }>("/v1/plugpay/pix/quote", data),
-    calcularParcelado: (data: { monto: number; moneda?: string; cuotas: number }) =>
-      client.post<{ ok: boolean; data?: any; error_message?: string }>("/v1/plugpay/credito-parcelado/calcular", data),
-    startParcelado: (data: { monto: number; moneda?: string; cuotas: number; customer_cpf: string; customer_phone: string; sale_id?: string; customer_id?: string }) =>
-      client.post<{ ok: boolean; data?: any; error_message?: string; transaction_log_id?: string }>("/v1/plugpay/credito-parcelado/start", data),
-    parceladoStatus: (referenciaInterna: string) =>
-      client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/credito-parcelado/${referenciaInterna}`),
-    cancelParcelado: (referenciaInterna: string) =>
-      client.post<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/credito-parcelado/cancel/${referenciaInterna}`, {}),
-    linkSale: (txnId: string, saleId: string) => client.patch<{ message: string }>(`/v1/plugpay/transactions/${txnId}/link-sale/${saleId}`, {}),
+  kiosk: {
+    lookup: (code: string) => client.get<KioskProductLookup>("/v1/kiosk/lookup", { code, company_id: COMPANY_ID }),
+    branding: () => client.get<{ nombre: string | null; logo_url: string | null; currencies: Record<string, any> }>("/v1/kiosk/branding", { company_id: COMPANY_ID }),
+    banners: {
+      active: () => client.get<KioskBanner[]>("/v1/kiosk/banners/active", { company_id: COMPANY_ID }),
+      list: () => client.get<KioskBanner[]>("/v1/kiosk/banners"),
+      create: (data: Partial<KioskBanner>) => client.post<KioskBanner>("/v1/kiosk/banners", data),
+      update: (id: string, data: Partial<KioskBanner>) => client.patch<KioskBanner>(`/v1/kiosk/banners/${id}`, data),
+      delete: (id: string) => client.delete<void>(`/v1/kiosk/banners/${id}`),
+      uploadImage: (id: string, file: File) => {
+        const fd = new FormData()
+        fd.append("file", file)
+        return requestMultipart<KioskBanner>(`/v1/kiosk/banners/${id}/image`, fd)
+      },
+    },
   },
   donaciones: {
     getCampanaActiva: (companyId?: string) => client.get<DonationCampaign>("/v1/donaciones/campana-activa", { company_id: companyId || COMPANY_ID }),
@@ -2294,6 +4893,34 @@ export const api = {
     getHistorial: (params?: any) => client.get<DonationRecord[]>("/v1/donaciones/historial", { company_id: COMPANY_ID, ...params }),
     getLiquidaciones: (companyId?: string) => client.get<DonationLiquidation[]>("/v1/donaciones/liquidaciones", { company_id: companyId || COMPANY_ID }),
     liquidar: (data: any) => client.post<DonationLiquidation>("/v1/donaciones/liquidar", data),
+  },
+  vouchers: {
+    check: (barcodeOrNumber: string) => client.get<any>(`/vouchers/check/${encodeURIComponent(barcodeOrNumber)}`),
+    redeem: (data: {
+      codigo_barras: string
+      sale_id?: string
+      caja_session_id?: string
+      caja_numero?: string
+      usuario_id?: string
+      beneficiario_nombre?: string
+    }) => client.post<any>("/vouchers/redeem", data),
+    seedUP: (data?: { total_vales?: number; monto_por_vale?: number; fecha_vencimiento?: string }) =>
+      client.post<any>("/vouchers/seed-up", data || { total_vales: 75, monto_por_vale: 100000, fecha_vencimiento: "2026-12-31" }),
+    listConvenios: () => client.get<any[]>("/vouchers/convenios"),
+    summary: (convenio = "Universidad del Pacífico") =>
+      client.get<any>(`/vouchers/summary?convenio=${encodeURIComponent(convenio)}`),
+    linkInvoice: (data: { convenio_nombre: string; factura_numero: string }) =>
+      client.post<any>("/vouchers/link-invoice", data),
+    createBatch: (data: {
+      convenio_nombre: string
+      total_vales: number
+      monto_por_vale: number
+      fecha_vencimiento: string
+      cliente_ruc?: string
+      cliente_razon_social?: string
+      factura_numero?: string
+      prefijo_codigo?: string
+    }) => client.post<any>("/vouchers/batch", data),
   },
 }
 
@@ -2370,3 +4997,11 @@ export interface CajeroSolidarioRankingItem {
   total_ventas_atendidas: number
   tasa_adhesion_pct: number
 }
+
+export type CuponTicket = any
+export type CuponCliente = any
+export type CuponStats = any
+export type SupplierKpiPeriod = any
+export type SupplierKpiSummary = any
+export type SupplierKpiIndicator = any
+

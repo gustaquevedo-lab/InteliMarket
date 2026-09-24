@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Text, Date, Time, Integer
+from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Text, Date, Time, Integer, ForeignKey, JSON
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.sql import func
 from api.src.db import Base
@@ -12,9 +12,11 @@ class Promotion(Base):
     nombre = Column(String(150), nullable=False)
     descripcion = Column(Text)
 
-    # porcentaje | monto_fijo | dos_por_uno | combo_precio | cantidad_lleva
-    tipo = Column(String(20), nullable=False)
-    valor = Column(Numeric(15, 2))  # porcentaje o monto fijo
+    # Tipos soportados con cálculo real:
+    # precio_fijo_oferta | porcentaje | monto_fijo | dos_por_uno | tres_por_dos | nxm | cantidad_lleva | segunda_unidad_pct | combo_pack | combo_precio
+    tipo = Column(String(30), nullable=False)
+    valor = Column(Numeric(15, 2))  # porcentaje o monto de descuento
+    precio_fijo_promocional = Column(Numeric(15, 2))  # precio directo de venta en oferta (ej. ₲ 38.000)
     valor_maximo = Column(Numeric(15, 2))  # techo del descuento
 
     # producto | categoria | carrito | marca
@@ -22,23 +24,83 @@ class Promotion(Base):
     producto_ids = Column(ARRAY(UUID))  # when aplica_a=producto
     categoria_ids = Column(ARRAY(UUID))  # when aplica_a=categoria
 
-    # Condiciones
+    # Origen & Justificación Comercial (Trade Marketing)
+    # corto_vencimiento | accion_proveedor | iniciativa_propia
+    origen = Column(String(50), default="iniciativa_propia")
+
+    # Financiación Comercial
+    # proveedor_sell_out | proveedor_sell_in | propio_supermercado | co_financiado
+    financiamiento = Column(String(50), default="propio_supermercado")
+    supplier_id = Column(UUID(as_uuid=True), nullable=True)
+    purchases_invoices_ids = Column(JSON, nullable=True)
+    porcentaje_aporte_proveedor = Column(Numeric(5, 2), default=0)
+    porcentaje_aporte_tienda = Column(Numeric(5, 2), default=0)
+    monto_aporte_proveedor_pyg = Column(Numeric(15, 2), default=0)
+    monto_aporte_tienda_pyg = Column(Numeric(15, 2), default=0)
+
+    # Control de Rentabilidad & Margen
+    costo_unitario_referencia = Column(Numeric(15, 2), default=0)
+    vende_bajo_costo = Column(Boolean, default=False)
+
+    # Base sobre la que se calcula el % de descuento: "venta" (descuento
+    # directo sobre el precio de venta actual) o "costo" (define un margen
+    # objetivo -- precio = costo * (1 + valor/100)). Solo aplica a tipo=porcentaje.
+    base_calculo_pct = Column(String(10), server_default="venta")
+
+    # Redondeo psicológico: fuerza que los últimos 2 dígitos del precio final
+    # calculado coincidan con este valor (0-99), ej. 77 -> Gs. 12.977. Aplica
+    # sobre el precio ya calculado por cualquier mecánica. Null = sin ajuste.
+    terminacion_psicologica = Column(Integer, nullable=True)
+
+    # Precios específicos por producto para campañas multiproducto o reglas por lote
+    # Formato: { "<producto_id>": precio_promocional_calculado_o_editado }
+    precios_por_producto = Column(JSON, nullable=True)
+    
+    # Aprobaciones de Gerencia
+    # borrador | pendiente_aprobacion_gerencia | activa | pausada | finalizada_por_stock | finalizada_por_fecha
+    estado = Column(String(50), default="activa", index=True)
+    aprobado_por = Column(UUID(as_uuid=True), nullable=True)
+    fecha_aprobacion = Column(DateTime(timezone=True), nullable=True)
+
+    # Restricciones por Ticket y Stock Límite
+    limite_por_compra = Column(Integer, nullable=True)  # ej: máx 6 unidades en oferta por ticket
+    limitar_unidades = Column(Boolean, default=False)
+    stock_limite_unidades = Column(Numeric(15, 2), nullable=True)  # cupo total autorizado (ej. 100 un)
+    unidades_vendidas_promo = Column(Numeric(15, 2), default=0)  # contador en tiempo real
+
+    # Condiciones de Compra
     monto_minimo_compra = Column(Numeric(15, 2))
     cantidad_minima = Column(Integer)
-    cantidad_maxima_items = Column(Integer)  # ej: 2x1 → max 10 uds
+    cantidad_maxima_items = Column(Integer)
     aplicaciones_por_cliente = Column(Integer)
     combinable = Column(Boolean, server_default="false")
 
-    # Schedule
+    # Calendario y Días de Semana
     valido_desde = Column(Date, nullable=False)
     valido_hasta = Column(Date, nullable=False)
-    horario_desde = Column(Time)  # ej: 18:00 for after-hours
+    horario_desde = Column(Time)
     horario_hasta = Column(Time)
-    dias_semana = Column(ARRAY(Integer))  # 0=domingo, 6=sabado
+    dias_semana = Column(ARRAY(Integer))  # 0=domingo, 1=lunes ... 6=sabado
 
     # Cupón
-    codigo_cupon = Column(String(50))  # optional coupon code
+    codigo_cupon = Column(String(50))
     requiere_cupon = Column(Boolean, server_default="false")
+
+    # Liquidación Sell-Out con Proveedor (Vendor Claim & Nota de Crédito)
+    # pendiente_liquidacion | obligacion_inicial_generada | solicitada_al_proveedor | nc_recibida_conciliada
+    nc_estado = Column(String(50), default="pendiente_liquidacion")
+    porcentaje_nc_costo = Column(Numeric(5, 2), default=0)  # % de NC acordado sobre el costo de adquisición
+    monto_total_nc_comprometido = Column(Numeric(15, 2), default=0)  # Monto total de la obligación en firme
+    fecha_vencimiento_lote = Column(Date, nullable=True)  # Fecha de vencimiento físico del producto
+    ar_receivable_id = Column(UUID(as_uuid=True), nullable=True)  # ID de la cuenta por cobrar en firme generada al inicio
+    nc_numero_proveedor = Column(String(50), nullable=True)  # Número de NC oficial (ej: 001-002-0004581)
+    nc_timbrado_proveedor = Column(String(20), nullable=True)
+    nc_monto_total = Column(Numeric(15, 2), default=0)
+
+    # Trazabilidad Legacy Nemuha & Auditoría
+    origen_fuente = Column(String(30), default="intelimarket")  # nemuha | intelimarket
+    legacy_id = Column(Integer, nullable=True, index=True)  # ID_PROMOCAO en MySQL Nemuha
+    usuario_registro = Column(String(100), nullable=True)  # Usuario que cargó/registró la promo
 
     # Control
     usos_maximos = Column(Integer)
@@ -54,10 +116,15 @@ class PromotionUsage(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     promotion_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    sale_id = Column(UUID(as_uuid=True), nullable=False)
+    sale_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     customer_id = Column(UUID(as_uuid=True))
     branch_id = Column(UUID(as_uuid=True))
+    product_id = Column(UUID(as_uuid=True), nullable=True)
     codigo_cupon = Column(String(50))
+    cantidad_items = Column(Numeric(15, 2), default=1)
+    precio_regular_unitario = Column(Numeric(15, 2), default=0)
+    precio_promo_unitario = Column(Numeric(15, 2), default=0)
     descuento_aplicado = Column(Numeric(15, 2), nullable=False)
+    es_venta_mayorista = Column(Boolean, default=False)
     items_aplicados = Column(ARRAY(UUID))  # sale_item_ids
     created_at = Column(DateTime(timezone=True), server_default=func.now())

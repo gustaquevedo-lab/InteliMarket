@@ -20,7 +20,6 @@ const FeatureContext = createContext<FeatureContextType | undefined>(undefined)
 
 function isValidJWT(token: string): boolean {
   if (!token) return false
-  if (token === "demo-token") return true // el backend acepta este token fijo para el acceso directo de demo
   const parts = token.split(".")
   return parts.length === 3
 }

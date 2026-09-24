@@ -7,7 +7,7 @@ import uuid
 
 
 class PriceListCreate(BaseModel):
-    company_id: uuid.UUID
+    company_id: Optional[uuid.UUID] = None  # el router lo pisa con user[company_id] -- no hace falta que lo mande el cliente
     nombre: str
     tipo: str = "general"
     customer_id: Optional[uuid.UUID] = None
@@ -16,11 +16,14 @@ class PriceListCreate(BaseModel):
 
 class PriceListUpdate(BaseModel):
     nombre: Optional[str] = None
+    tipo: Optional[str] = None
+    customer_id: Optional[uuid.UUID] = None
+    grupo: Optional[str] = None
     activo: Optional[bool] = None
 
 
 class PriceListItemCreate(BaseModel):
-    price_list_id: uuid.UUID
+    price_list_id: Optional[uuid.UUID] = None  # el router lo pisa con el {pl_id} de la URL -- no hace falta que lo mande el cliente
     product_id: uuid.UUID
     variant_id: Optional[uuid.UUID] = None
     precio: float

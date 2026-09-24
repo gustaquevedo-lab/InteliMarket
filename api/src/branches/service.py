@@ -270,3 +270,95 @@ async def get_consolidated_dashboard(db: AsyncSession, company_id: str) -> dict:
         pass
 
     return result
+
+
+async def get_commercial_targets_matrix(
+    db: AsyncSession,
+    company_id: str,
+    branch_id: Optional[str] = None,
+    periodo: str = "2026-08",
+) -> dict:
+    query = """
+        SELECT branch_id, branch_nombre, departamento, periodo, proveedor_nombre, vendedor_nombre, meta_monto, venta_monto, porcentaje_logro
+        FROM commercial_targets
+        WHERE company_id = :comp_id AND periodo = :periodo
+    """
+    params = {"comp_id": uuid.UUID(company_id), "periodo": periodo}
+    if branch_id and branch_id != "all":
+        query += " AND branch_id = :branch_id"
+        params["branch_id"] = uuid.UUID(branch_id)
+    
+    query += " ORDER BY proveedor_nombre, vendedor_nombre"
+    
+    res = await db.execute(text(query), params)
+    rows = res.fetchall()
+    
+    sellers_set = []
+    prov_map = {}
+    branch_info = {"branch_nombre": "Todas las Sucursales", "departamento": "Nacional"}
+    
+    for r in rows:
+        if r.vendedor_nombre not in sellers_set:
+            sellers_set.append(r.vendedor_nombre)
+        if branch_id and branch_id != "all":
+            branch_info["branch_nombre"] = r.branch_nombre or branch_info["branch_nombre"]
+            branch_info["departamento"] = r.departamento or branch_info["departamento"]
+        
+        p_name = r.proveedor_nombre
+        if p_name not in prov_map:
+            prov_map[p_name] = {
+                "proveedor_nombre": p_name,
+                "metas": {},
+                "ventas": {},
+                "logros": {},
+                "meta_total": 0.0,
+                "venta_total": 0.0,
+                "porcentaje_logro_total": 0.0,
+            }
+        
+        meta = float(r.meta_monto or 0)
+        venta = float(r.venta_monto or 0)
+        pct = float(r.porcentaje_logro or 0)
+        
+        prov_map[p_name]["metas"][r.vendedor_nombre] = meta
+        prov_map[p_name]["ventas"][r.vendedor_nombre] = venta
+        prov_map[p_name]["logros"][r.vendedor_nombre] = pct
+        
+        prov_map[p_name]["meta_total"] += meta
+        prov_map[p_name]["venta_total"] += venta
+
+    for p_name, p_data in prov_map.items():
+        if p_data["meta_total"] > 0:
+            p_data["porcentaje_logro_total"] = round((p_data["venta_total"] / p_data["meta_total"]) * 100, 2)
+
+    seller_totals = {}
+    for s in sellers_set:
+        s_meta = sum(p["metas"].get(s, 0) for p in prov_map.values())
+        s_venta = sum(p["ventas"].get(s, 0) for p in prov_map.values())
+        s_pct = round((s_venta / s_meta * 100), 2) if s_meta > 0 else 0
+        seller_totals[s] = {
+            "vendedor_nombre": s,
+            "meta_total": s_meta,
+            "venta_total": s_venta,
+            "porcentaje_logro": s_pct,
+        }
+
+    grand_meta = sum(p["meta_total"] for p in prov_map.values())
+    grand_venta = sum(p["venta_total"] for p in prov_map.values())
+    grand_pct = round((grand_venta / grand_meta * 100), 2) if grand_meta > 0 else 0
+
+    return {
+        "company_id": str(company_id),
+        "branch_id": branch_id,
+        "branch_nombre": branch_info["branch_nombre"],
+        "departamento": branch_info["departamento"],
+        "periodo": periodo,
+        "vendedores": sellers_set,
+        "proveedores": list(prov_map.values()),
+        "totales_vendedor": seller_totals,
+        "total_general": {
+            "meta_total": grand_meta,
+            "venta_total": grand_venta,
+            "porcentaje_logro": grand_pct,
+        },
+    }

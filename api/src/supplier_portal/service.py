@@ -79,7 +79,7 @@ async def get_dashboard(db: AsyncSession, supplier_id: str, company_id: str) -> 
         .where(
             PurchaseOrder.supplier_id == UUID(supplier_id),
             PurchaseOrder.company_id == UUID(company_id),
-            PurchaseOrder.estado == "enviada",
+            PurchaseOrder.estado == "enviado",
         )
     )
     pending_confirm = r.scalar() or 0
@@ -168,13 +168,13 @@ async def confirm_order(
         select(PurchaseOrder).where(
             PurchaseOrder.id == UUID(order_id),
             PurchaseOrder.supplier_id == UUID(supplier_id),
-            PurchaseOrder.estado == "enviada",
+            PurchaseOrder.estado == "enviado",
         )
     )
     order = r.scalar_one_or_none()
     if not order:
         raise ValueError("Orden no encontrada o no está pendiente de confirmación")
-    order.estado = "confirmada"
+    order.estado = "confirmada_proveedor"
     order.fecha_confirmacion_proveedor = datetime.now(timezone.utc)
     if fecha_despacho:
         try:
@@ -325,30 +325,24 @@ async def list_payments(db: AsyncSession, supplier_id: str, company_id: str) -> 
         select(SupplierInvoice)
         .where(
             SupplierInvoice.company_id == UUID(company_id),
-            # Map supplier_id to razon_social match or use supplier field
+            SupplierInvoice.supplier_id == UUID(supplier_id),
         )
-        .order_by(SupplierInvoice.created_at.desc())
+        .order_by(SupplierInvoice.fecha_emision.desc())
         .limit(50)
     )
     invoices = r.scalars().all()
-    from api.src.purchases.models import Supplier
-    sup_r = await db.execute(select(Supplier).where(Supplier.id == UUID(supplier_id)))
-    supplier = sup_r.scalar_one_or_none()
 
     results = []
     for inv in invoices:
-        if not supplier or inv.proveedor_nombre != supplier.razon_social:
-            continue
-        # Get payments
         pr = await db.execute(
             select(SupplierInvoicePayment).where(SupplierInvoicePayment.invoice_id == inv.id)
         )
         payments = pr.scalars().all()
-        pagado = float(sum(p.monto or 0) for p in payments) if payments else 0
+        pagado = float(sum((p.monto or 0) for p in payments)) if payments else 0
         results.append({
             "invoice_id": str(inv.id),
-            "numero": inv.numero,
-            "fecha": inv.fecha,
+            "numero": inv.numero_factura,
+            "fecha": inv.fecha_emision,
             "total": float(inv.total or 0),
             "pagado": pagado,
             "saldo": float(inv.total or 0) - pagado,
@@ -368,3 +362,62 @@ async def get_supplier_whatsapp_url(db: AsyncSession, supplier_id: str) -> str:
         phone = supplier.telefono.replace("+", "").replace(" ", "").replace("-", "")
     message = "Hola! Tengo consultas sobre pedidos"
     return f"https://wa.me/{phone}?text={message.replace(' ', '%20')}"
+
+
+# ── Admin (Internal Supermarket Management) ──────────────────────────
+
+async def list_supplier_users_for_company(db: AsyncSession, company_id: str) -> list[dict]:
+    r = await db.execute(
+        select(SupplierUser)
+        .where(SupplierUser.company_id == UUID(company_id))
+        .order_by(SupplierUser.created_at.desc())
+    )
+    users = r.scalars().all()
+    results = []
+    for u in users:
+        sup_r = await db.execute(select(Supplier.razon_social).where(Supplier.id == u.supplier_id))
+        supplier_nombre = sup_r.scalar_one_or_none() or "Proveedor"
+        results.append({
+            "id": str(u.id),
+            "supplier_id": str(u.supplier_id),
+            "supplier_nombre": supplier_nombre,
+            "email": u.email,
+            "nombre": u.nombre,
+            "telefono": u.telefono,
+            "cargo": u.cargo,
+            "activo": u.activo,
+            "last_login": u.last_login.isoformat() if u.last_login else None,
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+        })
+    return results
+
+
+async def list_all_documents_for_company(db: AsyncSession, company_id: str, tipo: str = "") -> list[dict]:
+    q = select(SupplierDocument).where(SupplierDocument.company_id == UUID(company_id))
+    if tipo:
+        q = q.where(SupplierDocument.tipo == tipo)
+    q = q.order_by(SupplierDocument.created_at.desc()).limit(100)
+    r = await db.execute(q)
+    docs = r.scalars().all()
+    results = []
+    for d in docs:
+        sup_r = await db.execute(select(Supplier.razon_social).where(Supplier.id == d.supplier_id))
+        supplier_nombre = sup_r.scalar_one_or_none() or "Proveedor"
+        res = doc_to_response(d)
+        res["supplier_nombre"] = supplier_nombre
+        results.append(res)
+    return results
+
+
+async def toggle_supplier_user(db: AsyncSession, user_id: UUID, company_id: str) -> dict:
+    r = await db.execute(
+        select(SupplierUser).where(SupplierUser.id == user_id, SupplierUser.company_id == UUID(company_id))
+    )
+    user = r.scalar_one_or_none()
+    if not user:
+        raise ValueError("Usuario no encontrado")
+    user.activo = not user.activo
+    await db.commit()
+    await db.refresh(user)
+    return {"id": str(user.id), "activo": user.activo}
+

@@ -596,7 +596,7 @@ async def get_product_margins(db: AsyncSession, company_id: str, category_id: st
     cid = UUID(company_id)
     q = select(Product).where(Product.company_id == cid, Product.activo == True)
     if category_id:
-        q = q.where(Product.category_id == UUID(category_id))
+        q = q.where(Product.categoria_id == UUID(category_id))
     q = q.order_by(Product.nombre).limit(200)
     r = await db.execute(q)
     products = r.scalars().all()

@@ -1,7 +1,7 @@
 """Customer model"""
 
 from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Text, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
 from sqlalchemy.sql import func
 
 from api.src.db import Base
@@ -13,20 +13,34 @@ class Customer(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     tipo_persona = Column(String(20), nullable=False, default="juridica")
-    ruc = Column(String(15), index=True)
+    tipo = Column(String(50), default="cliente")
+    ruc = Column(String(20), index=True)
+    extra_club_numero = Column(String(40), index=True)
+    empresa_vinculada_nombre = Column(String(255))
+    empresa_vinculada_ruc = Column(String(20))
     ci = Column(String(20))
     razon_social = Column(String(255), nullable=False)
     nombre_fantasia = Column(String(255))
-    condicion_iva = Column(String(20))
+    condicion_iva = Column(String(50))
     direccion = Column(Text)
     ciudad = Column(String(100))
     departamento = Column(String(100))
     telefono = Column(String(20))
     email = Column(String(255))
+    contacto = Column(String(200))
     price_list_id = Column(UUID(as_uuid=True))
     credito_limite = Column(Numeric(15, 0), default=0)
+    limite_credito = Column(Numeric(15, 0), default=0)
     credito_usado = Column(Numeric(15, 0), default=0, server_default=text("0"))
     pago_default = Column(String(20))
+    es_agente_retencion = Column(Boolean, default=False, server_default=text("false"))
+    regimen_retencion = Column(String(30), default="general", server_default=text("'general'"))
+    porcentaje_retencion_iva = Column(Numeric(5, 2), default=30.00, server_default=text("30.00"))
+    idioma = Column(String(10), default="es", server_default=text("'es'"))
+    whatsapp_valido = Column(Boolean, default=True, server_default=text("true"))
+    arquetipo = Column(String(100))
+    tags = Column(ARRAY(String), default=list, server_default=text("'{}'::text[]"))
+    ia_analisis = Column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
     activo = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

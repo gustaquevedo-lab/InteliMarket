@@ -1,0 +1,58 @@
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: ['./src/**/*.{astro,html,js,jsx,md,mdx,svelte,ts,tsx,vue}'],
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        surface: 'var(--color-surface)',
+        'surface-dim': 'var(--color-surface-dim)',
+        'surface-bright': 'var(--color-surface-bright)',
+        'surface-container-lowest': 'var(--color-surface-container-lowest)',
+        'surface-container-low': 'var(--color-surface-container-low)',
+        'surface-container': 'var(--color-surface-container)',
+        'surface-container-high': 'var(--color-surface-container-high)',
+        'surface-container-highest': 'var(--color-surface-container-highest)',
+        'on-surface': 'var(--color-on-surface)',
+        'on-surface-variant': 'var(--color-on-surface-variant)',
+        outline: 'var(--color-outline)',
+        'outline-variant': 'var(--color-outline-variant)',
+        primary: 'var(--color-primary)',
+        'on-primary': 'var(--color-on-primary)',
+        'primary-container': 'var(--color-primary-container)',
+        'on-primary-container': 'var(--color-on-primary-container)',
+        secondary: 'var(--color-secondary)',
+        'on-secondary': 'var(--color-on-secondary)',
+        'secondary-container': 'var(--color-secondary-container)',
+        tertiary: 'var(--color-tertiary)',
+        'tertiary-container': 'var(--color-tertiary-container)',
+        error: 'var(--color-error)',
+        background: 'var(--color-background)',
+        'on-background': 'var(--color-on-background)',
+        'brand-mint': '#4edea3',
+        'brand-emerald': '#006c49',
+        'brand-blue': '#abc7fc',
+        'brand-dark': '#0c141e',
+      },
+      fontFamily: {
+        sans: ['"Inter"', 'system-ui', 'sans-serif'],
+        headline: ['"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
+        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
+      },
+      spacing: {
+        'space-xs': '0.25rem',
+        'space-sm': '0.5rem',
+        'space-md': '0.75rem',
+        'space-lg': '1.25rem',
+        'space-xl': '2rem',
+        'gutter': '1rem',
+        'margin': '1.5rem',
+      },
+      boxShadow: {
+        'glow-secondary': '0 0 24px -2px rgba(78, 222, 163, 0.25)',
+        'glow-primary': '0 0 24px -2px rgba(171, 199, 252, 0.2)',
+      }
+    },
+  },
+  plugins: [],
+};

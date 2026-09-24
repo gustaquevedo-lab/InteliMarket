@@ -2,12 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.quotes.schemas import (
     QuoteCreate, QuoteUpdate, QuoteResponse, QuoteWithItems, QuoteConvertToSale,
 )
 from api.src.quotes import service
 
-router = APIRouter(prefix="/api/v1", tags=["quotes"])
+router = APIRouter(prefix="/api/v1", tags=["quotes"], dependencies=[Depends(require_auth)])
 
 
 @router.post("/quotes", response_model=QuoteResponse, status_code=status.HTTP_201_CREATED)

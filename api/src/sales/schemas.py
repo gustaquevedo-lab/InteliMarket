@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, Field
 from typing import Optional
-from datetime import datetime, date
+from datetime import datetime
 from uuid import UUID
 from decimal import Decimal
 
@@ -18,30 +18,35 @@ class SaleItemInput(BaseModel):
     costo_unitario: Optional[Decimal] = None
 
 
+class SalePaymentInput(BaseModel):
+    forma_pago: str
+    monto: Decimal = Field(gt=0)
+    moneda: str = "PYG"
+
+
 class SaleCreate(BaseModel):
+    id: Optional[UUID] = None
     company_id: UUID
     branch_id: Optional[UUID] = None
     customer_id: Optional[UUID] = None
     emission_point_id: Optional[UUID] = None
+    punto_emision: Optional[str] = None
     tipo_comprobante: str = "ticket"
     condicion: str = "contado"
     moneda: str = "PYG"
     tipo_cambio: Decimal = Decimal("1")
     items: list[SaleItemInput]
+    payments: list[SalePaymentInput] = []
     observaciones: Optional[str] = None
     user_id: Optional[UUID] = None
-    # Se completa cuando un supervisor ya autorizo un excedente de credito
-    # (POST /credit-accounts/{id}/authorize-excess) y el POS reintenta la venta.
-    credit_authorization_id: Optional[UUID] = None
-
-
-class CustomerBrief(BaseModel):
-    id: UUID
-    razon_social: str
-    ruc: Optional[str] = None
-
-    class Config:
-        from_attributes = True
+    session_id: Optional[UUID] = None
+    recibo_html: Optional[str] = None
+    recibo_escpos_b64: Optional[str] = None
+    admin_override_credito: bool = False
+    override_gran_volumen: bool = False
+    monto_donacion: Optional[Decimal] = Decimal("0")
+    donacion_campana: Optional[str] = None
+    donacion_ong: Optional[str] = None
 
 
 class SaleResponse(BaseModel):
@@ -49,8 +54,12 @@ class SaleResponse(BaseModel):
     company_id: UUID
     branch_id: Optional[UUID] = None
     customer_id: Optional[UUID] = None
-    customer: Optional[CustomerBrief] = None
+    user_id: Optional[UUID] = None
+    session_id: Optional[UUID] = None
+    recibo_html: Optional[str] = None
+    recibo_escpos_b64: Optional[str] = None
     numero: str
+    numero_interno: Optional[str] = None
     fecha: datetime
     tipo_comprobante: str
     condicion: str
@@ -65,11 +74,21 @@ class SaleResponse(BaseModel):
     iva_10: Decimal
     iva_5: Decimal
     total: Decimal
-    total_pagado: Decimal
+    total_pagado: Optional[Decimal] = None
     saldo: Optional[Decimal] = None
+    monto_donacion: Optional[Decimal] = Decimal("0")
+    donacion_campana: Optional[str] = None
+    donacion_ong: Optional[str] = None
     cdc: Optional[str] = None
     sifen_estado: Optional[str] = None
     observaciones: Optional[str] = None
+    puntos_ganados: Optional[int] = None
+    forma_pago: Optional[str] = None
+    customer_nombre: Optional[str] = None
+    customer_doc: Optional[str] = None
+    customer_extra_club: Optional[str] = None
+    cajero_nombre: Optional[str] = None
+    caja_nombre: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -92,11 +111,6 @@ class SaleAddPayment(BaseModel):
     monto: Decimal = Field(gt=0)
     referencia: Optional[str] = None
     user_id: Optional[UUID] = None
-    # Solo aplican cuando el metodo de pago resuelve a tipo "cheque"/"pagare"
-    check_numero: Optional[str] = None
-    check_banco: Optional[str] = None
-    check_titular: Optional[str] = None
-    check_fecha_vencimiento: Optional[date] = None
 
 
 class SaleLinkQuote(BaseModel):
@@ -105,3 +119,40 @@ class SaleLinkQuote(BaseModel):
 
 class SaleLinkOrder(BaseModel):
     order_id: UUID
+
+
+class SaleAttachTicket(BaseModel):
+    recibo_escpos_b64: str
+
+
+class SaleReopenCustomer(BaseModel):
+    customer_id: Optional[UUID] = None
+    autorizado_por_id: UUID
+    autorizado_por_nombre: str
+
+
+FORMAS_PAGO_VALIDAS = {
+    "EFECTIVO", "TARJETA", "TARJETA_BANCARD", "TARJETA_DINELCO",
+    "EXTRA_CLUB", "TRANSFERENCIA", "QR", "QR_ZIMPLE", "QR_PIX", "QR_DINELCO",
+    "CREDITO", "CHEQUE", "MIXTO", "VALE_CONVENIO", "VALE",
+}
+
+
+class SaleReopenPayment(BaseModel):
+    """Cambio de forma de pago en una venta ya cerrada.
+    Requiere autorización de supervisor y motivo descriptivo.
+    Solo aplicable a ventas del turno activo de caja.
+    """
+    forma_pago: str
+    customer_id: Optional[UUID] = None
+    motivo: str = Field(..., min_length=10, max_length=500,
+                        description="Motivo descriptivo obligatorio (mín. 10 caracteres)")
+    autorizado_por_id: UUID
+    autorizado_por_nombre: str
+    voucher: Optional[str] = None
+    lote: Optional[str] = None
+    tarjeta_marca: Optional[str] = None
+    terminal_ip: Optional[str] = None
+    moneda: Optional[str] = "PYG"
+    monto_moneda: Optional[Decimal] = None
+

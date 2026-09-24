@@ -4,11 +4,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.src.db import get_db
 from api.src.pagopar.schemas import CreatePaymentRequest, PagoparTransaction
 from api.src.pagopar import service
+from api.src.auth.middleware import require_auth
 
 router = APIRouter(prefix="/api/v1/pagopar", tags=["pagopar"])
 
 
-@router.post("/checkout")
+@router.post("/checkout", dependencies=[Depends(require_auth)])
 async def create_checkout(
     body: CreatePaymentRequest,
     company_id: str = Query(...),
@@ -45,7 +46,7 @@ async def webhook(
     return result
 
 
-@router.get("/transactions")
+@router.get("/transactions", dependencies=[Depends(require_auth)])
 async def list_transactions(
     company_id: str = Query(...),
     order_id: str | None = Query(None),
@@ -73,7 +74,7 @@ async def list_transactions(
     ]
 
 
-@router.get("/transactions/{transaction_id}")
+@router.get("/transactions/{transaction_id}", dependencies=[Depends(require_auth)])
 async def get_transaction(
     transaction_id: str,
     db: AsyncSession = Depends(get_db),

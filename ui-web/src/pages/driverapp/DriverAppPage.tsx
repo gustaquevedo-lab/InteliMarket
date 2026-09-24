@@ -41,7 +41,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
           <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <Truck className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-white">InteliEntregas</h1>
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-white">InteliEntregas</h1>
           <p className="text-blue-200 text-sm mt-1">App del repartidor</p>
         </div>
         <form onSubmit={handleSubmit} className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-xl space-y-4">

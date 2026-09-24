@@ -2,6 +2,7 @@
 
 import csv
 import io
+import uuid
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,8 +37,14 @@ async def import_products(
             unidad_medida = row.get("unidad_medida", "unidad").strip()
             iva_tasa = float(row.get("iva_tasa", "10").replace(",", "."))
             stock_minimo = float(row.get("stock_minimo", "0").replace(",", "."))
-            category_id = row.get("category_id", "").strip() or None
-            
+            categoria_id_raw = (row.get("categoria_id") or row.get("category_id") or "").strip() or None
+            categoria_id = None
+            if categoria_id_raw:
+                try:
+                    categoria_id = uuid.UUID(categoria_id_raw)
+                except ValueError:
+                    pass  # id invalido -> se importa sin categoria en vez de fallar la fila entera
+
             if not sku or not nombre:
                 errors += 1
                 details.append(ImportRow(
@@ -57,6 +64,7 @@ async def import_products(
                 unidad_medida=unidad_medida,
                 iva_tasa=iva_tasa,
                 stock_minimo=stock_minimo,
+                categoria_id=categoria_id,
                 activo=True,
             )
             db.add(product)

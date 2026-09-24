@@ -1,0 +1,29 @@
+# PLANTILLA -- no instalada ni activa. Copiar a /etc/systemd/system/ y hacer
+# `sudo systemctl daemon-reload && sudo systemctl enable --now intelimarket-intelifact`
+# manualmente el dia que se decida activar la facturacion electronica para
+# algun tenant -- este repo no lo instala ni lo arranca por si solo.
+#
+# Requiere antes: 1) haber vendorizado services/intelifact-library/ (ver
+# services/intelifact-service/README.md), 2) haber corrido `npm install &&
+# npm run build` dentro de services/intelifact-service/.
+#
+# Si mas de un tenant necesita su propia instancia (cada uno con su propio
+# certificado/timbrado), duplicar este archivo con otro nombre y otro PORT,
+# y apuntar el service_base_url de ese tenant en intelifact_configs a ese
+# puerto.
+
+[Unit]
+Description=InteliFact Engine (facturacion electronica)
+After=network.target
+
+[Service]
+Type=simple
+User=intellihouse
+WorkingDirectory=/home/intellihouse/intelimarket/services/intelifact-service
+EnvironmentFile=/home/intellihouse/intelimarket/services/intelifact-service/.env
+ExecStart=/usr/bin/node dist/server.js
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

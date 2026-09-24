@@ -4,10 +4,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
+from api.src.rbac.deps import require_permission
 from api.src.backups import service
 from api.src.backups.models import Backup, BackupScheduleConfig
 
-router = APIRouter(prefix="/api/v1/backups", tags=["backups"])
+# Antes solo pedia estar logueado (require_auth) -- cualquier token valido,
+# incluido el de un cajero, podia bajar un dump completo de la base, borrar
+# backups o apagar el schedule. Nada del frontend real llama a este modulo
+# (el backup de produccion corre por cron/shell aparte), pero seguia
+# expuesto por API. Se exige permiso real por endpoint.
+router = APIRouter(prefix="/api/v1/backups", tags=["backups"], dependencies=[Depends(require_auth)])
 
 
 @router.post("/create")
@@ -17,6 +24,7 @@ async def create_backup(
     tenant_slug: str | None = Query(None),
     notes: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_permission("backups:create")),
 ):
     backup = await service.create_backup(db, schema_name, tenant_id, tenant_slug, notes=notes)
     return {
@@ -34,6 +42,7 @@ async def list_backups(
     limit: int = Query(50, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_permission("backups:view")),
 ):
     backups = await service.list_backups(db, tenant_id, limit, offset)
     return [
@@ -56,6 +65,7 @@ async def list_backups(
 async def download_backup(
     backup_id: str,
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_permission("backups:view")),
 ):
     backup = await service.get_backup(db, backup_id)
     if not backup:
@@ -78,6 +88,7 @@ async def download_backup(
 async def delete_backup(
     backup_id: str,
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_permission("backups:restore")),
 ):
     deleted = await service.delete_backup(db, backup_id)
     if not deleted:
@@ -86,7 +97,7 @@ async def delete_backup(
 
 
 @router.post("/cleanup")
-async def cleanup_expired(db: AsyncSession = Depends(get_db)):
+async def cleanup_expired(db: AsyncSession = Depends(get_db), _=Depends(require_permission("backups:create"))):
     count = await service.cleanup_expired(db)
     return {"deleted": count, "message": f"{count} backups expirados eliminados"}
 
@@ -95,6 +106,7 @@ async def cleanup_expired(db: AsyncSession = Depends(get_db)):
 async def get_schedule(
     tenant_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_permission("backups:view")),
 ):
     query = select(BackupScheduleConfig)
     if tenant_id:
@@ -137,6 +149,7 @@ async def update_schedule(
     body: dict,
     tenant_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_permission("backups:restore")),
 ):
     query = select(BackupScheduleConfig)
     if tenant_id:

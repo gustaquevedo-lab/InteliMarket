@@ -14,9 +14,11 @@ from api.src.fiscal.models import TimbradoUsage
 from api.src.fiscal.schemas import (
     FiscalConfigCreate, FiscalConfigResponse,
     NotaCreditoDebitoCreate, NotaCreditoDebitoResponse,
+    PuntoEmisionSecuenciaCreate, PuntoEmisionSecuenciaUpdate, PuntoEmisionSecuenciaResponse,
 )
 from api.src.fiscal import service as fiscal_service
 from api.src.auth.middleware import require_auth
+from api.src.rbac.deps import require_permission
 
 router = APIRouter(prefix="/api/v1/fiscal", tags=["fiscal"])
 
@@ -39,6 +41,7 @@ async def upsert_fiscal_config(
     body: FiscalConfigCreate,
     db: AsyncSession = Depends(get_db),
     _=Depends(require_auth),
+    __=Depends(require_permission("fiscal:configure")),
 ):
     return await fiscal_service.upsert_fiscal_config(
         db,
@@ -50,6 +53,51 @@ async def upsert_fiscal_config(
         cert_password=body.cert_password,
         sifen_env=body.sifen_env or "test",
     )
+
+
+@router.get("/status/{company_id}")
+async def get_fiscal_status(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_auth),
+):
+    return await fiscal_service.get_fiscal_status(db, company_id)
+
+
+@router.get("/secuencias/{company_id}", response_model=list[PuntoEmisionSecuenciaResponse])
+async def list_secuencias(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_auth),
+):
+    return await fiscal_service.list_punto_emision_secuencias(db, company_id)
+
+
+@router.post("/secuencias", response_model=PuntoEmisionSecuenciaResponse, status_code=201)
+async def create_secuencia(
+    body: PuntoEmisionSecuenciaCreate,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_auth),
+    __=Depends(require_permission("fiscal:configure")),
+):
+    try:
+        return await fiscal_service.create_punto_emision_secuencia(db, body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.put("/secuencias/{secuencia_id}", response_model=PuntoEmisionSecuenciaResponse)
+async def update_secuencia(
+    secuencia_id: str,
+    body: PuntoEmisionSecuenciaUpdate,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_auth),
+    __=Depends(require_permission("fiscal:configure")),
+):
+    secuencia = await fiscal_service.update_punto_emision_secuencia(db, secuencia_id, body)
+    if not secuencia:
+        raise HTTPException(404, "Secuencia no encontrada")
+    return secuencia
 
 
 @router.get("/timbrados/{company_id}")
@@ -67,6 +115,7 @@ async def create_timbrado(
     body: TimbradoCreate,
     db: AsyncSession = Depends(get_db),
     _=Depends(require_auth),
+    __=Depends(require_permission("fiscal:configure")),
 ):
     timbrado = SifenTimbrado(
         company_id=uuid.UUID(body.company_id),
@@ -117,6 +166,7 @@ async def create_nota(
     body: NotaCreditoDebitoCreate,
     db: AsyncSession = Depends(get_db),
     _=Depends(require_auth),
+    __=Depends(require_permission("fiscal:configure")),
 ):
     from api.src.sales.models import Sale
     result = await db.execute(select(Sale).where(Sale.id == uuid.UUID(body.sale_id)))
@@ -141,6 +191,7 @@ async def emitir_nota(
     nota_id: str,
     db: AsyncSession = Depends(get_db),
     _=Depends(require_auth),
+    __=Depends(require_permission("fiscal:configure")),
 ):
     try:
         nota = await fiscal_service.emitir_nota_sifen(db, uuid.UUID(nota_id))

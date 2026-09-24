@@ -1,7 +1,7 @@
 {
   "name": "intelifact-service",
   "version": "1.0.0",
-  "description": "Microservice wrapper for InteliFact SIFEN / e-Kuatia Electronic Invoicing",
+  "description": "Microservicio InteliFact -- facturacion electronica SIFEN/e-Kuatia, generalizado por tenant. Listo pero inactivo hasta que se decida activarlo para un tenant real.",
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
@@ -11,7 +11,7 @@
   "dependencies": {
     "express": "^4.19.2",
     "cors": "^2.8.5",
-    "intellifact": "file:/home/intellihouse/intelifact-library"
+    "intellifact": "file:../intelifact-library"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

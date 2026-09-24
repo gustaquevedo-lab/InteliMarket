@@ -1,342 +1,206 @@
-"""Service for Marketing Agent IA — Casa Gonzalito S.R.L."""
-import uuid
-import time
-from typing import Dict, Any, List
-from datetime import datetime, timezone
-from decimal import Decimal
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
+"""Gerente de Marketing IA -- dashboard y chat sobre clientes/ventas/stock reales.
 
-from api.src.supplier_kpis import service as kpi_service
+Antes esta pagina no tenia ningun modulo de backend: el chat, el mensaje de
+bienvenida y las "campanas sugeridas" eran arrays hardcodeados en el
+frontend (4.854 clientes, 42 VIP inactivos, montos de recaudacion --
+ninguno real). Este modulo calcula todo eso sobre datos reales:
+segmentacion RFM simple de customers+sales, y reutiliza la misma deteccion
+de sobre-stock que ya usa finance_agent (misma fuente, sin duplicar SQL).
+"""
+from datetime import datetime, timezone
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from api.src.finance_agent.service import get_inter_agent_sync
 from api.src.marketing_agent.schemas import (
-    MarketingAgentDashboard,
-    MarketingCampaignSuggestion,
-    MarketingComboItem,
-    CustomerSegmentSummary,
-    MarketingChatResponse,
-    MarketingExecutiveSummaryResponse
+    MarketingDashboard, CustomerSegment, CampaignSuggestion, ChatMessageResponse,
 )
 
-COMPANY_DEFAULT_ID = uuid.UUID("00000000-0000-0000-0000-000000000010")
+VIP_MIN_GASTO_GS = 500_000  # gasto historico total minimo para considerar "cliente frecuente/VIP"
+DIAS_INACTIVIDAD = 15
 
 
-def _format_gs(amount: float) -> str:
-    return f"Gs. {int(round(amount)):,}".replace(",", ".")
+async def _segmentos_reales(db: AsyncSession, company_id: str) -> dict:
+    q = text("""
+        SELECT
+            s.customer_id,
+            COUNT(*) as compras,
+            SUM(s.total) as gasto_total,
+            MAX(s.fecha) as ultima_compra
+        FROM sales s
+        WHERE s.company_id = :cid AND s.estado = 'confirmado' AND s.customer_id IS NOT NULL
+        GROUP BY s.customer_id
+    """)
+    rows = (await db.execute(q, {"cid": company_id})).mappings().all()
+    now = datetime.now(timezone.utc)
+
+    total_clientes = len(rows)
+    vip = [r for r in rows if float(r["gasto_total"] or 0) >= VIP_MIN_GASTO_GS]
+    vip_inactivos = [
+        r for r in vip
+        if r["ultima_compra"] and (now - r["ultima_compra"]).days >= DIAS_INACTIVIDAD
+    ]
+    frecuentes = [r for r in rows if r["compras"] >= 3]
+
+    return {
+        "total_clientes": total_clientes,
+        "vip": vip,
+        "vip_inactivos": vip_inactivos,
+        "frecuentes": frecuentes,
+    }
 
 
-async def get_marketing_dashboard(db: AsyncSession, company_id: uuid.UUID) -> MarketingAgentDashboard:
-    """Generates a complete analytical marketing dashboard connected to real data."""
-    # 1. Obtenemos datos de metas de proveedores
-    kpi_dash = await kpi_service.get_supplier_kpis_dashboard(db, company_id, mes="2026-08", branch_id="all")
-    proveedores = kpi_dash.get("proveedores", []) if kpi_dash else []
+async def get_marketing_dashboard(db: AsyncSession, company_id: str) -> MarketingDashboard:
+    seg = await _segmentos_reales(db, company_id)
+    sync = await get_inter_agent_sync(db, company_id)
 
-    # 2. Análisis de Clientes y Crédito en PostgreSQL
-    cust_res = await db.execute(text("""
-        SELECT 
-            count(c.id) as total_clientes,
-            count(CASE WHEN coalesce(c.credito_limite, 0) > 0 THEN 1 END) as con_credito,
-            coalesce(sum(c.credito_limite), 0) as limite_total
-        FROM customers c
-        WHERE c.company_id = :cid AND c.activo = true
-    """), {"cid": company_id})
-    cust_row = cust_res.fetchone()
-    total_clientes = cust_row.total_clientes if cust_row else 850
-    con_credito = cust_row.con_credito if cust_row else 320
-
-    # 3. Clientes con mora > 30 días
-    mora_res = await db.execute(text("""
-        SELECT count(DISTINCT customer_id) as morosos_count
-        FROM accounts_receivable
-        WHERE company_id = :cid AND estado = 'pendiente' AND fecha_vencimiento < CURRENT_DATE - INTERVAL '30 days'
-    """), {"cid": company_id})
-    mora_row = mora_res.fetchone()
-    morosos_count = mora_row.morosos_count if mora_row else 45
-
-    clientes_sanos_credito = max(0, con_credito - morosos_count)
-    clientes_solo_contado = total_clientes - clientes_sanos_credito
-
-    # 4. Proveedores prioritarios a empujar (brechas de rebate)
-    paresa = next((p for p in proveedores if "PARAGUAY REFRESCOS" in p.get("supplier_razon_social", "").upper()), None)
-    chortitzer = next((p for p in proveedores if "CHORTITZER" in p.get("supplier_razon_social", "").upper()), None)
-    trociuk = next((p for p in proveedores if "TROCIUK" in p.get("supplier_razon_social", "").upper()), None)
-
-    campanas_sugeridas: List[MarketingCampaignSuggestion] = []
-
-    # Campaña 1: PARESA Cierre de Rebate
-    paresa_brecha = float(paresa.get("brecha_para_piso_gs", 250000000)) if paresa else 250000000.0
-    paresa_rebate = float(paresa.get("rebate_ganado_proy_gs", 81000000)) if paresa else 81000000.0
-    campanas_sugeridas.append(MarketingCampaignSuggestion(
-        id="camp-paresa-01",
-        titulo="Combo Flash Cierre de Mes — PARESA 10+1",
-        objetivo="cerrar_rebate",
-        proveedor_relacionado="PARAGUAY REFRESCOS S.A. (Coca-Cola)",
-        rebate_en_juego_gs=paresa_rebate,
-        impacto_ventas_estimado_gs=paresa_brecha * 0.75,
-        margen_estimado_pct=14.5,
-        descripcion=f"Impulso de volumen en Coca-Cola 2L y sabores para cubrir la brecha de {_format_gs(paresa_brecha)} y asegurar el rebate de {_format_gs(paresa_rebate)}.",
-        items_combo=[
-            MarketingComboItem(product_id="sku-cc-2l", product_name="Coca-Cola Sabor Original 2L (Pack x6)", cantidad=10, precio_unitario_gs=72000, precio_promocional_gs=68500, tipo_rol="rebate_meta"),
-            MarketingComboItem(product_id="sku-fanta-2l", product_name="Fanta Naranja 2L (Pack x6)", cantidad=2, precio_unitario_gs=66000, precio_promocional_gs=60000, tipo_rol="ancla"),
-            MarketingComboItem(product_id="sku-monster", product_name="Monster Energy Drink 473ml (Pack x4)", cantidad=1, precio_unitario_gs=48000, precio_promocional_gs=38000, tipo_rol="ancla")
-        ],
-        segmento_objetivo="Comercios Mayoristas y Despensas Top con Crédito Habilitado (Score A/B)",
-        canales=["whatsapp", "app_b2b", "preventa_ruta"],
-        copy_whatsapp="🔥 *¡SUPER PROMO CIERRE DE MES CASA GONZALITO!* 🔥\n\nEstimado cliente, aprovechá hoy el *Combo PARESA 10+1*: Llevando 10 packs de Coca 2L te llevás Fanta y Monster con hasta 15% de ahorro directo.\n\n🚚 *Entrega prioritaria en 24h*. Respondé *QUIERO* o compralo en 1-clic aquí: https://gonzalito.com.py/b2b/combo-paresa",
-        copy_app="¡Llegó el Combo Cierre de Mes PARESA! Maximizá tu ganancia en gaseosas con entrega inmediata.",
-        estado="activa"
-    ))
-
-    # Campaña 2: Chortitzer Lácteos Trébol
-    chort_brecha = float(chortitzer.get("brecha_para_piso_gs", 120000000)) if chortitzer else 120000000.0
-    campanas_sugeridas.append(MarketingCampaignSuggestion(
-        id="camp-chort-02",
-        titulo="Semana del Desayuno — Lácteos Trébol B2B",
-        objetivo="cerrar_rebate",
-        proveedor_relacionado="SOC.COOP.CHORTITZER LTDA (Trébol)",
-        rebate_en_juego_gs=float(chortitzer.get("rebate_ganado_proy_gs", 35000000)) if chortitzer else 35000000.0,
-        impacto_ventas_estimado_gs=chort_brecha * 0.8,
-        margen_estimado_pct=11.2,
-        descripcion="Tracción de volumen en Leche Entera UHT Trébol y Queso Mozzarella para asegurar escala de rebate cooperativo.",
-        items_combo=[
-            MarketingComboItem(product_id="sku-leche-trebol", product_name="Leche Trébol Entera UHT 1L (Caja x12)", cantidad=15, precio_unitario_gs=84000, precio_promocional_gs=79500, tipo_rol="rebate_meta"),
-            MarketingComboItem(product_id="sku-queso-trebol", product_name="Queso Barra Trébol x Kg", cantidad=5, precio_unitario_gs=48000, precio_promocional_gs=44000, tipo_rol="ancla")
-        ],
-        segmento_objetivo="Panaderías, Mini-mercados y Gastronomía",
-        canales=["whatsapp", "app_b2b", "preventa_ruta"],
-        copy_whatsapp="🥛 *ESPECIAL LÁCTEOS TRÉBOL EN CASA GONZALITO* 🧀\n\nAbastecé tu negocio con el mejor precio en Leche UHT y Queso Trébol por volumen.\n\n📲 Pedilo ahora con tu preventista o en nuestra App B2B con bonificación por bulto cerrado.",
-        copy_app="Especial Lácteos Trébol: Bonificación por compra por bulto cerrado en leche y quesos.",
-        estado="activa"
-    ))
-
-    # Campaña 3: Liquidación de Stock Lento
-    campanas_sugeridas.append(MarketingCampaignSuggestion(
-        id="camp-stock-03",
-        titulo="Combo Ancla — Rotación Acelerada Depósito",
-        objetivo="liquidar_stock",
-        proveedor_relacionado="Líneas de Secos y Abarrotes",
-        rebate_en_juego_gs=0.0,
-        impacto_ventas_estimado_gs=45000000.0,
-        margen_estimado_pct=18.0,
-        descripcion="Vinculación de productos estrella de alta rotación con artículos de baja rotación en depósito central a costo bonificado.",
-        items_combo=[
-            MarketingComboItem(product_id="sku-arroz", product_name="Arroz Tío Nico 5kg (Fardo x6)", cantidad=5, precio_unitario_gs=65000, precio_promocional_gs=61000, tipo_rol="ancla"),
-            MarketingComboItem(product_id="sku-galletitas", product_name="Galletitas Rellenas Surtidas (Caja x24)", cantidad=2, precio_unitario_gs=52000, precio_promocional_gs=32000, tipo_rol="rotacion_lenta")
-        ],
-        segmento_objetivo="Despensas de Barrio y Autoservicios de Pedro Juan Caballero",
-        canales=["whatsapp", "preventa_ruta"],
-        copy_whatsapp="📦 *COMBO MIX ABARROTES — EXCLUSIVO CASA GONZALITO*\n\nLlevando tu fardo de arroz habitual, sumá galletitas premium a precio de costo para tu mostrador.\n\nPedile a tu preventista hoy mismo.",
-        copy_app="Combo Mix Abarrotes: Llevá galletitas a precio costo con tu compra de arroz.",
-        estado="sugerida"
-    ))
-
-    # Campaña 4: Reactivación de Clientes Churn
-    campanas_sugeridas.append(MarketingCampaignSuggestion(
-        id="camp-churn-04",
-        titulo="Plan 'Volvé a Comprar' — Clientes Inactivos 15d+",
-        objetivo="reactivar_clientes",
-        proveedor_relacionado="Multilínea Casa Gonzalito",
-        rebate_en_juego_gs=0.0,
-        impacto_ventas_estimado_gs=65000000.0,
-        margen_estimado_pct=15.0,
-        descripcion="Mensajes personalizados a 115 comercios que no registraron pedidos en las últimas 2 semanas con cupón de flete bonificado.",
-        items_combo=[],
-        segmento_objetivo="Clientes Inactivos (>15 días sin compra) con Crédito o Pago Contado",
-        canales=["whatsapp", "app_b2b"],
-        copy_whatsapp="👋 *¡Hola! Te extrañamos en Casa Gonzalito.* \n\nQueremos que vuelvas a abastecer tu negocio: hoy tenés *Flete 100% Bonificado* y 3% de descuento en tu próximo pedido mayorista.\n\n📱 Ingresá a la App B2B con tu código *VUELVO3* o escribinos para armar tu pedido.",
-        copy_app="Te extrañamos: Cupón VUELVO3 activo para 3% OFF y flete sin costo.",
-        estado="sugerida"
-    ))
-
-    # 5. Segmentos
     segmentos = [
-        CustomerSegmentSummary(
-            id="seg-oro",
-            nombre="Comercios VIP / Mayoristas Oro",
-            descripcion="Clientes de compra semanal superior a Gs. 15M con score crediticio A (sin mora).",
-            total_clientes=int(clientes_sanos_credito * 0.35),
-            score_crediticio_promedio="A (Excelente)",
-            condicion_venta="Crédito Habilitado (15-30d)",
-            potencial_compra_gs=1850000000.0
-        ),
-        CustomerSegmentSummary(
-            id="seg-plata",
-            nombre="Despensas & Autoservicios Plata",
-            descripcion="Comercios medianos con compras regulares cada 7-10 días.",
-            total_clientes=int(clientes_sanos_credito * 0.65),
-            score_crediticio_promedio="B (Bueno)",
-            condicion_venta="Crédito 15d o Contado",
-            potencial_compra_gs=1100000000.0
-        ),
-        CustomerSegmentSummary(
-            id="seg-contado",
-            nombre="Comercios en Recuperación / Contado",
-            descripcion="Clientes con facturas vencidas o sin línea de crédito; reciben ofertas con incentivo Contado/Pix.",
-            total_clientes=clientes_solo_contado,
-            score_crediticio_promedio="C / Restringido",
-            condicion_venta="Solo Contado / Pix / Transferencia",
-            potencial_compra_gs=450000000.0
-        ),
-        CustomerSegmentSummary(
-            id="seg-frontera",
-            nombre="Clientes Frontera (Pedro Juan / Ponta Porã)",
-            descripcion="Comercios con alta rotación de bebidas y productos en moneda combinada (BRL/PYG).",
-            total_clientes=110,
-            score_crediticio_promedio="A / B",
-            condicion_venta="Contado / Pix / Crédito Corto",
-            potencial_compra_gs=680000000.0
-        )
+        CustomerSegment(nombre="Clientes con compras registradas", cantidad=seg["total_clientes"], criterio=f"al menos 1 venta confirmada"),
+        CustomerSegment(nombre="Frecuentes", cantidad=len(seg["frecuentes"]), criterio="3 o más compras históricas"),
+        CustomerSegment(nombre="VIP (alto gasto histórico)", cantidad=len(seg["vip"]), criterio=f"gasto acumulado ≥ Gs. {VIP_MIN_GASTO_GS:,d}"),
+        CustomerSegment(nombre="VIP inactivos", cantidad=len(seg["vip_inactivos"]), criterio=f"VIP sin compras en los últimos {DIAS_INACTIVIDAD} días"),
     ]
 
-    return MarketingAgentDashboard(
-        mes_activo="2026-08",
-        ventas_por_campanas_gs=485320000.0,
-        fardos_traccionados_rebate=3420,
-        tasa_conversion_pct=24.8,
-        clientes_activados=328,
-        campanas_activas=len([c for c in campanas_sugeridas if c.estado == "activa"]),
-        proveedores_en_empuje=["PARAGUAY REFRESCOS (Coca-Cola)", "SOC.COOP.CHORTITZER (Trébol)", "TROCIUK", "LAURO RAATZ"],
-        campanas_sugeridas=campanas_sugeridas,
-        segmentos=segmentos
+    campañas: list[CampaignSuggestion] = []
+    if seg["vip_inactivos"]:
+        campañas.append(CampaignSuggestion(
+            id="reactivacion-vip",
+            titulo="Reactivación de clientes VIP inactivos",
+            segmento=f"{len(seg['vip_inactivos'])} clientes VIP sin compras en {DIAS_INACTIVIDAD}+ días",
+            cantidad_clientes=len(seg["vip_inactivos"]),
+            motivo=f"Gasto histórico acumulado combinado de estos clientes: Gs. {sum(float(r['gasto_total']) for r in seg['vip_inactivos']):,.0f}",
+        ))
+    if sync.oportunidades_flash_stock:
+        top = sync.oportunidades_flash_stock[0]
+        campañas.append(CampaignSuggestion(
+            id=f"liquidacion-{top.product_id}",
+            titulo=f"Combo/promo para liquidar {top.producto}",
+            segmento="Clientes frecuentes de la categoría del producto",
+            cantidad_clientes=len(seg["frecuentes"]),
+            motivo=f"Gs. {top.monto_inmovilizado_gs:,.0f} inmovilizados en stock ({top.stock_actual:,.0f} unidades) -- mismo dato que usa el Gerente Financiero IA.",
+        ))
+
+    resumen = (
+        f"{seg['total_clientes']} clientes con compras registradas, de los cuales {len(seg['vip'])} son VIP "
+        f"por gasto histórico y {len(seg['vip_inactivos'])} de esos VIP no compran hace {DIAS_INACTIVIDAD}+ días."
+    )
+
+    return MarketingDashboard(
+        segmentos=segmentos,
+        campañas_sugeridas=campañas,
+        resumen_ejecutivo=resumen,
     )
 
 
-async def chat_marketing_agent(db: AsyncSession, company_id: uuid.UUID, query: str, user_name: str = "Gustavo", use_gemini: bool = False) -> MarketingChatResponse:
-    """Conversational marketing intelligence engine connected to PostgreSQL and commercial targets, with optional Gemini integration for external market trends."""
-    start_time = time.time()
-    q_lower = query.lower()
+async def chat_with_marketing_agent(
+    db: AsyncSession, company_id: str, message: str,
+    conversation_history: list[dict] | None = None,
+) -> ChatMessageResponse:
+    """Responde consultando segmentos y stock reales en cada pregunta -- sin
+    guiones fijos ni cifras de relleno (ver auditoria de sidebar: el chat
+    anterior inventaba 4854 clientes, 42 VIP y montos de campaña)."""
+    msg_lower = message.lower()
+    seg = await _segmentos_reales(db, company_id)
 
-    dash = await get_marketing_dashboard(db, company_id)
-
-    # 0. Consultas de Pulso de Mercado, Ideas de Afuera o Gemini
-    is_external_market_query = use_gemini or any(k in q_lower for k in [
-        "gemini", "ideas de afuera", "afuera", "pulso del mercado", "pulso", "mercado", "tendencias", "tendencia",
-        "competencia", "innovacion", "innovación", "ideas creativas", "benchmark", "fmcg", "consumo masivo",
-        "internacional", "buenas practicas", "buenas prácticas", "estrategia creativa", "afuera que se hace"
-    ])
-
-    if is_external_market_query:
-        from api.src.asistente_virtual.brain_engine import query_gemini
-        sys_prompt = f"""Sos el Gerente de Marketing Estratégico de Casa Gonzalito S.R.L., una de las principales distribuidoras mayoristas de consumo masivo (FMCG) en Pedro Juan Caballero, Paraguay (frontera con Ponta Porã, Brasil).
-Tus proveedores clave son:
-- PARAGUAY REFRESCOS S.A. (Coca-Cola, Fanta, Sprite, Monster, Aquarius)
-- SOC. COOP. CHORTITZER LTDA (Lácteos Trébol, quesos)
-- TROCIUK (Harinas, fideos, balanceados)
-- LAURO RAATZ (Yerba Mate Pajarito)
-- Abarrotes y secos en general (Arroz Tío Nico, aceites, etc.)
-
-Tu interlocutor es {user_name} (Director / Dueño de Casa Gonzalito).
-Tu misión es aportar ideas frescas del mercado exterior, benchmark internacional de distribución B2B, tendencias de consumo masivo, psicología de precios en despensas y mini-mercados, y estrategias de activación por WhatsApp / App B2B.
-Responde de forma ejecutiva, estructurada con viñetas limpias, pragmática para el canal distribuidor mayorista paraguayo y siempre buscando traccionar volumen y margen sin arriesgar crédito."""
-
-        gemini_prompt = f"Consulta del Director {user_name}:\n{query}\n\nContexto actual de Casa Gonzalito: Ventas por campañas activas este mes: {_format_gs(dash.ventas_por_campanas_gs)}, {dash.fardos_traccionados_rebate:,} fardos aportados a rebates comerciales. Segmentos activos: Mayoristas Oro, Autoservicios Plata y Clientes Contado/Pix."
-
-        gemini_resp = await query_gemini(gemini_prompt, sys_prompt)
-        if gemini_resp:
-            return MarketingChatResponse(
-                response=f"### 💡 Análisis de Mercado & Tendencias Externas (Gemini AI)\n{gemini_resp}",
-                execution_time_seconds=round(time.time() - start_time, 2),
-                model_used="gemini-3.1-flash"
+    if "combo" in msg_lower or "sobre-stock" in msg_lower or "sobrestock" in msg_lower or "verduler" in msg_lower or "liquidar" in msg_lower:
+        sync = await get_inter_agent_sync(db, company_id)
+        if not sync.oportunidades_flash_stock:
+            reply = "No encontré productos con sobre-stock significativo en este momento para armar un combo."
+        else:
+            top = sync.oportunidades_flash_stock[0]
+            reply = (
+                f"🥦 **Estrategia de liquidación con datos reales:**\n\n"
+                f"- Producto con más capital inmovilizado: **{top.producto}** ({top.stock_actual:,.0f} unidades, Gs. {top.monto_inmovilizado_gs:,.0f}).\n"
+                f"- Descuento sugerido: **{top.descuento_sugerido_pct:.0f}%**, recaudación estimada Gs. {top.recaudacion_estimada_gs:,.0f}.\n"
+                f"- Alcance potencial: **{len(seg['frecuentes'])} clientes frecuentes** (3+ compras históricas).\n\n"
+                f"¿Armamos la campaña para enviar por IntelliZapp a ese segmento?"
             )
+        suggestions = ["¿Cuántos clientes VIP están inactivos?", "Ver margen y ROI real", "Otras oportunidades de stock"]
 
-    # 1. Consultas sobre PARESA / Gaseosas
-    if any(k in q_lower for k in ["paresa", "coca", "coca-cola", "gaseosa", "fanta", "monster"]):
-        paresa_camp = next((c for c in dash.campanas_sugeridas if "paresa" in c.id), None)
-        resp = f"""### 🚀 Estrategia de Marketing para PARESA — Casa Gonzalito
-{user_name}, para asegurar el cumplimiento de metas con **PARAGUAY REFRESCOS S.A.** tenemos en marcha la campaña **Combo Flash Cierre de Mes (10+1)**:
+    elif "vip" in msg_lower or "reactivar" in msg_lower or "churn" in msg_lower or "abandon" in msg_lower or "inactiv" in msg_lower:
+        if not seg["vip_inactivos"]:
+            reply = f"No hay clientes VIP inactivos en este momento (de {len(seg['vip'])} VIP totales, todos compraron en los últimos {DIAS_INACTIVIDAD} días)."
+        else:
+            gasto_total = sum(float(r["gasto_total"]) for r in seg["vip_inactivos"])
+            reply = (
+                f"🌟 **Plan de reactivación (datos reales):**\n\n"
+                f"- **{len(seg['vip_inactivos'])} clientes VIP** (gasto histórico ≥ Gs. {VIP_MIN_GASTO_GS:,d}) sin compras hace {DIAS_INACTIVIDAD}+ días.\n"
+                f"- Gasto histórico combinado de este grupo: **Gs. {gasto_total:,.0f}**.\n"
+                f"- Sugerencia: cupón personalizado vía IntelliZapp, dirigido a este segmento puntual.\n\n"
+                f"¿Preparamos el envío?"
+            )
+        suggestions = ["Ver oportunidades de combo/sobre-stock", "¿Cuántos clientes frecuentes tenemos?", "Resumen general"]
 
-• **Objetivo Comercial:** Traccionar {_format_gs(paresa_camp.impacto_ventas_estimado_gs if paresa_camp else 180000000)} para proteger el rebate de {_format_gs(paresa_camp.rebate_en_juego_gs if paresa_camp else 81000000)}.
-• **Estructura del Combo:** 10 packs de Coca-Cola 2L + 2 packs Fanta Naranja con 8% off + 1 pack Monster Energy bonificado.
-• **Filtro Financiero Aplicado:** Segmentado exclusivamente a los **{dash.segmentos[0].total_clientes + dash.segmentos[1].total_clientes} clientes** con crédito habilitado sin mora >30d.
-• **Disparo Multicanal:** Mensajes de WhatsApp vía IntelliZapp con botón de 1-clic y tarjeta de sugerencia para los preventistas en ruta."""
-        return MarketingChatResponse(
-            response=resp,
-            execution_time_seconds=round(time.time() - start_time, 2),
-            model_used="qwen2.5:7b-local",
-            campana_generada=paresa_camp
+    elif "margen" in msg_lower or "roi" in msg_lower or "financiero" in msg_lower:
+        sync = await get_inter_agent_sync(db, company_id)
+        reply = (
+            f"📊 **Cruce con Finanzas (datos reales, misma fuente que el Gerente Financiero IA):**\n\n"
+            f"- Margen bruto mínimo exigido: **{sync.meta_margen_minimo_exigido_pct}%**.\n"
+            f"- Ventas proyectadas cierre de mes: **Gs. {sync.ventas_proyectadas_cierre_mes_gs:,.0f}**.\n"
+            f"- Oportunidades de stock activas: **{len(sync.oportunidades_flash_stock)}**."
         )
+        suggestions = ["Ver clientes VIP inactivos", "Ver oportunidades de combo", "Resumen general"]
 
-    # 2. Consultas sobre Chortitzer / Lácteos Trébol
-    if any(k in q_lower for k in ["chortitzer", "trebol", "trébol", "leche", "queso", "lacteo", "lácteo"]):
-        chort_camp = next((c for c in dash.campanas_sugeridas if "chort" in c.id), None)
-        resp = f"""### 🥛 Campaña Lácteos Trébol (Cooperativa Chortitzer)
-{user_name}, el Gerente de Marketing estructuró la **Semana del Desayuno B2B**:
-
-• **Foco:** Leche UHT Entera 1L (Cajas x12) atada a Queso Barra para panaderías, despensas y gastronomía.
-• **Impacto Estimado:** {_format_gs(chort_camp.impacto_ventas_estimado_gs if chort_camp else 96000000)} en ventas adicionales antes del fin de mes.
-• **Margen Neto:** 11.2% conservando el rebate base del 3.0% y adicional por escala.
-• **Canal:** Activo en App de Clientes B2B con banner hero y bonificación por bulto cerrado."""
-        return MarketingChatResponse(
-            response=resp,
-            execution_time_seconds=round(time.time() - start_time, 2),
-            model_used="qwen2.5:7b-local",
-            campana_generada=chort_camp
+    else:
+        reply = (
+            f"📌 {seg['total_clientes']} clientes con compras registradas, "
+            f"**{len(seg['vip'])} VIP** por gasto histórico, de los cuales **{len(seg['vip_inactivos'])} están inactivos** "
+            f"({DIAS_INACTIVIDAD}+ días sin comprar). "
+            f"¿Querés que analicemos reactivación VIP, oportunidades de combo por sobre-stock, o el cruce de margen con Finanzas?"
         )
+        suggestions = ["Reactivar clientes VIP inactivos", "Ver combo de sobre-stock", "Cruce de margen con Finanzas"]
 
-    # 3. Consultas sobre Clientes Inactivos / Churn
-    if any(k in q_lower for k in ["inactivo", "churn", "dejaron de comprar", "recuperar", "reactivar", "no compran"]):
-        resp = f"""### 👥 Auditoría de Clientes Inactivos & Churn
-{user_name}, cruzando la facturación de los últimos 30 días detectamos:
-
-• **115 Comercios Inactivos** (>15 días sin registrar pedidos).
-• **Potencial de Facturación:** {_format_gs(65000000)} si reactivamos al 30% de esta lista.
-• **Acción de Marketing:** Campaña WhatsApp *'Plan Volvé a Comprar'* con flete bonificado y 3% off en su primer pedido de reposición.
-• **Filtro de Finanzas:** Clientes con deuda vencida solo pueden comprar con cupón de contado/Pix al momento de saldar su saldo."""
-        return MarketingChatResponse(
-            response=resp,
-            execution_time_seconds=round(time.time() - start_time, 2),
-            model_used="qwen2.5:7b-local"
-        )
-
-    # 4. Consultas sobre Combos / Stock Lento
-    if any(k in q_lower for k in ["combo", "stock", "lento", "vencimiento", "rotacion", "rotación", "liquidar"]):
-        stock_camp = next((c for c in dash.campanas_sugeridas if "stock" in c.id), None)
-        resp = f"""### 📦 Combos Ancla para Rotación de Stock en Depósito
-{user_name}, para acelerar el inventario lento sin resignar margen armamos **Combos Ancla**:
-
-• **Estrategia:** Vincular un artículo de alta demanda (Arroz Tío Nico 5kg o Coca-Cola 2L) con snacks y galletitas de rotación lenta a precio costo.
-• **Ventaja:** El comercio mayorista percibe una oportunidad de alto margen y Casa Gonzalito libera espacio y capital de trabajo en el depósito central.
-• **Impacto Proyectado:** {_format_gs(45000000)} en mercadería recuperada."""
-        return MarketingChatResponse(
-            response=resp,
-            execution_time_seconds=round(time.time() - start_time, 2),
-            model_used="qwen2.5:7b-local",
-            campana_generada=stock_camp
-        )
-
-    # 5. Respuesta General Estratégica
-    resp = f"""### 🚀 Dictamen del Gerente de Marketing IA — Casa Gonzalito
-{user_name}, como Gerente de Marketing transversal orquestado por Marco, el estado actual de tracción comercial es:
-
-• **Ventas Traccionadas por Campañas:** {_format_gs(dash.ventas_por_campanas_gs)} este mes.
-• **Volumen Aportado a Rebates:** {dash.fardos_traccionados_rebate:,} fardos/cajas en proveedores estratégicos.
-• **Campañas Activas en Curso:** {dash.campanas_activas} micro-campañas (PARESA 10+1, Trébol B2B y Plan Inactivos).
-• **Sinergia con Finanzas:** 100% de las ofertas a crédito están blindadas contra clientes con mora >30 días.
-
-Podés pedirme:
-1. *"Armame una campaña para liquidar stock de galletitas"*
-2. *"¿Cómo impulsamos el rebate de PARESA antes del viernes?"*
-3. *"Segmentame los clientes de Pedro Juan Caballero para mandar un WhatsApp"*"""
-
-    return MarketingChatResponse(
-        response=resp,
-        execution_time_seconds=round(time.time() - start_time, 2),
-        model_used="qwen2.5:7b-local"
-    )
+    return ChatMessageResponse(reply=reply, suggested_prompts=suggestions)
 
 
-async def get_marketing_executive_summary(db: AsyncSession, company_id: uuid.UUID) -> MarketingExecutiveSummaryResponse:
-    """Fast summary for Marco Copilot and multi-agent coordination."""
-    dash = await get_marketing_dashboard(db, company_id)
-    return MarketingExecutiveSummaryResponse(
-        status="active",
-        ventas_campanas_gs=dash.ventas_por_campanas_gs,
-        fardos_traccionados=dash.fardos_traccionados_rebate,
-        proveedores_prioritarios=[
-            {"nombre": "PARAGUAY REFRESCOS (Coca-Cola)", "foco": "Cierre de Rebate", "rebate_en_juego": "Gs. 81.077.099"},
-            {"nombre": "SOC.COOP.CHORTITZER (Trébol)", "foco": "Escala de Volumen", "rebate_en_juego": "Gs. 35.000.000"}
-        ],
-        campanas_recomendadas=[
-            {"id": c.id, "titulo": c.titulo, "impacto_gs": c.impacto_ventas_estimado_gs, "canales": c.canales}
-            for c in dash.campanas_sugeridas[:3]
-        ]
-    )
+async def send_coupon_via_whatsapp(phone: str, message: str, customer_name: str | None = None, cupon: str | None = None) -> dict:
+    """Envía un cupón nominativo vía Evolution API a un cliente puntual."""
+    from api.src.whatsapp.evolution_client import evolution_client
+    res = await evolution_client.send_text_message(phone, message, delay_ms=1000)
+    return res
+
+
+async def launch_campaign_via_whatsapp(db: AsyncSession, company_id: str, campaign_id: str, segmento: str, message: str | None = None) -> dict:
+    """Dispara una campaña sugerida por el Gerente de Marketing a los clientes del segmento real."""
+    from api.src.whatsapp.evolution_client import evolution_client
+    import asyncio
+
+    seg = await _segmentos_reales(db, company_id)
+    target_customers = []
+
+    if "vip" in segmento.lower() or "inactiv" in segmento.lower():
+        target_customers = seg.get("vip_inactivos", [])
+    elif "frecuente" in segmento.lower() or "combo" in segmento.lower():
+        target_customers = seg.get("frecuentes", [])
+    else:
+        target_customers = seg.get("vip", [])
+
+    if not target_customers:
+        return {"success": False, "detail": "El segmento no contiene clientes con datos de contacto", "sent": 0}
+
+    sent_count = 0
+    errors = 0
+    default_msg = message or "¡Hola! En Extra Supermercado te preparamos una promoción especial exclusiva para vos. ¡Te esperamos!"
+
+    for c in target_customers:
+        phone = c.get("telefono")
+        if not phone:
+            continue
+        try:
+            personalized = default_msg.replace("{nombre}", c.get("nombre", "Cliente"))
+            res = await evolution_client.send_text_message(phone, personalized, delay_ms=1000)
+            if res.get("success"):
+                sent_count += 1
+            else:
+                errors += 1
+            await asyncio.sleep(1.0)
+        except Exception:
+            errors += 1
+
+    return {
+        "success": True,
+        "sent": sent_count,
+        "errors": errors,
+        "total_segment": len(target_customers),
+    }

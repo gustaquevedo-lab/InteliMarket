@@ -1,13 +1,17 @@
 """Purchases service — suppliers, orders, receipts, requisitions, forecasting, suggestions, budgets, reports"""
 
-from sqlalchemy import select, text, case
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select, text, case, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime, timezone, date
-from decimal import Decimal
+from sqlalchemy.orm import selectinload
+from datetime import datetime, timezone, date, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 import uuid
 import math
+import logging
 
+logger = logging.getLogger(__name__)
+
+from fastapi import HTTPException
 from api.src.purchases.models import (
     Supplier, PurchaseOrder, PurchaseOrderItem, PurchaseOrderHistory,
     PurchaseReceipt, PurchaseReceiptItem,
@@ -16,6 +20,8 @@ from api.src.purchases.models import (
     SupplierEvaluation, SupplierPriceHistory,
     ForecastRule, ForecastProjection,
     PurchaseSuggestion, PurchaseBudget,
+    PurchaseRfq, PurchaseRfqItem, PurchaseRfqResponse, PurchaseRfqResponseItem,
+    SupplierNcRequest,
 )
 from api.src.purchases.schemas import (
     SupplierCreate, SupplierUpdate,
@@ -26,27 +32,37 @@ from api.src.purchases.schemas import (
     EvaluationCreate,
     ForecastRuleCreate, ForecastRuleUpdate,
     BudgetCreate, BudgetUpdate,
+    RfqCreate, RfqResponseSubmit,
 )
 from api.src.inventory.models import Stock, StockLot, InventoryMovement
+from api.src.financial.models import SupplierInvoice
+from api.src.products.models import Product
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def calculate_taxes(precio: Decimal, cantidad: Decimal, descuento_pct: Decimal, iva_tasa: Decimal) -> dict:
-    subtotal_bruto = precio * cantidad
-    descuento_monto = subtotal_bruto * (descuento_pct / Decimal("100"))
-    base = subtotal_bruto - descuento_monto
-    if iva_tasa == Decimal("0"):
-        iva_monto = Decimal("0")
-        total = base
+    # En Paraguay y retail de supermercados, los precios de compra se pactan IVA INCLUIDO.
+    # El total de la línea es precio * cantidad menos descuento.
+    # El IVA se liquida a partir del total (IVA 10% = Total/11, IVA 5% = Total/21), no se adiciona encima.
+    total_bruto = precio * cantidad
+    descuento_monto = total_bruto * (descuento_pct / Decimal("100"))
+    total_linea = total_bruto - descuento_monto
+    if iva_tasa == Decimal("10"):
+        iva_monto = (total_linea / Decimal("11")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+        base = total_linea - iva_monto
+    elif iva_tasa == Decimal("5"):
+        iva_monto = (total_linea / Decimal("21")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+        base = total_linea - iva_monto
     else:
-        iva_monto = (base * iva_tasa / Decimal("100")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
-        total = base + iva_monto
+        iva_monto = Decimal("0")
+        base = total_linea
+
     return {
-        "subtotal_bruto": subtotal_bruto.quantize(Decimal("1")),
+        "subtotal_bruto": total_bruto.quantize(Decimal("1")),
         "descuento_monto": descuento_monto.quantize(Decimal("1")),
         "iva_monto": iva_monto,
-        "total": total.quantize(Decimal("1")),
+        "total": total_linea.quantize(Decimal("1")),
         "base": base.quantize(Decimal("1")),
     }
 
@@ -115,8 +131,23 @@ async def create_supplier(db: AsyncSession, data: SupplierCreate) -> Supplier:
     return supplier
 
 
-async def list_suppliers(db: AsyncSession, company_id: str, search: str | None = None) -> list[Supplier]:
+async def list_suppliers(
+    db: AsyncSession,
+    company_id: str,
+    search: str | None = None,
+    solo_mercaderia: bool = False,
+) -> list[Supplier]:
     query = select(Supplier).where(Supplier.company_id == uuid.UUID(company_id))
+
+    if solo_mercaderia:
+        subq = (
+            select(PurchaseOrder.supplier_id)
+            .join(PurchaseOrderItem, PurchaseOrderItem.purchase_order_id == PurchaseOrder.id)
+            .where(PurchaseOrder.supplier_id.is_not(None))
+            .distinct()
+        )
+        query = query.where(Supplier.id.in_(subq))
+
     if search:
         query = query.where(
             (Supplier.razon_social.ilike(f"%{search}%")) |
@@ -144,6 +175,15 @@ async def update_supplier(db: AsyncSession, supplier_id: str, data: SupplierUpda
     return supplier
 
 
+async def delete_supplier(db: AsyncSession, supplier_id: str) -> bool:
+    supplier = await get_supplier(db, supplier_id)
+    if not supplier:
+        return False
+    supplier.activo = False
+    await db.flush()
+    return True
+
+
 # ── Purchase Orders ───────────────────────────────────────────────────────────
 
 async def create_purchase_order(db: AsyncSession, data: POCreate) -> PurchaseOrder:
@@ -161,6 +201,8 @@ async def create_purchase_order(db: AsyncSession, data: POCreate) -> PurchaseOrd
         estado="borrador",
         moneda=data.moneda,
         tipo_cambio=data.tipo_cambio,
+        subtotal=Decimal("0"),
+        total=Decimal("0"),
         observaciones=data.observaciones,
         user_id=data.user_id,
         tipo_compra=data.tipo_compra,
@@ -177,6 +219,7 @@ async def create_purchase_order(db: AsyncSession, data: POCreate) -> PurchaseOrd
     db.add(order)
     await db.flush()
 
+    items_with_base: list[tuple[PurchaseOrderItem, Decimal]] = []
     for item_data in data.items:
         iva_tasa = item_data.iva_tasa or Decimal("10")
         taxes = calculate_taxes(
@@ -208,6 +251,7 @@ async def create_purchase_order(db: AsyncSession, data: POCreate) -> PurchaseOrd
             fecha_entrega_esperada=item_data.fecha_entrega_esperada,
         )
         db.add(item)
+        items_with_base.append((item, taxes["subtotal_bruto"] - taxes["descuento_monto"]))
 
     shipping_total = data.shipping_cost + data.insurance_cost + data.customs_cost + data.otros_costos
     order.subtotal = subtotal.quantize(Decimal("1"))
@@ -217,11 +261,63 @@ async def create_purchase_order(db: AsyncSession, data: POCreate) -> PurchaseOrd
 
     landed = shipping_total + subtotal - descuento_total
     order.costo_landed_total = landed.quantize(Decimal("1"))
-    order.total = (landed + iva_10 + iva_5).quantize(Decimal("1"))
+    order.total = landed.quantize(Decimal("1"))
+
+    # Distribuye el costo landed (flete + seguro + aduana + otros) proporcionalmente
+    # al peso de cada linea sobre el neto de la orden, para tener un costo unitario
+    # real de compra por producto (antes quedaba siempre vacio).
+    net_base = subtotal - descuento_total
+    if shipping_total > 0 and net_base > 0:
+        for item, base in items_with_base:
+            if item.cantidad and item.cantidad > 0:
+                landed_share = shipping_total * (base / net_base)
+                item.costo_unitario_estimado = (item.precio_unitario + landed_share / item.cantidad).quantize(Decimal("1"))
+    else:
+        for item, _base in items_with_base:
+            item.costo_unitario_estimado = item.precio_unitario
+
+    # Registrar automáticamente en SupplierPriceHistory para alimentar la comparativa de precios
+    for item, _base in items_with_base:
+        if item.product_id and item.precio_unitario:
+            ph = SupplierPriceHistory(
+                company_id=data.company_id,
+                supplier_id=data.supplier_id,
+                product_id=item.product_id,
+                precio=item.precio_unitario,
+                moneda=data.moneda or "PYG",
+                fecha=datetime.now(timezone.utc),
+                purchase_order_id=order.id,
+                notas=f"OC #{order.numero}",
+            )
+            db.add(ph)
+
+            if getattr(data, "update_default_supplier", False):
+                prod = await db.get(Product, item.product_id)
+                if prod:
+                    prod.supplier_id = data.supplier_id
+                    prod.ultimo_costo = item.precio_unitario
+                    prod.costo_unitario = item.precio_unitario
 
     await db.flush()
     await db.refresh(order)
+    await _attach_suppliers(db, [order])
     return order
+
+
+async def _attach_suppliers(db: AsyncSession, orders: list) -> None:
+    # POResponse/ReceiptResponse esperan un campo "supplier" embebido (asi lo
+    # consume el frontend), pero PurchaseOrder no tiene relationship() a
+    # Supplier (ni FK real) — se busca y se pega como atributo simple, en un
+    # solo select por lote en vez de un select por orden.
+    ids = {o.supplier_id for o in orders if getattr(o, "supplier_id", None)}
+    if not ids:
+        for o in orders:
+            o.supplier = None
+        return
+    result = await db.execute(select(Supplier).where(Supplier.id.in_(ids)))
+    by_id = {s.id: s for s in result.scalars().all()}
+    for o in orders:
+        o.supplier = by_id.get(getattr(o, "supplier_id", None))
 
 
 async def list_purchase_orders(
@@ -229,44 +325,75 @@ async def list_purchase_orders(
     company_id: str,
     supplier_id: str | None = None,
     estado: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
 ) -> list[PurchaseOrder]:
-    query = select(PurchaseOrder).options(selectinload(PurchaseOrder.supplier)).where(
-        PurchaseOrder.company_id == uuid.UUID(company_id)
-    )
+    query = select(PurchaseOrder).where(PurchaseOrder.company_id == uuid.UUID(company_id))
     if supplier_id:
         query = query.where(PurchaseOrder.supplier_id == uuid.UUID(supplier_id))
     if estado:
         query = query.where(PurchaseOrder.estado == estado)
-    # Sin limit/offset esto devolvia las 106.726 ordenes de Casa Gonzalito de
-    # una sola vez.
-    query = query.order_by(PurchaseOrder.fecha.desc()).limit(limit).offset(offset)
+    query = query.order_by(func.coalesce(PurchaseOrder.updated_at, PurchaseOrder.fecha).desc())
     result = await db.execute(query)
-    return list(result.scalars().all())
+    orders = list(result.scalars().all())
+    await _attach_suppliers(db, orders)
+    return orders
 
 
 async def get_purchase_order(db: AsyncSession, po_id: str) -> PurchaseOrder | None:
     result = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == uuid.UUID(po_id)))
-    return result.scalar_one_or_none()
+    order = result.scalar_one_or_none()
+    if order:
+        await _attach_suppliers(db, [order])
+    return order
 
 
 async def get_purchase_order_with_items(db: AsyncSession, po_id: str) -> PurchaseOrder | None:
     result = await db.execute(
         select(PurchaseOrder)
-        .options(
-            selectinload(PurchaseOrder.supplier),
-            selectinload(PurchaseOrder.items)
-        )
+        .options(selectinload(PurchaseOrder.items))
         .where(PurchaseOrder.id == uuid.UUID(po_id))
     )
-    return result.scalar_one_or_none()
+    order = result.scalar_one_or_none()
+    if order:
+        await _attach_suppliers(db, [order])
+        if order.items:
+            from api.src.products.models import Product
+            p_ids = [it.product_id for it in order.items if it.product_id]
+            if p_ids:
+                p_res = await db.execute(
+                    select(Product.id, Product.codigo_barra, Product.sku, Product.nombre, Product.unidad_medida)
+                    .where(Product.id.in_(p_ids))
+                )
+                p_map = {row.id: row for row in p_res.all()}
+                for it in order.items:
+                    prod = p_map.get(it.product_id)
+                    if prod:
+                        it.codigo_barra = prod.codigo_barra
+                        it.sku = prod.sku
+                        it.unidad_medida = prod.unidad_medida or "UN"
+                        if not it.descripcion:
+                            it.descripcion = prod.nombre
+    return order
 
 
 async def update_purchase_order(db: AsyncSession, po_id: str, data: POUpdate) -> PurchaseOrder | None:
     order = await get_purchase_order(db, po_id)
-    if not order or order.estado != "borrador":
+    if not order:
         return None
+
+    if order.estado in ("cancelado", "recibido", "facturado"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede modificar una orden en estado '{order.estado}'."
+        )
+
+    # Si ya tiene recepciones activas en muelle, bloquear para proteger inventario
+    recs = (await db.execute(select(PurchaseReceipt).where(PurchaseReceipt.purchase_order_id == order.id))).scalars().all()
+    active_recs = [r for r in recs if r.estado != "cancelado"]
+    if active_recs:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede modificar la orden {order.numero}: ya tiene recepciones activas en muelle."
+        )
 
     update_fields = data.model_dump(exclude_unset=True, exclude={"items"})
     for key, value in update_fields.items():
@@ -312,11 +439,109 @@ async def update_purchase_order(db: AsyncSession, po_id: str, data: POUpdate) ->
         order.iva_5 = iva_5
         landed = shipping + subtotal - descuento_total
         order.costo_landed_total = landed.quantize(Decimal("1"))
-        order.total = (landed + iva_10 + iva_5).quantize(Decimal("1"))
+        order.total = landed.quantize(Decimal("1"))
+
+        # Registrar historial de precios y actualizar proveedor habitual si solicitado
+        for item_data in data.items:
+            if item_data.product_id and item_data.precio_unitario and order.supplier_id:
+                ph = SupplierPriceHistory(
+                    company_id=order.company_id,
+                    supplier_id=order.supplier_id,
+                    product_id=item_data.product_id,
+                    precio=item_data.precio_unitario,
+                    moneda=order.moneda or "PYG",
+                    fecha=datetime.now(timezone.utc),
+                    purchase_order_id=order.id,
+                    notas=f"OC #{order.numero} (actualizada)",
+                )
+                db.add(ph)
+
+                if getattr(data, "update_default_supplier", False):
+                    prod = await db.get(Product, item_data.product_id)
+                    if prod:
+                        prod.supplier_id = order.supplier_id
+                        prod.ultimo_costo = item_data.precio_unitario
+                        prod.costo_unitario = item_data.precio_unitario
 
     await db.flush()
     await db.refresh(order)
+    await _attach_suppliers(db, [order])
     return order
+
+
+async def delete_purchase_order(db: AsyncSession, po_id: str, force: bool = False) -> dict:
+    """Elimina una orden de compra, sus ítems y desenlaza recepciones/solicitudes vinculadas."""
+    try:
+        order_uuid = uuid.UUID(po_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="ID de orden de compra inválido")
+
+    order = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == order_uuid))).scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Orden de compra no encontrada")
+
+    # 1. Verificar si tiene recepciones activas
+    recs = (await db.execute(select(PurchaseReceipt).where(PurchaseReceipt.purchase_order_id == order_uuid))).scalars().all()
+    active_recs = [r for r in recs if r.estado != "cancelado"]
+    if active_recs and not force:
+        rec_nums = ", ".join(r.numero for r in active_recs[:3])
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede eliminar la orden {order.numero}: tiene {len(active_recs)} recepción(es) activa(s) ({rec_nums}). Cancele las recepciones primero o use eliminación forzada."
+        )
+
+    # 2. Verificar solicitudes de NC activas
+    nc_reqs = (await db.execute(select(SupplierNcRequest).where(SupplierNcRequest.purchase_order_id == order_uuid))).scalars().all()
+    if nc_reqs and not force:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede eliminar la orden {order.numero}: tiene solicitudes de Nota de Crédito asociadas. Resuelva o anule las solicitudes primero o use eliminación forzada."
+        )
+
+    # 3. Limpiar solicitudes de NC si force=True
+    for nc in nc_reqs:
+        await db.delete(nc)
+
+    # 4. Desvincular o eliminar recepciones
+    for r in recs:
+        if force:
+            await db.execute(text("UPDATE supplier_invoices SET receipt_id = NULL WHERE receipt_id = :rid"), {"rid": r.id})
+            await db.execute(text("DELETE FROM supplier_nc_requests WHERE receipt_id = :rid"), {"rid": r.id})
+            await db.execute(text("DELETE FROM purchase_receipt_items WHERE receipt_id = :rid"), {"rid": r.id})
+            await db.execute(text("DELETE FROM nemuha_record_map WHERE target_table = 'purchase_receipts' AND target_id = :rid"), {"rid": str(r.id)})
+            await db.delete(r)
+        else:
+            r.purchase_order_id = None
+
+    # 5. Desvincular demandas insatisfechas de clientes
+    await db.execute(
+        text("UPDATE customer_lost_demands SET orden_compra_id = NULL WHERE orden_compra_id = :oid"),
+        {"oid": order_uuid}
+    )
+
+    # 6. Eliminar items de la orden de compra
+    await db.execute(
+        text("DELETE FROM purchase_order_items WHERE purchase_order_id = :oid"),
+        {"oid": order_uuid}
+    )
+
+    # 7. Eliminar historial de la orden de compra si existiera
+    await db.execute(
+        text("DELETE FROM purchase_order_history WHERE purchase_order_id = :oid"),
+        {"oid": order_uuid}
+    )
+
+    # 8. Eliminar mapeo legado nemuha_record_map
+    await db.execute(
+        text("DELETE FROM nemuha_record_map WHERE target_table = 'purchase_orders' AND target_id = :oid"),
+        {"oid": str(order_uuid)}
+    )
+
+    numero = order.numero
+    await db.delete(order)
+    await db.commit()
+
+    return {"ok": True, "message": f"Orden de compra {numero} eliminada exitosamente", "numero": numero}
 
 
 async def confirm_purchase_order(db: AsyncSession, po_id: str, user_id: str | None = None, user_name: str | None = None) -> PurchaseOrder | None:
@@ -334,8 +559,20 @@ async def confirm_purchase_order(db: AsyncSession, po_id: str, user_id: str | No
     order.estado = "confirmado"
     await add_po_history(db, po_id, old_estado, "confirmado", user_id, user_name, "Orden confirmada")
 
+    try:
+        from api.src.commercial_agreements.service import update_volume_tracking
+        await update_volume_tracking(db, order)
+    except Exception:
+        logger.exception("No se pudo actualizar el volumen del acuerdo comercial para la OC %s", po_id)
+
+    try:
+        await update_budget_consumption(db, str(order.company_id))
+    except Exception:
+        logger.exception("No se pudo actualizar el consumo del presupuesto para la OC %s", po_id)
+
     await db.flush()
     await db.refresh(order)
+    await _attach_suppliers(db, [order])
     return order
 
 
@@ -354,13 +591,14 @@ async def send_purchase_order(db: AsyncSession, po_id: str, seguimiento_numero: 
 
     await db.flush()
     await db.refresh(order)
+    await _attach_suppliers(db, [order])
     return order
 
 
 async def cancel_purchase_order(db: AsyncSession, po_id: str, motivo: str | None = None,
                                 user_id: str | None = None, user_name: str | None = None) -> PurchaseOrder | None:
     order = await get_purchase_order(db, po_id)
-    if not order or order.estado in ("completado", "recibido", "cancelado"):
+    if not order or order.estado in ("completado", "parcial", "cancelado"):
         return None
 
     old_estado = order.estado
@@ -368,16 +606,55 @@ async def cancel_purchase_order(db: AsyncSession, po_id: str, motivo: str | None
     order.rechazado_motivo = motivo
     await add_po_history(db, po_id, old_estado, "cancelado", user_id, user_name, motivo or "Orden cancelada")
 
+    try:
+        await update_budget_consumption(db, str(order.company_id))
+    except Exception:
+        logger.exception("No se pudo actualizar el consumo del presupuesto para la OC %s", po_id)
+
     await db.flush()
     await db.refresh(order)
+    await _attach_suppliers(db, [order])
     return order
 
 
-async def get_po_items(db: AsyncSession, po_id: str) -> list[PurchaseOrderItem]:
-    result = await db.execute(
-        select(PurchaseOrderItem).where(PurchaseOrderItem.purchase_order_id == uuid.UUID(po_id))
+async def get_po_items(db: AsyncSession, po_id: str) -> list[dict]:
+    from api.src.products.models import Product
+    stmt = (
+        select(
+            PurchaseOrderItem,
+            Product.sku,
+            Product.codigo_barra,
+            Product.unidad_medida,
+        )
+        .outerjoin(Product, Product.id == PurchaseOrderItem.product_id)
+        .where(PurchaseOrderItem.purchase_order_id == uuid.UUID(po_id))
+        .order_by(PurchaseOrderItem.created_at.asc())
     )
-    return list(result.scalars().all())
+    result = await db.execute(stmt)
+    items = []
+    for poi, sku, barcode, unidad in result.all():
+        items.append({
+            "id": poi.id,
+            "purchase_order_id": poi.purchase_order_id,
+            "product_id": poi.product_id,
+            "variant_id": poi.variant_id,
+            "descripcion": poi.descripcion,
+            "cantidad": poi.cantidad,
+            "cantidad_recibida": poi.cantidad_recibida,
+            "precio_unitario": poi.precio_unitario,
+            "descuento_pct": poi.descuento_pct,
+            "iva_tasa": poi.iva_tasa,
+            "total": poi.total,
+            "costo_unitario_estimado": poi.costo_unitario_estimado,
+            "fecha_entrega_esperada": poi.fecha_entrega_esperada,
+            "fecha_entrega_real": poi.fecha_entrega_real,
+            "warehouse_id": poi.warehouse_id,
+            "created_at": poi.created_at,
+            "sku": sku or "—",
+            "codigo_barra": barcode or "—",
+            "unidad_medida": unidad or "UN",
+        })
+    return items
 
 
 async def get_po_history(db: AsyncSession, po_id: str) -> list[PurchaseOrderHistory]:
@@ -391,14 +668,62 @@ async def get_po_history(db: AsyncSession, po_id: str) -> list[PurchaseOrderHist
 
 # ── Purchase Receipts ─────────────────────────────────────────────────────────
 
+RECEIPT_PRICE_TOLERANCE = Decimal("0.05")  # 5% de desvio vs. el precio pactado en la OC
+
+
 async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseReceipt:
+    po = None
+    if data.purchase_order_id:
+        po_res = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == data.purchase_order_id))
+        po = po_res.scalar_one_or_none()
+
+    company_id = data.company_id or (po.company_id if po else None) or UUID("00000000-0000-0000-0000-000000000010")
+    supplier_id = data.supplier_id or (po.supplier_id if po else None)
+    if not supplier_id:
+        raise ValueError("Proveedor requerido para registrar la recepción")
+
+    warehouse_id = data.warehouse_id
+    if not warehouse_id and po:
+        po_item_wh = await db.execute(
+            select(PurchaseOrderItem.warehouse_id)
+            .where(PurchaseOrderItem.purchase_order_id == po.id, PurchaseOrderItem.warehouse_id.isnot(None))
+            .limit(1)
+        )
+        warehouse_id = po_item_wh.scalars().first()
+
+    if not warehouse_id:
+        from api.src.inventory.models import Warehouse
+        wh_res = await db.execute(
+            select(Warehouse.id)
+            .where(Warehouse.company_id == company_id, Warehouse.activo.is_(True))
+            .order_by(Warehouse.codigo.asc(), Warehouse.created_at.asc())
+        )
+        warehouse_id = wh_res.scalars().first()
+        if not warehouse_id:
+            wh_any = await db.execute(select(Warehouse.id).where(Warehouse.activo.is_(True)).limit(1))
+            warehouse_id = wh_any.scalars().first()
+        if not warehouse_id:
+            raise ValueError("No se encontró ningún depósito activo para ingresar el stock recibido")
+
     numero = await generate_receipt_number(db)
+    total = sum((item.cantidad_recibida * item.costo_unitario for item in data.items), Decimal("0"))
+
+    po_price_map: dict[str, Decimal] = {}
+    if data.purchase_order_id:
+        po_items_result = await db.execute(
+            select(PurchaseOrderItem).where(PurchaseOrderItem.purchase_order_id == data.purchase_order_id)
+        )
+        po_price_map = {str(i.product_id): i.precio_unitario for i in po_items_result.scalars().all()}
+
+    review_reasons: list[str] = []
 
     receipt = PurchaseReceipt(
-        company_id=data.company_id,
+        company_id=company_id,
         purchase_order_id=data.purchase_order_id,
-        warehouse_id=data.warehouse_id,
+        supplier_id=supplier_id,
+        warehouse_id=warehouse_id,
         numero=numero,
+        total=total.quantize(Decimal("1")),
         proveedor_ref=data.proveedor_ref,
         observaciones=data.observaciones,
         user_id=data.user_id,
@@ -408,7 +733,22 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
 
     for item_data in data.items:
         cost = item_data.costo_unitario
-        qty = int(item_data.cantidad_recibida)
+        qty = round(float(item_data.cantidad_recibida))
+
+        po_price = po_price_map.get(str(item_data.product_id))
+        if po_price and po_price > 0:
+            desvio = abs(cost - po_price) / po_price
+            if desvio > RECEIPT_PRICE_TOLERANCE:
+                review_reasons.append(
+                    f"Precio de {item_data.product_id} recibido a {cost} vs {po_price} pactado en la OC ({(desvio * 100).quantize(Decimal('0.1'))}% de desvio)"
+                )
+        if item_data.cantidad_rechazada:
+            review_reasons.append(f"Rechazo parcial de {item_data.cantidad_rechazada} unidades de {item_data.product_id}: {item_data.motivo_rechazo or 'sin motivo especificado'}")
+        if getattr(item_data, "es_extraordinario", False):
+            review_reasons.append(
+                f"Adición extraordinaria en muelle de {qty} unidades de {item_data.product_id} "
+                f"(Motivo: {getattr(item_data, 'autorizacion_motivo', None) or 'Sin motivo especificado'})"
+            )
 
         receipt_item = PurchaseReceiptItem(
             receipt_id=receipt.id,
@@ -416,14 +756,21 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
             variant_id=item_data.variant_id,
             cantidad_ordenada=item_data.cantidad_ordenada,
             cantidad_recibida=item_data.cantidad_recibida,
+            precio_unitario=cost,
             costo_unitario=cost,
-            batch_id=item_data.batch_id,
+            total=(cost * item_data.cantidad_recibida).quantize(Decimal("1")),
+            batch_id=getattr(item_data, "batch_id", None),
+            cantidad_rechazada=item_data.cantidad_rechazada,
+            motivo_rechazo=item_data.motivo_rechazo,
+            es_extraordinario=getattr(item_data, "es_extraordinario", False),
+            autorizado_por=getattr(item_data, "autorizado_por", None),
+            autorizacion_motivo=getattr(item_data, "autorizacion_motivo", None),
         )
         db.add(receipt_item)
 
         stock_result = await db.execute(
             select(Stock).where(
-                Stock.warehouse_id == data.warehouse_id,
+                Stock.warehouse_id == warehouse_id,
                 Stock.product_id == item_data.product_id,
             )
         )
@@ -431,7 +778,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
 
         if not stock_obj:
             stock_obj = Stock(
-                warehouse_id=data.warehouse_id,
+                warehouse_id=warehouse_id,
                 product_id=item_data.product_id,
                 variant_id=item_data.variant_id,
                 cantidad=0,
@@ -448,21 +795,22 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         stock_obj.updated_at = datetime.now(timezone.utc)
 
         stock_lot = StockLot(
-            company_id=data.company_id,
-            warehouse_id=data.warehouse_id,
+            company_id=company_id,
+            warehouse_id=warehouse_id,
             product_id=item_data.product_id,
             variant_id=item_data.variant_id,
             cantidad=qty,
             cantidad_disponible=qty,
             costo_unitario=cost,
             costo_total=cost * qty,
-            referencia=receipt.numero,
+            referencia=f"{item_data.lote} - {receipt.numero}" if item_data.lote else receipt.numero,
+            fecha_vencimiento=item_data.fecha_vencimiento,
         )
         db.add(stock_lot)
 
         movement = InventoryMovement(
-            company_id=data.company_id,
-            warehouse_id=data.warehouse_id,
+            company_id=company_id,
+            warehouse_id=warehouse_id,
             product_id=item_data.product_id,
             variant_id=item_data.variant_id,
             tipo="entrada_compra",
@@ -474,10 +822,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         )
         db.add(movement)
 
-    if data.purchase_order_id:
-        po_result = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == data.purchase_order_id))
-        po = po_result.scalar_one_or_none()
-        if po:
+    if po:
             for item_data in data.items:
                 await db.execute(
                     text("""
@@ -502,7 +847,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
             )
             po.estado = "completado" if all_received else "parcial"
 
-            if all_received and po.fecha_entrega_estimada:
+            if all_received and getattr(po, "fecha_entrega_estimada", None):
                 for item_data in data.items:
                     await db.execute(
                         text("""
@@ -517,6 +862,143 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
                         }
                     )
 
+    if review_reasons:
+        receipt.requiere_revision = True
+        receipt.motivo_revision = "; ".join(review_reasons)
+
+    # Auto-vincular recepción a Cuentas por Pagar (SupplierInvoice)
+    try:
+        sup_res = await db.execute(select(Supplier).where(Supplier.id == supplier_id))
+        sup = sup_res.scalar_one_or_none()
+        plazo_dias = sup.plazo_pago_dias if (sup and sup.plazo_pago_dias) else 30
+        fecha_emision = date.today()
+        fecha_vencimiento = fecha_emision + timedelta(days=plazo_dias)
+
+        invoice_num = (data.proveedor_ref or receipt.numero).strip()
+        iva_10 = (receipt.total / Decimal("11")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
+        is_br_sup = bool(sup and (sup.tipo_proveedor in ("brasilero", "br") or (getattr(sup, "moneda_default", "") == "BRL"))) or (data.total_brl is not None)
+        inv_moneda = "BRL" if is_br_sup else "PYG"
+        inv_tc = data.tipo_cambio or Decimal("1")
+        inv_total_brl = data.total_brl
+        if is_br_sup and inv_total_brl is None and inv_tc > 1:
+            inv_total_brl = (receipt.total / inv_tc).quantize(Decimal("0.01"))
+
+        inv = SupplierInvoice(
+            company_id=company_id,
+            supplier_id=supplier_id,
+            numero_factura=invoice_num,
+            fecha_emision=fecha_emision,
+            fecha_recepcion=fecha_emision,
+            fecha_vencimiento=fecha_vencimiento,
+            subtotal=receipt.total - iva_10,
+            descuento=Decimal("0"),
+            iva_10=iva_10,
+            iva_5=Decimal("0"),
+            total=receipt.total,
+            saldo_pendiente=receipt.total,
+            moneda=inv_moneda,
+            tipo_cambio=inv_tc,
+            total_brl=inv_total_brl,
+            saldo_pendiente_brl=inv_total_brl,
+            purchase_order_id=data.purchase_order_id,
+            receipt_id=receipt.id,
+            condicion="credito" if plazo_dias > 0 else "contado",
+            tipo_comprobante="factura",
+            estado="pendiente",
+            concepto=f"Recepción de mercadería {receipt.numero}" + (f" - Ref: {data.proveedor_ref}" if data.proveedor_ref else ""),
+            notas=data.observaciones,
+            created_by=data.user_id,
+        )
+        db.add(inv)
+    except Exception as e:
+        logger.warning("No se pudo crear automáticamente la factura en Cuentas por Pagar: %s", e)
+
+    await db.flush()
+    await db.refresh(receipt)
+    return receipt
+
+
+async def cancel_receipt(db: AsyncSession, receipt_id: str) -> PurchaseReceipt:
+    result = await db.execute(
+        select(PurchaseReceipt)
+        .options(selectinload(PurchaseReceipt.items))
+        .where(PurchaseReceipt.id == uuid.UUID(receipt_id))
+    )
+    receipt = result.scalar_one_or_none()
+    if not receipt:
+        raise ValueError("Recepcion no encontrada")
+    if receipt.estado == "cancelado":
+        raise ValueError("La recepcion ya esta cancelada")
+
+    for item in receipt.items:
+        qty = round(float(item.cantidad_recibida))
+
+        lot_result = await db.execute(
+            select(StockLot).where(
+                StockLot.warehouse_id == receipt.warehouse_id,
+                StockLot.product_id == item.product_id,
+                StockLot.referencia == receipt.numero,
+            )
+        )
+        lot = lot_result.scalar_one_or_none()
+        if lot and lot.cantidad_disponible != lot.cantidad:
+            raise ValueError(
+                "No se puede anular: parte del stock de esta recepcion ya se vendio o se uso "
+                f"(disponible {lot.cantidad_disponible} de {lot.cantidad})"
+            )
+
+        stock_result = await db.execute(
+            select(Stock).where(Stock.warehouse_id == receipt.warehouse_id, Stock.product_id == item.product_id)
+        )
+        stock_obj = stock_result.scalar_one_or_none()
+        if stock_obj:
+            stock_obj.cantidad = max(0, stock_obj.cantidad - qty)
+            stock_obj.updated_at = datetime.now(timezone.utc)
+
+        if lot:
+            await db.delete(lot)
+
+        db.add(InventoryMovement(
+            company_id=receipt.company_id,
+            warehouse_id=receipt.warehouse_id,
+            product_id=item.product_id,
+            variant_id=item.variant_id,
+            tipo="cancelacion_recepcion",
+            cantidad=-qty,
+            costo_unitario=item.costo_unitario,
+            referencia_type="purchase_receipt",
+            referencia_id=receipt.id,
+            motivo=f"Anulacion de recepcion {receipt.numero}",
+        ))
+
+    if receipt.purchase_order_id:
+        po_result = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == receipt.purchase_order_id))
+        po = po_result.scalar_one_or_none()
+        if po:
+            for item in receipt.items:
+                await db.execute(
+                    text("""
+                        UPDATE purchase_order_items
+                        SET cantidad_recibida = GREATEST(0, COALESCE(cantidad_recibida, 0) - :recibida)
+                        WHERE purchase_order_id = :po_id AND product_id = :product_id
+                    """),
+                    {
+                        "recibida": float(item.cantidad_recibida),
+                        "po_id": receipt.purchase_order_id,
+                        "product_id": item.product_id,
+                    },
+                )
+            items_result = await db.execute(
+                select(PurchaseOrderItem).where(PurchaseOrderItem.purchase_order_id == receipt.purchase_order_id)
+            )
+            po_items = list(items_result.scalars().all())
+            all_received = all((i.cantidad_recibida or 0) >= i.cantidad for i in po_items)
+            nothing_received = all((i.cantidad_recibida or 0) <= 0 for i in po_items)
+            if po.estado != "cancelado":
+                po.estado = "completado" if all_received else ("confirmado" if nothing_received else "parcial")
+
+    receipt.estado = "cancelado"
     await db.flush()
     await db.refresh(receipt)
     return receipt
@@ -528,19 +1010,50 @@ async def list_receipts(db: AsyncSession, company_id: str) -> list[PurchaseRecei
         .where(PurchaseReceipt.company_id == uuid.UUID(company_id))
         .order_by(PurchaseReceipt.fecha.desc())
     )
-    return list(result.scalars().all())
+    receipts = list(result.scalars().all())
+    await _attach_suppliers(db, receipts)
+    return receipts
+
+
+async def _attach_product_names(db: AsyncSession, items: list) -> None:
+    # ReceiptItemResponse espera nombre/sku del producto embebidos (asi lo
+    # consume el frontend), pero PurchaseReceiptItem.product_id no tiene FK
+    # real a products -- se busca y se pega como atributo simple, en un solo
+    # select por lote en vez de un select por item (mismo patron que
+    # _attach_suppliers).
+    from api.src.products.models import Product
+
+    ids = {i.product_id for i in items if getattr(i, "product_id", None)}
+    if not ids:
+        return
+    result = await db.execute(select(Product.id, Product.nombre, Product.sku).where(Product.id.in_(ids)))
+    by_id = {row.id: row for row in result.all()}
+    for i in items:
+        row = by_id.get(i.product_id)
+        i.producto_nombre = row.nombre if row else None
+        i.producto_sku = row.sku if row else None
 
 
 async def get_receipt(db: AsyncSession, receipt_id: str) -> PurchaseReceipt | None:
-    result = await db.execute(select(PurchaseReceipt).where(PurchaseReceipt.id == uuid.UUID(receipt_id)))
-    return result.scalar_one_or_none()
+    result = await db.execute(
+        select(PurchaseReceipt)
+        .options(selectinload(PurchaseReceipt.items))
+        .where(PurchaseReceipt.id == uuid.UUID(receipt_id))
+    )
+    receipt = result.scalar_one_or_none()
+    if receipt:
+        await _attach_suppliers(db, [receipt])
+        await _attach_product_names(db, receipt.items)
+    return receipt
 
 
 async def get_receipt_items(db: AsyncSession, receipt_id: str) -> list[PurchaseReceiptItem]:
     result = await db.execute(
         select(PurchaseReceiptItem).where(PurchaseReceiptItem.receipt_id == uuid.UUID(receipt_id))
     )
-    return list(result.scalars().all())
+    items = list(result.scalars().all())
+    await _attach_product_names(db, items)
+    return items
 
 
 # ── Requisitions ──────────────────────────────────────────────────────────────
@@ -600,14 +1113,12 @@ async def list_requisitions(db: AsyncSession, company_id: str, estado: str | Non
 
 
 async def get_requisition(db: AsyncSession, req_id: str) -> PurchaseRequisition | None:
-    result = await db.execute(select(PurchaseRequisition).where(PurchaseRequisition.id == uuid.UUID(req_id)))
-    req = result.scalar_one_or_none()
-    if req:
-        items_result = await db.execute(
-            select(PurchaseRequisitionItem).where(PurchaseRequisitionItem.requisition_id == req.id)
-        )
-        req.items = list(items_result.scalars().all())
-    return req
+    result = await db.execute(
+        select(PurchaseRequisition)
+        .options(selectinload(PurchaseRequisition.items))
+        .where(PurchaseRequisition.id == uuid.UUID(req_id))
+    )
+    return result.scalar_one_or_none()
 
 
 async def update_requisition(db: AsyncSession, req_id: str, data: RequisitionUpdate) -> PurchaseRequisition | None:
@@ -737,6 +1248,8 @@ async def convert_requisition_to_po(db: AsyncSession, req_id: str, user_id: str 
         estado="borrador",
         moneda=req.moneda or "PYG",
         tipo_cambio=Decimal("1"),
+        subtotal=Decimal("0"),
+        total=Decimal("0"),
         observaciones=f"Generado desde requisición {req.numero}",
         user_id=user_id,
         prioridad=req.prioridad or "normal",
@@ -785,6 +1298,7 @@ async def convert_requisition_to_po(db: AsyncSession, req_id: str, user_id: str 
 
     await db.flush()
     await db.refresh(order)
+    await _attach_suppliers(db, [order])
     return order
 
 
@@ -845,7 +1359,7 @@ async def run_forecast(db: AsyncSession, rule_id: str) -> dict:
         product_ids = [product_id_filter]
     elif rule.categoria_id:
         cat_result = await db.execute(
-            text("SELECT id FROM products WHERE company_id = :cid AND category_id = :cat"),
+            text("SELECT id FROM products WHERE company_id = :cid AND categoria_id = :cat"),
             {"cid": company_id, "cat": rule.categoria_id},
         )
         product_ids = [r[0] for r in cat_result.fetchall()]
@@ -860,8 +1374,8 @@ async def run_forecast(db: AsyncSession, rule_id: str) -> dict:
                 JOIN sale_items si ON si.sale_id = s.id
                 WHERE s.company_id = :cid
                   AND si.product_id = :pid
-                  AND s.estado IN ('confirmado', 'completado', 'pagado')
-                  AND s.fecha >= NOW() - INTERVAL :days DAY
+                  AND s.estado = 'confirmado'
+                  AND s.fecha >= NOW() - make_interval(days => :days)
                 GROUP BY DATE(s.fecha)
                 ORDER BY dia
             """),
@@ -917,7 +1431,7 @@ async def generate_purchase_suggestions(db: AsyncSession, company_id: str) -> di
             product_ids = [rule.product_id]
         elif rule.categoria_id:
             cat_result = await db.execute(
-                text("SELECT id FROM products WHERE company_id = :cid AND category_id = :cat AND activo = true"),
+                text("SELECT id FROM products WHERE company_id = :cid AND categoria_id = :cat AND activo = true"),
                 {"cid": company_id, "cat": rule.categoria_id},
             )
             product_ids = [r[0] for r in cat_result.fetchall()]
@@ -941,8 +1455,8 @@ async def generate_purchase_suggestions(db: AsyncSession, company_id: str) -> di
                     JOIN sale_items si ON si.sale_id = s.id
                     WHERE s.company_id = :cid
                       AND si.product_id = :pid
-                      AND s.estado IN ('confirmado', 'completado', 'pagado')
-                      AND s.fecha >= NOW() - INTERVAL :days DAY
+                      AND s.estado = 'confirmado'
+                      AND s.fecha >= NOW() - make_interval(days => :days)
                     GROUP BY DATE(s.fecha)
                 """),
                 {"cid": company_id, "pid": pid, "days": days_history},
@@ -1112,6 +1626,9 @@ async def apply_suggestion(db: AsyncSession, suggestion_id: str, user_id: str | 
     if not suggestion or suggestion.estado != "pendiente":
         return None
 
+    if not suggestion.supplier_id:
+        raise ValueError("La sugerencia no tiene un proveedor asignado, no se puede generar la orden automáticamente")
+
     prod_result = await db.execute(
         text("SELECT nombre, iva_tasa FROM products WHERE id = :pid"),
         {"pid": suggestion.product_id},
@@ -1123,7 +1640,7 @@ async def apply_suggestion(db: AsyncSession, suggestion_id: str, user_id: str | 
     from api.src.purchases.schemas import POCreate
     po_data = POCreate(
         company_id=suggestion.company_id,
-        supplier_id=suggestion.supplier_id or uuid.UUID(int=0),
+        supplier_id=suggestion.supplier_id,
         moneda="PYG",
         items=[],
         observaciones=f"Generado desde sugerencia de compra #{suggestion.id}",
@@ -1141,11 +1658,13 @@ async def apply_suggestion(db: AsyncSession, suggestion_id: str, user_id: str | 
 
     order = PurchaseOrder(
         company_id=suggestion.company_id,
-        supplier_id=suggestion.supplier_id or uuid.UUID(int=0),
+        supplier_id=suggestion.supplier_id,
         numero=numero,
         estado="borrador",
         moneda="PYG",
         tipo_cambio=Decimal("1"),
+        subtotal=Decimal("0"),
+        total=Decimal("0"),
         observaciones=f"Generado desde sugerencia de compra",
         user_id=uuid.UUID(user_id) if user_id else None,
         created_by_name=user_name,
@@ -1184,6 +1703,7 @@ async def apply_suggestion(db: AsyncSession, suggestion_id: str, user_id: str | 
 
     await db.flush()
     await db.refresh(order)
+    await _attach_suppliers(db, [order])
     return order
 
 
@@ -1251,6 +1771,279 @@ async def get_supplier_price_history(db: AsyncSession, supplier_id: str, product
     query = query.order_by(SupplierPriceHistory.fecha.desc())
     result = await db.execute(query)
     return list(result.scalars().all())
+
+
+async def get_product_supplier_comparison(
+    db: AsyncSession,
+    company_id: str | uuid.UUID,
+    product_id: str | uuid.UUID,
+) -> dict:
+    """
+    Consolida las ofertas y el historial de precios de todos los proveedores
+    para un producto, determinando quién lo vende más barato y el ahorro potencial.
+    """
+    cid = uuid.UUID(str(company_id))
+    pid = uuid.UUID(str(product_id))
+
+    # 1. Producto base
+    prod = await db.get(Product, pid)
+    if not prod:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+
+    habitual_sup_id = prod.supplier_id
+    habitual_sup_nombre = None
+    hab_sup = None
+    if habitual_sup_id:
+        hab_sup = await db.get(Supplier, habitual_sup_id)
+        if hab_sup:
+            habitual_sup_nombre = hab_sup.razon_social or hab_sup.nombre_fantasia
+
+    suppliers_data: dict[str, dict] = {}
+
+    # Registrar proveedor habitual base
+    if habitual_sup_id:
+        sid_str = str(habitual_sup_id)
+        costo_base = prod.ultimo_costo or prod.costo_unitario or Decimal("0")
+        suppliers_data[sid_str] = {
+            "supplier_id": habitual_sup_id,
+            "razon_social": habitual_sup_nombre or "Proveedor Habitual",
+            "nombre_fantasia": getattr(hab_sup, "nombre_fantasia", None),
+            "ruc": getattr(hab_sup, "ruc", None),
+            "telefono": getattr(hab_sup, "telefono", None),
+            "es_habitual": True,
+            "ultimo_precio": Decimal(str(costo_base)),
+            "mejor_precio": Decimal(str(costo_base)),
+            "moneda": "PYG",
+            "fecha_ultima_compra": None,
+            "origen": "catalogo",
+            "referencia_doc": "Ficha Técnica",
+        }
+
+    # 2. Órdenes de Compra
+    po_query = (
+        select(
+            PurchaseOrder.supplier_id,
+            PurchaseOrderItem.precio_unitario,
+            PurchaseOrder.moneda,
+            PurchaseOrder.fecha,
+            PurchaseOrder.numero,
+            Supplier.razon_social,
+            Supplier.nombre_fantasia,
+            Supplier.ruc,
+            Supplier.telefono,
+        )
+        .join(PurchaseOrder, PurchaseOrder.id == PurchaseOrderItem.purchase_order_id)
+        .outerjoin(Supplier, Supplier.id == PurchaseOrder.supplier_id)
+        .where(
+            PurchaseOrderItem.product_id == pid,
+            PurchaseOrder.company_id == cid,
+            PurchaseOrder.estado != "cancelado",
+        )
+        .order_by(PurchaseOrder.fecha.desc())
+    )
+    po_results = (await db.execute(po_query)).all()
+    for row in po_results:
+        sid = row.supplier_id
+        if not sid:
+            continue
+        sid_str = str(sid)
+        precio = Decimal(str(row.precio_unitario or 0))
+        if precio <= 0:
+            continue
+
+        if sid_str not in suppliers_data:
+            suppliers_data[sid_str] = {
+                "supplier_id": sid,
+                "razon_social": row.razon_social or "Proveedor",
+                "nombre_fantasia": row.nombre_fantasia,
+                "ruc": row.ruc,
+                "telefono": row.telefono,
+                "es_habitual": (sid == habitual_sup_id),
+                "ultimo_precio": precio,
+                "mejor_precio": precio,
+                "moneda": row.moneda or "PYG",
+                "fecha_ultima_compra": row.fecha,
+                "origen": "orden_compra",
+                "referencia_doc": f"OC #{row.numero}",
+            }
+        else:
+            sd = suppliers_data[sid_str]
+            if sd["fecha_ultima_compra"] is None or (row.fecha and row.fecha > sd["fecha_ultima_compra"]):
+                sd["ultimo_precio"] = precio
+                sd["fecha_ultima_compra"] = row.fecha
+                sd["referencia_doc"] = f"OC #{row.numero}"
+            if precio < sd["mejor_precio"]:
+                sd["mejor_precio"] = precio
+            if row.razon_social:
+                sd["razon_social"] = row.razon_social
+                sd["ruc"] = row.ruc
+                sd["telefono"] = row.telefono
+
+    # 3. Historial de Precios (SupplierPriceHistory)
+    sph_query = (
+        select(
+            SupplierPriceHistory.supplier_id,
+            SupplierPriceHistory.precio,
+            SupplierPriceHistory.moneda,
+            SupplierPriceHistory.fecha,
+            SupplierPriceHistory.notas,
+            Supplier.razon_social,
+            Supplier.nombre_fantasia,
+            Supplier.ruc,
+            Supplier.telefono,
+        )
+        .outerjoin(Supplier, Supplier.id == SupplierPriceHistory.supplier_id)
+        .where(
+            SupplierPriceHistory.product_id == pid,
+            SupplierPriceHistory.company_id == cid,
+        )
+        .order_by(SupplierPriceHistory.fecha.desc())
+    )
+    sph_results = (await db.execute(sph_query)).all()
+    for row in sph_results:
+        sid = row.supplier_id
+        if not sid:
+            continue
+        sid_str = str(sid)
+        precio = Decimal(str(row.precio or 0))
+        if precio <= 0:
+            continue
+        if sid_str not in suppliers_data:
+            suppliers_data[sid_str] = {
+                "supplier_id": sid,
+                "razon_social": row.razon_social or "Proveedor",
+                "nombre_fantasia": row.nombre_fantasia,
+                "ruc": row.ruc,
+                "telefono": row.telefono,
+                "es_habitual": (sid == habitual_sup_id),
+                "ultimo_precio": precio,
+                "mejor_precio": precio,
+                "moneda": row.moneda or "PYG",
+                "fecha_ultima_compra": row.fecha,
+                "origen": "historial_precios",
+                "referencia_doc": row.notas or "Historial",
+            }
+        else:
+            sd = suppliers_data[sid_str]
+            if precio < sd["mejor_precio"]:
+                sd["mejor_precio"] = precio
+            if row.razon_social and not sd.get("razon_social"):
+                sd["razon_social"] = row.razon_social
+
+    # 4. Acuerdos y Contratos de Proveedor
+    contr_query = (
+        select(
+            SupplierContract.supplier_id,
+            SupplierContractItem.precio_acordado,
+            SupplierContractItem.moneda,
+            SupplierContract.numero,
+            SupplierContract.fecha_inicio,
+            Supplier.razon_social,
+            Supplier.nombre_fantasia,
+            Supplier.ruc,
+            Supplier.telefono,
+        )
+        .join(SupplierContract, SupplierContract.id == SupplierContractItem.contract_id)
+        .outerjoin(Supplier, Supplier.id == SupplierContract.supplier_id)
+        .where(
+            SupplierContractItem.product_id == pid,
+            SupplierContract.company_id == cid,
+            SupplierContract.activo == True,
+        )
+    )
+    contr_results = (await db.execute(contr_query)).all()
+    for row in contr_results:
+        sid = row.supplier_id
+        if not sid:
+            continue
+        sid_str = str(sid)
+        precio = Decimal(str(row.precio_acordado or 0))
+        if precio <= 0:
+            continue
+        if sid_str not in suppliers_data:
+            suppliers_data[sid_str] = {
+                "supplier_id": sid,
+                "razon_social": row.razon_social or "Proveedor",
+                "nombre_fantasia": row.nombre_fantasia,
+                "ruc": row.ruc,
+                "telefono": row.telefono,
+                "es_habitual": (sid == habitual_sup_id),
+                "ultimo_precio": precio,
+                "mejor_precio": precio,
+                "moneda": row.moneda or "PYG",
+                "fecha_ultima_compra": row.fecha_inicio,
+                "origen": "contrato",
+                "referencia_doc": f"Contrato #{row.numero}",
+            }
+        else:
+            sd = suppliers_data[sid_str]
+            if precio < sd["mejor_precio"]:
+                sd["mejor_precio"] = precio
+                sd["origen"] = "contrato"
+                sd["referencia_doc"] = f"Contrato #{row.numero}"
+
+    # Resolver nombres faltantes si los hay
+    for sid_str, item in suppliers_data.items():
+        if not item.get("razon_social") or item["razon_social"] in ("Proveedor", "Proveedor Habitual"):
+            s_obj = await db.get(Supplier, item["supplier_id"])
+            if s_obj:
+                item["razon_social"] = s_obj.razon_social or s_obj.nombre_fantasia or "Proveedor"
+                item["ruc"] = s_obj.ruc
+                item["telefono"] = s_obj.telefono
+
+    # Determinar costo de referencia
+    costo_referencia = prod.ultimo_costo or prod.costo_unitario or Decimal("0")
+    if habitual_sup_id and str(habitual_sup_id) in suppliers_data:
+        hab_p = suppliers_data[str(habitual_sup_id)]["ultimo_precio"]
+        if hab_p and hab_p > 0:
+            costo_referencia = hab_p
+
+    valid_items = list(suppliers_data.values())
+    min_price: Decimal | None = None
+    best_supplier: dict | None = None
+
+    for it in valid_items:
+        if it["mejor_precio"] > 0:
+            if min_price is None or it["mejor_precio"] < min_price:
+                min_price = it["mejor_precio"]
+                best_supplier = it
+
+    for it in valid_items:
+        it["es_mas_barato"] = (min_price is not None and it["mejor_precio"] == min_price)
+        if costo_referencia > 0 and it["mejor_precio"] < costo_referencia:
+            diff = costo_referencia - it["mejor_precio"]
+            it["ahorro_vs_habitual"] = diff
+            it["ahorro_pct"] = ((diff / costo_referencia) * 100).quantize(Decimal("0.1"))
+        else:
+            it["ahorro_vs_habitual"] = Decimal("0")
+            it["ahorro_pct"] = Decimal("0")
+
+    # Ordenar: más barato primero
+    valid_items.sort(key=lambda x: (x["mejor_precio"] if x["mejor_precio"] > 0 else Decimal("999999999999")))
+
+    max_ahorro_gs = Decimal("0")
+    max_ahorro_pct = Decimal("0")
+    if best_supplier and costo_referencia > 0 and best_supplier["mejor_precio"] < costo_referencia:
+        max_ahorro_gs = costo_referencia - best_supplier["mejor_precio"]
+        max_ahorro_pct = ((max_ahorro_gs / costo_referencia) * 100).quantize(Decimal("0.1"))
+
+    return {
+        "product_id": pid,
+        "nombre": prod.nombre,
+        "sku": prod.sku,
+        "codigo_barra": prod.codigo_barra,
+        "costo_unitario_actual": prod.costo_unitario or Decimal("0"),
+        "ultimo_costo": prod.ultimo_costo or Decimal("0"),
+        "habitual_supplier_id": habitual_sup_id,
+        "habitual_supplier_nombre": habitual_sup_nombre,
+        "mejor_precio": min_price,
+        "mejor_supplier_id": best_supplier["supplier_id"] if best_supplier else None,
+        "mejor_supplier_nombre": best_supplier["razon_social"] if best_supplier else None,
+        "ahorro_maximo_gs": max_ahorro_gs,
+        "ahorro_maximo_pct": max_ahorro_pct,
+        "proveedores": valid_items,
+    }
+
 
 
 async def get_supplier_performance(db: AsyncSession, supplier_id: str) -> dict:
@@ -1447,6 +2240,15 @@ async def update_budget(db: AsyncSession, budget_id: str, data: BudgetUpdate) ->
     return budget
 
 
+async def delete_budget(db: AsyncSession, budget_id: str) -> bool:
+    budget = await get_budget(db, budget_id)
+    if not budget:
+        return False
+    await db.delete(budget)
+    await db.flush()
+    return True
+
+
 async def get_budget_consumption(db: AsyncSession, company_id: str, anio: int | None = None) -> list[dict]:
     query = select(PurchaseBudget).where(PurchaseBudget.company_id == uuid.UUID(company_id))
     if anio:
@@ -1471,29 +2273,51 @@ async def get_budget_consumption(db: AsyncSession, company_id: str, anio: int | 
     ]
 
 
-async def update_budget_consumption(db: AsyncSession, company_id: str, po_total: Decimal | None = None) -> None:
-    if po_total is None:
-        result = await db.execute(
-            text("""
-                SELECT COALESCE(SUM(total), 0) FROM purchase_orders
-                WHERE company_id = :cid AND estado IN ('confirmado', 'enviado', 'parcial', 'completado')
-            """),
-            {"cid": company_id},
+async def update_budget_consumption(db: AsyncSession, company_id: str) -> None:
+    """Recalcula monto_ejecutado real desde purchase_orders para cada presupuesto activo.
+
+    Solo se recalculan los presupuestos SIN categoria_id ni departamento: una OC hoy no
+    tiene forma de atribuirse a una categoria o departamento especifico (no hay ese dato
+    en purchase_orders/items), asi que esos presupuestos segmentados quedan para carga
+    manual en vez de pisarlos con el gasto total de la empresa (lo que antes hacia este
+    UPDATE, incorrectamente, ademas de solo cubrir presupuestos mensuales exactos).
+    """
+    result = await db.execute(
+        select(PurchaseBudget).where(
+            PurchaseBudget.company_id == uuid.UUID(company_id),
+            PurchaseBudget.activo == True,
+            PurchaseBudget.categoria_id.is_(None),
+            PurchaseBudget.departamento.is_(None),
         )
-        po_total = Decimal(str(result.scalar() or 0))
-
-    current_year = datetime.now(timezone.utc).year
-    current_month = datetime.now(timezone.utc).month
-
-    await db.execute(
-        text("""
-            UPDATE purchase_budgets
-            SET monto_ejecutado = :total,
-                monto_disponible = monto_presupuestado - :total
-            WHERE company_id = :cid AND anio = :year AND activo = true
-        """),
-        {"total": float(po_total), "cid": company_id, "year": current_year},
     )
+    budgets = list(result.scalars().all())
+    if not budgets:
+        return
+
+    for budget in budgets:
+        if budget.mes:
+            spend_result = await db.execute(
+                text("""
+                    SELECT COALESCE(SUM(total), 0) FROM purchase_orders
+                    WHERE company_id = :cid AND estado IN ('confirmado', 'enviado', 'parcial', 'completado')
+                      AND EXTRACT(YEAR FROM fecha) = :year AND EXTRACT(MONTH FROM fecha) = :month
+                """),
+                {"cid": company_id, "year": budget.anio, "month": budget.mes},
+            )
+        else:
+            spend_result = await db.execute(
+                text("""
+                    SELECT COALESCE(SUM(total), 0) FROM purchase_orders
+                    WHERE company_id = :cid AND estado IN ('confirmado', 'enviado', 'parcial', 'completado')
+                      AND EXTRACT(YEAR FROM fecha) = :year
+                """),
+                {"cid": company_id, "year": budget.anio},
+            )
+        spend = Decimal(str(spend_result.scalar() or 0))
+        budget.monto_ejecutado = spend
+        budget.monto_disponible = budget.monto_presupuestado - spend
+
+    await db.flush()
     await db.flush()
 
 
@@ -1534,17 +2358,17 @@ async def get_spend_by_category(db: AsyncSession, company_id: str) -> list[dict]
     result = await db.execute(
         text("""
             SELECT
-                p.category_id,
+                p.categoria_id,
                 COALESCE(pc.nombre, 'Sin categoría') as categoria_nombre,
                 COUNT(DISTINCT poi.product_id) as cantidad_productos,
                 COALESCE(SUM(poi.total), 0) as total_gastado
             FROM purchase_order_items poi
             JOIN purchase_orders po ON po.id = poi.purchase_order_id
             JOIN products p ON p.id = poi.product_id
-            LEFT JOIN product_categories pc ON pc.id = p.category_id
+            LEFT JOIN product_categories pc ON pc.id = p.categoria_id
             WHERE po.company_id = :cid
               AND po.estado IN ('confirmado', 'enviado', 'parcial', 'completado')
-            GROUP BY p.category_id, pc.nombre
+            GROUP BY p.categoria_id, pc.nombre
             ORDER BY total_gastado DESC
         """),
         {"cid": company_id},
@@ -1562,26 +2386,42 @@ async def get_spend_by_category(db: AsyncSession, company_id: str) -> list[dict]
 
 
 async def get_price_variance(db: AsyncSession, company_id: str) -> list[dict]:
+    # MAX(po.id)/MAX(po.fecha) sobre columnas no numericas dentro del mismo GROUP BY no
+    # funciona en Postgres para UUID (MAX(uuid) no existe) -- se resuelve el "ultimo
+    # proveedor/fecha" por producto con una CTE aparte (DISTINCT ON por fecha), en vez
+    # de un aggregate invalido dentro de una subquery correlacionada.
     result = await db.execute(
         text("""
-            SELECT
-                poi.product_id,
-                p.nombre,
-                AVG(poi.precio_unitario) as avg_price,
-                MIN(poi.precio_unitario) as min_price,
-                MAX(poi.precio_unitario) as max_price,
-                MAX(po.fecha) as last_purchase_date,
-                (SELECT s2.razon_social FROM purchase_orders po2
-                 JOIN suppliers s2 ON s2.id = po2.supplier_id
-                 WHERE po2.id = MAX(po.id)) as last_supplier
-            FROM purchase_order_items poi
-            JOIN purchase_orders po ON po.id = poi.purchase_order_id
-            JOIN products p ON p.id = poi.product_id
-            WHERE po.company_id = :cid
-              AND po.estado IN ('confirmado', 'enviado', 'parcial', 'completado')
-            GROUP BY poi.product_id, p.nombre
-            HAVING COUNT(poi.id) > 1
-            ORDER BY (MAX(poi.precio_unitario) - MIN(poi.precio_unitario)) DESC
+            WITH product_stats AS (
+                SELECT
+                    poi.product_id,
+                    p.nombre,
+                    AVG(poi.precio_unitario) as avg_price,
+                    MIN(poi.precio_unitario) as min_price,
+                    MAX(poi.precio_unitario) as max_price
+                FROM purchase_order_items poi
+                JOIN purchase_orders po ON po.id = poi.purchase_order_id
+                JOIN products p ON p.id = poi.product_id
+                WHERE po.company_id = :cid
+                  AND po.estado IN ('confirmado', 'enviado', 'parcial', 'completado')
+                GROUP BY poi.product_id, p.nombre
+                HAVING COUNT(poi.id) > 1
+            ),
+            last_purchase AS (
+                SELECT DISTINCT ON (poi.product_id)
+                    poi.product_id, po.fecha as last_purchase_date, s.razon_social as last_supplier
+                FROM purchase_order_items poi
+                JOIN purchase_orders po ON po.id = poi.purchase_order_id
+                JOIN suppliers s ON s.id = po.supplier_id
+                WHERE po.company_id = :cid
+                  AND po.estado IN ('confirmado', 'enviado', 'parcial', 'completado')
+                ORDER BY poi.product_id, po.fecha DESC
+            )
+            SELECT ps.product_id, ps.nombre, ps.avg_price, ps.min_price, ps.max_price,
+                   lp.last_purchase_date, lp.last_supplier
+            FROM product_stats ps
+            LEFT JOIN last_purchase lp ON lp.product_id = ps.product_id
+            ORDER BY (ps.max_price - ps.min_price) DESC
         """),
         {"cid": company_id},
     )
@@ -1673,3 +2513,741 @@ async def get_purchase_kpis(db: AsyncSession, company_id: str) -> dict:
         "ahorro_estimado": Decimal(str(ahorro_total)),
         "cumplimiento_rate": Decimal(str(round(cumplimiento_rate, 1))),
     }
+
+
+# ── RFQ / Cotizacion comparativa ────────────────────────────────────────────────
+
+async def generate_rfq_number(db: AsyncSession) -> str:
+    date_part = datetime.now(timezone.utc).strftime("%Y%m%d")
+    result = await db.execute(select(PurchaseRfq).order_by(PurchaseRfq.created_at.desc()).limit(1))
+    last = result.scalar_one_or_none()
+    seq = int(last.numero.split("-")[-1]) + 1 if last else 1
+    return f"RFQ-{date_part}-{seq:06d}"
+
+
+async def _attach_rfq_response_suppliers(db: AsyncSession, responses: list) -> None:
+    ids = {r.supplier_id for r in responses if getattr(r, "supplier_id", None)}
+    if not ids:
+        for r in responses:
+            r.supplier = None
+        return
+    result = await db.execute(select(Supplier).where(Supplier.id.in_(ids)))
+    by_id = {s.id: s for s in result.scalars().all()}
+    for r in responses:
+        r.supplier = by_id.get(r.supplier_id)
+
+
+def _compute_rfq_response_totals(rfq: PurchaseRfq) -> None:
+    qty_by_product = {str(i.product_id): i.cantidad_solicitada for i in rfq.items}
+    for resp in rfq.responses:
+        total = Decimal("0")
+        for item in resp.items:
+            qty = qty_by_product.get(str(item.product_id), Decimal("0"))
+            total += item.precio_unitario * qty
+        resp.total_cotizado = total if resp.items else None
+
+
+async def get_rfq(db: AsyncSession, rfq_id: str) -> PurchaseRfq | None:
+    result = await db.execute(
+        select(PurchaseRfq)
+        .options(
+            selectinload(PurchaseRfq.items),
+            selectinload(PurchaseRfq.responses).selectinload(PurchaseRfqResponse.items),
+        )
+        .where(PurchaseRfq.id == uuid.UUID(rfq_id))
+    )
+    rfq = result.scalar_one_or_none()
+    if rfq:
+        await _attach_rfq_response_suppliers(db, rfq.responses)
+        _compute_rfq_response_totals(rfq)
+    return rfq
+
+
+async def list_rfqs(db: AsyncSession, company_id: str, estado: str | None = None) -> list[PurchaseRfq]:
+    query = select(PurchaseRfq).where(PurchaseRfq.company_id == uuid.UUID(company_id))
+    if estado:
+        query = query.where(PurchaseRfq.estado == estado)
+    query = query.order_by(PurchaseRfq.fecha.desc())
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
+async def create_rfq(db: AsyncSession, data: RfqCreate) -> PurchaseRfq | None:
+    items_input = data.items
+    if not items_input:
+        if not data.requisition_id:
+            return None
+        req = await get_requisition(db, str(data.requisition_id))
+        if not req or not req.items:
+            return None
+        items_input = [
+            {
+                "product_id": i.product_id, "variant_id": i.variant_id, "descripcion": i.descripcion,
+                "cantidad_solicitada": i.cantidad_aprobada or i.cantidad_solicitada,
+            }
+            for i in req.items
+        ]
+    else:
+        items_input = [i.model_dump() for i in items_input]
+
+    if not items_input or len(data.supplier_ids) < 2:
+        return None
+
+    numero = await generate_rfq_number(db)
+    rfq = PurchaseRfq(
+        company_id=data.company_id,
+        requisition_id=data.requisition_id,
+        numero=numero,
+        fecha_limite=data.fecha_limite,
+        estado="enviada",
+        motivo=data.motivo,
+        observaciones=data.observaciones,
+        user_id=data.user_id,
+    )
+    db.add(rfq)
+    await db.flush()
+
+    for item_data in items_input:
+        db.add(PurchaseRfqItem(
+            rfq_id=rfq.id,
+            product_id=item_data["product_id"],
+            variant_id=item_data.get("variant_id"),
+            descripcion=item_data.get("descripcion"),
+            cantidad_solicitada=item_data["cantidad_solicitada"],
+        ))
+
+    for sid in data.supplier_ids:
+        db.add(PurchaseRfqResponse(rfq_id=rfq.id, supplier_id=sid, estado="invitada"))
+
+    await db.flush()
+    return await get_rfq(db, str(rfq.id))
+
+
+async def submit_rfq_response(db: AsyncSession, rfq_id: str, supplier_id: str, data: RfqResponseSubmit) -> PurchaseRfq | None:
+    rfq = await get_rfq(db, rfq_id)
+    if not rfq or rfq.estado not in ("enviada", "evaluando"):
+        return None
+
+    resp = next((r for r in rfq.responses if str(r.supplier_id) == supplier_id), None)
+    if not resp:
+        return None
+
+    item_by_product = {str(i.product_id): i for i in rfq.items}
+
+    existing_items = await db.execute(select(PurchaseRfqResponseItem).where(PurchaseRfqResponseItem.response_id == resp.id))
+    for existing in existing_items.scalars().all():
+        await db.delete(existing)
+    await db.flush()
+
+    for item_data in data.items:
+        rfq_item = item_by_product.get(str(item_data.product_id))
+        if not rfq_item:
+            continue
+        db.add(PurchaseRfqResponseItem(
+            response_id=resp.id,
+            rfq_item_id=rfq_item.id,
+            product_id=item_data.product_id,
+            precio_unitario=item_data.precio_unitario,
+            plazo_entrega_dias=item_data.plazo_entrega_dias,
+        ))
+
+    resp.estado = "respondida"
+    resp.fecha_respuesta = datetime.now(timezone.utc)
+    resp.plazo_entrega_dias = data.plazo_entrega_dias
+    resp.observaciones = data.observaciones
+
+    if rfq.estado == "enviada":
+        rfq.estado = "evaluando"
+
+    await db.flush()
+    # Sin esto, el re-fetch de abajo reutiliza las colecciones .items ya cargadas
+    # en memoria por el get_rfq() del principio de esta funcion (todavia vacias en
+    # ese momento) en vez de traer los response_items recien insertados.
+    db.expire_all()
+    return await get_rfq(db, rfq_id)
+
+
+async def award_rfq(db: AsyncSession, rfq_id: str, supplier_id: str,
+                    user_id: str | None = None, user_name: str | None = None) -> PurchaseOrder | None:
+    rfq = await get_rfq(db, rfq_id)
+    if not rfq or rfq.estado not in ("evaluando", "enviada"):
+        return None
+
+    winner = next((r for r in rfq.responses if str(r.supplier_id) == supplier_id and r.estado == "respondida"), None)
+    if not winner or not winner.items:
+        return None
+
+    from api.src.products.models import Product
+    product_ids = [i.product_id for i in winner.items]
+    products_result = await db.execute(select(Product).where(Product.id.in_(product_ids)))
+    products = {str(p.id): p for p in products_result.scalars().all()}
+
+    qty_by_product = {str(i.product_id): i.cantidad_solicitada for i in rfq.items}
+
+    numero = await generate_po_number(db)
+    subtotal = iva_10 = iva_5 = Decimal("0")
+
+    order = PurchaseOrder(
+        company_id=rfq.company_id,
+        supplier_id=uuid.UUID(supplier_id),
+        numero=numero,
+        estado="borrador",
+        moneda="PYG",
+        tipo_cambio=Decimal("1"),
+        subtotal=Decimal("0"),
+        total=Decimal("0"),
+        observaciones=f"Generado desde cotización {rfq.numero}",
+        user_id=uuid.UUID(user_id) if user_id else None,
+        created_by_name=user_name,
+        fecha_entrega_estimada=(date.today() + timedelta(days=winner.plazo_entrega_dias)) if winner.plazo_entrega_dias else None,
+    )
+    db.add(order)
+    await db.flush()
+
+    for resp_item in winner.items:
+        prod = products.get(str(resp_item.product_id))
+        cantidad = qty_by_product.get(str(resp_item.product_id), Decimal("0"))
+        iva_tasa = Decimal(str(prod.iva_tasa)) if prod and prod.iva_tasa else Decimal("10")
+        taxes = calculate_taxes(resp_item.precio_unitario, cantidad, Decimal("0"), iva_tasa)
+        if iva_tasa == Decimal("10"):
+            iva_10 += taxes["iva_monto"]
+        elif iva_tasa == Decimal("5"):
+            iva_5 += taxes["iva_monto"]
+        subtotal += taxes["subtotal_bruto"]
+
+        item = PurchaseOrderItem(
+            purchase_order_id=order.id,
+            product_id=resp_item.product_id,
+            cantidad=cantidad,
+            precio_unitario=resp_item.precio_unitario,
+            descuento_pct=Decimal("0"),
+            iva_tasa=iva_tasa,
+            total=taxes["total"],
+            fecha_entrega_esperada=(date.today() + timedelta(days=resp_item.plazo_entrega_dias)) if resp_item.plazo_entrega_dias else None,
+        )
+        db.add(item)
+
+    order.subtotal = subtotal.quantize(Decimal("1"))
+    order.descuento_total = Decimal("0")
+    order.iva_10 = iva_10
+    order.iva_5 = iva_5
+    order.total = (subtotal + iva_10 + iva_5).quantize(Decimal("1"))
+
+    for r in rfq.responses:
+        r.estado = "ganadora" if str(r.supplier_id) == supplier_id else "descartada"
+
+    rfq.estado = "adjudicada"
+    rfq.ganador_supplier_id = uuid.UUID(supplier_id)
+    rfq.purchase_order_id = order.id
+
+    await add_po_history(db, str(order.id), "borrador", "borrador", user_id, user_name,
+                         f"Generado desde cotización {rfq.numero}")
+
+    await db.flush()
+    await db.refresh(order)
+    await _attach_suppliers(db, [order])
+    return order
+
+
+# ── Smart Replenishment & Demand Forecast (AI) ────────────────────────────────
+
+async def calculate_smart_replenishment_preview(
+    db: AsyncSession,
+    company_id: str,
+    supplier_id: str | None = None,
+    categoria_id: str | None = None,
+    dias_cobertura: int = 30,
+    lead_time_dias: int = 3,
+    dias_historial_ventas: int = 30,
+    factor_fin_semana: bool = False,
+    factor_fin_mes: bool = False,
+    factor_clima: str = "normal",
+    factor_evento: str = "normal",
+    solo_quiebre_o_bajo: bool = False,
+    search: str | None = None,
+    limit: int = 500,
+) -> dict:
+    cid = company_id
+    dias_hist = max(dias_historial_ventas, 7)
+    
+    # Etiquetas de los 4 meses anteriores en español (cronológico: M-4, M-3, M-2, M-1)
+    month_names_es = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Set", "Oct", "Nov", "Dic"]
+    today = date.today()
+    cur_year = today.year
+    cur_month = today.month
+    
+    mes_actual_label = month_names_es[cur_month - 1]
+    meses_labels = []
+    for i in [4, 3, 2, 1]:
+        m = cur_month - i
+        y = cur_year
+        while m <= 0:
+            m += 12
+            y -= 1
+        meses_labels.append(month_names_es[m - 1])
+    
+    where_clauses = ["p.company_id = :cid", "p.activo = true", "p.nombre NOT LIKE 'Producto legacy #%'"]
+    params: dict = {"cid": cid, "days": dias_hist, "limit": limit}
+    
+    if supplier_id:
+        params["supplier_id"] = supplier_id
+        where_clauses.append("""
+            (
+                p.supplier_id = :supplier_id
+                OR last_sup.last_sup_id = :supplier_id
+                OR EXISTS (
+                    SELECT 1 FROM purchase_order_items poi2
+                    JOIN purchase_orders po2 ON po2.id = poi2.purchase_order_id
+                    WHERE po2.supplier_id = :supplier_id AND poi2.product_id = p.id
+                )
+                OR EXISTS (
+                    SELECT 1 FROM supplier_price_history sph2
+                    WHERE sph2.supplier_id = :supplier_id AND sph2.product_id = p.id
+                )
+            )
+        """)
+        
+    if categoria_id:
+        params["cat_id"] = categoria_id
+        where_clauses.append("p.categoria_id = :cat_id")
+        
+    if search and search.strip():
+        params["search"] = f"%{search.strip()}%"
+        where_clauses.append("(p.nombre ILIKE :search OR p.sku ILIKE :search OR p.codigo_barra ILIKE :search)")
+
+    sql = f"""
+        SELECT 
+            p.id,
+            p.nombre,
+            p.sku,
+            p.codigo_barra,
+            p.unidad_medida,
+            COALESCE(p.costo_promedio, 0) as costo_promedio,
+            COALESCE(p.ultimo_costo, 0) as ultimo_costo,
+            COALESCE(p.ultimo_costo, p.costo_promedio, 0) as costo_estimado,
+            COALESCE(p.iva_tasa, 10) as iva_tasa,
+            p.categoria_id,
+            COALESCE(stk.total_stock, 0) as stock_actual,
+            COALESCE(sales.total_vendido, 0) as total_vendido_periodo,
+            COALESCE(po_transit.total_en_transito, 0) as stock_en_transito,
+            COALESCE(sales_4m.v_mes_actual, 0) as v_mes_actual,
+            COALESCE(sales_4m.v_m1, 0) as v_m1,
+            COALESCE(sales_4m.v_m2, 0) as v_m2,
+            COALESCE(sales_4m.v_m3, 0) as v_m3,
+            COALESCE(sales_4m.v_m4, 0) as v_m4,
+            COALESCE(sales_4m.v_promo_qty, 0) as v_promo_qty,
+            COALESCE(promo_flag.en_promo_activa, false) as en_promo_flag,
+            COALESCE(p.supplier_id, last_sup.last_sup_id) as last_sup_id,
+            COALESCE(p_sup.razon_social, last_sup.last_sup_name) as last_sup_name
+        FROM products p
+        LEFT JOIN suppliers p_sup ON p_sup.id = p.supplier_id
+        LEFT JOIN (
+            SELECT product_id, SUM(cantidad) as total_stock
+            FROM stock
+            GROUP BY product_id
+        ) stk ON stk.product_id = p.id
+        LEFT JOIN (
+            SELECT si.product_id, SUM(si.cantidad) as total_vendido
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            WHERE s.company_id = :cid
+              AND s.estado = 'confirmado'
+              AND s.fecha >= NOW() - make_interval(days => :days)
+            GROUP BY si.product_id
+        ) sales ON sales.product_id = p.id
+        LEFT JOIN (
+            SELECT 
+                si.product_id,
+                SUM(CASE WHEN s.fecha >= DATE_TRUNC('month', NOW()) THEN si.cantidad ELSE 0 END) as v_mes_actual,
+                SUM(CASE WHEN s.fecha >= DATE_TRUNC('month', NOW() - INTERVAL '1 month') AND s.fecha < DATE_TRUNC('month', NOW()) THEN si.cantidad ELSE 0 END) as v_m1,
+                SUM(CASE WHEN s.fecha >= DATE_TRUNC('month', NOW() - INTERVAL '2 month') AND s.fecha < DATE_TRUNC('month', NOW() - INTERVAL '1 month') THEN si.cantidad ELSE 0 END) as v_m2,
+                SUM(CASE WHEN s.fecha >= DATE_TRUNC('month', NOW() - INTERVAL '3 month') AND s.fecha < DATE_TRUNC('month', NOW() - INTERVAL '2 month') THEN si.cantidad ELSE 0 END) as v_m3,
+                SUM(CASE WHEN s.fecha >= DATE_TRUNC('month', NOW() - INTERVAL '4 month') AND s.fecha < DATE_TRUNC('month', NOW() - INTERVAL '3 month') THEN si.cantidad ELSE 0 END) as v_m4,
+                SUM(CASE WHEN (COALESCE(si.descuento_monto, 0) > 0 OR COALESCE(si.descuento_pct, 0) > 0) AND s.fecha >= DATE_TRUNC('month', NOW() - INTERVAL '4 month') THEN si.cantidad ELSE 0 END) as v_promo_qty
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            WHERE s.company_id = :cid
+              AND s.estado = 'confirmado'
+              AND s.fecha >= DATE_TRUNC('month', NOW() - INTERVAL '4 month')
+            GROUP BY si.product_id
+        ) sales_4m ON sales_4m.product_id = p.id
+        LEFT JOIN (
+            SELECT DISTINCT unnest(pr.producto_ids)::uuid as product_id, true as en_promo_activa
+            FROM promotions pr
+            WHERE pr.company_id = :cid
+              AND (pr.estado = 'activa' OR pr.activo = true)
+              AND pr.producto_ids IS NOT NULL
+              AND (pr.valido_hasta IS NULL OR pr.valido_hasta >= CURRENT_DATE - INTERVAL '120 days')
+        ) promo_flag ON promo_flag.product_id = p.id
+        LEFT JOIN (
+            SELECT DISTINCT ON (poi_last.product_id)
+                poi_last.product_id,
+                po_last.supplier_id as last_sup_id,
+                sup_last.razon_social as last_sup_name
+            FROM purchase_order_items poi_last
+            JOIN purchase_orders po_last ON po_last.id = poi_last.purchase_order_id
+            JOIN suppliers sup_last ON sup_last.id = po_last.supplier_id
+            WHERE po_last.company_id = :cid
+            ORDER BY poi_last.product_id, po_last.fecha DESC
+        ) last_sup ON last_sup.product_id = p.id
+        LEFT JOIN (
+            SELECT poi.product_id, SUM(poi.cantidad - COALESCE(poi.cantidad_recibida, 0)) as total_en_transito
+            FROM purchase_order_items poi
+            JOIN purchase_orders po ON po.id = poi.purchase_order_id
+            WHERE po.company_id = :cid
+              AND po.estado IN ('enviada', 'confirmada', 'parcial')
+              AND po.fecha >= NOW() - make_interval(days => 60)
+              AND poi.cantidad > COALESCE(poi.cantidad_recibida, 0)
+            GROUP BY poi.product_id
+        ) po_transit ON po_transit.product_id = p.id
+        WHERE {" AND ".join(where_clauses)}
+        ORDER BY COALESCE(sales.total_vendido, 0) DESC
+        LIMIT :limit
+    """
+    
+    result = await db.execute(text(sql), params)
+    rows = result.fetchall()
+    
+    items = []
+    total_quiebres = 0
+    total_bajos = 0
+    total_sugeridos = 0
+    monto_total_estimado = Decimal("0")
+    
+    for r in rows:
+        pid = r[0]
+        nombre = r[1]
+        sku = r[2]
+        cod_barra = r[3]
+        unidad = r[4] or "UN"
+        costo_prom = Decimal(str(r[5]))
+        costo_ult = Decimal(str(r[6]))
+        costo_est = Decimal(str(r[7]))
+        costo_unit = costo_ult if costo_ult > 0 else (costo_est if costo_est > 0 else costo_prom)
+        iva_tasa = Decimal(str(r[8]))
+        stock_actual = Decimal(str(r[10]))
+        ventas_periodo = Decimal(str(r[11]))
+        stock_en_transito = Decimal(str(r[12]))
+        
+        vm_actual = float(r[13])
+        vm1 = float(r[14])
+        vm2 = float(r[15])
+        vm3 = float(r[16])
+        vm4 = float(r[17])
+        v_promo_qty = float(r[18])
+        en_promo_flag = bool(r[19])
+        ultimo_proveedor_id = str(r[20]) if r[20] else None
+        ultimo_proveedor_nombre = str(r[21]) if r[21] else None
+        
+        # Variación porcentual de costo (Último costo vs Costo promedio)
+        if costo_prom > Decimal("0") and costo_ult > Decimal("0"):
+            var_costo_pct = float(round(((costo_ult - costo_prom) / costo_prom) * Decimal("100"), 1))
+        else:
+            var_costo_pct = 0.0
+            
+        # Pulso de venta (Tendencia comparando mes reciente con promedio de meses previos)
+        prom_prev = (vm2 + vm3 + vm4) / 3.0 if (vm2 + vm3 + vm4) > 0 else vm1
+        if prom_prev > 0:
+            ratio_pulso = vm1 / prom_prev
+            if ratio_pulso >= 1.25:
+                pulso_tendencia = "acelerando"
+            elif ratio_pulso <= 0.75:
+                pulso_tendencia = "desacelerando"
+            else:
+                pulso_tendencia = "estable"
+        else:
+            pulso_tendencia = "estable"
+
+        # Demanda diaria base y ajuste por promociones que nublan el análisis
+        explicaciones = []
+        tiene_promo = en_promo_flag or v_promo_qty > 0
+        promo_info = None
+        total_4m = vm1 + vm2 + vm3 + vm4
+        
+        ventas_periodo_calc = ventas_periodo
+        if tiene_promo:
+            if v_promo_qty > 0 and total_4m > 0 and (v_promo_qty / total_4m) >= 0.15:
+                promo_info = f"Promo detectada ({int(v_promo_qty)} un. en oferta). Demanda normalizada para evitar sobre-compra."
+                exceso_estimado = Decimal(str(v_promo_qty * 0.35))
+                ventas_periodo_calc = max(Decimal("0"), ventas_periodo - (exceso_estimado / Decimal("4.0")))
+                explicaciones.append("Demanda normalizada por promociones pasadas")
+            elif en_promo_flag:
+                promo_info = "Producto con promoción activa o reciente en tienda."
+
+        demanda_diaria_base = (ventas_periodo_calc / Decimal(str(dias_hist))).quantize(Decimal("0.01"))
+        
+        # Multiplicadores de contexto
+        mult = Decimal("1.0")
+        nombre_lower = nombre.lower()
+        is_bebida_o_asado = any(w in nombre_lower for w in ["cerv", "coca", "pepsi", "fanta", "agua", "vino", "carne", "costilla", "vacio", "carbon", "snack"])
+        is_canasta_o_limp = any(w in nombre_lower for w in ["arroz", "aceite", "harina", "azucar", "fideo", "leche", "lavandina", "jabon", "detergente", "papel"])
+        is_frio_item = any(w in nombre_lower for w in ["cafe", "te ", "choco", "sopa", "fideo", "harina", "puchero", "guiso"])
+        is_calor_item = any(w in nombre_lower for w in ["hielo", "agua", "cerv", "gaseosa", "jugo", "helado"])
+        
+        if factor_fin_semana:
+            if is_bebida_o_asado:
+                mult *= Decimal("1.40")
+                explicaciones.append("+40% Fin de semana (alta rotación)")
+            else:
+                mult *= Decimal("1.15")
+                explicaciones.append("+15% Fin de semana")
+                
+        if factor_fin_mes:
+            if is_canasta_o_limp:
+                mult *= Decimal("1.35")
+                explicaciones.append("+35% Cobro de salarios / Canasta básica")
+            else:
+                mult *= Decimal("1.10")
+                explicaciones.append("+10% Fin de mes")
+                
+        if factor_clima == "calor":
+            if is_calor_item:
+                mult *= Decimal("1.30")
+                explicaciones.append("+30% Ola de calor (bebidas/refrigerados)")
+        elif factor_clima == "frio":
+            if is_frio_item:
+                mult *= Decimal("1.35")
+                explicaciones.append("+35% Frente frío (infusiones/calientes/harinas)")
+        elif factor_clima == "lluvia":
+            if any(w in nombre_lower for w in ["pan", "harina", "aceite"]):
+                mult *= Decimal("1.25")
+                explicaciones.append("+25% Lluvia (panificados)")
+                
+        if factor_evento == "feriado":
+            if is_bebida_o_asado:
+                mult *= Decimal("1.35")
+                explicaciones.append("+35% Feriado / Reuniones")
+        elif factor_evento == "semana_santa":
+            if any(w in nombre_lower for w in ["pesc", "queso", "harina", "almidon", "choclo"]):
+                mult *= Decimal("1.60")
+                explicaciones.append("+60% Tradición Semana Santa")
+        elif factor_evento == "fin_de_ano":
+            if any(w in nombre_lower for w in ["sidra", "panet", "cerv", "carne", "turron"]):
+                mult *= Decimal("1.50")
+                explicaciones.append("+50% Fiestas de Fin de Año")
+
+        demanda_ajustada = (demanda_diaria_base * mult).quantize(Decimal("0.01"))
+        
+        # Parámetros Estadísticos de Inventario
+        lead_time_dec = Decimal(str(lead_time_dias))
+        sigma_estimado = demanda_ajustada * Decimal("0.35")
+        import math
+        sqrt_lead = Decimal(str(round(math.sqrt(float(lead_time_dias)), 2)))
+        stock_seguridad = max(
+            Decimal("1.0") if demanda_ajustada > 0 else Decimal("0.0"),
+            (Decimal("1.65") * sigma_estimado * sqrt_lead).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        )
+        
+        punto_reorden = ((demanda_ajustada * lead_time_dec) + stock_seguridad).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
+        # Días de stock restantes (autonomía basada en stock físico real)
+        if demanda_ajustada > Decimal("0.001"):
+            dias_restantes = (stock_actual / demanda_ajustada).quantize(Decimal("0.1"))
+        else:
+            dias_restantes = Decimal("999.0") if stock_actual > 0 else Decimal("0.0")
+            
+        dias_totales_objetivo = Decimal(str(dias_cobertura + lead_time_dias))
+        target_stock = (demanda_ajustada * dias_totales_objetivo).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
+        if stock_actual <= 0 or stock_actual <= (demanda_ajustada * lead_time_dec) or stock_actual <= stock_seguridad:
+            autonomia_estado = "critico"
+            total_quiebres += 1
+        elif stock_actual <= punto_reorden:
+            autonomia_estado = "bajo"
+            total_bajos += 1
+        elif stock_actual <= target_stock:
+            autonomia_estado = "optimo"
+        else:
+            autonomia_estado = "sobrestock"
+            
+        if solo_quiebre_o_bajo and autonomia_estado not in ("critico", "bajo"):
+            continue
+            
+        # Cantidad sugerida: basada puramente en stock físico en góndola/depósito
+        deficit = max(Decimal("0"), target_stock - stock_actual)
+        cantidad_sugerida = deficit
+        
+        if cantidad_sugerida > Decimal("0"):
+            total_sugeridos += 1
+            
+        subtotal_item = (cantidad_sugerida * costo_unit).quantize(Decimal("1"))
+        monto_total_estimado += subtotal_item
+        
+        explicacion_texto = "; ".join(explicaciones) if explicaciones else f"Demanda calculada sobre ventas reales ({dias_hist}d) y ritmo de 4 meses."
+        
+        items.append({
+            "product_id": pid,
+            "nombre": nombre,
+            "sku": sku,
+            "codigo_barra": cod_barra,
+            "unidad_medida": unidad,
+            "stock_actual": float(stock_actual),
+            "stock_en_transito": float(stock_en_transito),
+            "ventas_periodo": float(ventas_periodo),
+            "ventas_mes_actual": vm_actual,
+            "ventas_mes_1": vm1,
+            "ventas_mes_2": vm2,
+            "ventas_mes_3": vm3,
+            "ventas_mes_4": vm4,
+            "costo_promedio": float(costo_prom),
+            "ultimo_costo": float(costo_ult),
+            "variacion_costo_pct": var_costo_pct,
+            "pulso_tendencia": pulso_tendencia,
+            "tiene_promocion_detectada": tiene_promo,
+            "promocion_info": promo_info,
+            "ultimo_proveedor_id": ultimo_proveedor_id,
+            "ultimo_proveedor_nombre": ultimo_proveedor_nombre,
+            "demanda_diaria_base": float(demanda_diaria_base),
+            "multiplicador_estacional": float(mult),
+            "demanda_diaria_ajustada": float(demanda_ajustada),
+            "dias_stock_restantes": float(dias_restantes),
+            "autonomia_estado": autonomia_estado,
+            "stock_seguridad": float(stock_seguridad),
+            "punto_reorden": float(punto_reorden),
+            "target_stock": float(target_stock),
+            "cantidad_sugerida": float(cantidad_sugerida),
+            "costo_unitario_estimado": float(costo_unit),
+            "subtotal_estimado": float(subtotal_item),
+            "iva_tasa": float(iva_tasa or 10),
+            "explicacion_ia": explicacion_texto,
+            "generada_automaticamente": True,
+        })
+        
+    return {
+        "total_evaluados": len(rows),
+        "total_quiebres": total_quiebres,
+        "total_bajos": total_bajos,
+        "total_sugeridos": total_sugeridos,
+        "monto_total_estimado": float(monto_total_estimado),
+        "meses_labels": meses_labels,
+        "mes_actual_label": mes_actual_label,
+        "items": items,
+    }
+
+
+async def create_po_from_replenishment(db: AsyncSession, data) -> PurchaseOrder:
+    from api.src.purchases.schemas import POCreate
+    po_create_data = POCreate(
+        company_id=data.company_id,
+        supplier_id=data.supplier_id,
+        fecha_entrega_estimada=data.fecha_entrega_estimada,
+        moneda=data.moneda,
+        prioridad=data.prioridad,
+        condiciones_pago=data.condiciones_pago,
+        observaciones=data.observaciones or "Generado mediante Asistente de Sugerencia de Compra IA",
+        user_id=data.user_id,
+        created_by_name=data.user_name,
+        items=data.items,
+    )
+    return await create_purchase_order(db, po_create_data)
+
+
+async def create_multi_po_from_replenishment(db: AsyncSession, data) -> dict:
+    from api.src.purchases.schemas import POCreate
+    created_orders = []
+    
+    for grp in data.orders:
+        if not grp.items:
+            continue
+            
+        items_payload = [
+            {
+                "product_id": it.product_id,
+                "variant_id": it.variant_id,
+                "descripcion": it.descripcion or "Item sugerido",
+                "cantidad": it.cantidad,
+                "precio_unitario": it.precio_unitario,
+                "descuento_pct": it.descuento_pct or 0,
+                "iva_tasa": it.iva_tasa or 10,
+            }
+            for it in grp.items
+            if it.cantidad > 0
+        ]
+        
+        if not items_payload:
+            continue
+            
+        po_create_data = POCreate(
+            company_id=data.company_id,
+            supplier_id=grp.supplier_id,
+            fecha_entrega_estimada=grp.fecha_entrega_estimada,
+            moneda=grp.moneda or "PYG",
+            prioridad=grp.prioridad or "normal",
+            condiciones_pago=grp.condiciones_pago,
+            observaciones=grp.observaciones or "Generado mediante Emisión Múltiple por Proveedor (Asistente IA)",
+            user_id=data.user_id,
+            created_by_name=data.user_name,
+            items=items_payload,
+        )
+        order = await create_purchase_order(db, po_create_data)
+        created_orders.append(order)
+        
+    return {
+        "total_created": len(created_orders),
+        "orders": created_orders
+    }
+
+
+
+async def list_lost_demand(
+    db: AsyncSession,
+    company_id: Optional[str] = None,
+    estado: Optional[str] = None,
+):
+    from .models import CustomerLostDemand
+    stmt = select(CustomerLostDemand)
+    if company_id:
+        stmt = stmt.where(CustomerLostDemand.company_id == company_id)
+    if estado:
+        stmt = stmt.where(CustomerLostDemand.estado == estado)
+    stmt = stmt.order_by(CustomerLostDemand.created_at.desc())
+    res = await db.execute(stmt)
+    return res.scalars().all()
+
+
+async def create_lost_demand(
+    db: AsyncSession,
+    data,
+):
+    from .models import CustomerLostDemand
+    item = CustomerLostDemand(
+        company_id=data.company_id,
+        producto_nombre=data.producto_nombre,
+        categoria=data.categoria,
+        marca=data.marca,
+        notas=data.notas,
+        cliente_nombre=data.cliente_nombre,
+        cliente_contacto=data.cliente_contacto,
+        customer_id=data.customer_id,
+        urgencia=data.urgencia or "normal",
+        cajero_id=data.cajero_id,
+        cajero_nombre=data.cajero_nombre,
+        caja_id=data.caja_id,
+        estado="PENDIENTE",
+    )
+    db.add(item)
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
+async def update_lost_demand(
+    db: AsyncSession,
+    demand_id: str,
+    data,
+):
+    from .models import CustomerLostDemand
+    stmt = select(CustomerLostDemand).where(CustomerLostDemand.id == demand_id)
+    res = await db.execute(stmt)
+    item = res.scalar_one_or_none()
+    if not item:
+        return None
+    if data.estado is not None:
+        item.estado = data.estado
+    if data.notas is not None:
+        item.notas = data.notas
+    if data.orden_compra_id is not None:
+        item.orden_compra_id = data.orden_compra_id
+    await db.commit()
+    await db.refresh(item)
+    return item

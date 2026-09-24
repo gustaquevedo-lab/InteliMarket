@@ -1,0 +1,114 @@
+---
+// Footer: Official IntelliHouse backing and enterprise navigation
+import Logo from './Logo.astro';
+---
+
+<footer class="bg-surface-container-lowest border-t border-outline-variant/20 pt-16 pb-12 transition-colors duration-200">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-10 pb-12 border-b border-outline-variant/20">
+      <!-- Col 1: Brand & Backing (2 cols on lg) -->
+      <div class="lg:col-span-2">
+        <div class="mb-4">
+          <Logo showTagline={false} />
+        </div>
+        <p class="text-xs sm:text-sm text-on-surface-variant leading-relaxed max-w-sm mb-6">
+          El sistema operativo de misión crítica para supermercados, mayoristas y retail en Paraguay. Diseñado para garantizar cero caídas, cumplimiento SIFEN y control total de rentabilidad.
+        </p>
+        <div class="flex items-center gap-2 text-xs text-on-surface-variant font-mono">
+          <span>Un producto de</span>
+          <a
+            href="https://intellihouse.lat"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-brand-mint font-bold hover:underline"
+          >
+            IntelliHouse (intellihouse.lat)
+          </a>
+        </div>
+      </div>
+
+      <!-- Col 2: Navigation -->
+      <div>
+        <h4 class="font-headline text-xs font-bold uppercase tracking-wider text-on-surface mb-4">
+          Navegación
+        </h4>
+        <ul class="space-y-2.5 text-xs text-on-surface-variant font-medium">
+          <li><a href="#problema" class="hover:text-brand-mint transition-colors">El Problema de Caja</a></li>
+          <li><a href="#solucion" class="hover:text-brand-mint transition-colors">Solución por Vertical</a></li>
+          <li><a href="#tecnica" class="hover:text-brand-mint transition-colors">Solidez Técnica</a></li>
+          <li><a href="#casos" class="hover:text-brand-mint transition-colors">Casos Reales</a></li>
+          <li><a href="#demo" class="hover:text-brand-mint transition-colors font-bold text-on-surface">Agendá una Demo</a></li>
+        </ul>
+      </div>
+
+      <!-- Col 3: Capacidades Clave -->
+      <div>
+        <h4 class="font-headline text-xs font-bold uppercase tracking-wider text-on-surface mb-4">
+          Capacidades
+        </h4>
+        <ul class="space-y-2.5 text-xs text-on-surface-variant font-mono">
+          <li class="flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-brand-mint"></span>
+            100% Offline-Ready
+          </li>
+          <li class="flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-brand-mint"></span>
+            SIFEN e-Kuatia Directo
+          </li>
+          <li class="flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-brand-blue"></span>
+            Multimoneda PYG/BRL/USD
+          </li>
+          <li class="flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-tertiary"></span>
+            Integración con Balanzas
+          </li>
+          <li class="flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+            Arqueos Quirúrgicos
+          </li>
+        </ul>
+      </div>
+
+      <!-- Col 4: Contacto Oficial -->
+      <div>
+        <h4 class="font-headline text-xs font-bold uppercase tracking-wider text-on-surface mb-4">
+          Contacto Directo
+        </h4>
+        <ul class="space-y-3 text-xs text-on-surface-variant">
+          <li class="flex items-center gap-2">
+            <span class="material-symbols-outlined text-[18px] text-brand-mint">chat</span>
+            <a
+              href="https://wa.me/595994516360"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="hover:text-on-surface font-semibold"
+            >
+              +595 994 516360
+            </a>
+          </li>
+          <li class="flex items-center gap-2">
+            <span class="material-symbols-outlined text-[18px] text-brand-blue">mail</span>
+            <a href="mailto:intelimarket@intellihouse.lat" class="hover:text-on-surface">
+              intelimarket@intellihouse.lat
+            </a>
+          </li>
+          <li class="flex items-start gap-2">
+            <span class="material-symbols-outlined text-[18px] text-on-surface-variant shrink-0 mt-0.5">location_on</span>
+            <span>Asunción • CDE • Encarnación • Todo Paraguay</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Bottom Bar -->
+    <div class="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-on-surface-variant font-mono">
+      <div>
+        © 2026 InteliMarket by IntelliHouse. Todos los derechos reservados.
+      </div>
+      <div class="flex items-center gap-4">
+        <span>Dominio oficial: <strong>intelimarket.intellihouse.lat</strong></span>
+      </div>
+    </div>
+  </div>
+</footer>

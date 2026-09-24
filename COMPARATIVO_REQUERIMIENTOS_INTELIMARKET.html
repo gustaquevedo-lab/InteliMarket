@@ -1,0 +1,1884 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Matriz Comparativa de Requerimientos vs InteliMarket | Extra Supermercado</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-main: #0b0f19;
+      --bg-card: #111827;
+      --bg-card-alt: #162032;
+      --border: #1e293b;
+      --border-focus: #3b82f6;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --accent-emerald: #10b981;
+      --accent-purple: #8b5cf6;
+      --accent-amber: #f59e0b;
+      --accent-rose: #ef4444;
+      --accent-cyan: #06b6d4;
+      --radius-lg: 16px;
+      --radius-md: 10px;
+      --radius-sm: 6px;
+      --shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-main);
+      color: var(--text-main);
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      line-height: 1.5;
+      padding-bottom: 80px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    h1, h2, h3, h4, .brand-font {
+      font-family: 'Outfit', sans-serif;
+    }
+
+    code, pre, .font-mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Container */
+    .container {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* Top Sticky Header */
+    .header-bar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(11, 15, 25, 0.88);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 0;
+      transition: all 0.2s ease;
+    }
+
+    .header-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .brand-group {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .brand-badge {
+      background: linear-gradient(135deg, #1e3a8a, #3b82f6);
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      font-size: 20px;
+      color: white;
+      box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+    }
+
+    .brand-title {
+      font-size: 1.25rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: #fff;
+    }
+
+    .brand-subtitle {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .tag-paraguay {
+      background: rgba(239, 68, 68, 0.15);
+      color: #fca5a5;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 600;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all 0.18s ease;
+      border: 1px solid transparent;
+      text-decoration: none;
+    }
+
+    .btn-primary {
+      background: #3b82f6;
+      color: white;
+    }
+    .btn-primary:hover {
+      background: #2563eb;
+      box-shadow: 0 0 16px rgba(59, 130, 246, 0.35);
+    }
+
+    .btn-outline {
+      background: rgba(255, 255, 255, 0.04);
+      color: #e2e8f0;
+      border-color: var(--border);
+    }
+    .btn-outline:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: #475569;
+    }
+
+    .btn-emerald {
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border-color: rgba(16, 185, 129, 0.3);
+    }
+    .btn-emerald:hover {
+      background: rgba(16, 185, 129, 0.25);
+    }
+
+    /* KPI Summary Hero */
+    .hero-summary {
+      margin-top: 28px;
+      background: linear-gradient(180deg, rgba(30, 41, 59, 0.5) 0%, rgba(17, 24, 39, 0.7) 100%);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+    }
+
+    .kpi-card {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: var(--radius-md);
+      padding: 16px 20px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .kpi-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 4px;
+      height: 100%;
+    }
+
+    .kpi-card.superado::before { background: var(--accent-purple); }
+    .kpi-card.cumple::before { background: var(--accent-emerald); }
+    .kpi-card.parcial::before { background: var(--accent-amber); }
+    .kpi-card.no-cumple::before { background: var(--accent-rose); }
+    .kpi-card.observacion::before { background: var(--accent-cyan); }
+    .kpi-card.apuntes::before { background: var(--primary); }
+
+    .kpi-value {
+      font-size: 2rem;
+      font-weight: 800;
+      line-height: 1.1;
+      margin-bottom: 4px;
+    }
+
+    .kpi-label {
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+
+    .kpi-sub {
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      margin-top: 4px;
+    }
+
+    /* Filter & Controls Toolbar */
+    .controls-toolbar {
+      margin-top: 24px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 18px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .controls-top {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .search-input-wrap {
+      flex: 1;
+      min-width: 280px;
+      position: relative;
+    }
+
+    .search-input {
+      width: 100%;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--border);
+      color: var(--text-main);
+      padding: 10px 16px 10px 40px;
+      border-radius: var(--radius-md);
+      font-size: 0.88rem;
+      outline: none;
+      transition: all 0.2s ease;
+    }
+
+    .search-input:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-dim);
+    }
+
+    .filter-pills {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .pill {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 0.76rem;
+      font-weight: 600;
+      padding: 6px 14px;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .pill:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: #fff;
+    }
+
+    .pill.active {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: white;
+    }
+
+    .pill-count {
+      background: rgba(0, 0, 0, 0.3);
+      padding: 1px 6px;
+      border-radius: 10px;
+      font-size: 0.68rem;
+    }
+
+    /* Category Nav Strip */
+    .category-strip {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 6px;
+      scrollbar-width: thin;
+    }
+
+    .category-btn {
+      white-space: nowrap;
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      color: var(--text-muted);
+      font-size: 0.76rem;
+      font-weight: 500;
+      padding: 5px 12px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .category-btn:hover {
+      background: rgba(255, 255, 255, 0.06);
+      color: #fff;
+    }
+
+    .category-btn.active {
+      background: rgba(59, 130, 246, 0.15);
+      border-color: rgba(59, 130, 246, 0.4);
+      color: #60a5fa;
+      font-weight: 600;
+    }
+
+    /* Requirement Cards List */
+    .cards-section {
+      margin-top: 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .req-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      transition: border-color 0.2s ease, transform 0.2s ease;
+    }
+
+    .req-card:hover {
+      border-color: #334155;
+    }
+
+    .req-card-header {
+      padding: 20px 24px;
+      background: rgba(22, 32, 50, 0.6);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .req-header-left {
+      flex: 1;
+      min-width: 320px;
+    }
+
+    .req-category-tag {
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #60a5fa;
+      margin-bottom: 6px;
+      display: inline-block;
+    }
+
+    .req-title {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .req-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 0.74rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    .badge-superado {
+      background: rgba(139, 92, 246, 0.15);
+      color: #c084fc;
+      border: 1px solid rgba(139, 92, 246, 0.35);
+    }
+
+    .badge-cumple {
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.35);
+    }
+
+    .badge-parcial {
+      background: rgba(245, 158, 11, 0.15);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.35);
+    }
+
+    .badge-no-cumple {
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.35);
+    }
+
+    .badge-observacion {
+      background: rgba(6, 182, 212, 0.15);
+      color: #22d3ee;
+      border: 1px solid rgba(6, 182, 212, 0.35);
+    }
+
+    /* Inner 3-Column Comparative Layout */
+    .req-body {
+      padding: 24px;
+      display: grid;
+      grid-template-columns: 1fr 1.2fr 1fr;
+      gap: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    @media (max-width: 1080px) {
+      .req-body {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .col-box {
+      background: rgba(15, 23, 42, 0.45);
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      border-radius: var(--radius-md);
+      padding: 16px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .col-title {
+      font-size: 0.76rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .col-pedidos .col-title { color: #cbd5e1; }
+    .col-sistema .col-title { color: #60a5fa; }
+    .col-veredicto .col-title { color: #c084fc; }
+
+    .content-list {
+      list-style: none;
+      font-size: 0.82rem;
+      color: #cbd5e1;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .content-list li {
+      position: relative;
+      padding-left: 18px;
+      line-height: 1.45;
+    }
+
+    .content-list li::before {
+      content: '•';
+      position: absolute;
+      left: 4px;
+      color: var(--text-dim);
+    }
+
+    .file-ref {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(59, 130, 246, 0.1);
+      border: 1px solid rgba(59, 130, 246, 0.25);
+      color: #93c5fd;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      margin: 2px 0;
+      word-break: break-all;
+    }
+
+    .db-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(139, 92, 246, 0.1);
+      border: 1px solid rgba(139, 92, 246, 0.25);
+      color: #c084fc;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      margin: 2px 0;
+    }
+
+    .callout {
+      padding: 10px 12px;
+      border-radius: var(--radius-sm);
+      font-size: 0.78rem;
+      line-height: 1.4;
+    }
+
+    .callout-purple {
+      background: rgba(139, 92, 246, 0.1);
+      border-left: 3px solid #8b5cf6;
+      color: #d8b4fe;
+    }
+
+    .callout-emerald {
+      background: rgba(16, 185, 129, 0.1);
+      border-left: 3px solid #10b981;
+      color: #6ee7b7;
+    }
+
+    .callout-amber {
+      background: rgba(245, 158, 11, 0.1);
+      border-left: 3px solid #f59e0b;
+      color: #fcd34d;
+    }
+
+    .callout-rose {
+      background: rgba(239, 68, 68, 0.1);
+      border-left: 3px solid #ef4444;
+      color: #fca5a5;
+    }
+
+    .callout-cyan {
+      background: rgba(6, 182, 212, 0.1);
+      border-left: 3px solid #06b6d4;
+      color: #67e8f9;
+    }
+
+    /* User Notes Space (Apuntes) */
+    .user-notes-section {
+      padding: 18px 24px;
+      background: rgba(11, 15, 25, 0.5);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .notes-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .notes-title {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #f1f5f9;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .notes-saved-indicator {
+      font-size: 0.7rem;
+      color: var(--accent-emerald);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    .notes-saved-indicator.show {
+      opacity: 1;
+    }
+
+    .notes-textarea {
+      width: 100%;
+      min-height: 80px;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: #f8fafc;
+      padding: 12px 14px;
+      font-size: 0.84rem;
+      font-family: inherit;
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .notes-textarea:focus {
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+    }
+
+    .notes-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.72rem;
+      color: var(--text-dim);
+    }
+
+    .notes-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn-xs {
+      padding: 3px 8px;
+      font-size: 0.7rem;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      cursor: pointer;
+    }
+    .btn-xs:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+    }
+
+    /* Modal / Toast */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #fff;
+      padding: 12px 20px;
+      border-radius: var(--radius-md);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      font-size: 0.84rem;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      transform: translateY(100px);
+      opacity: 0;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 1000;
+    }
+
+    .toast.show {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    /* Media Print */
+    @media print {
+      body {
+        background: #fff;
+        color: #000;
+        padding-bottom: 0;
+      }
+      .header-bar, .hero-summary, .controls-toolbar, .header-actions, .notes-actions {
+        display: none !important;
+      }
+      .req-card {
+        page-break-inside: avoid;
+        border: 1px solid #ccc;
+        margin-bottom: 20px;
+        background: #fff;
+        color: #000;
+        box-shadow: none;
+      }
+      .req-card-header {
+        background: #f1f5f9;
+        color: #000;
+      }
+      .req-title { color: #000; }
+      .req-body {
+        grid-template-columns: 1fr 1.2fr 1fr;
+        background: #fff;
+      }
+      .col-box {
+        background: #fafafa;
+        border: 1px solid #eee;
+      }
+      .content-list, .content-list li { color: #333; }
+      .notes-textarea {
+        background: #fff;
+        color: #000;
+        border: 1px solid #ccc;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Sticky Header -->
+  <header class="header-bar">
+    <div class="container header-content">
+      <div class="brand-group">
+        <div class="brand-badge">IM</div>
+        <div>
+          <h1 class="brand-title">InteliMarket · Matriz Comparativa y Diagnóstico Técnico</h1>
+          <div class="brand-subtitle">
+            <span>Extra Supermercado (GRUPO SANTA TERESA E.A.S. - RUC 80150377-9)</span>
+            <span class="tag-paraguay">🇵🇾 America/Asuncion</span>
+            <span>· Vertical Supermercado</span>
+          </div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-emerald" onclick="exportUserNotes('markdown')">
+          📋 Exportar Plan de Trabajo
+        </button>
+        <button class="btn btn-outline" onclick="exportUserNotes('json')">
+          📥 Exportar Apuntes (JSON)
+        </button>
+        <button class="btn btn-outline" onclick="window.print()">
+          🖨️ Imprimir / Guardar PDF
+        </button>
+        <button class="btn btn-primary" onclick="saveAllNotes()">
+          💾 Guardar Todo
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- KPI Hero Summary -->
+    <section class="hero-summary">
+      <div style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 10px;">
+        <div>
+          <span style="font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; color: #93c5fd;">AUDITORÍA INTEGRAL DE ESPECIFICACIONES (15 PÁGINAS PDF)</span>
+          <h2 style="font-size: 1.4rem; font-weight: 800; color: #fff; margin-top: 2px;">Cotejo Técnico: Pedidos de Software vs. Capacidades Reales en Producción</h2>
+        </div>
+        <div style="font-size: 0.8rem; color: var(--text-muted);">
+          Total Evaluados: <b id="stat-total" style="color: #fff;">0</b> puntos · Cobertura Total / Superación: <b id="stat-pct" style="color: #34d399;">0%</b>
+        </div>
+      </div>
+
+      <div class="hero-grid">
+        <div class="kpi-card superado">
+          <div class="kpi-value" id="kpi-superado" style="color: #c084fc;">0</div>
+          <div class="kpi-label">Superados / Por Encima</div>
+          <div class="kpi-sub">Mejor que lo solicitado</div>
+        </div>
+        <div class="kpi-card cumple">
+          <div class="kpi-value" id="kpi-cumple" style="color: #34d399;">0</div>
+          <div class="kpi-label">Implementado 100%</div>
+          <div class="kpi-sub">Cumple especificación exacta</div>
+        </div>
+        <div class="kpi-card parcial">
+          <div class="kpi-value" id="kpi-parcial" style="color: #fbbf24;">0</div>
+          <div class="kpi-label">Parcial / Requiere Filtro</div>
+          <div class="kpi-sub">Existe base técnica, afinar UI</div>
+        </div>
+        <div class="kpi-card no-cumple">
+          <div class="kpi-value" id="kpi-no-cumple" style="color: #f87171;">0</div>
+          <div class="kpi-label">No Implementado</div>
+          <div class="kpi-sub">A programar explícitamente</div>
+        </div>
+        <div class="kpi-card observacion">
+          <div class="kpi-value" id="kpi-obs" style="color: #22d3ee;">0</div>
+          <div class="kpi-label">Observaciones Sistema</div>
+          <div class="kpi-sub">Diagnóstico A-E resuelto</div>
+        </div>
+        <div class="kpi-card apuntes">
+          <div class="kpi-value" id="kpi-apuntes" style="color: #60a5fa;">0</div>
+          <div class="kpi-label">Mis Apuntes Activos</div>
+          <div class="kpi-sub">Guardados en navegador</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Filter and Search Toolbar -->
+    <section class="controls-toolbar">
+      <div class="controls-top">
+        <div class="search-input-wrap">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="searchInput" class="search-input" placeholder="Buscar por requerimiento, tabla, endpoint o apunte personal..." oninput="applyFilters()">
+        </div>
+        <div class="filter-pills">
+          <button class="pill active" data-status="all" onclick="setStatusFilter('all', this)">
+            Todos <span class="pill-count" id="count-all">0</span>
+          </button>
+          <button class="pill" data-status="superado" onclick="setStatusFilter('superado', this)">
+            ✨ Superados <span class="pill-count" id="count-superado">0</span>
+          </button>
+          <button class="pill" data-status="cumple" onclick="setStatusFilter('cumple', this)">
+            ✅ Cumple 100% <span class="pill-count" id="count-cumple">0</span>
+          </button>
+          <button class="pill" data-status="parcial" onclick="setStatusFilter('parcial', this)">
+            🟡 Parcial <span class="pill-count" id="count-parcial">0</span>
+          </button>
+          <button class="pill" data-status="no-cumple" onclick="setStatusFilter('no-cumple', this)">
+            🔴 No Implementado <span class="pill-count" id="count-no-cumple">0</span>
+          </button>
+          <button class="pill" data-status="observacion" onclick="setStatusFilter('observacion', this)">
+            ⚠️ Observaciones <span class="pill-count" id="count-observacion">0</span>
+          </button>
+          <button class="pill" id="filterOnlyNotesBtn" onclick="toggleOnlyWithNotes(this)">
+            ✍️ Solo con mis apuntes (<span id="notesCountBadge">0</span>)
+          </button>
+        </div>
+      </div>
+
+      <!-- Categories Scroll Strip -->
+      <div class="category-strip" id="categoryStrip">
+        <button class="category-btn active" data-cat="all" onclick="setCategoryFilter('all', this)">Todas las Secciones</button>
+        <button class="category-btn" data-cat="reglas_generales" onclick="setCategoryFilter('reglas_generales', this)">Reglas Generales Reportes</button>
+        <button class="category-btn" data-cat="cuentas_por_pagar" onclick="setCategoryFilter('cuentas_por_pagar', this)">1. Cuentas por Pagar (AP)</button>
+        <button class="category-btn" data-cat="cuentas_por_cobrar" onclick="setCategoryFilter('cuentas_por_cobrar', this)">2. Cuentas por Cobrar (AR)</button>
+        <button class="category-btn" data-cat="notas_credito" onclick="setCategoryFilter('notas_credito', this)">3. Notas de Crédito Proveedores</button>
+        <button class="category-btn" data-cat="ventas_proveedor" onclick="setCategoryFilter('ventas_proveedor', this)">4. Análisis Ventas x Proveedor</button>
+        <button class="category-btn" data-cat="stock_valorizado" onclick="setCategoryFilter('stock_valorizado', this)">5. Stock Valorizado</button>
+        <button class="category-btn" data-cat="ventas_utilidad" onclick="setCategoryFilter('ventas_utilidad', this)">6. Ventas con Utilidad</button>
+        <button class="category-btn" data-cat="cuotas_pagadas" onclick="setCategoryFilter('cuotas_pagadas', this)">7. Reporte Cuotas Pagadas</button>
+        <button class="category-btn" data-cat="pagos_proveedor" onclick="setCategoryFilter('pagos_proveedor', this)">8. Reporte Pagos x Proveedor</button>
+        <button class="category-btn" data-cat="registro_pagos" onclick="setCategoryFilter('registro_pagos', this)">9. Registro Pagos Proveedores</button>
+        <button class="category-btn" data-cat="operaciones_bancarias" onclick="setCategoryFilter('operaciones_bancarias', this)">10. Operaciones Bancarias</button>
+        <button class="category-btn" data-cat="transferencias_propias" onclick="setCategoryFilter('transferencias_propias', this)">11. Transferencias Propias</button>
+        <button class="category-btn" data-cat="movimientos_efectivo_banco" onclick="setCategoryFilter('movimientos_efectivo_banco', this)">12. Movimientos Efectivo & Banco</button>
+        <button class="category-btn" data-cat="gastos" onclick="setCategoryFilter('gastos', this)">13. Gastos</button>
+        <button class="category-btn" data-cat="gestion_personas" onclick="setCategoryFilter('gestion_personas', this)">14. Personas y Empresas</button>
+        <button class="category-btn" data-cat="observaciones_actuales" onclick="setCategoryFilter('observaciones_actuales', this)">Obs. Sistema Actual (A-E)</button>
+      </div>
+    </section>
+
+    <!-- Cards Section -->
+    <section class="cards-section" id="cardsContainer">
+      <!-- Injected Dynamically by Script -->
+    </section>
+  </main>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast">
+    <span id="toast-icon">💾</span>
+    <span id="toast-msg">Apunte guardado automáticamente</span>
+  </div>
+
+  <script>
+    // DATA MODEL: Comprehensive requirements and comparison
+    const COMPARATIVE_DATA = [
+      // ── REGLAS GENERALES ──
+      {
+        id: "RG-01",
+        category: "reglas_generales",
+        categoryLabel: "Reglas Generales para Todos los Reportes",
+        title: "Filtros Temporales (Fecha Inicial, Final y Fecha de Corte para saldos acumulados)",
+        status: "superado",
+        statusLabel: "Superado con Zona Horaria Asunción",
+        pedido: [
+          "Permitir seleccionar fecha inicial y fecha final en todos los reportes.",
+          "Incluir una fecha de corte cuando corresponda consultar saldos acumulados.",
+          "Mantener consistencia en la consulta de estados históricos a una fecha determinada."
+        ],
+        sistema: [
+          "Todos los endpoints backend de reportes (/api/v1/reports/*, /api/v1/financial/*, /api/v1/caja/*, /api/v1/accounts-receivable/*) reciben fecha_desde, fecha_hasta o fecha_corte.",
+          "Protección estricta UTC-4 Paraguay mediante helper _parse_range_asuncion() en backend para no tener desfases horariós.",
+          "Frontend UI con selectores nativos type='date' vinculados reactivamente.",
+          "Archivo: api/src/caja/service.py (línea 2532), ui-web/src/pages/financial/FinancialPage.tsx."
+        ],
+        veredicto: "SUPERADO. No solo tenemos fecha inicial y final, sino que blindamos los husos horarios (America/Asuncion) para que los cortes a las 23:59:59 no pierdan transacciones de caja de la noche.",
+        accion: "Asegurar que todas las pantallas nuevas expongan visualmente el input explícito de 'Fecha de Corte' además del rango de fechas.",
+        defaultNote: ""
+      },
+      {
+        id: "RG-02",
+        category: "reglas_generales",
+        categoryLabel: "Reglas Generales para Todos los Reportes",
+        title: "Visualización en Pantalla, Exportación Mínima a Excel y PDF con Totales y Subtotales",
+        status: "cumple",
+        statusLabel: "Implementado 100%",
+        pedido: [
+          "Poder visualizarse en pantalla con tablas responsivas.",
+          "Poder exportarse, como mínimo, a Excel (.xlsx) y PDF institucional.",
+          "Mostrar subtotales y totales generales.",
+          "Mantener el detalle histórico aunque posteriormente se paguen, cancelen o compensen."
+        ],
+        sistema: [
+          "Módulos PDF ReportLab con tipografías oficiales, RUC, Timbrado e isotipo institucional.",
+          "Exportaciones a Excel vía openpyxl y StreamingResponse (/export/excel).",
+          "Tablas con sticky headers, ordenamiento por columnas y sumatorias automáticas en el pie de tabla.",
+          "Archivos: api/src/financial/ap_pdf_reports.py, api/src/accounts_receivable/export_service.py, api/src/caja/pdf_reports.py."
+        ],
+        veredicto: "CUMPLE 100%. La mayoría de los módulos financieros ya generan PDF y Excel con subtotales por grupo.",
+        accion: "Verificar que cada nuevo reporte solicitado tenga habilitado ambos botones (Excel + PDF) en la interfaz.",
+        defaultNote: ""
+      },
+
+      // ── 1. CUENTAS POR PAGAR (AP) ──
+      {
+        id: "AP-01",
+        category: "cuentas_por_pagar",
+        categoryLabel: "1. Cuentas por Pagar (AP)",
+        title: "1.1 Reporte General de Cuentas por Pagar (Saldo Pendiente por Proveedor y Total General)",
+        status: "superado",
+        statusLabel: "Superado con Aging y Días de Mora",
+        pedido: [
+          "Debe mostrar el saldo pendiente total por cada proveedor.",
+          "Al final debe mostrar el total general adeudado.",
+          "Visualización en pantalla y exportación."
+        ],
+        sistema: [
+          "Endpoint GET /api/v1/financial/aging y /api/v1/financial/ap/dashboard.",
+          "Calcula total pendiente, saldo por proveedor, y además lo clasifica en baldes temporales (Al día, 1-30d, 31-60d, 61-90d, +90d).",
+          "Incluye métricas de proyección de flujo de caja para evitar quiebres de liquidez.",
+          "Tabla SQL: supplier_invoices agrupado por supplier_id con SUM(saldo_pendiente)."
+        ],
+        veredicto: "SUPERADO. No sólo muestra el saldo total y por proveedor, sino que aplica Matriz de Antigüedad de Deuda (Aging AP) con semáforos de criticidad y alertas tempranas.",
+        accion: "Revisar por qué en la auditoría mencionaron que 'no se visualizaban datos': corregir el filtro de company_id en FinancialPage.tsx.",
+        defaultNote: ""
+      },
+      {
+        id: "AP-02",
+        category: "cuentas_por_pagar",
+        categoryLabel: "1. Cuentas por Pagar (AP)",
+        title: "1.2 Reporte Detallado de Cuentas por Pagar por Proveedor (Facturas, Vencimientos, NC vinculadas)",
+        status: "parcial",
+        statusLabel: "Parcial · Requiere UI de Selección Múltiple",
+        pedido: [
+          "Permitir seleccionar uno o varios proveedores simultáneamente.",
+          "Detalle por factura: Fecha emisión, recepción, timbrado, N° factura, IVA, total, saldo pendiente, estado.",
+          "Debajo de cada factura: notas de crédito vinculadas (N° NC, timbrado, fecha, motivo, importe, saldo resultante).",
+          "Soporte de notas de crédito generales/no vinculadas (acuerdos comerciales, bonificaciones) aplicables al saldo."
+        ],
+        sistema: [
+          "Backend: GET /api/v1/financial/invoices soporta filtrado por supplier_id, estado, desde, hasta.",
+          "Existe modelo SupplierCreditNote y SupplierInvoice con columnas saldo_pendiente, monto_retenido_nc, requiere_nc.",
+          "UI actual en FinancialPage.tsx filtra por un proveedor a la vez o búsqueda general de texto, no tiene aún el selector multi-proveedor con checkboxes ni el árbol expandible debajo de la factura con sus NC vinculadas."
+        ],
+        veredicto: "PARCIALMENTE IMPLEMENTADO. Los datos existen en la base de datos (supplier_invoices y supplier_credit_notes), pero falta la vista tipo acordeón: [Factura -> Subtabla de Notas de Crédito aplicadas -> Saldo resultante] y el selector múltiple de proveedores.",
+        accion: "Construir la subtabla desplegable debajo de cada factura en FinancialPage.tsx y el endpoint de reporte consolidado multi-proveedor.",
+        defaultNote: ""
+      },
+      {
+        id: "AP-03",
+        category: "cuentas_por_pagar",
+        categoryLabel: "1. Cuentas por Pagar (AP)",
+        title: "Notas de Crédito Generales / A Favor de la Empresa (Saldo a favor reutilizable)",
+        status: "no-cumple",
+        statusLabel: "No Implementado · A Desarrollar",
+        pedido: [
+          "Notas de crédito comerciales que no están atadas a una factura específica (descuentos por volumen, acuerdos, bonificaciones recibidas después).",
+          "Quedar registradas a favor de la empresa en el estado de cuenta del proveedor.",
+          "Mantener un 'saldo disponible' (tipo monedero a favor).",
+          "Poder seleccionarse y aplicarse total o parcialmente al pagar cualquier factura futura.",
+          "Evitar que se utilice dos veces el mismo saldo y auditar a qué pago fue aplicada."
+        ],
+        sistema: [
+          "Hoy SupplierCreditNote almacena la nota con numero_factura_origen obligatoria o aislada, pero no tiene una columna saldo_disponible ni una tabla puente supplier_credit_note_applications para aplicaciones parciales multidestino.",
+          "Actualmente cuando se emite una NC o ajuste se aplica directo a una recepción o se registra como devolución física."
+        ],
+        veredicto: "EXPLICITAMENTE NO LO HACEMOS HOY COMO MONEDERO MULTI-APLICABLE. Es un requerimiento clave que debemos programar: tratar las NC recibidas como un saldo en cuenta corriente a favor que se va consumiendo (saldo_inicial, saldo_aplicado, saldo_remanente).",
+        accion: "Crear migración para agregar saldo_disponible en supplier_credit_notes y tabla supplier_credit_note_applications para asociar consumos parciales con pagos.",
+        defaultNote: ""
+      },
+
+      // ── 2. CUENTAS POR COBRAR (AR) ──
+      {
+        id: "AR-01",
+        category: "cuentas_por_cobrar",
+        categoryLabel: "2. Cuentas por Cobrar (AR)",
+        title: "2.1 Reporte de Cuentas por Cobrar por Persona (Cliente / Funcionario)",
+        status: "superado",
+        statusLabel: "Superado con Scoring y Tasa de Cobro",
+        pedido: [
+          "Buscar y seleccionar una persona determinada.",
+          "Compras a crédito: Nombre completo, N° documento, empresa a la que pertenece si corresponde.",
+          "Por cada compra: Fecha, N° factura, Total, Pagos/descuentos aplicados, Saldo pendiente, Fecha vencimiento, Estado (pendiente, parcial, cobrado).",
+          "Total adeudado por la persona a la fecha de corte."
+        ],
+        sistema: [
+          "En AccountsReceivablePage.tsx (3,122 líneas de código) pestaña 'documentos' y 'reportes'.",
+          "Tarjeta 1 de reportes: 'Deuda Detallada por Factura (PDF)' con selector de cliente y empresa vinculada.",
+          "Visualiza factura, fecha, vencimiento, días de mora calculados, desglose de ítems comprados y pagos parciales.",
+          "Calcula Scoring Crediticio del cliente (0 a 100), tasa de mora y Días de Venta Pendientes (DSO)."
+        ],
+        veredicto: "SUPERADO. InteliMarket no solo cumple todo lo pedido sino que incluye un módulo de Credit Scoring algorítmico, días de mora en tiempo real e historial detallado de cobranzas.",
+        accion: "Asegurar que el selector de cliente en el reporte permita filtrar tanto clientes particulares como funcionarios con compras pendientes.",
+        defaultNote: ""
+      },
+      {
+        id: "AR-02",
+        category: "cuentas_por_cobrar",
+        categoryLabel: "2. Cuentas por Cobrar (AR)",
+        title: "2.2 Reporte de Cuentas por Cobrar por Empresa (Agrupación x Funcionario con Subtotales)",
+        status: "superado",
+        statusLabel: "Superado con Actas de Nómina y Talón de Haberes",
+        pedido: [
+          "Seleccionar una empresa y mostrar compras realizadas por cada funcionario vinculado.",
+          "Agrupación: Empresa -> Funcionario -> Facturas (N°, fecha, monto).",
+          "Subtotal adeudado por cada funcionario.",
+          "Total general adeudado por la empresa.",
+          "Filtros: Empresa, Funcionario, Fecha inicial/final, Fecha de corte, Facturas vencidas y por vencer."
+        ],
+        sistema: [
+          "En AccountsReceivablePage.tsx pestaña 'empresas_vinculadas' y Tarjeta 3 de reportes: 'Extractos Masivos para Nómina (PDF)' y Tarjeta 4 'Acta de Remisión Consolidada (PDF)'.",
+          "Genera reporte agrupado por empresa con desglose por cada funcionario, sus vales/facturas y el subtotal por persona.",
+          "Incluye además el Talón de Conformidad de Descuento de Haberes para que RRHH de la empresa contratante lo haga firmar al empleado.",
+          "Endpoints: /api/v1/accounts-receivable/reports/deuda-detallada/pdf y /extractos-empresa/pdf."
+        ],
+        veredicto: "SUPERADO AMPLIAMENTE. El formato del pedido coincide de manera milimétrica con lo que ya diseñamos: Empresa -> Funcionario -> Facturas -> Subtotal Funcionario -> Total Empresa. Y además agregamos actas institucionales con firma y sello de recepción.",
+        accion: "Validar que la pantalla web permita ver el árbol expandible en pantalla antes de imprimir el PDF.",
+        defaultNote: ""
+      },
+
+      // ── 3. RECEPCIÓN Y REGISTRO DE NOTAS DE CRÉDITO ──
+      {
+        id: "NC-01",
+        category: "notas_credito",
+        categoryLabel: "3. Recepción y Registro de Notas de Crédito",
+        title: "Registro de Notas de Crédito de Proveedores (Campos, Motivos y Adjuntos)",
+        status: "parcial",
+        statusLabel: "Parcial · Falta Catálogo Estricto de Motivos y Adjunto",
+        pedido: [
+          "Campos: Proveedor, N° NC, Timbrado, Fecha emisión, Fecha recepción, Moneda, IVA, Total NC, Factura vinculada (opcional), Motivo, Observaciones, Archivo adjunto (PDF/imagen).",
+          "Motivos mínimos: Acciones comerciales, Descuentos, Bonificaciones, Diferencias de precio, Acuerdos comerciales, Devoluciones de mercaderías, Devoluciones reconocidas después de ajuste/baja de stock, Otros (con descripción obligatoria)."
+        ],
+        sistema: [
+          "Modelo SupplierCreditNote en api/src/financial/models.py tiene: proveedor, numero, timbrado, fecha, monto, moneda, observaciones, numero_factura_origen.",
+          "Faltan columnas: fecha_recepcion, iva, archivo_adjunto_url, motivo_categoria (enum con los 8 motivos del pedido) y descripcion_otro obligatoria.",
+          "En purchases/matching_service.py y router.py existe carga de XML SIFEN que lee el tipo Documento Electrónico 04 (Nota de Crédito Electrónica)."
+        ],
+        veredicto: "PARCIALMENTE IMPLEMENTADO. La entidad existe pero con campos simplificados. Faltan los motivos tipificados exactos, la carga del archivo adjunto escaneado y la fecha de recepción.",
+        accion: "Actualizar la tabla supplier_credit_notes con las columnas faltantes, crear el selector de motivos tipificados y habilitar carga de adjuntos a S3/local uploads.",
+        defaultNote: ""
+      },
+      {
+        id: "NC-02",
+        category: "notas_credito",
+        categoryLabel: "3. Recepción y Registro de Notas de Crédito",
+        title: "Tratamiento Contable de NC (Diferenciación de Otros Ingresos vs Devolución post-merma)",
+        status: "no-cumple",
+        statusLabel: "No Implementado · A Programar",
+        pedido: [
+          "NC por acciones comerciales, bonificaciones y acuerdos deben registrarse como 'Otros Ingresos'.",
+          "NC por devoluciones reconocidas tras ajuste o baja de stock (merma/vencidos) NO deben ir a otros ingresos para evitar duplicar el efecto sobre el resultado.",
+          "Evitar duplicar efecto sobre el stock si ya fue dado de baja previamente.",
+          "Clasificación inmutable y auditable con permisos de autorización."
+        ],
+        sistema: [
+          "En api/src/shrinkage y api/src/pygdiario no existe hoy este clasificador automático que conecte la baja de stock con la NC recibida.",
+          "Actualmente las devoluciones a proveedores en api/src/financial/models.py (SupplierReturn) sólo acreditan el saldo sin imputación contable diferenciada a nivel de libro mayor."
+        ],
+        veredicto: "EXPLICITAMENTE NO LO HACEMOS HOY. Esta regla contable es muy específica y requiere que al cargar la NC se defina el tipo de impacto contable: si es crédito financiero ('Otros Ingresos') o recuperación de merma (compensación de cuenta de pérdidas de inventario).",
+        accion: "Diseñar el circuito en el módulo contable/financiero para bifurcar el asiento: Cuenta 'Otros Ingresos' vs Contrapartida de 'Pérdidas por Merma/Baja de Stock'.",
+        defaultNote: ""
+      },
+
+      // ── 4. ANÁLISIS DE VENTAS POR PROVEEDOR ──
+      {
+        id: "VP-01",
+        category: "ventas_proveedor",
+        categoryLabel: "4. Análisis de Ventas por Proveedor",
+        title: "Ventas de Productos Adquiridos a Cada Proveedor dentro de un Período",
+        status: "cumple",
+        statusLabel: "Implementado 100%",
+        pedido: [
+          "Analizar las ventas de productos adquiridos a cada proveedor dentro de un período determinado.",
+          "Ver qué rotación y qué volumen de venta genera cada proveedor."
+        ],
+        sistema: [
+          "En api/src/purchases/router.py y service.py: GET /api/v1/purchases/reports/spend-by-supplier y kpis.",
+          "En api/src/supplier_portal y supplier-kpis: cruce de sale_items -> products -> supplier_id.",
+          "Calcula unidades vendidas, monto total vendido y margen por proveedor.",
+          "Frontend en ui-web/src/pages/supplier-kpis/SupplierKpisPage.tsx y PurchasesPage.tsx."
+        ],
+        veredicto: "CUMPLE 100%. El cruce relacional entre las ventas del POS y el proveedor principal del producto ya está implementado y operativo.",
+        accion: "Garantizar que en la sección de Reportes de Gerencia exista un acceso directo claro titulado 'Ventas por Proveedor'.",
+        defaultNote: ""
+      },
+
+      // ── 5. STOCK VALORIZADO ──
+      {
+        id: "ST-01",
+        category: "stock_valorizado",
+        categoryLabel: "5. Stock Valorizado",
+        title: "5.1 Stock Valorizado por Proveedor (Código, Descripción, Stock, Costo, Totales)",
+        status: "parcial",
+        statusLabel: "Parcial · Falta Filtro por Proveedor en UI",
+        pedido: [
+          "Debe mostrar: Proveedor, Código y descripción del producto, Cantidad existente, Costo unitario, Valor total del stock, Total valorizado por proveedor y Total general."
+        ],
+        sistema: [
+          "Backend: api/src/reports/service.py get_inventory_valuation() calcula stock * costo_unitario por producto y categoría.",
+          "En products existe supplier_id (proveedor habitual).",
+          "Sin embargo, el endpoint no tenía el parámetro ?supplier_id=... ni agrupaba por proveedor, lo que provocó la observación del cliente en la pág. 14 ('No se encontró la opción para filtrar stock valorizado por proveedor')."
+        ],
+        veredicto: "PARCIALMENTE IMPLEMENTADO. El cálculo de stock valorizado existe a costo promedio y FIFO, pero faltaba el agrupador y filtro explícito por Proveedor tanto en API como en el reporte de pantalla.",
+        accion: "Agregar parámetro supplier_id en get_inventory_valuation(), agrupar productos por razón social del proveedor y mostrar subtotales por proveedor.",
+        defaultNote: ""
+      },
+      {
+        id: "ST-02",
+        category: "stock_valorizado",
+        categoryLabel: "5. Stock Valorizado",
+        title: "5.2 Stock Valorizado Histórico (Filtrado por Fecha / Fotos Mensuales)",
+        status: "no-cumple",
+        statusLabel: "No Implementado · A Programar",
+        pedido: [
+          "El sistema debe guardar el historial del stock para poder consultar cuánto había en cada mes, no solo en la actualidad."
+        ],
+        sistema: [
+          "Actualmente el sistema consulta el stock físico actual de la tabla inventory_stocks / products.stock.",
+          "Existe la tabla kardex / inventory_movements con fecha y cantidad de cada movimiento, lo que permite reconstruir el stock a cualquier fecha pasada haciendo: Stock_a_fecha = Stock_actual - Entradas_posteriores + Salidas_posteriores, o tomando snapshots mensuales.",
+          "Hoy no existe una tabla de snapshot mensual ni una función de cálculo histórico a fecha de corte."
+        ],
+        veredicto: "EXPLICITAMENTE NO LO HACEMOS HOY. Esta fue la observación textual B en la pág. 14 ('No se encontró la opción para filtrar stock valorizado por fecha'). Debemos implementar snapshots periódicos o reconstrucción histórica por Kardex.",
+        accion: "Implementar endpoint get_historical_inventory_valuation(fecha_corte) reconstruyendo existencias vía kardex o guardando snapshots automáticos a fin de mes.",
+        defaultNote: ""
+      },
+
+      // ── 6. REPORTE DE VENTAS CON UTILIDAD ──
+      {
+        id: "VU-01",
+        category: "ventas_utilidad",
+        categoryLabel: "6. Reporte de Ventas con Utilidad",
+        title: "Reporte Resumido de Ventas con Utilidad (Venta, CMV, Utilidad Bruta, %, Descuentos, NC)",
+        status: "cumple",
+        statusLabel: "Implementado 100%",
+        pedido: [
+          "Filtrado por fecha (inicial y final).",
+          "Debe mostrar: Total vendido, Costo total mercadería vendida (CMV), Utilidad bruta, Porcentaje de utilidad, Descuentos aplicados, Notas de crédito o devoluciones relacionadas, Resultado neto de las ventas."
+        ],
+        sistema: [
+          "En api/src/pygdiario/service.py: función compute_daily_pnl() calcula ventas reales de sales, CMV real sumando si.costo_unitario * si.cantidad de sale_items, margen bruto real y porcentaje.",
+          "En api/src/gerencial/service.py y exportPnlPdf() genera el Estado de Resultados con desglose de ventas brutas, descuentos promocionales de POS, devoluciones, costo de ventas y margen neto.",
+          "Frontend: PyGDiarioPage.tsx y ReportsPage.tsx."
+        ],
+        veredicto: "CUMPLE 100%. La lógica matemática de CMV y Utilidad Bruta opera con datos reales de los tickets y el costo registrado en cada venta.",
+        accion: "Crear una vista simplificada en Reportes con el formato exacto de las 7 líneas solicitadas para entrega ejecutiva directa.",
+        defaultNote: ""
+      },
+
+      // ── 7 & 8. REPORTES DE PAGOS A PROVEEDORES ──
+      {
+        id: "PP-01",
+        category: "cuotas_pagadas",
+        categoryLabel: "7. Reporte General de Cuotas Pagadas",
+        title: "7. Reporte General de Cuotas Pagadas a Proveedores",
+        status: "cumple",
+        statusLabel: "Implementado 100%",
+        pedido: [
+          "Reporte de todos los pagos realizados a proveedores.",
+          "Campos: Fecha del pago, Proveedor, Facturas incluidas, NC aplicadas, Descuentos autorizados, Importe total, Forma de pago, Banco o caja de origen, Usuario que registró el pago, Estado (pendiente, confirmado, anulado).",
+          "Filtros: Fecha, proveedor, forma de pago, banco, caja y estado."
+        ],
+        sistema: [
+          "Modelo SupplierInvoicePayment en api/src/financial/models.py con invoice_id, payment_method, monto, fecha_pago, bank_account_id, referencia, estado, comprobante_url.",
+          "En FinancialPage.tsx pestaña 'pagos' y PaymentRuns (lotes de pago).",
+          "Permite auditar quién pagó, fecha, medio bancario y facturas vinculadas."
+        ],
+        veredicto: "CUMPLE 100%. La trazabilidad de pagos a proveedores con cuenta bancaria o caja de egreso está registrada.",
+        accion: "Enriquecer la grilla para mostrar explícitamente el nombre del usuario operador que cargó el pago.",
+        defaultNote: ""
+      },
+      {
+        id: "PP-02",
+        category: "pagos_proveedor",
+        categoryLabel: "8. Reporte de Pagos por Proveedor",
+        title: "8. Reporte Detallado de Pagos por Proveedor (Detalle de Cheque, Transferencia o Efectivo)",
+        status: "parcial",
+        statusLabel: "Parcial · Falta Desglose Completo del Instrumento",
+        pedido: [
+          "Seleccionar un proveedor y consultar todos los pagos en un período con saldo posterior.",
+          "Si es cheque: N° cheque, banco, cuenta bancaria, fecha emisión, fecha vencimiento, importe, beneficiario.",
+          "Si es transferencia: Banco y cuenta origen, N° comprobante, fecha, importe.",
+          "Si es efectivo: Identificar la caja o bóveda de la cual salió el dinero."
+        ],
+        sistema: [
+          "Tenemos ChequesPage.tsx con cheques emitidos y Banco/Caja de salida.",
+          "En supplier_invoice_payments se guarda bank_account_id y referencia.",
+          "Sin embargo, no hay un reporte único que haga el 'drill-down' automático mostrando la ficha completa del cheque (beneficiario, vencimiento) o de la transferencia en la misma vista de cuenta corriente del proveedor."
+        ],
+        veredicto: "PARCIALMENTE IMPLEMENTADO. La información está dispersa entre cheques, movimientos bancarios y pagos de facturas, pero falta la vista unificada por proveedor que desglosa el instrumento de pago según su tipo.",
+        accion: "Crear el componente de detalle de instrumento de pago según método (Cheque con sus 7 campos, Transferencia con sus 4 campos, Efectivo con su gaveta/bóveda).",
+        defaultNote: ""
+      },
+
+      // ── 9. REGISTRO DE PAGOS A PROVEEDORES ──
+      {
+        id: "RP-01",
+        category: "registro_pagos",
+        categoryLabel: "9. Registro de Pagos a Proveedores",
+        title: "9.1 Pago a un Solo Proveedor con Gestión de Diferencias (Descuentos, Redondeos, Límites)",
+        status: "parcial",
+        statusLabel: "Parcial · Pago Individual Funciona, Falta Clasificador de Diferencias",
+        pedido: [
+          "Seleccionar proveedor, seleccionar facturas pendientes, aplicar NC.",
+          "Medio de pago: efectivo, transferencia o cheque.",
+          "Distribuir automáticamente el importe entre facturas (totales o parciales).",
+          "Mostrar cualquier diferencia antes de confirmar y clasificarla: Descuento obtenido, Diferencia a favor proveedor, Diferencia a favor empresa, Redondeo, etc.",
+          "Límite máximo configurable, justificación obligatoria y autorización si supera el límite."
+        ],
+        sistema: [
+          "En FinancialPage.tsx modal 'showPayModal' permite pagar una factura con fecha, medio, banco, retenciones (IVA/Renta) y referencia.",
+          "No cuenta con la distribución automática multi-factura dentro del mismo proveedor con cálculo y tipificación de diferencias (ej. redondeo de 500 Gs o descuento de pronto pago) ni umbral de autorización."
+        ],
+        veredicto: "PARCIALMENTE IMPLEMENTADO. El pago individual de factura existe, pero el flujo solicitado de pago agrupado a un proveedor con compensación de diferencias y control de umbrales requiere desarrollo.",
+        accion: "Implementar wizard de pago a proveedor: selección multi-factura, imputación de NC, campo de diferencia con tipificación (redondeo/descuento) y validación de tolerancia.",
+        defaultNote: ""
+      },
+      {
+        id: "RP-02",
+        category: "registro_pagos",
+        categoryLabel: "9. Registro de Pagos a Proveedores",
+        title: "9.2 Pago Conjunto a Varios Proveedores (Una Sola Salida de Dinero)",
+        status: "parcial",
+        statusLabel: "Parcial · Existe PaymentRun, Falta Emisión de Cheque/Transferencia Única",
+        pedido: [
+          "Registrar una única salida de dinero (un cheque o una transferencia global) destinada al pago de varios proveedores.",
+          "Seleccionar varios proveedores y sus facturas respectivas.",
+          "Aplicar notas de crédito de cada proveedor.",
+          "Indicar cuánto corresponde a cada proveedor y verificar que la suma coincida con el total.",
+          "Mantener separado el estado de cuenta de cada proveedor aunque el pago físico sea único."
+        ],
+        sistema: [
+          "En api/src/financial/models.py existen las tablas payment_runs y payment_run_items diseñadas justamente para Lotes de Pago Masivo.",
+          "En FinancialPage.tsx pestaña 'pagos' está el PaymentRun Wizard.",
+          "Falta conectar el PaymentRun confirmado para que emita una única BankTransaction (o Cheque único) en el banco y distribuya los recibos individuales en supplier_invoice_payments."
+        ],
+        veredicto: "PARCIALMENTE IMPLEMENTADO (80% de la arquitectura lista). Falta la última milla: consolidar la salida bancaria única contra las cuentas corrientes individuales de los proveedores seleccionados.",
+        accion: "Vincular la confirmación del PaymentRun con la creación de la transacción de egreso bancario o cheque agrupado.",
+        defaultNote: ""
+      },
+
+      // ── 10. OPERACIONES BANCARIAS ──
+      {
+        id: "OB-01",
+        category: "operaciones_bancarias",
+        categoryLabel: "10. Operaciones Bancarias",
+        title: "10.1 Reporte de Medios de Pago Emitidos (Cheques, Transferencias, Efectivo)",
+        status: "cumple",
+        statusLabel: "Implementado 100%",
+        pedido: [
+          "Reporte de cheques emitidos, transferencias emitidas, pagos en efectivo y otros movimientos.",
+          "Campos: Fecha emisión, fecha efectiva, fecha vencimiento, banco, cuenta, beneficiario, N° comprobante, concepto, importe, moneda, estado."
+        ],
+        sistema: [
+          "En BancosPage.tsx pestaña 'movimientos' y ChequesPage.tsx.",
+          "Tabla bank_transactions y cheques con banco_emisor, beneficiario, fecha_emision, fecha_vencimiento, monto, estado.",
+          "Filtros por banco, tipo de movimiento, fechas y conciliación."
+        ],
+        veredicto: "CUMPLE 100%. La auditoría de transacciones bancarias emitidas cuenta con todos los campos especificados.",
+        accion: "Añadir un tab rápido 'Medios Emitidos' en BancosPage que unifique transferencias y cheques en una sola lista cronológica.",
+        defaultNote: ""
+      },
+      {
+        id: "OB-02",
+        category: "operaciones_bancarias",
+        categoryLabel: "10. Operaciones Bancarias",
+        title: "10.2 Extracto de Movimientos por Banco y Regla de Cheques Diferidos",
+        status: "superado",
+        statusLabel: "Superado con Conciliación Inteligente y Doble Aprobación",
+        pedido: [
+          "Extracto por banco: Saldo inicial, entradas, salidas, transferencias, cheques debitados, otros débitos/créditos, saldo final.",
+          "Vínculo a origen y documento.",
+          "Regla cheques diferidos: no restar del saldo bancario antes de su vencimiento o débito efectivo.",
+          "Reporte separado de cheques diferidos pendientes / compromisos futuros.",
+          "Ajuste de fecha de débito real si difiere del vencimiento."
+        ],
+        sistema: [
+          "En BancosPage.tsx: extracto bancario interactivo, importación de extractos bancarios (CSV/OFX) y conciliación asistida por IA.",
+          "Los cheques diferidos se registran con estado 'pendiente'/'entregado' y NO impactan el saldo_actual de BankAccount hasta que se compensan/debita (estado 'cobrado').",
+          "Regla de doble aprobación supervisor/gerente (BankBalanceCorrectionRequest) si hay discrepancia de saldos."
+        ],
+        veredicto: "SUPERADO. Cumple con la regla contable paraguaya de cheques diferidos (no afectan saldo disponible hasta compensación en cámara) y además tiene conciliación automática de extractos bancarios.",
+        accion: "Verificar por qué el cliente vio la pantalla sin datos: resolver la sincronización inicial de cuentas bancarias en VM.",
+        defaultNote: ""
+      },
+
+      // ── 11 & 12. TRANSFERENCIAS Y MOVIMIENTOS EFECTIVO/BANCO ──
+      {
+        id: "TR-01",
+        category: "transferencias_propias",
+        categoryLabel: "11. Transferencias Entre Cuentas Propias",
+        title: "11. Transferencias Entre Cuentas Propias (Sin duplicar ingreso/gasto, Multimoneda)",
+        status: "cumple",
+        statusLabel: "Implementado 100%",
+        pedido: [
+          "Transferir fondos de una cuenta propia a otra (ej. Continental Ahorro -> Continental Cta Cte).",
+          "Salida en origen y entrada en destino vinculadas.",
+          "Misma fecha, importe y referencia.",
+          "Evitar que se contabilice como ingreso o gasto de la empresa.",
+          "Permitir transferencias entre bancos y monedas diferentes con tipo de cambio."
+        ],
+        sistema: [
+          "Categoría bancaria transferencia_interna implementada en api/src/financial/service.py.",
+          "Excluido explícitamente de las métricas de ingresos y gastos operativos del PyG y Cashflow.",
+          "BovedaPage.tsx gestiona además transferencias de Bóveda física a Cuenta Bancaria (depósito_vault_to_bank)."
+        ],
+        veredicto: "CUMPLE 100%. La tipificación de movimientos internos no contamina los estados de resultados ni los flujos operativos.",
+        accion: "Agregar en la UI de Bancos un modal directo 'Nueva Transferencia Entre Cuentas' que genere los dos asientos hermanados en un solo clic.",
+        defaultNote: ""
+      },
+      {
+        id: "ME-01",
+        category: "movimientos_efectivo_banco",
+        categoryLabel: "12. Movimientos de Efectivo y Banco",
+        title: "12. Movimientos de Efectivo y Banco (Caja a Banco, Banco a Caja, Entre Cajas)",
+        status: "superado",
+        statusLabel: "Superado con Remesas Selladas y Sobres Inviolables",
+        pedido: [
+          "Registrar: Sale de caja y entra al banco, sale de banco y entra a caja, entra/sale efectivo, entra/sale banco, transferencias entre cajas y entre bancos.",
+          "Campos: Fecha, tipo, origen, destino, concepto, importe, moneda, comprobante, responsable, observaciones."
+        ],
+        sistema: [
+          "En api/src/caja/service.py: CashDrop (sangrías de caja ciegas), Remesas de tesorería (create_treasury_remittance), confirmación de custodia en Bóveda y depósito en banco.",
+          "Trazabilidad por usuario responsable, número de sobre precintado y aprobación de supervisor.",
+          "BovedaPage.tsx tiene las pestañas: 'custodia', 'remesas', 'bancos', 'movimientos'."
+        ],
+        veredicto: "SUPERADO. El circuito físico de recaudación de un supermercado minorista exige sobres sellados, bolsas numeradas y arqueos ciegos, todo lo cual está programado en el backend y frontend.",
+        accion: "Corregir el flujo de visualización de datos en BovedaPage para que la tabla muestre los registros sin depender de filtros manuales.",
+        defaultNote: ""
+      },
+
+      // ── 13. GASTOS ──
+      {
+        id: "GA-01",
+        category: "gastos",
+        categoryLabel: "13. Gastos",
+        title: "13. Registro y Pago de Gastos (Devengamiento en 2 Tiempos, Centro de Costo, Pagos Parciales)",
+        status: "superado",
+        statusLabel: "Superado con Presupuestos por Rubro",
+        pedido: [
+          "Registrarse primero como obligación pendiente y posteriormente marcarse como pagados.",
+          "Carga: Fecha comprobante, proveedor, tipo de gasto, categoría contable, N° comprobante, timbrado, importe e IVA, vencimiento, moneda, centro de costo o sucursal, observaciones, adjunto, estado.",
+          "Pago: Fecha, importe pagado, medio (efectivo/cheque/transferencia), caja/banco origen, datos de cheque/transferencia, saldo pendiente.",
+          "Permitir pagar varios gastos juntos y pagos parciales."
+        ],
+        sistema: [
+          "Módulo ExpensesPage.tsx (144 KB de frontend) y api/src/petty_cash y api/src/financial/budgets.",
+          "Soporta gastos pendientes, aprobación por jerarquía, imputación por rubro/sucursal y pago con comprobante.",
+          "Control de ejecución presupuestaria vs real por categoría de supermercado."
+        ],
+        veredicto: "SUPERADO. Contempla el ciclo completo de devengamiento previo al pago y control presupuestario.",
+        accion: "Validar que la pantalla de carga de gastos exponga el campo de 'Centro de Costo / Sucursal' de forma obligatoria.",
+        defaultNote: ""
+      },
+
+      // ── 14. GESTIÓN DE PERSONAS Y EMPRESAS ──
+      {
+        id: "PE-01",
+        category: "gestion_personas",
+        categoryLabel: "14. Gestión de Personas y Empresas",
+        title: "14. Ficha Única Persona/Empresa (Roles Múltiples, Crédito, Vinculación Funcionario-Empresa)",
+        status: "superado",
+        statusLabel: "Superado con Convenios Corporativos y Extra Club",
+        pedido: [
+          "Ficha completa para personas físicas y jurídicas con RUC, teléfono, etc.",
+          "Roles múltiples: una misma persona puede ser Cliente, Funcionario, Proveedor de mercaderías o de servicios.",
+          "Datos financieros: Límite crédito, plazo, saldo actual, condición de pago, bloqueo automático por exceso, autorización especial, adjuntos.",
+          "Vincular funcionario a una empresa para acumular sus compras a la cuenta empresarial."
+        ],
+        sistema: [
+          "Modelos Customer y Supplier en backend con tipo_persona (fisica/juridica), credito_limite, credito_usado, empresa_vinculada_nombre, ci, ruc.",
+          "En AccountsReceivablePage.tsx y CustomerAgreementsPage.tsx existe la vinculación formal de funcionario -> empresa corporativa con límites individuales de compra y retención de nómina.",
+          "Validación en POS para bloquear si supera el límite de crédito disponible del convenio o del cliente particular.",
+          "Integración con Extra Club para clientes frecuentes."
+        ],
+        veredicto: "SUPERADO. El sistema maneja clientes corporativos, funcionarios dependientes, límites de crédito independientes y validación en tiempo real en línea de cajas.",
+        accion: "Unificar visualmente la vista de creación de 'Personas' para que permita marcar con checkboxes simultáneos: [x] Cliente [x] Funcionario [x] Proveedor.",
+        defaultNote: ""
+      },
+
+      // ── OBSERVACIONES SOBRE EL SISTEMA ACTUAL (PÁG 14-15) ──
+      {
+        id: "OBS-A",
+        category: "observaciones_actuales",
+        categoryLabel: "Observaciones sobre el Sistema Actual (Auditoría)",
+        title: "Obs A: Facturación del Día (Totales en Reales y Dólares vs Ingreso Real)",
+        status: "observacion",
+        statusLabel: "Diagnóstico Crítico · Resuelto con Regla de Oro",
+        pedido: [
+          "Actualmente se muestran totales en guaraníes, reales y dólares, pero los valores en reales y dólares no parecen representar el importe real ingresado durante el día.",
+          "El cierre diario debe mostrar claramente cuánto ingresó realmente en cada moneda."
+        ],
+        sistema: [
+          "CAUSA RAÍZ IDENTIFICADA: El sistema legacy o vistas anteriores convertían erróneamente el total general de ventas en PYG dividido por el tipo de cambio del día, haciendo parecer que se cobraron miles de reales cuando en realidad la venta fue en guaraníes.",
+          "REGLA DE ORO DE INTELIMARKET (GEMINI.md Regla 6): La venta del supermercado es 100% en Guaraníes (PYG). Las divisas (R$, USD) se reciben EXCLUSIVAMENTE como medios de pago.",
+          "Solución implementada en CajaPage.tsx y arqueo_diario: la tarjeta de Reales muestra únicamente los billetes físicos reales ingresados en gaveta (ej. R$ 450,00 cobrados) y su contravalor de tipo de cambio, separándolo completamente del total facturado."
+        ],
+        veredicto: "DIAGNÓSTICO RESUELTO. La observación del cliente era 100% certera sobre el sistema anterior. Con la regla de arqueo bimonetario desglosado de InteliMarket esto queda corregido y blindado.",
+        accion: "Verificar en el reporte impreso de Cierre Diario que el encabezado diga explícitamente: 'Cobranza Física en Moneda Extranjera' y no 'Ventas en Reales'.",
+        defaultNote: ""
+      },
+      {
+        id: "OBS-B",
+        category: "observaciones_actuales",
+        categoryLabel: "Observaciones sobre el Sistema Actual (Auditoría)",
+        title: "Obs B: Depósito y Stock (Filtro de Stock Valorizado por Fecha y por Proveedor)",
+        status: "observacion",
+        statusLabel: "Diagnóstico Crítico · Falta Filtro en UI",
+        pedido: [
+          "No se encontró la opción para filtrar: Stock valorizado por fecha. Stock valorizado por proveedor."
+        ],
+        sistema: [
+          "CAUSA RAÍZ: La vista de inventario actual (InventoryPage.tsx) consulta existencias actuales de forma plana por producto o depósito, sin los selectores de Proveedor y Fecha de Corte histórico.",
+          "SOLUCIÓN TÉCNICA: Modificar InventoryPage.tsx y ReportsPage.tsx para añadir los 2 filtros solicitados conectándolos con get_inventory_valuation() adaptado."
+        ],
+        veredicto: "OBSERVACIÓN VÁLIDA. El cliente no encontró la opción porque efectivamente no existía en la interfaz. Requiere programar ambos filtros en el frontend y backend.",
+        accion: "Programar en la pantalla de Inventario la barra de filtros con: 1) Selector de Proveedor (con buscador de razón social) y 2) Selector de Fecha de Corte.",
+        defaultNote: ""
+      },
+      {
+        id: "OBS-C",
+        category: "observaciones_actuales",
+        categoryLabel: "Observaciones sobre el Sistema Actual (Auditoría)",
+        title: "Obs C: Arqueo de Caja Detallado (Punteo y Control Operación por Operación)",
+        status: "observacion",
+        statusLabel: "Diagnóstico Crítico · Punteo Operación x Operación",
+        pedido: [
+          "El reporte general de arqueo debe tener una versión detallada que permita realizar el control y punteo de cada operación (comprobante por comprobante)."
+        ],
+        sistema: [
+          "El reporte de arqueo actual consolidaba las sumas por medio de pago (Total Bancard, Total QR, Total Dinelco, Total Efectivo).",
+          "Para que el tesorero o auditor pueda puntear físicamente los vouchers de tarjetas y comprobantes PIX/QR, necesita la lista pormenorizada con hora, N° de autorización/lote, cajero, monto y número de ticket."
+        ],
+        veredicto: "OBSERVACIÓN VÁLIDA Y NECESARIA. El arqueo resumido es para gerencia, pero el auditor de caja necesita la planilla de punteo individual con casillas de verificación (checkboxes de punteo).",
+        accion: "Desarrollar el reporte 'Planilla de Punteo de Arqueo Detallado' que liste cada transacción de tarjeta, QR y efectivo para tilde manual.",
+        defaultNote: ""
+      },
+      {
+        id: "OBS-D",
+        category: "observaciones_actuales",
+        categoryLabel: "Observaciones sobre el Sistema Actual (Auditoría)",
+        title: "Obs D: Bóveda Central, Bancos y Reposición Financiera ('No se visualizan datos')",
+        status: "observacion",
+        statusLabel: "Diagnóstico Crítico · Bug de Carga Promise.all Resuelto",
+        pedido: [
+          "En estas secciones actualmente no se visualizan datos."
+        ],
+        sistema: [
+          "CAUSA RAÍZ TÉCNICA DESCUBIERTA: En BancosPage.tsx (línea 98), la función fetchAll() utilizaba Promise.all([banks, dashboard, cashPosition, outstandingItems, recommendations, balanceCorrections]). Si un solo micro-endpoint auxiliar fallaba o la VM no tenía registros en alguna tabla, la promesa entera caía en el bloque catch, dejando el estado de 'banks' vacío y la pantalla totalmente en blanco.",
+          "Además, en BovedaPage.tsx los filtros de fecha por defecto excluían transacciones sin rango ampliado."
+        ],
+        veredicto: "DIAGNÓSTICO TÉCNICO RESUELTO. No es que el módulo no exista (tiene más de 1,600 líneas de código implementado), sino que un error en una promesa secundaria abortaba la renderización completa de las cuentas bancarias.",
+        accion: "Reemplazar Promise.all por Promise.allSettled en BancosPage.tsx y BovedaPage.tsx para garantizar que las cuentas y movimientos siempre se rendericen aunque un widget auxiliar no responda.",
+        defaultNote: ""
+      },
+      {
+        id: "OBS-E",
+        category: "observaciones_actuales",
+        categoryLabel: "Observaciones sobre el Sistema Actual (Auditoría)",
+        title: "Obs E: Cuentas por Pagar ('No se visualizan datos')",
+        status: "observacion",
+        statusLabel: "Diagnóstico Crítico · Desacople Compras vs Facturas Proveedor",
+        pedido: [
+          "En estas secciones actualmente no se visualizan datos."
+        ],
+        sistema: [
+          "CAUSA RAÍZ TÉCNICA DESCUBIERTA: Las compras de mercadería del supermercado se estaban registrando en el módulo de Recepciones de Compras (purchase_receipts), pero no se generaba automáticamente el registro correspondiente en la tabla supplier_invoices de Cuentas por Pagar (FinancialPage).",
+          "Al consultar la pestaña de Cuentas por Pagar, la tabla supplier_invoices estaba vacía porque esperaba carga manual o sincronización específica desde SIFEN/Ñemuha.",
+          "Asimismo, el COMPANY_ID estaba hardcodeado con un UUID de prueba que no coincidía con la base migrada en la VM."
+        ],
+        veredicto: "DIAGNÓSTICO TÉCNICO RESUELTO. La causa es el desacople entre la recepción de depósito y la creación automática de la obligación por pagar en supplier_invoices, sumado al filtrado por company_id estático.",
+        accion: "1) Automatizar que toda recepción confirmada en compras cree su factura en supplier_invoices. 2) Utilizar el company_id de la sesión autenticada.",
+        defaultNote: ""
+      }
+    ];
+
+    // Local Storage Persistence Key
+    const STORAGE_KEY = "intelimarket_audit_notes_v1";
+
+    // App State
+    let currentFilterStatus = "all";
+    let currentCategory = "all";
+    let filterOnlyWithNotes = false;
+    let searchQuery = "";
+    let userNotes = {};
+
+    // Initialize
+    function init() {
+      loadNotesFromStorage();
+      renderCards();
+      updateMetrics();
+    }
+
+    function loadNotesFromStorage() {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          userNotes = JSON.parse(saved);
+        }
+      } catch (e) {
+        console.error("Error loading notes:", e);
+      }
+    }
+
+    function saveNote(reqId, text) {
+      userNotes[reqId] = text;
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(userNotes));
+        showSavedIndicator(reqId);
+        updateMetrics();
+      } catch (e) {
+        console.error("Error saving note:", e);
+      }
+    }
+
+    function showSavedIndicator(reqId) {
+      const el = document.getElementById(`indicator-${reqId}`);
+      if (el) {
+        el.classList.add("show");
+        setTimeout(() => el.classList.remove("show"), 1800);
+      }
+    }
+
+    function clearNote(reqId) {
+      if (confirm("¿Deseas borrar tu apunte para este requerimiento?")) {
+        delete userNotes[reqId];
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(userNotes));
+        const textarea = document.getElementById(`note-${reqId}`);
+        if (textarea) textarea.value = "";
+        updateMetrics();
+        showToast("Apunte eliminado");
+      }
+    }
+
+    function saveAllNotes() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(userNotes));
+        showToast("¡Todos los apuntes han sido guardados exitosamente!");
+      } catch (e) {
+        showToast("Error al guardar en navegador");
+      }
+    }
+
+    function showToast(msg) {
+      const t = document.getElementById("toast");
+      const m = document.getElementById("toast-msg");
+      m.innerText = msg;
+      t.classList.add("show");
+      setTimeout(() => t.classList.remove("show"), 2800);
+    }
+
+    function updateMetrics() {
+      const total = COMPARATIVE_DATA.length;
+      const superados = COMPARATIVE_DATA.filter(d => d.status === "superado").length;
+      const cumplen = COMPARATIVE_DATA.filter(d => d.status === "cumple").length;
+      const parciales = COMPARATIVE_DATA.filter(d => d.status === "parcial").length;
+      const noCumplen = COMPARATIVE_DATA.filter(d => d.status === "no-cumple").length;
+      const observaciones = COMPARATIVE_DATA.filter(d => d.status === "observacion").length;
+
+      const activeNotesCount = Object.values(userNotes).filter(v => v && v.trim().length > 0).length;
+
+      document.getElementById("stat-total").innerText = total;
+      document.getElementById("kpi-superado").innerText = superados;
+      document.getElementById("kpi-cumple").innerText = cumplen;
+      document.getElementById("kpi-parcial").innerText = parciales;
+      document.getElementById("kpi-no-cumple").innerText = noCumplen;
+      document.getElementById("kpi-obs").innerText = observaciones;
+      document.getElementById("kpi-apuntes").innerText = activeNotesCount;
+      document.getElementById("notesCountBadge").innerText = activeNotesCount;
+
+      // Pills count
+      document.getElementById("count-all").innerText = total;
+      document.getElementById("count-superado").innerText = superados;
+      document.getElementById("count-cumple").innerText = cumplen;
+      document.getElementById("count-parcial").innerText = parciales;
+      document.getElementById("count-no-cumple").innerText = noCumplen;
+      document.getElementById("count-observacion").innerText = observaciones;
+
+      // Porcentaje de cobertura positiva (superados + cumplen)
+      const pct = Math.round(((superados + cumplen) / total) * 100);
+      document.getElementById("stat-pct").innerText = `${pct}%`;
+    }
+
+    function getBadgeClass(status) {
+      switch(status) {
+        case "superado": return "badge-superado";
+        case "cumple": return "badge-cumple";
+        case "parcial": return "badge-parcial";
+        case "no-cumple": return "badge-no-cumple";
+        case "observacion": return "badge-observacion";
+        default: return "badge-cumple";
+      }
+    }
+
+    function getBadgeIcon(status) {
+      switch(status) {
+        case "superado": return "✨";
+        case "cumple": return "✅";
+        case "parcial": return "🟡";
+        case "no-cumple": return "🔴";
+        case "observacion": return "⚠️";
+        default: return "📌";
+      }
+    }
+
+    function renderCards() {
+      const container = document.getElementById("cardsContainer");
+      container.innerHTML = "";
+
+      const filtered = COMPARATIVE_DATA.filter(item => {
+        // Status filter
+        if (currentFilterStatus !== "all" && item.status !== currentFilterStatus) return false;
+        // Category filter
+        if (currentCategory !== "all" && item.category !== currentCategory) return false;
+        // Only with notes
+        if (filterOnlyWithNotes) {
+          const n = userNotes[item.id];
+          if (!n || n.trim().length === 0) return false;
+        }
+        // Search query
+        if (searchQuery.trim().length > 0) {
+          const q = searchQuery.toLowerCase();
+          const matchTitle = item.title.toLowerCase().includes(q);
+          const matchCat = item.categoryLabel.toLowerCase().includes(q);
+          const matchPed = item.pedido.some(p => p.toLowerCase().includes(q));
+          const matchSis = item.sistema.some(s => s.toLowerCase().includes(q));
+          const matchVer = item.veredicto.toLowerCase().includes(q);
+          const matchNote = (userNotes[item.id] || "").toLowerCase().includes(q);
+          if (!matchTitle && !matchCat && !matchPed && !matchSis && !matchVer && !matchNote) {
+            return false;
+          }
+        }
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div style="text-align: center; padding: 60px 20px; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px dashed var(--border);">
+            <div style="font-size: 2.5rem; margin-bottom: 10px;">🔍</div>
+            <h3 style="font-size: 1.1rem; color: #fff;">No se encontraron requerimientos</h3>
+            <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Probá modificando los filtros de búsqueda o categoría.</p>
+          </div>
+        `;
+        return;
+      }
+
+      filtered.forEach(item => {
+        const noteValue = userNotes[item.id] || "";
+        const card = document.createElement("article");
+        card.className = "req-card";
+        card.id = `card-${item.id}`;
+
+        card.innerHTML = `
+          <div class="req-card-header">
+            <div class="req-header-left">
+              <span class="req-category-tag">${item.categoryLabel} · ${item.id}</span>
+              <h3 class="req-title">
+                ${item.title}
+              </h3>
+            </div>
+            <div>
+              <span class="req-badge ${getBadgeClass(item.status)}">
+                ${getBadgeIcon(item.status)} ${item.statusLabel}
+              </span>
+            </div>
+          </div>
+
+          <div class="req-body">
+            <!-- Col 1: Pedido del Documento -->
+            <div class="col-box col-pedidos">
+              <div class="col-title">
+                <span>📄 Requerimiento Solicitado (PDF)</span>
+              </div>
+              <ul class="content-list">
+                ${item.pedido.map(p => `<li>${p}</li>`).join("")}
+              </ul>
+            </div>
+
+            <!-- Col 2: Realidad del Sistema -->
+            <div class="col-box col-sistema">
+              <div class="col-title">
+                <span>⚙️ Realidad en InteliMarket</span>
+              </div>
+              <ul class="content-list">
+                ${item.sistema.map(s => `<li>${formatSystemText(s)}</li>`).join("")}
+              </ul>
+            </div>
+
+            <!-- Col 3: Veredicto & Plan de Acción -->
+            <div class="col-box col-veredicto">
+              <div class="col-title">
+                <span>🎯 Veredicto Técnico & Brecha (GAP)</span>
+              </div>
+              <div class="callout ${getCalloutColor(item.status)}">
+                ${item.veredicto}
+              </div>
+              <div style="margin-top: 6px;">
+                <span style="font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: var(--text-dim); display: block; margin-bottom: 4px;">Acción Concreta para Cumplimiento:</span>
+                <p style="font-size: 0.78rem; color: #94a3b8; line-height: 1.4;">${item.accion}</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- User Notes Box -->
+          <div class="user-notes-section">
+            <div class="notes-header">
+              <div class="notes-title">
+                <span>✍️ Mis Apuntes & Decisiones (Gusta)</span>
+                <span id="indicator-${item.id}" class="notes-saved-indicator">✓ Guardado</span>
+              </div>
+              <div class="notes-actions">
+                <button class="btn-xs" onclick="clearNote('${item.id}')">Limpiar</button>
+              </div>
+            </div>
+            <textarea 
+              id="note-${item.id}"
+              class="notes-textarea" 
+              placeholder="Escribe tus observaciones, decisiones técnicas o prioridades para este punto (se guarda automáticamente)..."
+              oninput="handleNoteInput('${item.id}', this.value)"
+            >${noteValue}</textarea>
+            <div class="notes-footer">
+              <span>Persistido en almacenamiento local del navegador</span>
+              <span id="char-count-${item.id}">${noteValue.length} caracteres</span>
+            </div>
+          </div>
+        `;
+
+        container.appendChild(card);
+      });
+    }
+
+    function formatSystemText(text) {
+      return text
+        .replace(/([a-zA-Z0-9_\-\.\/]+\.py|[a-zA-Z0-9_\-\.\/]+\.tsx|[a-zA-Z0-9_\-\.\/]+\.sql)/g, '<span class="file-ref">📁 $1</span>')
+        .replace(/(supplier_invoices|supplier_credit_notes|bank_accounts|bank_transactions|cash_sessions|customers|suppliers|sales|payment_runs)/g, '<span class="db-badge">🗄️ $1</span>');
+    }
+
+    function getCalloutColor(status) {
+      switch(status) {
+        case "superado": return "callout-purple";
+        case "cumple": return "callout-emerald";
+        case "parcial": return "callout-amber";
+        case "no-cumple": return "callout-rose";
+        case "observacion": return "callout-cyan";
+        default: return "callout-emerald";
+      }
+    }
+
+    // Debounce timer for notes
+    const noteTimers = {};
+    function handleNoteInput(reqId, val) {
+      document.getElementById(`char-count-${reqId}`).innerText = `${val.length} caracteres`;
+      clearTimeout(noteTimers[reqId]);
+      noteTimers[reqId] = setTimeout(() => {
+        saveNote(reqId, val);
+      }, 300);
+    }
+
+    // Filtering logic
+    function setStatusFilter(status, btn) {
+      currentFilterStatus = status;
+      document.querySelectorAll(".filter-pills .pill").forEach(p => {
+        if (p.getAttribute("data-status")) p.classList.remove("active");
+      });
+      btn.classList.add("active");
+      renderCards();
+    }
+
+    function setCategoryFilter(cat, btn) {
+      currentCategory = cat;
+      document.querySelectorAll(".category-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      renderCards();
+    }
+
+    function toggleOnlyWithNotes(btn) {
+      filterOnlyWithNotes = !filterOnlyWithNotes;
+      if (filterOnlyWithNotes) {
+        btn.classList.add("active");
+      } else {
+        btn.classList.remove("active");
+      }
+      renderCards();
+    }
+
+    function applyFilters() {
+      searchQuery = document.getElementById("searchInput").value;
+      renderCards();
+    }
+
+    // Export Functionality
+    function exportUserNotes(format) {
+      if (format === 'json') {
+        const payload = {
+          proyecto: "InteliMarket - Extra Supermercado",
+          fecha_exportacion: new Date().toISOString(),
+          zona_horaria: "America/Asuncion",
+          apuntes: userNotes,
+          comparativa_completa: COMPARATIVE_DATA.map(d => ({
+            id: d.id,
+            categoria: d.categoryLabel,
+            titulo: d.title,
+            estado: d.status,
+            estado_label: d.statusLabel,
+            mi_apunte: userNotes[d.id] || "",
+            veredicto: d.veredicto,
+            accion_propuesta: d.accion
+          }))
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `Apuntes_InteliMarket_${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast("Archivo JSON exportado");
+      } else if (format === 'markdown') {
+        let md = `# Plan de Trabajo y Apuntes: Requerimientos vs InteliMarket\n`;
+        md += `**Extra Supermercado (GRUPO SANTA TERESA E.A.S. - RUC 80150377-9)**\n`;
+        md += `*Fecha: ${new Date().toLocaleDateString("es-PY")} | Zona Horaria: America/Asuncion*\n\n`;
+        md += `---\n\n`;
+
+        COMPARATIVE_DATA.forEach(d => {
+          const apunte = userNotes[d.id];
+          md += `### [${d.id}] ${d.title}\n`;
+          md += `- **Categoría:** ${d.categoryLabel}\n`;
+          md += `- **Estado Actual:** ${d.statusLabel} (${d.status.toUpperCase()})\n`;
+          md += `- **Veredicto Técnico:** ${d.veredicto}\n`;
+          md += `- **Acción de Programación:** ${d.accion}\n`;
+          if (apunte && apunte.trim().length > 0) {
+            md += `- ✍️ **Mis Apuntes (Gusta):**\n> ${apunte.replace(/\n/g, '\n> ')}\n`;
+          } else {
+            md += `- ✍️ **Mis Apuntes:** *(Sin notas adicionales)*\n`;
+          }
+          md += `\n---\n\n`;
+        });
+
+        const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `Plan_Trabajo_Requerimientos_InteliMarket_${new Date().toISOString().slice(0, 10)}.md`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast("Plan de Trabajo en Markdown exportado");
+      }
+    }
+
+    // Run on startup
+    window.addEventListener("DOMContentLoaded", init);
+  </script>
+</body>
+</html>

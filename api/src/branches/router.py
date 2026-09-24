@@ -6,6 +6,7 @@ from typing import Optional
 
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
+from api.src.rbac.deps import require_permission
 from api.src.branches import service
 from api.src.branches.schemas import (
     BranchCreate, BranchUpdate, BranchResponse,
@@ -32,6 +33,7 @@ async def upsert_branch_price(
     data: BranchPriceUpsert,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("branches:update")),
 ):
     bp = await service.upsert_branch_price(db, data)
     result = await service.get_branch_prices(db, user["company_id"])
@@ -46,6 +48,7 @@ async def delete_branch_price(
     price_id: str,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("branches:update")),
 ):
     ok = await service.delete_branch_price(db, price_id)
     if not ok:
@@ -124,6 +127,21 @@ async def consolidated_dashboard(
     return await service.get_consolidated_dashboard(db, user["company_id"])
 
 
+@router.get("/commercial-targets/matrix")
+async def get_commercial_targets_matrix(
+    branch_id: Optional[str] = None,
+    periodo: str = "2026-08",
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.get_commercial_targets_matrix(
+        db=db,
+        company_id=user["company_id"],
+        branch_id=branch_id,
+        periodo=periodo,
+    )
+
+
 # ── Branch CRUD (with /{branch_id} param) ────────────────────
 
 @router.post("", response_model=BranchResponse)
@@ -131,6 +149,7 @@ async def create_branch(
     data: BranchCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("branches:create")),
 ):
     return await service.create_branch(db, data)
 
@@ -162,6 +181,7 @@ async def update_branch(
     data: BranchUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("branches:update")),
 ):
     branch = await service.update_branch(db, branch_id, data)
     if not branch:
@@ -174,6 +194,7 @@ async def delete_branch(
     branch_id: str,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("branches:update")),
 ):
     success = await service.delete_branch(db, branch_id)
     if not success:

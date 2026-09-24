@@ -3,66 +3,23 @@ import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { ShieldCheck, Thermometer, AlertTriangle, CheckCircle, FileText, Plus, X, Search, Loader2, ChevronRight, Check, Trash2, Clock, Gauge, BarChart3, Activity, AlertCircle } from "lucide-react"
 
-const MOCK_PLANS = [
-  { id: "hp1", codigo: "HACCP-PAN-001", nombre: "Plan HACCP Panadería", area: "panadería", descripcion: "Control de puntos críticos en producción de panificados", activo: true, created_at: "2026-05-01T08:00:00Z", updated_at: "2026-05-27T10:00:00Z" },
-  { id: "hp2", codigo: "HACCP-CAR-001", nombre: "Plan HACCP Carnicería", area: "carnicería", descripcion: "Control sanitario en desposte y conservación de carnes", activo: true, created_at: "2026-04-15T08:00:00Z", updated_at: "2026-05-26T14:00:00Z" },
-  { id: "hp3", codigo: "HACCP-LAC-001", nombre: "Plan HACCP Lácteos", area: "lácteos", descripcion: "Control de temperatura en cadena de frío de lácteos", activo: false, created_at: "2026-03-01T08:00:00Z", updated_at: "2026-05-20T09:00:00Z" }
-]
-
-const MOCK_PCC = [
-  { id: "pcc1", plan_id: "hp1", codigo: "PCC-01", nombre: "Cocción de Panificados", descripcion: "Temperatura interna mínima de cocción", limite_critico: "≥ 90°C", limite_inferior: 90, limite_superior: 100, unidad: "°C", frecuencia_monitoreo: "Cada lote", responsable: "Maestro Panadero" },
-  { id: "pcc2", plan_id: "hp1", codigo: "PCC-02", nombre: "Enfriamiento Controlado", descripcion: "Temperatura de enfriamiento post-cocción", limite_critico: "≤ 35°C en 2h", limite_inferior: 0, limite_superior: 35, unidad: "°C", frecuencia_monitoreo: "Cada 30 min", responsable: "Encargado de Producción" },
-  { id: "pcc3", plan_id: "hp2", codigo: "PCC-03", nombre: "Temperatura de Cámara Frigorífica", descripcion: "Rango seguro para conservación de carnes", limite_critico: "0°C a 4°C", limite_inferior: 0, limite_superior: 4, unidad: "°C", frecuencia_monitoreo: "Cada hora", responsable: "Carnicero Jefe" },
-  { id: "pcc4", plan_id: "hp2", codigo: "PCC-04", nombre: "pH de la Carne", descripcion: "Rango de pH aceptable para carne fresca", limite_critico: "5.4 a 5.8", limite_inferior: 5.4, limite_superior: 5.8, unidad: "pH", frecuencia_monitoreo: "Cada recepción", responsable: "Control de Calidad" },
-  { id: "pcc5", plan_id: "hp3", codigo: "PCC-05", nombre: "Temperatura de Cámara de Lácteos", descripcion: "Rango seguro para lácteos pasteurizados", limite_critico: "1°C a 6°C", limite_inferior: 1, limite_superior: 6, unidad: "°C", frecuencia_monitoreo: "Cada 2 horas", responsable: "Encargado de Lácteos" }
-]
-
-const MOCK_MONITOREO = [
-  { id: "log1", pcc_id: "pcc1", valor: 92, unidad: "°C", conforme: true, observaciones: "Cocción correcta, temperatura homogénea", registrado_por: "Maestro Panadero", created_at: "2026-05-27T08:30:00Z" },
-  { id: "log2", pcc_id: "pcc1", valor: 88, unidad: "°C", conforme: false, observaciones: "Temperatura inferior al límite crítico, ajustar horno", registrado_por: "Maestro Panadero", created_at: "2026-05-27T09:15:00Z" },
-  { id: "log3", pcc_id: "pcc3", valor: 3.2, unidad: "°C", conforme: true, observaciones: "Cámara estable", registrado_por: "Carnicero Jefe", created_at: "2026-05-27T07:00:00Z" },
-  { id: "log4", pcc_id: "pcc3", valor: 5.8, unidad: "°C", conforme: false, observaciones: "Puerta de cámara abierta por más tiempo del permitido", registrado_por: "Carnicero Jefe", created_at: "2026-05-27T10:30:00Z" },
-  { id: "log5", pcc_id: "pcc4", valor: 5.62, unidad: "pH", conforme: true, observaciones: "pH dentro del rango ideal", registrado_por: "Control de Calidad", created_at: "2026-05-27T06:45:00Z" }
-]
-
-const MOCK_ACCIONES = [
-  { id: "ca1", pcc_id: "pcc1", log_id: "log2", descripcion: "Calibrar termostato del horno rotativo N°2", responsable: "Mantenimiento", estado: "en_curso", prioridad: "alta", creada_en: "2026-05-27T09:20:00Z", resuelta_en: null, notas: "Se detectó desviación de 2°C en la sonda interna" },
-  { id: "ca2", pcc_id: "pcc3", log_id: "log4", descripcion: "Instalar cierre automático en puerta de cámara frigorífica", responsable: "Instalaciones", estado: "pendiente", prioridad: "crítica", creada_en: "2026-05-27T10:35:00Z", resuelta_en: null, notas: "La puerta quedó abierta 15 min durante carga de mercadería" },
-  { id: "ca3", pcc_id: "pcc2", log_id: null, descripcion: "Reemplazar ventilador de túnel de enfriamiento", responsable: "Mantenimiento", estado: "resuelta", prioridad: "media", creada_en: "2026-05-25T14:00:00Z", resuelta_en: "2026-05-26T11:00:00Z", notas: "Ventilador con rodamiento dañado, reemplazado y probado" }
-]
-
-const MOCK_REPORTE = {
-  total_planes: 3,
-  planes_activos: 2,
-  total_pcc: 5,
-  pcc_conformes: 3,
-  pcc_no_conformes: 2,
-  total_monitoreos: 5,
-  monitoreos_conformes: 3,
-  monitoreos_no_conformes: 2,
-  total_acciones: 3,
-  acciones_pendientes: 1,
-  acciones_en_curso: 1,
-  acciones_resueltas: 1,
-  conformidad_global: 60,
-  periodo: "2026-05-01 / 2026-05-31"
-}
-
 type Tab = "planes" | "pcc" | "monitoreo" | "acciones" | "reporte"
 
 export default function HaccpTab() {
   const [tab, setTab] = useState<Tab>("planes")
   const [loading, setLoading] = useState(true)
-  const [planes, setPlanes] = useState<any[]>(MOCK_PLANS)
-  const [pccs, setPccs] = useState<any[]>(MOCK_PCC)
-  const [monitoreos, setMonitoreos] = useState<any[]>(MOCK_MONITOREO)
-  const [acciones, setAcciones] = useState<any[]>(MOCK_ACCIONES)
-  const [reporte, setReporte] = useState<any>(MOCK_REPORTE)
+  const [planes, setPlanes] = useState<any[]>([])
+  const [pccs, setPccs] = useState<any[]>([])
+  const [monitoreos, setMonitoreos] = useState<any[]>([])
+  const [acciones, setAcciones] = useState<any[]>([])
+  const [reporte, setReporte] = useState<any>(null)
+  const [selectedPlanId, setSelectedPlanId] = useState("")
+  const [selectedPccId, setSelectedPccId] = useState("")
   const [showPlanModal, setShowPlanModal] = useState(false)
   const [showPccModal, setShowPccModal] = useState(false)
   const [showMonitoreoModal, setShowMonitoreoModal] = useState(false)
   const [showAccionModal, setShowAccionModal] = useState(false)
-  const [planForm, setPlanForm] = useState({ codigo: "", nombre: "", area: "panadería", descripcion: "" })
+  const [planForm, setPlanForm] = useState({ nombre: "", area: "panadería", descripcion: "" })
   const [pccForm, setPccForm] = useState({ plan_id: "", codigo: "", nombre: "", descripcion: "", limite_inferior: 0, limite_superior: 100, unidad: "°C", frecuencia_monitoreo: "", responsable: "" })
   const [monitoreoForm, setMonitoreoForm] = useState({ pcc_id: "", valor: 0, observaciones: "", registrado_por: "" })
   const [accionForm, setAccionForm] = useState({ pcc_id: "", descripcion: "", responsable: "", prioridad: "media", notas: "" })
@@ -71,21 +28,36 @@ export default function HaccpTab() {
 
   useEffect(() => {
     fetchAll()
-  }, [tab])
+  }, [tab, selectedPlanId, selectedPccId])
 
   const fetchAll = async () => {
     setLoading(true)
     try {
-      const promises: Promise<any>[] = []
-      if (tab === "planes") promises.push(api.haccp.plans.list().then(setPlanes).catch(() => setPlanes(MOCK_PLANS)))
-      if (tab === "pcc") promises.push(api.haccp.criticalPoints.list(MOCK_PLANS[0].id).then(setPccs).catch(() => setPccs(MOCK_PCC)))
-      if (tab === "monitoreo") {
-        const cp = MOCK_PCC[0]
-        promises.push(api.haccp.monitoring.list(cp.id).then(setMonitoreos).catch(() => setMonitoreos(MOCK_MONITOREO)))
+      if (tab === "planes") {
+        try { setPlanes(await api.haccp.plans.list()) } catch { toast.error("Error", "No se pudieron cargar los planes HACCP") }
       }
-      if (tab === "acciones") promises.push(api.haccp.correctiveActions.list().then(setAcciones).catch(() => setAcciones(MOCK_ACCIONES)))
-      if (tab === "reporte") promises.push(api.haccp.complianceReport(MOCK_REPORTE.periodo).then(setReporte).catch(() => setReporte(MOCK_REPORTE)))
-      await Promise.all(promises.map(p => p.catch(e => console.warn("Demo fetch warning:", e))))
+      if (tab === "pcc") {
+        if (planes.length === 0) { try { setPlanes(await api.haccp.plans.list()) } catch { /* handled below */ } }
+        if (selectedPlanId) {
+          try { setPccs(await api.haccp.criticalPoints.list(selectedPlanId)) } catch { toast.error("Error", "No se pudieron cargar los PCC") }
+        } else {
+          setPccs([])
+        }
+      }
+      if (tab === "monitoreo") {
+        if (pccs.length === 0 && selectedPlanId) { try { setPccs(await api.haccp.criticalPoints.list(selectedPlanId)) } catch { /* handled below */ } }
+        if (selectedPccId) {
+          try { setMonitoreos(await api.haccp.monitoringLogs.list(selectedPccId)) } catch { toast.error("Error", "No se pudo cargar el monitoreo") }
+        } else {
+          setMonitoreos([])
+        }
+      }
+      if (tab === "acciones") {
+        try { setAcciones(await api.haccp.correctiveActions.list()) } catch { toast.error("Error", "No se pudieron cargar las acciones correctivas") }
+      }
+      if (tab === "reporte") {
+        try { setReporte(await api.haccp.complianceReport()) } catch { toast.error("Error", "No se pudo cargar el reporte"); setReporte(null) }
+      }
     } finally {
       setLoading(false)
     }
@@ -93,8 +65,8 @@ export default function HaccpTab() {
 
   const handleCreatePlan = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!planForm.nombre || !planForm.codigo) {
-      toast.error("Validación", "Código y nombre son obligatorios.")
+    if (!planForm.nombre) {
+      toast.error("Validación", "El nombre es obligatorio.")
       return
     }
     setSaving(true)
@@ -102,7 +74,7 @@ export default function HaccpTab() {
       await api.haccp.plans.create(planForm)
       toast.success("Plan HACCP creado")
       setShowPlanModal(false)
-      setPlanForm({ codigo: "", nombre: "", area: "panadería", descripcion: "" })
+      setPlanForm({ nombre: "", area: "panadería", descripcion: "" })
       fetchAll()
     } catch (err: any) {
       toast.error("Error", err.message)
@@ -160,7 +132,7 @@ export default function HaccpTab() {
     }
     setSaving(true)
     try {
-      await api.haccp.monitoring.create(monitoreoForm.pcc_id, monitoreoForm)
+      await api.haccp.monitoringLogs.create(monitoreoForm.pcc_id, monitoreoForm)
       toast.success("Registro de monitoreo guardado")
       setShowMonitoreoModal(false)
       setMonitoreoForm({ pcc_id: "", valor: 0, observaciones: "", registrado_por: "" })
@@ -255,7 +227,6 @@ export default function HaccpTab() {
                 <table className="w-full">
                   <thead>
                     <tr className="bg-gray-50 dark:bg-slate-800 text-left text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider">
-                      <th className="p-4">Código</th>
                       <th className="p-4">Plan HACCP</th>
                       <th className="p-4">Área</th>
                       <th className="p-4">Estado</th>
@@ -265,7 +236,6 @@ export default function HaccpTab() {
                   <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
                     {planes.map(p => (
                       <tr key={p.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-700/20 transition-colors">
-                        <td className="p-4 font-mono text-xs font-bold text-gray-500">{p.codigo}</td>
                         <td className="p-4">
                           <div className="font-bold text-gray-900 dark:text-white">{p.nombre}</div>
                           <div className="text-[10px] text-gray-400 max-w-xs truncate">{p.descripcion}</div>
@@ -312,21 +282,15 @@ export default function HaccpTab() {
                       </button>
                     </div>
                     <form onSubmit={handleCreatePlan} className="p-6 space-y-4">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="input-label label-required font-bold">Código</label>
-                          <input className="input-field mt-1 font-mono text-sm" placeholder="Ej. HACCP-PAN-002" value={planForm.codigo} onChange={e => setPlanForm({ ...planForm, codigo: e.target.value })} required />
-                        </div>
-                        <div>
-                          <label className="input-label label-required font-bold">Área</label>
-                          <select className="input-field mt-1" value={planForm.area} onChange={e => setPlanForm({ ...planForm, area: e.target.value })}>
-                            <option value="panadería">Panadería</option>
-                            <option value="carnicería">Carnicería</option>
-                            <option value="lácteos">Lácteos</option>
-                            <option value="verdulería">Verdulería</option>
-                            <option value="rotisería">Rotisería</option>
-                          </select>
-                        </div>
+                      <div>
+                        <label className="input-label label-required font-bold">Área</label>
+                        <select className="input-field mt-1" value={planForm.area} onChange={e => setPlanForm({ ...planForm, area: e.target.value })}>
+                          <option value="panadería">Panadería</option>
+                          <option value="carnicería">Carnicería</option>
+                          <option value="lácteos">Lácteos</option>
+                          <option value="verdulería">Verdulería</option>
+                          <option value="rotisería">Rotisería</option>
+                        </select>
                       </div>
                       <div>
                         <label className="input-label label-required font-bold">Nombre del Plan</label>
@@ -351,7 +315,11 @@ export default function HaccpTab() {
 
           {tab === "pcc" && (
             <div className="space-y-4">
-              <div className="flex justify-end">
+              <div className="flex justify-between items-center gap-3">
+                <select className="input-field max-w-xs" value={selectedPlanId} onChange={e => { setSelectedPlanId(e.target.value); }}>
+                  <option value="">Selecciona un plan HACCP...</option>
+                  {planes.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                </select>
                 <button onClick={() => setShowPccModal(true)} className="btn-primary flex items-center gap-1.5 py-2.5 px-4 rounded-xl shadow-md transition-all active:scale-95">
                   <Plus className="w-4 h-4" />Nuevo PCC
                 </button>
@@ -360,7 +328,6 @@ export default function HaccpTab() {
                 <table className="w-full">
                   <thead>
                     <tr className="bg-gray-50 dark:bg-slate-800 text-left text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider">
-                      <th className="p-4">Código</th>
                       <th className="p-4">Punto Crítico</th>
                       <th className="p-4">Límite Crítico</th>
                       <th className="p-4">Frecuencia</th>
@@ -373,7 +340,6 @@ export default function HaccpTab() {
                       const plan = planes.find(p => p.id === pcc.plan_id)
                       return (
                         <tr key={pcc.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-700/20 transition-colors">
-                          <td className="p-4 font-mono text-xs font-bold text-gray-500">{pcc.codigo}</td>
                           <td className="p-4">
                             <div className="font-bold text-gray-900 dark:text-white">{pcc.nombre}</div>
                             <div className="text-[10px] text-gray-400 max-w-xs truncate">{pcc.descripcion} {plan ? `· ${plan.nombre}` : ""}</div>
@@ -477,7 +443,11 @@ export default function HaccpTab() {
 
           {tab === "monitoreo" && (
             <div className="space-y-4">
-              <div className="flex justify-end">
+              <div className="flex justify-between items-center gap-3">
+                <select className="input-field max-w-xs" value={selectedPccId} onChange={e => setSelectedPccId(e.target.value)}>
+                  <option value="">Selecciona un PCC...</option>
+                  {pccs.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                </select>
                 <button onClick={() => setShowMonitoreoModal(true)} className="btn-primary flex items-center gap-1.5 py-2.5 px-4 rounded-xl shadow-md transition-all active:scale-95">
                   <Plus className="w-4 h-4" />Nuevo Registro
                 </button>
@@ -501,7 +471,6 @@ export default function HaccpTab() {
                         <tr key={m.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-700/20 transition-colors">
                           <td className="p-4">
                             <span className="font-bold text-gray-900 dark:text-white text-sm">{pcc?.nombre || m.pcc_id}</span>
-                            <div className="text-[10px] text-gray-400">{pcc?.codigo}</div>
                           </td>
                           <td className="p-4">
                             <span className="font-mono font-bold text-lg text-gray-900 dark:text-white">{m.valor}<span className="text-sm text-gray-400 ml-0.5">{m.unidad}</span></span>

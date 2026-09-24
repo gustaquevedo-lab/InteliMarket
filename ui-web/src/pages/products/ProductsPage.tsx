@@ -1,812 +1,3897 @@
-import { useState, useEffect } from "react"
-import { Search, Plus, Package, AlertTriangle, Edit, Trash2, Loader2, Eye, X, Save, Tag, Barcode, DollarSign, Layers, Upload, Download, Shirt } from "lucide-react"
-import { api, type Product, type Category, type ProductVariant } from "../../api"
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
+import {
+  Search, Plus, Package, AlertTriangle, AlertCircle, Edit, Trash2, Loader2, Eye, X,
+  Save, Tag, Barcode, DollarSign, Layers, Upload, Download, Shirt,
+  TrendingUp, TrendingDown, Percent, Sparkles, Building2, ShoppingCart,
+  ArrowUpDown, CheckCircle2, ShieldAlert, Scale, ChevronDown, ChevronRight,
+  Filter, Calendar, Clock, RefreshCw, Box, ExternalLink, ArrowRight,
+  HelpCircle, Info, BookOpen, Gift, Check, Palette, Cpu, Zap, Copy,
+  Lock, Unlock, Calculator, Boxes, Truck, FileText, Image as ImageIcon,
+  Wheat, Wrench, Ban, Power, ToggleLeft, ToggleRight
+} from "lucide-react"
+import {
+  api,
+  COMPANY_ID,
+  type Product,
+  type Category,
+  type ProductVariant,
+  type PackBarcode,
+  type Supplier,
+  type ProductsStatsResponse,
+  type Product360Response,
+} from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { useConfirm } from "../../components/ConfirmDialog"
-import { StatusBadge } from "../../components/DataTable"
 import { formatPYG } from "../../utils/format"
+import { Modal, ModalFooter } from "../../components/Modal"
+import { useAuth } from "../../context/AuthContext"
+import Product360Modal from "./Product360Modal"
 
-export default function ProductsPage() {
-  const [products, setProducts] = useState<Product[]>([])
-  const [categories, setCategories] = useState<Category[]>([])
-  const [perishableConfigs, setPerishableConfigs] = useState<any[]>([])
-  const [search, setSearch] = useState("")
-  const [showForm, setShowForm] = useState(false)
-  const [editingProduct, setEditingProduct] = useState<Product | null>(null)
-  const [viewingProduct, setViewingProduct] = useState<Product | null>(null)
-  const [productDetail, setProductDetail] = useState<Product & { stock_actual?: number; costo_promedio?: number; precio_referencia?: number } | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [detailLoading, setDetailLoading] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [formTab, setFormTab] = useState<"general" | "precios" | "perecederos">("general")
-  const [form, setForm] = useState({
-    sku: "", nombre: "", codigo_barra: "", category_id: "",
-    tipo: "producto", unidad_medida: "UN", iva_tasa: 10,
-    stock_minimo: 0, descripcion: "", costo: 0, precio: 0,
-    plu_codigo: "", es_perecedero: false, vida_util_dias: 0,
-    temperatura_min: 0, temperatura_max: 0, markdown_opt_in: false
-  })
-  const [showImport, setShowImport] = useState(false)
-  const [importFile, setImportFile] = useState<File | null>(null)
-  const [importResult, setImportResult] = useState<{ total_rows: number; success: number; errors: number; details: Array<{ row: number; status: string; message: string }> } | null>(null)
-  const [importing, setImporting] = useState(false)
-  const [variants, setVariants] = useState<ProductVariant[]>([])
-  const [showVariantForm, setShowVariantForm] = useState(false)
-  const [editingVariant, setEditingVariant] = useState<ProductVariant | null>(null)
-  const [variantForm, setVariantForm] = useState({ tipo: "talle", valor: "", sku_variante: "", codigo_barra: "", precio_extra: 0, stock: 0 })
-  const [variantSaving, setVariantSaving] = useState(false)
-  const toast = useToast()
-  const confirm = useConfirm()
+// Presets rápidos para carga veloz de códigos de pack/caja
+const PACK_PRESETS = [
+  { label: "Pack x6", unidades: 6, tag: "Pack x6" },
+  { label: "Pack x12", unidades: 12, tag: "Pack x12" },
+  { label: "Fardo x12", unidades: 12, tag: "Fardo x12" },
+  { label: "Caja x24", unidades: 24, tag: "Caja x24" },
+  { label: "Caja x48", unidades: 48, tag: "Caja x48" },
+  { label: "Display x12", unidades: 12, tag: "Display x12" },
+  { label: "Six-Pack", unidades: 6, tag: "Six-Pack" },
+  { label: "Pack x4", unidades: 4, tag: "Pack x4" },
+]
 
-  const fetchData = async () => {
+// Buscador de productos con autocompletado por código de barra / SKU / nombre.
+// Soporta lectura ultra-rápida por pistola/lector (Enter automático con coincidencia exacta o 1 resultado),
+// selección directa y mensaje claro e inequívoco si el código no existe en el catálogo.
+function ProductSearchPicker({
+  selectedProduct,
+  onSelect,
+  onClear,
+  placeholder = "Buscar por código de barra, SKU o nombre...",
+  disabled = false,
+  autoFocus = false,
+  onAfterSelect,
+}: {
+  selectedProduct: Product | null
+  onSelect: (p: Product) => void
+  onClear?: () => void
+  placeholder?: string
+  disabled?: boolean
+  autoFocus?: boolean
+  onAfterSelect?: (p: Product) => void
+}) {
+  const [query, setQuery] = useState("")
+  const [results, setResults] = useState<Product[]>([])
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [selectedIndex, setSelectedIndex] = useState<number>(-1)
+
+  const inputRef = useRef<HTMLInputElement>(null)
+  const searchTimeoutRef = useRef<any>(null)
+
+  const selectProduct = useCallback((p: Product) => {
+    setQuery("")
+    setResults([])
+    setOpen(false)
+    setErrorMessage(null)
+    setSelectedIndex(-1)
+    onSelect(p)
+    onAfterSelect?.(p)
+  }, [onSelect, onAfterSelect])
+
+  const executeSearchAndSelect = useCallback(async (term: string) => {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current)
+    }
+    const cleanTerm = term.trim()
+    if (!cleanTerm) return
+
     setLoading(true)
+    setErrorMessage(null)
+
     try {
-      const [prods, cats, pConfigs] = await Promise.all([
-        api.products.list({ search: search || undefined }),
-        api.categories.list(),
-        api.supermer.perishableConfigs.list().catch(() => []),
-      ])
-      setProducts(prods)
-      setCategories(cats)
-      setPerishableConfigs(pConfigs)
-    } catch {
-      toast.info("Datos demo", "Conectá el backend para ver datos reales")
-      setProducts([])
-      setCategories([])
+      const res = (await api.products.list({ search: cleanTerm, limit: 25 })) || []
+      const qLower = cleanTerm.toLowerCase()
+
+      // 1. Coincidencia exacta por código de barra
+      const exactBarcode = res.find(p => p.codigo_barra && p.codigo_barra.trim().toLowerCase() === qLower)
+      if (exactBarcode) {
+        selectProduct(exactBarcode)
+        return
+      }
+
+      // 2. Coincidencia exacta por SKU
+      const exactSku = res.find(p => p.sku && p.sku.trim().toLowerCase() === qLower)
+      if (exactSku) {
+        selectProduct(exactSku)
+        return
+      }
+
+      // 3. Coincidencia exacta por nombre
+      const exactName = res.find(p => p.nombre && p.nombre.trim().toLowerCase() === qLower)
+      if (exactName) {
+        selectProduct(exactName)
+        return
+      }
+
+      // 4. Si hay exactamente 1 resultado
+      if (res.length === 1) {
+        selectProduct(res[0])
+        return
+      }
+
+      // 5. Si no se encontró ningún producto
+      if (res.length === 0) {
+        setResults([])
+        setOpen(false)
+        setErrorMessage(`No se encontró ningún producto con el código "${cleanTerm}"`)
+        inputRef.current?.select()
+        return
+      }
+
+      // 6. Múltiples resultados sin coincidencia exacta: desplegar para que el operador elija
+      setResults(res)
+      setSelectedIndex(0)
+      setOpen(true)
+      setErrorMessage(null)
+    } catch (err: any) {
+      setResults([])
+      setOpen(false)
+      setErrorMessage("Error al conectar con el servidor para buscar el producto.")
     } finally {
       setLoading(false)
     }
+  }, [selectProduct])
+
+  // Debounce para búsqueda interactiva por tipeo normal
+  useEffect(() => {
+    if (!open || query.trim().length < 2) {
+      setResults([])
+      setSelectedIndex(-1)
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    const timer = setTimeout(() => {
+      api.products.list({ search: query.trim(), limit: 20 })
+        .then((res) => {
+          if (!cancelled) {
+            setResults(res || [])
+            setSelectedIndex(-1)
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setResults([])
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false)
+        })
+    }, 250)
+    searchTimeoutRef.current = timer
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [query, open])
+
+  // Manejador de teclado para lector de código de barras (Enter) y navegación con flechas
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault()
+      e.stopPropagation()
+      if (selectedIndex >= 0 && results[selectedIndex]) {
+        selectProduct(results[selectedIndex])
+        return
+      }
+      executeSearchAndSelect(query)
+    } else if (e.key === "ArrowDown") {
+      if (!open && results.length > 0) {
+        setOpen(true)
+        setSelectedIndex(0)
+      } else if (results.length > 0) {
+        e.preventDefault()
+        setSelectedIndex((prev) => (prev < results.length - 1 ? prev + 1 : 0))
+      }
+    } else if (e.key === "ArrowUp") {
+      if (results.length > 0) {
+        e.preventDefault()
+        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : results.length - 1))
+      }
+    } else if (e.key === "Escape") {
+      setOpen(false)
+      setErrorMessage(null)
+    }
   }
 
-  useEffect(() => { fetchData() }, [])
-
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault()
-    fetchData()
+  if (disabled && selectedProduct) {
+    return (
+      <div className="input-field w-full text-xs font-bold opacity-60 flex items-center justify-between">
+        <span>{selectedProduct.nombre} (SKU: {selectedProduct.sku})</span>
+      </div>
+    )
   }
 
-  const handleImport = async () => {
-    if (!importFile) return
-    setImporting(true)
-    const formData = new FormData()
-    formData.append("file", importFile)
+  return (
+    <div className="relative">
+      {selectedProduct && !open ? (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => { setQuery(""); setErrorMessage(null); setOpen(true) }}
+          className="input-field w-full text-xs font-bold flex items-center justify-between disabled:opacity-60 bg-amber-50/50 dark:bg-amber-950/20 border-amber-300 dark:border-amber-800"
+        >
+          <span className="truncate text-left">
+            {selectedProduct.nombre}{" "}
+            <span className="font-mono text-slate-400 font-normal">
+              ({selectedProduct.codigo_barra ? `Cód: ${selectedProduct.codigo_barra} · ` : ""}SKU: {selectedProduct.sku})
+            </span>
+          </span>
+          {!disabled && (
+            <X
+              className="w-3.5 h-3.5 text-slate-400 hover:text-rose-500 shrink-0 ml-2"
+              onClick={(e) => { e.stopPropagation(); setQuery(""); setErrorMessage(null); onClear?.() }}
+            />
+          )}
+        </button>
+      ) : (
+        <div>
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <input
+              ref={inputRef}
+              type="text"
+              autoFocus={autoFocus || open}
+              disabled={disabled}
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value)
+                if (errorMessage) setErrorMessage(null)
+              }}
+              onFocus={() => setOpen(true)}
+              onBlur={() => setTimeout(() => setOpen(false), 200)}
+              onKeyDown={handleKeyDown}
+              placeholder={placeholder}
+              className={`input-field w-full text-xs font-bold pl-8 pr-8 ${
+                errorMessage ? "border-rose-400 dark:border-rose-700 bg-rose-50/40 dark:bg-rose-950/20 focus:border-rose-500" : ""
+              }`}
+            />
+            {loading && (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600 absolute right-2.5 top-1/2 -translate-y-1/2" />
+            )}
+          </div>
+
+          {errorMessage && (
+            <div className="mt-2 p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 flex items-center gap-2 text-xs font-semibold text-rose-600 dark:text-rose-400 animate-fade-in shadow-sm">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+              <div className="flex-1">{errorMessage}</div>
+              <button
+                type="button"
+                onClick={() => setErrorMessage(null)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {open && query.trim().length >= 2 && (
+        <div className="absolute z-[100] mt-1 w-full max-h-72 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl">
+          {loading ? (
+            <div className="p-3.5 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" /> Buscando productos...
+            </div>
+          ) : results.length === 0 ? (
+            <div className="p-3.5 text-center text-xs text-rose-500 font-semibold flex items-center justify-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+              Sin resultados para "{query}"
+            </div>
+          ) : (
+            results.map((p, idx) => (
+              <button
+                key={p.id}
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); selectProduct(p) }}
+                className={`w-full text-left px-3.5 py-2.5 border-b border-slate-100 dark:border-slate-700/60 last:border-0 flex items-center justify-between gap-3 transition-colors ${
+                  selectedIndex === idx
+                    ? "bg-amber-100 dark:bg-amber-900/50"
+                    : "hover:bg-amber-50 dark:hover:bg-amber-950/40"
+                }`}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-bold text-slate-900 dark:text-white truncate">{p.nombre}</div>
+                  <div className="text-[10px] font-mono text-slate-400 flex items-center gap-2 mt-0.5">
+                    {p.codigo_barra && <span>Cod: <strong className="text-slate-600 dark:text-slate-300">{p.codigo_barra}</strong></span>}
+                    {p.sku && <span>SKU: {p.sku}</span>}
+                  </div>
+                </div>
+                {p.precio_venta != null && (
+                  <span className="text-[11px] font-mono font-bold text-amber-600 dark:text-amber-400 shrink-0">
+                    Gs. {Number(p.precio_venta).toLocaleString("es-PY")}
+                  </span>
+                )}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function ProductsPage() {
+  const toast = useToast()
+  const confirm = useConfirm()
+  const { user } = useAuth()
+  const isManagerOrAdmin = Boolean(
+    user?.is_superadmin ||
+    user?.rol === "admin" ||
+    user?.rol === "gerente" ||
+    user?.rol === "supervisor"
+  )
+
+  // Pestaña Principal
+  const [mainTab, setMainTab] = useState<"catalogo" | "variantes" | "packs" | "kits" | "guia">("catalogo")
+
+  // Datos principales
+  const [products, setProducts] = useState<Product[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
+  const [variantsList, setVariantsList] = useState<ProductVariant[]>([])
+  const [packBarcodesList, setPackBarcodesList] = useState<PackBarcode[]>([])
+  const [stats, setStats] = useState<ProductsStatsResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [loadingVariants, setLoadingVariants] = useState(false)
+  const [loadingPackBarcodes, setLoadingPackBarcodes] = useState(false)
+  const [loadingStats, setLoadingStats] = useState(true)
+
+  // Filtros y Búsqueda
+  const [search, setSearch] = useState("")
+  const [selectedCategory, setSelectedCategory] = useState("")
+  const [filterStockTag, setFilterStockTag] = useState<"todos" | "con_stock" | "quiebre" | "bajo_stock" | "pesables" | "perecederos">("todos")
+  const [filterTipoProducto, setFilterTipoProducto] = useState<"todos" | "producto" | "materia_prima" | "insumo" | "servicio">("todos")
+  const [filterEstado, setFilterEstado] = useState<"todos" | "activos" | "inactivos">("activos")
+  const [sortBy, setSortBy] = useState<"nombre" | "precio_desc" | "precio_asc" | "margen_desc">("nombre")
+  
+  // Paginación Catálogo
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
+
+  // Ficha 360° del Producto
+  const [selectedProduct360Id, setSelectedProduct360Id] = useState<string | null>(null)
+  const [product360Data, setProduct360Data] = useState<Product360Response | null>(null)
+  const [loading360, setLoading360] = useState(false)
+  const [tab360, setTab360] = useState<"rentabilidad" | "stock_depositos" | "compras" | "ventas" | "kardex">("rentabilidad")
+
+  // Modal Alta / Edición Producto
+  const [showForm, setShowForm] = useState(false)
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [costoUnlocked, setCostoUnlocked] = useState(false)
+  const [formTab, setFormTab] = useState<"general" | "empaque" | "precios" | "inventario">("general")
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  interface LocalProductTier {
+    id?: string
+    min_qty: number
+    max_qty: number | null
+    precio_unitario: number
+    isNew?: boolean
+    isDeleted?: boolean
+  }
+  const [productTiers, setProductTiers] = useState<LocalProductTier[]>([])
+  const [loadingTiers, setLoadingTiers] = useState(false)
+  const [form, setForm] = useState({
+    sku: "",
+    nombre: "",
+    codigo_barra: "",
+    categoria_id: "",
+    supplier_id: "",
+    tipo: "producto",
+    tipo_producto: "producto" as "producto" | "materia_prima" | "insumo" | "servicio",
+    activo: true,
+    unidad_medida: "UN",
+    iva_tasa: 10,
+    stock_minimo: 5,
+    stock_maximo: 0,
+    peso_kg: 0,
+    descripcion: "",
+    imagen_url: "",
+    costo_promedio: 0,
+    precio_venta: 0,
+    plu_codigo: "",
+    plu_balanza: null as number | null,
+    es_perecedero: false,
+    vida_util_dias: 0,
+    tiene_lotes: false,
+    tipo_venta: "unidad",
+    // Configuración Bulto / Pack Mayorista
+    tiene_pack: false,
+    pack_id: null as string | null,
+    pack_cantidad: 12,
+    pack_codigo_barra: "",
+    pack_etiqueta: "Caja x12",
+  })
+
+  // Carga de Imagen local desde computadora
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const imageFileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleUploadImageFile = async (file: File) => {
+    if (!file) return
+    if (!file.type.startsWith("image/")) {
+      toast.error("Formato inválido", "Por favor selecciona un archivo de imagen (PNG, JPG, WEBP o GIF).")
+      return
+    }
+    if (file.size > 12 * 1024 * 1024) {
+      toast.error("Archivo muy pesado", "La imagen no debe superar los 12MB.")
+      return
+    }
+
     try {
-      const result = await fetch(`${import.meta.env.VITE_API_URL || "/api"}/v1/imports/products`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
-        body: formData,
-      })
-      const data = await result.json()
-      if (!result.ok) throw new Error(data.detail || "Error en importación")
-      setImportResult(data)
-      toast.success("Importación completada", `${data.success} de ${data.total_rows} productos importados`)
-      if (data.success > 0) fetchData()
+      setUploadingImage(true)
+      const res = await api.products.uploadImage(file, editingProduct?.id, form.sku)
+      setForm((prev) => ({ ...prev, imagen_url: res.url }))
+      toast.success("Foto Cargada", "La imagen ha sido optimizada y asignada al producto.")
     } catch (err: any) {
-      toast.error("Error", err.message || "No se pudo importar")
+      toast.error("Error al subir imagen", err.message || "No se pudo subir la foto.")
     } finally {
-      setImporting(false)
+      setUploadingImage(false)
+      if (imageFileInputRef.current) imageFileInputRef.current.value = ""
     }
   }
 
-  const loadProductDetail = async (product: Product) => {
-    setViewingProduct(product)
-    setDetailLoading(true)
+  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) handleUploadImageFile(file)
+  }
+
+  const handleImageDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const file = e.dataTransfer.files?.[0]
+    if (file) handleUploadImageFile(file)
+  }
+
+  const handleRemoveImage = () => {
+    setForm((prev) => ({ ...prev, imagen_url: "" }))
+    if (imageFileInputRef.current) imageFileInputRef.current.value = ""
+  }
+
+  // Módulo de Variantes
+  const [selectedParentProductId, setSelectedParentProductId] = useState<string>("")
+  const [selectedParentProduct, setSelectedParentProduct] = useState<Product | null>(null)
+  const [showVariantModal, setShowVariantModal] = useState(false)
+  const [savingVariant, setSavingVariant] = useState(false)
+  const [variantForm, setVariantForm] = useState({
+    tipo: "talle",
+    valor: "",
+    sku_variante: "",
+    codigo_barra: "",
+    precio_extra: 0,
+    stock: 0,
+  })
+
+  // Módulo de Códigos de Pack/Caja (1 codigo = N unidades del mismo producto)
+  // Estado del Filtro de la Tabla:
+  const [packFilterProductId, setPackFilterProductId] = useState<string>("")
+  const [packFilterProduct, setPackFilterProduct] = useState<Product | null>(null)
+  const [packSearchQuery, setPackSearchQuery] = useState<string>("")
+
+  // Estado del Modal de Creación / Edición:
+  const [packModalProductId, setPackModalProductId] = useState<string>("")
+  const [packModalProduct, setPackModalProduct] = useState<Product | null>(null)
+  const [showPackBarcodeModal, setShowPackBarcodeModal] = useState(false)
+  const [savingPackBarcode, setSavingPackBarcode] = useState(false)
+  const [editingPackBarcode, setEditingPackBarcode] = useState<PackBarcode | null>(null)
+  const [packBarcodeForm, setPackBarcodeForm] = useState({
+    codigo_barra: "",
+    etiqueta: "",
+    unidades_por_paquete: 1,
+  })
+  const packBarcodeInputRef = useRef<HTMLInputElement>(null)
+  const packEtiquetaInputRef = useRef<HTMLInputElement>(null)
+
+  // Módulo de Kits / Combos
+  const [kitForm, setKitForm] = useState({
+    nombre: "",
+    sku: "",
+    precio_venta: 0,
+    items: [] as Array<{ product_id: string; product_nombre: string; cantidad: number; costo_unitario: number; precio_unitario: number }>,
+  })
+  const [kitSelectedComponentId, setKitSelectedComponentId] = useState<string>("")
+  const [kitSelectedComponent, setKitSelectedComponent] = useState<Product | null>(null)
+  const [kitComponentQty, setKitComponentQty] = useState<number>(1)
+  const [kitsSaved, setKitsSaved] = useState<any[]>([])
+  const [loadingKits, setLoadingKits] = useState(false)
+
+  const loadKits = useCallback(async () => {
+    setLoadingKits(true)
     try {
-      const [detail, variantData] = await Promise.all([
-        api.products.get(product.id),
-        api.variants.list(product.id),
-      ])
-      setProductDetail(detail as Product & { stock_actual?: number; costo_promedio?: number; precio_referencia?: number })
-      setVariants(variantData)
+      const kits = await api.kits.list()
+      setKitsSaved((kits || []).map((k: any) => ({
+        id: k.id,
+        nombre: k.nombre,
+        descripcion: k.descripcion || "",
+        precio_venta: k.precio_venta || 0,
+        costo_total: k.costo_total || 0,
+        margen_pct: k.margen_pct != null ? Number(k.margen_pct).toFixed(1) : "0.0",
+        componentes: (k.items || []).map((i: any) => ({ nombre: i.nombre || "Producto", cantidad: i.cantidad, costo: i.costo_unitario })),
+      })))
+    } catch (e: any) {
+      toast.error("Error", "No se pudieron cargar los kits.")
+    } finally {
+      setLoadingKits(false)
+    }
+  }, [toast])
+
+  useEffect(() => { loadKits() }, [loadKits])
+
+  // Carga de Datos
+  const loadStats = useCallback(async () => {
+    setLoadingStats(true)
+    try {
+      const s = await api.products.getStats()
+      setStats(s)
     } catch {
-      setProductDetail(product as Product & { stock_actual?: number; costo_promedio?: number; precio_referencia?: number })
-      setVariants([])
+      // fallback
     } finally {
-      setDetailLoading(false)
+      setLoadingStats(false)
+    }
+  }, [])
+
+  const fetchData = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [prodsRes, catsRes, suppsRes] = await Promise.allSettled([
+        api.products.list({ search: search || undefined, categoria_id: selectedCategory || undefined, include_inactive: true, limit: 1000 }),
+        api.categories.list(),
+        api.purchases.suppliers(),
+      ])
+
+      if (prodsRes.status === "fulfilled" && Array.isArray(prodsRes.value)) {
+        // Filtrar nombres válidos y dar prioridad a productos con precio/stock
+        const validProds = prodsRes.value.filter(p => p.nombre && p.nombre.replace(/\./g, "").trim().length > 0)
+        setProducts(validProds.length > 0 ? validProds : prodsRes.value)
+        if (validProds.length > 0 && !selectedParentProductId) {
+          setSelectedParentProductId(validProds[0].id)
+          setSelectedParentProduct(validProds[0])
+        }
+      } else {
+        setProducts([])
+      }
+
+      if (catsRes.status === "fulfilled" && Array.isArray(catsRes.value)) {
+        setCategories(catsRes.value)
+      } else {
+        setCategories([])
+      }
+
+      if (suppsRes.status === "fulfilled" && Array.isArray(suppsRes.value)) {
+        setSuppliers(suppsRes.value)
+      }
+    } catch (e: any) {
+      toast.error("Error al cargar productos", e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [search, selectedCategory, selectedParentProductId])
+
+  const loadVariants = useCallback(async () => {
+    setLoadingVariants(true)
+    try {
+      const v = await api.products.variants.list(selectedParentProductId || undefined)
+      setVariantsList(v)
+    } catch (e: any) {
+      // fallback
+    } finally {
+      setLoadingVariants(false)
+    }
+  }, [selectedParentProductId])
+
+  const loadPackBarcodes = useCallback(async () => {
+    setLoadingPackBarcodes(true)
+    try {
+      const v = await api.products.packBarcodes.list(packFilterProductId || undefined)
+      setPackBarcodesList(v || [])
+    } catch (e: any) {
+      // fallback
+    } finally {
+      setLoadingPackBarcodes(false)
+    }
+  }, [packFilterProductId])
+
+  useEffect(() => {
+    loadStats()
+    fetchData()
+  }, [loadStats, fetchData])
+
+  useEffect(() => {
+    if (mainTab === "variantes") {
+      loadVariants()
+    }
+  }, [mainTab, loadVariants])
+
+  useEffect(() => {
+    if (mainTab === "packs") {
+      loadPackBarcodes()
+    }
+  }, [mainTab, loadPackBarcodes])
+
+  // Abrir Ficha 360°
+  const openProduct360 = async (prodId: string) => {
+    setSelectedProduct360Id(prodId)
+    setLoading360(true)
+    setTab360("rentabilidad")
+    try {
+      const res = await api.products.get360(prodId)
+      setProduct360Data(res)
+    } catch (e: any) {
+      toast.error("Error al cargar Ficha 360°", e.message)
+      setProduct360Data(null)
+    } finally {
+      setLoading360(false)
     }
   }
 
-  const openEdit = (product: Product) => {
-    setEditingProduct(product)
-    const match = perishableConfigs.find(c => c.producto_id === product.id)
-    setFormTab("general")
-    setForm({
-      sku: product.sku,
-      nombre: product.nombre,
-      codigo_barra: product.codigo_barra || "",
-      category_id: product.category_id || "",
-      tipo: product.tipo || "producto",
-      unidad_medida: product.unidad_medida || "UN",
-      iva_tasa: product.iva_tasa ?? 10,
-      stock_minimo: product.stock_minimo ?? 0,
-      descripcion: product.descripcion || "",
-      costo: product.costo_promedio ?? 0,
-      precio: product.precio_venta ?? 0,
-      plu_codigo: (product as any).plu_codigo || "",
-      es_perecedero: !!match,
-      vida_util_dias: match?.vida_util_dias || 0,
-      temperatura_min: 0,
-      temperatura_max: 0,
-      markdown_opt_in: match?.requiere_markdown || false,
+  // Filtrado y Ordenación en Memoria
+  const filteredAndSortedProducts = useMemo(() => {
+    let list = [...products]
+
+    // Filtro por Tags de Estado de Stock
+    if (filterStockTag === "con_stock") {
+      list = list.filter(p => (Number((p as any).stock_actual) || 0) > 0)
+    } else if (filterStockTag === "quiebre") {
+      list = list.filter(p => (Number((p as any).stock_actual) || 0) <= 0)
+    } else if (filterStockTag === "bajo_stock") {
+      list = list.filter(p => {
+        const s = Number((p as any).stock_actual) || 0
+        const min = Number(p.stock_minimo) || 0
+        return s > 0 && s <= min
+      })
+    } else if (filterStockTag === "pesables") {
+      list = list.filter(p => ["KG", "Kg", "kg", "LT", "Lt"].includes(p.unidad_medida || "") || p.tipo_venta === "peso")
+    } else if (filterStockTag === "perecederos") {
+      list = list.filter(p => (p as any).es_perecedero)
+    }
+
+    // Filtro por Estado (Activos / Inactivos)
+    if (filterEstado === "activos") {
+      list = list.filter(p => p.activo !== false)
+    } else if (filterEstado === "inactivos") {
+      list = list.filter(p => p.activo === false)
+    }
+
+    // Filtro por Tipo de Producto
+    if (filterTipoProducto !== "todos") {
+      list = list.filter(p => (p.tipo_producto || "producto") === filterTipoProducto)
+    }
+
+    // Ordenación
+    list.sort((a, b) => {
+      if (sortBy === "nombre") return (a.nombre || "").localeCompare(b.nombre || "")
+      if (sortBy === "precio_desc") return Number(b.precio_venta || 0) - Number(a.precio_venta || 0)
+      if (sortBy === "precio_asc") return Number(a.precio_venta || 0) - Number(b.precio_venta || 0)
+      if (sortBy === "margen_desc") {
+        const margA = Number(a.precio_venta || 0) > 0 ? (Number(a.precio_venta) - Number(a.costo_promedio || 0)) / Number(a.precio_venta) : 0
+        const margB = Number(b.precio_venta || 0) > 0 ? (Number(b.precio_venta) - Number(b.costo_promedio || 0)) / Number(b.precio_venta) : 0
+        return margB - margA
+      }
+      return 0
     })
-  }
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSaving(true)
-    try {
-      const { es_perecedero, vida_util_dias, temperatura_min, temperatura_max, markdown_opt_in, plu_codigo, ...cleanForm } = form
-      const newProd = await api.products.create({
-        ...cleanForm,
-        activo: true,
-        precio_venta: form.precio,
-        costo_promedio: form.costo,
-        plu_codigo: plu_codigo || undefined,
-      } as any)
+    return list
+  }, [products, filterStockTag, filterTipoProducto, filterEstado, sortBy])
 
-      if (form.es_perecedero) {
-        await api.supermer.perishableConfigs.upsert({
-          producto_id: newProd.id,
-          vida_util_dias: form.vida_util_dias,
-          requiere_markdown: form.markdown_opt_in,
-          categoria_perecedera: "Perecedero"
-        })
-      }
+  // Paginación
+  const totalPages = Math.ceil(filteredAndSortedProducts.length / pageSize) || 1
+  const paginatedProducts = useMemo(() => {
+    const start = (page - 1) * pageSize
+    return filteredAndSortedProducts.slice(start, start + pageSize)
+  }, [filteredAndSortedProducts, page, pageSize])
 
-      toast.success("Producto creado", form.nombre)
-      setShowForm(false)
-      setForm({ sku: "", nombre: "", codigo_barra: "", category_id: "", tipo: "producto", unidad_medida: "UN", iva_tasa: 10, stock_minimo: 0, descripcion: "", costo: 0, precio: 0, plu_codigo: "", es_perecedero: false, vida_util_dias: 0, temperatura_min: 0, temperatura_max: 0, markdown_opt_in: false })
-      fetchData()
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Error al crear producto"
-      toast.error("Error", msg)
-    } finally {
-      setSaving(false)
+  // Guardar Formulario Alta / Edición
+  const handleSaveProduct = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
+    if (!form.sku?.trim() || !form.nombre?.trim()) {
+      toast.error("Datos incompletos", "El SKU y Nombre del producto son obligatorios.")
+      return
     }
-  }
-
-  const handleUpdate = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!editingProduct) return
     setSaving(true)
     try {
-      const { es_perecedero, vida_util_dias, temperatura_min, temperatura_max, markdown_opt_in, plu_codigo, ...cleanForm } = form
-      await api.products.update(editingProduct.id, {
-        sku: form.sku,
-        nombre: form.nombre,
-        codigo_barra: form.codigo_barra || undefined,
-        category_id: form.category_id || undefined,
-        tipo: form.tipo,
-        unidad_medida: form.unidad_medida,
-        iva_tasa: form.iva_tasa,
-        stock_minimo: form.stock_minimo,
-        descripcion: form.descripcion || undefined,
-        precio_venta: form.precio || undefined,
-        costo_promedio: form.costo || undefined,
-        plu_codigo: plu_codigo || undefined,
-      } as any)
-
-      if (form.es_perecedero) {
-        await api.supermer.perishableConfigs.upsert({
-          producto_id: editingProduct.id,
-          vida_util_dias: form.vida_util_dias,
-          requiere_markdown: form.markdown_opt_in,
-          categoria_perecedera: "Perecedero"
-        })
+      const isPeso = form.tipo_venta === "peso"
+      const payload: Partial<Product> & { sku: string; nombre: string } = {
+        sku: form.sku.trim(),
+        nombre: form.nombre.trim(),
+        codigo_barra: form.codigo_barra?.trim() || undefined,
+        descripcion: form.descripcion?.trim() || null,
+        categoria_id: form.categoria_id && form.categoria_id.trim() !== "" ? form.categoria_id : null,
+        supplier_id: form.supplier_id && form.supplier_id.trim() !== "" ? form.supplier_id : undefined,
+        tipo: form.tipo || "producto",
+        tipo_producto: form.tipo_producto || "producto",
+        activo: form.activo !== false,
+        tipo_venta: isPeso ? "peso" : "unidad",
+        unidad_medida: isPeso ? "KG" : (form.unidad_medida === "KG" ? "UN" : (form.unidad_medida || "UN")),
+        plu_balanza: isPeso && form.plu_balanza ? Number(form.plu_balanza) : null,
+        costo_promedio: Number(form.costo_promedio) || 0,
+        precio_venta: Number(form.precio_venta) || 0,
+        stock_minimo: Number(form.stock_minimo) || 0,
+        stock_maximo: form.stock_maximo ? Number(form.stock_maximo) : undefined,
+        peso_kg: form.peso_kg ? Number(form.peso_kg) : undefined,
+        imagen_url: form.imagen_url?.trim() || null,
+        iva_tasa: Number(form.iva_tasa) !== undefined ? Number(form.iva_tasa) : 10,
+        tiene_vencimiento: !!form.es_perecedero,
+        tiene_lotes: !!form.tiene_lotes,
       }
 
-      toast.success("Producto actualizado", form.nombre)
+      let savedProduct: Product
+      if (editingProduct) {
+        savedProduct = await api.products.update(editingProduct.id, payload)
+        toast.success("Producto Actualizado", `${form.nombre} guardado correctamente.`)
+      } else {
+        savedProduct = await api.products.create(payload)
+        toast.success("Producto Creado", `${form.nombre} registrado en el catálogo.`)
+      }
+
+      // Sincronizar o crear Pack Barcode si se configuró venta/recepción por caja
+      const targetProductId = editingProduct ? editingProduct.id : savedProduct.id
+      if (targetProductId && form.tiene_pack && Number(form.pack_cantidad) > 1 && form.pack_codigo_barra?.trim()) {
+        const packPayload = {
+          codigo_barra: form.pack_codigo_barra.trim(),
+          unidades_por_paquete: Number(form.pack_cantidad),
+          etiqueta: form.pack_etiqueta?.trim() || `Caja x${form.pack_cantidad}`,
+        }
+        try {
+          if (form.pack_id) {
+            await api.products.packBarcodes.update(targetProductId, form.pack_id, packPayload)
+          } else {
+            await api.products.packBarcodes.create(targetProductId, packPayload)
+          }
+        } catch (packErr: any) {
+          console.warn("Pack barcode warning:", packErr)
+        }
+      }
+
+      // Sincronizar escalas de precios mayoristas (Tiered Prices)
+      if (targetProductId && productTiers.length > 0) {
+        for (const tier of productTiers) {
+          try {
+            if (tier.isDeleted && tier.id) {
+              await api.smartPricing.deleteTieredPrice(tier.id)
+            } else if (tier.isNew && !tier.isDeleted && tier.min_qty > 0 && tier.precio_unitario > 0) {
+              await api.smartPricing.createTieredPrice({
+                company_id: COMPANY_ID,
+                product_id: targetProductId,
+                min_qty: Number(tier.min_qty),
+                max_qty: tier.max_qty ? Number(tier.max_qty) : null,
+                precio_unitario: Number(tier.precio_unitario),
+                moneda: "PYG",
+                activo: true,
+              })
+            } else if (!tier.isNew && !tier.isDeleted && tier.id && tier.min_qty > 0 && tier.precio_unitario > 0) {
+              await api.smartPricing.updateTieredPrice(tier.id, {
+                min_qty: Number(tier.min_qty),
+                max_qty: tier.max_qty ? Number(tier.max_qty) : null,
+                precio_unitario: Number(tier.precio_unitario),
+              })
+            }
+          } catch (tErr) {
+            console.warn("Error guardando escala:", tErr)
+          }
+        }
+      }
+
+      setShowForm(false)
       setEditingProduct(null)
       fetchData()
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Error al actualizar"
-      toast.error("Error", msg)
+      loadStats()
+    } catch (e: any) {
+      toast.error("Error al guardar", e.message)
     } finally {
       setSaving(false)
     }
   }
 
-  const handleDelete = async (product: Product) => {
+  // Toggle rápido Activo / Inactivo con efecto inmediato en POS y Compras
+  const handleToggleActivo = async (p: Product) => {
+    const nuevoEstado = !(p.activo !== false)
+    try {
+      // Actualización optimista inmediata en UI
+      setProducts((prev) => prev.map((item) => item.id === p.id ? { ...item, activo: nuevoEstado } : item))
+      await api.products.update(p.id, { activo: nuevoEstado })
+      toast.success(
+        nuevoEstado ? "Producto Activado" : "Producto Desactivado",
+        `"${p.nombre}" ahora está ${nuevoEstado ? "activo (facturable en POS y disponible en compras)" : "inactivo (bloqueado para facturación y compras)"}.`
+      )
+    } catch (err: any) {
+      // Revertir en caso de falla
+      setProducts((prev) => prev.map((item) => item.id === p.id ? { ...item, activo: p.activo } : item))
+      toast.error("Error al cambiar estado", err.message || "No se pudo actualizar el estado del producto.")
+    }
+  }
+
+  const handleEditClick = (p: Product) => {
+    setEditingProduct(p)
+    setCostoUnlocked(false)
+    const nombreUpper = (p.nombre || "").toUpperCase()
+    const bc = (p.codigo_barra || "").trim()
+    const esNombreKg = nombreUpper.endsWith(" KG") || nombreUpper.includes(" KG ") || nombreUpper.includes("/KG")
+    const esPatronBalanza = bc.startsWith("2000") && bc.length === 7 && /^\d+$/.test(bc)
+    const isPesable = p.tipo_venta === "peso" || ["KG", "Kg", "kg"].includes(p.unidad_medida || "") || (esPatronBalanza && esNombreKg)
+
+    let pluCalculado = (p as any).plu_balanza ? Number((p as any).plu_balanza) : null
+    if (!pluCalculado && esPatronBalanza && (isPesable || esNombreKg)) {
+      pluCalculado = parseInt(bc.slice(4), 10) || null
+    }
+
+    setForm({
+      sku: p.sku || "",
+      nombre: p.nombre || "",
+      codigo_barra: p.codigo_barra || "",
+      categoria_id: p.categoria_id || "",
+      supplier_id: p.supplier_id || "",
+      tipo: p.tipo || "producto",
+      tipo_producto: (p.tipo_producto || "producto") as any,
+      activo: p.activo !== false,
+      unidad_medida: isPesable ? "KG" : (p.unidad_medida || "UN"),
+      iva_tasa: Number(p.iva_tasa) !== undefined ? Number(p.iva_tasa) : 10,
+      stock_minimo: Number(p.stock_minimo) || 5,
+      stock_maximo: Number(p.stock_maximo) || 0,
+      peso_kg: p.peso_kg ? Number(p.peso_kg) : 0,
+      descripcion: p.descripcion || "",
+      imagen_url: p.imagen_url || "",
+      costo_promedio: Number(p.costo_promedio) || 0,
+      precio_venta: Number(p.precio_venta) || 0,
+      plu_codigo: (p as any).plu_codigo || "",
+      plu_balanza: pluCalculado,
+      es_perecedero: !!(p as any).es_perecedero || !!(p as any).tiene_vencimiento,
+      vida_util_dias: (p as any).vida_util_dias || 0,
+      tiene_lotes: !!(p as any).tiene_lotes,
+      tipo_venta: isPesable ? "peso" : (p.tipo_venta || "unidad"),
+      tiene_pack: false,
+      pack_id: null,
+      pack_cantidad: 12,
+      pack_codigo_barra: "",
+      pack_etiqueta: "Caja x12",
+    })
+    setFormTab("general")
+    setShowForm(true)
+
+    // Cargar si ya tiene código de caja/pack registrado
+    api.products.packBarcodes.list(p.id).then((packs: PackBarcode[]) => {
+      if (packs && packs.length > 0) {
+        const firstPack = packs[0]
+        setForm((prev) => ({
+          ...prev,
+          tiene_pack: true,
+          pack_id: firstPack.id,
+          pack_cantidad: Number(firstPack.unidades_por_paquete) || 12,
+          pack_codigo_barra: firstPack.codigo_barra || "",
+          pack_etiqueta: firstPack.etiqueta || `Caja x${firstPack.unidades_por_paquete}`,
+        }))
+      }
+    }).catch(() => {})
+
+    // Cargar escalas mayoristas (Tiered Prices)
+    setLoadingTiers(true)
+    api.smartPricing.listTieredPrices(COMPANY_ID, p.id).then((tiers: any[]) => {
+      setProductTiers((tiers || []).map(t => ({
+        id: t.id,
+        min_qty: Number(t.min_qty),
+        max_qty: t.max_qty ? Number(t.max_qty) : null,
+        precio_unitario: Number(t.precio_unitario),
+        isNew: false,
+        isDeleted: false,
+      })))
+    }).catch(() => setProductTiers([])).finally(() => setLoadingTiers(false))
+  }
+
+  const handleNewClick = async () => {
+    setEditingProduct(null)
+    setCostoUnlocked(true)
+    setProductTiers([])
+    let nextSku = "126595"
+    try {
+      const skuRes = await api.products.getNextSku()
+      if (skuRes?.next_sku) nextSku = skuRes.next_sku
+    } catch (e) {
+      console.warn("No se pudo obtener el siguiente sku correlativo:", e)
+    }
+
+    setForm({
+      sku: nextSku,
+      nombre: "",
+      codigo_barra: "",
+      categoria_id: "",
+      supplier_id: "",
+      tipo: "producto",
+      tipo_producto: "producto",
+      activo: true,
+      unidad_medida: "UN",
+      iva_tasa: 10,
+      stock_minimo: 5,
+      stock_maximo: 0,
+      peso_kg: 0,
+      descripcion: "",
+      imagen_url: "",
+      costo_promedio: 0,
+      precio_venta: 0,
+      plu_codigo: "",
+      plu_balanza: null,
+      es_perecedero: false,
+      vida_util_dias: 0,
+      tiene_lotes: false,
+      tipo_venta: "unidad",
+      tiene_pack: false,
+      pack_id: null,
+      pack_cantidad: 12,
+      pack_codigo_barra: "",
+      pack_etiqueta: "Caja x12",
+    })
+    setFormTab("general")
+    setShowForm(true)
+  }
+
+  const handleDeleteProduct = async (p: Product) => {
     const ok = await confirm({
-      title: "Eliminar producto",
-      message: `¿Estás seguro de eliminar "${product.nombre}"?`,
+      title: "Eliminar Producto",
+      message: `¿Estás seguro de eliminar "${p.nombre}"? Esta acción no se puede deshacer si tiene historial.`,
       confirmText: "Eliminar",
-      variant: "danger",
+    })
+    if (!ok) return
+
+    try {
+      await api.products.delete(p.id)
+      toast.success("Producto Eliminado", `${p.nombre} fue removido.`)
+      fetchData()
+      loadStats()
+    } catch (e: any) {
+      toast.error("No se pudo eliminar", e.message)
+    }
+  }
+
+  // Guardar Variante
+  const handleSaveVariant = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedParentProductId || !variantForm.valor) {
+      toast.error("Datos requeridos", "Seleccioná el producto padre y el valor de la variante (ej. XL, Rojo).")
+      return
+    }
+    setSavingVariant(true)
+    try {
+      await api.products.variants.create(selectedParentProductId, {
+        tipo: variantForm.tipo,
+        valor: variantForm.valor,
+        sku_variante: variantForm.sku_variante || undefined,
+        codigo_barra: variantForm.codigo_barra || undefined,
+        precio_extra: Number(variantForm.precio_extra),
+        stock: Number(variantForm.stock),
+      })
+      toast.success("Variante Creada", `Variante "${variantForm.valor}" agregada al producto.`)
+      setShowVariantModal(false)
+      setVariantForm({ tipo: "talle", valor: "", sku_variante: "", codigo_barra: "", precio_extra: 0, stock: 0 })
+      loadVariants()
+    } catch (e: any) {
+      toast.error("Error al crear variante", e.message)
+    } finally {
+      setSavingVariant(false)
+    }
+  }
+
+  const handleDeleteVariant = async (v: ProductVariant) => {
+    const ok = await confirm({
+      title: "Eliminar Variante",
+      message: `¿Desea eliminar la variante "${v.valor}"?`,
+      confirmText: "Eliminar",
     })
     if (!ok) return
     try {
-      await api.products.delete(product.id)
-      toast.success("Producto eliminado")
-      fetchData()
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Error al eliminar"
-      toast.error("Error", msg)
+      await api.products.variants.delete(v.id)
+      toast.success("Variante eliminada", "")
+      loadVariants()
+    } catch (e: any) {
+      toast.error("Error", e.message)
     }
   }
 
-  const toggleActive = async (product: Product) => {
+  // Abrir Modal de Alta de Pack (opcionalmente con producto pre-cargado)
+  const handleOpenCreatePackModal = (preselected?: Product | null) => {
+    setEditingPackBarcode(null)
+    setPackBarcodeForm({ codigo_barra: "", etiqueta: "", unidades_por_paquete: 1 })
+    const prod = preselected !== undefined ? preselected : (packFilterProduct || null)
+    setPackModalProduct(prod)
+    setPackModalProductId(prod?.id || "")
+    setShowPackBarcodeModal(true)
+  }
+
+  // Guardar Código de Pack/Caja (soporta modo normal y modo "guardar y añadir otro")
+  const handleSavePackBarcode = async (e?: React.FormEvent, keepProduct = false) => {
+    if (e) e.preventDefault()
+    if (!packModalProductId || !packBarcodeForm.codigo_barra.trim() || !packBarcodeForm.etiqueta.trim()) {
+      toast.error("Datos requeridos", "Seleccioná el producto base y completá el código de barras y la etiqueta.")
+      return
+    }
+    if (Number(packBarcodeForm.unidades_por_paquete) <= 0) {
+      toast.error("Cantidad inválida", "Las unidades por paquete deben ser mayores a cero.")
+      return
+    }
+    setSavingPackBarcode(true)
     try {
-      await api.products.update(product.id, { activo: !product.activo })
-      toast.success(product.activo ? "Producto desactivado" : "Producto activado", product.nombre)
-      fetchData()
-    } catch {
-      toast.error("Error", "No se pudo cambiar el estado")
+      if (editingPackBarcode) {
+        await api.products.packBarcodes.update(packModalProductId, editingPackBarcode.id, {
+          codigo_barra: packBarcodeForm.codigo_barra.trim(),
+          etiqueta: packBarcodeForm.etiqueta.trim(),
+          unidades_por_paquete: Number(packBarcodeForm.unidades_por_paquete),
+        })
+        toast.success("Código de Pack Actualizado", `"${packBarcodeForm.etiqueta}" guardado correctamente.`)
+      } else {
+        await api.products.packBarcodes.create(packModalProductId, {
+          codigo_barra: packBarcodeForm.codigo_barra.trim(),
+          etiqueta: packBarcodeForm.etiqueta.trim(),
+          unidades_por_paquete: Number(packBarcodeForm.unidades_por_paquete),
+        })
+        toast.success("Código de Pack Creado", `"${packBarcodeForm.etiqueta}" agregado al producto.`)
+      }
+
+      await loadPackBarcodes()
+
+      if (keepProduct && !editingPackBarcode) {
+        // Mantiene el producto base seleccionado y resetea solo los datos del pack para el siguiente
+        setPackBarcodeForm({ codigo_barra: "", etiqueta: "", unidades_por_paquete: 1 })
+        setTimeout(() => packBarcodeInputRef.current?.focus(), 80)
+        toast.info("Listo para el siguiente", `Podés escanear o cargar la siguiente presentación para "${packModalProduct?.nombre || 'este producto'}".`)
+      } else {
+        setShowPackBarcodeModal(false)
+        setEditingPackBarcode(null)
+        setPackModalProductId("")
+        setPackModalProduct(null)
+        setPackBarcodeForm({ codigo_barra: "", etiqueta: "", unidades_por_paquete: 1 })
+      }
+    } catch (e: any) {
+      toast.error("Error al guardar código de pack", e.message)
+    } finally {
+      setSavingPackBarcode(false)
     }
   }
 
-  const filtered = products.filter(p =>
-    !search ||
-    p.nombre.toLowerCase().includes(search.toLowerCase()) ||
-    p.sku.toLowerCase().includes(search.toLowerCase()) ||
-    (p.codigo_barra && p.codigo_barra.includes(search))
-  )
+  const handleEditPackBarcodeClick = (pb: PackBarcode) => {
+    setEditingPackBarcode(pb)
+    setPackModalProductId(pb.product_id)
+    setPackModalProduct({
+      id: pb.product_id,
+      nombre: pb.product_nombre || "Producto Base",
+      sku: pb.product_sku || "",
+      codigo_barra: (pb as any).product_codigo_barra || "",
+    } as Product)
+    setPackBarcodeForm({
+      codigo_barra: pb.codigo_barra,
+      etiqueta: pb.etiqueta,
+      unidades_por_paquete: Number(pb.unidades_por_paquete),
+    })
+    setShowPackBarcodeModal(true)
+  }
 
-  const lowStock = products.filter(p => p.activo && (p.stock || 0) <= (p.stock_minimo || 0))
+  const handleDeletePackBarcode = async (pb: PackBarcode) => {
+    const ok = await confirm({
+      title: "Eliminar Código de Pack",
+      message: `¿Desea eliminar el código de pack "${pb.etiqueta}" (${pb.codigo_barra}) de "${pb.product_nombre || 'Producto'}"?`,
+      confirmText: "Eliminar",
+    })
+    if (!ok) return
+    try {
+      await api.products.packBarcodes.delete(pb.product_id, pb.id)
+      toast.success("Código de pack eliminado", "")
+      loadPackBarcodes()
+    } catch (e: any) {
+      toast.error("Error", e.message)
+    }
+  }
 
-  const formModal = (
-    <div className="modal-overlay" onClick={() => { setShowForm(false); setEditingProduct(null) }}>
-      <div className="modal-content max-w-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-700">
-          <h3 className="text-lg font-bold text-gray-900 dark:text-white">{editingProduct ? "Editar producto" : "Nuevo producto"}</h3>
-          <button onClick={() => { setShowForm(false); setEditingProduct(null) }} className="btn-ghost"><X className="w-4 h-4" /></button>
-        </div>
+  // Componentes Kit
+  const handleAddKitComponent = () => {
+    if (!kitSelectedComponentId) return
+    const compProd = kitSelectedComponent || products.find(p => p.id === kitSelectedComponentId)
+    if (!compProd) return
 
-        {/* Navigation Tabs */}
-        <div className="flex border-b border-gray-100 dark:border-gray-700 px-6 bg-gray-50 dark:bg-gray-800/50">
-          <button
-            type="button"
-            className={`py-3 px-4 text-sm font-semibold border-b-2 transition-all ${
-              formTab === "general"
-                ? "border-primary text-primary"
-                : "border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-            }`}
-            onClick={() => setFormTab("general")}
-          >
-            General
-          </button>
-          <button
-            type="button"
-            className={`py-3 px-4 text-sm font-semibold border-b-2 transition-all ${
-              formTab === "precios"
-                ? "border-primary text-primary"
-                : "border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-            }`}
-            onClick={() => setFormTab("precios")}
-          >
-            Precios y Variantes
-          </button>
-          <button
-            type="button"
-            className={`py-3 px-4 text-sm font-semibold border-b-2 transition-all ${
-              formTab === "perecederos"
-                ? "border-primary text-primary"
-                : "border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-            }`}
-            onClick={() => setFormTab("perecederos")}
-          >
-            Control de Perecederos
-          </button>
-        </div>
+    setKitForm(prev => {
+      const exists = prev.items.find(i => i.product_id === compProd.id)
+      if (exists) {
+        return {
+          ...prev,
+          items: prev.items.map(i => i.product_id === compProd.id ? { ...i, cantidad: i.cantidad + kitComponentQty } : i)
+        }
+      }
+      return {
+        ...prev,
+        items: [
+          ...prev.items,
+          {
+            product_id: compProd.id,
+            product_nombre: compProd.nombre,
+            cantidad: kitComponentQty,
+            costo_unitario: Number(compProd.costo_promedio || 0),
+            precio_unitario: Number(compProd.precio_venta || 0),
+          }
+        ]
+      }
+    })
+    setKitSelectedComponentId("")
+    setKitSelectedComponent(null)
+    setKitComponentQty(1)
+  }
 
-        <form onSubmit={editingProduct ? handleUpdate : handleCreate} className="p-6 space-y-4">
-          {formTab === "general" && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="input-label label-required">SKU</label>
-                  <div className="relative">
-                    <Tag className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                    <input className="input-field pl-10" value={form.sku} onChange={(e) => setForm({...form, sku: e.target.value})} required placeholder="PROD-001" />
-                  </div>
-                </div>
-                <div>
-                  <label className="input-label">Código de barra</label>
-                  <div className="relative">
-                    <Barcode className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                    <input className="input-field pl-10" value={form.codigo_barra} onChange={(e) => setForm({...form, codigo_barra: e.target.value})} placeholder="7891234567890" />
-                  </div>
-                </div>
-              </div>
-              <div>
-                <label className="input-label label-required">Nombre</label>
-                <input className="input-field" value={form.nombre} onChange={(e) => setForm({...form, nombre: e.target.value})} required placeholder="Nombre del producto" />
-              </div>
-              <div>
-                <label className="input-label">Descripción</label>
-                <textarea className="input-field resize-none" rows={2} value={form.descripcion} onChange={(e) => setForm({...form, descripcion: e.target.value})} placeholder="Descripción del producto..." />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="input-label">Categoría</label>
-                  <select className="input-field" value={form.category_id} onChange={(e) => setForm({...form, category_id: e.target.value})}>
-                    <option value="">Sin categoría</option>
-                    {categories.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="input-label">Tipo</label>
-                  <select className="input-field" value={form.tipo} onChange={(e) => setForm({...form, tipo: e.target.value})}>
-                    <option value="producto">Producto</option>
-                    <option value="servicio">Servicio</option>
-                  </select>
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="input-label">IVA</label>
-                  <select className="input-field" value={form.iva_tasa} onChange={(e) => setForm({...form, iva_tasa: Number(e.target.value)})}>
-                    <option value={10}>10%</option>
-                    <option value={5}>5%</option>
-                    <option value={0}>0% (Exento)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="input-label">U. medida</label>
-                  <select className="input-field" value={form.unidad_medida} onChange={(e) => setForm({...form, unidad_medida: e.target.value})}>
-                    <option value="UN">Unidad</option>
-                    <option value="KG">Kilogramo</option>
-                    <option value="LT">Litro</option>
-                    <option value="MT">Metro</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="input-label">Stock mínimo</label>
-                  <input type="number" className="input-field" value={form.stock_minimo} onChange={(e) => setForm({...form, stock_minimo: Number(e.target.value)})} min="0" />
-                </div>
-              </div>
-              <div>
-                <label className="input-label">Código PLU (Balanza)</label>
-                <div className="relative">
-                  <Barcode className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <input className="input-field pl-10" value={form.plu_codigo} onChange={(e) => setForm({...form, plu_codigo: e.target.value})} placeholder="Ej: 2005" />
-                </div>
-              </div>
-            </div>
-          )}
+  const kitCostoAcumulado = kitForm.items.reduce((acc, item) => acc + (item.costo_unitario * item.cantidad), 0)
+  const kitPrecioIndividualTotal = kitForm.items.reduce((acc, item) => acc + (item.precio_unitario * item.cantidad), 0)
+  const kitMargenMonto = Number(kitForm.precio_venta || 0) - kitCostoAcumulado
+  const kitMargenPct = Number(kitForm.precio_venta || 0) > 0 ? (kitMargenMonto / Number(kitForm.precio_venta)) * 100 : 0
 
-          {formTab === "precios" && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="input-label">Costo</label>
-                  <input type="number" className="input-field" value={form.costo} onChange={(e) => setForm({...form, costo: Number(e.target.value)})} min="0" step="100" />
-                </div>
-                <div>
-                  <label className="input-label">Precio venta</label>
-                  <input type="number" className="input-field" value={form.precio} onChange={(e) => setForm({...form, precio: Number(e.target.value)})} min="0" step="500" />
-                </div>
-              </div>
-              <div className="p-4 bg-blue-50 dark:bg-blue-950/20 text-blue-700 dark:text-blue-400 rounded-xl text-xs space-y-1">
-                <p className="font-bold">Información de Variantes:</p>
-                <p>Las variantes técnicas como color, talle, sabor o presentación se definen y administran individualmente desde el panel de detalle técnico una vez guardado el producto.</p>
-              </div>
-            </div>
-          )}
+  const [savingKit, setSavingKit] = useState(false)
 
-          {formTab === "perecederos" && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
-                <input
-                  type="checkbox"
-                  id="es_perecedero"
-                  className="rounded text-primary focus:ring-primary h-4 w-4"
-                  checked={form.es_perecedero}
-                  onChange={(e) => setForm({...form, es_perecedero: e.target.checked})}
-                />
-                <label htmlFor="es_perecedero" className="text-sm font-bold text-gray-900 dark:text-white cursor-pointer select-none">
-                  ¿Es un producto fresco / perecedero?
-                </label>
-              </div>
+  const handleSaveKit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!kitForm.nombre || kitForm.items.length < 2 || !kitForm.precio_venta) {
+      toast.error("Kit incompleto", "El kit debe tener un nombre, al menos 2 componentes y un precio de venta.")
+      return
+    }
 
-              {form.es_perecedero && (
-                <div className="space-y-4 border border-gray-100 dark:border-gray-800 p-4 rounded-xl">
-                  <div>
-                    <label className="input-label">Vida útil en góndola (Días)</label>
-                    <input
-                      type="number"
-                      className="input-field"
-                      value={form.vida_util_dias}
-                      onChange={(e) => setForm({...form, vida_util_dias: Number(e.target.value)})}
-                      min="1"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="input-label">Temperatura Mínima (°C)</label>
-                      <input
-                        type="number"
-                        className="input-field"
-                        value={form.temperatura_min}
-                        onChange={(e) => setForm({...form, temperatura_min: Number(e.target.value)})}
-                      />
-                    </div>
-                    <div>
-                      <label className="input-label">Temperatura Máxima (°C)</label>
-                      <input
-                        type="number"
-                        className="input-field"
-                        value={form.temperatura_max}
-                        onChange={(e) => setForm({...form, temperatura_max: Number(e.target.value)})}
-                      />
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 p-2">
-                    <input
-                      type="checkbox"
-                      id="markdown_opt_in"
-                      className="rounded text-primary focus:ring-primary h-4 w-4"
-                      checked={form.markdown_opt_in}
-                      onChange={(e) => setForm({...form, markdown_opt_in: e.target.checked})}
-                    />
-                    <label htmlFor="markdown_opt_in" className="text-sm text-gray-700 dark:text-gray-300 cursor-pointer select-none">
-                      Habilitar regla de Markdown (descuento automático por vencimiento sugerido)
-                    </label>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="flex gap-3 pt-4 border-t border-gray-100 dark:border-gray-700">
-            <button type="button" className="btn-outline flex-1" onClick={() => { setShowForm(false); setEditingProduct(null) }}>Cancelar</button>
-            <button type="submit" className="btn-primary flex-1" disabled={saving}>
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : editingProduct ? "Guardar cambios" : "Crear producto"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
+    setSavingKit(true)
+    try {
+      await api.kits.create({
+        nombre: kitForm.nombre,
+        descripcion: kitForm.sku || undefined,
+        precio_venta: Number(kitForm.precio_venta),
+        items: kitForm.items.map(i => ({ product_id: i.product_id, cantidad: i.cantidad })),
+      })
+      toast.success("Kit Promocional Creado", `${kitForm.nombre} registrado con éxito.`)
+      setKitForm({ nombre: "", sku: "", precio_venta: 0, items: [] })
+      await loadKits()
+    } catch (e: any) {
+      toast.error("Error al crear el kit", e?.message || "No se pudo guardar el kit.")
+    } finally {
+      setSavingKit(false)
+    }
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Productos</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{products.length} productos registrados</p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={() => setShowImport(true)} className="btn-outline">
-            <Upload className="w-4 h-4" />
-            Importar
-          </button>
-          <button onClick={() => setShowForm(true)} className="btn-primary">
-            <Plus className="w-4 h-4" />
-            Nuevo producto
-          </button>
-        </div>
-      </div>
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/90 text-white p-7 border border-indigo-500/20 shadow-2xl shadow-indigo-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
 
-      <form onSubmit={handleSearch} className="flex gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input type="text" className="input-field pl-10" placeholder="Buscar por nombre, SKU o código de barra..." value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
-        <button type="submit" className="btn-primary">Buscar</button>
-      </form>
-
-      {lowStock.length > 0 && (
-        <div className="flex items-center gap-2 px-4 py-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/30 rounded-xl">
-          <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0" />
-          <span className="text-sm text-amber-700 dark:text-amber-400">
-            <strong>{lowStock.length}</strong> {lowStock.length === 1 ? "producto con" : "productos con"} stock bajo el mínimo
-          </span>
-        </div>
-      )}
-
-      <div className="card overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="table-header">
-              <th className="table-cell">SKU</th>
-              <th className="table-cell">Nombre</th>
-              <th className="table-cell">Código barra</th>
-              <th className="table-cell">Categoría</th>
-              <th className="table-cell">Stock</th>
-              <th className="table-cell">Precio</th>
-              <th className="table-cell">IVA</th>
-              <th className="table-cell">Estado</th>
-              <th className="table-cell">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={8} className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></td></tr>
-            ) : filtered.length === 0 ? (
-              <tr><td colSpan={8} className="text-center py-12 text-gray-400">
-                <Package className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                No se encontraron productos
-              </td></tr>
-            ) : (
-              filtered.map((p) => (
-                <tr key={p.id} className="table-row">
-                  <td className="table-td font-mono text-xs font-bold text-primary">{p.sku}</td>
-                  <td className="table-td font-medium">
-                    <div>
-                      <p className="font-semibold text-gray-900 dark:text-white">{p.nombre}</p>
-                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                        {p.descripcion && <span className="text-xs text-gray-400 truncate max-w-48">{p.descripcion}</span>}
-                        {(p as any).plu_codigo && (
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-extrabold uppercase bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                            PLU: {(p as any).plu_codigo}
-                          </span>
-                        )}
-                        {perishableConfigs.some(pc => pc.producto_id === p.id) && (
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-extrabold uppercase bg-teal-100 dark:bg-teal-900/40 text-teal-800 dark:text-teal-300 border border-teal-200 dark:border-teal-800">
-                            Cold Chain
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="table-td font-mono text-xs text-gray-400">{p.codigo_barra || "—"}</td>
-                  <td className="table-td text-sm">{p.categoria?.nombre || "—"}</td>
-                  <td className="table-td">
-                    <span className={`font-mono font-bold ${(p.stock || 0) <= (p.stock_minimo || 0) ? "text-red-500" : "text-gray-900 dark:text-white"}`}>
-                      {p.stock ?? 0}
-                    </span>
-                  </td>
-              <td className="table-td font-mono font-bold text-green-600">{formatPYG(p.precio_venta || 0)}</td>
-              <td className="table-td font-mono">{p.iva_tasa}%</td>
-              <td className="table-td">
-                    <button onClick={() => toggleActive(p)} className="cursor-pointer">
-                      <StatusBadge status={p.activo ? "activo" : "cancelado"} />
-                    </button>
-                  </td>
-                  <td className="table-td">
-                    <div className="flex items-center gap-1">
-                      <button className="btn-ghost" title="Ver detalle" onClick={() => loadProductDetail(p)}><Eye className="w-4 h-4" /></button>
-                      <button className="btn-ghost" title="Editar" onClick={() => openEdit(p)}><Edit className="w-4 h-4" /></button>
-                      <button className="btn-ghost text-red-400 hover:text-red-500" title="Eliminar" onClick={(e) => { e.stopPropagation(); handleDelete(p) }}><Trash2 className="w-4 h-4" /></button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {viewingProduct && (
-        <div className="modal-overlay" onClick={() => { setViewingProduct(null); setProductDetail(null) }}>
-          <div className="modal-content max-w-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-700">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Detalle del producto</h3>
-              <button onClick={() => { setViewingProduct(null); setProductDetail(null) }} className="btn-ghost"><X className="w-4 h-4" /></button>
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-blue-500 border border-indigo-400/30 text-white flex items-center justify-center shadow-lg shadow-indigo-500/25">
+                  <Tag className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-indigo-500 border-2 border-slate-950"></span>
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-indigo-400 uppercase bg-indigo-500/10 px-2.5 py-0.5 rounded-md border border-indigo-500/20">
+                    MAESTRO DE ARTÍCULOS · GÓNDOLA & BALANZA
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                    {stats?.total_productos?.toLocaleString() || products.length.toLocaleString()} Artículos Activos
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Catálogo de Productos & Precios
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Artículos, códigos EAN/PLU de balanza, variantes por empaque, kits y márgenes en góndola
+                </p>
+              </div>
             </div>
-            {detailLoading ? (
-              <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
-            ) : productDetail ? (
-              <div className="p-6 space-y-6">
-                <div className="flex items-start gap-4">
-                  <div className="w-16 h-16 bg-gradient-to-br from-primary to-primary-light rounded-2xl flex items-center justify-center flex-shrink-0">
-                    <Package className="w-8 h-8 text-white" />
-                  </div>
-                  <div className="flex-1">
-                    <h4 className="text-xl font-bold text-gray-900 dark:text-white">{productDetail.nombre}</h4>
-                    <p className="text-sm text-gray-500 font-mono">{productDetail.sku}</p>
-                    {productDetail.codigo_barra && (
-                      <p className="text-xs text-gray-400 font-mono flex items-center gap-1 mt-1">
-                        <Barcode className="w-3 h-3" /> {productDetail.codigo_barra}
-                      </p>
-                    )}
-                  </div>
-                  <StatusBadge status={productDetail.activo ? "activo" : "cancelado"} />
-                </div>
 
-                {productDetail.descripcion && (
-                  <div className="px-4 py-3 bg-gray-50 dark:bg-gray-800 rounded-xl">
-                    <p className="text-sm text-gray-600 dark:text-gray-300">{productDetail.descripcion}</p>
-                  </div>
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-indigo-300">
+                ⚖️ {stats?.total_pesables || 0} pesables / balanza
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                💰 {formatPYG(stats?.total_valorizado_costo || 0)} valorizado
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={() => {
+                fetchData()
+                loadStats()
+                if (mainTab === "variantes") loadVariants()
+              }}
+              disabled={loading}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-indigo-400" : ""}`} />
+              Recargar
+            </button>
+
+            <button
+              onClick={handleNewClick}
+              className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-indigo-600 to-blue-500 hover:from-indigo-500 hover:to-blue-400 transition shadow-lg shadow-indigo-500/25 flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              Nuevo Producto
+            </button>
+          </div>
+        </div>
+
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Catálogo Activo</span>
+              <Package className="w-4 h-4 text-indigo-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-indigo-300">
+              {stats?.total_productos?.toLocaleString() || products.length.toLocaleString()}
+            </p>
+            <p className="text-[11px] text-slate-400">
+              <strong className="text-indigo-400 font-mono font-bold">{stats?.total_pesables || 0}</strong> pesables / balanza
+            </p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Valor Inventario</span>
+              <DollarSign className="w-4 h-4 text-emerald-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+              {formatPYG(stats?.total_valorizado_costo || 0)}
+            </p>
+            <p className="text-[11px] text-slate-400">Costo promedio ponderado</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Quiebres de Stock</span>
+              <AlertTriangle className="w-4 h-4 text-rose-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
+              {stats?.total_quiebres?.toLocaleString() || 0}
+            </p>
+            <p className="text-[11px] text-slate-400">
+              <strong className="text-amber-400 font-bold font-mono">{stats?.total_bajos || 0}</strong> en stock crítico
+            </p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Margen Bruto</span>
+              <TrendingUp className="w-4 h-4 text-blue-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-blue-300">
+              {stats?.margen_promedio_pct || 0}%
+            </p>
+            <p className="text-[11px] text-slate-400">Rentabilidad media góndola</p>
+          </div>
+        </div>
+      </div>
+
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+        {[
+          { key: "catalogo", label: "Catálogo General", icon: Package, count: products.length },
+          { key: "variantes", label: "Variantes (Talles / Sabores)", icon: Palette, count: variantsList.length },
+          { key: "packs", label: "Códigos de Pack / Caja", icon: Box, count: packBarcodesList.length },
+          { key: "kits", label: "Kits & Combos Promocionales", icon: Gift, count: kitsSaved.length },
+          { key: "guia", label: "Manual Operativo & Ayuda", icon: BookOpen },
+        ].map((tab) => {
+          const Icon = tab.icon
+          const active = mainTab === tab.key
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setMainTab(tab.key as any)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              <span>{tab.label}</span>
+              {tab.count !== undefined && (
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  active ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                }`}>
+                  {tab.count}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          PESTAÑA 1: CATÁLOGO GENERAL & PRECIOS
+      ────────────────────────────────────────────────────────────────────────── */}
+      {mainTab === "catalogo" && (
+        <div className="space-y-4">
+          {/* Barra de Herramientas: Búsqueda y Filtros */}
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm rounded-2xl space-y-3">
+            <div className="flex flex-col lg:flex-row items-center gap-3">
+              {/* Buscador */}
+              <div className="relative flex-1 w-full">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Buscar por Nombre, SKU, Código de Barras o PLU..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="input-field pl-9 pr-8 w-full text-xs font-medium py-2.5"
+                />
+                {search && (
+                  <button
+                    onClick={() => setSearch("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
                 )}
+              </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="card p-4">
-                    <div className="flex items-center gap-2 mb-1"><Layers className="w-4 h-4 text-gray-400" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Categoría</span></div>
-                    <p className="text-sm font-bold text-gray-900 dark:text-white">{productDetail.categoria?.nombre || "Sin categoría"}</p>
-                  </div>
-                  <div className="card p-4">
-                    <div className="flex items-center gap-2 mb-1"><Tag className="w-4 h-4 text-gray-400" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Tipo</span></div>
-                    <StatusBadge status={productDetail.tipo || "-"} map={{ producto: "badge-info", servicio: "badge-accent" }} />
-                  </div>
-                  <div className="card p-4">
-                    <div className="flex items-center gap-2 mb-1"><Package className="w-4 h-4 text-gray-400" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Stock actual</span></div>
-                    <p className={`text-2xl font-bold ${(productDetail.stock || 0) <= (productDetail.stock_minimo || 0) ? "text-red-500" : "text-gray-900 dark:text-white"}`}>
-                      {productDetail.stock ?? 0} <span className="text-sm text-gray-400">{productDetail.unidad_medida}</span>
-                    </p>
-                    <p className="text-xs text-gray-400 mt-1">Mínimo: {productDetail.stock_minimo}</p>
-                  </div>
-                  <div className="card p-4">
-                    <div className="flex items-center gap-2 mb-1"><DollarSign className="w-4 h-4 text-gray-400" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">IVA</span></div>
-                    <p className="text-2xl font-bold text-gray-900 dark:text-white">{productDetail.iva_tasa}%</p>
-                  </div>
-                </div>
+              {/* Selector de Categoría */}
+              <div className="w-full lg:w-64">
+                <select
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  className="input-field w-full text-xs font-semibold py-2.5 truncate"
+                >
+                  <option value="">Todas las Categorías ({categories.length})</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nombre}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-                {(productDetail as { costo_promedio?: number }).costo_promedio != null && (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="card p-4">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Costo promedio</span>
-                      <p className="text-lg font-bold text-gray-900 dark:text-white">{formatPYG((productDetail as { costo_promedio?: number }).costo_promedio || 0)}</p>
-                    </div>
-                    <div className="card p-4">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Precio referencia</span>
-                      <p className="text-lg font-bold text-green-600">{formatPYG((productDetail as { precio_referencia?: number }).precio_referencia || 0)}</p>
-                    </div>
-                  </div>
-                )}
+              {/* Selector de Ordenación */}
+              <div className="w-full lg:w-52">
+                <select
+                  value={sortBy}
+                  onChange={(e: any) => setSortBy(e.target.value)}
+                  className="input-field w-full text-xs font-semibold py-2.5"
+                >
+                  <option value="nombre">Ordenar: Nombre (A-Z)</option>
+                  <option value="precio_desc">Mayor Precio Venta</option>
+                  <option value="precio_asc">Menor Precio Venta</option>
+                  <option value="margen_desc">Mayor Margen %</option>
+                </select>
+              </div>
+            </div>
 
-                <div className="text-xs text-gray-400 pt-2 border-t border-gray-100 dark:border-gray-700">
-                  Creado: {productDetail.created_at ? new Date(productDetail.created_at).toLocaleDateString("es-PY") : "—"} &middot; Actualizado: {productDetail.updated_at ? new Date(productDetail.updated_at).toLocaleDateString("es-PY") : "—"}
-                </div>
+            {/* Pastillas de Clasificación (Tipo de Producto) y Estado */}
+            <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-slate-100 dark:border-slate-800">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 mr-1">
+                <Box className="w-3 h-3" /> Clasificación:
+              </span>
+              {[
+                { key: "todos", label: "Todos los Tipos" },
+                { key: "producto", label: "📦 Productos Finales" },
+                { key: "materia_prima", label: "🌾 Materias Primas" },
+                { key: "insumo", label: "🧴 Insumos" },
+                { key: "servicio", label: "🛠 Servicios" },
+              ].map((tag) => {
+                const isSelected = filterTipoProducto === tag.key
+                return (
+                  <button
+                    key={tag.key}
+                    type="button"
+                    onClick={() => {
+                      setFilterTipoProducto(tag.key as any)
+                      setPage(1)
+                    }}
+                    className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${
+                      isSelected
+                        ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm"
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                    }`}
+                  >
+                    {tag.label}
+                  </button>
+                )
+              })}
 
-                {/* Variants Section */}
-                <div className="border-t border-gray-100 dark:border-gray-700 pt-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-1"><Shirt className="w-4 h-4" /> Variantes ({variants.length})</span>
-                    <button className="btn-ghost text-xs text-primary" onClick={() => {
-                      setEditingVariant(null)
-                      setVariantForm({ tipo: "talle", valor: "", sku_variante: "", codigo_barra: "", precio_extra: 0, stock: 0 })
-                      setShowVariantForm(true)
-                    }}>
-                      <Plus className="w-3 h-3" /> Añadir
-                    </button>
-                  </div>
-                  {variants.length > 0 ? (
-                    <div className="space-y-1 max-h-32 overflow-y-auto">
-                      {variants.map(v => (
-                        <div key={v.id} className="flex items-center justify-between py-1 px-2 rounded-lg bg-gray-50 dark:bg-gray-800 text-xs">
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono text-gray-500">{v.tipo}</span>
-                            <span className="font-bold">{v.valor}</span>
-                            <span className="font-mono text-gray-400">{v.sku_variante}</span>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            {(v.precio_extra ?? 0) > 0 && <span className="text-green-500">{formatPYG(v.precio_extra ?? 0)}</span>}
-                            <span className="text-gray-400">Stock: {v.stock}</span>
-                            <button className="text-gray-400 hover:text-primary" onClick={() => {
-                              setEditingVariant(v)
-                              setVariantForm({ tipo: v.tipo ?? "", valor: v.valor ?? "", sku_variante: v.sku_variante ?? "", codigo_barra: v.codigo_barra ?? "", precio_extra: v.precio_extra ?? 0, stock: v.stock ?? 0 })
-                              setShowVariantForm(true)
-                            }}><Edit className="w-3 h-3" /></button>
-                            <button className="text-gray-400 hover:text-red-500" onClick={async () => {
-                              try { await api.variants.delete(v.id); setVariants(prev => prev.filter(x => x.id !== v.id)); toast.success("Eliminada", "Variante eliminada") } catch { toast.error("Error", "No se pudo eliminar") }
-                            }}><Trash2 className="w-3 h-3" /></button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-gray-400 py-2">Sin variantes. Agregá talles, colores, etc.</p>
-                  )}
-                </div>
+              <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-1 hidden sm:block" />
 
-                <div className="flex gap-3">
-                  <button className="btn-outline flex-1" onClick={() => { setViewingProduct(null); openEdit(productDetail); }}>
-                    <Edit className="w-4 h-4" /> Editar
+              {/* Selector de Estado Activo / Inactivo */}
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 mr-1">
+                <Power className="w-3 h-3" /> Estado:
+              </span>
+              {[
+                { key: "activos", label: "Activos", activeClass: "bg-emerald-600 text-white" },
+                { key: "inactivos", label: "Inactivos", activeClass: "bg-rose-600 text-white" },
+                { key: "todos", label: "Todos", activeClass: "bg-slate-700 text-white" },
+              ].map((st) => {
+                const isSelected = filterEstado === st.key
+                return (
+                  <button
+                    key={st.key}
+                    type="button"
+                    onClick={() => {
+                      setFilterEstado(st.key as any)
+                      setPage(1)
+                    }}
+                    className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${
+                      isSelected
+                        ? `${st.activeClass} shadow-sm ring-2 ring-emerald-300/30`
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                    }`}
+                  >
+                    {st.label}
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* Pastillas de Filtro Interactivas (Tags de Stock) */}
+            <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-slate-100 dark:border-slate-800">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 mr-1">
+                <Filter className="w-3 h-3" /> Stock:
+              </span>
+
+              {[
+                { key: "todos", label: `Todos (${products.length})` },
+                { key: "con_stock", label: "Con Stock Físico" },
+                { key: "quiebre", label: `Quiebres / Stock 0 (${stats?.total_quiebres || 0})` },
+                { key: "pesables", label: `Pesables / Balanza (${stats?.total_pesables || 0})` },
+                { key: "perecederos", label: "Perecederos" },
+              ].map((tag) => {
+                const isSelected = filterStockTag === tag.key
+                return (
+                  <button
+                    key={tag.key}
+                    type="button"
+                    onClick={() => setFilterStockTag(tag.key as any)}
+                    className={`px-3 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      isSelected
+                        ? "bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-300 dark:ring-indigo-900"
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                    }`}
+                  >
+                    {tag.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Tabla de Productos de Alta Densidad */}
+          <div className="card bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm rounded-2xl overflow-hidden">
+            <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between flex-wrap gap-2">
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                Mostrando {paginatedProducts.length} de {filteredAndSortedProducts.length} productos
+              </span>
+
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-slate-400">Por página:</span>
+                {[25, 50, 100].map((size) => (
+                  <button
+                    key={size}
+                    onClick={() => {
+                      setPageSize(size)
+                      setPage(1)
+                    }}
+                    className={`px-2.5 py-1 rounded-lg font-mono font-bold text-xs transition-colors ${
+                      pageSize === size
+                        ? "bg-indigo-600 text-white"
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200"
+                    }`}
+                  >
+                    {size}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="p-16 text-center">
+                <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mx-auto mb-3" />
+                <p className="text-sm font-semibold text-slate-600 dark:text-slate-400">Cargando catálogo...</p>
+              </div>
+            ) : paginatedProducts.length === 0 ? (
+              <div className="p-16 text-center text-slate-400">
+                <Package className="w-10 h-10 mx-auto mb-2 opacity-40 text-indigo-500" />
+                <p className="text-sm font-bold text-slate-700 dark:text-slate-300">No se encontraron productos</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 font-bold uppercase text-[9px] tracking-wider border-b border-slate-200 dark:border-slate-800">
+                    <tr>
+                      <th className="py-2.5 px-2.5 min-w-[160px] max-w-[210px]">Producto & SKU</th>
+                      <th className="py-2.5 px-1.5 text-center whitespace-nowrap">Tipo</th>
+                      <th className="py-2.5 px-1.5 text-center whitespace-nowrap">Estado</th>
+                      <th className="py-2.5 px-1.5 max-w-[85px]">Categoría</th>
+                      <th className="py-2.5 px-1.5 max-w-[85px]">Proveedor</th>
+                      <th className="py-2.5 px-1.5 whitespace-nowrap">Código / PLU</th>
+                      <th className="py-2.5 px-1.5 text-center whitespace-nowrap">Stock</th>
+                      <th className="py-2.5 px-1.5 text-right whitespace-nowrap">Costo Prom.</th>
+                      <th className="py-2.5 px-1.5 text-right text-slate-900 dark:text-slate-100 whitespace-nowrap">PVP (Minorista)</th>
+                      <th className="py-2.5 px-1 text-center whitespace-nowrap" title="Margen Esperado: (PVP - Costo Promedio) / PVP">Margen Esp.</th>
+                      <th className="py-2.5 px-1.5 text-right text-indigo-600 dark:text-indigo-400 whitespace-nowrap">P. Mayorista</th>
+                      <th className="py-2.5 px-1.5 text-right text-sky-600 dark:text-sky-400 whitespace-nowrap" title="PVPromedio: Precio Venta Promedio Ponderado Real de Ventas en Caja">PVPromedio</th>
+                      <th className="py-2.5 px-1 text-center whitespace-nowrap" title="Margen Real: (PVPromedio - Costo Promedio) / PVPromedio">Margen Real</th>
+                      <th className="py-2.5 px-1.5 text-center whitespace-nowrap">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                    {paginatedProducts.map((p, idx) => {
+                      const costo = Number(p.costo_promedio || p.ultimo_costo || 0)
+                      const precio = Number(p.precio_venta || 0)
+                      
+                      // 1. Margen Esperado (entre Costo Promedio y PVP Minorista)
+                      const margenEspMonto = precio - costo
+                      const margenEspPct = precio > 0 && costo > 0 ? (margenEspMonto / precio) * 100 : null
+
+                      // 2. Precio Mayorista
+                      const tieneMayorista = p.precio_mayorista != null && Number(p.precio_mayorista) > 0
+                      const precioMayorista = tieneMayorista ? Number(p.precio_mayorista) : null
+
+                      // 3. PVPromedio (Precio de Venta Promedio Ponderado Real en Caja)
+                      const tieneVentasReales = p.precio_promedio_real != null && Number(p.precio_promedio_real) > 0
+                      const pvPromedio = tieneVentasReales
+                        ? Number(p.precio_promedio_real)
+                        : (precio > 0 ? precio : null)
+
+                      // 4. Margen Real (entre Costo Promedio y PVPromedio)
+                      const margenRealMonto = pvPromedio && costo > 0 ? pvPromedio - costo : null
+                      const margenRealPct = pvPromedio && costo > 0 ? (margenRealMonto! / pvPromedio) * 100 : null
+
+                      const esPesable = ["KG", "Kg", "kg", "LT", "Lt"].includes(p.unidad_medida || "") || p.tipo_venta === "peso"
+                      const isEven = idx % 2 === 0
+
+                      return (
+                        <tr
+                          key={p.id}
+                          className={`transition-colors duration-150 border-b border-slate-100 dark:border-slate-800/60 ${
+                            p.activo === false
+                              ? "bg-rose-50/20 dark:bg-rose-950/10 opacity-75"
+                              : isEven
+                              ? "bg-white dark:bg-slate-900"
+                              : "bg-slate-50/70 dark:bg-slate-800/40"
+                          } hover:!bg-indigo-50/60 dark:hover:!bg-indigo-950/30 cursor-pointer group`}
+                          onClick={() => openProduct360(p.id)}
+                        >
+                          {/* Producto & SKU */}
+                          <td className="py-2 px-2.5 max-w-[210px]">
+                            <div className="flex items-center gap-2">
+                              <div className="w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center font-bold text-xs shrink-0 group-hover:bg-indigo-100 dark:group-hover:bg-indigo-950/50 group-hover:text-indigo-600 transition-colors">
+                                {esPesable ? <Scale className="w-3.5 h-3.5 text-amber-500" /> : <Box className="w-3.5 h-3.5 text-indigo-500" />}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="font-bold text-slate-900 dark:text-white truncate text-xs flex items-center gap-1">
+                                  <span className="truncate" title={p.nombre}>{p.nombre}</span>
+                                  {(p as any).es_perecedero && (
+                                    <span className="px-1 py-0.1 rounded text-[8px] font-bold bg-amber-100 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 shrink-0">
+                                      Per.
+                                    </span>
+                                  )}
+                                  {p.activo === false && (
+                                    <span className="px-1 py-0.1 rounded text-[8px] font-extrabold bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 shrink-0">
+                                      INACTIVO
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[9px] text-slate-400 font-mono">
+                                  SKU: <strong className="text-slate-600 dark:text-slate-300">{p.sku}</strong>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Tipo de Producto */}
+                          <td className="py-2 px-1.5 text-center whitespace-nowrap">
+                            {p.tipo_producto === "materia_prima" ? (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60" title="Materia Prima para Producción interna">
+                                <Wheat className="w-2.5 h-2.5 text-amber-600" /> M. Prima
+                              </span>
+                            ) : p.tipo_producto === "insumo" ? (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-purple-50 dark:bg-purple-950/50 text-purple-700 dark:text-purple-400 border border-purple-200 dark:border-purple-800/60" title="Insumo o Suministro Interno">
+                                <Package className="w-2.5 h-2.5 text-purple-600" /> Insumo
+                              </span>
+                            ) : p.tipo_producto === "servicio" ? (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700" title="Servicio o Mano de Obra">
+                                <Wrench className="w-2.5 h-2.5 text-slate-500" /> Servicio
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800/60" title="Producto Final facturable en POS">
+                                <Box className="w-2.5 h-2.5 text-blue-600" /> Venta
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Toggle Activo con Efectos Reales */}
+                          <td className="py-2 px-1.5 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleActivo(p)}
+                              className={`group/tog inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold transition-all border cursor-pointer ${
+                                p.activo !== false
+                                  ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/60 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                                  : "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 border-rose-200 dark:border-rose-800/60 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200"
+                              }`}
+                              title={p.activo !== false ? "Producto ACTIVO. Click para desactivar (bloquear de POS y compras)" : "Producto INACTIVO. Click para activar (habilitar en POS y compras)"}
+                            >
+                              {p.activo !== false ? (
+                                <>
+                                  <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 group-hover/tog:hidden" />
+                                  <Ban className="w-2.5 h-2.5 text-rose-600 hidden group-hover/tog:inline" />
+                                  <span className="group-hover/tog:hidden">Activo</span>
+                                  <span className="hidden group-hover/tog:inline">Desactivar</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Ban className="w-2.5 h-2.5 text-rose-600 group-hover/tog:hidden" />
+                                  <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 hidden group-hover/tog:inline" />
+                                  <span className="group-hover/tog:hidden">Inactivo</span>
+                                  <span className="hidden group-hover/tog:inline">Activar</span>
+                                </>
+                              )}
+                            </button>
+                          </td>
+
+                          {/* Categoría */}
+                          <td className="py-2 px-1.5 max-w-[85px]">
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 block truncate" title={p.categoria?.nombre || "Sin Categoría"}>
+                              {p.categoria?.nombre || "Sin Cat."}
+                            </span>
+                          </td>
+
+                          {/* Proveedor */}
+                          <td className="py-2 px-1.5 max-w-[85px]">
+                            {p.supplier_nombre ? (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 block truncate" title={p.supplier_nombre}>
+                                {p.supplier_nombre}
+                              </span>
+                            ) : (
+                              <span className="text-slate-300 dark:text-slate-600 text-[9px] italic">Sin asignar</span>
+                            )}
+                          </td>
+
+                          {/* Código de Barras / PLU */}
+                          <td className="py-2 px-1.5 font-mono text-[10px] text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                            {p.codigo_barra ? (
+                              <div className="flex items-center gap-1">
+                                <Barcode className="w-3 h-3 text-slate-400 shrink-0" />
+                                <span>{p.codigo_barra}</span>
+                              </div>
+                            ) : (p as any).plu_codigo ? (
+                              <span className="px-1 py-0.2 rounded bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 font-bold text-[9px]">
+                                PLU: {(p as any).plu_codigo}
+                              </span>
+                            ) : (
+                              <span className="text-slate-300 dark:text-slate-600">—</span>
+                            )}
+                          </td>
+
+                          {/* Stock Físico (con unidad integrada) */}
+                          <td className="py-2 px-1.5 text-center whitespace-nowrap">
+                            {Number((p as any).stock_actual || 0) <= 0 ? (
+                              <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800/60 font-mono">
+                                0 {p.unidad_medida || "UN"}
+                              </span>
+                            ) : Number((p as any).stock_actual || 0) <= Number(p.stock_minimo || 0) ? (
+                              <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60 font-mono">
+                                {Number((p as any).stock_actual).toLocaleString("es-PY")} {p.unidad_medida || "UN"}
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60 font-mono">
+                                {Number((p as any).stock_actual).toLocaleString("es-PY")} {p.unidad_medida || "UN"}
+                              </span>
+                            )}
+                          </td>
+
+                          {/* 1. Costo Promedio */}
+                          <td className="py-2 px-1.5 text-right font-mono text-[11px] text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                            {costo > 0 ? formatPYG(costo) : "—"}
+                          </td>
+
+                          {/* 2. PVP (Minorista) */}
+                          <td className="py-2 px-1.5 text-right font-mono font-bold text-[11px] text-slate-900 dark:text-white whitespace-nowrap">
+                            {precio > 0 ? formatPYG(precio) : <span className="text-amber-500 font-normal text-[10px]">Sin Precio</span>}
+                          </td>
+
+                          {/* 3. Margen Esperado (Entre Costo Promedio y PVP Minorista) */}
+                          <td className="py-2 px-1 text-center whitespace-nowrap">
+                            {margenEspPct !== null ? (
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-extrabold inline-block ${
+                                  margenEspPct >= 20
+                                    ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400"
+                                    : margenEspPct >= 10
+                                    ? "bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400"
+                                    : "bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400"
+                                }`}
+                                title={`Margen Esperado: ${formatPYG(margenEspMonto)}`}
+                              >
+                                {margenEspPct.toFixed(1)}%
+                              </span>
+                            ) : (
+                              <span className="text-slate-300 dark:text-slate-600 text-[10px]">—</span>
+                            )}
+                          </td>
+
+                          {/* 4. Precio Mayorista */}
+                          <td className="py-2 px-1.5 text-right font-mono text-[11px] whitespace-nowrap">
+                            {tieneMayorista ? (
+                              <div className="flex flex-col items-end leading-tight">
+                                <span className="font-extrabold text-indigo-600 dark:text-indigo-400">
+                                  {formatPYG(precioMayorista!)}
+                                </span>
+                                <span className="text-[8px] font-medium text-slate-400">
+                                  (x{p.precio_mayorista_min_qty || 1})
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-slate-300 dark:text-slate-600 font-normal">—</span>
+                            )}
+                          </td>
+
+                          {/* 5. PVPromedio (Precio de Venta Promedio Ponderado Real de Ventas) */}
+                          <td className="py-2 px-1.5 text-right font-mono text-[11px] whitespace-nowrap">
+                            {pvPromedio !== null ? (
+                              <div className="flex flex-col items-end leading-tight">
+                                <span className="font-extrabold text-sky-700 dark:text-sky-300">
+                                  {formatPYG(pvPromedio)}
+                                </span>
+                                <span className="text-[8px] text-slate-400 font-sans" title={tieneVentasReales ? "Promedio ponderado de tickets reales en caja" : "Sin ventas históricas registradas (igual a PVP)"}>
+                                  {tieneVentasReales ? "real" : "teórico"}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-slate-300 dark:text-slate-600 font-normal">—</span>
+                            )}
+                          </td>
+
+                          {/* 6. Margen Real (Entre Costo Promedio y PVPromedio) */}
+                          <td className="py-2 px-1 text-center whitespace-nowrap">
+                            {margenRealPct !== null ? (
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-extrabold inline-block ${
+                                  margenRealPct >= 20
+                                    ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400"
+                                    : margenRealPct >= 10
+                                    ? "bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400"
+                                    : "bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400"
+                                }`}
+                                title={tieneVentasReales ? `Margen Real efectivo: ${formatPYG(margenRealMonto || 0)}` : "Margen estimado s/ PVP"}
+                              >
+                                {margenRealPct.toFixed(1)}%
+                              </span>
+                            ) : (
+                              <span className="text-slate-300 dark:text-slate-600 text-[10px]">—</span>
+                            )}
+                          </td>
+
+                          {/* 7. Acciones (Iconos en dos líneas 2x2) */}
+                          <td className="py-2 px-1.5 text-center whitespace-nowrap">
+                            <div className="grid grid-cols-2 gap-0.5 w-fit mx-auto">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setMainTab("packs"); setPackFilterProductId(p.id); setPackFilterProduct(p) }}
+                                className="p-1 rounded text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-950/50 transition-colors cursor-pointer"
+                                title="Ver Códigos de Pack / Caja"
+                              >
+                                <Box className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); openProduct360(p.id) }}
+                                className="p-1 rounded text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-950/50 transition-colors cursor-pointer"
+                                title="Ficha 360° del Producto"
+                              >
+                                <Sparkles className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleEditClick(p) }}
+                                className="p-1 rounded text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                                title="Editar producto"
+                              >
+                                <Edit className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteProduct(p)}
+                                className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-100 dark:hover:bg-red-950/50 transition-colors cursor-pointer"
+                                title="Eliminar producto"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Paginador Inferior */}
+            {!loading && filteredAndSortedProducts.length > 0 && (
+              <div className="p-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between flex-wrap gap-2 text-xs">
+                <span className="text-slate-500">
+                  Página <strong className="text-slate-800 dark:text-slate-200">{page}</strong> de <strong className="text-slate-800 dark:text-slate-200">{totalPages}</strong>
+                </span>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setPage(prev => Math.max(1, prev - 1))}
+                    disabled={page === 1}
+                    className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-bold disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                  >
+                    Anterior
+                  </button>
+                  <button
+                    onClick={() => setPage(prev => Math.min(totalPages, prev + 1))}
+                    disabled={page === totalPages}
+                    className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-bold disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                  >
+                    Siguiente
                   </button>
                 </div>
               </div>
-            ) : null}
+            )}
           </div>
         </div>
       )}
 
-      {(showForm || editingProduct) && formModal}
-
-      {/* Variant Form Modal */}
-      {showVariantForm && viewingProduct && (
-        <div className="modal-overlay" onClick={() => setShowVariantForm(false)}>
-          <div className="modal-content max-w-md" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-700">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">{editingVariant ? "Editar variante" : "Nueva variante"}</h3>
-              <button onClick={() => setShowVariantForm(false)} className="btn-ghost"><X className="w-4 h-4" /></button>
+      {/* ──────────────────────────────────────────────────────────────────────────
+          PESTAÑA 2: VARIANTES DE PRODUCTO
+      ────────────────────────────────────────────────────────────────────────── */}
+      {mainTab === "variantes" && (
+        <div className="space-y-6">
+          {/* BANNER EDUCATIVO E INSTRUCCIONES */}
+          <div className="card p-5 bg-gradient-to-r from-indigo-50/80 via-white to-purple-50/60 dark:from-slate-900 dark:via-slate-900 dark:to-indigo-950/30 border border-indigo-200/80 dark:border-indigo-900/60 rounded-3xl space-y-3">
+            <div className="flex items-start gap-3.5">
+              <div className="p-2.5 rounded-2xl bg-indigo-600 text-white shadow-md shrink-0">
+                <Palette className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  ¿Cómo usar el Módulo de Variantes? (Talles, Colores, Sabores, Packs)
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  Las variantes te permiten agrupar múltiples presentaciones de un mismo producto matriz bajo un solo artículo base. 
+                  Cada variante cuenta con su propio <strong>SKU derivado</strong>, <strong>Código de barras individual</strong>, <strong>Stock propio</strong> y la opción de aplicar un <strong>Sobreprecio (+Gs.)</strong>.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
+                  <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs">
+                    <strong className="text-indigo-600 dark:text-indigo-400 block font-mono">1. Producto Padre</strong>
+                    Creá el producto matriz (ej. "Remera Básica Algodón" o "Cerveza Lata 269ml").
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs">
+                    <strong className="text-indigo-600 dark:text-indigo-400 block font-mono">2. Atributos</strong>
+                    Definí el tipo (Talle, Color, Sabor, Presentación) y el valor (S, M, L, XL, Six-pack).
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs">
+                    <strong className="text-indigo-600 dark:text-indigo-400 block font-mono">3. Facturación POS</strong>
+                    Al pistolear el código de barras de la variante, el POS descuenta su stock exacto.
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className="p-6 space-y-4">
+          </div>
+
+          {/* Panel de Control de Variantes */}
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="w-full sm:w-96">
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                Filtrar por Producto Padre:
+              </label>
+              <ProductSearchPicker
+                selectedProduct={selectedParentProduct}
+                onSelect={(p) => { setSelectedParentProductId(p.id); setSelectedParentProduct(p) }}
+                onClear={() => { setSelectedParentProductId(""); setSelectedParentProduct(null) }}
+                placeholder="Todos los productos con variantes... (buscar por código, SKU o nombre)"
+              />
+            </div>
+
+            <button
+              onClick={() => setShowVariantModal(true)}
+              className="btn-primary text-xs px-4 py-2.5 flex items-center gap-1.5 shadow-md self-end sm:self-auto"
+            >
+              <Plus className="w-4 h-4" /> + Nueva Variante
+            </button>
+          </div>
+
+          {/* Tabla de Variantes */}
+          <div className="card bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm rounded-2xl overflow-hidden">
+            {loadingVariants ? (
+              <div className="p-16 text-center">
+                <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mx-auto mb-3" />
+                <p className="text-xs font-semibold text-slate-500">Cargando variantes...</p>
+              </div>
+            ) : variantsList.length === 0 ? (
+              <div className="p-16 text-center text-slate-400 space-y-2">
+                <Palette className="w-10 h-10 mx-auto opacity-40 text-indigo-500" />
+                <p className="text-sm font-bold text-slate-700 dark:text-slate-300">No hay variantes registradas</p>
+                <p className="text-xs">Hacé clic en "+ Nueva Variante" para crear talles, colores o sabores para tus productos.</p>
+              </div>
+            ) : (
+              <table className="w-full text-left text-xs min-w-[800px]">
+                <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-800">
+                  <tr>
+                    <th className="p-3.5">Producto Padre</th>
+                    <th className="p-3.5">Tipo</th>
+                    <th className="p-3.5">Valor / Opción</th>
+                    <th className="p-3.5">SKU Variante</th>
+                    <th className="p-3.5">Código de Barras</th>
+                    <th className="p-3.5 text-right">Precio Extra</th>
+                    <th className="p-3.5 text-right">Stock</th>
+                    <th className="p-3.5 text-right pr-4">Acción</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                  {variantsList.map((v: any) => (
+                    <tr key={v.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                      <td className="p-3.5 font-bold text-slate-900 dark:text-white">
+                        {v.product_nombre || "Producto Base"}
+                      </td>
+                      <td className="p-3.5">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-100 dark:bg-slate-800 text-slate-600">
+                          {v.tipo}
+                        </span>
+                      </td>
+                      <td className="p-3.5 font-black text-indigo-600 dark:text-indigo-400 text-sm">
+                        {v.valor}
+                      </td>
+                      <td className="p-3.5 font-mono text-slate-600">{v.sku_variante || "—"}</td>
+                      <td className="p-3.5 font-mono text-slate-600">{v.codigo_barra || "—"}</td>
+                      <td className="p-3.5 text-right font-mono font-bold text-emerald-600">
+                        {Number(v.precio_extra || 0) > 0 ? `+${formatPYG(Number(v.precio_extra))}` : "—"}
+                      </td>
+                      <td className="p-3.5 text-right font-mono font-bold text-slate-900 dark:text-white">
+                        {v.stock || 0}
+                      </td>
+                      <td className="p-3.5 text-right pr-4">
+                        <button
+                          onClick={() => handleDeleteVariant(v)}
+                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          PESTAÑA: CÓDIGOS DE PACK / CAJA
+      ────────────────────────────────────────────────────────────────────────── */}
+      {mainTab === "packs" && (
+        <div className="space-y-6">
+          {/* BANNER EDUCATIVO E INSTRUCCIONES */}
+          <div className="card p-5 bg-gradient-to-r from-amber-50/80 via-white to-orange-50/60 dark:from-slate-900 dark:via-slate-900 dark:to-amber-950/30 border border-amber-200/80 dark:border-amber-900/60 rounded-3xl space-y-3">
+            <div className="flex items-start gap-3.5">
+              <div className="p-2.5 rounded-2xl bg-amber-600 text-white shadow-md shrink-0">
+                <Box className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  ¿Para qué sirve esto? Códigos de Pack / Caja
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  Muchos productos llegan en cajas o packs cerrados con un <strong>código de barras propio, distinto</strong> al del producto suelto.
+                  Registrá acá ese código y cuántas unidades trae — el stock siempre queda expresado en unidades sueltas, esto es solo
+                  una forma más rápida de cargarlo. (Próximamente: al escanear ese código en Caja, se van a agregar automáticamente
+                  esas unidades al carrito.)
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
+                  <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs">
+                    <strong className="text-amber-600 dark:text-amber-400 block font-mono">1. Producto Base</strong>
+                    Elegí el producto suelto que ya está cargado (ej. "Coca Cola 500ml").
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs">
+                    <strong className="text-amber-600 dark:text-amber-400 block font-mono">2. Código de la Caja</strong>
+                    Escaneá o tipeá el código impreso en la caja/pack (no el del producto suelto).
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs">
+                    <strong className="text-amber-600 dark:text-amber-400 block font-mono">3. Unidades por Paquete</strong>
+                    Cuántas unidades sueltas trae esa caja/pack (ej. 24).
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Panel de Control y Filtros */}
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto flex-1">
+              <div className="w-full sm:w-80">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                  Filtrar por Producto Base:
+                </label>
+                <ProductSearchPicker
+                  selectedProduct={packFilterProduct}
+                  onSelect={(p) => { setPackFilterProductId(p.id); setPackFilterProduct(p) }}
+                  onClear={() => { setPackFilterProductId(""); setPackFilterProduct(null) }}
+                  placeholder="Todos los productos... (código, SKU o nombre)"
+                />
+              </div>
+
+              <div className="w-full sm:w-64">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                  Buscar en la lista:
+                </label>
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={packSearchQuery}
+                    onChange={(e) => setPackSearchQuery(e.target.value)}
+                    placeholder="Filtrar por etiqueta o código..."
+                    className="input-field w-full text-xs pl-8 py-2"
+                  />
+                  {packSearchQuery && (
+                    <button
+                      onClick={() => setPackSearchQuery("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={() => handleOpenCreatePackModal()}
+              className="btn-primary text-xs px-4 py-2.5 flex items-center gap-2 shadow-md shrink-0 w-full sm:w-auto justify-center"
+            >
+              <Plus className="w-4 h-4" /> + Nuevo Código de Pack
+            </button>
+          </div>
+
+          {/* Tabla de Códigos de Pack */}
+          <div className="card bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm rounded-2xl overflow-hidden">
+            {loadingPackBarcodes ? (
+              <div className="p-16 text-center">
+                <Loader2 className="w-8 h-8 animate-spin text-amber-600 mx-auto mb-3" />
+                <p className="text-xs font-semibold text-slate-500">Cargando códigos de pack...</p>
+              </div>
+            ) : packBarcodesList.length === 0 ? (
+              <div className="p-16 text-center text-slate-400 space-y-3">
+                <div className="w-14 h-14 rounded-2xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 flex items-center justify-center mx-auto shadow-inner">
+                  <Box className="w-7 h-7" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-slate-700 dark:text-slate-200">No hay códigos de pack registrados</p>
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1">
+                    {packFilterProduct
+                      ? `No hay presentaciones registradas para "${packFilterProduct.nombre}". Podés crear la primera ahora.`
+                      : "Hacé clic en \"+ Nuevo Código de Pack\" para registrar cajas, packs o fardos asociados a productos sueltos."}
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleOpenCreatePackModal()}
+                  className="btn-primary text-xs px-4 py-2 inline-flex items-center gap-1.5 shadow"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Crear presentación
+                </button>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs min-w-[700px]">
+                  <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-800">
+                    <tr>
+                      <th className="p-3.5">Producto Base</th>
+                      <th className="p-3.5">Presentación / Etiqueta</th>
+                      <th className="p-3.5 text-center">Multiplicador</th>
+                      <th className="p-3.5">Código de Barras (Caja/Pack)</th>
+                      <th className="p-3.5 text-right pr-4">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                    {packBarcodesList
+                      .filter((pb) => {
+                        if (!packSearchQuery.trim()) return true
+                        const q = packSearchQuery.trim().toLowerCase()
+                        return (
+                          (pb.product_nombre || "").toLowerCase().includes(q) ||
+                          (pb.product_sku || "").toLowerCase().includes(q) ||
+                          (pb.codigo_barra || "").toLowerCase().includes(q) ||
+                          (pb.etiqueta || "").toLowerCase().includes(q)
+                        )
+                      })
+                      .map((pb) => (
+                        <tr key={pb.id} className="hover:bg-amber-50/30 dark:hover:bg-slate-800/40 transition-colors">
+                          <td className="p-3.5 font-bold text-slate-900 dark:text-white">
+                            <div className="flex items-center gap-2">
+                              <span className="truncate max-w-xs">{pb.product_nombre || "Producto Base"}</span>
+                            </div>
+                            {pb.product_sku && (
+                              <span className="block text-[10px] font-mono text-slate-400 font-normal mt-0.5">
+                                SKU: {pb.product_sku}
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3.5">
+                            <span className="inline-flex items-center gap-1.5 font-black text-amber-700 dark:text-amber-300 text-xs bg-amber-50 dark:bg-amber-950/40 px-2.5 py-1 rounded-lg border border-amber-200/60 dark:border-amber-900/50">
+                              <Box className="w-3.5 h-3.5 text-amber-500" />
+                              {pb.etiqueta}
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-center">
+                            <span className="inline-flex items-center font-mono font-black text-xs px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
+                              × {Number(pb.unidades_por_paquete)} un.
+                            </span>
+                          </td>
+                          <td className="p-3.5">
+                            <span className="font-mono text-xs text-slate-700 dark:text-slate-300 font-semibold bg-slate-100/80 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700">
+                              {pb.codigo_barra}
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-right pr-4">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => handleOpenCreatePackModal({ id: pb.product_id, nombre: pb.product_nombre || "Producto", sku: pb.product_sku || "" } as Product)}
+                                className="px-2 py-1 text-[11px] font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-900/50 rounded-lg transition-colors flex items-center gap-1 shadow-sm border border-amber-200/50 dark:border-amber-900/40"
+                                title="Agregar otra presentación (pack/caja) a este mismo producto"
+                              >
+                                <Plus className="w-3.5 h-3.5" /> + Pack
+                              </button>
+                              <button
+                                onClick={() => handleEditPackBarcodeClick(pb)}
+                                className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                                title="Editar"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleDeletePackBarcode(pb)}
+                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                                title="Eliminar"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          PESTAÑA 3: KITS & COMBOS PROMOCIONALES
+      ────────────────────────────────────────────────────────────────────────── */}
+      {mainTab === "kits" && (
+        <div className="space-y-6">
+          {/* BANNER EDUCATIVO E INSTRUCCIONES */}
+          <div className="card p-5 bg-gradient-to-r from-purple-50/80 via-white to-pink-50/60 dark:from-slate-900 dark:via-slate-900 dark:to-purple-950/30 border border-purple-200/80 dark:border-purple-900/60 rounded-3xl space-y-3">
+            <div className="flex items-start gap-3.5">
+              <div className="p-2.5 rounded-2xl bg-purple-600 text-white shadow-md shrink-0">
+                <Gift className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  ¿Cómo armar Kits y Combos Promocionales con Explosión de Stock?
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  Un <strong>Kit o Combo</strong> es un producto comercial agrupado compuesto por 2 o más artículos individuales del catálogo 
+                  (ej. "Pack Asado: 2kg Costilla + 1 Carbón + 2 Gaseosas").
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
+                  <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs">
+                    <strong className="text-purple-600 dark:text-purple-400 block font-mono">1. Descuento Automático</strong>
+                    Al venderse el Kit en caja, el sistema descuenta automáticamente cada producto componente de su stock.
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs">
+                    <strong className="text-purple-600 dark:text-purple-400 block font-mono">2. Margen Garantizado</strong>
+                    El constructor suma el costo de cada ítem en tiempo real para asegurarte que el precio de oferta siempre deje ganancia.
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs">
+                    <strong className="text-purple-600 dark:text-purple-400 block font-mono">3. Aumento del Ticket</strong>
+                    Los combos aumentan la rotación de artículos complementarios e impulsan el ticket promedio de compra.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Constructor de Kits y Lista Existente */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Formulario Creador de Kits */}
+            <div className="lg:col-span-5 card p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm rounded-3xl space-y-4">
+              <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                <Plus className="w-4 h-4 text-purple-600" /> Crear Nuevo Kit / Combo
+              </h3>
+
+              <form onSubmit={handleSaveKit} className="space-y-4">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Nombre del Kit / Combo *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej. Pack Merienda Familiar"
+                    value={kitForm.nombre}
+                    onChange={(e) => setKitForm({ ...kitForm, nombre: e.target.value })}
+                    className="input-field w-full text-xs font-bold"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">SKU del Kit</label>
+                    <input
+                      type="text"
+                      placeholder="KIT-1001"
+                      value={kitForm.sku}
+                      onChange={(e) => setKitForm({ ...kitForm, sku: e.target.value })}
+                      className="input-field w-full text-xs font-mono font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Precio Venta Kit (Gs.) *</label>
+                    <input
+                      type="number"
+                      min="0"
+                      required
+                      value={kitForm.precio_venta}
+                      onChange={(e) => setKitForm({ ...kitForm, precio_venta: Number(e.target.value) })}
+                      className="input-field w-full text-xs font-mono font-black text-purple-600"
+                    />
+                  </div>
+                </div>
+
+                {/* Agregar Componentes */}
+                <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 space-y-3">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Agregar Componentes al Pack:</span>
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <ProductSearchPicker
+                        selectedProduct={kitSelectedComponent}
+                        onSelect={(p) => { setKitSelectedComponentId(p.id); setKitSelectedComponent(p) }}
+                        onClear={() => { setKitSelectedComponentId(""); setKitSelectedComponent(null) }}
+                        placeholder="Buscar producto por código, SKU o nombre..."
+                      />
+                    </div>
+                    <input
+                      type="number"
+                      min="1"
+                      value={kitComponentQty}
+                      onChange={(e) => setKitComponentQty(Math.max(1, Number(e.target.value)))}
+                      className="input-field w-16 text-center text-xs font-mono font-bold"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddKitComponent}
+                      className="p-2 rounded-xl bg-purple-600 text-white hover:bg-purple-700 transition-colors"
+                      title="Agregar componente"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Lista de Componentes en el Kit */}
+                  {kitForm.items.length > 0 && (
+                    <div className="space-y-1.5 pt-2 border-t border-slate-200 dark:border-slate-700">
+                      {kitForm.items.map((item, idx) => (
+                        <div key={idx} className="flex items-center justify-between text-xs p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
+                          <div>
+                            <span className="font-bold text-slate-800 dark:text-slate-200">{item.product_nombre}</span>
+                            <span className="text-[10px] text-slate-400 block">
+                              {item.cantidad} un. × Costo: {formatPYG(item.costo_unitario)}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setKitForm({ ...kitForm, items: kitForm.items.filter((_, i) => i !== idx) })}
+                            className="p-1 text-slate-400 hover:text-red-500"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Métricas de Rentabilidad del Kit */}
+                {kitForm.items.length > 0 && (
+                  <div className="p-3.5 rounded-2xl bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-900/60 space-y-1.5">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-500">Costo Acumulado:</span>
+                      <strong className="font-mono text-slate-800 dark:text-slate-200">{formatPYG(kitCostoAcumulado)}</strong>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-500">Suma Precios Sueltos:</span>
+                      <strong className="font-mono text-slate-400 line-through">{formatPYG(kitPrecioIndividualTotal)}</strong>
+                    </div>
+                    <div className="flex justify-between text-xs pt-1 border-t border-purple-200/60">
+                      <span className="font-bold text-purple-700 dark:text-purple-300">Margen Bruto Kit:</span>
+                      <strong className="font-mono font-black text-purple-700 dark:text-purple-300">
+                        {kitMargenPct.toFixed(1)}% ({formatPYG(kitMargenMonto)})
+                      </strong>
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={savingKit}
+                  className="btn-primary w-full text-xs py-2.5 font-bold shadow-md bg-purple-600 hover:bg-purple-700 disabled:opacity-60"
+                >
+                  {savingKit ? "Guardando..." : "Guardar Kit / Combo"}
+                </button>
+              </form>
+            </div>
+
+            {/* Kits Guardados */}
+            <div className="lg:col-span-7 space-y-4">
+              <h3 className="text-sm font-black text-slate-900 dark:text-white">Kits & Combos Activos ({kitsSaved.length}){loadingKits ? " -- cargando..." : ""}</h3>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {kitsSaved.map((kit) => (
+                  <div key={kit.id} className="card p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm rounded-3xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="p-2 rounded-xl bg-purple-100 dark:bg-purple-950/50 text-purple-600 font-bold text-xs">
+                        <Gift className="w-4 h-4" />
+                      </div>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-emerald-50 text-emerald-600">
+                        Margen: {kit.margen_pct}%
+                      </span>
+                    </div>
+
+                    <div>
+                      <h4 className="font-bold text-slate-900 dark:text-white text-sm">{kit.nombre}</h4>
+                      {kit.descripcion && <p className="text-[11px] text-slate-400 mt-0.5">{kit.descripcion}</p>}
+                    </div>
+
+                    <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 space-y-1">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase">Componentes del pack:</span>
+                      {kit.componentes.map((c: any, i: number) => (
+                        <p key={i} className="text-xs text-slate-600 dark:text-slate-300 flex items-center justify-between">
+                          <span>• {c.nombre}</span>
+                          <span className="font-mono text-slate-400">×{c.cantidad}</span>
+                        </p>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block">Precio Oferta:</span>
+                        <strong className="text-base font-black font-mono text-purple-600">{formatPYG(kit.precio_venta)}</strong>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[10px] text-slate-400 block">Costo Total:</span>
+                        <strong className="text-xs font-bold font-mono text-slate-500">{formatPYG(kit.costo_total)}</strong>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          PESTAÑA 4: MANUAL OPERATIVO & AYUDA INTEGRADA
+      ────────────────────────────────────────────────────────────────────────── */}
+      {mainTab === "guia" && (
+        <div className="space-y-6 max-w-4xl">
+          <div className="card p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl space-y-6">
+            <div className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div className="p-2.5 rounded-2xl bg-indigo-600 text-white shadow-md">
+                <BookOpen className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-slate-900 dark:text-white">Manual Operativo del Módulo de Catálogo & Precios</h3>
+                <p className="text-xs text-slate-500">Guía práctica de mejores prácticas para la gestión del inventario y la rentabilidad comercial.</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {/* Sección 1: Balanzas y PLU */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 space-y-2">
+                <h4 className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider flex items-center gap-2">
+                  <Scale className="w-4 h-4" /> 1. Artículos Pesables y Códigos de Balanza (PLU)
+                </h4>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  Para productos fraccionables (Carnicería, Verdulería, Panadería), la unidad de medida debe ser <strong>KG</strong> o <strong>LT</strong>.
+                  El sistema genera o lee códigos de barras con el estándar de balanzas electrónicas (prefijo <code>2000xxx</code>). Al escanear la etiqueta en el Punto de Venta (POS), el sistema descompone el código en PLU y peso exacto facturando automáticamente el total correspondiente.
+                </p>
+              </div>
+
+              {/* Sección 2: Rentabilidad y Márgenes */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 space-y-2">
+                <h4 className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-2">
+                  <Percent className="w-4 h-4" /> 2. Cálculo de Márgenes Comerciales y Mark-up
+                </h4>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  • <strong>Margen Bruto (%)</strong>: <code>(Precio Venta - Costo) / Precio Venta × 100</code>. Indica qué porcentaje del dinero ingresado en caja queda como utilidad bruta.<br />
+                  • <strong>Mark-up (%)</strong>: <code>(Precio Venta - Costo) / Costo × 100</code>. Es el multiplicador que le aplicás al costo de compra para determinar el precio en góndola.
+                </p>
+              </div>
+
+              {/* Sección 3: Perecederos y Vencimientos */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 space-y-2">
+                <h4 className="text-xs font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4" /> 3. Productos Perecederos y Control de Mermas
+                </h4>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  Al tildar la opción <strong>"Producto Perecedero"</strong>, podés definir los días de vida útil. El sistema alertará en la Gestión de Inventario los lotes próximos a vencer para aplicar descuentos dinámicos preventivos o registrar mermas operativas sin distorsionar el balance general.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: ALTA / EDICIÓN DE CÓDIGO DE PACK
+      ────────────────────────────────────────────────────────────────────────── */}
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: ALTA / EDICIÓN DE CÓDIGO DE PACK
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showPackBarcodeModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl max-w-xl w-full flex flex-col my-8">
+            <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-amber-50/50 dark:bg-amber-950/20 rounded-t-3xl">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-600 text-white flex items-center justify-center shadow-md">
+                  <Box className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white">
+                    {editingPackBarcode ? "Editar Código de Pack" : "Nuevo Código de Pack / Caja"}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Asignar código de barra a una presentación por cantidad (ej. Six-Pack, Caja x24)
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowPackBarcodeModal(false)
+                  setEditingPackBarcode(null)
+                  setPackModalProductId("")
+                  setPackModalProduct(null)
+                }}
+                className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={(e) => handleSavePackBarcode(e, false)} className="p-6 space-y-5">
+              {/* Selector o Ficha del Producto Base */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
+                  Producto Base *
+                </label>
+                {packModalProduct ? (
+                  <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 flex items-center justify-center shrink-0 font-bold text-xs">
+                        <Package className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-black text-slate-900 dark:text-white truncate">
+                          {packModalProduct.nombre}
+                        </p>
+                        <div className="flex items-center gap-2 text-[10px] font-mono text-slate-400 mt-0.5">
+                          {packModalProduct.codigo_barra && (
+                            <span>
+                              Cod: <strong className="text-slate-600 dark:text-slate-300">{packModalProduct.codigo_barra}</strong>
+                            </span>
+                          )}
+                          {packModalProduct.sku && <span>SKU: {packModalProduct.sku}</span>}
+                        </div>
+                      </div>
+                    </div>
+                    {!editingPackBarcode && (
+                      <button
+                        type="button"
+                        onClick={() => { setPackModalProduct(null); setPackModalProductId("") }}
+                        className="text-[11px] font-bold text-amber-600 hover:text-amber-700 hover:underline shrink-0"
+                      >
+                        Cambiar
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <ProductSearchPicker
+                    autoFocus={!packModalProduct}
+                    selectedProduct={packModalProduct}
+                    onSelect={(p) => { setPackModalProductId(p.id); setPackModalProduct(p) }}
+                    onAfterSelect={() => {
+                      setTimeout(() => packBarcodeInputRef.current?.focus(), 80)
+                    }}
+                    onClear={() => { setPackModalProductId(""); setPackModalProduct(null) }}
+                    disabled={!!editingPackBarcode}
+                    placeholder="Escanear con lectora o buscar por código de barra, SKU o nombre..."
+                  />
+                )}
+              </div>
+
+              {/* Presets Rápidos */}
+              <div className="bg-amber-50/40 dark:bg-amber-950/20 p-3.5 rounded-2xl border border-amber-200/50 dark:border-amber-900/40 space-y-2">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-800 dark:text-amber-300">
+                  <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500" /> Atajos de Presentación Frecuentes:
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {PACK_PRESETS.map((pr) => (
+                    <button
+                      key={pr.label}
+                      type="button"
+                      onClick={() => {
+                        setPackBarcodeForm(prev => ({
+                          ...prev,
+                          etiqueta: pr.tag,
+                          unidades_por_paquete: pr.unidades,
+                        }))
+                      }}
+                      className="px-2.5 py-1 text-[11px] font-bold bg-white dark:bg-slate-800 hover:bg-amber-500 hover:text-white dark:hover:bg-amber-600 text-slate-700 dark:text-slate-200 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm transition-all"
+                    >
+                      {pr.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Código de Barras de la Caja */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                  Código de Barras de la Caja/Pack *
+                </label>
+                <div className="relative">
+                  <Barcode className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    ref={packBarcodeInputRef}
+                    type="text"
+                    required
+                    autoFocus={!!packModalProduct}
+                    placeholder="Escaneá con la lectora o tipeá el código impreso en la caja"
+                    value={packBarcodeForm.codigo_barra}
+                    onChange={(e) => setPackBarcodeForm({ ...packBarcodeForm, codigo_barra: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        if (!packBarcodeForm.etiqueta.trim()) {
+                          e.preventDefault()
+                          packEtiquetaInputRef.current?.focus()
+                        }
+                      }
+                    }}
+                    className="input-field w-full text-xs font-mono font-bold pl-9 py-2.5"
+                  />
+                </div>
+              </div>
+
+              {/* Etiqueta y Unidades */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                    Etiqueta Descriptiva *
+                  </label>
+                  <input
+                    ref={packEtiquetaInputRef}
+                    type="text"
+                    required
+                    placeholder="Ej. Caja x24, Six-Pack, Fardo x12"
+                    value={packBarcodeForm.etiqueta}
+                    onChange={(e) => setPackBarcodeForm({ ...packBarcodeForm, etiqueta: e.target.value })}
+                    className="input-field w-full text-xs font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                    Unidades sueltas contenidas *
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      required
+                      min="1"
+                      step="1"
+                      value={packBarcodeForm.unidades_por_paquete}
+                      onChange={(e) => setPackBarcodeForm({ ...packBarcodeForm, unidades_por_paquete: Number(e.target.value) })}
+                      className="input-field w-full text-xs font-mono font-black text-amber-600 dark:text-amber-400 text-right pr-14"
+                    />
+                    <span className="text-[10px] font-bold text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                      unidades
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Botonera de Acciones */}
+              <div className="flex flex-col-reverse sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPackBarcodeModal(false)
+                    setEditingPackBarcode(null)
+                    setPackModalProductId("")
+                    setPackModalProduct(null)
+                  }}
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  Cancelar
+                </button>
+
+                <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                  {!editingPackBarcode && (
+                    <button
+                      type="button"
+                      disabled={savingPackBarcode}
+                      onClick={() => handleSavePackBarcode(undefined, true)}
+                      className="px-4 py-2.5 rounded-xl text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/50 dark:text-amber-300 dark:hover:bg-amber-900/60 border border-amber-200 dark:border-amber-800 transition-colors flex items-center gap-1.5 shadow-sm disabled:opacity-60"
+                      title="Guarda este pack y deja el producto listo para agregar la siguiente presentación"
+                    >
+                      {savingPackBarcode ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                      Guardar y agregar otro pack
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={savingPackBarcode}
+                    className="btn-primary text-xs px-5 py-2.5 flex items-center gap-1.5 shadow-md disabled:opacity-60"
+                  >
+                    {savingPackBarcode ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    {editingPackBarcode ? "Guardar Cambios" : "Guardar y Cerrar"}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: ALTA DE VARIANTE
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showVariantModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl max-w-md w-full overflow-hidden flex flex-col">
+            <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-indigo-50/50 dark:bg-indigo-950/20">
+              <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                <Palette className="w-5 h-5 text-indigo-600" /> Nueva Variante de Producto
+              </h3>
+              <button onClick={() => setShowVariantModal(false)} className="p-1 text-slate-400 hover:text-slate-700">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveVariant} className="p-6 space-y-4">
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Producto Padre *</label>
+                <ProductSearchPicker
+                  selectedProduct={selectedParentProduct}
+                  onSelect={(p) => { setSelectedParentProductId(p.id); setSelectedParentProduct(p) }}
+                  onClear={() => { setSelectedParentProductId(""); setSelectedParentProduct(null) }}
+                  placeholder="Buscar producto por código de barra, SKU o nombre..."
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="input-label">Tipo</label>
-                  <select className="input-field" value={variantForm.tipo} onChange={(e) => setVariantForm({...variantForm, tipo: e.target.value})}>
-                    <option value="talle">Talle</option>
+                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Tipo de Variante *</label>
+                  <select
+                    value={variantForm.tipo}
+                    onChange={(e) => setVariantForm({ ...variantForm, tipo: e.target.value })}
+                    className="input-field w-full text-xs font-bold"
+                  >
+                    <option value="talle">Talle (S, M, L, XL)</option>
                     <option value="color">Color</option>
-                    <option value="material">Material</option>
                     <option value="sabor">Sabor</option>
-                    <option value="presentacion">Presentación</option>
+                    <option value="presentacion">Presentación / Pack</option>
                   </select>
                 </div>
+
                 <div>
-                  <label className="input-label label-required">Valor</label>
-                  <input className="input-field" placeholder="XL / Rojo / 500ml" value={variantForm.valor} onChange={(e) => setVariantForm({...variantForm, valor: e.target.value})} />
+                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Valor / Opción *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej. XL, Rojo, 6-Pack"
+                    value={variantForm.valor}
+                    onChange={(e) => setVariantForm({ ...variantForm, valor: e.target.value })}
+                    className="input-field w-full text-xs font-bold"
+                  />
                 </div>
               </div>
-              <div>
-                <label className="input-label label-required">SKU Variante</label>
-                <input className="input-field" placeholder="PROD-001-XL" value={variantForm.sku_variante} onChange={(e) => setVariantForm({...variantForm, sku_variante: e.target.value})} />
-              </div>
-              <div>
-                <label className="input-label">Código de barra</label>
-                <input className="input-field" placeholder="1234567890123" value={variantForm.codigo_barra} onChange={(e) => setVariantForm({...variantForm, codigo_barra: e.target.value})} />
-              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="input-label">Precio extra (PYG)</label>
-                  <input className="input-field" type="number" value={variantForm.precio_extra || ""} onChange={(e) => setVariantForm({...variantForm, precio_extra: parseFloat(e.target.value) || 0})} />
+                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">SKU Derivado</label>
+                  <input
+                    type="text"
+                    placeholder="Auto o Ej. 120480-XL"
+                    value={variantForm.sku_variante}
+                    onChange={(e) => setVariantForm({ ...variantForm, sku_variante: e.target.value })}
+                    className="input-field w-full text-xs font-mono"
+                  />
                 </div>
+
                 <div>
-                  <label className="input-label">Stock</label>
-                  <input className="input-field" type="number" value={variantForm.stock || ""} onChange={(e) => setVariantForm({...variantForm, stock: parseInt(e.target.value) || 0})} />
+                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Código de Barras</label>
+                  <input
+                    type="text"
+                    placeholder="784..."
+                    value={variantForm.codigo_barra}
+                    onChange={(e) => setVariantForm({ ...variantForm, codigo_barra: e.target.value })}
+                    className="input-field w-full text-xs font-mono"
+                  />
                 </div>
               </div>
-              <div className="flex gap-3 pt-4">
-                <button className="btn-outline flex-1" onClick={() => setShowVariantForm(false)}>Cancelar</button>
-                <button className="btn-primary flex-1" onClick={async () => {
-                  if (!variantForm.valor || !variantForm.sku_variante) { toast.error("Error", "Valor y SKU son obligatorios"); return }
-                  setVariantSaving(true)
-                  try {
-                    if (editingVariant) {
-                      await api.variants.update(editingVariant.id, variantForm)
-                      toast.success("Actualizada", "Variante actualizada")
-                    } else {
-                      await api.variants.create({ product_id: viewingProduct.id, ...variantForm })
-                      toast.success("Creada", "Variante creada")
-                    }
-                    const updated = await api.variants.list(viewingProduct.id)
-                    setVariants(updated)
-                    setShowVariantForm(false)
-                  } catch { toast.error("Error", "No se pudo guardar la variante") }
-                  finally { setVariantSaving(false) }
-                }} disabled={variantSaving}>
-                  {variantSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Guardar"}
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Precio Extra (+Gs.)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={variantForm.precio_extra}
+                    onChange={(e) => setVariantForm({ ...variantForm, precio_extra: Number(e.target.value) })}
+                    className="input-field w-full text-xs font-mono font-bold text-emerald-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Stock Inicial</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={variantForm.stock}
+                    onChange={(e) => setVariantForm({ ...variantForm, stock: Number(e.target.value) })}
+                    className="input-field w-full text-xs font-mono font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="p-4 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowVariantModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-600 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingVariant}
+                  className="btn-primary text-xs px-5 py-2 flex items-center gap-2 shadow-md disabled:opacity-50"
+                >
+                  {savingVariant && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  Crear Variante
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         </div>
       )}
 
-      {/* Import Modal */}
-      {showImport && (
-        <div className="modal-overlay" onClick={() => { setShowImport(false); setImportFile(null); setImportResult(null) }}>
-          <div className="modal-content max-w-lg" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-700">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Importar productos</h3>
-              <button onClick={() => { setShowImport(false); setImportFile(null); setImportResult(null) }} className="btn-ghost"><X className="w-4 h-4" /></button>
-            </div>
-            <div className="p-6 space-y-4">
-              <p className="text-sm text-gray-500">Subí un archivo CSV con las columnes: sku, nombre, codigo_barra, descripcion, unidad_medida, iva_tasa, stock_minimo, category_id</p>
-              <a href={`${import.meta.env.VITE_API_URL || "/api"}/v1/imports/template/products`} className="text-sm text-primary hover:underline flex items-center gap-1" download>
-                <Download className="w-3 h-3" /> Descargar plantilla
-              </a>
-              <div>
-                <label className="input-label">Archivo CSV</label>
-                <input type="file" accept=".csv" className="input-field" onChange={(e) => setImportFile(e.target.files?.[0] || null)} />
-              </div>
-              {importFile && (
-                <p className="text-sm text-gray-500">Archivo: {importFile.name} ({(importFile.size / 1024).toFixed(1)} KB)</p>
-              )}
-              {importResult && (
-                <div className="space-y-2 max-h-48 overflow-y-auto">
-                  <div className="flex gap-2 text-sm">
-                    <span className="text-green-500 font-bold">{importResult.success} éxitos</span>
-                    <span className="text-red-500 font-bold">{importResult.errors} errores</span>
-                  </div>
-                  {importResult.details.filter(d => d.status !== "success").slice(0, 5).map(d => (
-                    <div key={d.row} className="text-xs p-2 bg-red-50 dark:bg-red-900/20 rounded-lg text-red-600">
-                      Fila {d.row}: {d.message}
-                    </div>
-                  ))}
-                  {importResult.errors > 5 && <p className="text-xs text-gray-400">... y {importResult.errors - 5} errores más</p>}
-                </div>
-              )}
-              <div className="flex gap-3 pt-4">
-                <button className="btn-outline flex-1" onClick={() => { setShowImport(false); setImportFile(null); setImportResult(null) }}>Cerrar</button>
-                <button className="btn-primary flex-1" onClick={handleImport} disabled={!importFile || importing}>
-                  {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : "Importar"}
-                </button>
-              </div>
-            </div>
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: FICHA 360° DEL PRODUCTO (componente dedicado)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {selectedProduct360Id && product360Data && !loading360 && (
+        <Product360Modal
+          data={product360Data}
+          onClose={() => { setSelectedProduct360Id(null) }}
+          onPriceUpdated={(productId, newPrice) => {
+            setProducts(prev => prev.map(p =>
+              p.id === productId ? { ...p, precio_venta: newPrice } : p
+            ))
+            setSelectedProduct360Id(null)
+          }}
+        />
+      )}
+      {selectedProduct360Id && loading360 && (
+        <div className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-8 flex flex-col items-center gap-3 shadow-2xl">
+            <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+            <p className="text-sm font-bold text-slate-600 dark:text-slate-300">Cargando Ficha 360°...</p>
           </div>
         </div>
       )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL ESTÁNDAR: ALTA / EDICIÓN DE PRODUCTO (PORTAL LOCK)
+      ────────────────────────────────────────────────────────────────────────── */}
+      <Modal
+        open={showForm}
+        onClose={() => setShowForm(false)}
+        title={editingProduct ? `Editar Producto: ${editingProduct.nombre}` : "Nuevo Producto en Catálogo"}
+        subtitle={
+          editingProduct
+            ? `SKU: ${editingProduct.sku} ${editingProduct.codigo_barra ? `| EAN: ${editingProduct.codigo_barra}` : ""}`
+            : "Alta oficial de producto para Supermercado & Retail"
+        }
+        icon={editingProduct ? <Edit className="w-5 h-5 text-indigo-500" /> : <Plus className="w-5 h-5 text-indigo-500" />}
+        size="2xl"
+        footer={
+          <ModalFooter>
+            <button
+              type="button"
+              onClick={() => setShowForm(false)}
+              className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSaveProduct()}
+              disabled={saving}
+              className="btn-primary text-xs px-5 py-2 flex items-center gap-2 shadow-md disabled:opacity-50"
+            >
+              {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              {editingProduct ? "Guardar Cambios" : "Crear Producto"}
+            </button>
+          </ModalFooter>
+        }
+      >
+        <form onSubmit={handleSaveProduct} className="space-y-4">
+          {/* BARRA SUPERIOR DE PESTAÑAS DEL PRODUCTO */}
+          <div className="flex border-b border-slate-200 dark:border-slate-800 gap-1 pb-2 overflow-x-auto">
+            <button
+              type="button"
+              onClick={() => setFormTab("general")}
+              className={`flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-xl transition-all shrink-0 ${
+                formTab === "general"
+                  ? "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 shadow-xs"
+                  : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60"
+              }`}
+            >
+              <Barcode className="w-3.5 h-3.5" />
+              <span>Identificación & Proveedor</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setFormTab("empaque")}
+              className={`flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-xl transition-all shrink-0 ${
+                formTab === "empaque"
+                  ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800 shadow-xs"
+                  : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60"
+              }`}
+            >
+              <Boxes className="w-3.5 h-3.5" />
+              <span>Caja, Bulto & Balanza</span>
+              {form.tipo_venta === "peso" && (
+                <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+              )}
+              {form.tiene_pack && (
+                <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setFormTab("precios")}
+              className={`flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-xl transition-all shrink-0 ${
+                formTab === "precios"
+                  ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 shadow-xs"
+                  : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60"
+              }`}
+            >
+              <DollarSign className="w-3.5 h-3.5" />
+              <span>Precios, Costo & SIFEN</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setFormTab("inventario")}
+              className={`flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-xl transition-all shrink-0 ${
+                formTab === "inventario"
+                  ? "bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 shadow-xs"
+                  : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60"
+              }`}
+            >
+              <Package className="w-3.5 h-3.5" />
+              <span>Stock & Perecederos</span>
+              {form.es_perecedero && (
+                <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+              )}
+            </button>
+          </div>
+
+          {/* ──────────────────────────────────────────────────────────
+              TAB 1: IDENTIFICACIÓN, PROVEEDOR Y DATOS BÁSICOS
+          ────────────────────────────────────────────────────────── */}
+          {formTab === "general" && (
+            <div className="space-y-4 animate-fade-in">
+              {/* Clasificación de Negocio (Tipo de Producto) y Estado Operativo */}
+              <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                      Destino Operativo & Clasificación
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      Define el comportamiento en ventas (POS), recetas de producción interna y compras
+                    </span>
+                  </div>
+
+                  {/* Toggle Activo / Inactivo */}
+                  <div className="flex items-center gap-2.5 bg-slate-50 dark:bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className={`text-xs font-bold ${form.activo !== false ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                      {form.activo !== false ? "Producto Activo" : "Producto Inactivo"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setForm(prev => ({ ...prev, activo: prev.activo === false }))}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        form.activo !== false ? "bg-emerald-600" : "bg-slate-300 dark:bg-slate-700"
+                      }`}
+                      title={form.activo !== false ? "Desactivar producto" : "Activar producto"}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          form.activo !== false ? "translate-x-5" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Selector visual de Tipo de Producto */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                  {[
+                    {
+                      key: "producto",
+                      icon: Box,
+                      title: "Producto Final",
+                      badge: "Venta Salón",
+                      desc: "Facturable en cajas POS, góndolas y mostrador.",
+                    },
+                    {
+                      key: "materia_prima",
+                      icon: Wheat,
+                      title: "Materia Prima",
+                      badge: "Producción",
+                      desc: "Para recetas y elaboración (Panadería, Rotisería, Carnicería). No se expone en POS.",
+                    },
+                    {
+                      key: "insumo",
+                      icon: Package,
+                      title: "Insumo / Suministro",
+                      badge: "Uso Interno",
+                      desc: "Embalajes, bobinas térmicas, limpieza, bolsas plásticas.",
+                    },
+                    {
+                      key: "servicio",
+                      icon: Wrench,
+                      title: "Servicio",
+                      badge: "Intangible",
+                      desc: "Fletes, mano de obra, servicios no inventariables.",
+                    },
+                  ].map((t) => {
+                    const isSelected = (form.tipo_producto || "producto") === t.key
+                    const IconComp = t.icon
+                    return (
+                      <button
+                        key={t.key}
+                        type="button"
+                        onClick={() => setForm(prev => ({ ...prev, tipo_producto: t.key as any }))}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-1.5 ${
+                          isSelected
+                            ? "border-indigo-600 bg-indigo-50/70 dark:bg-indigo-950/40 ring-2 ring-indigo-500/20 shadow-xs"
+                            : "border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850 hover:bg-slate-100/70 dark:hover:bg-slate-800"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <IconComp className={`w-4 h-4 ${isSelected ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400"}`} />
+                            <span className={`text-xs font-bold ${isSelected ? "text-indigo-950 dark:text-indigo-200" : "text-slate-700 dark:text-slate-300"}`}>
+                              {t.title}
+                            </span>
+                          </div>
+                          {isSelected && (
+                            <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                          )}
+                        </div>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                          {t.desc}
+                        </p>
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {form.activo === false && (
+                  <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 flex items-center gap-2 text-rose-700 dark:text-rose-400 text-xs">
+                    <Ban className="w-4 h-4 shrink-0 text-rose-500" />
+                    <span><strong>Efecto real:</strong> Al estar <strong>inactivo</strong>, este producto queda bloqueado en cajas POS (no facturable) y no podrá ser seleccionado en compras.</span>
+                  </div>
+                )}
+                {form.tipo_producto === "materia_prima" && (
+                  <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 flex items-center gap-2 text-amber-700 dark:text-amber-400 text-xs">
+                    <Wheat className="w-4 h-4 shrink-0 text-amber-500" />
+                    <span><strong>Materia Prima:</strong> Este producto estará disponible para costeo de recetas y consumo en sectores de producción interna (Panadería, Rotisería, Carnicería), y <strong>no aparecerá en POS</strong>.</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-slate-50/80 dark:bg-slate-800/40 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <Lock className="w-3.5 h-3.5 text-indigo-500" />
+                        <span>SKU / Código Interno *</span>
+                      </label>
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center gap-1">
+                        🔒 Secuencia Ñemuha
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        readOnly
+                        disabled
+                        value={form.sku}
+                        className="input-field w-full text-xs font-mono font-black bg-slate-100 dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-indigo-600 dark:text-indigo-400 cursor-not-allowed pl-8"
+                        placeholder="Generando..."
+                      />
+                      <Lock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      Correlativo numérico protegido para preservar la integridad con el sistema Ñemuha.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                      Código de Barras Unitario (EAN-13 / UPC)
+                    </label>
+                    <input
+                      type="text"
+                      value={form.codigo_barra}
+                      onChange={(e) => setForm({ ...form, codigo_barra: e.target.value })}
+                      className="input-field w-full text-xs font-mono"
+                      placeholder="Ej. 7840001002345"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                    Nombre Comercial del Producto *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={form.nombre}
+                    onChange={(e) => setForm({ ...form, nombre: e.target.value })}
+                    className="input-field w-full text-xs font-bold"
+                    placeholder="Ej. BRAHMITA CERVEZA ULTRA CERO 269ML"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                      Categoría
+                    </label>
+                    <select
+                      value={form.categoria_id}
+                      onChange={(e) => setForm({ ...form, categoria_id: e.target.value })}
+                      className="input-field w-full text-xs"
+                    >
+                      <option value="">Seleccionar Categoría...</option>
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.nombre}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                      Proveedor Habitual
+                    </label>
+                    <select
+                      value={form.supplier_id}
+                      onChange={(e) => setForm({ ...form, supplier_id: e.target.value })}
+                      className="input-field w-full text-xs"
+                    >
+                      <option value="">Sin proveedor habitual asignado...</option>
+                      {suppliers.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.razon_social || s.nombre_fantasia || "Proveedor"} {s.ruc ? `(${s.ruc})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                      Unidad de Medida Base
+                    </label>
+                    <select
+                      value={form.unidad_medida}
+                      onChange={(e) => {
+                        const newUm = e.target.value
+                        const isKg = newUm === "KG"
+                        setForm((prev) => {
+                          let autoPlu = prev.plu_balanza
+                          if (isKg && !autoPlu && prev.codigo_barra && prev.codigo_barra.startsWith("2000") && prev.codigo_barra.length === 7 && /^\d+$/.test(prev.codigo_barra)) {
+                            autoPlu = parseInt(prev.codigo_barra.slice(4), 10) || null
+                          }
+                          return {
+                            ...prev,
+                            unidad_medida: newUm,
+                            tipo_venta: isKg ? "peso" : (prev.tipo_venta === "peso" ? "unidad" : prev.tipo_venta),
+                            plu_balanza: isKg ? (autoPlu ?? prev.plu_balanza) : prev.plu_balanza,
+                          }
+                        })
+                      }}
+                      className="input-field w-full text-xs font-bold"
+                    >
+                      <option value="UN">Unidad (UN)</option>
+                      <option value="KG">Kilogramo (KG) - Balanza / Pesable</option>
+                      <option value="LT">Litro (LT)</option>
+                      <option value="PQ">Paquete (PQ)</option>
+                      <option value="CJ">Caja (CJ)</option>
+                      <option value="MT">Metro (MT)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                      Modalidad de Venta
+                    </label>
+                    <div className="flex items-center gap-2 h-[38px] px-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
+                      <span className="font-semibold text-slate-700 dark:text-slate-300">
+                        {form.unidad_medida === "KG" || form.tipo_venta === "peso" ? "⚖️ Venta por Peso (Balanza)" : "📦 Venta Unitaria / Bulto"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Foto del Producto desde archivo de computadora */}
+                <div className="bg-slate-50/80 dark:bg-slate-900/40 rounded-xl p-3 border border-slate-200/80 dark:border-slate-800">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <ImageIcon className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                      Foto del Producto (Kiosko & POS)
+                    </label>
+                    <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-200/60 dark:border-emerald-800/40">
+                      Carga directa desde esta computadora
+                    </span>
+                  </div>
+
+                  <input
+                    type="file"
+                    ref={imageFileInputRef}
+                    onChange={handleImageFileChange}
+                    accept="image/png, image/jpeg, image/webp, image/gif"
+                    className="hidden"
+                  />
+
+                  {form.imagen_url ? (
+                    <div className="flex items-center gap-4 p-2.5 bg-white dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                      <div className="relative w-20 h-20 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 shrink-0 flex items-center justify-center">
+                        <img
+                          src={form.imagen_url}
+                          alt={form.nombre || "Preview"}
+                          className="w-full h-full object-contain p-1"
+                          onError={(e) => { (e.target as any).style.display = "none" }}
+                        />
+                        {uploadingImage && (
+                          <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                            <Loader2 className="w-6 h-6 text-white animate-spin" />
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                          <span className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                            Foto vinculada correctamente
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate font-mono mb-2">
+                          {form.imagen_url}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => imageFileInputRef.current?.click()}
+                            disabled={uploadingImage}
+                            className="px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 rounded-lg border border-emerald-200 dark:border-emerald-800/60 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          >
+                            {uploadingImage ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Upload className="w-3.5 h-3.5" />
+                            )}
+                            Cambiar foto de la PC
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleRemoveImage}
+                            disabled={uploadingImage}
+                            className="px-2.5 py-1 text-xs font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/40 rounded-lg border border-rose-200 dark:border-rose-800/60 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Quitar foto
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      onClick={() => imageFileInputRef.current?.click()}
+                      onDragOver={(e) => { e.preventDefault(); e.stopPropagation() }}
+                      onDrop={handleImageDrop}
+                      className={`group border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all ${
+                        uploadingImage
+                          ? "border-emerald-500 bg-emerald-50/30 dark:bg-emerald-950/20"
+                          : "border-slate-300 dark:border-slate-700 hover:border-emerald-500 dark:hover:border-emerald-500 bg-white/60 dark:bg-slate-800/40 hover:bg-emerald-50/20"
+                      }`}
+                    >
+                      {uploadingImage ? (
+                        <div className="py-2 flex flex-col items-center justify-center gap-1.5">
+                          <Loader2 className="w-6 h-6 text-emerald-600 animate-spin" />
+                          <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                            Subiendo y optimizando foto desde tu equipo...
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="py-1 flex flex-col items-center justify-center gap-1">
+                          <div className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+                            <Upload className="w-4 h-4" />
+                          </div>
+                          <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                            Haz clic para seleccionar la foto desde esta computadora
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                            Arrastra aquí el archivo o haz clic para buscarlo • PNG, JPG, WEBP
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                    Descripción / Especificaciones / Notas Internas
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={form.descripcion}
+                    onChange={(e) => setForm({ ...form, descripcion: e.target.value })}
+                    className="input-field w-full text-xs"
+                    placeholder="Detalles sobre presentación, sabor, graduación alcohólica o notas de reposición..."
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ──────────────────────────────────────────────────────────
+              TAB 2: CAJA, BULTO MAYORISTA & BALANZA
+          ────────────────────────────────────────────────────────── */}
+          {formTab === "empaque" && (
+            <div className="space-y-4 animate-fade-in">
+              {/* CASO 1: PRODUCTO PESABLE / BALANZA */}
+              {(form.tipo_venta === "peso" || form.unidad_medida === "KG") ? (
+                <div className="rounded-2xl p-4 border bg-amber-500/10 dark:bg-amber-950/30 border-amber-300 dark:border-amber-700 shadow-sm space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                        <Scale className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                          <span>Venta Pesable & Balanza (Fiambrería, Verdulería, Carnicería, Panadería)</span>
+                          <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500 text-white animate-pulse">
+                            Pesable Activo
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Venta fraccionada por peso en balanzas etiquetadoras (Balmak Edge / Toledo) y lectores POS
+                        </div>
+                      </div>
+                    </div>
+
+                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={form.tipo_venta === "peso"}
+                        onChange={(e) => {
+                          const isPeso = e.target.checked
+                          setForm((prev) => {
+                            let autoPlu = prev.plu_balanza
+                            if (isPeso && !autoPlu && prev.codigo_barra && prev.codigo_barra.startsWith("2000") && prev.codigo_barra.length === 7 && /^\d+$/.test(prev.codigo_barra)) {
+                              autoPlu = parseInt(prev.codigo_barra.slice(4), 10) || null
+                            }
+                            return {
+                              ...prev,
+                              tipo_venta: isPeso ? "peso" : "unidad",
+                              unidad_medida: isPeso ? "KG" : (prev.unidad_medida === "KG" ? "UN" : prev.unidad_medida),
+                              plu_balanza: isPeso ? (autoPlu ?? prev.plu_balanza) : prev.plu_balanza,
+                            }
+                          })
+                        }}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+                    </label>
+                  </div>
+
+                  <div className="pt-3 border-t border-amber-200/60 dark:border-amber-800/40 space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[11px] font-bold text-amber-900 dark:text-amber-300 block mb-1">
+                          Código PLU Balanza (1 a 99999)
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="99999"
+                          value={form.plu_balanza || ""}
+                          onChange={(e) => setForm({ ...form, plu_balanza: e.target.value ? parseInt(e.target.value) : null })}
+                          className="input-field w-full text-xs font-mono font-bold bg-white dark:bg-slate-900 border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200"
+                          placeholder="Ej. 988"
+                        />
+                        <div className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
+                          Número de memoria en balanza para emitir etiqueta con código 20...
+                        </div>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-amber-100/60 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 flex items-start gap-2 text-[11px] text-amber-900 dark:text-amber-200 leading-snug">
+                        <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                        <div>
+                          <strong>Regla de Balanza:</strong> En productos pesables, el <em>Precio de Venta</em> equivale al <strong>Precio por Kilogramo (Gs./KG)</strong>. Tanto la balanza como el POS fraccionan el peso automáticamente.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* CASO 2: PRODUCTO POR UNIDAD / CAJA / PACK MAYORISTA */
+                <div className="space-y-4">
+                  <div className="rounded-2xl p-4 border bg-indigo-500/5 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-800 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-xl bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                          <Boxes className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                            <span>Presentación Mayorista & Caja Cerrada (DUN-14 / Bulto)</span>
+                            {form.tiene_pack && (
+                              <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-indigo-600 text-white">
+                                Bulto Activo ({form.pack_cantidad} UN)
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                            Configure la cantidad que contiene la caja del fabricante para compras, recepción y venta por bulto cerrado
+                          </div>
+                        </div>
+                      </div>
+
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                        <input
+                          type="checkbox"
+                          checked={form.tiene_pack}
+                          onChange={(e) => setForm({ ...form, tiene_pack: e.target.checked })}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                      </label>
+                    </div>
+
+                    {form.tiene_pack && (
+                      <div className="pt-3 border-t border-indigo-200/60 dark:border-indigo-800/40 space-y-3 animate-fade-in">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div>
+                            <label className="text-[11px] font-bold text-indigo-950 dark:text-indigo-300 block mb-1">
+                              Cantidad por Caja / Pack (UN) *
+                            </label>
+                            <input
+                              type="number"
+                              min="2"
+                              required={form.tiene_pack}
+                              value={form.pack_cantidad}
+                              onChange={(e) => {
+                                const q = Number(e.target.value)
+                                setForm({
+                                  ...form,
+                                  pack_cantidad: q,
+                                  pack_etiqueta: form.pack_etiqueta.startsWith("Caja x") ? `Caja x${q}` : form.pack_etiqueta,
+                                })
+                              }}
+                              className="input-field w-full text-xs font-mono font-bold bg-white dark:bg-slate-900 border-indigo-300 dark:border-indigo-700"
+                              placeholder="Ej. 12"
+                            />
+                            <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                              {[6, 12, 24, 48].map((q) => (
+                                <button
+                                  key={q}
+                                  type="button"
+                                  onClick={() => setForm({ ...form, pack_cantidad: q, pack_etiqueta: `Caja x${q}` })}
+                                  className={`text-[10px] font-bold px-2 py-0.5 rounded-md border transition-all ${
+                                    form.pack_cantidad === q
+                                      ? "bg-indigo-600 text-white border-indigo-600"
+                                      : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50"
+                                  }`}
+                                >
+                                  x{q}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-indigo-950 dark:text-indigo-300 block mb-1">
+                              Código de Barras de la Caja (DUN-14 / EAN-14)
+                            </label>
+                            <input
+                              type="text"
+                              value={form.pack_codigo_barra}
+                              onChange={(e) => setForm({ ...form, pack_codigo_barra: e.target.value })}
+                              className="input-field w-full text-xs font-mono bg-white dark:bg-slate-900 border-indigo-300 dark:border-indigo-700"
+                              placeholder="Ej. 17840001002342"
+                            />
+                            <div className="text-[10px] text-indigo-600 dark:text-indigo-400 mt-1">
+                              Código impreso en la caja de cartón o fardo
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-indigo-950 dark:text-indigo-300 block mb-1">
+                              Etiqueta / Descripción del Bulto
+                            </label>
+                            <input
+                              type="text"
+                              value={form.pack_etiqueta}
+                              onChange={(e) => setForm({ ...form, pack_etiqueta: e.target.value })}
+                              className="input-field w-full text-xs bg-white dark:bg-slate-900 border-indigo-300 dark:border-indigo-700 font-semibold"
+                              placeholder="Ej. Caja x12 o Fardo x6"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="p-3 rounded-xl bg-indigo-100/50 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800/60 flex items-start gap-2 text-[11px] text-indigo-950 dark:text-indigo-200 leading-snug">
+                          <Info className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+                          <div>
+                            <strong>Regla de Fraccionamiento:</strong> Al escanear este código de caja en el Punto de Venta (POS) o en Recepción de Mercaderías, el sistema computará o descontará automáticamente <strong>{form.pack_cantidad || 1} unidades</strong> del stock individual del producto.
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ──────────────────────────────────────────────────────────
+              TAB 3: PRECIOS, COSTO BLINDADO & FISCAL SIFEN
+          ────────────────────────────────────────────────────────── */}
+          {formTab === "precios" && (
+            <div className="space-y-4 animate-fade-in">
+              <div className="bg-slate-50/80 dark:bg-slate-800/40 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                    <DollarSign className="w-4 h-4 text-emerald-500" />
+                    <span>Precios, Costo & Rentabilidad</span>
+                  </div>
+
+                  {editingProduct && !costoUnlocked && (
+                    <div className="flex items-center gap-1.5">
+                      {isManagerOrAdmin ? (
+                        <button
+                          type="button"
+                          onClick={() => setCostoUnlocked(true)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800 transition-colors"
+                        >
+                          <Unlock className="w-3.5 h-3.5" />
+                          Desbloquear Costo (Gerencia)
+                        </button>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg">
+                          <Lock className="w-3 h-3 text-slate-400" />
+                          Costo Protegido (Solo Gerencia)
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Costo Unitario */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                        Costo Promedio (Gs.)
+                      </label>
+                      {editingProduct && !costoUnlocked && (
+                        <span title="Bloqueado contra edición no autorizada">
+                          <Lock className="w-3 h-3 text-slate-400" />
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      type="number"
+                      min="0"
+                      disabled={editingProduct ? !costoUnlocked : false}
+                      value={form.costo_promedio}
+                      onChange={(e) => setForm({ ...form, costo_promedio: Number(e.target.value) })}
+                      className={`input-field w-full text-xs font-mono font-bold ${
+                        editingProduct && !costoUnlocked
+                          ? "bg-slate-100 dark:bg-slate-800/80 text-slate-500 cursor-not-allowed border-slate-200 dark:border-slate-700"
+                          : "bg-white dark:bg-slate-900 border-amber-300 dark:border-amber-600 text-slate-900 dark:text-white"
+                      }`}
+                    />
+                    {costoUnlocked && editingProduct && (
+                      <div className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1 font-semibold">
+                        <AlertTriangle className="w-3 h-3 shrink-0" />
+                        Edición manual de costo habilitada
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Precio de Venta al Público */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                      {form.tipo_venta === "peso" ? "Precio Venta / KG (Gs.) *" : "Precio Venta Unitario (Gs.) *"}
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      required
+                      value={form.precio_venta}
+                      onChange={(e) => setForm({ ...form, precio_venta: Number(e.target.value) })}
+                      className="input-field w-full text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50/20 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-700"
+                    />
+                  </div>
+
+                  {/* Tasa de IVA */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                      Tasa de IVA SIFEN (DNIT)
+                    </label>
+                    <select
+                      value={form.iva_tasa}
+                      onChange={(e) => setForm({ ...form, iva_tasa: Number(e.target.value) })}
+                      className="input-field w-full text-xs font-semibold"
+                    >
+                      <option value={10}>10% (General Supermercado / Bebidas / Limpieza)</option>
+                      <option value={5}>5% (Canasta Familiar / Frutas / Carnes / Agro)</option>
+                      <option value={0}>0% (Exenta - Libros / Insumos agropecuarios)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Widget de Cálculo Dinámico de Margen */}
+                {(() => {
+                  const costo = Number(form.costo_promedio) || 0
+                  const precio = Number(form.precio_venta) || 0
+                  const ganancia = precio - costo
+                  const margenBruto = precio > 0 ? (ganancia / precio) * 100 : 0
+                  const markup = costo > 0 ? (ganancia / costo) * 100 : 0
+                  const badgeColor =
+                    margenBruto >= 25
+                      ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-300 dark:border-emerald-800"
+                      : margenBruto >= 10
+                      ? "text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-300 dark:border-amber-800"
+                      : "text-red-600 dark:text-red-400 bg-red-500/10 border-red-300 dark:border-red-800"
+
+                  return (
+                    <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 grid grid-cols-3 gap-2 text-center">
+                      <div>
+                        <div className="text-[10px] font-bold uppercase text-slate-400">Ganancia Bruta</div>
+                        <div className="text-xs font-mono font-bold text-slate-800 dark:text-slate-200 mt-0.5">
+                          {formatPYG(ganancia)}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-[10px] font-bold uppercase text-slate-400">Margen Bruto</div>
+                        <div className={`text-xs font-mono font-black mt-0.5 inline-block px-2 py-0.5 rounded-md border ${badgeColor}`}>
+                          {margenBruto.toFixed(1)}%
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-[10px] font-bold uppercase text-slate-400">Markup s/ Costo</div>
+                        <div className="text-xs font-mono font-semibold text-slate-600 dark:text-slate-300 mt-0.5">
+                          {markup > 0 ? `+${markup.toFixed(1)}%` : "0%"}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })()}
+
+                {/* ── ESCALAS DE PRECIOS MAYORISTAS (TIERED PRICING) ── */}
+                <div className="bg-slate-50/80 dark:bg-slate-900/60 rounded-2xl p-4 border border-indigo-200/60 dark:border-indigo-900/40 space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
+                        <TrendingDown className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                          <span>Escalas de Precios Mayoristas (Venta por Volumen)</span>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                            Fardos / Cajas / Mayorista
+                          </span>
+                        </h4>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Precios diferenciados aplicables automáticamente en POS según la cantidad llevada por el cliente.
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProductTiers(prev => {
+                          const active = prev.filter(t => !t.isDeleted)
+                          const nextMin = active.length > 0 ? (Math.max(...active.map(t => Number(t.max_qty || t.min_qty))) + 1) : 6
+                          return [
+                            ...prev,
+                            {
+                              min_qty: nextMin,
+                              max_qty: null,
+                              precio_unitario: form.precio_venta > 0 ? Math.round(form.precio_venta * 0.95) : 0,
+                              isNew: true,
+                              isDeleted: false,
+                            }
+                          ]
+                        })
+                      }}
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 shadow-sm transition"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Añadir Escala</span>
+                    </button>
+                  </div>
+
+                  {loadingTiers ? (
+                    <div className="p-4 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin text-indigo-500" />
+                      <span>Cargando escalas de precios...</span>
+                    </div>
+                  ) : productTiers.filter(t => !t.isDeleted).length === 0 ? (
+                    <div className="p-4 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-xs text-slate-400">
+                      No hay escalas mayoristas configuradas. Se aplica únicamente el Precio Venta Minorista ({formatPYG(form.precio_venta)}).
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs text-left">
+                        <thead className="bg-slate-100 dark:bg-slate-800/80 text-[10px] font-bold uppercase text-slate-500">
+                          <tr>
+                            <th className="p-2.5 rounded-l-xl">Desde (Mín. Cant.)</th>
+                            <th className="p-2.5">Hasta (Máx. Cant.)</th>
+                            <th className="p-2.5 text-right">Precio Mayorista (Gs.)</th>
+                            <th className="p-2.5 text-center">Descuento vs Minorista</th>
+                            <th className="p-2.5 text-center rounded-r-xl">Acción</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                          {productTiers.map((tier, idx) => {
+                            if (tier.isDeleted) return null
+                            const descPct = form.precio_venta > 0 && tier.precio_unitario > 0
+                              ? Math.max(0, ((form.precio_venta - tier.precio_unitario) / form.precio_venta) * 100)
+                              : 0
+
+                            return (
+                              <tr key={tier.id || `new-${idx}`} className="hover:bg-slate-50/50 dark:hover:bg-slate-850">
+                                <td className="p-2.5">
+                                  <input
+                                    type="number"
+                                    min="2"
+                                    value={tier.min_qty}
+                                    onChange={(e) => {
+                                      const val = Math.max(1, parseInt(e.target.value, 10) || 1)
+                                      setProductTiers(prev => prev.map((t, i) => i === idx ? { ...t, min_qty: val } : t))
+                                    }}
+                                    className="input-field w-24 text-xs font-mono font-bold"
+                                  />
+                                </td>
+                                <td className="p-2.5">
+                                  <input
+                                    type="number"
+                                    min={tier.min_qty}
+                                    placeholder="Sin límite (+)"
+                                    value={tier.max_qty ?? ""}
+                                    onChange={(e) => {
+                                      const val = e.target.value === "" ? null : parseInt(e.target.value, 10)
+                                      setProductTiers(prev => prev.map((t, i) => i === idx ? { ...t, max_qty: val } : t))
+                                    }}
+                                    className="input-field w-28 text-xs font-mono"
+                                  />
+                                </td>
+                                <td className="p-2.5 text-right">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="100"
+                                    value={tier.precio_unitario}
+                                    onChange={(e) => {
+                                      const val = Math.max(0, parseFloat(e.target.value) || 0)
+                                      setProductTiers(prev => prev.map((t, i) => i === idx ? { ...t, precio_unitario: val } : t))
+                                    }}
+                                    className="input-field w-32 text-xs font-mono font-bold text-right text-indigo-600 dark:text-indigo-400"
+                                  />
+                                </td>
+                                <td className="p-2.5 text-center">
+                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                    descPct > 0 ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800" : "text-slate-400"
+                                  }`}>
+                                    {descPct > 0 ? `-${descPct.toFixed(1)}%` : "0%"}
+                                  </span>
+                                </td>
+                                <td className="p-2.5 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setProductTiers(prev => prev.map((t, i) => i === idx ? { ...t, isDeleted: true } : t))
+                                    }}
+                                    className="p-1 text-slate-400 hover:text-rose-500 rounded-lg transition"
+                                    title="Eliminar escala"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ──────────────────────────────────────────────────────────
+              TAB 4: INVENTARIO, CAPACIDAD DE GÓNDOLA & PERECEDEROS
+          ────────────────────────────────────────────────────────── */}
+          {formTab === "inventario" && (
+            <div className="space-y-4 animate-fade-in">
+              <div className="bg-slate-50/80 dark:bg-slate-800/40 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 space-y-4">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                  <Package className="w-4 h-4 text-blue-500" />
+                  <span>Control de Stock & Capacidad de Góndola</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                      Stock Mínimo de Alerta
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={form.stock_minimo}
+                      onChange={(e) => setForm({ ...form, stock_minimo: Number(e.target.value) })}
+                      className="input-field w-full text-xs font-mono font-bold"
+                    />
+                    <div className="text-[10px] text-slate-400 mt-1">Dispara reposición y orden de compra</div>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                      Stock Máximo / Capacidad Góndola
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={form.stock_maximo}
+                      onChange={(e) => setForm({ ...form, stock_maximo: Number(e.target.value) })}
+                      className="input-field w-full text-xs font-mono"
+                      placeholder="0 = Sin límite"
+                    />
+                    <div className="text-[10px] text-slate-400 mt-1">Capacidad máxima del estante o salón</div>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                      Peso Unitario en Kg
+                    </label>
+                    <input
+                      type="number"
+                      step="0.001"
+                      min="0"
+                      value={form.peso_kg || ""}
+                      onChange={(e) => setForm({ ...form, peso_kg: Number(e.target.value) })}
+                      className="input-field w-full text-xs font-mono"
+                      placeholder="Ej. 0.250"
+                    />
+                    <div className="text-[10px] text-slate-400 mt-1">Para cálculo de fletes y logística</div>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-3">
+                  <div className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-rose-500" />
+                    <span>Trazabilidad, Lotes & Vencimiento</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                      <label className="flex items-start gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={form.es_perecedero}
+                          onChange={(e) => setForm({ ...form, es_perecedero: e.target.checked })}
+                          className="rounded text-rose-600 focus:ring-rose-500 mt-0.5"
+                        />
+                        <div>
+                          <div>Producto Perecedero</div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 font-normal">
+                            Exige control de fecha de caducidad en recepción de depósito y auditoría de góndola
+                          </div>
+                        </div>
+                      </label>
+
+                      {form.es_perecedero && (
+                        <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                          <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                            Vida Útil Estimada (en Días)
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={form.vida_util_dias || ""}
+                            onChange={(e) => setForm({ ...form, vida_util_dias: Number(e.target.value) })}
+                            className="input-field w-full text-xs font-mono font-bold"
+                            placeholder="Ej. 90"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                      <label className="flex items-start gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={form.tiene_lotes}
+                          onChange={(e) => setForm({ ...form, tiene_lotes: e.target.checked })}
+                          className="rounded text-indigo-600 focus:ring-indigo-500 mt-0.5"
+                        />
+                        <div>
+                          <div>Control de Lotes y Partidas</div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 font-normal">
+                            Exige registrar el número de lote de fábrica en remisiones y recepciones para trazabilidad sanitaria
+                          </div>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </form>
+      </Modal>
     </div>
   )
 }

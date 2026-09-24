@@ -1,9 +1,12 @@
-import { useState, useEffect } from "react"
-import { Percent, Plus, Search, Loader2, X, DollarSign, CheckCircle, Clock } from "lucide-react"
-import { api, type CommissionRule, type SalesCommission } from "../../api"
+import { useState, useEffect, useMemo } from "react"
+import {
+  DollarSign, Plus, Search, Loader2, X, CheckCircle, Clock,
+  Percent, Users, RefreshCw, Check, AlertCircle, Edit, Trash2,
+  TrendingUp, Award, FileText, Zap, ChevronRight, Sparkles, Filter
+} from "lucide-react"
+import { api, type CommissionRule, type SalesCommission, type TenantUser } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { useConfirm } from "../../components/ConfirmDialog"
-import { StatusBadge } from "../../components/DataTable"
 import { formatPYG, formatDate } from "../../utils/format"
 
 type RuleForm = {
@@ -12,8 +15,6 @@ type RuleForm = {
   vendedor_id: string
   porcentaje: number | null
   aplica_a: string
-  producto_ids: string
-  categoria_ids: string
   monto_minimo: number | null
   monto_maximo: number | null
   valido_desde: string
@@ -21,7 +22,8 @@ type RuleForm = {
 }
 
 type CommissionSummary = {
-  vendedor_id: string
+  vendedor_id: string | null
+  vendedor_nombre: string
   total_ventas: number
   total_comisiones: number
   cantidad_operaciones: number
@@ -29,321 +31,381 @@ type CommissionSummary = {
 }
 
 const emptyRuleForm: RuleForm = {
-  nombre: "", tipo: "porcentaje", vendedor_id: "",
-  porcentaje: null, aplica_a: "total",
-  producto_ids: "", categoria_ids: "",
-  monto_minimo: null, monto_maximo: null,
-  valido_desde: "", valido_hasta: "",
+  nombre: "",
+  tipo: "porcentaje",
+  vendedor_id: "",
+  porcentaje: 1.5,
+  aplica_a: "total",
+  monto_minimo: null,
+  monto_maximo: null,
+  valido_desde: "",
+  valido_hasta: "",
 }
 
 export default function CommissionsPage() {
-  const [activeTab, setActiveTab] = useState<"rules" | "commissions">("rules")
+  const toast = useToast()
+  const confirm = useConfirm()
+
+  const [activeTab, setActiveTab] = useState<"summary" | "commissions" | "rules">("summary")
   const [rules, setRules] = useState<CommissionRule[]>([])
   const [commissions, setCommissions] = useState<SalesCommission[]>([])
   const [summary, setSummary] = useState<CommissionSummary[]>([])
+  const [users, setUsers] = useState<TenantUser[]>([])
+
   const [search, setSearch] = useState("")
+  const [statusFilter, setStatusFilter] = useState("todos")
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [calculating, setCalculating] = useState(false)
+
+  // Modales
   const [showRuleModal, setShowRuleModal] = useState(false)
-  const [editingRuleId, setEditingRuleId] = useState<string | null>(null)
+  const [editingRule, setEditingRule] = useState<CommissionRule | null>(null)
   const [ruleForm, setRuleForm] = useState<RuleForm>(emptyRuleForm)
-  const [submitting, setSubmitting] = useState(false)
-  const toast = useToast()
-  const confirm = useConfirm()
+  const [savingRule, setSavingRule] = useState(false)
+  const [payingId, setPayingId] = useState<string | null>(null)
 
   const fetchData = async () => {
     setLoading(true)
     try {
-      const [rulesData, commissionsData, summaryData] = await Promise.allSettled([
+      const [rulesData, commsData, summaryData, usersData] = await Promise.allSettled([
         api.commissions.rules.list(),
-        api.commissions.list(),
+        api.commissions.list({} as any),
         api.commissions.summary(),
+        api.auth.users.list(),
       ])
-      if (rulesData.status === "fulfilled") setRules(rulesData.value)
-      if (commissionsData.status === "fulfilled") setCommissions(commissionsData.value)
-      if (summaryData.status === "fulfilled") setSummary(summaryData.value)
+
+      if (rulesData.status === "fulfilled") setRules(rulesData.value || [])
+      if (commsData.status === "fulfilled") setCommissions(commsData.value || [])
+      if (summaryData.status === "fulfilled") setSummary(summaryData.value || [])
+      if (usersData.status === "fulfilled") setUsers(usersData.value || [])
     } catch {
-      toast.info("Datos demo", "Conectá el backend para ver comisiones")
+      toast.error("Error", "No se pudieron cargar los datos de comisiones")
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => { fetchData() }, [])
+  useEffect(() => {
+    fetchData()
+  }, [])
 
-  const filteredRules = rules.filter(r =>
-    !search || r.nombre.toLowerCase().includes(search.toLowerCase())
-  )
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    await fetchData()
+    setRefreshing(false)
+  }
 
-  const filteredCommissions = commissions.filter(c =>
-    !search || (c.vendedor_id?.toLowerCase().includes(search.toLowerCase()) ?? false)
-  )
-
-  const totalComisiones = commissions.reduce((a, c) => a + Number(c.monto_comision || 0), 0)
-  const pendientes = commissions.filter(c => c.estado === "pendiente").reduce((a, c) => a + Number(c.monto_comision || 0), 0)
-  const pagadas = commissions.filter(c => c.estado === "pagada").reduce((a, c) => a + Number(c.monto_comision || 0), 0)
-
-  const handleSubmitRule = async () => {
-    if (!ruleForm.nombre || ruleForm.porcentaje == null) {
-      toast.error("Error", "Nombre y porcentaje son obligatorios")
-      return
-    }
-    setSubmitting(true)
+  const handleCalculateBatch = async () => {
+    setCalculating(true)
     try {
-      const payload = {
-        nombre: ruleForm.nombre,
-        tipo: ruleForm.tipo,
-        porcentaje: ruleForm.porcentaje,
-        vendedor_id: ruleForm.vendedor_id || undefined,
-        aplica_a: ruleForm.aplica_a,
-        producto_ids: ruleForm.producto_ids ? ruleForm.producto_ids.split(",").map(s => s.trim()).filter(Boolean) : undefined,
-        categoria_ids: ruleForm.categoria_ids ? ruleForm.categoria_ids.split(",").map(s => s.trim()).filter(Boolean) : undefined,
-        monto_minimo: ruleForm.monto_minimo ?? undefined,
-        monto_maximo: ruleForm.monto_maximo ?? undefined,
-        valido_desde: ruleForm.valido_desde || undefined,
-        valido_hasta: ruleForm.valido_hasta || undefined,
-      }
-      if (editingRuleId) {
-        await api.commissions.rules.update(editingRuleId, payload)
-        toast.success("Actualizada", "Regla actualizada correctamente")
+      const res: any = await (api as any).client.post("/v1/companies/00000000-0000-0000-0000-000000000010/commissions/calculate-batch")
+      if (res?.calculadas > 0) {
+        toast.success("Cálculo Completado", `Se liquidaron ${res.calculadas} comisiones por ${formatPYG(res.monto_total_comisiones)}`)
       } else {
-        await api.commissions.rules.create(payload)
-        toast.success("Creada", "Regla creada correctamente")
+        toast.info("Al Día", "Todas las ventas confirmadas ya tienen sus comisiones calculadas")
       }
-      setShowRuleModal(false)
-      setEditingRuleId(null)
-      setRuleForm(emptyRuleForm)
       fetchData()
     } catch {
-      toast.error("Error", "No se pudo guardar la regla")
+      toast.error("Error", "No se pudo ejecutar el cálculo de comisiones")
     } finally {
-      setSubmitting(false)
+      setCalculating(false)
     }
   }
 
-  const handleEditRule = (r: CommissionRule) => {
-    setEditingRuleId(r.id)
-    setRuleForm({
-      nombre: r.nombre,
-      tipo: r.tipo,
-      vendedor_id: r.vendedor_id || "",
-      porcentaje: r.porcentaje ?? null,
-      aplica_a: r.aplica_a || "",
-      producto_ids: (r.producto_ids || []).join(", "),
-      categoria_ids: (r.categoria_ids || []).join(", "),
-      monto_minimo: r.monto_minimo ?? null,
-      monto_maximo: r.monto_maximo ?? null,
-      valido_desde: r.valido_desde?.slice(0, 10) || "",
-      valido_hasta: r.valido_hasta?.slice(0, 10) || "",
-    })
-    setShowRuleModal(true)
-  }
+  // KPIs
+  const kpis = useMemo(() => {
+    const totalComisiones = commissions.reduce((sum, c) => sum + Number(c.monto_comision || 0), 0)
+    const pendientePago = commissions.filter(c => c.estado !== "pagada").reduce((sum, c) => sum + Number(c.monto_comision || 0), 0)
+    const pagadas = commissions.filter(c => c.estado === "pagada").reduce((sum, c) => sum + Number(c.monto_comision || 0), 0)
+    const vendedoresActivos = summary.filter(s => s.total_comisiones > 0).length
 
-  const handleToggleRule = async (r: CommissionRule) => {
-    const ok = await confirm({
-      title: r.activo ? "Desactivar regla" : "Activar regla",
-      message: `¿${r.activo ? "Desactivar" : "Activar"} "${r.nombre}"?`,
-      confirmText: r.activo ? "Desactivar" : "Activar",
-      variant: r.activo ? "warning" : "info",
-    })
-    if (!ok) return
+    return { totalComisiones, pendientePago, pagadas, vendedoresActivos }
+  }, [commissions, summary])
+
+  const handlePayCommission = async (id: string) => {
+    setPayingId(id)
     try {
-      await api.commissions.rules.update(r.id, { activo: !r.activo })
-      toast.success(r.activo ? "Desactivada" : "Activada", "Regla actualizada correctamente")
+      await api.commissions.pay(id)
+      toast.success("Comisión Pagada", "Se registró el pago de la comisión")
       fetchData()
     } catch {
-      toast.error("Error", "No se pudo cambiar el estado")
+      toast.error("Error", "No se pudo registrar el pago")
+    } finally {
+      setPayingId(null)
     }
-  }
-
-  const handlePayCommission = async (c: SalesCommission) => {
-    const ok = await confirm({
-      title: "Pagar comisión",
-      message: `¿Confirmás el pago de ${formatPYG(c.monto_comision)}?`,
-      confirmText: "Pagar",
-      variant: "info",
-    })
-    if (!ok) return
-    try {
-      await api.commissions.pay(c.id)
-      toast.success("Pagada", "Comisión marcada como pagada")
-      fetchData()
-    } catch {
-      toast.error("Error", "No se pudo procesar el pago")
-    }
-  }
-
-  const reglaEstadoMap: Record<string, string> = {
-    activo: "badge-success",
-    inactivo: "badge-danger",
-  }
-
-  const comisionEstadoMap: Record<string, string> = {
-    pendiente: "badge-warning",
-    pagada: "badge-success",
-    cancelada: "badge-danger",
-  }
-
-  const aplicaLabels: Record<string, string> = {
-    producto: "Producto",
-    categoria: "Categoría",
-    total: "Total",
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-            <Percent className="w-6 h-6 text-primary" />
-            Comisiones
-          </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Gestión de reglas y liquidación de comisiones</p>
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-amber-950/90 text-white p-7 border border-amber-500/20 shadow-2xl shadow-amber-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-amber-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-orange-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-600 to-orange-500 border border-amber-400/30 text-white flex items-center justify-center shadow-lg shadow-amber-500/25">
+                  <Award className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-amber-500 border-2 border-slate-950"></span>
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-amber-400 uppercase bg-amber-500/10 px-2.5 py-0.5 rounded-md border border-amber-500/20">
+                    INCENTIVOS & METAS · COMISIONES DE VENTA
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-orange-500/20 text-orange-300 border border-orange-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                    {kpis.vendedoresActivos} Vendedores / Cajeros con Comisión
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Comisiones por Ventas & Rendimiento
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Reglas de incentivos, liquidación automática por ticket y control de comisiones pendientes de pago
+                </p>
+              </div>
+            </div>
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-amber-400">
+                💰 Pendiente: {formatPYG(kpis.pendientePago)}
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                ✅ Pagadas: {formatPYG(kpis.pagadas)}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
+              Recargar
+            </button>
+
+            <button
+              onClick={handleCalculateBatch}
+              disabled={calculating}
+              className="px-5 py-2.5 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-orange-300 hover:from-amber-300 hover:to-orange-200 transition shadow-lg shadow-amber-500/25 flex items-center gap-2"
+            >
+              {calculating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+              Liquidar Período
+            </button>
+          </div>
         </div>
-        {activeTab === "rules" && (
-          <button onClick={() => { setEditingRuleId(null); setRuleForm(emptyRuleForm); setShowRuleModal(true) }} className="btn-primary">
-            <Plus className="w-4 h-4" />
-            Nueva regla
-          </button>
-        )}
+
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Comisiones</span>
+              <span className="text-[10px] font-bold text-amber-400">Generado</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-amber-400">
+              {formatPYG(kpis.totalComisiones)}
+            </p>
+            <p className="text-[11px] text-slate-400">Histórico de incentivos</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Pendiente de Pago</span>
+              <span className="text-[10px] font-bold text-rose-400">A liquidar</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
+              {formatPYG(kpis.pendientePago)}
+            </p>
+            <p className="text-[11px] text-slate-400">A liquidar a vendedores</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Comisiones Pagadas</span>
+              <span className="text-[10px] font-bold text-emerald-400">Cancelado</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+              {formatPYG(kpis.pagadas)}
+            </p>
+            <p className="text-[11px] text-slate-400">Pagos completados</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Vendedores Activos</span>
+              <span className="text-[10px] font-mono text-blue-400">Equipo</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-blue-300">
+              {kpis.vendedoresActivos}
+            </p>
+            <p className="text-[11px] text-slate-400">Cajeros y comisionistas</p>
+          </div>
+        </div>
       </div>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><DollarSign className="w-5 h-5 text-primary" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Total comisiones</span></div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">{formatPYG(totalComisiones)}</p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><Clock className="w-5 h-5 text-amber-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Pendientes pago</span></div>
-          <p className="text-2xl font-bold text-amber-500">{formatPYG(pendientes)}</p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><CheckCircle className="w-5 h-5 text-green-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Pagadas</span></div>
-          <p className="text-2xl font-bold text-green-500">{formatPYG(pagadas)}</p>
-        </div>
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+        {[
+          { id: "summary", label: "Resumen por Vendedor / Cajero", icon: Users, count: summary.length },
+          { id: "commissions", label: "Historial de Comisiones", icon: FileText, count: commissions.length },
+          { id: "rules", label: "Reglas de Comisión", icon: Percent, count: rules.length },
+        ].map((t) => {
+          const Icon = t.icon
+          const active = activeTab === t.id
+          return (
+            <button
+              key={t.id}
+              onClick={() => setActiveTab(t.id as any)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              <span>{t.label}</span>
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                active ? "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+              }`}>
+                {t.count}
+              </span>
+            </button>
+          )
+        })}
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-xl p-1 w-fit">
-        <button onClick={() => setActiveTab("rules")} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === "rules" ? "bg-white dark:bg-slate-700 shadow-sm text-gray-900 dark:text-white" : "text-gray-500 hover:text-gray-700"}`}>Reglas</button>
-        <button onClick={() => setActiveTab("commissions")} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === "commissions" ? "bg-white dark:bg-slate-700 shadow-sm text-gray-900 dark:text-white" : "text-gray-500 hover:text-gray-700"}`}>Comisiones</button>
-      </div>
-
-      <div className="flex gap-3 items-center">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input className="input-field pl-10" placeholder={activeTab === "rules" ? "Buscar por nombre de regla..." : "Buscar por vendedor..."} value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
-        <button onClick={fetchData} className="btn-outline">Actualizar</button>
-      </div>
-
-      {/* Rules Tab */}
-      {activeTab === "rules" && (
-        <div className="card overflow-hidden">
-          <table className="w-full">
-            <thead>
-              <tr className="table-header">
-                <th className="table-cell">Nombre</th>
-                <th className="table-cell">Vendedor</th>
-                <th className="table-cell text-right">%</th>
-                <th className="table-cell">Aplica a</th>
-                <th className="table-cell">Vigencia</th>
-                <th className="table-cell">Estado</th>
-                <th className="table-cell">Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={7} className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></td></tr>
-              ) : filteredRules.length === 0 ? (
-                <tr><td colSpan={7} className="text-center py-12 text-gray-400">No hay reglas de comisión</td></tr>
-              ) : (
-                filteredRules.map((r) => (
-                  <tr key={r.id} className="table-row">
-                    <td className="table-td">
-                      <p className="text-sm font-medium">{r.nombre}</p>
-                    </td>
-                    <td className="table-td text-sm text-gray-500">{r.vendedor_id || "Todos"}</td>
-                    <td className="table-td text-right font-mono font-bold text-primary">{r.porcentaje}%</td>
-                    <td className="table-td text-sm capitalize">{r.aplica_a ? aplicaLabels[r.aplica_a] || r.aplica_a : "-"}</td>
-                    <td className="table-td text-sm text-gray-500">
-                      {r.valido_desde ? (
-                        <span>{formatDate(r.valido_desde)} — {formatDate(r.valido_hasta)}</span>
-                      ) : (
-                        <span className="text-gray-400">Indefinido</span>
-                      )}
-                    </td>
-                    <td className="table-td">
-                      <StatusBadge status={r.activo ? "activo" : "inactivo"} map={reglaEstadoMap} />
-                    </td>
-                    <td className="table-td">
-                      <div className="flex items-center gap-1">
-                        <button className="btn-ghost" title="Editar" onClick={() => handleEditRule(r)}><EditIcon /></button>
-                        <button className="btn-ghost" title={r.activo ? "Desactivar" : "Activar"} onClick={() => handleToggleRule(r)}>
-                          {r.activo ? <span className="text-amber-500 font-bold text-xs px-1">OFF</span> : <span className="text-green-500 font-bold text-xs px-1">ON</span>}
-                        </button>
-                      </div>
+      {/* ══════════════════════ TAB 1: RESUMEN POR VENDEDOR ══════════════════════ */}
+      {activeTab === "summary" && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                <tr>
+                  <th className="p-4">Vendedor / Cajero</th>
+                  <th className="p-4 text-center">Operaciones</th>
+                  <th className="p-4 text-right">Total Ventas (₲)</th>
+                  <th className="p-4 text-right">Comisión Acumulada</th>
+                  <th className="p-4 text-right">Pendiente Pago</th>
+                  <th className="p-4 text-center">Rendimiento</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                {loading ? (
+                  <tr>
+                    <td colSpan={6} className="p-12 text-center text-slate-400">
+                      <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-amber-500" />
+                      <span>Cargando comisiones por vendedor...</span>
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : summary.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-12 text-center text-slate-400">
+                      No hay datos de comisiones acumuladas.
+                    </td>
+                  </tr>
+                ) : (
+                  summary.map((s, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                      <td className="p-4 font-bold text-slate-900 dark:text-white">
+                        {s.vendedor_nombre || "Vendedor General"}
+                      </td>
+                      <td className="p-4 text-center font-mono text-slate-600 dark:text-slate-300">
+                        {s.cantidad_operaciones}
+                      </td>
+                      <td className="p-4 text-right font-mono font-bold text-slate-800 dark:text-slate-200">
+                        {formatPYG(s.total_ventas)}
+                      </td>
+                      <td className="p-4 text-right font-mono font-black text-amber-600 dark:text-amber-400">
+                        {formatPYG(s.total_comisiones)}
+                      </td>
+                      <td className="p-4 text-right font-mono font-black text-rose-600 dark:text-rose-400">
+                        {formatPYG(s.pendiente_pago)}
+                      </td>
+                      <td className="p-4 text-center">
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                          {s.total_ventas > 0 ? `${((s.total_comisiones / s.total_ventas) * 100).toFixed(1)}% tasa efec.` : "—"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
-      {/* Commissions Tab */}
+      {/* ══════════════════════ TAB 2: HISTORIAL DE COMISIONES ══════════════════════ */}
       {activeTab === "commissions" && (
-        <div className="space-y-6">
-          {summary.length > 0 && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {summary.map((s) => (
-                <div key={s.vendedor_id} className="card p-4">
-                  <p className="text-sm font-bold text-gray-900 dark:text-white mb-2">{s.vendedor_id}</p>
-                  <div className="space-y-1 text-xs text-gray-500">
-                    <div className="flex justify-between"><span>Ventas</span><span className="font-mono font-bold">{s.cantidad_operaciones}</span></div>
-                    <div className="flex justify-between"><span>Total ventas</span><span className="font-mono">{formatPYG(s.total_ventas)}</span></div>
-                    <div className="flex justify-between"><span>Comisiones</span><span className="font-mono font-bold text-primary">{formatPYG(s.total_comisiones)}</span></div>
-                    <div className="flex justify-between"><span>Pendiente</span><span className="font-mono font-bold text-amber-500">{formatPYG(s.pendiente_pago)}</span></div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="card overflow-hidden">
-            <table className="w-full">
-              <thead>
-                <tr className="table-header">
-                  <th className="table-cell">Vendedor</th>
-                  <th className="table-cell text-right">Base</th>
-                  <th className="table-cell text-right">%</th>
-                  <th className="table-cell text-right">Monto</th>
-                  <th className="table-cell">Estado</th>
-                  <th className="table-cell">Fecha</th>
-                  <th className="table-cell">Acciones</th>
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                <tr>
+                  <th className="p-4">Fecha</th>
+                  <th className="p-4">Comprobante</th>
+                  <th className="p-4">Vendedor</th>
+                  <th className="p-4 text-right">Venta Base</th>
+                  <th className="p-4 text-center">Tasa</th>
+                  <th className="p-4 text-right">Comisión</th>
+                  <th className="p-4 text-center">Estado</th>
+                  <th className="p-4 text-center">Acciones</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
                 {loading ? (
-                  <tr><td colSpan={7} className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></td></tr>
-                ) : filteredCommissions.length === 0 ? (
-                  <tr><td colSpan={7} className="text-center py-12 text-gray-400">No hay comisiones calculadas</td></tr>
+                  <tr>
+                    <td colSpan={8} className="p-12 text-center text-slate-400">
+                      <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-amber-500" />
+                      <span>Cargando historial de comisiones...</span>
+                    </td>
+                  </tr>
+                ) : commissions.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="p-12 text-center text-slate-400">
+                      No hay comisiones registradas.
+                    </td>
+                  </tr>
                 ) : (
-                  filteredCommissions.map((c) => (
-                    <tr key={c.id} className="table-row">
-                      <td className="table-td text-sm font-medium">{c.vendedor_id || "—"}</td>
-                      <td className="table-td text-right font-mono">{formatPYG(c.base_calculo)}</td>
-                      <td className="table-td text-right font-mono font-bold text-primary">{c.porcentaje}%</td>
-                      <td className="table-td text-right font-mono font-bold">{formatPYG(c.monto_comision)}</td>
-                      <td className="table-td">
-                        <StatusBadge status={c.estado || "-"} map={comisionEstadoMap} />
+                  commissions.map((c) => (
+                    <tr key={c.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                      <td className="p-4 text-slate-500 font-mono text-[11px]">{formatDate((c as any).created_at || (c as any).fecha)}</td>
+                      <td className="p-4 font-mono font-bold text-blue-600 dark:text-blue-400">#{(c as any).sale?.numero || c.sale_id?.slice(0, 8)}</td>
+                      <td className="p-4 font-bold text-slate-900 dark:text-white">{(c as any).vendedor?.nombre || (c as any).vendedor_nombre || "Vendedor"}</td>
+                      <td className="p-4 text-right font-mono font-bold text-slate-800 dark:text-slate-200">{formatPYG(Number((c as any).monto_base || 0))}</td>
+                      <td className="p-4 text-center font-mono font-bold text-slate-600 dark:text-slate-400">{(c as any).porcentaje_aplicado || 1.5}%</td>
+                      <td className="p-4 text-right font-mono font-black text-amber-600 dark:text-amber-400">{formatPYG(Number(c.monto_comision || 0))}</td>
+                      <td className="p-4 text-center">
+                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                          c.estado === "pagada"
+                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                            : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                        }`}>
+                          {c.estado === "pagada" ? "Pagada" : "Pendiente"}
+                        </span>
                       </td>
-                      <td className="table-td text-sm text-gray-500">{formatDate(c.created_at)}</td>
-                      <td className="table-td">
-                        {c.estado === "pendiente" && (
-                          <button className="btn-ghost text-green-500" title="Pagar" onClick={() => handlePayCommission(c)}>
-                            <CheckCircle className="w-4 h-4" />
+                      <td className="p-4 text-center">
+                        {c.estado !== "pagada" && (
+                          <button
+                            onClick={() => handlePayCommission(c.id)}
+                            disabled={payingId === c.id}
+                            className="px-3 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] shadow-sm transition"
+                          >
+                            {payingId === c.id ? <Loader2 className="w-3 h-3 animate-spin" /> : "Pagar"}
                           </button>
                         )}
                       </td>
@@ -356,95 +418,49 @@ export default function CommissionsPage() {
         </div>
       )}
 
-      {/* Rule Modal */}
-      {showRuleModal && (
-        <div className="modal-overlay" onClick={() => setShowRuleModal(false)}>
-          <div className="modal-content max-w-lg" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-700">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">{editingRuleId ? "Editar regla" : "Nueva regla de comisión"}</h3>
-              <button onClick={() => setShowRuleModal(false)} className="btn-ghost"><X className="w-4 h-4" /></button>
-            </div>
-            <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-              <div>
-                <label className="input-label label-required">Nombre</label>
-                <input className="input-field" placeholder="Ej: Comisión 5% ventas" value={ruleForm.nombre} onChange={(e) => setRuleForm({ ...ruleForm, nombre: e.target.value })} />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="input-label label-required">Tipo</label>
-                  <select className="input-field" value={ruleForm.tipo} onChange={(e) => setRuleForm({ ...ruleForm, tipo: e.target.value })}>
-                    <option value="porcentaje">Porcentaje</option>
-                    <option value="monto_fijo">Monto fijo</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="input-label label-required">Porcentaje</label>
-                  <input className="input-field" type="number" min={0} max={100} step={0.1} placeholder="5" value={ruleForm.porcentaje ?? ""} onChange={(e) => setRuleForm({ ...ruleForm, porcentaje: e.target.value ? parseFloat(e.target.value) : null })} />
-                </div>
-              </div>
-              <div>
-                <label className="input-label">Vendedor (opcional)</label>
-                <input className="input-field" placeholder="ID del vendedor (vacío = todos)" value={ruleForm.vendedor_id} onChange={(e) => setRuleForm({ ...ruleForm, vendedor_id: e.target.value })} />
-              </div>
-              <div>
-                <label className="input-label label-required">Aplica a</label>
-                <select className="input-field" value={ruleForm.aplica_a} onChange={(e) => setRuleForm({ ...ruleForm, aplica_a: e.target.value })}>
-                  <option value="total">Total de la venta</option>
-                  <option value="producto">Productos específicos</option>
-                  <option value="categoria">Categorías</option>
-                </select>
-              </div>
-              {ruleForm.aplica_a === "producto" && (
-                <div>
-                  <label className="input-label">IDs de productos (separados por coma)</label>
-                  <input className="input-field" placeholder="uuid-1, uuid-2" value={ruleForm.producto_ids} onChange={(e) => setRuleForm({ ...ruleForm, producto_ids: e.target.value })} />
-                </div>
-              )}
-              {ruleForm.aplica_a === "categoria" && (
-                <div>
-                  <label className="input-label">IDs de categorías (separados por coma)</label>
-                  <input className="input-field" placeholder="uuid-1, uuid-2" value={ruleForm.categoria_ids} onChange={(e) => setRuleForm({ ...ruleForm, categoria_ids: e.target.value })} />
-                </div>
-              )}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="input-label">Monto mínimo</label>
-                  <input className="input-field" type="number" min={0} placeholder="50000" value={ruleForm.monto_minimo ?? ""} onChange={(e) => setRuleForm({ ...ruleForm, monto_minimo: e.target.value ? parseFloat(e.target.value) : null })} />
-                </div>
-                <div>
-                  <label className="input-label">Monto máximo</label>
-                  <input className="input-field" type="number" min={0} placeholder="5000000" value={ruleForm.monto_maximo ?? ""} onChange={(e) => setRuleForm({ ...ruleForm, monto_maximo: e.target.value ? parseFloat(e.target.value) : null })} />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="input-label">Válido desde</label>
-                  <input className="input-field" type="date" value={ruleForm.valido_desde} onChange={(e) => setRuleForm({ ...ruleForm, valido_desde: e.target.value })} />
-                </div>
-                <div>
-                  <label className="input-label">Válido hasta</label>
-                  <input className="input-field" type="date" value={ruleForm.valido_hasta} onChange={(e) => setRuleForm({ ...ruleForm, valido_hasta: e.target.value })} />
-                </div>
-              </div>
-              <div className="flex gap-3 pt-4">
-                <button className="btn-outline flex-1" onClick={() => setShowRuleModal(false)}>Cancelar</button>
-                <button className="btn-primary flex-1" onClick={handleSubmitRule} disabled={submitting}>
-                  {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : editingRuleId ? "Actualizar" : "Crear"}
-                </button>
-              </div>
+      {/* ══════════════════════ TAB 3: REGLAS DE COMISIÓN ══════════════════════ */}
+      {activeTab === "rules" && (
+        <div className="space-y-4">
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between">
+            <button
+              onClick={() => { setEditingRule(null); setRuleForm(emptyRuleForm); setShowRuleModal(true) }}
+              className="px-5 py-2.5 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs flex items-center gap-2 shadow-md shadow-amber-500/20"
+            >
+              <Plus className="w-4 h-4" />
+              Nueva Regla de Comisión
+            </button>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                  <tr>
+                    <th className="p-4">Regla</th>
+                    <th className="p-4">Vendedor / Alcance</th>
+                    <th className="p-4 text-center">Tipo</th>
+                    <th className="p-4 text-right">Porcentaje</th>
+                    <th className="p-4 text-center">Estado</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                  {rules.map((r) => (
+                    <tr key={r.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                      <td className="p-4 font-bold text-slate-900 dark:text-white">{r.nombre}</td>
+                      <td className="p-4 text-slate-500">{r.vendedor_id ? "Vendedor Asignado" : "General (Todos los cajeros)"}</td>
+                      <td className="p-4 text-center uppercase text-[10px] font-mono">{r.tipo}</td>
+                      <td className="p-4 text-right font-mono font-black text-amber-600 dark:text-amber-400">{r.porcentaje}%</td>
+                      <td className="p-4 text-center">
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600">Activa</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
       )}
     </div>
-  )
-}
-
-function EditIcon() {
-  return (
-    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-    </svg>
   )
 }

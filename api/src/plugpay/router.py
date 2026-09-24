@@ -1,0 +1,250 @@
+import logging
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime
+from typing import Optional
+
+from api.src.db import get_db
+from api.src.auth.middleware import require_auth
+from api.src.plugpay import service, transactions_service
+from api.src.plugpay.service import PlugpayNotConfigured, PlugpayApiError
+from api.src.plugpay.schemas import (
+    PixCreateRequest, PixQuoteRequest, CalcularParceladoRequest, StartParceladoRequest,
+    PlugpayTransactionResponse, ComplianceCheckResponse,
+    PlugpayTransactionListResponse, PlugpaySummaryResponse,
+)
+
+logger = logging.getLogger("intelimarket.plugpay")
+router = APIRouter(prefix="/api/v1/plugpay", tags=["plugpay"])
+
+
+def _error_response(e: Exception) -> PlugpayTransactionResponse:
+    if isinstance(e, PlugpayNotConfigured):
+        return PlugpayTransactionResponse(ok=False, error_message=str(e))
+    if isinstance(e, PlugpayApiError):
+        return PlugpayTransactionResponse(ok=False, error_message=e.message)
+    return PlugpayTransactionResponse(ok=False, error_message=f"Error inesperado: {e}")
+
+
+@router.get("/compliance/{cpf}", response_model=ComplianceCheckResponse)
+async def compliance(cpf: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    try:
+        data = await service.check_compliance(db, user["company_id"], cpf)
+        return ComplianceCheckResponse(ok=True, data=data)
+    except PlugpayNotConfigured as e:
+        return ComplianceCheckResponse(ok=False, error_message=str(e))
+    except PlugpayApiError as e:
+        return ComplianceCheckResponse(ok=False, error_message=e.message)
+
+
+@router.post("/pix/create", response_model=PlugpayTransactionResponse)
+async def pix_create(data: PixCreateRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    try:
+        cpf = data.customer_cpf or data.customer_cpf_cnpj or ""
+        result = await service.create_pix(db, user["company_id"], data.monto, data.moneda, cpf)
+        
+        val_brl = result.get("valueBRL") or result.get("value_brl")
+        try:
+            val_brl = float(val_brl) if val_brl is not None else None
+        except (ValueError, TypeError):
+            val_brl = None
+
+        txn = None
+        try:
+            txn = await transactions_service.log_transaction(
+                db, user["company_id"], sale_id=data.sale_id, customer_id=data.customer_id,
+                tipo_operacion="pix", id_transacao=str(result.get("IdTransacao") or result.get("idTransacao") or ""),
+                referencia_interna=result.get("referenciaInterna"), qr_code_id=result.get("qrCodeId"),
+                qr_code_string_image=result.get("qrCodeStringImage"), moneda_origen=data.moneda, monto_origen=data.monto,
+                value_brl=val_brl, exitosa=True, raw_response=result,
+            )
+        except Exception as log_err:
+            logger.error("Failed to log plugpay pix transaction to DB: %s", log_err)
+
+        return PlugpayTransactionResponse(ok=True, data=result, transaction_log_id=txn.id if txn else None)
+    except (PlugpayNotConfigured, PlugpayApiError) as e:
+        if isinstance(e, PlugpayApiError):
+            try:
+                await transactions_service.log_transaction(
+                    db, user["company_id"], sale_id=data.sale_id, customer_id=data.customer_id,
+                    tipo_operacion="pix", moneda_origen=data.moneda, monto_origen=data.monto,
+                    exitosa=False, error_message=str(e.message) if e.message else None, raw_response=e.body,
+                )
+            except Exception as log_err:
+                logger.error("Failed to log failed plugpay pix transaction: %s", log_err)
+        return _error_response(e)
+
+
+@router.get("/pix/last-pending")
+async def get_last_pending_pix(db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    try:
+        txn = await transactions_service.get_last_unlinked_pix(db, user["company_id"])
+        if not txn:
+            return {"ok": False, "error_message": "No hay transacciones PIX pendientes recientes."}
+        
+        ref = txn.referencia_interna
+        live_status = await service.get_pix_status(db, user["company_id"], ref)
+        status_code = live_status.get("status") or live_status.get("Status")
+        
+        # Si ya se aprobó, actualizar el registro
+        if status_code == 1:
+            txn.exitosa = True
+            await db.commit()
+            await db.refresh(txn)
+
+        return {
+            "ok": True,
+            "transaction_log_id": str(txn.id),
+            "referencia_interna": ref,
+            "id_transacao": txn.id_transacao,
+            "monto": float(txn.monto_origen or 0),
+            "value_brl": float(txn.value_brl or 0) if txn.value_brl else None,
+            "created_at": txn.created_at.isoformat() if txn.created_at else None,
+            "live_status": live_status,
+            "is_approved": status_code == 1,
+            "status_code": status_code,
+        }
+    except Exception as e:
+        return {"ok": False, "error_message": str(e)}
+
+
+@router.get("/pix/status/{referencia_interna}", response_model=PlugpayTransactionResponse)
+async def pix_status(referencia_interna: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    try:
+        result = await service.get_pix_status(db, user["company_id"], referencia_interna)
+        return PlugpayTransactionResponse(ok=True, data=result)
+    except (PlugpayNotConfigured, PlugpayApiError) as e:
+        return _error_response(e)
+
+
+@router.get("/pix/qrcode/{referencia_interna}", response_model=PlugpayTransactionResponse)
+async def pix_qrcode(referencia_interna: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    try:
+        result = await service.get_pix_qrcode(db, user["company_id"], referencia_interna)
+        return PlugpayTransactionResponse(ok=True, data=result)
+    except (PlugpayNotConfigured, PlugpayApiError) as e:
+        return _error_response(e)
+
+
+@router.post("/pix/quote", response_model=PlugpayTransactionResponse)
+async def pix_quote(data: PixQuoteRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    try:
+        result = await service.quote_pix(db, user["company_id"], data.monto, data.moneda)
+        return PlugpayTransactionResponse(ok=True, data=result)
+    except (PlugpayNotConfigured, PlugpayApiError) as e:
+        return _error_response(e)
+
+
+@router.post("/credito-parcelado/calcular", response_model=PlugpayTransactionResponse)
+async def credito_calcular(data: CalcularParceladoRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    try:
+        result = await service.calcular_valor_parcelado(db, user["company_id"], data.monto, data.moneda, data.cuotas)
+        return PlugpayTransactionResponse(ok=True, data=result)
+    except (PlugpayNotConfigured, PlugpayApiError) as e:
+        return _error_response(e)
+
+
+@router.post("/credito-parcelado/start", response_model=PlugpayTransactionResponse)
+async def credito_start(data: StartParceladoRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    try:
+        result = await service.start_credito_parcelado(
+            db, user["company_id"], data.monto, data.moneda, data.cuotas, data.customer_cpf, data.customer_phone,
+        )
+        txn = None
+        try:
+            txn = await transactions_service.log_transaction(
+                db, user["company_id"], sale_id=data.sale_id, customer_id=data.customer_id,
+                tipo_operacion="credito_parcelado", id_transacao=str(result.get("IdTransacao") or ""),
+                referencia_interna=result.get("referenciaInterna"), value_brl=result.get("valueBRL"),
+                url_payment_form=result.get("UrlPaymentForm"), numero_cuotas=data.cuotas,
+                moneda_origen=data.moneda, monto_origen=data.monto, exitosa=True, raw_response=result,
+            )
+        except Exception as log_err:
+            logger.error("Failed to log plugpay parcelado transaction to DB: %s", log_err)
+
+        return PlugpayTransactionResponse(ok=True, data=result, transaction_log_id=txn.id if txn else None)
+    except (PlugpayNotConfigured, PlugpayApiError) as e:
+        if isinstance(e, PlugpayApiError):
+            try:
+                await transactions_service.log_transaction(
+                    db, user["company_id"], sale_id=data.sale_id, customer_id=data.customer_id,
+                    tipo_operacion="credito_parcelado", numero_cuotas=data.cuotas,
+                    moneda_origen=data.moneda, monto_origen=data.monto,
+                    exitosa=False, error_message=str(e.message) if e.message else None, raw_response=e.body,
+                )
+            except Exception as log_err:
+                logger.error("Failed to log failed plugpay parcelado transaction: %s", log_err)
+        return _error_response(e)
+
+
+@router.get("/credito-parcelado/{referencia_interna}", response_model=PlugpayTransactionResponse)
+async def credito_status(referencia_interna: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    try:
+        result = await service.get_credito_parcelado_status(db, user["company_id"], referencia_interna)
+        return PlugpayTransactionResponse(ok=True, data=result)
+    except (PlugpayNotConfigured, PlugpayApiError) as e:
+        return _error_response(e)
+
+
+@router.post("/credito-parcelado/cancel/{referencia_interna}", response_model=PlugpayTransactionResponse)
+async def credito_cancel(referencia_interna: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    try:
+        result = await service.cancel_credito_parcelado(db, user["company_id"], referencia_interna)
+        return PlugpayTransactionResponse(ok=True, data=result)
+    except (PlugpayNotConfigured, PlugpayApiError) as e:
+        return _error_response(e)
+
+
+@router.patch("/transactions/{txn_id}/link-sale/{sale_id}")
+async def link_sale(txn_id: str, sale_id: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    row = await transactions_service.link_sale(db, txn_id, sale_id)
+    if not row:
+        raise HTTPException(status_code=404)
+    return {"message": "OK"}
+
+
+@router.get("/transactions", response_model=PlugpayTransactionListResponse)
+async def list_transactions(
+    fecha_desde: Optional[datetime] = None,
+    fecha_hasta: Optional[datetime] = None,
+    tipo_operacion: Optional[str] = None,
+    exitosa: Optional[bool] = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    items, total = await transactions_service.list_transactions(
+        db,
+        user["company_id"],
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+        tipo_operacion=tipo_operacion,
+        exitosa=exitosa,
+        limit=limit,
+        offset=offset,
+    )
+    return PlugpayTransactionListResponse(
+        ok=True,
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/summary", response_model=PlugpaySummaryResponse)
+async def get_summary(
+    fecha_desde: Optional[datetime] = None,
+    fecha_hasta: Optional[datetime] = None,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    data = await transactions_service.get_summary(
+        db,
+        user["company_id"],
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+    )
+    return PlugpaySummaryResponse(**data)
+

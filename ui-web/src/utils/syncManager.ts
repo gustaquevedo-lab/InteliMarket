@@ -1,7 +1,8 @@
 /** Offline sync manager — catalog caching, retry queue, crash recovery */
 
-import { offlineDB, type CachedProduct, type CachedCustomer, type PendingSale, type CachedReceipt } from "./offlineDB"
-import { api } from "../api"
+import { offlineDB, type CachedProduct, type CachedCustomer, type PendingSale, type CachedReceipt, type CachedTerminal, type CachedCreditAccount } from "./offlineDB"
+import { api, COMPANY_ID } from "../api"
+import { syncSupervisorPins } from "./localAuth"
 
 const CART_SAVE_INTERVAL = 5000
 const MAX_RETRIES = 10
@@ -28,15 +29,37 @@ export async function restoreCart(): Promise<Array<{ id: string; nombre: string;
   return offlineDB.cart.getAll()
 }
 
-export async function syncFullCatalog(): Promise<{ products: number; customers: number; success: boolean }> {
+export async function syncFullCatalog(forceFull = false): Promise<{ products: number; customers: number; success: boolean }> {
   try {
-    // Descarga el catálogo completo (todos los SKUs) y clientes con líneas de crédito
+    const syncState = await offlineDB.syncState.get()
+    const lastSync = syncState?.last_full_sync
+    const localProducts = await offlineDB.products.getAll()
+    const hasLocalProducts = localProducts.length > 0
+    // Autocuracion: versiones anteriores guardaban productos SIN precio_venta
+    // (solo `precio`), y el POS lee precio_venta -> precio 0 en caja. Si el
+    // cache local tiene alguno asi, se fuerza carga completa que lo reemplaza.
+    const cacheSinPrecioVenta = localProducts.some((p: any) => p && p.precio_venta === undefined)
+
+    // Si ya hay catálogo local y no es forceFull, hacemos sincronización DELTA (solo novedades)
+    const isDelta = !forceFull && hasLocalProducts && !!lastSync && !cacheSinPrecioVenta
+
     const [products, customers] = await Promise.all([
-      api.products.list({ limit: 10000, activo: true }),
-      api.customers.list({ limit: 10000, activo: true }),
+      api.products.list({
+        limit: isDelta ? 2000 : 15000,
+        include_inactive: true,
+        updated_since: isDelta ? lastSync : undefined,
+      }),
+      api.customers.list({
+        limit: isDelta ? 2000 : 15000,
+        updated_since: isDelta ? lastSync : undefined,
+      }),
     ])
 
-    const cachedProducts: CachedProduct[] = products.map(p => ({
+    const cachedProducts: CachedProduct[] = (products || []).map(p => ({
+      // Se conserva el producto completo (precio_venta, precio_promo,
+      // en_promocion, precio_regular, escalas...): el POS usa este mismo
+      // objeto como Product, no solo `precio`.
+      ...p,
       id: p.id,
       sku: p.sku,
       codigo_barra: p.codigo_barra ?? null,
@@ -51,7 +74,7 @@ export async function syncFullCatalog(): Promise<{ products: number; customers: 
       cached_at: new Date().toISOString(),
     }))
 
-    const cachedCustomers: CachedCustomer[] = customers.map(c => {
+    const cachedCustomers: CachedCustomer[] = (customers || []).map(c => {
       const limite = Number(c.credito_limite ?? c.limite_credito ?? 0)
       const usado = Number(c.credito_usado ?? c.saldo_pendiente ?? 0)
       return {
@@ -73,19 +96,68 @@ export async function syncFullCatalog(): Promise<{ products: number; customers: 
       }
     })
 
-    await Promise.all([
-      offlineDB.products.setAll(cachedProducts),
-      offlineDB.customers.setAll(cachedCustomers),
-    ])
+    if (isDelta) {
+      // Sincronización Delta: actualización rápida in-place sin borrar nada
+      if (cachedProducts.length > 0) await offlineDB.products.upsertMany(cachedProducts)
+      if (cachedCustomers.length > 0) await offlineDB.customers.upsertMany(cachedCustomers)
+    } else {
+      // Carga completa inicial
+      await Promise.all([
+        offlineDB.products.setAll(cachedProducts),
+        offlineDB.customers.setAll(cachedCustomers),
+      ])
+    }
+
+    // No bloquean el resultado del sync de catalogo -- si fallan (sin
+    // conexion en este preciso instante) se mantiene el cache anterior de
+    // cada uno, que es exactamente el comportamiento que se busca.
+    syncSupervisorPins().catch(() => {})
+    syncTerminals().catch(() => {})
+    syncCreditAccounts().catch(() => {})
 
     await offlineDB.syncState.set({
       last_full_sync: new Date().toISOString(),
     })
 
     return { products: cachedProducts.length, customers: cachedCustomers.length, success: true }
-  } catch {
+  } catch (e) {
+    console.warn("[syncManager] Error en syncFullCatalog:", e)
     return { products: 0, customers: 0, success: false }
   }
+}
+
+// Lista de cajas (hostname/IP/punto de emision) para que la malla LAN entre
+// cajas (peer-mesh, ver OfflineContext.tsx) sepa a quien preguntarle
+// mientras el servidor central esta caido.
+async function syncTerminals(): Promise<void> {
+  const terminals = await api.posTerminals.list()
+  const cached: CachedTerminal[] = (terminals || []).map((t: any) => ({
+    id: t.id,
+    hostname: t.hostname,
+    ip_address: t.ip_address ?? null,
+    punto_emision: t.punto_emision,
+    caja_nombre: t.caja_nombre,
+    activo: t.activo !== false,
+  }))
+  await offlineDB.terminals.setAll(cached)
+}
+
+// Ultimo saldo conocido de cada cuenta de credito Extra Club -- para poder
+// cobrar Extra Club offline (sin tope, venta marcada para revision) usando
+// este dato en vez de bloquear el cobro cuando el servidor no responde.
+async function syncCreditAccounts(): Promise<void> {
+  const accounts = await api.creditAccounts.list({ activo: true })
+  const cached: CachedCreditAccount[] = (accounts || []).map((a: any) => ({
+    id: a.id,
+    customer_id: a.customer_id,
+    limite_credito: Number(a.limite_credito || 0),
+    saldo_disponible: Number(a.saldo_disponible || 0),
+    saldo_utilizado: Number(a.saldo_utilizado || 0),
+    activo: a.activo !== false,
+    en_mora: !!a.en_mora,
+    cached_at: new Date().toISOString(),
+  }))
+  await offlineDB.creditAccounts.setAll(cached)
 }
 
 export async function getCachedCatalog(): Promise<{
@@ -93,14 +165,13 @@ export async function getCachedCatalog(): Promise<{
   customers: CachedCustomer[]
   lastSync: string | null
 }> {
-  const [products, customers, state] = await Promise.all([
+  const [products, state] = await Promise.all([
     offlineDB.products.getAll(),
-    offlineDB.customers.getAll(),
     offlineDB.syncState.get(),
   ])
   return {
     products: products.filter(p => p.activo),
-    customers: customers.filter(c => c.activo),
+    customers: [], // Optimización: los clientes se buscan bajo demanda en offlineDB.customers.search
     lastSync: state?.last_full_sync || null,
   }
 }
@@ -109,12 +180,43 @@ export function getRetryDelay(retryCount: number): number {
   return Math.min(BASE_DELAY_MS * Math.pow(2, retryCount), 5 * 60 * 1000)
 }
 
-export async function syncPendingSales(onProgress?: (synced: number, total: number) => void): Promise<{ synced: number; failed: number }> {
+// Ventas que quedaron trabadas (status "syncing" porque la app se recargo en
+// medio del envio, "error" o retry_count agotado) se rescatan UNA vez por sesion
+// de la app: vuelven a "pending" y se reintentan. Si el servidor las vuelve a
+// rechazar quedan en "error" (con el mensaje) y no se reintentan en bucle.
+const ventasRescatadas = new Set<string>()
+const rechazosReportados = new Set<string>()
+
+async function rescatarVentasAtascadas(): Promise<void> {
+  try {
+    const todas = await offlineDB.pendingSales.getAll()
+    const ahora = Date.now()
+    for (const v of todas) {
+      if (!v || v.status === "synced") continue
+      const syncingViejo = v.status === "syncing" && ahora - new Date(v.last_retry).getTime() > 60000
+      const agotada = v.retry_count >= MAX_RETRIES
+      const enError = v.status === "error"
+      if ((syncingViejo || agotada || enError) && !ventasRescatadas.has(v.id)) {
+        ventasRescatadas.add(v.id)
+        await offlineDB.pendingSales.update({
+          ...v,
+          status: "pending" as const,
+          retry_count: 0,
+          next_retry: new Date(ahora).toISOString(),
+        })
+      }
+    }
+  } catch {}
+}
+
+export async function syncPendingSales(onProgress?: (synced: number, total: number) => void): Promise<{ synced: number; failed: number; lastError?: string }> {
+  await rescatarVentasAtascadas()
   const pending = await offlineDB.pendingSales.getPending()
   if (pending.length === 0) return { synced: 0, failed: 0 }
 
   let synced = 0
   let failed = 0
+  let lastError: string | undefined
 
   for (const sale of pending) {
     if (sale.retry_count >= MAX_RETRIES) continue
@@ -134,13 +236,57 @@ export async function syncPendingSales(onProgress?: (synced: number, total: numb
     try {
       await api.sales.create(sale.data as Parameters<typeof api.sales.create>[0])
       await offlineDB.pendingSales.update({ ...sale, status: "synced" as const })
+      // Si esta venta tenia un consumo Extra Club anotado en la malla LAN
+      // (ver OfflineContext.recordExtraClubOfflineConsumption, misma
+      // convencion de id: "xc-" + id de la venta local), avisar que ya se
+      // confirmo -- para que deje de descontarse del saldo offline de las
+      // demas cajas. No rompe el sync si falla (ej. ya no es Electron).
+      ;(window as any).electronAPI?.peerMesh?.confirmSynced?.(`xc-${sale.id}`)?.catch?.(() => {})
       synced++
     } catch (err) {
       failed++
+      const msg = err instanceof Error ? err.message : "Sync failed"
+      lastError = msg
+      // Corte de red / servidor caido = transitorio, se reintenta con backoff.
+      // Cualquier otra respuesta (ej. 400 "Linea de credito insuficiente") es un
+      // rechazo de negocio: reintentar identico jamas va a funcionar, asi que se
+      // aparta como "error" (NO se borra: queda guardada para revision) en vez de
+      // martillar al servidor cada 10s para siempre.
+      const transitorio = /failed to fetch|network|load failed|abort|timeout|reiniciando|HTTP 5\d\d|HTTP 408|HTTP 429/i.test(msg)
+      if (!transitorio && !rechazosReportados.has(sale.id)) {
+        // Avisa al servidor (auditoria) QUE venta y POR QUE fue rechazada, para
+        // que administracion la vea sin depender de que la cajera mire la caja.
+        rechazosReportados.add(sale.id)
+        try {
+          const d = sale.data as any
+          api.inteliaudit.recordEvent({
+            company_id: d?.company_id || COMPANY_ID,
+            user_id: d?.user_id,
+            accion: "venta_offline_rechazada",
+            entidad: "venta_pendiente",
+            // sale.id NO es UUID (ej. "off-1758...-ab12c"): entidad_id es uuid
+            // en audit_logs, asi que va dentro de datos_nuevos.
+            datos_nuevos: {
+              id_local: sale.id,
+              error: msg,
+              total: d?.total,
+              customer_id: d?.customer_id,
+              condicion: d?.condicion,
+              formas_pago: Array.isArray(d?.payments) ? d.payments.map((x: any) => `${x?.forma_pago}:${x?.monto}`) : undefined,
+              items: Array.isArray(d?.items) ? d.items.length : undefined,
+              creada: sale.created_at,
+              punto_emision: d?.punto_emision,
+            },
+          } as any).catch(() => {})
+        } catch {}
+      }
       await offlineDB.pendingSales.update({
         ...sale,
-        status: "pending" as const,
-        error: err instanceof Error ? err.message : "Sync failed",
+        status: transitorio ? ("pending" as const) : ("error" as const),
+        retry_count: sale.retry_count + 1,
+        last_retry: new Date(now).toISOString(),
+        next_retry: new Date(now + getRetryDelay(sale.retry_count)).toISOString(),
+        error: msg,
       })
     }
   }
@@ -150,6 +296,40 @@ export async function syncPendingSales(onProgress?: (synced: number, total: numb
       last_sale_sync: new Date().toISOString(),
       pending_count: (await offlineDB.pendingSales.getPending()).length,
     })
+  }
+
+  if (onProgress) onProgress(synced, pending.length)
+  return { synced, failed, lastError }
+}
+
+export async function syncPendingCupones(onProgress?: (synced: number, total: number) => void): Promise<{ synced: number; failed: number }> {
+  const pending = await offlineDB.pendingCupones.getPending()
+  if (pending.length === 0) return { synced: 0, failed: 0 }
+
+  let synced = 0
+  let failed = 0
+
+  for (const cupon of pending) {
+    if (cupon.retry_count >= MAX_RETRIES) continue
+
+    await offlineDB.pendingCupones.update({
+      ...cupon,
+      status: "syncing",
+      retry_count: cupon.retry_count + 1,
+    })
+
+    try {
+      await api.cupones.registrarMultiple(cupon.data as any)
+      await offlineDB.pendingCupones.update({ ...cupon, status: "synced" as const })
+      synced++
+    } catch (err) {
+      failed++
+      await offlineDB.pendingCupones.update({
+        ...cupon,
+        status: "pending" as const,
+        last_error: err instanceof Error ? err.message : "Sync failed",
+      })
+    }
   }
 
   if (onProgress) onProgress(synced, pending.length)
@@ -164,7 +344,7 @@ export function generateOfflineReceipt(
   iva5: number,
   paymentMethod: string,
   customerName: string | null,
-  branchName: string = "CASA GONZALITO S.R.L.",
+  branchName: string = "EXTRA SUPERMERCADO S.A.",
 ): string {
   const now = new Date().toLocaleString("es-PY")
   const lines = items.map((i) => {
@@ -231,8 +411,18 @@ export async function getOfflineReceipt(saleId: string): Promise<CachedReceipt |
 export function scheduleSyncRetry(onSyncComplete: () => void) {
   if (syncTimer) clearTimeout(syncTimer)
   syncTimer = setTimeout(async () => {
-    const result = await syncPendingSales()
-    if (result.synced > 0 || result.failed > 0) {
+    const [salesResult, cuponesResult] = await Promise.allSettled([
+      syncPendingSales(),
+      syncPendingCupones()
+    ])
+    const salesSynced = salesResult.status === "fulfilled" ? salesResult.value.synced : 0
+    const salesFailed = salesResult.status === "fulfilled" ? salesResult.value.failed : 0
+    const cuponesSynced = cuponesResult.status === "fulfilled" ? cuponesResult.value.synced : 0
+    const cuponesFailed = cuponesResult.status === "fulfilled" ? cuponesResult.value.failed : 0
+
+    let quedanPendientes = false
+    try { quedanPendientes = (await offlineDB.pendingSales.getPending()).length > 0 } catch {}
+    if (salesSynced > 0 || salesFailed > 0 || cuponesSynced > 0 || cuponesFailed > 0 || quedanPendientes) {
       scheduleSyncRetry(onSyncComplete)
     }
     onSyncComplete()

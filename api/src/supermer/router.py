@@ -1,6 +1,6 @@
 """Supermarket router — production, perishables, waste, forecasting API"""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
@@ -10,18 +10,19 @@ from uuid import UUID
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
 from api.src.features import require_feature
+from api.src.rbac.deps import require_permission
 from api.src.supermer import service
 from api.src.supermer.schemas import (
     RecipeCreate, RecipeUpdate, RecipeResponse,
     ProductionOrderCreate, ProductionOrderUpdate, ProductionOrderResponse,
     ProductionBatchCreate, ProductionBatchResponse,
-    WasteLogCreate, WasteLogResponse,
+    WasteLogCreate, WasteLogRejectRequest, WasteLogUpdate, WasteLogResponse,
     PerishableConfigCreate, PerishableConfigResponse,
     MarkdownLogCreate, MarkdownLogResponse,
     PurchaseForecastResponse, PurchaseSuggestionCreate, PurchaseSuggestionUpdate,
     PurchaseSuggestionResponse,
     DashboardStats, WasteByArea, ProductionByArea,
-    ButcheryTemplateCreate, ButcheryTemplateResponse,
+    ButcheryTemplateCreate, ButcheryTemplateUpdate, ButcheryTemplateResponse,
     DesposteInput, DesposteResponse, ButcheryYieldReport,
     BakeryPlanCreate, BakeryPlanResponse,
     ScaleRecipeInput, ScaleRecipeResult,
@@ -30,7 +31,7 @@ from api.src.supermer.schemas import (
     FreshnessAuditCreate, FreshnessAuditResponse,
     SupplierScorecardResponse,
     AutoApplyMarkdownByBatchInput, AutoApplyMarkdownResult,
-    ForecastEnhanceInput,
+    ForecastEnhanceInput, ProduceDirectInput,
 )
 
 from . import (
@@ -76,7 +77,8 @@ from .schemas_fase2 import (
     DsdRejectionCreate, DsdRejectionResponse,
     DsdDashboard,
     CountSessionCreate, CountSessionUpdate, CountSessionResponse,
-    CountItemCreate, CountItemUpdate, CountItemResponse,
+    CountItemCreate,
+    EvidenciaUploadResponse, CountItemUpdate, CountItemResponse,
     AdjustmentCreate, AdjustmentResponse,
     CountSessionDashboard,
     ReplenishmentRuleCreate, ReplenishmentRuleUpdate, ReplenishmentRuleResponse,
@@ -214,6 +216,19 @@ async def list_orders(
     return await service.list_orders(db, user["company_id"], area, estado, desde, hasta, limit, offset)
 
 
+@router.post("/orders/produce-direct", response_model=ProductionOrderResponse, status_code=status.HTTP_201_CREATED)
+async def produce_direct(
+    data: ProduceDirectInput,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        user_uuid = UUID(user["id"]) if "id" in user and user["id"] else None
+        return await service.produce_batch_direct(db, user["company_id"], data, user_id=user_uuid)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.get("/orders/{order_id}", response_model=ProductionOrderResponse)
 async def get_order(
     order_id: str,
@@ -265,11 +280,13 @@ async def complete_order(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
+    user_uuid = UUID(user["id"]) if "id" in user and user["id"] else None
     result = await service.complete_order(
-        db, order_id, data.producto_obtenido,
-        costo_unitario=data.costo_unitario,
+        db, order_id, Decimal(str(data.producto_obtenido)),
+        costo_unitario=Decimal(str(data.costo_unitario)) if data.costo_unitario is not None else None,
         fecha_vencimiento=data.fecha_vencimiento,
         lote_codigo=data.lote_codigo,
+        user_id=user_uuid,
     )
     if not result:
         raise HTTPException(status_code=404, detail="Orden de producción no encontrada")
@@ -284,6 +301,7 @@ async def complete_order(
 async def list_waste(
     area: Optional[str] = Query(None),
     tipo_merma: Optional[str] = Query(None),
+    estado: Optional[str] = Query(None),
     desde: Optional[datetime] = Query(None),
     hasta: Optional[datetime] = Query(None),
     limit: int = Query(100, le=500),
@@ -291,17 +309,18 @@ async def list_waste(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service.list_waste(db, user["company_id"], area, tipo_merma, desde, hasta, limit, offset)
+    return await service.list_waste(db, user["company_id"], area, tipo_merma, estado, desde, hasta, limit, offset)
 
 
 @router.get("/waste/by-area", response_model=list[WasteByArea])
 async def get_waste_by_area(
     desde: Optional[datetime] = Query(None),
     hasta: Optional[datetime] = Query(None),
+    estado: Optional[str] = Query("aprobada"),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service.get_waste_by_area(db, user["company_id"], desde, hasta)
+    return await service.get_waste_by_area(db, user["company_id"], desde, hasta, estado)
 
 
 @router.post("/waste", response_model=WasteLogResponse, status_code=status.HTTP_201_CREATED)
@@ -309,8 +328,41 @@ async def create_waste(
     data: WasteLogCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service.create_waste(db, user["company_id"], data, user["user_id"])
+
+
+@router.put("/waste/{waste_id}", response_model=WasteLogResponse)
+async def update_waste(
+    waste_id: str,
+    data: WasteLogUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
+):
+    return await service.update_waste(db, user["company_id"], waste_id, data, user["user_id"])
+
+
+@router.post("/waste/{waste_id}/approve", response_model=WasteLogResponse)
+async def approve_waste(
+    waste_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+    _=Depends(require_permission("mermas:approve")),
+):
+    return await service.approve_waste(db, user["company_id"], waste_id, user["user_id"])
+
+
+@router.post("/waste/{waste_id}/reject", response_model=WasteLogResponse)
+async def reject_waste(
+    waste_id: str,
+    data: WasteLogRejectRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+    _=Depends(require_permission("mermas:approve")),
+):
+    return await service.reject_waste(db, user["company_id"], waste_id, user["user_id"], data.motivo_rechazo)
 
 
 # ============================================================
@@ -504,8 +556,36 @@ async def create_butchery_template(
     data: ButcheryTemplateCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service.create_butchery_template(db, user["company_id"], data)
+
+
+@router.put("/butchery/templates/{template_id}", response_model=ButcheryTemplateResponse)
+async def update_butchery_template(
+    template_id: str,
+    data: ButcheryTemplateUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
+):
+    try:
+        return await service.update_butchery_template(db, user["company_id"], template_id, data)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.delete("/butchery/templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_butchery_template(
+    template_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
+):
+    deleted = await service.delete_butchery_template(db, user["company_id"], template_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Plantilla no encontrada")
+    return None
 
 
 @router.post("/butchery/desposte", response_model=DesposteResponse)
@@ -513,6 +593,7 @@ async def execute_desposte(
     data: DesposteInput,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     try:
         return await service.execute_desposte(db, user["company_id"], data)
@@ -642,6 +723,7 @@ async def create_receive_batch(
     data: ReceiveBatchCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service.create_receive_batch(db, user["company_id"], data, user.get("id"))
 
@@ -666,6 +748,7 @@ async def create_freshness_audit(
     data: FreshnessAuditCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     try:
         return await service.create_freshness_audit(db, user["company_id"], data, user.get("id"))
@@ -692,6 +775,7 @@ async def list_scorecards(
 async def generate_scorecards(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service.generate_supplier_scorecards(db, user["company_id"])
 
@@ -705,6 +789,7 @@ async def auto_markdown_by_batch(
     data: AutoApplyMarkdownByBatchInput = AutoApplyMarkdownByBatchInput(),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service.auto_apply_markdown_by_batch(db, user["company_id"], data)
 
@@ -718,6 +803,7 @@ async def enhanced_forecast(
     data: ForecastEnhanceInput = ForecastEnhanceInput(),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service.generate_enhanced_forecast(db, user["company_id"], data)
 
@@ -761,6 +847,7 @@ async def rotiseria_create_recipe(
     data: RotiseriaRecipeCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_rotiseria.create_recipe(user["company_id"], data, db)
 
@@ -771,6 +858,7 @@ async def rotiseria_update_recipe(
     data: RotiseriaRecipeUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_rotiseria.update_recipe(recipe_id, data, db)
 
@@ -780,6 +868,7 @@ async def rotiseria_delete_recipe(
     recipe_id: UUID,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     await service_rotiseria.delete_recipe(recipe_id, db)
 
@@ -808,6 +897,7 @@ async def rotiseria_create_plan(
     data: RotiseriaPlanCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_rotiseria.create_plan(user["company_id"], data, db)
 
@@ -818,6 +908,7 @@ async def rotiseria_update_plan(
     data: RotiseriaPlanUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_rotiseria.update_plan(plan_id, data, db)
 
@@ -828,6 +919,7 @@ async def rotiseria_complete_plan(
     data: dict,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_rotiseria.complete_plan(plan_id, data, db)
 
@@ -838,8 +930,9 @@ async def rotiseria_add_temp_log(
     data: RotiseriaTemperatureLogCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
-    return await service_rotiseria.add_temp_log(plan_id, user["user_id"], data, db)
+    return await service_rotiseria.add_temp_log(plan_id, user["id"], data, db)
 
 
 @router.get("/rotiseria/plans/{plan_id}/temp-logs", response_model=list[RotiseriaTemperatureLogResponse])
@@ -857,6 +950,7 @@ async def rotiseria_generate_labels(
     data: list[RotiseriaLabelCreate],
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_rotiseria.generate_labels(plan_id, user["company_id"], {"labels": [l.model_dump() for l in data]}, db)
 
@@ -875,6 +969,7 @@ async def rotiseria_auto_markdown(
     data: AutoMarkdownRotiseriaInput = AutoMarkdownRotiseriaInput(),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_rotiseria.suggest_markdowns(user["company_id"], data.model_dump(exclude_none=True), db)
 
@@ -914,6 +1009,7 @@ async def haccp_create_plan(
     data: HaccpPlanCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_haccp.create_haccp_plan(user["company_id"], data, db)
 
@@ -924,6 +1020,7 @@ async def haccp_update_plan(
     data: HaccpPlanUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_haccp.update_haccp_plan(plan_id, data, db)
 
@@ -943,6 +1040,7 @@ async def haccp_create_critical_point(
     data: HaccpCriticalPointCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_haccp.create_critical_point(plan_id, data, db)
 
@@ -953,6 +1051,7 @@ async def haccp_update_critical_point(
     data: HaccpCriticalPointUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_haccp.update_critical_point(cp_id, data, db)
 
@@ -962,6 +1061,7 @@ async def haccp_delete_critical_point(
     cp_id: UUID,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     await service_haccp.delete_critical_point(cp_id, db)
 
@@ -981,8 +1081,9 @@ async def haccp_create_monitoring_log(
     data: HaccpMonitoringLogCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
-    return await service_haccp.create_monitoring_log(cp_id, user["user_id"], data, db)
+    return await service_haccp.create_monitoring_log(cp_id, user["id"], data, db)
 
 
 @router.get("/haccp/corrective-actions", response_model=list[HaccpCorrectiveActionResponse])
@@ -999,6 +1100,7 @@ async def haccp_create_corrective_action(
     data: HaccpCorrectiveActionCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_haccp.create_corrective_action(data, db)
 
@@ -1008,6 +1110,7 @@ async def haccp_resolve_corrective_action(
     ca_id: UUID,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_haccp.resolve_corrective_action(ca_id, db)
 
@@ -1135,7 +1238,7 @@ async def audit_start_execution(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service_audits.start_execution(user["company_id"], user["user_id"], data, db)
+    return await service_audits.start_execution(user["company_id"], user["id"], data, db)
 
 
 @router.post("/audit/executions/{execution_id}/answers", response_model=AuditExecutionResponse)
@@ -1145,7 +1248,7 @@ async def audit_submit_answers(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service_audits.submit_answers(execution_id, user["user_id"], data, db)
+    return await service_audits.submit_answers(execution_id, user["id"], data, db)
 
 
 @router.post("/audit/executions/{execution_id}/complete", response_model=AuditExecutionResponse)
@@ -1179,20 +1282,12 @@ async def equipment_list(
     return await service_equipment.list_equipment(user["company_id"], db, categoria, activo)
 
 
-@router.get("/equipment/{equipment_id}", response_model=EquipmentResponse)
-async def equipment_get(
-    equipment_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    user=Depends(require_auth),
-):
-    return await service_equipment.get_equipment(equipment_id, db)
-
-
 @router.post("/equipment", response_model=EquipmentResponse, status_code=status.HTTP_201_CREATED)
 async def equipment_create(
     data: EquipmentCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_equipment.create_equipment(user["company_id"], data, db)
 
@@ -1203,6 +1298,7 @@ async def equipment_update(
     data: EquipmentUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_equipment.update_equipment(equipment_id, data, db)
 
@@ -1212,6 +1308,7 @@ async def equipment_delete(
     equipment_id: UUID,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     await service_equipment.delete_equipment(equipment_id, db)
 
@@ -1230,6 +1327,7 @@ async def equipment_create_schedule(
     data: EquipmentScheduleCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_equipment.create_schedule(user["company_id"], data, db)
 
@@ -1240,6 +1338,7 @@ async def equipment_update_schedule(
     data: EquipmentScheduleUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_equipment.update_schedule(schedule_id, data, db)
 
@@ -1249,6 +1348,7 @@ async def equipment_delete_schedule(
     schedule_id: UUID,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     await service_equipment.delete_schedule(schedule_id, db)
 
@@ -1277,6 +1377,7 @@ async def equipment_create_work_order(
     data: WorkOrderCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_equipment.create_work_order(user["company_id"], data, db)
 
@@ -1287,6 +1388,7 @@ async def equipment_update_work_order(
     data: WorkOrderUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_equipment.update_work_order(wo_id, data, db)
 
@@ -1296,6 +1398,7 @@ async def equipment_start_work_order(
     wo_id: UUID,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_equipment.start_work_order(wo_id, db)
 
@@ -1306,6 +1409,7 @@ async def equipment_complete_work_order(
     data: WorkOrderComplete,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_equipment.complete_work_order(wo_id, data, db)
 
@@ -1324,6 +1428,7 @@ async def equipment_resolve_alert(
     alert_id: UUID,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_equipment.resolve_alert(alert_id, db)
 
@@ -1332,6 +1437,7 @@ async def equipment_resolve_alert(
 async def equipment_check_alerts(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_equipment.check_equipment_alerts(user["company_id"], db)
 
@@ -1342,6 +1448,15 @@ async def equipment_dashboard(
     user=Depends(require_auth),
 ):
     return await service_equipment.equipment_dashboard(user["company_id"], db)
+
+
+@router.get("/equipment/{equipment_id}", response_model=EquipmentResponse)
+async def equipment_get(
+    equipment_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service_equipment.get_equipment(equipment_id, db)
 
 
 # ============================================================
@@ -1609,6 +1724,20 @@ async def inventory_reject_adjustment(
     return await service_inventory.reject_adjustment(adjustment_id, db)
 
 
+@router.post("/inventory/upload-evidencia", response_model=EvidenciaUploadResponse)
+async def inventory_upload_evidencia(
+    file: UploadFile = File(...),
+    user=Depends(require_auth),
+):
+    """Foto de respaldo de un item de conteo (etiqueta con lote/vencimiento, faltante, etc)."""
+    content = await file.read()
+    try:
+        url = service_inventory.save_evidencia_conteo(content, file.filename or "evidencia")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return EvidenciaUploadResponse(url=url, filename=file.filename or "evidencia")
+
+
 @router.get("/inventory/dashboard", response_model=CountSessionDashboard)
 async def inventory_dashboard(
     db: AsyncSession = Depends(get_db),
@@ -1684,7 +1813,7 @@ async def replenishment_review_suggestion(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service_replenishment.review_suggestion(suggestion_id, data, db, user["user_id"])
+    return await service_replenishment.review_suggestion(suggestion_id, data, db, user["id"])
 
 
 @router.post("/crossdock/orders", response_model=CrossDockOrderResponse, status_code=201)
@@ -1746,15 +1875,6 @@ async def returns_create(
     return await service_returns.create_return(user["company_id"], data, db)
 
 
-@router.get("/returns/{return_id}", response_model=SupplierReturnResponse)
-async def returns_get(
-    return_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    user=Depends(require_auth),
-):
-    return await service_returns.get_return(return_id, db)
-
-
 @router.put("/returns/{return_id}", response_model=SupplierReturnResponse)
 async def returns_update(
     return_id: UUID,
@@ -1771,7 +1891,7 @@ async def returns_authorize(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service_returns.authorize_return(return_id, user["user_id"], db)
+    return await service_returns.authorize_return(return_id, user["id"], db)
 
 
 @router.post("/returns/{return_id}/complete", response_model=SupplierReturnResponse)
@@ -1780,7 +1900,7 @@ async def returns_complete(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service_returns.complete_return(return_id, user["user_id"], db)
+    return await service_returns.complete_return(return_id, user["id"], db)
 
 
 @router.post("/returns/{return_id}/items", response_model=ReturnItemResponse, status_code=201)
@@ -1857,6 +1977,15 @@ async def returns_dashboard(
     return await service_returns.get_returns_dashboard(user["company_id"], db)
 
 
+@router.get("/returns/{return_id}", response_model=SupplierReturnResponse)
+async def returns_get(
+    return_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service_returns.get_return(return_id, db)
+
+
 # ============================================================
 # FASE 3 — PRECIOS MULTICANAL
 # ============================================================
@@ -1926,7 +2055,7 @@ async def pricing_create_audit_log(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service_pricing.create_price_audit_log(user["company_id"], data, db, user["user_id"])
+    return await service_pricing.create_price_audit_log(user["company_id"], data, db, user["id"])
 
 @router.post("/price-audit-logs/{log_id}/approve", response_model=PriceAuditLogResponse)
 async def pricing_approve_change(
@@ -1934,7 +2063,7 @@ async def pricing_approve_change(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service_pricing.approve_price_change(log_id, user["user_id"], db)
+    return await service_pricing.approve_price_change(log_id, user["id"], db)
 
 @router.get("/psychological-rules", response_model=list[PsychologicalRuleResponse])
 async def pricing_list_psych_rules(
@@ -1985,6 +2114,7 @@ async def esl_create_zone(
     data: EslZoneCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_esl.create_esl_zone(user["company_id"], data, db)
 
@@ -2002,6 +2132,7 @@ async def esl_create_device(
     data: EslDeviceCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_esl.create_esl_device(user["company_id"], data, db)
 
@@ -2011,6 +2142,7 @@ async def esl_update_device(
     data: EslDeviceUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_esl.update_esl_device(device_id, data, db)
 
@@ -2019,6 +2151,7 @@ async def esl_sync_price(
     data: EslSyncCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_esl.sync_esl_price(user["company_id"], data, db)
 
@@ -2027,6 +2160,7 @@ async def esl_confirm_sync(
     sync_id: UUID,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
 ):
     return await service_esl.confirm_esl_sync(sync_id, db)
 

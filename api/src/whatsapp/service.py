@@ -7,7 +7,7 @@ from typing import Optional
 from uuid import UUID
 
 import httpx
-from sqlalchemy import select, update, func, text
+from sqlalchemy import select, update, func, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.whatsapp.models import (
@@ -17,80 +17,91 @@ from api.src.whatsapp.models import (
 from api.src.whatsapp.schemas import TwilioWebhook
 
 
-TWILIO_API_URL = "https://api.twilio.com/2010-04-01"
+from api.src.whatsapp.evolution_client import evolution_client, normalize_phone_e164
 
 
 def mask_token(token: str) -> str:
     return "****"
 
 
-def verify_twilio_signature(auth_token: str, signature: str, url: str, params: dict) -> bool:
-    data = url + "".join(f"{k}{v}" for k, v in sorted(params.items()))
-    expected = base64.b64encode(
-        hmac.new(auth_token.encode(), data.encode(), hashlib.sha1).digest()
-    ).decode()
-    return hmac.compare_digest(expected, signature)
-
-
-async def get_config(db: AsyncSession, tenant_id: UUID) -> Optional[WhatsAppConfig]:
-    result = await db.execute(
-        select(WhatsAppConfig).where(WhatsAppConfig.tenant_id == tenant_id)
-    )
-    return result.scalar_one_or_none()
-
-
-async def save_config(db: AsyncSession, tenant_id: UUID, data: dict) -> WhatsAppConfig:
-    config = await get_config(db, tenant_id)
-    if config:
-        for key, value in data.items():
-            if value is not None and key != "auth_token" or (key == "auth_token" and value):
-                setattr(config, key, value)
-        await db.commit()
-        await db.refresh(config)
-        return config
+async def make_twilio_call(to_phone: str, content: str, config: Optional[WhatsAppConfig] = None, media_url: Optional[str] = None) -> dict:
+    """Wrapper retrocompatible: envía mensaje vía Evolution API."""
+    if media_url:
+        resp = await evolution_client.send_media_message(to_phone, media_url, caption=content)
     else:
-        config = WhatsAppConfig(tenant_id=tenant_id, **data)
+        resp = await evolution_client.send_text_message(to_phone, content)
+    
+    return {
+        "sid": resp.get("message_id", "evolution-ok"),
+        "status": resp.get("status", "sent"),
+        "success": resp.get("success", False),
+    }
+
+
+async def get_config(db: AsyncSession, tenant_id: UUID) -> WhatsAppConfig:
+    """Obtiene o inicializa la configuración de WhatsApp para el tenant."""
+    result = await db.execute(
+        select(WhatsAppConfig).where(WhatsAppConfig.tenant_id == tenant_id).limit(1)
+    )
+    config = result.scalar_one_or_none()
+    if not config:
+        config = WhatsAppConfig(
+            tenant_id=tenant_id,
+            account_sid="evolution-api",
+            auth_token="evolution-token",
+            phone_number="+595981000000",
+            webhook_url="/api/v1/whatsapp/webhook/evolution",
+            enabled=True,
+            auto_reply=True,
+        )
         db.add(config)
         await db.commit()
         await db.refresh(config)
-        return config
+    return config
 
 
-async def make_twilio_call(to_phone: str, content: str, config: WhatsAppConfig, media_url: Optional[str] = None) -> dict:
-    url = f"{TWILIO_API_URL}/Accounts/{config.account_sid}/Messages.json"
-    auth = (config.account_sid, config.auth_token)
-    data = {
-        "From": config.phone_number,
-        "To": to_phone,
-        "Body": content,
-    }
-    if media_url:
-        data["MediaUrl"] = media_url
-
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(url, data=data, auth=auth)
-        resp.raise_for_status()
-        return resp.json()
+async def save_config(db: AsyncSession, tenant_id: UUID, data: dict) -> WhatsAppConfig:
+    """Guarda cambios en la configuración de WhatsApp del tenant."""
+    config = await get_config(db, tenant_id)
+    for key, value in data.items():
+        if hasattr(config, key) and value is not None:
+            setattr(config, key, value)
+    await db.commit()
+    await db.refresh(config)
+    return config
 
 
 async def get_or_create_conversation(
     db: AsyncSession, tenant_id: UUID, phone: str, name: Optional[str] = None
 ) -> WhatsAppConversation:
-    clean_phone = re.sub(r"[^\d+]", "", phone)
+    norm_digits = normalize_phone_e164(phone) or re.sub(r"\D", "", phone)
+    plus_phone = f"+{norm_digits}" if not norm_digits.startswith("+") else norm_digits
+    raw_digits = re.sub(r"\D", "", phone)
+
     result = await db.execute(
         select(WhatsAppConversation)
         .where(WhatsAppConversation.tenant_id == tenant_id)
-        .where(WhatsAppConversation.contact_phone == clean_phone)
+        .where(
+            or_(
+                WhatsAppConversation.contact_phone == plus_phone,
+                WhatsAppConversation.contact_phone == norm_digits,
+                WhatsAppConversation.contact_phone == raw_digits,
+                WhatsAppConversation.contact_phone == phone,
+            )
+        )
     )
-    conv = result.scalar_one_or_none()
+    conv = result.scalars().first()
     if conv:
+        if name and (not conv.contact_name or conv.contact_name == conv.contact_phone):
+            conv.contact_name = name
         conv.last_message_at = datetime.now(timezone.utc)
         await db.commit()
         return conv
+
     conv = WhatsAppConversation(
         tenant_id=tenant_id,
-        contact_phone=clean_phone,
-        contact_name=name,
+        contact_phone=plus_phone,
+        contact_name=name or plus_phone,
         last_message_at=datetime.now(timezone.utc),
     )
     db.add(conv)
@@ -110,7 +121,9 @@ async def get_conversation_messages(
         .limit(limit)
         .offset(offset)
     )
-    return list(result.scalars().all())
+    msgs = list(result.scalars().all())
+    msgs.reverse()
+    return msgs
 
 
 async def archive_conversation(db: AsyncSession, tenant_id: UUID, conversation_id: UUID):
@@ -124,10 +137,22 @@ async def archive_conversation(db: AsyncSession, tenant_id: UUID, conversation_i
 
 
 async def send_message(
-    db: AsyncSession, tenant_id: UUID, conversation_id: UUID, content: str, media_url: Optional[str] = None
+    db: AsyncSession,
+    tenant_id: UUID,
+    conversation_id: UUID,
+    content: str,
+    media_url: Optional[str] = None,
+    sender_type: str = "agent",
+    sender_user_id: Optional[UUID] = None,
+    sender_name: Optional[str] = None,
+    media_type: Optional[str] = None,
+    media_filename: Optional[str] = None,
+    media_size_bytes: Optional[int] = None,
 ) -> WhatsAppMessage:
     config = await get_config(db, tenant_id)
     conversation = await db.get(WhatsAppConversation, conversation_id)
+    if not conversation:
+        raise ValueError("Conversación no encontrada")
 
     msg = WhatsAppMessage(
         tenant_id=tenant_id,
@@ -136,14 +161,31 @@ async def send_message(
         content=content,
         media_url=media_url,
         status=MessageStatus.queued,
+        sender_type=sender_type,
+        sender_user_id=sender_user_id,
+        sender_name=sender_name,
+        media_type=media_type,
+        media_filename=media_filename,
+        media_size_bytes=media_size_bytes,
     )
     db.add(msg)
     await db.flush()
 
-    if config and config.enabled:
-        twilio_resp = await make_twilio_call(conversation.contact_phone, content, config, media_url)
-        msg.message_id = twilio_resp.get("sid")
-        msg.status = MessageStatus.sent
+    evo_resp = await make_twilio_call(conversation.contact_phone, content, config, media_url)
+    msg.message_id = evo_resp.get("sid")
+    msg.status = MessageStatus.sent if evo_resp.get("success") else MessageStatus.failed
+
+    conversation.last_message_at = datetime.now(timezone.utc)
+    if sender_type == "agent":
+        conversation.handling_mode = "human_active"
+        conversation.unread_agent_count = 0
+        s_data = dict(conversation.session_data or {})
+        s_data["human_takeover"] = True
+        s_data["human_takeover_at"] = datetime.now(timezone.utc).isoformat()
+        conversation.session_data = s_data
+        if not conversation.assigned_user_id and sender_user_id:
+            conversation.assigned_user_id = sender_user_id
+            conversation.assigned_user_name = sender_name
 
     await db.commit()
     await db.refresh(msg)
@@ -155,6 +197,8 @@ async def reply_to_conversation(
 ) -> WhatsAppMessage:
     config = await get_config(db, tenant_id)
     conversation = await db.get(WhatsAppConversation, conversation_id)
+    if not conversation:
+        raise ValueError("Conversación no encontrada")
 
     msg = WhatsAppMessage(
         tenant_id=tenant_id,
@@ -167,10 +211,9 @@ async def reply_to_conversation(
     db.add(msg)
     await db.flush()
 
-    if config and config.enabled:
-        twilio_resp = await make_twilio_call(conversation.contact_phone, response, config)
-        msg.message_id = twilio_resp.get("sid")
-        msg.status = MessageStatus.sent
+    evo_resp = await make_twilio_call(conversation.contact_phone, response, config)
+    msg.message_id = evo_resp.get("sid")
+    msg.status = MessageStatus.sent if evo_resp.get("success") else MessageStatus.failed
 
     conversation.last_message_at = datetime.now(timezone.utc)
     await db.commit()
@@ -349,29 +392,20 @@ async def handle_inbound_webhook(
     await db.commit()
 
     if config.auto_reply:
-        # Use new chatbot engine with interactive menus
-        from api.src.whatsapp.chatbot import ChatbotEngine, update_conversation_state
-        
-        # Get company_id from tenant (assuming first company)
+        # Usar Agente de IA Conversacional (Qwen 2.5)
         from api.src.companies.models import Company
         company_result = await db.execute(
             select(Company).where(Company.tenant_id == config.tenant_id).limit(1)
         )
         company = company_result.scalar_one_or_none()
-        
+
         if company:
-            chatbot = ChatbotEngine(db, company.id)
-            response_data = await chatbot.process_message(conversation, body, msg.media_url)
-            
-            if response_data and response_data.get("text"):
-                # Send response
-                await reply_to_conversation(db, config.tenant_id, conversation.id, response_data["text"], command)
-                
-                # Update conversation state
-                if response_data.get("next_state"):
-                    await update_conversation_state(db, conversation.id, response_data["next_state"])
+            from api.src.whatsapp.ai_agent import CustomerAIAgent
+            agent = CustomerAIAgent(db, company.id, config.tenant_id)
+            ai_res = await agent.process_message(conversation, body)
+            if ai_res and ai_res.get("text"):
+                await reply_to_conversation(db, config.tenant_id, conversation.id, ai_res["text"], command)
         else:
-            # Fallback to old command system if no company found
             response = await execute_command(db, command or "", args, config.tenant_id, raw_body=body)
             if response:
                 await reply_to_conversation(db, config.tenant_id, conversation.id, response, command)
@@ -380,10 +414,28 @@ async def handle_inbound_webhook(
 
 
 async def get_templates(db: AsyncSession, tenant_id: UUID) -> list:
+    from sqlalchemy import or_
     result = await db.execute(
-        select(WhatsAppTemplate).where(WhatsAppTemplate.tenant_id == tenant_id)
+        select(WhatsAppTemplate).where(
+            or_(
+                WhatsAppTemplate.tenant_id == tenant_id,
+                WhatsAppTemplate.tenant_id == UUID("00000000-0000-0000-0000-000000000001"),
+            )
+        ).order_by(WhatsAppTemplate.name.asc())
     )
-    return list(result.scalars().all())
+    templates = list(result.scalars().all())
+    if not templates or len(templates) < 5:
+        await seed_default_templates(db, tenant_id)
+        result2 = await db.execute(
+            select(WhatsAppTemplate).where(
+                or_(
+                    WhatsAppTemplate.tenant_id == tenant_id,
+                    WhatsAppTemplate.tenant_id == UUID("00000000-0000-0000-0000-000000000001"),
+                )
+            ).order_by(WhatsAppTemplate.name.asc())
+        )
+        templates = list(result2.scalars().all())
+    return templates
 
 
 async def create_template(db: AsyncSession, tenant_id: UUID, data: dict) -> WhatsAppTemplate:
@@ -396,13 +448,11 @@ async def create_template(db: AsyncSession, tenant_id: UUID, data: dict) -> What
 
 async def update_template(db: AsyncSession, tenant_id: UUID, template_id: UUID, data: dict) -> WhatsAppTemplate:
     result = await db.execute(
-        select(WhatsAppTemplate)
-        .where(WhatsAppTemplate.id == template_id)
-        .where(WhatsAppTemplate.tenant_id == tenant_id)
+        select(WhatsAppTemplate).where(WhatsAppTemplate.id == template_id)
     )
     template = result.scalar_one_or_none()
     if not template:
-        raise ValueError("Template not found")
+        raise ValueError("Plantilla no encontrada")
     for key, value in data.items():
         if value is not None:
             setattr(template, key, value)
@@ -412,64 +462,164 @@ async def update_template(db: AsyncSession, tenant_id: UUID, template_id: UUID, 
 
 
 async def delete_template(db: AsyncSession, tenant_id: UUID, template_id: UUID):
+    from sqlalchemy import delete
     await db.execute(
-        select(WhatsAppTemplate)
-        .where(WhatsAppTemplate.id == template_id)
-        .where(WhatsAppTemplate.tenant_id == tenant_id)
+        delete(WhatsAppTemplate).where(WhatsAppTemplate.id == template_id)
     )
+    await db.commit()
 
 
-async def seed_default_templates(db: AsyncSession, tenant_id: UUID):
-    defaults = [
-        {"name": "Bienvenido", "tipo": TemplateTipo.welcome,
-         "content": "¡Hola! Bienvenido a [EMPRESA]. ¿En qué podemos ayudarte hoy?", "active": True},
-        {"name": "Estado de pedido", "tipo": TemplateTipo.order_status,
-         "content": "Tu pedido #[ID] está: [ESTADO]. Monto: [MONTO] PYG. Gracias por confiar en nosotros.", "active": True},
-        {"name": "Alerta de stock", "tipo": TemplateTipo.stock_alert,
-         "content": "⚠️ Alerta: [PRODUCTO] tiene stock bajo. Stock actual: [CANTIDAD] unidades.", "active": True},
-    ]
-    for t in defaults:
+OFFICIAL_SUPERMARKET_TEMPLATES = [
+    {
+        "name": "Ticket Digital POS + Puntos",
+        "tipo": "venta.creada",
+        "content": "🛒 *¡Gracias por tu compra en Extra Supermercado Mayorista!*\n\n📄 Ticket Digital: *#{ticket}*\n💰 Total: *Gs. {monto}*\n⭐ Puntos Sumados: *{puntos} Pts.*\n💳 ExtraClub Socio: *{socio_numero}*\n\n¡Te esperamos pronto en nuestras sucursales!",
+        "active": True
+    },
+    {
+        "name": "Agradecimiento + Cupones Sorteo + Opt-In",
+        "tipo": "sorteo.optin",
+        "content": "🛒 *¡Muchas gracias por tu compra en Extra Supermercado!*\nEsperamos que hayas tenido una excelente experiencia y te esperamos nuevamente muy pronto.\n\n🎟️ *¡Con esta compra generaste {cupones_generados} cupones para el sorteo '{campana_sorteo}'!*\nAcumulás un total de *{cupones_totales} cupones* registrados a tu nombre (Doc: {documento}).\n\n📲 *¿Querés recibir ofertas personalizadas, descuentos relámpago y promociones exclusivas en tu WhatsApp?*\n👉 *Respondé SÍ a este mensaje* para activar tus beneficios exclusivos y enterarte primero que nadie.",
+        "active": True
+    },
+    {
+        "name": "Cupón Oficial de Sorteo",
+        "tipo": "cupon.sorteo",
+        "content": "🎟️ *¡Tu Cupón Oficial de Sorteo — Extra Supermercado!*\n\n🎉 Registramos exitosamente tus *{cantidad}* para el *{sorteo}* con tu Ticket *#{ticket}* en *{empresa}*.\n👤 Titular: *{cliente}*\n\n🛒 ¡Muchas gracias por tu compra y mucha suerte! 🍀✨",
+        "active": True
+    },
+    {
+        "name": "Comprobante de Cobro / Pago Recibido",
+        "tipo": "pago.recibido",
+        "content": "💵 *Pago Recibido — Extra Supermercado*\n\nHola *{cliente}*, confirmamos la recepción de tu pago:\n💰 Monto abonado: *Gs. {monto}*\n📄 Factura / Recibo: *#{numero}*\n📅 Fecha: *{fecha}*\n\n¡Muchas gracias por tu confianza!",
+        "active": True
+    },
+    {
+        "name": "Confirmación Opt-In Validado",
+        "tipo": "optin.confirmado",
+        "content": "🎉 *¡Excelente! Tu número ha sido validado para recibir promociones exclusivas.*\n\nA partir de ahora vas a recibir ofertas personalizadas, descuentos relámpago y beneficios de Extra Supermercado directo en tu WhatsApp.\n\nℹ️ _Podés responder 'BAJA' en cualquier momento si deseás pausar estas comunicaciones._",
+        "active": True
+    },
+    {
+        "name": "Invitación ExtraClub (No Socio)",
+        "tipo": "extraclub.invitacion",
+        "content": "👋 ¡Hola {cliente}! Notamos que aún no contás con tu tarjeta *ExtraClub*, el programa oficial de fidelidad de Extra Supermercado. ✨\n\n🎁 *Beneficios exclusivos:*\n• Acumulás puntos en cada compra que canjeás directamente por dinero en caja al pagar.\n• Participás con cupones adicionales en todos los sorteos del año.\n• Accedés a precios preferenciales en artículos seleccionados.\n\n¡La adhesión es 100% gratuita! Pedile a tu cajero en tu próxima visita o respondenos a este mensaje.",
+        "active": True
+    },
+    {
+        "name": "Consulta Saldo de Puntos ExtraClub",
+        "tipo": "extraclub.saldo",
+        "content": "⭐ *Tu Saldo ExtraClub — Extra Supermercado* ⭐\n\n👤 Titular: *{cliente}*\n💳 N° de Socio: *{socio_numero}*\n✨ Puntos Disponibles: *{puntos} Pts.*\n💰 Equivalente en Compras: *Gs. {valor_monetario}*\n\n🛒 _Podés canjear tus puntos directamente en línea de caja en tu próxima compra._ ¡Gracias por ser parte de la familia Extra!",
+        "active": True
+    },
+    {
+        "name": "Catálogo de Premios de la Temporada",
+        "tipo": "extraclub.premios",
+        "content": "🎁 *Catálogo de Premios de la Temporada — ExtraClub* 🏆\n\n¡Canjeá tus puntos por premios fabulosos o descuento directo en tus compras!\n\n☕ *1.500 Pts:* Pava Eléctrica Inox 1.8L\n🍳 *2.500 Pts:* Set de Sartenes Antiadherentes\n🥪 *3.500 Pts:* Sandwichera Grill Antiadherente\n💨 *7.000 Pts:* Freidora de Aire Digital 4.5L\n🍲 *12.000 Pts:* Horno Eléctrico de Mesa 45L\n📺 *25.000 Pts:* Smart TV 43\" Full HD\n\n💡 _También podés descontar tus puntos directamente de tu factura al abonar en caja._ Consultá con Atención al Cliente.",
+        "active": True
+    },
+    {
+        "name": "Recordatorio de Cuota de Crédito",
+        "tipo": "cuota.recordatorio",
+        "content": "🔔 *Recordatorio de Vencimiento — Extra Supermercado*\n\nEstimado/a *{cliente}*, te recordamos que tu cuota de crédito de *Gs. {monto}* tiene fecha de vencimiento el *{fecha}*.\nPodés abonar en caja de cualquier sucursal o solicitar datos de transferencia respondiendo a este mensaje.",
+        "active": True
+    },
+    {
+        "name": "Promoción Relámpago del Día",
+        "tipo": "promocion.flash",
+        "content": "🔥 *¡OFERTA RELÁMPAGO EXTRA SUPERMERCADO!* 🔥\n\n¡Solo por hoy o hasta agotar stock!\n🛒 *{oferta_titulo}*\n🏷️ Precio Oferta: *Gs. {precio_oferta}* (Antes: Gs. {precio_regular})\n💥 Descuento exclusivo para socios y clientes validados.\n\n¡Te esperamos en nuestro salón! Promoción válida con cualquier medio de pago.",
+        "active": True
+    },
+    {
+        "name": "Delivery en Camino / Tránsito",
+        "tipo": "entrega.in_transit",
+        "content": "🛵 *¡Tu pedido de Extra Supermercado está en camino!*\n\n📦 Pedido: *#{numero}*\n📍 Destino: *{direccion}*\n👤 Repartidor: *{repartidor}*\n\n¡En breves momentos llegará a tu puerta!",
+        "active": True
+    },
+    {
+        "name": "Delivery Entregado",
+        "tipo": "entrega.delivered",
+        "content": "✅ *¡Pedido Entregado con Éxito!*\n\nHola *{cliente}*, tu pedido *#{numero}* ha sido entregado.\n¡Esperamos que disfrutes tus productos y gracias por preferir Extra Supermercado! 🛒",
+        "active": True
+    },
+    {
+        "name": "Pedido Recibido / Pendiente",
+        "tipo": "pedido.pendiente",
+        "content": "📄 *Pedido Registrado con Éxito — Extra Supermercado*\n\nHola *{cliente}*, recibimos tu pedido *#{numero}* por un total de *Gs. {total}*.\nPronto iniciaremos la preparación en tienda.",
+        "active": True
+    },
+    {
+        "name": "Pedido Listo para Retiro",
+        "tipo": "pedido.listo",
+        "content": "📦 *¡Tu Pedido está Listo! — Extra Supermercado*\n\nHola *{cliente}*, tu pedido *#{numero}* ya está empaquetado y listo para ser retirado en nuestro mostrador de Atención al Cliente.",
+        "active": True
+    },
+]
+
+
+async def seed_default_templates(db: AsyncSession, tenant_id: UUID, force: bool = False):
+    from sqlalchemy import or_
+    for t in OFFICIAL_SUPERMARKET_TEMPLATES:
         existing = await db.execute(
             select(WhatsAppTemplate).where(
-                WhatsAppTemplate.tenant_id == tenant_id,
-                WhatsAppTemplate.name == t["name"],
+                or_(
+                    WhatsAppTemplate.tenant_id == tenant_id,
+                    WhatsAppTemplate.tenant_id == UUID("00000000-0000-0000-0000-000000000001"),
+                ),
+                or_(
+                    WhatsAppTemplate.name == t["name"],
+                    WhatsAppTemplate.tipo == t["tipo"],
+                )
             )
         )
-        if not existing.scalar_one_or_none():
+        template_row = existing.scalar_one_or_none()
+        if not template_row:
             db.add(WhatsAppTemplate(tenant_id=tenant_id, **t))
+        elif force:
+            template_row.name = t["name"]
+            template_row.content = t["content"]
+            template_row.tipo = t["tipo"]
+            template_row.active = t["active"]
     await db.commit()
 
 
 async def send_message_to_phone(
     db: AsyncSession, company_id: str, to_phone: str, message: str
 ) -> bool:
-    """Send WhatsApp to a phone using the company's Twilio config. Non-blocking."""
+    """Send WhatsApp to a phone using Evolution API gateway. Non-blocking."""
     try:
-        from api.src.companies.models import Company
-        from sqlalchemy import select as sel_q
-
-        company_result = await db.execute(sel_q(Company).where(Company.id == company_id))
-        company = company_result.scalar_one_or_none()
-        if not company or not company.tenant_id:
+        if not to_phone or not message:
             return False
-
-        config_result = await db.execute(
-            sel_q(WhatsAppConfig).where(
-                WhatsAppConfig.tenant_id == company.tenant_id,
-                WhatsAppConfig.enabled == True,
-            )
-        )
-        config = config_result.scalar_one_or_none()
-        if not config:
-            return False
-
-        phone = to_phone
-        if not phone.startswith("+"):
-            phone = "+595" + phone.lstrip("0")
-
-        await make_twilio_call(phone, message, config)
-        return True
-    except Exception:
+        res = await evolution_client.send_text_message(to_phone, message, delay_ms=1000)
+        success = bool(res.get("success", False))
+        if success and company_id:
+            try:
+                from uuid import UUID
+                c_uuid = company_id if isinstance(company_id, UUID) else UUID(str(company_id))
+                conv = await get_or_create_conversation(db, c_uuid, to_phone, name=to_phone)
+                msg_id = (
+                    res.get("data", {}).get("key", {}).get("id")
+                    or res.get("message_id")
+                    or f"auto-{datetime.now(timezone.utc).timestamp()}"
+                )
+                outbound_msg = WhatsAppMessage(
+                    tenant_id=c_uuid,
+                    conversation_id=conv.id,
+                    direction=MessageDirection.outbound,
+                    content=message,
+                    message_id=msg_id,
+                    status=MessageStatus.sent,
+                )
+                db.add(outbound_msg)
+                conv.last_message_at = datetime.now(timezone.utc)
+                await db.commit()
+            except Exception as reg_err:
+                import logging
+                logging.getLogger("whatsapp.service").warning(f"No se pudo registrar mensaje saliente en BD: {reg_err}")
+        return success
+    except Exception as e:
+        import logging
+        logging.getLogger("whatsapp.service").error(f"Error in send_message_to_phone: {e}")
         return False
 
 
@@ -549,18 +699,56 @@ DEFAULT_WA_TEMPLATES: dict[str, str] = {
     "entrega.in_transit": "🚚 *Tu pedido está en tránsito!*\nEl repartidor va en camino a tu dirección.",
     "entrega.delivered": "✅ *Pedido entregado!*\nTu pedido ha sido entregado con éxito.",
     "entrega.failed": "❌ *Entrega fallida*\nNo se pudo entregar tu pedido. Contactanos para más información.",
-    # Ventas
-    "venta.creada": "🧾 *Factura {NUMERO}*\nTotal: {TOTAL} PYG\nGracias por tu compra!",
+    # Ventas & Extra Supermercado
+    "venta.creada": "🛒 *¡Gracias por tu compra en Extra Supermercado Mayorista!*\n\n📄 Ticket Digital: *#{ticket}*\n💰 Total: *Gs. {monto}*\n⭐ Sumaste *{puntos} Puntos ExtraClub*.\n\n¡Te esperamos pronto en nuestras sucursales!",
+    "sorteo.optin": "🛒 *¡Muchas gracias por tu compra en Extra Supermercado!*\nEsperamos que hayas tenido una excelente experiencia y te esperamos nuevamente muy pronto.\n\n🎟️ *¡Con esta compra generaste {cupones_generados} cupones para el sorteo '{campana_sorteo}'!*\nAcumulás un total de *{cupones_totales} cupones* registrados a tu nombre (Doc: {documento}).\n\n📲 *¿Querés recibir ofertas personalizadas, descuentos relámpago y promociones exclusivas en tu WhatsApp?*\n👉 *Respondé SÍ a este mensaje* para activar tus beneficios exclusivos y enterarte primero que nadie.",
+    "optin.confirmado": "🎉 *¡Excelente! Tu número ha sido validado para recibir promociones exclusivas.*\n\nA partir de ahora vas a recibir ofertas personalizadas, descuentos relámpago y beneficios de Extra Supermercado directo en tu WhatsApp.\n\nℹ️ _Podés responder 'BAJA' en cualquier momento si deseás pausar estas comunicaciones._",
+    "extraclub.invitacion": "👋 ¡Hola {cliente}! Notamos que aún no formás parte de *ExtraClub*, el club de fidelidad de Extra Supermercado. ✨\n\n🎁 *Al ser socio ExtraClub:*\n• Acumulás puntos en cada compra que canjeás por dinero directo en caja (1 Punto = Gs. 100).\n• Participás automáticamente con cupones dobles en todos los sorteos del año.\n• Accedés a descuentos especiales exclusivos para miembros.\n\n¡Hacerte socio es 100% gratuito! Acercate al mostrador de Atención al Cliente en tu próxima visita o pedile al cajero al abonar.",
+    "extraclub.saldo": "⭐ *Tu Saldo ExtraClub — Extra Supermercado* ⭐\n\n👤 Titular: *{cliente}*\n💳 N° de Socio: *{socio_numero}*\n✨ Puntos Acumulados: *{puntos} Pts.*\n💰 Equivalente en Compras: *Gs. {valor_monetario}*\n\n🛒 _Podés canjear tus puntos directamente en línea de caja en tu próxima compra._ ¡Gracias por ser parte de la familia Extra!",
+    "extraclub.premios": "🎁 *Catálogo de Premios de la Temporada — ExtraClub* 🏆\n\n¡Canjeá tus puntos por premios fabulosos o descuento directo en tus compras!\n\n☕ *1.500 Pts:* Pava Eléctrica Inox 1.8L\n🍳 *2.500 Pts:* Set de Sartenes Antiadherentes (2 piezas)\n🥪 *3.500 Pts:* Sandwichera Grill Antiadherente\n💨 *7.000 Pts:* Freidora de Aire Digital 4.5L\n🍲 *12.000 Pts:* Horno Eléctrico de Mesa 45L\n📺 *25.000 Pts:* Smart TV 43\" Full HD\n\n💡 *Descuento en Caja:* Recordá que también podés descontar tus puntos directamente de tu factura: *1 Punto = Gs. 100*.\nConsultá en Atención al Cliente o escribinos aquí para iniciar tu canje.",
+    "cupon.sorteo": "🎟️ *¡Tu Cupón Oficial de Sorteo Extra Supermercado!*\n\nCupón N°: *{cupon_numero}*\nCliente: *{cliente}* (Doc: {documento})\nPromoción: *{campana_sorteo}*\nFecha del Sorteo: *{fecha_sorteo}*\n\nGuardá este mensaje como comprobante oficial. ¡Mucha suerte!",
+    "cuota.recordatorio": "🔔 *Recordatorio de Vencimiento — Extra Supermercado*\n\nEstimado/a *{cliente}*, te recordamos que tu cuota de crédito de *Gs. {monto}* tiene fecha de vencimiento el *{fecha}*.\nPodés abonar en caja de cualquier sucursal o solicitar datos de transferencia respondiendo a este mensaje.",
+    "promocion.flash": "🔥 *¡OFERTA RELÁMPAGO EXTRA SUPERMERCADO!* 🔥\n\n¡Solo por hoy o hasta agotar stock!\n🛒 *{oferta_titulo}*\n🏷️ Precio Oferta: *Gs. {precio_oferta}* (Antes: Gs. {precio_regular})\n💥 Descuento exclusivo para socios y clientes validados.\n\n¡Te esperamos en nuestro salón! Promoción válida con cualquier medio de pago.",
     "venta.cancelada": "🚫 *Factura {NUMERO}* cancelada.\nSi tenés dudas contactanos.",
     "pago.recibido": "💵 *Pago recibido*\nMonto: {MONTO} PYG\nFactura: {NUMERO}",
 }
 
 
-def format_wa_template(template: str, **kwargs: str) -> str:
-    """Replace {VAR} placeholders in a template with provided values."""
+def format_wa_template(template: str, **kwargs: object) -> str:
+    """Replace {VAR} or {{VAR}} placeholders in a template with provided values.
+
+    Supports:
+    - Case-insensitive matching: {TICKET}, {ticket}, {Ticket}
+    - Double curly braces: {{ticket}}, {{monto}}
+    - Whitespace inside braces: { ticket }
+    - Automatic synonyms: ticket <-> numero, monto <-> total, puntos <-> puntos_ganados, etc.
+    """
+    if not template:
+        return ""
     result = template
-    for key, value in kwargs.items():
-        result = result.replace(f"{{{key}}}", value)
+    expanded: dict[str, str] = {}
+    for k, v in kwargs.items():
+        val_str = str(v) if v is not None else ""
+        expanded[k] = val_str
+        kl = k.lower()
+        if kl in ("ticket", "numero"):
+            expanded["ticket"] = val_str
+            expanded["numero"] = val_str
+        elif kl in ("monto", "total"):
+            expanded["monto"] = val_str
+            expanded["total"] = val_str
+        elif kl in ("puntos", "puntos_ganados"):
+            expanded["puntos"] = val_str
+            expanded["puntos_ganados"] = val_str
+        elif kl in ("cliente", "nombre"):
+            expanded["cliente"] = val_str
+            expanded["nombre"] = val_str
+        elif kl in ("doc", "documento", "ruc", "ci"):
+            expanded["documento"] = val_str
+
+    for key, value in expanded.items():
+        pattern = re.compile(r"\{{1,2}\s*" + re.escape(key) + r"\s*\}{1,2}", re.IGNORECASE)
+        result = pattern.sub(str(value), result)
     return result
 
 

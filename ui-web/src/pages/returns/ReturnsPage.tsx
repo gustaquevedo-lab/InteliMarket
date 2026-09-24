@@ -1,65 +1,124 @@
-import { useState, useEffect } from "react"
-import { Search, RotateCcw, Eye, Loader2, CheckCircle, XCircle, Filter, X, ShoppingCart, DollarSign, Clock, ThumbsUp, ThumbsDown, Undo2 } from "lucide-react"
+import { useState, useEffect, useMemo } from "react"
+import {
+  Search, RotateCcw, Eye, Loader2, CheckCircle, XCircle, X,
+  DollarSign, Clock, Undo2, Check, RefreshCw, PackageCheck, AlertCircle,
+  FileText, Plus, Building2, Tag, Truck, ArrowUpRight, ShieldCheck,
+  AlertTriangle, Filter, ChevronRight, Printer
+} from "lucide-react"
 import { api, type ReturnType, type ReturnItemType, type Sale, type Warehouse } from "../../api"
 import { useToast } from "../../context/ToastContext"
-import { StatusBadge } from "../../components/DataTable"
-import { Modal } from "../../components/Modal"
 import { useConfirm } from "../../components/ConfirmDialog"
 import { formatPYG, formatDate } from "../../utils/format"
+import { DevolucionProveedorPrintModal } from "../purchases/DevolucionProveedorPrintModal"
+
+interface SupplierCreditNote {
+  id: string
+  supplier_id: string
+  supplier_nombre: string
+  numero: string
+  numero_factura_origen: string
+  fecha: string
+  motivo: string
+  monto: number
+  moneda: string
+  observaciones: string
+}
+
+interface SupplierReturn {
+  id: string
+  supplier_id: string
+  supplier_nombre: string
+  numero_factura_origen: string
+  numero_nota_credito: string
+  fecha: string
+  monto: number
+  moneda: string
+  observaciones: string
+  estado?: string
+  almacen_nombre?: string
+  items?: any[]
+  raw?: any
+}
 
 const MOTIVOS_LABELS: Record<string, string> = {
-  producto_defectuoso: "Producto defectuoso",
-  producto_equivocado: "Producto equivocado",
-  vencimiento: "Vencimiento",
-  dano_transporte: "Daño en transporte",
-  cliente_insatisfecho: "Cliente insatisfecho",
-  error_venta: "Error de venta",
-  devolucion_voluntaria: "Devolución voluntaria",
-  garantia: "Garantía",
-  otro: "Otro",
+  producto_defectuoso: "Producto Defectuoso",
+  producto_equivocado: "Producto Equivocado",
+  vencimiento: "Vencimiento / Caducidad",
+  dano_transporte: "Daño en Transporte",
+  cliente_insatisfecho: "Cliente Insatisfecho",
+  error_venta: "Error en Facturación",
+  devolucion_voluntaria: "Devolución Voluntaria",
+  garantia: "Garantía de Calidad",
+  otro: "Otro Motivo",
 }
 
 const CONDICION_LABELS: Record<string, string> = {
-  buen_estado: "Buen estado",
-  defectuoso: "Defectuoso",
+  buen_estado: "Buen Estado (Apto Reventa)",
+  defectuoso: "Defectuoso (Merma)",
   danado: "Dañado",
   vencido: "Vencido",
-  incompleto: "Incompleto",
+  incompleto: "Incompleto / Faltante",
+}
+
+const STATUS_META: Record<string, { label: string; class: string }> = {
+  pendiente: { label: "Pendiente RMA", class: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20" },
+  aprobado:  { label: "Aprobada (Stock Rest.)", class: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20" },
+  rechazado: { label: "Rechazada", class: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20" },
 }
 
 export default function ReturnsPage() {
+  const toast = useToast()
+  const confirm = useConfirm()
+
+  // Pestaña Principal
+  const [mainTab, setMainTab] = useState<"customer_returns" | "supplier_credit_notes" | "supplier_returns">("customer_returns")
+
+  // Estado: Devoluciones Clientes
   const [returns, setReturns] = useState<ReturnType[]>([])
   const [sales, setSales] = useState<Sale[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
+  const [motivos, setMotivos] = useState<string[]>([])
   const [search, setSearch] = useState("")
   const [filterStatus, setFilterStatus] = useState<string>("todos")
-  const [loading, setLoading] = useState(true)
+  const [loadingReturns, setLoadingReturns] = useState(true)
+
+  // Estado: Notas de Crédito Proveedores
+  const [creditNotes, setCreditNotes] = useState<SupplierCreditNote[]>([])
+  const [ncSearch, setNcSearch] = useState("")
+  const [ncFilterMotivo, setNcFilterMotivo] = useState("todos")
+  const [loadingNc, setLoadingNc] = useState(true)
+  const [viewingNc, setViewingNc] = useState<SupplierCreditNote | null>(null)
+
+  // Estado: Devoluciones a Proveedores
+  const [supplierReturns, setSupplierReturns] = useState<SupplierReturn[]>([])
+  const [supRetSearch, setSupRetSearch] = useState("")
+  const [loadingSupRet, setLoadingSupRet] = useState(true)
+  const [viewingSupRet, setViewingSupRet] = useState<SupplierReturn | null>(null)
+  const [printingSupplierReturn, setPrintingSupplierReturn] = useState<any | null>(null)
+
+  const [refreshing, setRefreshing] = useState(false)
+
+  // Modales Devoluciones Clientes
   const [viewingReturn, setViewingReturn] = useState<ReturnType | null>(null)
   const [returnItems, setReturnItems] = useState<ReturnItemType[]>([])
   const [showCreate, setShowCreate] = useState(false)
   const [selectedSaleId, setSelectedSaleId] = useState("")
+  const [selectedSale, setSelectedSale] = useState<Sale | null>(null)
   const [saleSearch, setSaleSearch] = useState("")
+  const [modalSales, setModalSales] = useState<Sale[]>([])
   const [searchingSales, setSearchingSales] = useState(false)
   const [saleItems, setSaleItems] = useState<any[]>([])
   const [selectedItems, setSelectedItems] = useState<Record<string, { cantidad: number; condicion: string; motivo_detalle: string }>>({})
   const [motivo, setMotivo] = useState("")
   const [motivoDetalle, setMotivoDetalle] = useState("")
-  const [motivos, setMotivos] = useState<string[]>([])
   const [creating, setCreating] = useState(false)
   const [processing, setProcessing] = useState<string | null>(null)
   const [rejectModal, setRejectModal] = useState<ReturnType | null>(null)
   const [rejectReason, setRejectReason] = useState("")
-  const toast = useToast()
-  const confirm = useConfirm()
 
-  const statusMap: Record<string, string> = {
-    pendiente: "badge-warning",
-    aprobado: "badge-success",
-    rechazado: "badge-danger",
-  }
-
-  const fetchData = async () => {
-    setLoading(true)
+  /* ── DATA FETCH ────────────────────────────────────────────────────────── */
+  const fetchCustomerReturns = async () => {
+    setLoadingReturns(true)
     try {
       const [returnsData, warehousesData, motivosData] = await Promise.allSettled([
         api.returns.list({ estado: filterStatus !== "todos" ? filterStatus : undefined }),
@@ -71,39 +130,201 @@ export default function ReturnsPage() {
       if (motivosData.status === "fulfilled") setMotivos(motivosData.value)
     } catch {
       setReturns([])
-    } finally { setLoading(false) }
+    } finally {
+      setLoadingReturns(false)
+    }
   }
 
-  useEffect(() => { fetchData() }, [filterStatus])
+  const fetchSupplierCreditNotes = async () => {
+    setLoadingNc(true)
+    try {
+      const data = await api.financial.creditNotes()
+      setCreditNotes(Array.isArray(data) ? data : [])
+    } catch {
+      setCreditNotes([])
+    } finally {
+      setLoadingNc(false)
+    }
+  }
 
-  const handleSaleSearch = (value: string) => {
-    setSaleSearch(value)
-    setSales([])
-    if (!value.trim()) return
+  const fetchSupplierReturns = async () => {
+    setLoadingSupRet(true)
+    try {
+      const [finData, managedData] = await Promise.allSettled([
+        api.financial.supplierReturns().catch(() => []),
+        api.purchases.returns.list().catch(() => []),
+      ])
+      const finList: any[] = finData.status === "fulfilled" && Array.isArray(finData.value) ? finData.value : []
+      const managedList: any[] = managedData.status === "fulfilled" && Array.isArray(managedData.value) ? managedData.value : []
+
+      const normalizedManaged: SupplierReturn[] = managedList.map((m: any) => ({
+        id: m.id,
+        supplier_id: m.proveedor_id || m.supplier_id || "",
+        supplier_nombre: m.proveedor_nombre || m.supplier_nombre || "Proveedor",
+        numero_factura_origen: m.items?.[0]?.factura_numero || m.factura_numero || "",
+        numero_nota_credito: m.codigo || m.numero || `DEV-${m.id?.slice(0, 8)}`,
+        fecha: m.fecha || m.created_at,
+        monto: Number(m.monto_total || m.monto || 0),
+        moneda: m.moneda || "PYG",
+        observaciones: m.observaciones || m.motivo || "",
+        estado: m.estado || "pendiente",
+        almacen_nombre: m.almacen_nombre,
+        items: m.items || [],
+        raw: m,
+      }))
+
+      const managedIds = new Set(normalizedManaged.map(m => m.id))
+      const combined: SupplierReturn[] = [
+        ...normalizedManaged,
+        ...finList.filter((f: any) => !managedIds.has(f.id)).map((f: any) => ({
+          id: f.id,
+          supplier_id: f.supplier_id || "",
+          supplier_nombre: f.supplier_nombre || "Proveedor",
+          numero_factura_origen: f.numero_factura_origen || "",
+          numero_nota_credito: f.numero_nota_credito || `DEV-${f.id?.slice(0, 8)}`,
+          fecha: f.fecha,
+          monto: Number(f.monto || 0),
+          moneda: f.moneda || "PYG",
+          observaciones: f.observaciones || "Devolución física a proveedor",
+          estado: f.estado || "completado",
+          raw: f,
+        })),
+      ]
+
+      setSupplierReturns(combined)
+    } catch {
+      setSupplierReturns([])
+    } finally {
+      setLoadingSupRet(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchCustomerReturns()
+    fetchSupplierCreditNotes()
+    fetchSupplierReturns()
+  }, [filterStatus])
+
+  // Búsqueda en servidor de comprobantes para el modal de devolución (cualquier fecha)
+  useEffect(() => {
+    if (!showCreate) {
+      setModalSales([])
+      setSearchingSales(false)
+      return
+    }
+
+    const term = saleSearch.trim()
+    if (!term) {
+      setModalSales(sales.slice(0, 10))
+      setSearchingSales(false)
+      return
+    }
+
     setSearchingSales(true)
-    clearTimeout((window as any).__saleSearchTimer)
-    ;(window as any).__saleSearchTimer = setTimeout(async () => {
+    const timeout = setTimeout(async () => {
       try {
-        const results = await api.sales.list({ numero: value.trim(), estado: "completado", limit: 20 })
-        setSales(results)
+        const results = await api.sales.list({
+          search: term,
+          all_dates: true,
+          estado: "confirmado",
+          limit: 20,
+        })
+        setModalSales(results || [])
+      } catch (err) {
+        console.error("Error buscando ventas para devolución:", err)
+        setModalSales([])
       } finally {
         setSearchingSales(false)
       }
-    }, 350)
+    }, 300)
+
+    return () => clearTimeout(timeout)
+  }, [saleSearch, showCreate, sales])
+
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    await Promise.all([fetchCustomerReturns(), fetchSupplierCreditNotes(), fetchSupplierReturns()])
+    setRefreshing(false)
   }
 
-  const filtered = returns.filter(r => {
-    if (search && !(r.numero || "").toLowerCase().includes(search.toLowerCase())) return false
-    return true
-  })
+  /* ── FILTRADO Y KPIS: DEVOLUCIONES CLIENTES ──────────────────────────── */
+  const filteredReturns = useMemo(() => {
+    return returns.filter(r => {
+      const matchSearch = !search.trim() ||
+        (r.numero || "").toLowerCase().includes(search.toLowerCase()) ||
+        ((r as any).sale?.numero || "").toLowerCase().includes(search.toLowerCase()) ||
+        ((r as any).customer?.razon_social || "").toLowerCase().includes(search.toLowerCase()) ||
+        ((r as any).customer?.ruc || "").toLowerCase().includes(search.toLowerCase()) ||
+        (r.motivo || "").toLowerCase().includes(search.toLowerCase())
+      const matchStatus = filterStatus === "todos" || r.estado === filterStatus
+      return matchSearch && matchStatus
+    })
+  }, [returns, search, filterStatus])
 
-  const pendientes = returns.filter(r => r.estado === "pendiente").length
-  const aprobadas = returns.filter(r => r.estado === "aprobado").length
-  const rechazadas = returns.filter(r => r.estado === "rechazado").length
-  const montoTotal = returns.reduce((a, b) => a + Number(b.total || 0), 0)
+  const returnKpis = useMemo(() => {
+    const total = returns.length
+    const pendientes = returns.filter(r => r.estado === "pendiente").length
+    const aprobadas = returns.filter(r => r.estado === "aprobado").length
+    const rechazadas = returns.filter(r => r.estado === "rechazado").length
+    const montoTotal = returns.reduce((a, b) => a + Number(b.total || 0), 0)
+    const montoAprobado = returns.filter(r => r.estado === "aprobado").reduce((a, b) => a + Number(b.total || 0), 0)
+    return { total, pendientes, aprobadas, rechazadas, montoTotal, montoAprobado }
+  }, [returns])
 
+  /* ── FILTRADO Y KPIS: NOTAS DE CRÉDITO PROVEEDORES ───────────────────── */
+  const filteredCreditNotes = useMemo(() => {
+    return creditNotes.filter(nc => {
+      const matchSearch = !ncSearch.trim() ||
+        (nc.numero || "").toLowerCase().includes(ncSearch.toLowerCase()) ||
+        (nc.supplier_nombre || "").toLowerCase().includes(ncSearch.toLowerCase()) ||
+        (nc.numero_factura_origen || "").toLowerCase().includes(ncSearch.toLowerCase()) ||
+        (nc.observaciones || "").toLowerCase().includes(ncSearch.toLowerCase())
+      const matchMotivo = ncFilterMotivo === "todos" || (nc.motivo || "").toUpperCase() === ncFilterMotivo.toUpperCase()
+      return matchSearch && matchMotivo
+    })
+  }, [creditNotes, ncSearch, ncFilterMotivo])
+
+  const ncKpis = useMemo(() => {
+    const total = creditNotes.length
+    const montoTotal = creditNotes.reduce((acc, nc) => acc + Number(nc.monto || 0), 0)
+    const proveedoresUnicos = new Set(creditNotes.map(nc => nc.supplier_id || nc.supplier_nombre)).size
+    const avgMonto = total > 0 ? Math.round(montoTotal / total) : 0
+    return { total, montoTotal, proveedoresUnicos, avgMonto }
+  }, [creditNotes])
+
+  const ncMotivosList = useMemo(() => {
+    const set = new Set<string>()
+    creditNotes.forEach(nc => {
+      if (nc.motivo) set.add(nc.motivo)
+    })
+    return Array.from(set)
+  }, [creditNotes])
+
+  /* ── FILTRADO Y KPIS: DEVOLUCIONES A PROVEEDORES ─────────────────────── */
+  const filteredSupplierReturns = useMemo(() => {
+    return supplierReturns.filter(sr => {
+      return !supRetSearch.trim() ||
+        (sr.supplier_nombre || "").toLowerCase().includes(supRetSearch.toLowerCase()) ||
+        (sr.numero_nota_credito || "").toLowerCase().includes(supRetSearch.toLowerCase()) ||
+        (sr.numero_factura_origen || "").toLowerCase().includes(supRetSearch.toLowerCase()) ||
+        (sr.observaciones || "").toLowerCase().includes(supRetSearch.toLowerCase())
+    })
+  }, [supplierReturns, supRetSearch])
+
+  const supRetKpis = useMemo(() => {
+    const total = supplierReturns.length
+    const montoTotal = supplierReturns.reduce((acc, sr) => acc + Number(sr.monto || 0), 0)
+    const proveedoresUnicos = new Set(supplierReturns.map(sr => sr.supplier_id || sr.supplier_nombre)).size
+    return { total, montoTotal, proveedoresUnicos }
+  }, [supplierReturns])
+
+  /* ── ACCIONES: DEVOLUCIONES CLIENTES ─────────────────────────────────── */
   const handleLoadSaleItems = async (saleId: string) => {
-    if (!saleId) { setSaleItems([]); setSelectedItems({}); return }
+    if (!saleId) {
+      setSaleItems([])
+      setSelectedItems({})
+      return
+    }
     try {
       const items = await api.sales.getItems(saleId)
       setSaleItems(items)
@@ -114,13 +335,19 @@ export default function ReturnsPage() {
       setSelectedItems(sel)
     } catch {
       setSaleItems([])
-      toast.error("Error", "No se pudieron cargar los items de la venta")
+      toast.error("Error", "No se pudieron cargar los productos de la venta")
     }
   }
 
   const handleCreateReturn = async () => {
-    if (!motivo) { toast.error("Error", "Seleccione un motivo de devolución"); return }
-    if (!selectedSaleId) { toast.error("Error", "Seleccione una venta"); return }
+    if (!motivo) {
+      toast.error("Error", "Seleccioná un motivo de devolución")
+      return
+    }
+    if (!selectedSaleId) {
+      toast.error("Error", "Seleccioná la venta de origen")
+      return
+    }
     const items = Object.entries(selectedItems)
       .filter(([_, v]) => v.cantidad > 0)
       .map(([key, v]) => {
@@ -134,10 +361,13 @@ export default function ReturnsPage() {
           motivo_detalle: v.motivo_detalle || undefined,
         }
       })
-    if (items.length === 0) { toast.error("Error", "Seleccione al menos un item"); return }
+    if (items.length === 0) {
+      toast.error("Error", "Indicá al menos un producto a devolver")
+      return
+    }
     setCreating(true)
     try {
-      const sale = sales.find(s => s.id === selectedSaleId)
+      const sale = selectedSale || sales.find(s => s.id === selectedSaleId)
       await api.returns.create({
         sale_id: selectedSaleId,
         customer_id: sale?.customer_id || undefined,
@@ -145,19 +375,22 @@ export default function ReturnsPage() {
         observaciones: motivoDetalle || undefined,
         items,
       })
-      toast.success("Creada", "Devolución registrada correctamente")
+      toast.success("Devolución registrada", "La solicitud fue creada correctamente")
       setShowCreate(false)
       resetCreateForm()
-      fetchData()
-    } catch {
-      toast.error("Error", "No se pudo crear la devolución")
-    } finally { setCreating(false) }
+      fetchCustomerReturns()
+    } catch (err: any) {
+      toast.error("Error", err?.message || "No se pudo registrar la devolución")
+    } finally {
+      setCreating(false)
+    }
   }
 
   const resetCreateForm = () => {
     setSelectedSaleId("")
+    setSelectedSale(null)
     setSaleSearch("")
-    setSales([])
+    setModalSales([])
     setSaleItems([])
     setSelectedItems({})
     setMotivo("")
@@ -166,37 +399,41 @@ export default function ReturnsPage() {
 
   const handleApprove = async (r: ReturnType) => {
     const ok = await confirm({
-      title: "Aprobar devolución",
-      message: `¿Confirma la aprobación de la devolución ${r.numero}? Se restaurará el stock de los items devueltos.`,
-      confirmText: "Aprobar",
+      title: "Aprobar Devolución de Mercadería",
+      message: `¿Confirmar la aprobación de la devolución ${r.numero}? Se restaurará automáticamente el stock al inventario.`,
+      confirmText: "Aprobar & Reponer Stock",
       variant: "info",
     })
     if (!ok) return
     setProcessing(r.id)
     try {
-      await api.returns.approve(r.id, "sistema")
-      toast.success("Aprobada", `Devolución ${r.numero} aprobada — stock restaurado`)
-      fetchData()
+      await api.returns.approve(r.id, "supervisor")
+      toast.success("Devolución Aprobada", `Devolución ${r.numero} aprobada — Stock restaurado al inventario`)
+      fetchCustomerReturns()
     } catch {
       toast.error("Error", "No se pudo aprobar la devolución")
-    } finally { setProcessing(null) }
+    } finally {
+      setProcessing(null)
+    }
   }
 
   const handleReject = async () => {
     if (!rejectModal || !rejectReason.trim()) {
-      toast.error("Error", "Ingrese el motivo del rechazo")
+      toast.error("Error", "Ingresá el motivo del rechazo")
       return
     }
     setProcessing(rejectModal.id)
     try {
       await api.returns.reject(rejectModal.id, rejectReason.trim())
-      toast.success("Rechazada", `Devolución ${rejectModal.numero} rechazada`)
+      toast.success("Devolución Rechazada", `Devolución ${rejectModal.numero} rechazada`)
       setRejectModal(null)
       setRejectReason("")
-      fetchData()
+      fetchCustomerReturns()
     } catch {
       toast.error("Error", "No se pudo rechazar la devolución")
-    } finally { setProcessing(null) }
+    } finally {
+      setProcessing(null)
+    }
   }
 
   const handleViewReturn = async (r: ReturnType) => {
@@ -213,272 +450,1088 @@ export default function ReturnsPage() {
   const condicionLabel = (c: string) => CONDICION_LABELS[c] || c.replace(/_/g, " ")
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><RotateCcw className="w-6 h-6 text-primary" />Devoluciones</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{returns.length} devoluciones registradas</p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={() => setShowCreate(true)} className="btn-primary flex items-center gap-2"><Undo2 className="w-4 h-4" />Nueva devolución</button>
-          <button onClick={fetchData} className="btn-outline"><Filter className="w-4 h-4" /></button>
-        </div>
-      </div>
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-rose-950/90 text-white p-7 border border-rose-500/20 shadow-2xl shadow-rose-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-rose-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-pink-500/10 rounded-full blur-3xl pointer-events-none" />
 
-      {/* KPIs */}
-      <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><RotateCcw className="w-5 h-5 text-primary" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Total</span></div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">{returns.length}</p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><Clock className="w-5 h-5 text-amber-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Pendientes</span></div>
-          <p className="text-2xl font-bold text-amber-500">{pendientes}</p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><CheckCircle className="w-5 h-5 text-green-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Aprobadas</span></div>
-          <p className="text-2xl font-bold text-green-500">{aprobadas}</p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><XCircle className="w-5 h-5 text-red-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Rechazadas</span></div>
-          <p className="text-2xl font-bold text-red-500">{rechazadas}</p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><DollarSign className="w-5 h-5 text-blue-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Monto total</span></div>
-          <p className="text-2xl font-bold text-blue-500">{formatPYG(montoTotal)}</p>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" /><input className="input-field pl-10" placeholder="Buscar por número..." value={search} onChange={(e) => setSearch(e.target.value)} /></div>
-        <select className="input-field w-40" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
-          <option value="todos">Todos</option><option value="pendiente">Pendiente</option><option value="aprobado">Aprobado</option><option value="rechazado">Rechazado</option>
-        </select>
-      </div>
-
-      {/* Table */}
-      <div className="card overflow-hidden">
-        <table className="w-full">
-          <thead><tr className="table-header"><th className="table-cell">Número</th><th className="table-cell">Fecha</th><th className="table-cell">Cliente</th><th className="table-cell">Venta origen</th><th className="table-cell">Motivo</th><th className="table-cell text-right">Total</th><th className="table-cell">Estado</th><th className="table-cell">Acciones</th></tr></thead>
-          <tbody>
-            {loading ? <tr><td colSpan={8} className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></td></tr>
-            : filtered.length === 0 ? <tr><td colSpan={8} className="text-center py-12 text-gray-400">No se encontraron devoluciones</td></tr>
-            : filtered.map((r) => (
-              <tr key={r.id} className="table-row">
-                <td className="table-td font-mono text-xs font-bold text-primary">{r.numero}</td>
-                <td className="table-td text-sm text-gray-500">{formatDate(r.fecha)}</td>
-                <td className="table-td text-sm font-medium">{(r as any).customer?.razon_social || (r as any).customer_name || "—"}</td>
-                <td className="table-td font-mono text-xs">{(r as any).sale?.numero || r.sale_id?.slice(0, 8) || "—"}</td>
-                <td className="table-td text-sm">{motivoLabel(r.motivo!)}</td>
-                <td className="table-td text-right font-mono font-bold">{formatPYG(r.total)}</td>
-                <td className="table-td"><StatusBadge status={r.estado!} map={statusMap} /></td>
-                <td className="table-td">
-                  <div className="flex items-center gap-1">
-                    <button className="btn-ghost" title="Ver detalle" onClick={() => handleViewReturn(r)}><Eye className="w-4 h-4" /></button>
-                    {r.estado === "pendiente" && (
-                      <>
-                        <button className="btn-ghost text-green-500" title="Aprobar" onClick={() => handleApprove(r)} disabled={processing === r.id}>
-                          {processing === r.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <ThumbsUp className="w-4 h-4" />}
-                        </button>
-                        <button className="btn-ghost text-red-500" title="Rechazar" onClick={() => { setRejectModal(r); setRejectReason("") }}>
-                          <ThumbsDown className="w-4 h-4" />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Create Return Modal */}
-      <Modal open={showCreate} onClose={() => { if (!creating) { setShowCreate(false); resetCreateForm() } }} title="Nueva devolución" size="xl">
-        <div className="space-y-4">
-          {/* Sale Search */}
-          <div>
-            <label className="block text-sm font-bold mb-1">Venta de origen</label>
-            {selectedSaleId ? (
-              <div className="input-field w-full flex items-center justify-between">
-                <span>{sales.find(s => s.id === selectedSaleId)?.numero} — {sales.find(s => s.id === selectedSaleId)?.customer?.razon_social || "CF"}</span>
-                <button type="button" className="text-xs text-red-500 font-bold" onClick={() => { setSelectedSaleId(""); setSaleItems([]); setSaleSearch("") }}>Cambiar</button>
-              </div>
-            ) : (
-              <>
-                <div className="relative">
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <input
-                    className="input-field pl-9 w-full"
-                    placeholder="Buscar por número de factura..."
-                    value={saleSearch}
-                    onChange={(e) => handleSaleSearch(e.target.value)}
-                  />
-                  {searchingSales && <Loader2 className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-gray-400" />}
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-rose-600 to-pink-500 border border-rose-400/30 text-white flex items-center justify-center shadow-lg shadow-rose-500/25">
+                  <RotateCcw className="w-7 h-7" />
                 </div>
-                {sales.length > 0 && (
-                  <div className="mt-1 border border-gray-200 dark:border-gray-700 rounded-lg max-h-48 overflow-y-auto">
-                    {sales.map(s => (
-                      <button
-                        key={s.id} type="button"
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 border-b border-gray-50 dark:border-gray-800 last:border-0"
-                        onClick={() => { setSelectedSaleId(s.id); handleLoadSaleItems(s.id) }}
-                      >
-                        <span className="font-bold">{s.numero}</span> — {s.customer?.razon_social || "Consumidor Final"} — {formatDate(s.fecha)} — {formatPYG(s.total)}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-rose-500 border-2 border-slate-950"></span>
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-rose-400 uppercase bg-rose-500/10 px-2.5 py-0.5 rounded-md border border-rose-500/20">
+                    GESTIÓN DE MERMAS & NOTAS DE CRÉDITO
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-pink-500/20 text-pink-300 border border-pink-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+                    RMA Clientes & NC Nemuha ERP
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Devoluciones & Notas de Crédito
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Auditoría de mercadería devuelta, control de RMA, reposición a góndola y notas de crédito a favor
+                </p>
+              </div>
+            </div>
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-rose-400">
+                🔄 {returns.length} devoluciones registradas
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-300">
+                💰 {creditNotes.length} NC a favor proveedores
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
+              Recargar
+            </button>
+
+            {mainTab === "customer_returns" && (
+              <button
+                onClick={() => setShowCreate(true)}
+                className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-rose-600 to-pink-500 hover:from-rose-500 hover:to-pink-400 transition shadow-lg shadow-rose-500/25 flex items-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                Nueva Devolución
+              </button>
             )}
           </div>
+        </div>
 
-          {/* Items */}
-          {saleItems.length > 0 && (
-            <div>
-              <h4 className="text-sm font-bold mb-2">Items a devolver</h4>
-              <table className="w-full text-sm">
-                <thead><tr className="border-b border-gray-100 dark:border-gray-700"><th className="text-left py-1">Producto</th><th className="text-center py-1">Cant. venta</th><th className="text-center py-1">A devolver</th><th className="text-left py-1">Condición</th><th className="text-left py-1">Detalle</th></tr></thead>
-                <tbody>
-                  {saleItems.map((i: any) => (
-                    <tr key={i.id} className="border-b border-gray-50 dark:border-gray-800">
-                      <td className="py-1 font-medium">{i.descripcion || i.product?.nombre || "—"}</td>
-                      <td className="py-1 text-center">{i.cantidad}</td>
-                      <td className="py-1 text-center">
-                        <input
-                          type="number" min={0} max={i.cantidad}
-                          className="input-field w-20 text-center"
-                          value={selectedItems[i.id]?.cantidad ?? 0}
-                          onChange={(e) => {
-                            const val = Math.min(Math.max(0, parseInt(e.target.value) || 0), i.cantidad)
-                            setSelectedItems(prev => ({ ...prev, [i.id]: { ...prev[i.id], cantidad: val } }))
-                          }}
-                        />
-                      </td>
-                      <td className="py-1">
-                        <select className="input-field text-xs" value={selectedItems[i.id]?.condicion || "buen_estado"}
-                          onChange={(e) => setSelectedItems(prev => ({ ...prev, [i.id]: { ...prev[i.id], condicion: e.target.value } }))}>
-                          {Object.entries(CONDICION_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                        </select>
-                      </td>
-                      <td className="py-1">
-                        <input className="input-field text-xs" placeholder="Detalle..." value={selectedItems[i.id]?.motivo_detalle || ""}
-                          onChange={(e) => setSelectedItems(prev => ({ ...prev, [i.id]: { ...prev[i.id], motivo_detalle: e.target.value } }))} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <p className="text-xs text-gray-400 mt-1">Seleccione cantidad a devolver por cada item</p>
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                {mainTab === "customer_returns" ? "Total Devuelto Clientes" : "Crédito a Favor Total"}
+              </span>
+              <span className="text-[10px] font-bold text-rose-400">Total</span>
             </div>
-          )}
-
-          {/* Motivo */}
-          <div>
-            <label className="block text-sm font-bold mb-1">Motivo</label>
-            <select className="input-field w-full" value={motivo} onChange={(e) => setMotivo(e.target.value)}>
-              <option value="">Seleccionar motivo...</option>
-              {motivos.map(m => <option key={m} value={m}>{motivoLabel(m)}</option>)}
-            </select>
+            <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
+              {formatPYG(mainTab === "customer_returns" ? returnKpis.montoTotal : ncKpis.montoTotal)}
+            </p>
+            <p className="text-[11px] text-slate-400">
+              {mainTab === "customer_returns" ? `${returnKpis.total} solicitudes en cartera` : `${ncKpis.total} notas registradas`}
+            </p>
           </div>
 
-          {/* Observaciones */}
-          <div>
-            <label className="block text-sm font-bold mb-1">Observaciones</label>
-            <textarea className="input-field w-full" rows={2} value={motivoDetalle} onChange={(e) => setMotivoDetalle(e.target.value)} placeholder="Detalle adicional..." />
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                {mainTab === "customer_returns" ? "Pendientes RMA" : "Proveedores con NC"}
+              </span>
+              <span className="text-[10px] font-bold text-amber-400">Revisión</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-amber-400">
+              {mainTab === "customer_returns" ? returnKpis.pendientes : ncKpis.proveedoresUnicos}
+            </p>
+            <p className="text-[11px] text-slate-400">Requieren firma o aplicación</p>
           </div>
 
-          <div className="flex justify-end gap-3 pt-4 border-t border-gray-100 dark:border-gray-700">
-            <button className="btn-outline" onClick={() => { setShowCreate(false); resetCreateForm() }} disabled={creating}>Cancelar</button>
-            <button className="btn-primary flex items-center gap-2" onClick={handleCreateReturn} disabled={creating}>
-              {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Undo2 className="w-4 h-4" />}
-              Registrar devolución
-            </button>
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                {mainTab === "customer_returns" ? "Stock Restaurado" : "Promedio por Nota"}
+              </span>
+              <span className="text-[10px] font-bold text-emerald-400">Repuesto</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+              {mainTab === "customer_returns" ? returnKpis.aprobadas : formatPYG(ncKpis.avgMonto)}
+            </p>
+            <p className="text-[11px] text-slate-400">
+              {mainTab === "customer_returns" ? `${formatPYG(returnKpis.montoAprobado)} reingresado` : "Ticket promedio NC"}
+            </p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                {mainTab === "customer_returns" ? "Rechazadas" : "Sincronización Nemuha"}
+              </span>
+              <span className="text-[10px] font-mono text-cyan-400">Auditado</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-cyan-300">
+              {mainTab === "customer_returns" ? returnKpis.rechazadas : "100% OK"}
+            </p>
+            <p className="text-[11px] text-slate-400">Sin impacto contable negativo</p>
           </div>
         </div>
-      </Modal>
+      </div>
 
-      {/* Detail Modal */}
-      {viewingReturn && (
-        <div className="modal-overlay" onClick={() => setViewingReturn(null)}>
-          <div className="modal-content max-w-2xl max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-700">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Devolución {viewingReturn.numero}</h3>
-              <button onClick={() => setViewingReturn(null)} className="btn-ghost"><X className="w-4 h-4" /></button>
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+        {[
+          { id: "customer_returns", label: "Devoluciones de Clientes (RMA)", icon: RotateCcw, count: returns.length },
+          { id: "supplier_credit_notes", label: "Notas de Crédito Proveedores", icon: Building2, count: creditNotes.length },
+          { id: "supplier_returns", label: "Devoluciones a Proveedores", icon: Truck, count: supplierReturns.length },
+        ].map((t) => {
+          const Icon = t.icon
+          const active = mainTab === t.id
+          return (
+            <button
+              key={t.id}
+              onClick={() => setMainTab(t.id as any)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-rose-600 dark:text-rose-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              <span>{t.label}</span>
+              {t.count !== undefined && (
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  active ? "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                }`}>
+                  {t.count}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* ══════════════════════ TAB 1: DEVOLUCIONES CLIENTES ══════════════════════ */}
+      {mainTab === "customer_returns" && (
+        <div className="space-y-4">
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3.5 w-4 h-4 text-slate-400 top-3" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar por Nº devolución, Nº venta, RUC/CI o cliente..."
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
             </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div><span className="text-gray-500">Estado</span><p><StatusBadge status={viewingReturn.estado!} map={statusMap} /></p></div>
-                <div><span className="text-gray-500">Fecha</span><p className="font-bold">{formatDate(viewingReturn.fecha)}</p></div>
-                <div><span className="text-gray-500">Cliente</span><p className="font-bold">{(viewingReturn as any).customer?.razon_social || "—"}</p></div>
-                <div><span className="text-gray-500">Venta origen</span><p className="font-mono text-xs">{(viewingReturn as any).sale?.numero || viewingReturn.sale_id?.slice(0, 8) || "—"}</p></div>
-                <div className="col-span-2"><span className="text-gray-500">Motivo</span><p className="font-medium">{motivoLabel(viewingReturn.motivo!)}{viewingReturn.motivo_detalle ? ` — ${viewingReturn.motivo_detalle}` : ""}</p></div>
-              </div>
 
-              {viewingReturn.estado === "aprobado" && (
-                <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-4">
-                  <div className="flex items-center gap-2 text-sm font-bold text-green-700 dark:text-green-400 mb-1"><CheckCircle className="w-4 h-4" />Stock restaurado</div>
-                  <p className="text-xs text-green-600 dark:text-green-400">Los items devueltos han sido reintegrados al inventario automáticamente.</p>
-                  {viewingReturn.aprobado_por && <p className="text-xs text-green-600 dark:text-green-400 mt-1">Aprobado por: {viewingReturn.aprobado_por}</p>}
-                </div>
-              )}
+            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+              {[
+                { id: "todos", label: "Todas", count: returns.length },
+                { id: "pendiente", label: "Pendientes", count: returnKpis.pendientes },
+                { id: "aprobado", label: "Aprobadas", count: returnKpis.aprobadas },
+                { id: "rechazado", label: "Rechazadas", count: returnKpis.rechazadas },
+              ].map(st => (
+                <button
+                  key={st.id}
+                  onClick={() => setFilterStatus(st.id)}
+                  className={`px-3 py-2 rounded-2xl text-xs font-bold transition-all ${
+                    filterStatus === st.id
+                      ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm"
+                      : "bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100"
+                  }`}
+                >
+                  {st.label} ({st.count})
+                </button>
+              ))}
+            </div>
+          </div>
 
-              {viewingReturn.estado === "rechazado" && (
-                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
-                  <div className="flex items-center gap-2 text-sm font-bold text-red-700 dark:text-red-400 mb-1"><XCircle className="w-4 h-4" />Rechazada</div>
-                  {(viewingReturn as any).motivo_rechazo && <p className="text-xs text-red-600 dark:text-red-400">Motivo: {(viewingReturn as any).motivo_rechazo}</p>}
-                </div>
-              )}
-
-              <div className="border-t pt-3">
-                <h4 className="text-sm font-bold mb-2">Items devueltos ({returnItems.length})</h4>
-                <table className="w-full text-sm">
-                  <thead><tr className="border-b border-gray-100 dark:border-gray-700"><th className="text-left py-1">Producto</th><th className="text-right py-1">Cant</th><th className="text-right py-1">P.U.</th><th className="text-right py-1">Total</th><th className="text-left py-1">Condición</th></tr></thead>
-                  <tbody>{returnItems.map((i: ReturnItemType) => (
-                    <tr key={i.id} className="border-b border-gray-50 dark:border-gray-800">
-                      <td className="py-1">{i.descripcion || "—"}</td>
-                      <td className="text-right py-1">{i.cantidad}</td>
-                      <td className="text-right py-1 font-mono">{formatPYG(i.precio_unitario)}</td>
-                      <td className="text-right py-1 font-bold">{formatPYG(i.total)}</td>
-                      <td className="py-1"><span className="text-xs font-medium bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded">{condicionLabel(i.condicion!)}</span></td>
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                  <tr>
+                    <th className="p-4">Nº Devolución</th>
+                    <th className="p-4">Fecha</th>
+                    <th className="p-4">Venta Origen</th>
+                    <th className="p-4">Cliente</th>
+                    <th className="p-4">Motivo Principal</th>
+                    <th className="p-4 text-right">Monto Devuelto</th>
+                    <th className="p-4 text-center">Estado</th>
+                    <th className="p-4 text-center">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                  {loadingReturns ? (
+                    <tr>
+                      <td colSpan={8} className="p-12 text-center text-slate-400">
+                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-rose-500" />
+                        <span>Cargando devoluciones de clientes...</span>
+                      </td>
                     </tr>
-                  ))}</tbody>
-                </table>
-              </div>
+                  ) : filteredReturns.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="p-12 text-center text-slate-400">
+                        No se encontraron solicitudes de devolución coincidentes.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredReturns.map((r: any) => {
+                      const saleNum = r.sale?.numero || r.sale_id?.slice(0, 8) || "—"
+                      const custName = r.customer?.razon_social || r.customer_name || "Cliente General"
 
-              <div className="border-t pt-3 grid grid-cols-1 gap-2 text-sm">
-                <div className="flex justify-between font-bold text-lg"><span>Total devuelto</span><span>{formatPYG(viewingReturn.total)}</span></div>
-              </div>
+                      return (
+                        <tr key={r.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                          <td className="p-4 font-mono font-bold text-slate-900 dark:text-white">
+                            <div className="flex items-center gap-1.5">
+                              <RotateCcw className="w-3.5 h-3.5 text-rose-500" />
+                              <span>{r.numero}</span>
+                            </div>
+                          </td>
+                          <td className="p-4 text-slate-500 font-mono text-[11px]">
+                            {r.fecha ? formatDate(r.fecha) : "—"}
+                          </td>
+                          <td className="p-4 font-mono font-bold text-blue-600 dark:text-blue-400">
+                            #{saleNum}
+                          </td>
+                          <td className="p-4 font-bold text-slate-800 dark:text-slate-200 max-w-[180px] truncate">
+                            {custName}
+                          </td>
+                          <td className="p-4 text-slate-600 dark:text-slate-300">
+                            <span className="font-semibold">{motivoLabel(r.motivo || "otro")}</span>
+                            {r.motivo_detalle && (
+                              <p className="text-[10px] text-slate-400 truncate max-w-[150px]">{r.motivo_detalle}</p>
+                            )}
+                          </td>
+                          <td className="p-4 text-right font-mono font-black text-slate-900 dark:text-white">
+                            {formatPYG(Number(r.total || 0))}
+                          </td>
+                          <td className="p-4 text-center">
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${STATUS_META[r.estado || "pendiente"]?.class || ""}`}>
+                              {STATUS_META[r.estado || "pendiente"]?.label || r.estado}
+                            </span>
+                          </td>
+                          <td className="p-4 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                onClick={() => handleViewReturn(r)}
+                                className="p-2 text-slate-400 hover:text-rose-600 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                                title="Ver Detalle RMA"
+                              >
+                                <Eye className="w-4 h-4" />
+                              </button>
+
+                              {r.estado === "pendiente" && (
+                                <>
+                                  <button
+                                    onClick={() => handleApprove(r)}
+                                    disabled={processing === r.id}
+                                    className="px-3 py-1.5 rounded-xl text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm flex items-center gap-1 transition"
+                                    title="Aprobar & Restaurar Stock"
+                                  >
+                                    {processing === r.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                                    <span>Aprobar</span>
+                                  </button>
+                                  <button
+                                    onClick={() => setRejectModal(r)}
+                                    disabled={processing === r.id}
+                                    className="px-3 py-1.5 rounded-xl text-[11px] font-bold bg-rose-50 dark:bg-rose-950/30 text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-900/40 border border-rose-200 dark:border-rose-800 flex items-center gap-1 transition"
+                                    title="Rechazar"
+                                  >
+                                    <XCircle className="w-3 h-3" />
+                                    <span>Rechazar</span>
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
       )}
 
-      {/* Reject Modal */}
-      {rejectModal && (
-        <div className="modal-overlay" onClick={() => { if (processing !== rejectModal.id) { setRejectModal(null); setRejectReason("") } }}>
-          <div className="modal-content max-w-sm" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6">
-              <div className="w-12 h-12 rounded-full flex items-center justify-center mb-4 bg-red-100 dark:bg-red-900/30">
-                <XCircle className="w-6 h-6 text-red-600" />
-              </div>
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Rechazar devolución</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Devolución {rejectModal.numero}</p>
-              <div className="mb-4">
-                <label className="block text-sm font-bold mb-1">Motivo del rechazo</label>
-                <textarea className="input-field w-full" rows={3} value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="Indique el motivo del rechazo..." />
-              </div>
-              <div className="flex gap-3">
-                <button className="btn-outline flex-1" onClick={() => { setRejectModal(null); setRejectReason("") }} disabled={processing === rejectModal.id}>Cancelar</button>
-                <button className="flex-1 text-white font-bold py-2 px-4 rounded-xl transition-colors bg-red-600 hover:bg-red-700 flex items-center justify-center gap-2" onClick={handleReject} disabled={processing === rejectModal.id}>
-                  {processing === rejectModal.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
-                  Rechazar
-                </button>
-              </div>
+      {/* ══════════════════════ TAB 2: NC PROVEEDORES ══════════════════════ */}
+      {mainTab === "supplier_credit_notes" && (
+        <div className="space-y-4">
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3.5 w-4 h-4 text-slate-400 top-3" />
+              <input
+                type="text"
+                value={ncSearch}
+                onChange={(e) => setNcSearch(e.target.value)}
+                placeholder="Buscar por Nº de NC, Proveedor, Factura afectada u observaciones..."
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <select
+                value={ncFilterMotivo}
+                onChange={(e) => setNcFilterMotivo(e.target.value)}
+                className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
+              >
+                <option value="todos">Todos los Motivos ({creditNotes.length})</option>
+                {ncMotivosList.map(m => (
+                  <option key={m} value={m}>{m.replace(/_/g, " ")}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                  <tr>
+                    <th className="p-4">Nº Nota de Crédito</th>
+                    <th className="p-4">Fecha</th>
+                    <th className="p-4">Proveedor</th>
+                    <th className="p-4">Factura Origen</th>
+                    <th className="p-4">Concepto / Motivo</th>
+                    <th className="p-4 text-right">Monto Total</th>
+                    <th className="p-4 text-right">Saldo Remanente</th>
+                    <th className="p-4 text-center">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                  {loadingNc ? (
+                    <tr>
+                      <td colSpan={8} className="p-12 text-center text-slate-400">
+                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-rose-500" />
+                        <span>Cargando notas de crédito de proveedores...</span>
+                      </td>
+                    </tr>
+                  ) : filteredCreditNotes.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="p-12 text-center text-slate-400">
+                        No se encontraron notas de crédito de proveedores.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredCreditNotes.map((nc) => {
+                      const saldo = Number((nc as any).saldo_disponible ?? nc.monto ?? 0)
+                      return (
+                        <tr key={nc.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                          <td className="p-4 font-mono font-bold text-slate-900 dark:text-white">
+                            <div className="flex items-center gap-1.5">
+                              <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>{nc.numero || "NC-" + nc.id.slice(0, 8)}</span>
+                            </div>
+                          </td>
+                          <td className="p-4 text-slate-500 font-mono text-[11px]">
+                            {nc.fecha ? formatDate(nc.fecha) : "—"}
+                          </td>
+                          <td className="p-4 font-bold text-slate-800 dark:text-slate-200 max-w-[200px] truncate">
+                            {nc.supplier_nombre || "Proveedor"}
+                          </td>
+                          <td className="p-4 font-mono text-slate-500 text-[11px]">
+                            {nc.numero_factura_origen ? `#${nc.numero_factura_origen}` : "—"}
+                          </td>
+                          <td className="p-4 text-slate-600 dark:text-slate-300">
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                              {(nc.motivo || "CREDITO").replace(/_/g, " ")}
+                            </span>
+                            {nc.observaciones && (
+                              <p className="text-[10px] text-slate-400 truncate max-w-[180px] mt-0.5">{nc.observaciones}</p>
+                            )}
+                          </td>
+                          <td className="p-4 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
+                            {formatPYG(Number(nc.monto || 0))}
+                          </td>
+                          <td className="p-4 text-right font-mono font-black">
+                            <span className={saldo > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-slate-400 line-through"}>
+                              {formatPYG(saldo)}
+                            </span>
+                          </td>
+                          <td className="p-4 text-center">
+                            <button
+                              onClick={() => setViewingNc(nc)}
+                              className="p-2 text-slate-400 hover:text-emerald-600 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                              title="Ver Detalle NC"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
+      )}
+
+      {/* ══════════════════════ TAB 3: DEVOLUCIONES PROVEEDORES ══════════════════════ */}
+      {mainTab === "supplier_returns" && (
+        <div className="space-y-4">
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3.5 w-4 h-4 text-slate-400 top-3" />
+              <input
+                type="text"
+                value={supRetSearch}
+                onChange={(e) => setSupRetSearch(e.target.value)}
+                placeholder="Buscar por Proveedor, Nº Nota de Crédito o Factura..."
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                  <tr>
+                    <th className="p-4">Nº Devolución / Código</th>
+                    <th className="p-4">Fecha</th>
+                    <th className="p-4">Proveedor</th>
+                    <th className="p-4">Factura Afectada</th>
+                    <th className="p-4">Impacto en Stock & Etapa</th>
+                    <th className="p-4">Observaciones / Motivo</th>
+                    <th className="p-4 text-right">Monto Devuelto</th>
+                    <th className="p-4 text-center">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                  {loadingSupRet ? (
+                    <tr>
+                      <td colSpan={8} className="p-12 text-center text-slate-400">
+                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-rose-500" />
+                        <span>Cargando devoluciones a proveedores...</span>
+                      </td>
+                    </tr>
+                  ) : filteredSupplierReturns.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="p-12 text-center text-slate-400">
+                        No se encontraron devoluciones a proveedores.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredSupplierReturns.map((sr) => (
+                      <tr key={sr.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                        <td className="p-4 font-mono font-bold text-slate-900 dark:text-white">
+                          <div className="flex items-center gap-1.5">
+                            <Truck className="w-3.5 h-3.5 text-amber-600" />
+                            <span>{sr.numero_nota_credito || "DEV-" + sr.id.slice(0, 8)}</span>
+                          </div>
+                        </td>
+                        <td className="p-4 text-slate-500 font-mono text-[11px]">
+                          {sr.fecha ? formatDate(sr.fecha) : "—"}
+                        </td>
+                        <td className="p-4 font-bold text-slate-800 dark:text-slate-200 max-w-[180px] truncate">
+                          {sr.supplier_nombre || "Proveedor"}
+                        </td>
+                        <td className="p-4 font-mono text-slate-500 text-[11px]">
+                          {sr.numero_factura_origen ? `#${sr.numero_factura_origen}` : "—"}
+                        </td>
+                        <td className="p-4">
+                          {sr.estado === "completado" ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/60">
+                              <CheckCircle className="w-3 h-3 text-emerald-600" /> Stock Descontado (Egresado)
+                            </span>
+                          ) : sr.estado === "autorizado" ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800/60">
+                              <Clock className="w-3 h-3 text-blue-600" /> Mercadería Separada (Autorizado)
+                            </span>
+                          ) : sr.estado === "rechazado" ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-red-50 text-red-700 border border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-800/60">
+                              <XCircle className="w-3 h-3 text-red-600" /> Rechazado / Anulado
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/60">
+                              <AlertCircle className="w-3 h-3 text-amber-600" /> Sin Egreso (En Trámite)
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-4 text-slate-600 dark:text-slate-300 max-w-[200px] truncate">
+                          {sr.observaciones || "Devolución física a proveedor"}
+                        </td>
+                        <td className="p-4 text-right font-mono font-black text-amber-600 dark:text-amber-400">
+                          {formatPYG(Number(sr.monto || 0))}
+                        </td>
+                        <td className="p-4 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setViewingSupRet(sr)}
+                              className="p-1.5 text-slate-400 hover:text-amber-600 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                              title="Ver Detalle"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPrintingSupplierReturn(sr.raw || sr)}
+                              className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                              title="Imprimir Remito Oficial"
+                            >
+                              <Printer className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: REGISTRAR DEVOLUCIÓN CLIENTE ── */}
+      {showCreate && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900 dark:text-white">Registrar Devolución de Mercadería</h3>
+                <p className="text-xs text-slate-400">Seleccioná el comprobante de venta origen y los productos a reintegrar</p>
+              </div>
+              <button onClick={() => { setShowCreate(false); resetCreateForm() }} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div>
+                <label className="block font-black uppercase text-[10px] text-slate-400 mb-1">Comprobante de Venta Origen *</label>
+                {selectedSaleId ? (
+                  <div className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700">
+                    <div>
+                      <span className="font-bold text-slate-900 dark:text-white">
+                        Venta #{selectedSale?.numero || sales.find(s => s.id === selectedSaleId)?.numero || selectedSaleId.slice(0, 8)}
+                      </span>
+                      <p className="text-[11px] text-slate-400 font-mono">
+                        Cliente: {selectedSale?.customer?.razon_social || (selectedSale as any)?.customer_name || sales.find(s => s.id === selectedSaleId)?.customer?.razon_social || (sales.find(s => s.id === selectedSaleId) as any)?.customer_name || "Consumidor Final"} · Total: {formatPYG(Number(selectedSale?.total || sales.find(s => s.id === selectedSaleId)?.total || 0))}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => { setSelectedSaleId(""); setSelectedSale(null); setSaleItems([]); setSelectedItems({}) }}
+                      className="text-rose-500 hover:text-rose-700 font-bold"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                    <input
+                      value={saleSearch}
+                      onChange={e => setSaleSearch(e.target.value)}
+                      placeholder="Buscar por Nº comprobante, RUC o cliente..."
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl pl-9 pr-9 py-2.5 text-xs text-slate-900 dark:text-white"
+                    />
+                    {searchingSales && (
+                      <Loader2 className="w-4 h-4 absolute right-3 top-3 text-rose-500 animate-spin" />
+                    )}
+                    {saleSearch && (
+                      <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-20 max-h-56 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                        {searchingSales ? (
+                          <div className="p-4 text-center text-slate-400 flex items-center justify-center gap-2">
+                            <Loader2 className="w-4 h-4 animate-spin text-rose-500" />
+                            <span>Buscando en base de datos...</span>
+                          </div>
+                        ) : modalSales.length > 0 ? (
+                          modalSales.map(s => (
+                            <button
+                              key={s.id}
+                              onClick={() => {
+                                setSelectedSale(s)
+                                setSelectedSaleId(s.id)
+                                setSaleSearch("")
+                                setModalSales([])
+                                setSales(prev => prev.some(x => x.id === s.id) ? prev : [s, ...prev])
+                                handleLoadSaleItems(s.id)
+                              }}
+                              className="w-full p-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-between transition-colors"
+                            >
+                              <div>
+                                <p className="font-bold text-xs text-slate-900 dark:text-white">
+                                  Venta #{s.numero || s.id.slice(0, 8)}
+                                  {s.fecha && (
+                                    <span className="ml-2 font-mono font-normal text-[10px] text-slate-400">
+                                      {formatDate(s.fecha)}
+                                    </span>
+                                  )}
+                                </p>
+                                <p className="text-[10px] text-slate-400 font-mono">
+                                  {s.customer?.razon_social || (s as any).customer_name || "Consumidor Final"} · RUC {s.customer?.ruc || (s as any).customer_ruc || "—"}
+                                </p>
+                              </div>
+                              <span className="font-mono font-bold text-emerald-600 text-xs">{formatPYG(Number(s.total || 0))}</span>
+                            </button>
+                          ))
+                        ) : (
+                          <div className="p-4 text-center text-slate-400 text-xs">
+                            No se encontraron ventas confirmadas con "{saleSearch}"
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {saleItems.length > 0 && (
+                <div>
+                  <label className="block font-black uppercase text-[10px] text-slate-400 mb-1.5">Ítems a Devolver & Condición Física</label>
+                  <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden max-h-48 overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <thead className="bg-slate-50 dark:bg-slate-800 uppercase text-[9px] font-black text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                        <tr>
+                          <th className="p-2.5">Producto</th>
+                          <th className="p-2.5 text-center w-24">Cant. Dev.</th>
+                          <th className="p-2.5 text-center w-36">Condición</th>
+                          <th className="p-2.5 text-right">Subtotal</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                        {saleItems.map((item: any) => {
+                          const sel = selectedItems[item.id] || { cantidad: 0, condicion: "buen_estado", motivo_detalle: "" }
+                          return (
+                            <tr key={item.id} className="hover:bg-slate-50/50">
+                              <td className="p-2.5">
+                                <p className="font-bold">{item.product_name || item.descripcion || "Producto"}</p>
+                                <p className="text-[10px] text-slate-400 font-mono">Comprado: {item.cantidad} un. @ {formatPYG(item.precio_unitario)}</p>
+                              </td>
+                              <td className="p-2.5 text-center">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={item.cantidad}
+                                  value={sel.cantidad}
+                                  onChange={e => setSelectedItems(prev => ({
+                                    ...prev,
+                                    [item.id]: { ...prev[item.id], cantidad: Math.min(item.cantidad, Math.max(0, parseInt(e.target.value) || 0)) }
+                                  }))}
+                                  className="w-16 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-1 text-center font-mono font-bold text-xs"
+                                />
+                              </td>
+                              <td className="p-2.5">
+                                <select
+                                  value={sel.condicion}
+                                  onChange={e => setSelectedItems(prev => ({
+                                    ...prev,
+                                    [item.id]: { ...prev[item.id], condicion: e.target.value }
+                                  }))}
+                                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-1 text-[11px] font-bold"
+                                >
+                                  {Object.entries(CONDICION_LABELS).map(([k, v]) => (
+                                    <option key={k} value={k}>{v}</option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td className="p-2.5 text-right font-mono font-bold text-slate-900 dark:text-white">
+                                {formatPYG(sel.cantidad * item.precio_unitario)}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-black uppercase text-[10px] text-slate-400 mb-1">Motivo Principal *</label>
+                  <select
+                    value={motivo}
+                    onChange={e => setMotivo(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-2.5 text-xs font-bold"
+                  >
+                    <option value="">Seleccionar motivo...</option>
+                    {motivos.map(m => (
+                      <option key={m} value={m}>{motivoLabel(m)}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-black uppercase text-[10px] text-slate-400 mb-1">Observaciones / Auditoría</label>
+                  <input
+                    type="text"
+                    value={motivoDetalle}
+                    onChange={e => setMotivoDetalle(e.target.value)}
+                    placeholder="Detalle adicional..."
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-2.5 text-xs font-medium"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button
+                onClick={() => { setShowCreate(false); resetCreateForm() }}
+                className="px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleCreateReturn}
+                disabled={creating}
+                className="px-5 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-md shadow-rose-500/20 transition"
+              >
+                {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Undo2 className="w-3.5 h-3.5" />}
+                <span>{creating ? "Registrando..." : "Registrar Devolución"}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: VER DETALLE DEVOLUCIÓN CLIENTE ── */}
+      {viewingReturn && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900 dark:text-white">Devolución Nº {viewingReturn.numero}</h3>
+                <p className="text-xs text-slate-400 font-mono">Venta Origen: #{(viewingReturn as any).sale?.numero || viewingReturn.sale_id?.slice(0, 8)}</p>
+              </div>
+              <button onClick={() => setViewingReturn(null)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="p-4 bg-slate-50 dark:bg-slate-800/70 rounded-2xl space-y-1.5">
+                <div className="flex justify-between"><span className="text-slate-400">Cliente:</span><strong className="text-slate-900 dark:text-white">{(viewingReturn as any).customer?.razon_social || (viewingReturn as any).customer_name || "Cliente General"}</strong></div>
+                <div className="flex justify-between"><span className="text-slate-400">Motivo:</span><span className="font-bold text-rose-500">{motivoLabel(viewingReturn.motivo || "otro")}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Estado:</span><span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${STATUS_META[viewingReturn.estado || "pendiente"]?.class}`}>{STATUS_META[viewingReturn.estado || "pendiente"]?.label}</span></div>
+              </div>
+
+              <div className="space-y-2">
+                <span className="text-[10px] font-bold text-slate-400 uppercase">Productos Reintegrados</span>
+                <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {returnItems.map((item, idx) => (
+                    <div key={idx} className="py-2.5 flex justify-between">
+                      <div>
+                        <p className="font-bold text-slate-900 dark:text-white">{(item as any).product_name || (item as any).descripcion || "Producto"}</p>
+                        <p className="text-[10px] text-slate-400 font-mono">{item.cantidad ?? 1} un. · Condición: {condicionLabel(item.condicion || "buen_estado")}</p>
+                      </div>
+                      <span className="font-mono font-bold text-slate-900 dark:text-white">{formatPYG(Number(item.total || ((item.cantidad || 0) * (item.precio_unitario || 0)) || 0))}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-between pt-2 border-t border-slate-100 dark:border-slate-800 text-sm font-black">
+                <span>Total Reintegrado:</span>
+                <span className="font-mono text-rose-600 dark:text-rose-400">{formatPYG(Number(viewingReturn.total || 0))}</span>
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button onClick={() => setViewingReturn(null)} className="px-5 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs">
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: VER NOTA DE CRÉDITO PROVEEDOR ── */}
+      {viewingNc && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-emerald-600" />
+                <h3 className="font-extrabold text-base text-slate-900 dark:text-white">Nota de Crédito {viewingNc.numero}</h3>
+              </div>
+              <button onClick={() => setViewingNc(null)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <div className="p-4 bg-slate-50 dark:bg-slate-800/70 rounded-2xl space-y-2">
+                <div className="flex justify-between"><span className="text-slate-400">Proveedor:</span><strong className="text-slate-900 dark:text-white">{viewingNc.supplier_nombre}</strong></div>
+                <div className="flex justify-between"><span className="text-slate-400">Factura Afectada:</span><span className="font-mono text-slate-700 dark:text-slate-300">#{viewingNc.numero_factura_origen || "—"}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Fecha de Emisión:</span><span className="font-mono text-slate-700 dark:text-slate-300">{formatDate(viewingNc.fecha)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Motivo Comercial:</span><span className="font-bold text-emerald-600">{viewingNc.motivo}</span></div>
+                {viewingNc.observaciones && (
+                  <div className="pt-2 border-t border-slate-200 dark:border-slate-700 text-slate-500 italic text-[11px]">
+                    "{viewingNc.observaciones}"
+                  </div>
+                )}
+              </div>
+
+              <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl space-y-1.5">
+                <div className="flex justify-between text-xs">
+                  <span className="text-slate-500">Monto Acreditado Original:</span>
+                  <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{formatPYG(Number(viewingNc.monto || 0))}</span>
+                </div>
+                <div className="flex justify-between text-sm font-black pt-1.5 border-t border-emerald-500/20">
+                  <span className="text-emerald-900 dark:text-emerald-300">Saldo Remanente Disponible:</span>
+                  <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                    {formatPYG(Number((viewingNc as any).saldo_disponible ?? viewingNc.monto ?? 0))}
+                  </span>
+                </div>
+                <p className="text-[10px] text-emerald-700 dark:text-emerald-400 leading-snug">
+                  Este crédito está disponible para amortizar saldos en Facturas Proveedores (Procure-to-Pay) o futuras compras.
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button onClick={() => setViewingNc(null)} className="px-5 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs">
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: RECHAZAR DEVOLUCIÓN ── */}
+      {rejectModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 border-2 border-rose-500 rounded-3xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-2.5 text-rose-600">
+              <AlertCircle className="w-6 h-6 shrink-0" />
+              <div>
+                <h3 className="font-black text-base text-slate-900 dark:text-white">Rechazar Devolución {rejectModal.numero}</h3>
+                <p className="text-[11px] text-slate-400">La mercadería no reingresará al stock comercial</p>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-bold text-slate-400 mb-1 block">Motivo del Rechazo *</label>
+              <textarea
+                value={rejectReason}
+                onChange={e => setRejectReason(e.target.value)}
+                placeholder="Ej: Embalaje abierto, daño causado por el cliente..."
+                rows={3}
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 text-xs outline-none focus:border-rose-500 text-slate-900 dark:text-white"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => { setRejectModal(null); setRejectReason("") }} className="px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs">
+                Cancelar
+              </button>
+              <button onClick={handleReject} disabled={!rejectReason.trim()} className="px-5 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs shadow-md shadow-rose-600/20 transition">
+                Confirmar Rechazo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: VER DETALLE DEVOLUCIÓN PROVEEDOR ── */}
+      {viewingSupRet && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                    {(viewingSupRet.estado || "pendiente").toUpperCase()}
+                  </span>
+                  <span className="text-xs text-gray-400 font-mono">
+                    Comprobante: {viewingSupRet.numero_nota_credito}
+                  </span>
+                </div>
+                <h3 className="font-extrabold text-base text-slate-900 dark:text-white flex items-center gap-2">
+                  <Truck className="w-5 h-5 text-amber-600" />
+                  Devolución a {viewingSupRet.supplier_nombre}
+                </h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPrintingSupplierReturn(viewingSupRet.raw || viewingSupRet)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 shadow-sm transition-colors"
+                >
+                  <Printer className="w-4 h-4" /> Imprimir Remito
+                </button>
+                <button onClick={() => setViewingSupRet(null)} className="text-slate-400 hover:text-slate-600 p-1 rounded-xl">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Banner de Impacto en Stock */}
+            {viewingSupRet.estado === "completado" && (
+              <div className="p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50 flex items-start gap-3 text-xs">
+                <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold text-emerald-900 dark:text-emerald-200">
+                    Impacto en Stock: Egresado y Confirmado
+                  </div>
+                  <div className="text-[11px] text-emerald-700 dark:text-emerald-300 mt-0.5">
+                    Las unidades salieron físicamente del inventario bajo el movimiento Kardex <code>devolucion_proveedor</code>. El saldo de compra fue afectado.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {viewingSupRet.estado === "autorizado" && (
+              <div className="p-3.5 rounded-2xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/50 flex items-start gap-3 text-xs">
+                <Clock className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold text-blue-900 dark:text-blue-200">
+                    Impacto en Stock: Salida Autorizada (Pendiente de Retiro)
+                  </div>
+                  <div className="text-[11px] text-blue-700 dark:text-blue-300 mt-0.5">
+                    Devolución aprobada comercialmente. La mercadería debe prepararse para el transportista. El egreso de stock definitivo se consolidará al marcar la devolución como completada.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {(!viewingSupRet.estado || viewingSupRet.estado === "pendiente") && (
+              <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 flex items-start gap-3 text-xs">
+                <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold text-amber-900 dark:text-amber-200">
+                    Impacto en Stock: En Trámite (Sin Egreso de Inventario)
+                  </div>
+                  <div className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5">
+                    La solicitud está en espera de aprobación del proveedor. No se ha realizado aún ningún descuento contable ni físico de mercadería.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Datos Generales */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/70 rounded-2xl space-y-1.5 text-xs">
+              <div className="flex justify-between"><span className="text-slate-400">Proveedor:</span><strong className="text-slate-900 dark:text-white">{viewingSupRet.supplier_nombre}</strong></div>
+              <div className="flex justify-between"><span className="text-slate-400">Factura Afectada:</span><span className="font-mono text-slate-700 dark:text-slate-300">{viewingSupRet.numero_factura_origen ? `#${viewingSupRet.numero_factura_origen}` : "Ajuste directo / Sin factura"}</span></div>
+              <div className="flex justify-between"><span className="text-slate-400">Fecha de Registro:</span><span className="font-mono text-slate-700 dark:text-slate-300">{viewingSupRet.fecha ? formatDate(viewingSupRet.fecha) : "—"}</span></div>
+              <div className="flex justify-between"><span className="text-slate-400">Depósito / Almacén:</span><span className="font-medium text-slate-700 dark:text-slate-300">{viewingSupRet.almacen_nombre || "Depósito Central"}</span></div>
+              {viewingSupRet.observaciones && (
+                <div className="pt-2 border-t border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-[11px]">
+                  <strong>Observaciones:</strong> {viewingSupRet.observaciones}
+                </div>
+              )}
+            </div>
+
+            {/* Lista de Ítems */}
+            {viewingSupRet.items && viewingSupRet.items.length > 0 ? (
+              <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden text-xs">
+                <table className="w-full text-left">
+                  <thead className="bg-slate-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 font-bold">
+                    <tr>
+                      <th className="py-2.5 px-3">Producto / Código</th>
+                      <th className="py-2.5 px-3">Motivo</th>
+                      <th className="py-2.5 px-3 text-right">Cant.</th>
+                      <th className="py-2.5 px-3 text-right">Unitario</th>
+                      <th className="py-2.5 px-3 text-right">Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {(() => {
+                      const rawItems = viewingSupRet.items || []
+                      const map = new Map<string, any>()
+                      for (const it of rawItems) {
+                        const key = String(it.producto_id || it.id || it.producto_nombre || it.descripcion)
+                        const cant = Number(it.cantidad || 0)
+                        const valU = Number(it.valor_unitario || it.precio_unitario || 0)
+                        const valTot = Number(it.valor_total || it.total || (cant * valU))
+                        if (map.has(key)) {
+                          const ex = map.get(key)
+                          const nCant = ex.cantidad + cant
+                          const nTot = ex.valor_total + valTot
+                          map.set(key, {
+                            ...ex,
+                            cantidad: nCant,
+                            valor_total: nTot,
+                            valor_unitario: nCant > 0 ? Math.round(nTot / nCant) : valU,
+                            lote: [ex.lote, it.lote].filter(Boolean).join(", ") || undefined,
+                          })
+                        } else {
+                          map.set(key, { ...it, cantidad: cant, valor_unitario: valU, valor_total: valTot })
+                        }
+                      }
+                      return Array.from(map.values()).map((it: any, idx: number) => (
+                        <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                          <td className="py-2 px-3">
+                            <span className="font-semibold text-gray-900 dark:text-white block">{it.producto_nombre || it.descripcion}</span>
+                            <div className="flex items-center gap-2 text-[10px] text-gray-400 font-mono">
+                              {it.codigo_barras && <span>CB: {it.codigo_barras}</span>}
+                              {it.codigo_barra && !it.codigo_barras && <span>CB: {it.codigo_barra}</span>}
+                              {it.codigo_interno && <span>SKU: {it.codigo_interno}</span>}
+                              {it.sku && !it.codigo_interno && <span>SKU: {it.sku}</span>}
+                              {it.lote && <span>Lote: {it.lote}</span>}
+                            </div>
+                          </td>
+                          <td className="py-2 px-3">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300">
+                              {it.motivo || "Devolución"}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 text-right font-bold text-gray-900 dark:text-white">
+                            {it.cantidad}
+                          </td>
+                          <td className="py-2 px-3 text-right text-gray-700 dark:text-gray-300 font-mono">
+                            {formatPYG(Number(it.valor_unitario || it.precio_unitario || 0))}
+                          </td>
+                          <td className="py-2 px-3 text-right font-bold text-amber-600 dark:text-amber-400 font-mono">
+                            {formatPYG(Number(it.valor_total || it.total || 0))}
+                          </td>
+                        </tr>
+                      ))
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
+            {/* Total */}
+            <div className="flex justify-between items-center pt-2 border-t border-slate-100 dark:border-slate-800 text-sm font-black">
+              <span>Monto Total Devolución:</span>
+              <span className="font-mono text-amber-600 dark:text-amber-400 text-base">
+                {formatPYG(Number(viewingSupRet.monto || 0))}
+              </span>
+            </div>
+
+            {/* Footer */}
+            <div className="pt-2 flex justify-between items-center">
+              <button
+                type="button"
+                onClick={() => setPrintingSupplierReturn(viewingSupRet.raw || viewingSupRet)}
+                className="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition"
+              >
+                <Printer className="w-4 h-4" /> Imprimir Remito Oficial
+              </button>
+              <button
+                onClick={() => setViewingSupRet(null)}
+                className="px-5 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: REMITO OFICIAL DE IMPRESIÓN ── */}
+      {printingSupplierReturn && (
+        <DevolucionProveedorPrintModal
+          devolucion={printingSupplierReturn}
+          onClose={() => setPrintingSupplierReturn(null)}
+        />
       )}
     </div>
   )

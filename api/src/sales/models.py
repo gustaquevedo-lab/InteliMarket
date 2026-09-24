@@ -14,9 +14,15 @@ class Sale(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     branch_id = Column(UUID(as_uuid=True))
+    session_id = Column(UUID(as_uuid=True), index=True)
     customer_id = Column(UUID(as_uuid=True))
     emission_point_id = Column(UUID(as_uuid=True))
     numero = Column(String(20), nullable=False, unique=True)
+    # Correlativo interno propio (independiente del numero de factura fiscal
+    # 001-XXX-NNNNNNN) -- se genera y guarda SIEMPRE, exista o no timbrado
+    # configurado, para que haya un codigo de venta estable que no dependa
+    # de la config fiscal ni del punto de emision.
+    numero_interno = Column(String(20), unique=True)
     fecha = Column(DateTime(timezone=True), server_default=func.now())
     tipo_comprobante = Column(String(20), nullable=False)
     condicion = Column(String(20), nullable=False, default="contado")
@@ -35,11 +41,12 @@ class Sale(Base):
     total_pagado = Column(Numeric(15, 0), default=0)
     saldo = Column(Numeric(15, 0))
 
-    cdc = Column(String(50))
-    factura_numero = Column(String(30))
-    link_qr = Column(String(1000))
-    timbrado = Column(String(20))
-    codigo_hash = Column(String(100))
+    # Redondeo solidario / Donación (Amor y Esperanza)
+    monto_donacion = Column(Numeric(15, 0), default=0, server_default=text("0"))
+    donacion_campana = Column(String(100), nullable=True)
+    donacion_ong = Column(String(100), nullable=True)
+
+    cdc = Column(String(44))
     sifen_estado = Column(String(20))
     sifen_fecha_respuesta = Column(DateTime(timezone=True))
     sifen_xml_sent = Column(Text)
@@ -49,6 +56,8 @@ class Sale(Base):
 
     observaciones = Column(Text)
     user_id = Column(UUID(as_uuid=True))
+    recibo_html = Column(Text)
+    recibo_escpos_b64 = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -74,3 +83,19 @@ class SaleItem(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     sale = relationship("Sale", back_populates="items")
+
+
+class SalePayment(Base):
+    """Desglose de medios de pago por venta (efectivo, tarjeta, QR, PIX, etc.)"""
+    __tablename__ = "sale_payments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    sale_id = Column(UUID(as_uuid=True), ForeignKey("sales.id"), nullable=False, index=True)
+    forma_pago = Column(String(30), nullable=False)
+    monto = Column(Numeric(15, 2), nullable=False)
+    moneda = Column(String(3), nullable=False, default="PYG", server_default=text("'PYG'"))
+    fecha = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    sale = relationship("Sale")

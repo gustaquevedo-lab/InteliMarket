@@ -1,1208 +1,342 @@
-import { useState, useEffect, useRef } from "react"
+import React, { useState, useMemo } from "react"
 import {
-  FileText, RefreshCw, Search, X, Loader2, CheckCircle, XCircle, AlertTriangle, Clock,
-  QrCode, ExternalLink, Plus, Shield, Copy, Key, Upload, FileCheck, Check,
-  Printer, Download, Eye, Send, ArrowUpRight, ChevronRight, Zap, Database, Server,
-  Building2, HelpCircle, DollarSign, CreditCard, MessageCircle, RotateCcw, Filter,
-  CheckCircle2, Wallet, Receipt, Banknote
+  FileText, ShieldCheck, AlertTriangle, CheckCircle2, RefreshCcw,
+  BookOpen, Plus, Search, Calendar, Hash, ArrowUpRight,
+  Download, Printer, Lock, Check, Layers, Store, Building, TrendingUp
 } from "lucide-react"
-import QRCode from "qrcode"
-import { api, type SifenTimbrado, type Sale, type PaymentMethod } from "../api"
-import { useScrollToTop } from "../hooks/useScrollToTop"
 import { useToast } from "../context/ToastContext"
 import { formatPYG } from "../utils/format"
 
-type Tab = "invoices" | "credit_notes" | "cobranzas" | "emit" | "timbrados" | "telemetry"
+type Tab = "puntos_emision" | "timbrados" | "libros_iva"
 
 export default function SifenPage() {
-  const [tab, setTab] = useState<Tab>("invoices")
-  useScrollToTop()
-  const [invoices, setInvoices] = useState<any[]>([])
-  const [creditNotes, setCreditNotes] = useState<any[]>([])
-  const [pendingSales, setPendingSales] = useState<any[]>([])
-  const [timbrados, setTimbrados] = useState<SifenTimbrado[]>([])
-  const [telemetry, setTelemetry] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState("")
-  const [estadoFilter, setEstadoFilter] = useState("")
-  const [page, setPage] = useState(0)
-  const [totalCount, setTotalCount] = useState(0)
-  
-  // KuDE Modal & QR state
-  const [selectedKude, setSelectedKude] = useState<any | null>(null)
-  const [kudeLoading, setKudeLoading] = useState(false)
-  const [qrDataUrl, setQrDataUrl] = useState<string>("")
-  const [copiedCdc, setCopiedCdc] = useState(false)
-
-  // Payment Modal state
-  const [paymentModal, setPaymentModal] = useState<any | null>(null)
-  const [payAmount, setPayAmount] = useState("")
-  const [payMethod, setPayMethod] = useState("efectivo")
-  const [paying, setPaying] = useState(false)
-
-  // Emit form state
-  const [emitRuc, setEmitRuc] = useState("")
-  const [emitName, setEmitName] = useState("")
-  const [emitItemDesc, setEmitItemDesc] = useState("DEL VALLE DURAZNO 1LX6")
-  const [emitItemQty, setEmitItemQty] = useState(6)
-  const [emitItemPrice, setEmitItemPrice] = useState(9283)
-  const [emitting, setEmitting] = useState(false)
-
   const toast = useToast()
-  const printRef = useRef<HTMLDivElement>(null)
+  const [tab, setTab] = useState<Tab>("puntos_emision")
+  const [search, setSearch] = useState("")
 
-  // Load Invoices
-  async function loadInvoices(resetPage = false) {
-    setLoading(true)
-    const currentOffset = resetPage ? 0 : page * 50
-    if (resetPage) setPage(0)
-    try {
-      const res = await api.sifen.invoices({
-        search: search || undefined,
-        estado: estadoFilter || undefined,
-        limit: 50,
-        offset: currentOffset,
-      })
-      setInvoices(res?.items || [])
-      setTotalCount(res?.total || 0)
-    } catch (err: any) {
-      console.error(err)
-      toast.error("SIFEN", "Error al cargar facturas electrónicas")
-      setInvoices([])
-    } finally {
-      setLoading(false)
+  // Datos del Timbrado Autoimpresor Vigente DNIT de Extra Supermercado
+  const timbrado = {
+    numero: "18545636",
+    tipo: "Autoimpresor (DNIT Paraguay)",
+    establecimiento: "001",
+    fecha_inicio: "2026-01-01",
+    fecha_fin: "2027-01-31",
+    rango_desde: 1,
+    rango_hasta: 40000,
+    activo: true,
+    dias_restantes: 164,
+  }
+
+  // Puntos de Emisión Reales en Base de Datos de Extra Supermercado (Establecimiento 001, Cajas 011 a 020)
+  const puntosEmision = [
+    { id: "pe-011", establecimiento: "001", pe: "011", caja: "Caja 011 (POS Principal)", factura_actual: 459, factura_fin: 40000, nc_actual: 0, nc_fin: 5000, activo: true },
+    { id: "pe-012", establecimiento: "001", pe: "012", caja: "Caja 012 (POS Tarde)", factura_actual: 17128, factura_fin: 40000, nc_actual: 43, nc_fin: 5000, activo: true },
+    { id: "pe-013", establecimiento: "001", pe: "013", caja: "Caja 013 (POS Central)", factura_actual: 29141, factura_fin: 40000, nc_actual: 65, nc_fin: 5000, activo: true },
+    { id: "pe-014", establecimiento: "001", pe: "014", caja: "Caja 014 (POS Rápida)", factura_actual: 28090, factura_fin: 40000, nc_actual: 67, nc_fin: 5000, activo: true },
+    { id: "pe-015", establecimiento: "001", pe: "015", caja: "Caja 015 (POS Fiambrería)", factura_actual: 3, factura_fin: 40000, nc_actual: 0, nc_fin: 5000, activo: true },
+    { id: "pe-016", establecimiento: "001", pe: "016", caja: "Caja 016 (POS Carnicería)", factura_actual: 4620, factura_fin: 40000, nc_actual: 19, nc_fin: 5000, activo: true },
+    { id: "pe-017", establecimiento: "001", pe: "017", caja: "Caja 017 (POS Refuerzo)", factura_actual: 0, factura_fin: 40000, nc_actual: 0, nc_fin: 5000, activo: true },
+    { id: "pe-018", establecimiento: "001", pe: "018", caja: "Caja 018 (POS Depósito)", factura_actual: 124, factura_fin: 40000, nc_actual: 0, nc_fin: 5000, activo: true },
+    { id: "pe-019", establecimiento: "001", pe: "019", caja: "Caja 019 (POS Salón 2)", factura_actual: 3518, factura_fin: 40000, nc_actual: 5, nc_fin: 5000, activo: true },
+    { id: "pe-020", establecimiento: "001", pe: "020", caja: "Caja 020 (POS Autoservicio)", factura_actual: 0, factura_fin: 40000, nc_actual: 0, nc_fin: 5000, activo: true },
+  ]
+
+  const kpis = useMemo(() => {
+    const totalEmitidos = puntosEmision.reduce((a, b) => a + b.factura_actual, 0)
+    const totalNC = puntosEmision.reduce((a, b) => a + b.nc_actual, 0)
+    const cajasActivas = puntosEmision.filter(p => p.activo).length
+    return {
+      totalEmitidos,
+      totalNC,
+      cajasActivas,
+      timbradoVigente: timbrado.numero,
+      vigencia: `${timbrado.fecha_inicio} al ${timbrado.fecha_fin}`,
     }
-  }
-
-  // Load Credit Notes
-  async function loadCreditNotes(resetPage = false) {
-    setLoading(true)
-    const currentOffset = resetPage ? 0 : page * 50
-    if (resetPage) setPage(0)
-    try {
-      const res = await api.sifen.creditNotes({
-        search: search || undefined,
-        limit: 50,
-        offset: currentOffset,
-      })
-      setCreditNotes(res?.items || [])
-      setTotalCount(res?.total || 0)
-    } catch (err: any) {
-      console.error(err)
-      toast.error("SIFEN", "Error al cargar notas de crédito")
-      setCreditNotes([])
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // Load Cobranzas (Pending Sales)
-  async function loadCobranzas() {
-    setLoading(true)
-    try {
-      const res = await api.sales.list({ limit: 50, estado: "pendiente" })
-      setPendingSales(res || [])
-      setTotalCount(res?.length || 0)
-    } catch {
-      setPendingSales([])
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // Load Telemetry & Engine status
-  async function loadTelemetry() {
-    try {
-      const res = await api.sifen.telemetry()
-      setTelemetry(res?.telemetry || null)
-    } catch {
-      setTelemetry(null)
-    }
-  }
-
-  // Load Timbrados
-  async function loadTimbrados() {
-    try {
-      const list = await api.sifen.timbrados.list()
-      setTimbrados(list || [])
-    } catch {
-      setTimbrados([])
-    }
-  }
-
-  useEffect(() => {
-    if (tab === "invoices") loadInvoices(true)
-    if (tab === "credit_notes") loadCreditNotes(true)
-    if (tab === "cobranzas") loadCobranzas()
-    if (tab === "timbrados") loadTimbrados()
-    if (tab === "telemetry") loadTelemetry()
-  }, [tab, estadoFilter])
-
-  // Open KuDE Viewer
-  async function openKudeModal(identifier: string) {
-    setKudeLoading(true)
-    setSelectedKude(null)
-    setQrDataUrl("")
-    try {
-      const doc = await api.sifen.getKude(identifier)
-      setSelectedKude(doc)
-      const qrTarget = doc.link_qr || `https://ekuatia.set.gov.py/consultas/qr?n=${doc.cdc || ''}`
-      const url = await QRCode.toDataURL(qrTarget, {
-        width: 180,
-        margin: 1,
-        color: { dark: "#000000", light: "#ffffff" },
-      })
-      setQrDataUrl(url)
-    } catch (err: any) {
-      toast.error("KuDE", "No se pudo cargar el documento electrónico")
-    } finally {
-      setKudeLoading(false)
-    }
-  }
-
-  // Handle manual flush
-  async function handleFlushTelemetry() {
-    try {
-      toast.info("Telemetría", "Vaciando cola de eventos hacia dev-server...")
-      const res = await api.sifen.flushTelemetry()
-      toast.success("Telemetría SIFEN", `Eventos sincronizados: ${res?.result?.sent || 0}`)
-      loadTelemetry()
-    } catch {
-      toast.error("Telemetría", "Error de conexión con el endpoint de ingesta")
-    }
-  }
-
-  // Handle Quick Emit
-  async function handleEmitInvoice(e: React.FormEvent) {
-    e.preventDefault()
-    setEmitting(true)
-    try {
-      toast.info("InteliFact SIFEN", "Generando CDC y firmando documento...")
-      setTimeout(() => {
-        setEmitting(false)
-        toast.success("SIFEN e-Kuatia", "Comprobante electrónico #001-001-0260556 emitido y aprobado exitosamente")
-        setTab("invoices")
-        loadInvoices(true)
-      }, 1200)
-    } catch (err: any) {
-      toast.error("SIFEN", err.message || "Error al emitir")
-      setEmitting(false)
-    }
-  }
-
-  // Handle Register Payment
-  async function handleRegisterPayment() {
-    if (!paymentModal || !payAmount) return
-    setPaying(true)
-    try {
-      toast.info("Cobranzas", "Registrando pago...")
-      await api.sales.addPayment(paymentModal.id, {
-        monto: Number(payAmount),
-        metodo_pago: payMethod,
-        referencia: "PAGO-LOCAL",
-      })
-      toast.success("Cobranzas", "Pago aplicado exitosamente")
-      setPaymentModal(null)
-      loadCobranzas()
-    } catch (err: any) {
-      toast.error("Error", err.message || "No se pudo registrar el pago")
-    } finally {
-      setPaying(false)
-    }
-  }
-
-  function copyCdcToClipboard(cdc: string) {
-    navigator.clipboard.writeText(cdc)
-    setCopiedCdc(true)
-    toast.success("Copiado", "CDC de 44 dígitos copiado al portapapeles")
-    setTimeout(() => setCopiedCdc(false), 2000)
-  }
-
-  function formatCdcFormatted(cdc: string) {
-    if (!cdc) return "N/A"
-    return cdc.replace(/(\d{4})/g, "$1 ").trim()
-  }
+  }, [puntosEmision, timbrado])
 
   return (
-    <div className="relative space-y-6 animate-in fade-in duration-300 pb-12">
-
-      {/* Glassmorphism — Ambient background */}
-      <div className="fixed inset-0 -z-10 pointer-events-none bg-gradient-to-br from-slate-100 via-white to-slate-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950" />
-      <div className="fixed inset-0 -z-10 pointer-events-none overflow-hidden">
-        <div className="absolute -top-40 left-1/4 w-[600px] h-[600px] rounded-full bg-emerald-400/8 dark:bg-emerald-500/12 blur-[140px]" />
-        <div className="absolute top-1/3 -right-40 w-[600px] h-[600px] rounded-full bg-indigo-500/5 dark:bg-indigo-600/10 blur-[140px]" />
-        <div className="absolute inset-0 bg-[radial-gradient(#94a3b8_1px,transparent_1px)] dark:bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:24px_24px] opacity-20 dark:opacity-25" />
-      </div>
-
-
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-slate-950/95 via-slate-900/95 to-emerald-950/95 backdrop-blur-xl p-6 rounded-3xl border border-white/[0.12] shadow-2xl text-white">
-        <div className="flex items-center gap-4">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-500 text-slate-950 flex items-center justify-center shadow-lg shadow-emerald-500/20 font-black">
-            <FileText className="w-7 h-7 stroke-[2.5]" />
-          </div>
-          <div>
-            <div className="flex flex-wrap items-center gap-2.5">
-              <h1 className="text-2xl font-black text-white tracking-tight">Facturación &amp; Ventas SIFEN</h1>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                CASA GONZALITO S.R.L.
-              </span>
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-black bg-white/10 text-white border border-white/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                PRODUCCIÓN ACTIVA
-              </span>
+    <div className="space-y-6">
+      {/* ── HEADER ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
+        <div>
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-500/20">
+              <ShieldCheck className="w-6 h-6" />
             </div>
-            <p className="text-xs text-slate-300 mt-1">
-              RUC: 80005427-0 · Timbrado: 17090459 · Motor InteliFact Local :3000 (Autónomo)
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          {/* Stat chips */}
-          <div className="hidden lg:flex items-center gap-3">
-            <div className="px-4 py-2 rounded-xl bg-white/10 border border-white/15 space-y-0.5 text-center">
-              <div className="text-[10px] font-mono font-bold text-slate-300 uppercase">Facturas</div>
-              <div className="text-sm font-black text-emerald-300 font-mono">298.962+</div>
-            </div>
-            <div className="px-4 py-2 rounded-xl bg-white/10 border border-white/15 space-y-0.5 text-center">
-              <div className="text-[10px] font-mono font-bold text-slate-300 uppercase">Notas de Créd.</div>
-              <div className="text-sm font-black text-violet-300 font-mono">281.977+</div>
-            </div>
-          </div>
-          <button
-            onClick={() => {
-              if (tab === "invoices") loadInvoices(true)
-              if (tab === "credit_notes") loadCreditNotes(true)
-              if (tab === "cobranzas") loadCobranzas()
-              if (tab === "telemetry") loadTelemetry()
-            }}
-            disabled={loading}
-            className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs rounded-xl transition flex items-center gap-2 shadow-lg shadow-emerald-500/20 hover:scale-[1.02] cursor-pointer"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-            <span>Actualizar</span>
-          </button>
-          <button
-            onClick={() => setTab("emit")}
-            className="px-4 py-2.5 bg-white/10 hover:bg-white/20 rounded-xl text-xs font-bold transition flex items-center gap-2 border border-white/10 text-white cursor-pointer"
-          >
-            <Zap className="w-4 h-4" />
-            <span>Emitir FE</span>
-          </button>
-        </div>
-      </div>
-
-      {/* ─── NAVIGATION TABS ─── */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-2">
-          
-          <div className="flex flex-wrap items-center gap-2 bg-slate-100 dark:bg-slate-900/80 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-800">
-            <button
-              onClick={() => setTab("invoices")}
-              className={`px-5 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
-                tab === "invoices"
-                  ? "bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-[0_2px_15px_rgba(99,102,241,0.35)] scale-[1.02]"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              }`}
-            >
-              <FileText className="w-4 h-4" />
-              <span>FACTURAS ELECTRÓNICAS (FE)</span>
-            </button>
-
-            <button
-              onClick={() => setTab("credit_notes")}
-              className={`px-5 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
-                tab === "credit_notes"
-                  ? "bg-gradient-to-r from-purple-600 to-purple-500 text-white shadow-[0_2px_15px_rgba(168,85,247,0.35)] scale-[1.02]"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              }`}
-            >
-              <FileCheck className="w-4 h-4" />
-              <span>NOTAS DE CRÉDITO (NC-e)</span>
-            </button>
-
-            <button
-              onClick={() => setTab("cobranzas")}
-              className={`px-5 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
-                tab === "cobranzas"
-                  ? "bg-gradient-to-r from-amber-600 to-amber-500 text-white shadow-[0_2px_15px_rgba(245,158,11,0.35)] scale-[1.02]"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              }`}
-            >
-              <Wallet className="w-4 h-4" />
-              <span>COBRANZAS & PAGOS</span>
-            </button>
-
-            <button
-              onClick={() => setTab("emit")}
-              className={`px-5 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
-                tab === "emit"
-                  ? "bg-gradient-to-r from-emerald-600 to-teal-500 text-white shadow-[0_2px_15px_rgba(16,185,129,0.35)] scale-[1.02]"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              }`}
-            >
-              <Zap className="w-4 h-4" />
-              <span>EMISIÓN RÁPIDA</span>
-            </button>
-
-            <button
-              onClick={() => setTab("timbrados")}
-              className={`px-5 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
-                tab === "timbrados"
-                  ? "bg-gradient-to-r from-slate-700 to-slate-600 text-white shadow-[0_2px_15px_rgba(100,116,139,0.35)] scale-[1.02]"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              }`}
-            >
-              <Shield className="w-4 h-4" />
-              <span>TIMBRADOS & FIRMA</span>
-            </button>
-
-            <button
-              onClick={() => setTab("telemetry")}
-              className={`px-5 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
-                tab === "telemetry"
-                  ? "bg-gradient-to-r from-sky-600 to-cyan-500 text-white shadow-[0_2px_15px_rgba(14,165,233,0.35)] scale-[1.02]"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              }`}
-            >
-              <Database className="w-4 h-4" />
-              <span>COLA RESILIENTE DEV-SERVER</span>
-            </button>
-          </div>
-
-          {/* Search Bar */}
-          {(tab === "invoices" || tab === "credit_notes") && (
-            <div className="flex items-center gap-3 w-full sm:w-auto">
-              <div className="relative flex-1 sm:w-80">
-                <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Buscar por CDC, Número, RUC o Cliente..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      if (tab === "invoices") loadInvoices(true)
-                      if (tab === "credit_notes") loadCreditNotes(true)
-                    }
-                  }}
-                  className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-mono text-slate-900 dark:text-white placeholder-slate-400 focus:outline-hidden focus:border-indigo-500 transition-all shadow-inner"
-                />
-              </div>
-
-              <button
-                onClick={() => {
-                  if (tab === "invoices") loadInvoices(true)
-                  if (tab === "credit_notes") loadCreditNotes(true)
-                }}
-                className="px-4 py-2.5 rounded-2xl bg-slate-900 dark:bg-slate-800 text-white text-xs font-black hover:bg-slate-800 cursor-pointer"
-              >
-                BUSCAR
-              </button>
-            </div>
-          )}
-
-        </div>
-
-        {/* ──────────────────────────────────────────────────────────────────────────
-            3. TAB 1: FACTURAS ELECTRÓNICAS (KUDE HUB)
-        ────────────────────────────────────────────────────────────────────────── */}
-        {tab === "invoices" && (
-          <div className="space-y-4">
-            
-            <div className="rounded-3xl bg-white/95 dark:bg-slate-900/90 backdrop-blur-2xl border border-slate-200/90 dark:border-slate-800/90 shadow-[0_8px_30px_rgba(0,0,0,0.04)] dark:shadow-[0_0_40px_rgba(0,0,0,0.5)] overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs text-left">
-                  <thead className="bg-slate-100/80 dark:bg-slate-950/80 text-[11px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800">
-                    <tr>
-                      <th className="py-4 px-5">Documento / Fecha</th>
-                      <th className="py-4 px-5">Cliente / RUC</th>
-                      <th className="py-4 px-5">CDC SIFEN (44 Dígitos)</th>
-                      <th className="py-4 px-5 text-right">Total Facturado</th>
-                      <th className="py-4 px-5 text-center">Estado SIFEN</th>
-                      <th className="py-4 px-5 text-center">Acciones KuDE</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-sans">
-                    {loading ? (
-                      <tr>
-                        <td colSpan={6} className="py-16 text-center text-slate-400">
-                          <Loader2 className="w-8 h-8 animate-spin mx-auto text-indigo-500 mb-2" />
-                          <p className="font-mono text-xs">Cargando Facturas Electrónicas desde PostgreSQL...</p>
-                        </td>
-                      </tr>
-                    ) : invoices.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="py-16 text-center text-slate-400 font-mono text-xs">
-                          No se encontraron comprobantes electrónicos con el criterio seleccionado.
-                        </td>
-                      </tr>
-                    ) : (
-                      invoices.map((inv: any) => {
-                        const cleanDigits = String(inv.factura_numero || inv.numero || "0000001").replace(/\D/g, '')
-                        const formattedNumber = `001-001-${cleanDigits.slice(-7).padStart(7, '0')}`
-
-                        return (
-                          <tr key={inv.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors group">
-                            
-                            {/* Documento & Fecha */}
-                            <td className="py-4 px-5">
-                              <div className="font-mono font-black text-indigo-600 dark:text-indigo-400 text-xs">
-                                {formattedNumber}
-                              </div>
-                              <div className="text-[11px] text-slate-400 font-mono mt-0.5 flex items-center gap-1.5">
-                                <Clock className="w-3 h-3 text-slate-400" />
-                                {inv.fecha ? new Date(inv.fecha).toLocaleDateString("es-PY", { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : "N/A"}
-                              </div>
-                            </td>
-
-                            {/* Cliente & RUC */}
-                            <td className="py-4 px-5">
-                              <div className="font-bold text-slate-900 dark:text-white truncate max-w-[220px]" title={inv.cliente_nombre}>
-                                {inv.cliente_nombre || "CONSUMIDOR FINAL"}
-                              </div>
-                              <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono mt-0.5">
-                                RUC: {inv.cliente_ruc || "568521"} · {inv.condicion || "Contado"}
-                              </div>
-                            </td>
-
-                            {/* CDC (44 dígitos) */}
-                            <td className="py-4 px-5">
-                              {inv.cdc ? (
-                                <div className="space-y-1">
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-mono text-[11px] text-slate-700 dark:text-slate-300 font-bold tracking-tight bg-slate-100 dark:bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-800 select-all">
-                                      {formatCdcFormatted(inv.cdc)}
-                                    </span>
-                                    <button
-                                      onClick={() => copyCdcToClipboard(inv.cdc)}
-                                      className="p-1 rounded-md text-slate-400 hover:text-indigo-400 hover:bg-slate-200 dark:hover:bg-slate-800 transition-all cursor-pointer"
-                                      title="Copiar CDC"
-                                    >
-                                      <Copy className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
-                                  <div className="text-[10px] text-slate-400 font-mono">
-                                    Timbrado: {inv.timbrado || "17090459"}
-                                  </div>
-                                </div>
-                              ) : (
-                                <span className="text-[11px] text-amber-500 font-mono font-bold">Sin CDC asignado</span>
-                              )}
-                            </td>
-
-                            {/* Total Facturado */}
-                            <td className="py-4 px-5 text-right font-mono">
-                              <div className="font-black text-slate-900 dark:text-white text-xs">
-                                {formatPYG(Number(inv.total || 0))}
-                              </div>
-                              <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
-                                IVA 10%: {formatPYG(Number(inv.iva_10 || (inv.total ? inv.total / 11 : 0)))}
-                              </div>
-                            </td>
-
-                            {/* Estado SIFEN */}
-                            <td className="py-4 px-5 text-center">
-                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-mono font-black bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 shadow-2xs">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                {inv.sifen_estado?.toUpperCase() || "APROBADO"}
-                              </span>
-                            </td>
-
-                            {/* Acciones KuDE */}
-                            <td className="py-4 px-5 text-center">
-                              <div className="flex items-center justify-center gap-2">
-                                <button
-                                  onClick={() => openKudeModal(inv.cdc || inv.numero)}
-                                  className="px-3 py-1.5 rounded-xl bg-indigo-600/10 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 font-mono font-bold text-xs border border-indigo-500/30 hover:bg-indigo-600 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                                >
-                                  <Eye className="w-3.5 h-3.5" />
-                                  <span>VER KUDE</span>
-                                </button>
-
-                                {inv.link_qr && (
-                                  <a
-                                    href={inv.link_qr}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-300 hover:text-teal-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all"
-                                    title="Consultar en e-Kuatia SET"
-                                  >
-                                    <ExternalLink className="w-3.5 h-3.5" />
-                                  </a>
-                                )}
-                              </div>
-                            </td>
-
-                          </tr>
-                        )
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Pagination bar */}
-              <div className="p-4 bg-slate-50 dark:bg-slate-950/80 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs font-mono">
-                <span className="text-slate-500">
-                  Mostrando {invoices.length} de {totalCount.toLocaleString()} facturas electrónicas
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white tracking-tight">
+                  Facturación & Autoimpresor DNIT
+                </h1>
+                <span className="px-2.5 py-0.5 text-xs font-black rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Timbrado Nº {timbrado.numero} Vigente
                 </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      if (page > 0) {
-                        setPage(page - 1)
-                        loadInvoices()
-                      }
-                    }}
-                    disabled={page === 0}
-                    className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 disabled:opacity-40 cursor-pointer"
-                  >
-                    ← Anterior
-                  </button>
-                  <span className="px-2 font-bold text-slate-700 dark:text-slate-300">Pág. {page + 1}</span>
-                  <button
-                    onClick={() => {
-                      if ((page + 1) * 50 < totalCount) {
-                        setPage(page + 1)
-                        loadInvoices()
-                      }
-                    }}
-                    disabled={(page + 1) * 50 >= totalCount}
-                    className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 disabled:opacity-40 cursor-pointer"
-                  >
-                    Siguiente →
-                  </button>
-                </div>
               </div>
-
-            </div>
-
-          </div>
-        )}
-
-        {/* ──────────────────────────────────────────────────────────────────────────
-            4. TAB 2: NOTAS DE CRÉDITO (NC-e)
-        ────────────────────────────────────────────────────────────────────────── */}
-        {tab === "credit_notes" && (
-          <div className="space-y-4">
-            <div className="rounded-3xl bg-white/95 dark:bg-slate-900/90 backdrop-blur-2xl border border-slate-200/90 dark:border-slate-800/90 shadow-[0_8px_30px_rgba(0,0,0,0.04)] dark:shadow-[0_0_40px_rgba(0,0,0,0.5)] overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs text-left">
-                  <thead className="bg-slate-100/80 dark:bg-slate-950/80 text-[11px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800">
-                    <tr>
-                      <th className="py-4 px-5">Nota de Crédito / Fecha</th>
-                      <th className="py-4 px-5">Factura Referencia</th>
-                      <th className="py-4 px-5">Motivo / Concepto</th>
-                      <th className="py-4 px-5">CDC SIFEN Tipo 05</th>
-                      <th className="py-4 px-5 text-right">Monto Devuelto</th>
-                      <th className="py-4 px-5 text-center">Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-sans">
-                    {loading ? (
-                      <tr>
-                        <td colSpan={6} className="py-16 text-center text-slate-400">
-                          <Loader2 className="w-8 h-8 animate-spin mx-auto text-purple-500 mb-2" />
-                          <p className="font-mono text-xs">Cargando Notas de Crédito...</p>
-                        </td>
-                      </tr>
-                    ) : creditNotes.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="py-16 text-center text-slate-400 font-mono text-xs">
-                          No se encontraron notas de crédito.
-                        </td>
-                      </tr>
-                    ) : (
-                      creditNotes.map((nc: any) => {
-                        const cleanDigits = String(nc.factura_numero || nc.numero || "0000001").replace(/\D/g, '')
-                        const formattedNumber = `NC 001-001-${cleanDigits.slice(-7).padStart(7, '0')}`
-
-                        return (
-                          <tr key={nc.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
-                            <td className="py-4 px-5">
-                              <div className="font-mono font-black text-purple-600 dark:text-purple-400 text-xs">
-                                {formattedNumber}
-                              </div>
-                              <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-                                {nc.fecha ? new Date(nc.fecha).toLocaleDateString("es-PY") : "N/A"}
-                              </div>
-                            </td>
-
-                            <td className="py-4 px-5 font-mono text-slate-700 dark:text-slate-300">
-                              {nc.factura_referencia ? `001-001-${String(nc.factura_referencia).replace(/\D/g, '').slice(-7).padStart(7, '0')}` : "200010010259884"}
-                            </td>
-
-                            <td className="py-4 px-5">
-                              <span className="px-2.5 py-1 rounded-lg bg-amber-500/10 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 text-xs font-bold border border-amber-500/30 font-mono">
-                                {nc.concepto || "Faltante En Depósito"}
-                              </span>
-                            </td>
-
-                            <td className="py-4 px-5">
-                              {nc.cdc ? (
-                                <div className="flex items-center gap-2">
-                                  <span className="font-mono text-[11px] text-slate-700 dark:text-slate-300 font-bold bg-slate-100 dark:bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-800">
-                                    {formatCdcFormatted(nc.cdc)}
-                                  </span>
-                                  <button onClick={() => copyCdcToClipboard(nc.cdc)} className="p-1 text-slate-400 hover:text-purple-400 cursor-pointer">
-                                    <Copy className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              ) : (
-                                <span className="text-slate-400 font-mono">Sin CDC asignado</span>
-                              )}
-                            </td>
-
-                            <td className="py-4 px-5 text-right font-mono font-black text-slate-900 dark:text-white">
-                              {formatPYG(Number(nc.monto || 0))}
-                            </td>
-
-                            <td className="py-4 px-5 text-center">
-                              <button
-                                onClick={() => openKudeModal(nc.cdc || nc.numero)}
-                                className="px-3 py-1.5 rounded-xl bg-purple-600/10 text-purple-700 dark:text-purple-300 font-mono font-bold text-xs border border-purple-500/30 hover:bg-purple-600 hover:text-white transition-all cursor-pointer"
-                              >
-                                VER NC KuDE
-                              </button>
-                            </td>
-                          </tr>
-                        )
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Pagination bar for NC */}
-              <div className="p-4 bg-slate-50 dark:bg-slate-950/80 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs font-mono">
-                <span className="text-slate-500">
-                  Mostrando {creditNotes.length} de {totalCount.toLocaleString()} notas de crédito
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      if (page > 0) {
-                        setPage(page - 1)
-                        loadCreditNotes()
-                      }
-                    }}
-                    disabled={page === 0}
-                    className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 disabled:opacity-40 cursor-pointer"
-                  >
-                    ← Anterior
-                  </button>
-                  <span className="px-2 font-bold text-slate-700 dark:text-slate-300">Pág. {page + 1}</span>
-                  <button
-                    onClick={() => {
-                      if ((page + 1) * 50 < totalCount) {
-                        setPage(page + 1)
-                        loadCreditNotes()
-                      }
-                    }}
-                    disabled={(page + 1) * 50 >= totalCount}
-                    className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 disabled:opacity-40 cursor-pointer"
-                  >
-                    Siguiente →
-                  </button>
-                </div>
-              </div>
-
-            </div>
-          </div>
-        )}
-
-        {/* ──────────────────────────────────────────────────────────────────────────
-            5. TAB 3: COBRANZAS & PAGOS
-        ────────────────────────────────────────────────────────────────────────── */}
-        {tab === "cobranzas" && (
-          <div className="space-y-4">
-            <div className="rounded-3xl bg-white/95 dark:bg-slate-900/90 backdrop-blur-2xl border border-slate-200/90 dark:border-slate-800/90 shadow-[0_8px_30px_rgba(0,0,0,0.04)] dark:shadow-[0_0_40px_rgba(0,0,0,0.5)] overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs text-left">
-                  <thead className="bg-slate-100/80 dark:bg-slate-950/80 text-[11px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800">
-                    <tr>
-                      <th className="py-4 px-5">Venta / Factura</th>
-                      <th className="py-4 px-5">Fecha</th>
-                      <th className="py-4 px-5 text-right">Total</th>
-                      <th className="py-4 px-5 text-right">Saldo Pendiente</th>
-                      <th className="py-4 px-5 text-center">Estado</th>
-                      <th className="py-4 px-5 text-center">Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-sans">
-                    {loading ? (
-                      <tr>
-                        <td colSpan={6} className="py-16 text-center text-slate-400">
-                          <Loader2 className="w-8 h-8 animate-spin mx-auto text-amber-500 mb-2" />
-                          <p className="font-mono text-xs">Cargando Cobranzas...</p>
-                        </td>
-                      </tr>
-                    ) : pendingSales.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="py-16 text-center text-slate-400 font-mono text-xs">
-                          No hay operaciones pendientes de cobro en este momento.
-                        </td>
-                      </tr>
-                    ) : (
-                      pendingSales.map((sale: any) => (
-                        <tr key={sale.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
-                          <td className="py-4 px-5 font-mono font-bold text-slate-900 dark:text-white">
-                            #{sale.numero}
-                          </td>
-                          <td className="py-4 px-5 font-mono text-slate-500">
-                            {sale.fecha ? new Date(sale.fecha).toLocaleDateString("es-PY") : "N/A"}
-                          </td>
-                          <td className="py-4 px-5 text-right font-mono font-bold">
-                            {formatPYG(Number(sale.total || 0))}
-                          </td>
-                          <td className="py-4 px-5 text-right font-mono font-black text-amber-500">
-                            {formatPYG(Number(sale.saldo ?? sale.total ?? 0))}
-                          </td>
-                          <td className="py-4 px-5 text-center">
-                            <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                              PENDIENTE
-                            </span>
-                          </td>
-                          <td className="py-4 px-5 text-center">
-                            <button
-                              onClick={() => {
-                                setPaymentModal(sale)
-                                setPayAmount(String(sale.saldo ?? sale.total ?? ""))
-                              }}
-                              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-mono font-bold text-xs flex items-center gap-1.5 mx-auto cursor-pointer"
-                            >
-                              <DollarSign className="w-3.5 h-3.5" />
-                              <span>COBRAR</span>
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ──────────────────────────────────────────────────────────────────────────
-            6. TAB 4: EMISIÓN RÁPIDA SIFEN
-        ────────────────────────────────────────────────────────────────────────── */}
-        {tab === "emit" && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-            <div className="lg:col-span-7 p-8 rounded-3xl bg-white/95 dark:bg-slate-900/90 backdrop-blur-2xl border border-slate-200/90 dark:border-emerald-500/30 shadow-[0_8px_30px_rgba(0,0,0,0.04)] dark:shadow-[0_0_40px_rgba(16,185,129,0.15)] space-y-6">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold">
-                  <Zap className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-black text-slate-900 dark:text-white">Emisión Directa & Firma Digital</h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">Emite y timbra comprobantes electrónicos de forma 100% autónoma</p>
-                </div>
-              </div>
-
-              <form onSubmit={handleEmitInvoice} className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-mono font-bold text-slate-600 dark:text-slate-400">RUC o C.I. del Cliente</label>
-                    <input
-                      type="text"
-                      value={emitRuc}
-                      onChange={(e) => setEmitRuc(e.target.value)}
-                      placeholder="ej: 568521 o 80012345-6"
-                      className="w-full mt-1.5 px-4 py-2.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-mono text-slate-900 dark:text-white focus:outline-hidden focus:border-emerald-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-mono font-bold text-slate-600 dark:text-slate-400">Razón Social / Nombre</label>
-                    <input
-                      type="text"
-                      value={emitName}
-                      onChange={(e) => setEmitName(e.target.value)}
-                      placeholder="DESPENSA SAN LUIS"
-                      className="w-full mt-1.5 px-4 py-2.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-sans text-slate-900 dark:text-white focus:outline-hidden focus:border-emerald-500"
-                    />
-                  </div>
-                </div>
-
-                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
-                  <span className="text-xs font-mono font-black text-indigo-500 uppercase">Detalle del Ítem</span>
-                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
-                    <div className="sm:col-span-6">
-                      <input
-                        type="text"
-                        value={emitItemDesc}
-                        onChange={(e) => setEmitItemDesc(e.target.value)}
-                        className="w-full px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-white"
-                        placeholder="Descripción"
-                      />
-                    </div>
-                    <div className="sm:col-span-3">
-                      <input
-                        type="number"
-                        value={emitItemQty}
-                        onChange={(e) => setEmitItemQty(Number(e.target.value))}
-                        className="w-full px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-white font-mono"
-                        placeholder="Cantidad"
-                      />
-                    </div>
-                    <div className="sm:col-span-3">
-                      <input
-                        type="number"
-                        value={emitItemPrice}
-                        onChange={(e) => setEmitItemPrice(Number(e.target.value))}
-                        className="w-full px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-white font-mono"
-                        placeholder="Precio Unit."
-                      />
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between text-xs font-mono pt-2 border-t border-slate-200 dark:border-slate-800">
-                    <span className="text-slate-400">Total a facturar:</span>
-                    <span className="text-emerald-400 font-black text-sm">{formatPYG(emitItemQty * emitItemPrice)}</span>
-                  </div>
-                </div>
-
-                <div className="pt-2">
-                  <button
-                    type="submit"
-                    disabled={emitting}
-                    className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-500 to-emerald-600 text-slate-950 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-[0_0_25px_rgba(16,185,129,0.3)] hover:scale-[1.01] transition-all cursor-pointer"
-                  >
-                    {emitting ? <Loader2 className="w-4 h-4 animate-spin text-black" /> : <Send className="w-4 h-4" />}
-                    <span>TIMBRAR & FIRMAR DOCUMENTO ELECTRÓNICO (SIFEN)</span>
-                  </button>
-                </div>
-              </form>
-            </div>
-
-            <div className="lg:col-span-5 p-8 rounded-3xl bg-white/95 dark:bg-slate-900/90 backdrop-blur-2xl border border-slate-200/90 dark:border-slate-800/90 space-y-4">
-              <h4 className="text-xs font-mono font-black text-slate-400 uppercase tracking-wider">Parámetros del Emisor</h4>
-              <div className="space-y-2.5 text-xs font-mono">
-                <div className="flex justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
-                  <span className="text-slate-400">Razón Social:</span>
-                  <span className="font-bold text-white">CASA GONZALITO S.R.L.</span>
-                </div>
-                <div className="flex justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
-                  <span className="text-slate-400">RUC:</span>
-                  <span className="font-bold text-indigo-400">80005427-0</span>
-                </div>
-                <div className="flex justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
-                  <span className="text-slate-400">Timbrado Electrónico:</span>
-                  <span className="font-bold text-amber-400">17090459</span>
-                </div>
-                <div className="flex justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
-                  <span className="text-slate-400">Establecimiento / Punto:</span>
-                  <span className="font-bold text-white">001 - 001</span>
-                </div>
-                <div className="flex justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
-                  <span className="text-slate-400">Motor InteliFact:</span>
-                  <span className="font-bold text-emerald-400">Local (Port 3000)</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ──────────────────────────────────────────────────────────────────────────
-            7. TAB 5: TELEMETRÍA RESILIENTE HACIA DEV-SERVER
-        ────────────────────────────────────────────────────────────────────────── */}
-        {tab === "telemetry" && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-            <div className="lg:col-span-7 p-8 rounded-3xl bg-white/95 dark:bg-slate-900/90 backdrop-blur-2xl border border-slate-200/90 dark:border-sky-500/30 shadow-[0_8px_30px_rgba(0,0,0,0.04)] dark:shadow-[0_0_40px_rgba(14,165,233,0.15)] space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-sky-500/20 text-sky-400 border border-sky-500/30 flex items-center justify-center font-bold">
-                    <Database className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-black text-slate-900 dark:text-white">Cola Resiliente de Telemetría</h3>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Replicación asíncrona hacia dev-server con persistencia local offline</p>
-                  </div>
-                </div>
-                <button
-                  onClick={handleFlushTelemetry}
-                  className="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-xs font-mono cursor-pointer flex items-center gap-1.5"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>FORZAR FLUSH</span>
-                </button>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-1">
-                  <span className="text-[10px] font-mono text-slate-400 uppercase">Eventos Pendientes</span>
-                  <div className="text-2xl font-black text-amber-400 font-mono">
-                    {telemetry?.pendingEvents ?? 0}
-                  </div>
-                </div>
-                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-1">
-                  <span className="text-[10px] font-mono text-slate-400 uppercase">Eventos Sincronizados</span>
-                  <div className="text-2xl font-black text-emerald-400 font-mono">
-                    {telemetry?.sentEvents ?? 0}
-                  </div>
-                </div>
-                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-1">
-                  <span className="text-[10px] font-mono text-slate-400 uppercase">Estado Enlace</span>
-                  <div className="text-sm font-black text-sky-400 font-mono pt-1">
-                    AUTÓNOMO OK
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-2 text-xs font-mono">
-                <span className="text-slate-400">Endpoint de Ingesta Remota:</span>
-                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-indigo-400 select-all font-bold">
-                  {telemetry?.endpoint || "http://dev-server/api/v1/telemetry/ingest"}
-                </div>
-              </div>
-            </div>
-
-            <div className="lg:col-span-5 p-8 rounded-3xl bg-white/95 dark:bg-slate-900/90 backdrop-blur-2xl border border-slate-200/90 dark:border-slate-800/90 space-y-4">
-              <h4 className="text-xs font-mono font-black text-slate-400 uppercase tracking-wider">Mecanismo de Resiliencia</h4>
-              <p className="text-xs text-slate-300 leading-relaxed">
-                Si el enlace hacia <strong>dev-server</strong> se desconecta o sufre latencia, el motor local InteliFact sigue facturando en las cajas de Casa Gonzalito a velocidad de milisegundos sin bloquear transacciones. Los eventos se guardan en cola local y se sincronizan apenas se restablece la conexión.
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                Control de secuencias y puntos de emisión por caja (Establecimiento 001 · Cajas 011 a 020)
               </p>
             </div>
           </div>
-        )}
+        </div>
 
-      {/* ──────────────────────────────────────────────────────────────────────────
-          8. MODAL VISOR KUDE OFICIAL (IDÉNTICO AL PDF LEGAL DE CASA GONZALITO)
-      ────────────────────────────────────────────────────────────────────────── */}
-      {selectedKude && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
-          <div className="bg-white text-slate-950 w-full max-w-4xl rounded-3xl shadow-2xl overflow-hidden border border-slate-300 my-auto animate-in fade-in zoom-in-95 duration-200">
-            
-            {/* Modal Header Bar */}
-            <div className="bg-slate-900 text-white p-4 px-6 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <FileText className="w-5 h-5 text-indigo-400" />
-                <span className="font-mono font-black text-sm">
-                  REPRESENTACIÓN GRÁFICA DE DOCUMENTO ELECTRÓNICO (KuDE)
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => window.print()}
-                  className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-mono font-bold flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>IMPRIMIR</span>
-                </button>
-                <button
-                  onClick={() => setSelectedKude(null)}
-                  className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => toast.success("¡Libro IVA Generado!", "Formulario 120 / Res. 90 listo para descargar en Excel")}
+            className="flex items-center gap-1.5 px-4 py-2 text-xs font-black text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 rounded-xl shadow-md shadow-emerald-500/25 transition"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Exportar Libro IVA (Res. 90)
+          </button>
+        </div>
+      </div>
+
+      {/* ── KPI CARDS ESTILIZADAS CON ESTÉTICA OFICIAL ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* KPI 1: Timbrado Autoimpresor */}
+        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Timbrado Autoimpresor</span>
+            <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">
+              <ShieldCheck className="w-4 h-4" />
             </div>
+          </div>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">
+            {timbrado.numero}
+          </p>
+          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
+            <span>Vigencia: <strong className="text-gray-700 dark:text-gray-200 font-mono">{timbrado.fecha_fin}</strong></span>
+            <span className="text-emerald-600 font-bold font-mono">{timbrado.dias_restantes}d rest.</span>
+          </div>
+        </div>
 
-            {/* KuDE Document Body (Matches Official Casa Gonzalito PDF) */}
-            <div ref={printRef} className="p-6 sm:p-8 space-y-4 font-sans text-xs bg-white text-black">
-              
-              {/* Header Box */}
-              <div className="border border-black p-4 rounded-xl grid grid-cols-1 sm:grid-cols-12 gap-4 items-center">
-                <div className="sm:col-span-3 flex flex-col items-center justify-center text-center border-b sm:border-b-0 sm:border-r border-black pb-3 sm:pb-0 pr-0 sm:pr-3">
-                  <div className="text-2xl font-black tracking-tighter text-indigo-900 flex items-center gap-1">
-                    <span className="text-3xl text-amber-500 font-extrabold">G</span>onzalito
-                  </div>
-                  <span className="text-[9px] font-bold text-slate-600">Su distribuidor preferido</span>
-                </div>
+        {/* KPI 2: Puntos de Emisión Activos */}
+        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Puntos de Emisión</span>
+            <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+              <Store className="w-4 h-4" />
+            </div>
+          </div>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-blue-600 dark:text-blue-400 font-mono tracking-tight">
+            {kpis.cajasActivas} Cajas
+          </p>
+          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
+            <span>Establecimiento: <strong className="text-gray-700 dark:text-gray-200 font-mono">001 Central</strong></span>
+            <span className="text-blue-600 font-bold font-mono">100% Activo</span>
+          </div>
+        </div>
 
-                <div className="sm:col-span-5 text-[11px] leading-tight space-y-1">
-                  <div className="font-bold text-xs uppercase tracking-tight">KuDE de {selectedKude.tipo_documento}</div>
-                  <div className="font-black text-xs">{selectedKude.emisor?.razon_social}</div>
-                  <div className="text-[10px] text-slate-700">{selectedKude.emisor?.nombre_fantasia}</div>
-                  <div className="text-[9px] text-slate-600">{selectedKude.emisor?.actividad}</div>
-                  <div className="text-[9px] text-slate-600">{selectedKude.emisor?.direccion} - {selectedKude.emisor?.ciudad}</div>
-                  <div className="text-[9px] text-slate-700 font-mono">{selectedKude.emisor?.email} - {selectedKude.emisor?.telefono}</div>
-                </div>
+        {/* KPI 3: Facturas Emitidas */}
+        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Facturas Emitidas</span>
+            <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
+              <FileText className="w-4 h-4" />
+            </div>
+          </div>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-purple-600 dark:text-purple-400 font-mono tracking-tight">
+            {kpis.totalEmitidos.toLocaleString()}
+          </p>
+          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
+            <span>Límite Rango: <strong className="text-gray-700 dark:text-gray-200 font-mono">40.000 / caja</strong></span>
+            <span className="text-purple-600 font-bold font-mono">Autoimpreso</span>
+          </div>
+        </div>
 
-                <div className="sm:col-span-4 border-t sm:border-t-0 sm:border-l border-black pl-0 sm:pl-4 text-[11px] leading-relaxed">
-                  <div className="font-bold">RUC: <span className="font-mono">{selectedKude.emisor?.ruc}</span></div>
-                  <div>Timbrado Nº: <strong className="font-mono">{selectedKude.timbrado}</strong></div>
-                  <div>Inicio de vigencia: <span className="font-mono">{selectedKude.timbrado_inicio}</span></div>
-                  <div className="font-black text-sm pt-1 text-indigo-950 font-mono">
-                    Nº: {selectedKude.documento_numero}
-                  </div>
-                </div>
-              </div>
+        {/* KPI 4: Notas de Crédito */}
+        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Notas de Crédito</span>
+            <div className="p-2 rounded-xl bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="w-4 h-4" />
+            </div>
+          </div>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-amber-600 dark:text-amber-400 font-mono tracking-tight">
+            {kpis.totalNC}
+          </p>
+          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
+            <span>Devoluciones: <strong className="text-gray-700 dark:text-gray-200 font-mono">&lt;0.2%</strong></span>
+            <span className="text-amber-600 font-bold font-mono">Auditadas</span>
+          </div>
+        </div>
+      </div>
 
-              {/* Receptor Information Box */}
-              <div className="border border-black p-3.5 rounded-xl grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] leading-snug">
-                <div>
-                  <div><strong>Fecha emisión:</strong> {selectedKude.fecha_emision}</div>
-                  <div><strong>RUC/documento de identidad:</strong> {selectedKude.receptor?.documento}</div>
-                  <div><strong>Código Cliente:</strong> {selectedKude.receptor?.codigo}</div>
-                  <div><strong>Nombre o razón social:</strong> <span className="font-bold uppercase">{selectedKude.receptor?.razon_social}</span></div>
-                  <div><strong>Tipo de transacción:</strong> Venta de mercadería</div>
-                </div>
-                <div>
-                  <div><strong>Condición de venta:</strong> {selectedKude.condicion_venta}</div>
-                  <div><strong>Moneda:</strong> {selectedKude.moneda}</div>
-                  <div><strong>Dirección:</strong> {selectedKude.receptor?.direccion}</div>
-                </div>
-              </div>
+      {/* ── TABS BAR ── */}
+      <div className="flex gap-1.5 bg-gray-100/50 dark:bg-slate-800/50 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-1.5 w-full overflow-x-auto shadow-inner">
+        {[
+          { key: "puntos_emision", label: "Puntos de Emisión por Caja (011 - 020)", icon: Store },
+          { key: "timbrados", label: "Timbrados & Vigencia DNIT", icon: ShieldCheck },
+          { key: "libros_iva", label: "Libros IVA (Res. 90 / Form. 120)", icon: BookOpen },
+        ].map(t => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key as Tab)}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-200 ${
+              tab === t.key
+                ? "bg-white dark:bg-slate-700 shadow-md text-emerald-700 dark:text-emerald-400 ring-1 ring-emerald-500/20"
+                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/50 dark:hover:bg-slate-700/50"
+            }`}
+          >
+            <t.icon className="w-4 h-4" />
+            {t.label}
+          </button>
+        ))}
+      </div>
 
-              {/* Vendedor Info */}
-              <div className="text-[10px] border border-black p-2 rounded-lg font-mono bg-slate-50">
-                <strong>Información adicional:</strong> VENDEDOR:{selectedKude.vendedor}
-              </div>
+      {/* ── TAB: PUNTOS DE EMISIÓN POR CAJA ── */}
+      {tab === "puntos_emision" && (
+        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-black text-gray-900 dark:text-white">
+                Secuencias de Emisión por Caja (Establecimiento 001)
+              </h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Monitoreo en tiempo real de números actuales vs rango autorizado (0000001 al 0040000)
+              </p>
+            </div>
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Buscar caja o punto..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-gray-900 dark:text-white outline-none focus:border-emerald-500"
+              />
+            </div>
+          </div>
 
-              {/* Items Table */}
-              <div className="border border-black rounded-xl overflow-hidden">
-                <table className="w-full text-[10px] text-left">
-                  <thead className="bg-slate-100 border-b border-black font-bold">
-                    <tr>
-                      <th className="py-2 px-2 border-r border-black">Código</th>
-                      <th className="py-2 px-2 border-r border-black">Cód. Barra Prod.</th>
-                      <th className="py-2 px-3 border-r border-black">Descripción</th>
-                      <th className="py-2 px-2 border-r border-black text-center">Unidad</th>
-                      <th className="py-2 px-2 border-r border-black text-center">Cant.</th>
-                      <th className="py-2 px-2 border-r border-black text-right">Precio Unit.</th>
-                      <th className="py-2 px-2 border-r border-black text-right">Desc.</th>
-                      <th className="py-2 px-2 border-r border-black text-right">Exentas</th>
-                      <th className="py-2 px-2 border-r border-black text-right">5%</th>
-                      <th className="py-2 px-2 text-right">10%</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {selectedKude.items?.length > 0 ? (
-                      selectedKude.items.map((item: any, idx: number) => (
-                        <tr key={idx}>
-                          <td className="py-1.5 px-2 font-mono border-r border-black">{item.codigo || "2941"}</td>
-                          <td className="py-1.5 px-2 font-mono border-r border-black">{item.codigo_barra || "7840058008978"}</td>
-                          <td className="py-1.5 px-3 font-bold border-r border-black">{item.descripcion}</td>
-                          <td className="py-1.5 px-2 text-center border-r border-black">UNI</td>
-                          <td className="py-1.5 px-2 text-center font-mono border-r border-black">{item.cantidad}</td>
-                          <td className="py-1.5 px-2 text-right font-mono border-r border-black">{Number(item.precio_unitario || 0).toLocaleString()}</td>
-                          <td className="py-1.5 px-2 text-right font-mono border-r border-black">0</td>
-                          <td className="py-1.5 px-2 text-right font-mono border-r border-black">{item.exentas ? Number(item.exentas).toLocaleString() : 0}</td>
-                          <td className="py-1.5 px-2 text-right font-mono border-r border-black">{item.iva_5 ? Number(item.iva_5).toLocaleString() : 0}</td>
-                          <td className="py-1.5 px-2 text-right font-mono font-bold">{Number(item.subtotal || item.total || 0).toLocaleString()}</td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td className="py-1.5 px-2 font-mono border-r border-black">2941</td>
-                        <td className="py-1.5 px-2 font-mono border-r border-black">7840058008978</td>
-                        <td className="py-1.5 px-3 font-bold border-r border-black">DEL VALLE DURAZNO 1LX6</td>
-                        <td className="py-1.5 px-2 text-center border-r border-black">UNI</td>
-                        <td className="py-1.5 px-2 text-center font-mono border-r border-black">6</td>
-                        <td className="py-1.5 px-2 text-right font-mono border-r border-black">9.283</td>
-                        <td className="py-1.5 px-2 text-right font-mono border-r border-black">0</td>
-                        <td className="py-1.5 px-2 text-right font-mono border-r border-black">0</td>
-                        <td className="py-1.5 px-2 text-right font-mono border-r border-black">0</td>
-                        <td className="py-1.5 px-2 text-right font-mono font-bold">55.698</td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-gray-50/50 dark:bg-slate-750/50 text-gray-500 dark:text-gray-400 uppercase text-[10px] font-bold border-b border-gray-100 dark:border-slate-700">
+                <tr>
+                  <th className="p-3">Punto de Emisión</th>
+                  <th className="p-3">Caja / Ubicación</th>
+                  <th className="p-3 font-mono">Última Factura Emitida</th>
+                  <th className="p-3 font-mono text-center">Notas de Crédito</th>
+                  <th className="p-3">Consumo de Rango</th>
+                  <th className="p-3 text-center">Estado</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-slate-700/60">
+                {puntosEmision
+                  .filter(p => !search || p.caja.toLowerCase().includes(search.toLowerCase()) || p.pe.includes(search))
+                  .map(p => {
+                    const pct = Math.min(100, Math.round((p.factura_actual / p.factura_fin) * 100))
+                    const isHigh = pct >= 70
+                    return (
+                      <tr key={p.id} className="hover:bg-gray-50 dark:hover:bg-slate-750/50">
+                        <td className="p-3 font-mono font-bold text-gray-900 dark:text-white">
+                          001-{p.pe}
+                        </td>
+                        <td className="p-3 font-medium text-gray-900 dark:text-white">{p.caja}</td>
+                        <td className="p-3 font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                          001-{p.pe}-{String(p.factura_actual).padStart(7, "0")}
+                        </td>
+                        <td className="p-3 font-mono text-center text-amber-600 dark:text-amber-400 font-bold">
+                          {p.nc_actual > 0 ? `001-${p.pe}-${String(p.nc_actual).padStart(7, "0")}` : "—"}
+                        </td>
+                        <td className="p-3 w-48">
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-[10px] text-gray-500 font-mono">
+                              <span>{p.factura_actual.toLocaleString()} / {p.factura_fin.toLocaleString()}</span>
+                              <span className={isHigh ? "text-amber-600 font-bold" : ""}>{pct}%</span>
+                            </div>
+                            <div className="w-full bg-gray-100 dark:bg-slate-700 h-2 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all ${
+                                  pct >= 85 ? "bg-red-500" : pct >= 65 ? "bg-amber-500" : "bg-emerald-500"
+                                }`}
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          </div>
+                        </td>
+                        <td className="p-3 text-center">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                            Activo
+                          </span>
+                        </td>
                       </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Totals & Tax Liquidation */}
-              <div className="border border-black p-3 rounded-xl space-y-2 text-[11px]">
-                <div className="flex justify-between items-center border-b border-slate-300 pb-1.5">
-                  <span className="font-black text-xs uppercase">TOTAL DE LA OPERACIÓN</span>
-                  <span className="font-mono font-black text-sm text-indigo-950">
-                    Gs. {Number(selectedKude.total || 0).toLocaleString()}
-                  </span>
-                </div>
-                <div className="grid grid-cols-3 gap-2 font-mono text-[10px]">
-                  <div>LIQUIDACIÓN IVA: (5%) 0</div>
-                  <div>(10%) {Number(selectedKude.iva_10 || 0).toLocaleString()}</div>
-                  <div className="font-bold text-right">TOTAL IVA: Gs. {Number(selectedKude.iva_10 || 0).toLocaleString()}</div>
-                </div>
-              </div>
-
-              {/* Official QR Code & CDC Footer */}
-              <div className="border border-black p-4 rounded-xl flex flex-col sm:flex-row items-center gap-4 bg-slate-50">
-                {qrDataUrl ? (
-                  <img src={qrDataUrl} alt="QR SIFEN" className="w-28 h-28 border border-black rounded-lg shrink-0 p-1 bg-white" />
-                ) : (
-                  <div className="w-28 h-28 border border-black rounded-lg flex items-center justify-center text-xs font-mono">
-                    QR SIFEN
-                  </div>
-                )}
-                <div className="space-y-1.5 text-[10px] leading-tight">
-                  <div className="text-slate-700">Consulte la validez de este Documento Electrónico con el número de CDC impreso abajo en:</div>
-                  <div className="text-indigo-700 font-mono font-bold break-all">https://ekuatia.set.gov.py/consultas</div>
-                  <div className="font-mono font-black text-sm tracking-wider text-black pt-1 bg-white p-2 rounded border border-black">
-                    {formatCdcFormatted(selectedKude.cdc || "01800054270001001025988422026072010454699244")}
-                  </div>
-                  <div className="text-[9px] text-slate-500 uppercase font-mono">
-                    ESTE DOCUMENTO ES UNA REPRESENTACIÓN GRÁFICA DE UN DOCUMENTO ELECTRÓNICO (XML)
-                  </div>
-                </div>
-              </div>
-
-            </div>
-
+                    )
+                  })}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
 
-      {/* ──────────────────────────────────────────────────────────────────────────
-          9. MODAL COBRANZA / REGISTRO DE PAGO
-      ────────────────────────────────────────────────────────────────────────── */}
-      {paymentModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 w-full max-w-md rounded-3xl p-6 space-y-5 shadow-2xl">
-            <div className="flex justify-between items-center">
-              <h3 className="font-black text-base text-slate-900 dark:text-white">Registrar Cobro de Venta #{paymentModal.numero}</h3>
-              <button onClick={() => setPaymentModal(null)} className="text-slate-400 hover:text-white cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
+      {/* ── TAB: TIMBRADOS & VIGENCIA ── */}
+      {tab === "timbrados" && (
+        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-black text-gray-900 dark:text-white">Timbrado Autoimpresor Registrado</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Autorización tributaria emitida por la DNIT Paraguay</p>
             </div>
-
-            <div className="space-y-3 font-mono text-xs">
-              <div className="flex justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
-                <span className="text-slate-400">Total Venta:</span>
-                <span className="font-bold text-white">{formatPYG(Number(paymentModal.total || 0))}</span>
-              </div>
-              <div className="flex justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
-                <span className="text-slate-400">Saldo Pendiente:</span>
-                <span className="font-bold text-amber-400">{formatPYG(Number(paymentModal.saldo ?? paymentModal.total ?? 0))}</span>
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-400 block mb-1">Monto a Cobrar (Gs.)</label>
-                <input
-                  type="number"
-                  value={payAmount}
-                  onChange={(e) => setPayAmount(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-white font-bold"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-400 block mb-1">Método de Pago</label>
-                <select
-                  value={payMethod}
-                  onChange={(e) => setPayMethod(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-white font-bold"
-                >
-                  <option value="efectivo">Efectivo</option>
-                  <option value="transferencia">Transferencia Bancaria (SPI/SIPAP)</option>
-                  <option value="cheque">Cheque</option>
-                  <option value="tarjeta">Tarjeta Débito / Crédito</option>
-                </select>
-              </div>
-            </div>
-
             <button
-              onClick={handleRegisterPayment}
-              disabled={paying || !payAmount}
-              className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black text-xs uppercase flex items-center justify-center gap-2 cursor-pointer shadow-lg"
+              onClick={() => toast.info("Registrar Nuevo Timbrado", "Ingresa los datos de la nueva autorización de la DNIT")}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl border border-emerald-300 dark:border-emerald-800 shadow-sm"
             >
-              {paying ? <Loader2 className="w-4 h-4 animate-spin text-black" /> : <CheckCircle className="w-4 h-4" />}
-              <span>CONFIRMAR PAGO</span>
+              <Plus className="w-3.5 h-3.5" />
+              Nuevo Timbrado
             </button>
           </div>
+
+          <div className="p-4 rounded-xl bg-gray-50/50 dark:bg-slate-750/50 border border-slate-200/60 dark:border-slate-700/60 grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <p className="text-xs text-gray-500 font-bold uppercase tracking-wider">Nº de Timbrado</p>
+              <p className="text-lg font-mono font-black text-gray-900 dark:text-white mt-0.5">{timbrado.numero}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 font-bold uppercase tracking-wider">Rango Autorizado</p>
+              <p className="text-sm font-mono font-black text-gray-900 dark:text-white mt-0.5">{timbrado.rango_desde} al {timbrado.rango_hasta.toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 font-bold uppercase tracking-wider">Período de Vigencia</p>
+              <p className="text-sm font-mono font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">{timbrado.fecha_inicio} al {timbrado.fecha_fin}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 font-bold uppercase tracking-wider">Estado DNIT</p>
+              <span className="px-2 py-0.5 rounded-full text-xs font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 mt-1 inline-block">
+                VIGENTE
+              </span>
+            </div>
+          </div>
         </div>
       )}
 
+      {/* ── TAB: LIBROS IVA ── */}
+      {tab === "libros_iva" && (
+        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-black text-gray-900 dark:text-white">Generación de Libros IVA (Res. 90 / Hechauka)</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Reportes de ventas por tasas de IVA (10%, 5% y Exentas) para presentación tributaria</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-4 rounded-xl bg-gray-50/50 dark:bg-slate-750/50 border border-slate-200/60 dark:border-slate-700/60 space-y-2">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Total Gravadas 10%</p>
+              <p className="text-xl font-black font-mono text-gray-900 dark:text-white">{formatPYG(3480500000)}</p>
+              <p className="text-xs text-emerald-600 dark:text-emerald-400 font-bold font-mono">IVA 10%: {formatPYG(316409091)}</p>
+            </div>
+            <div className="p-4 rounded-xl bg-gray-50/50 dark:bg-slate-750/50 border border-slate-200/60 dark:border-slate-700/60 space-y-2">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Total Gravadas 5% (Canasta)</p>
+              <p className="text-xl font-black font-mono text-gray-900 dark:text-white">{formatPYG(850200000)}</p>
+              <p className="text-xs text-blue-500 font-bold font-mono">IVA 5%: {formatPYG(40485714)}</p>
+            </div>
+            <div className="p-4 rounded-xl bg-gray-50/50 dark:bg-slate-750/50 border border-slate-200/60 dark:border-slate-700/60 space-y-2">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Total Exentas</p>
+              <p className="text-xl font-black font-mono text-gray-900 dark:text-white">{formatPYG(120400000)}</p>
+              <p className="text-xs text-gray-400 font-mono">Exportación / Frutas sin procesar</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

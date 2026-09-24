@@ -1,0 +1,31 @@
+---
+// Logo.astro: Logotipo e isotipo oficial de InteliMarket desde Stitch
+interface Props {
+  className?: string;
+  showTagline?: boolean;
+}
+
+const { className = "h-9 w-9", showTagline = true } = Astro.props;
+---
+
+<div class="flex items-center gap-3 group">
+  <!-- Isotipo Oficial Exacto de InteliMarket -->
+  <img
+    src="/images/intelimarket-isotype.png"
+    alt="Isotipo InteliMarket"
+    class={`${className} rounded-xl object-contain shadow-md group-hover:scale-105 transition-transform`}
+  />
+
+  <!-- Texto de Marca Oficial según Stitch -->
+  <div class="flex flex-col">
+    <div class="flex items-center tracking-tight font-headline text-xl leading-none">
+      <span class="font-extrabold text-on-surface">Inteli</span><span class="font-light text-on-surface">Market</span>
+      <span class="w-1.5 h-1.5 rounded-full bg-brand-mint animate-pulse ml-1.5"></span>
+    </div>
+    {showTagline && (
+      <span class="text-[9px] sm:text-[10px] tracking-widest uppercase font-bold text-brand-mint font-mono mt-1 leading-none">
+        HECHO PARA CRECER
+      </span>
+    )}
+  </div>
+</div>

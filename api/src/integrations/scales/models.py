@@ -3,7 +3,7 @@
 from decimal import Decimal
 import enum
 
-from sqlalchemy import Column, String, Boolean, DateTime, Text, Numeric, Integer, Enum as SAEnum, ForeignKey, Index, Date
+from sqlalchemy import Column, String, Boolean, DateTime, Text, Numeric, Integer, ForeignKey, Index, Date
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 
@@ -45,10 +45,10 @@ class ScaleConfig(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     nombre = Column(String(100), nullable=False)
-    marca = Column(SAEnum(ScaleBrand), nullable=False)
+    marca = Column(String(20), nullable=False)
     modelo = Column(String(100))
-    protocolo = Column(SAEnum(ScaleProtocol), nullable=False)
-    conexion = Column(SAEnum(ConnectionType), nullable=False)
+    protocolo = Column(String(20), nullable=False)
+    conexion = Column(String(20), nullable=False)
 
     # Serial params
     puerto_com = Column(String(20))
@@ -70,6 +70,7 @@ class ScaleConfig(Base):
     # SDL / file-based
     ruta_carga = Column(String(500))
     sync_automatico = Column(Boolean, default=False)
+    categorias_ids = Column(JSONB, nullable=False, default=list, server_default="[]", comment="IDs de product_categories que esta balanza recibe via PLU sync; vacio = todas")
 
     # Label defaults
     etiqueta_formato = Column(String(50), default="40x30")

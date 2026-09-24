@@ -16,8 +16,9 @@ from api.src.sifen_avanzado.schemas import (
     SifenAvanzadoDashboard,
 )
 from api.src.sifen_avanzado import service
+from api.src.auth.middleware import require_auth
 
-router = APIRouter(prefix="/api/v1/sifen-avanzado", tags=["sifen-avanzado"])
+router = APIRouter(prefix="/api/v1/sifen-avanzado", tags=["sifen-avanzado"], dependencies=[Depends(require_auth)])
 
 
 # ── DISTRIBUIDORA INVOICE ────────────────────────────────────────────────────

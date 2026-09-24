@@ -7,7 +7,7 @@ const PAGE_SIZE = 20
 
 export default function SellersPage() {
   const { user } = useAuth()
-  const companyId = user?.company_id || "00000000-0000-0000-0000-000000000010"
+  const companyId = (user as any)?.company_id || "00000000-0000-0000-0000-000000000010"
   const [sellers, setSellers] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
@@ -61,7 +61,7 @@ export default function SellersPage() {
     <div className="p-4 md:p-6 space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Vendedores</h1>
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">Vendedores</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             {sellers.length} vendedores registrados
           </p>

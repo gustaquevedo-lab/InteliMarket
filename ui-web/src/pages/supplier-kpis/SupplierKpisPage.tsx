@@ -35,8 +35,6 @@ interface AgreementItem {
   supplier_id: string
   supplier_razon_social: string
   supplier_ruc?: string
-  branch_id?: string
-  branch_nombre?: string
   periodo: string
   nombre_acuerdo?: string
   meta_monto_gs: number
@@ -284,7 +282,7 @@ export default function SupplierKpisPage() {
     if (!summary) return
     setEditRebateObjetivo(Number(summary.period.rebate_pct_objetivo || 4.5))
     setEditObservaciones(summary.period.observaciones || "")
-    setEditIndicators(summary.indicadores.map(ind => ({
+    setEditIndicators(summary.indicadores.map((ind: any) => ({
       id: ind.id,
       codigo: ind.codigo,
       nombre: ind.nombre,
@@ -307,7 +305,7 @@ export default function SupplierKpisPage() {
       await api.supplierKpis.bulkUpdateIndicators(summary.period.id, {
         rebate_pct_objetivo: editRebateObjetivo,
         observaciones: editObservaciones,
-        indicators: editIndicators.map(i => ({
+        indicators: editIndicators.map((i: any) => ({
           id: i.id,
           codigo: i.codigo,
           nombre: i.nombre,
@@ -335,28 +333,28 @@ export default function SupplierKpisPage() {
   // Grouping PARESA indicators by official category / magnitude
   const paresaVolumeIndicators = useMemo(() => {
     if (!summary) return []
-    return summary.indicadores.filter(i => (i.categoria === "volumen" || i.categoria === "sell_in" || i.categoria === "categoria_venta" || i.codigo.startsWith("venta_")) && !i.es_foco && i.codigo !== "total_compra")
+    return summary.indicadores.filter((i: any) => (i.categoria === "volumen" || i.categoria === "sell_in" || i.categoria === "categoria_venta" || i.codigo.startsWith("venta_")) && !i.es_foco && i.codigo !== "total_compra")
   }, [summary])
 
   const paresaFocusIndicators = useMemo(() => {
     if (!summary) return []
-    return summary.indicadores.filter(i => i.es_foco)
+    return summary.indicadores.filter((i: any) => i.es_foco)
   }, [summary])
 
   const paresaTradeIndicators = useMemo(() => {
     if (!summary) return []
-    return summary.indicadores.filter(i => i.categoria === "trade_marketing")
+    return summary.indicadores.filter((i: any) => i.categoria === "trade_marketing")
   }, [summary])
 
   const paresaTotalVolume = useMemo(() => {
     if (!summary) return null
-    return summary.indicadores.find(i => i.codigo === "total_compra")
+    return summary.indicadores.find((i: any) => i.codigo === "total_compra")
   }, [summary])
 
   const macroTotals = useMemo(() => {
-    const totalPeso = paresaVolumeIndicators.reduce((acc, ind) => acc + Number(ind.peso_pct || 0), 0)
-    const totalMeta = paresaVolumeIndicators.reduce((acc, ind) => acc + Number(ind.meta_uc || ind.meta || 0), 0)
-    const totalReal = paresaVolumeIndicators.reduce((acc, ind) => acc + Number(ind.resultado_uc || ind.resultado || 0), 0)
+    const totalPeso = paresaVolumeIndicators.reduce((acc: number, ind: any) => acc + Number(ind.peso_pct || 0), 0)
+    const totalMeta = paresaVolumeIndicators.reduce((acc: number, ind: any) => acc + Number(ind.meta_uc || ind.meta || 0), 0)
+    const totalReal = paresaVolumeIndicators.reduce((acc: number, ind: any) => acc + Number(ind.resultado_uc || ind.resultado || 0), 0)
     const totalAvancePct = totalMeta > 0 ? ((totalReal / totalMeta) * 100).toFixed(2) : "0.00"
     
     const diasTrans = multiDashboard?.dias_transcurridos || Math.min(new Date().getDate(), 31)
@@ -377,8 +375,8 @@ export default function SupplierKpisPage() {
   }, [paresaVolumeIndicators, multiDashboard])
 
   const focusTotals = useMemo(() => {
-    const totalMeta = paresaFocusIndicators.reduce((acc, ind) => acc + Number(ind.meta_uc || ind.meta || 0), 0)
-    const totalReal = paresaFocusIndicators.reduce((acc, ind) => acc + Number(ind.resultado_uc || ind.resultado || 0), 0)
+    const totalMeta = paresaFocusIndicators.reduce((acc: number, ind: any) => acc + Number(ind.meta_uc || ind.meta || 0), 0)
+    const totalReal = paresaFocusIndicators.reduce((acc: number, ind: any) => acc + Number(ind.resultado_uc || ind.resultado || 0), 0)
     const totalAvancePct = totalMeta > 0 ? ((totalReal / totalMeta) * 100).toFixed(2) : "0.00"
     
     const diasTrans = multiDashboard?.dias_transcurridos || Math.min(new Date().getDate(), 31)
@@ -532,7 +530,7 @@ export default function SupplierKpisPage() {
       {/* ─── VISTA 1: TABLERO GENERAL MULTIPROVEEDOR ─── */}
       {/* ═════════════════════════════════════════════════════════════════════════════ */}
       {activeMainTab === "general" && (
-        <ErrorBoundary moduleName="Tablero Multiproveedor" compact onReset={loadGeneralDashboard}>
+        <ErrorBoundary moduleName="Tablero Multiproveedor">
         <div className="space-y-6">
 
           {/* 1. MACRO KPI CARDS MULTIPROVEEDOR */}
@@ -720,16 +718,9 @@ export default function SupplierKpisPage() {
                               {p.supplier_razon_social.charAt(0)}
                             </div>
                             <div>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <p className="font-bold text-gray-900 dark:text-white group-hover:text-indigo-600 transition-colors">
-                                  {p.supplier_razon_social}
-                                </p>
-                                {p.branch_nombre && (
-                                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-                                    🏢 {p.branch_nombre}
-                                  </span>
-                                )}
-                              </div>
+                              <p className="font-bold text-gray-900 dark:text-white group-hover:text-indigo-600 transition-colors">
+                                {p.supplier_razon_social}
+                              </p>
                               <p className="text-[10px] text-gray-400 font-mono">
                                 RUC: {p.supplier_ruc || "N/D"} • {p.skus_vendidos_count} SKUs
                               </p>
@@ -861,7 +852,7 @@ export default function SupplierKpisPage() {
       {/* ─── VISTA 2: PROGRAMA ESPECIAL PARESA (COCA-COLA) CON MAGNITUDES Y TOOLTIPS ─── */}
       {/* ═════════════════════════════════════════════════════════════════════════════ */}
       {activeMainTab === "paresa" && (
-        <ErrorBoundary moduleName="Tablero PARESA Coca-Cola" compact onReset={() => selectedPeriodId ? loadParesaSummary(selectedPeriodId) : loadParesaPeriods()}>
+        <ErrorBoundary moduleName="Tablero PARESA Coca-Cola">
         <div className="space-y-6">
           
           {/* Header PARESA: Selector de Período y Botones */}
@@ -1044,7 +1035,7 @@ export default function SupplierKpisPage() {
 
                 {/* Tarjetas Visuales de Macrocategorías */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {paresaVolumeIndicators.map(ind => {
+                  {paresaVolumeIndicators.map((ind: any) => {
                     const metaVal = Number(ind.meta_uc || ind.meta || 0)
                     const realVal = Number(ind.resultado_uc || ind.resultado || 0)
                     const diasTrans = multiDashboard?.dias_transcurridos || Math.min(new Date().getDate(), 31)
@@ -1169,7 +1160,7 @@ export default function SupplierKpisPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                      {paresaVolumeIndicators.map(ind => {
+                      {paresaVolumeIndicators.map((ind: any) => {
                         const metaVal = Number(ind.meta_uc || ind.meta || 0)
                         const realVal = Number(ind.resultado_uc || ind.resultado || 0)
                         const diasTrans = multiDashboard?.dias_transcurridos || Math.min(new Date().getDate(), 31)
@@ -1311,7 +1302,7 @@ export default function SupplierKpisPage() {
 
                 {/* Tarjetas Visuales de Líneas Foco */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {paresaFocusIndicators.map(ind => {
+                  {paresaFocusIndicators.map((ind: any) => {
                     const metaVal = Number(ind.meta_uc || ind.meta || 0)
                     const realVal = Number(ind.resultado_uc || ind.resultado || 0)
                     const diasTrans = multiDashboard?.dias_transcurridos || Math.min(new Date().getDate(), 31)
@@ -1445,7 +1436,7 @@ export default function SupplierKpisPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                      {paresaFocusIndicators.map(ind => {
+                      {paresaFocusIndicators.map((ind: any) => {
                         const metaVal = Number(ind.meta_uc || ind.meta || 0)
                         const realVal = Number(ind.resultado_uc || ind.resultado || 0)
                         const diasTrans = multiDashboard?.dias_transcurridos || Math.min(new Date().getDate(), 31)
@@ -1584,7 +1575,7 @@ export default function SupplierKpisPage() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {paresaTradeIndicators.map(ind => (
+                  {paresaTradeIndicators.map((ind: any) => (
                     <div key={ind.id} className="p-5 bg-gray-50 dark:bg-slate-800/60 rounded-2xl border border-gray-200 dark:border-slate-700 flex flex-col justify-between gap-4">
                       <div>
                         <div className="flex items-center justify-between">

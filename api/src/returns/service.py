@@ -2,13 +2,24 @@ from decimal import Decimal
 from datetime import datetime, timezone
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+import re
 
 from api.src.returns.models import Return, ReturnItem
 from api.src.returns.schemas import ReturnCreate, ReturnApprove
 from api.src.inventory.models import Stock, InventoryMovement
-from api.src.sales.models import Sale, SaleItem
+from api.src.products.models import Product
+from api.src.customers.models import Customer
+from api.src.sales.models import Sale, SaleItem, SalePayment
+from api.src.accounts_receivable.models import Account
+from api.src.credit_accounts.models import CreditAccount, CreditMovement
+from api.src.fiscal.models import NotaCreditoDebito, PuntoEmisionSecuencia
+from api.src.sifen.models import SifenTimbrado
+from api.src.fiscal.service import reserve_fiscal_invoice_number, TimbradoAgotadoError, TimbradoVencidoError
+
+NUMERO_FISCAL_RE = re.compile(r"^(\d{3})-(\d{3})-(\d+)$")
 
 
 RETURN_MOTIVOS = [
@@ -28,6 +39,21 @@ async def generate_return_number(db: AsyncSession, company_id: str) -> str:
     last = result.scalar_one_or_none()
     seq = int(last.numero.split("-")[-1]) + 1 if last else 1
     return f"DEV-{date_part}-{seq:06d}"
+
+
+async def get_returned_quantities(db: AsyncSession, sale_id) -> dict[str, Decimal]:
+    """Cuanto ya se devolvio de cada sale_item de una venta, sumando solo
+    devoluciones pendientes o aprobadas (una rechazada no bloquea nada --
+    libera la cantidad de nuevo). Es la fuente unica de verdad para no
+    permitir devolver dos veces el mismo item, tanto al crear una devolucion
+    nueva como al mostrar cuanto queda disponible en la pantalla de caja."""
+    result = await db.execute(
+        select(ReturnItem.sale_item_id, func.coalesce(func.sum(ReturnItem.cantidad), 0))
+        .join(Return, Return.id == ReturnItem.return_id)
+        .where(Return.sale_id == sale_id, Return.estado.in_(["pendiente", "aprobado"]))
+        .group_by(ReturnItem.sale_item_id)
+    )
+    return {str(sid): Decimal(str(qty)) for sid, qty in result.all() if sid is not None}
 
 
 async def create_return(db: AsyncSession, data: ReturnCreate) -> Return:
@@ -57,25 +83,70 @@ async def create_return(db: AsyncSession, data: ReturnCreate) -> Return:
     db.add(return_obj)
     await db.flush()
 
+    # ── Política de devolución: máximo 48 horas ─────────────────────────
+    if data.sale_id:
+        sale_res = await db.execute(select(Sale).where(Sale.id == data.sale_id))
+        sale_obj = sale_res.scalar_one_or_none()
+        if sale_obj and sale_obj.fecha:
+            sale_date = sale_obj.fecha
+            if sale_date.tzinfo is None:
+                sale_date = sale_date.replace(tzinfo=timezone.utc)
+            horas_pasadas = (datetime.now(timezone.utc) - sale_date).total_seconds() / 3600.0
+            if horas_pasadas > 48.0:
+                raise ValueError(
+                    f"La factura original {sale_obj.numero or ''} fue emitida el {sale_date.strftime('%d/%m/%Y %H:%M')}. "
+                    f"La política comercial permite devoluciones únicamente hasta 48 horas posteriores a la compra (han transcurrido {int(horas_pasadas)} horas)."
+                )
+
+    # ── Anti doble-devolucion ────────────────────────────────────────────
+    # Sin esto, nada impedia devolver dos veces el mismo item de la misma
+    # venta -- cada devolucion se creaba en el vacio, sin mirar si ya se
+    # habia devuelto ese item antes.
+    if data.sale_id:
+        ya_devuelto = await get_returned_quantities(db, data.sale_id)
+        sale_items_result = await db.execute(select(SaleItem).where(SaleItem.sale_id == data.sale_id))
+        original_qty = {str(si.id): Decimal(str(si.cantidad)) for si in sale_items_result.scalars().all()}
+
+        for item_data in data.items:
+            if not item_data.sale_item_id:
+                continue
+            sid = str(item_data.sale_item_id)
+            if sid not in original_qty:
+                continue
+            disponible = original_qty[sid] - ya_devuelto.get(sid, Decimal("0"))
+            solicitado = Decimal(str(item_data.cantidad))
+            if solicitado > disponible:
+                desc = item_data.descripcion or "este ítem"
+                raise ValueError(
+                    f"{desc}: ya se devolvió {ya_devuelto.get(sid, Decimal(0))} de {original_qty[sid]}. "
+                    f"Disponible para devolver: {disponible}."
+                )
+
     for item_data in data.items:
-        iva_tasa = Decimal(str(item_data.iva_tasa))
-        base = Decimal(str(item_data.precio_unitario)) * Decimal(str(item_data.cantidad))
+        iva_tasa = Decimal(str(item_data.iva_tasa if item_data.iva_tasa is not None else 10))
+        item_total = (Decimal(str(item_data.precio_unitario)) * Decimal(str(item_data.cantidad))).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
         if iva_tasa == Decimal("0"):
+            item_base = item_total
             iva_monto = Decimal("0")
-            item_total = base
         else:
-            iva_monto = (base * iva_tasa / Decimal("100")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
-            item_total = base + iva_monto
+            item_base = (item_total / (Decimal("1") + iva_tasa / Decimal("100"))).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+            iva_monto = item_total - item_base
+
+        # Si no viene descripción, buscamos el producto
+        desc = item_data.descripcion
+        if not desc:
+            p_res = await db.execute(select(Product.nombre).where(Product.id == item_data.product_id))
+            desc = p_res.scalar_one_or_none()
 
         item = ReturnItem(
             return_id=return_obj.id,
             sale_item_id=item_data.sale_item_id,
             product_id=item_data.product_id,
             variant_id=item_data.variant_id,
-            descripcion=item_data.descripcion,
+            descripcion=desc,
             cantidad=item_data.cantidad,
             precio_unitario=item_data.precio_unitario,
-            iva_tasa=item_data.iva_tasa,
+            iva_tasa=iva_tasa,
             iva_monto=iva_monto,
             total=item_total,
             motivo_detalle=item_data.motivo_detalle,
@@ -83,7 +154,7 @@ async def create_return(db: AsyncSession, data: ReturnCreate) -> Return:
         )
         db.add(item)
 
-        subtotal += base
+        subtotal += item_base
         if iva_tasa == Decimal("10"):
             iva_10 += iva_monto
         elif iva_tasa == Decimal("5"):
@@ -109,20 +180,86 @@ async def get_return_with_items(db: AsyncSession, return_id: str) -> dict | None
     return_obj = await get_return(db, return_id)
     if not return_obj:
         return None
-    items_result = await db.execute(select(ReturnItem).where(ReturnItem.return_id == return_obj.id))
-    items = items_result.scalars().all()
-    return {**{c.name: getattr(return_obj, c.name) for c in return_obj.__table__.columns}, "items": items}
+
+    # Obtenemos items con join a Producto
+    stmt = (
+        select(ReturnItem, Product.nombre, Product.sku, Product.codigo_barra)
+        .outerjoin(Product, ReturnItem.product_id == Product.id)
+        .where(ReturnItem.return_id == return_obj.id)
+    )
+    items_result = await db.execute(stmt)
+
+    items_list = []
+    for ri, p_name, p_sku, p_barcode in items_result.all():
+        ri_dict = {c.name: getattr(ri, c.name) for c in ri.__table__.columns}
+        ri_dict["product_name"] = p_name or ri.descripcion or "Producto General"
+        ri_dict["product_sku"] = p_sku or p_barcode or ""
+        ri_dict["descripcion"] = ri.descripcion or p_name or "Producto General"
+        items_list.append(ri_dict)
+
+    # Obtenemos cliente y venta si existen
+    cust_name = None
+    cust_ruc = None
+    if return_obj.customer_id:
+        c_res = await db.execute(select(Customer.razon_social, Customer.ruc).where(Customer.id == return_obj.customer_id))
+        row = c_res.first()
+        if row:
+            cust_name, cust_ruc = row[0], row[1]
+
+    sale_num = None
+    if return_obj.sale_id:
+        s_res = await db.execute(select(Sale.numero).where(Sale.id == return_obj.sale_id))
+        sale_num = s_res.scalar_one_or_none()
+
+    nc_numero = None
+    if return_obj.nota_credito_id:
+        nc_res = await db.execute(select(NotaCreditoDebito.numero).where(NotaCreditoDebito.id == return_obj.nota_credito_id))
+        nc_numero = nc_res.scalar_one_or_none()
+
+    ret_dict = {c.name: getattr(return_obj, c.name) for c in return_obj.__table__.columns}
+    ret_dict["customer_name"] = cust_name
+    ret_dict["customer_ruc"] = cust_ruc
+    ret_dict["sale_numero"] = sale_num
+    ret_dict["nota_credito_numero"] = nc_numero
+    ret_dict["items"] = items_list
+
+    return ret_dict
 
 
 async def list_returns(
-    db: AsyncSession, company_id: str, estado: str | None = None, limit: int = 50, offset: int = 0,
-) -> list[Return]:
-    query = select(Return).where(Return.company_id == company_id)
+    db: AsyncSession, company_id: str, estado: str | None = None, limit: int = 200, offset: int = 0,
+) -> list[dict]:
+    query = (
+        select(Return, Customer.razon_social, Customer.ruc, Sale.numero, NotaCreditoDebito.numero)
+        .outerjoin(Customer, Return.customer_id == Customer.id)
+        .outerjoin(Sale, Return.sale_id == Sale.id)
+        .outerjoin(NotaCreditoDebito, Return.nota_credito_id == NotaCreditoDebito.id)
+        .where(Return.company_id == company_id)
+    )
     if estado:
-        query = query.where(Return.estado == estado)
+        # manejar estados con flexibilidad (aprobado / aprobada, rechazado / rechazada)
+        if estado == "aprobado":
+            query = query.where(Return.estado.in_(["aprobado", "aprobada", "Aprobado", "APROBADO"]))
+        elif estado == "rechazado":
+            query = query.where(Return.estado.in_(["rechazado", "rechazada", "Rechazado", "RECHAZADO"]))
+        elif estado == "pendiente":
+            query = query.where(Return.estado.in_(["pendiente", "Pendiente", "PENDIENTE"]))
+        else:
+            query = query.where(Return.estado == estado)
+
     query = query.order_by(Return.fecha.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
-    return list(result.scalars().all())
+
+    records = []
+    for ret, c_name, c_ruc, s_num, nc_num in result.all():
+        d = {c.name: getattr(ret, c.name) for c in ret.__table__.columns}
+        d["customer_name"] = c_name
+        d["customer_ruc"] = c_ruc
+        d["sale_numero"] = s_num
+        d["nota_credito_numero"] = nc_num
+        records.append(d)
+
+    return records
 
 
 async def generate_credit_note_number(db: AsyncSession, company_id: str) -> str:
@@ -176,7 +313,7 @@ async def _create_credit_note(db: AsyncSession, return_obj: Return, items: list[
 
 async def approve_return(db: AsyncSession, return_id: str, data: ReturnApprove) -> Return | None:
     return_obj = await get_return(db, return_id)
-    if not return_obj or return_obj.estado != "pendiente":
+    if not return_obj or return_obj.estado not in ("pendiente", "Pendiente"):
         return None
 
     return_obj.estado = "aprobado"
@@ -189,8 +326,6 @@ async def approve_return(db: AsyncSession, return_id: str, data: ReturnApprove) 
 
     items_result = await db.execute(select(ReturnItem).where(ReturnItem.return_id == return_obj.id))
     return_items = list(items_result.scalars().all())
-    return_obj.nota_credito_id = await _create_credit_note(db, return_obj, return_items)
-
     for item in return_items:
         qty = int(item.cantidad)
         stock_result = await db.execute(
@@ -225,15 +360,175 @@ async def approve_return(db: AsyncSession, return_id: str, data: ReturnApprove) 
         )
         db.add(movement)
 
+    # ── Nota de Crédito real, numerada por punto de emisión (autoimpresor) ──
+    # Antes la devolución solo revertía stock -- no se generaba ningún
+    # documento fiscal, así que no había nada para imprimir. Se reserva un
+    # número real de la secuencia "nota_credito" del punto de emisión de la
+    # venta original (misma tabla que ya usa la numeración de factura) y se
+    # crea el NotaCreditoDebito. Sin CDC/SIFEN a propósito -- el cliente es
+    # autoimpresor, no factura electrónica.
+    nota_credito_numero = None
+    nota_credito_error = None
+    sale = None
+    if return_obj.sale_id:
+        sale_result = await db.execute(select(Sale).where(Sale.id == return_obj.sale_id))
+        sale = sale_result.scalar_one_or_none()
+
+    punto_emision = None
+    if sale and sale.numero:
+        m = NUMERO_FISCAL_RE.match(sale.numero)
+        if m:
+            punto_emision = m.group(2)
+
+    if not punto_emision:
+        nota_credito_error = "La venta original no tiene un número fiscal con punto de emisión reconocible."
+    else:
+        try:
+            numero_reservado = await reserve_fiscal_invoice_number(db, str(return_obj.company_id), punto_emision, "nota_credito")
+        except (TimbradoAgotadoError, TimbradoVencidoError, ValueError) as e:
+            nota_credito_error = str(e)
+        else:
+            timbrado_result = await db.execute(
+                select(SifenTimbrado.numero)
+                .join(PuntoEmisionSecuencia, PuntoEmisionSecuencia.timbrado_id == SifenTimbrado.id)
+                .where(
+                    PuntoEmisionSecuencia.company_id == return_obj.company_id,
+                    PuntoEmisionSecuencia.punto_emision == punto_emision,
+                    PuntoEmisionSecuencia.tipo_documento == "nota_credito",
+                )
+                .limit(1)
+            )
+            timbrado_numero = timbrado_result.scalar_one_or_none()
+
+            # Desglose exacto de bases gravadas según tasa de IVA de cada ítem
+            base_10 = Decimal("0")
+            base_5 = Decimal("0")
+            base_exenta = Decimal("0")
+            for it in return_items:
+                tasa = Decimal(str(it.iva_tasa or 0))
+                tot = Decimal(str(it.total or 0))
+                iva_m = Decimal(str(it.iva_monto or 0))
+                if tasa == Decimal("10"):
+                    base_10 += (tot - iva_m)
+                elif tasa == Decimal("5"):
+                    base_5 += (tot - iva_m)
+                else:
+                    base_exenta += tot
+
+            nota = NotaCreditoDebito(
+                company_id=return_obj.company_id,
+                sale_id=return_obj.sale_id,
+                tipo="credito",
+                numero=numero_reservado,
+                timbrado_numero=timbrado_numero,
+                motivo=f"Devolución {return_obj.numero} — {return_obj.motivo}",
+                subtotal=return_obj.subtotal or 0,
+                descuento_total=0,
+                base_gravada_10=base_10,
+                base_gravada_5=base_5,
+                base_exenta=base_exenta,
+                iva_10=return_obj.iva_10 or 0,
+                iva_5=return_obj.iva_5 or 0,
+                total=return_obj.total or 0,
+                estado="emitido",
+                user_id=data.aprobado_por,
+            )
+            db.add(nota)
+            await db.flush()
+            await db.refresh(nota)
+            return_obj.nota_credito_id = nota.id
+            nota_credito_numero = nota.numero
+
+    # ── Impacto en Cuentas por Cobrar y Línea de Crédito ──
+    # Si la venta original tenía cuentas por cobrar o se pagó con Extra Club / Crédito,
+    # la devolución debe reducir la deuda pendiente y liberar la línea de crédito del cliente.
+    if sale:
+        monto_dev = Decimal(str(return_obj.total or 0))
+        ar_result = await db.execute(select(Account).where(Account.sale_id == sale.id))
+        ar_list = ar_result.scalars().all()
+        monto_ar_deducido = Decimal(0)
+
+        if ar_list:
+            rem_dev = monto_dev
+            for ar in ar_list:
+                if (ar.saldo_pendiente or Decimal(0)) > Decimal(0) and rem_dev > Decimal(0):
+                    rebaja = min(Decimal(str(ar.saldo_pendiente)), rem_dev)
+                    ar.saldo_pendiente -= rebaja
+                    if ar.saldo_pendiente == Decimal(0):
+                        ar.estado = "pagado"
+                    ar.updated_at = datetime.now(timezone.utc)
+                    ar.notas_cobranza = (
+                        (ar.notas_cobranza or "")
+                        + f"\n[Devolución {return_obj.numero} - NC {nota_credito_numero or 'S/N'}] -₲ {rebaja:,.0f}"
+                    ).strip()
+                    rem_dev -= rebaja
+                    monto_ar_deducido += rebaja
+
+        # Verificar pagos a crédito / Extra Club de la venta
+        sp_result = await db.execute(select(SalePayment).where(SalePayment.sale_id == sale.id))
+        payments = sp_result.scalars().all()
+        credito_pagado = sum(
+            Decimal(str(p.monto))
+            for p in payments
+            if (p.forma_pago or "").upper() in ("EXTRA_CLUB", "CREDITO_LOCAL", "CREDITO")
+        )
+
+        monto_liberar_credito = monto_ar_deducido
+        if monto_liberar_credito == Decimal(0) and credito_pagado > Decimal(0):
+            monto_liberar_credito = min(monto_dev, credito_pagado)
+
+        if return_obj.customer_id and monto_liberar_credito > Decimal(0):
+            ca_result = await db.execute(
+                select(CreditAccount).where(CreditAccount.customer_id == return_obj.customer_id).limit(1)
+            )
+            credit_acc = ca_result.scalar_one_or_none()
+            if credit_acc:
+                saldo_ant = credit_acc.saldo_utilizado or Decimal(0)
+                nuevo_utilizado = max(Decimal(0), saldo_ant - monto_liberar_credito)
+                credit_acc.saldo_utilizado = nuevo_utilizado
+                credit_acc.saldo_disponible = (credit_acc.limite_credito or Decimal(0)) - nuevo_utilizado
+                credit_acc.updated_at = datetime.now(timezone.utc)
+
+                mov = CreditMovement(
+                    company_id=return_obj.company_id,
+                    credit_account_id=credit_acc.id,
+                    customer_id=return_obj.customer_id,
+                    tipo="devolucion",
+                    monto=monto_liberar_credito,
+                    saldo_anterior=saldo_ant,
+                    saldo_nuevo=nuevo_utilizado,
+                    referencia_type="return",
+                    referencia_id=return_obj.id,
+                    observaciones=f"Devolución {return_obj.numero} — Factura {sale.numero or ''}",
+                    created_at=return_obj.fecha or datetime.now(timezone.utc),
+                )
+                db.add(mov)
+
+    # ── Marcar la venta como devuelta si ya no queda nada por devolver ──
+    # "devuelto" ya existia como estado reconocido (bloquea ediciones/
+    # cancelacion en sales/service.py) pero nada lo asignaba nunca -- la
+    # factura original quedaba visualmente intacta aunque se le hubiera
+    # devuelto todo.
+    if sale:
+        ya_devuelto = await get_returned_quantities(db, sale.id)
+        sale_items_result = await db.execute(select(SaleItem).where(SaleItem.sale_id == sale.id))
+        sale_items = sale_items_result.scalars().all()
+        if sale_items and all(
+            ya_devuelto.get(str(si.id), Decimal("0")) >= Decimal(str(si.cantidad)) for si in sale_items
+        ):
+            sale.estado = "devuelto"
+
     return_obj.updated_at = datetime.now(timezone.utc)
     await db.flush()
     await db.refresh(return_obj)
+    setattr(return_obj, "nota_credito_numero", nota_credito_numero)
+    setattr(return_obj, "nota_credito_error", nota_credito_error)
     return return_obj
 
 
 async def reject_return(db: AsyncSession, return_id: str, motivo: str) -> Return | None:
     return_obj = await get_return(db, return_id)
-    if not return_obj or return_obj.estado != "pendiente":
+    if not return_obj or return_obj.estado not in ("pendiente", "Pendiente"):
         return None
     return_obj.estado = "rechazado"
     return_obj.observaciones = (return_obj.observaciones or "") + f"\nRechazo: {motivo}"

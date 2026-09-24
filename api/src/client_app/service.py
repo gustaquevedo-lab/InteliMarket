@@ -60,7 +60,7 @@ async def login_client(db: AsyncSession, email: str, password: str) -> tuple[Cli
 async def list_categories(db: AsyncSession, company_id: str) -> list[dict]:
     r = await db.execute(
         select(ProductCategory.id, ProductCategory.nombre, func.count(Product.id).label("cnt"))
-        .outerjoin(Product, Product.category_id == ProductCategory.id)
+        .outerjoin(Product, Product.categoria_id == ProductCategory.id)
         .where(ProductCategory.company_id == UUID(company_id))
         .group_by(ProductCategory.id, ProductCategory.nombre)
         .order_by(ProductCategory.nombre)
@@ -78,7 +78,7 @@ async def list_products(
             or_(Product.nombre.ilike(f"%{search}%"), Product.codigo_barra.ilike(f"%{search}%"), Product.sku.ilike(f"%{search}%"))
         )
     if category_id:
-        base_q = base_q.where(Product.category_id == UUID(category_id))
+        base_q = base_q.where(Product.categoria_id == UUID(category_id))
     base_q = base_q.order_by(Product.nombre).offset(offset).limit(limit)
     r = await db.execute(base_q)
     products = r.scalars().all()
@@ -107,8 +107,8 @@ async def list_products(
         pid = str(p.id)
         price = price_map.get(pid, float(p.precio_venta or 0))
         cat_name = ""
-        if p.category_id:
-            cat_r = await db.execute(select(ProductCategory.nombre).where(ProductCategory.id == p.category_id))
+        if p.categoria_id:
+            cat_r = await db.execute(select(ProductCategory.nombre).where(ProductCategory.id == p.categoria_id))
             cat_row = cat_r.one_or_none()
             if cat_row:
                 cat_name = cat_row[0]

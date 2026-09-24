@@ -1,51 +1,110 @@
 """Caja (Cash Register) API router"""
 
+from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.caja.schemas import (
     CashRegisterCreate, CashRegisterUpdate, CashRegisterResponse,
-    CashSessionCreate, CashSessionClose, CashSessionResponse,
+    CashSessionCreate, CashSessionClose, CashSessionResponse, CashDropCreate,
+    CashSessionPause, CashSessionResume, CashSessionFondoUpdate,
+    ConfirmHandoffRequest, DepositVaultEntriesRequest, RejectVaultDepositRequest,
+    ConfirmCashDropRequest, RejectCashDropRequest, VoidCashDropRequest,
+    CreateTreasuryRemittanceRequest, ReceiveTreasuryRemittanceRequest,
+    DepositVaultToBankRequest, DepositVaultAmountToBankRequest, SavePunteoAuditRequest,
+    PaymentMethodBankMappingUpdate, PaymentMethodBankMappingResponse,
+    CashShortageConfigUpdate, CashShortageConfigResponse,
+    ResolveCashShortageRequest, IncorporateSessionVaultAndBanksRequest,
+    ConfirmSessionCashReceptionRequest, CashSessionRendicionUpdate,
+    CreatePaymentAdjustmentRequest, PaymentAdjustmentResponse,
 )
 from api.src.caja import service
+from api.src.caja import pdf_reports
 
-router = APIRouter(prefix="/api/v1", tags=["caja"])
+PY_TZ = ZoneInfo("America/Asuncion")
+
+router = APIRouter(prefix="/api/v1", tags=["caja"], dependencies=[Depends(require_auth)])
+
+
+async def _get_company_info(db: AsyncSession, company_id: str) -> dict:
+    r = await db.execute(
+        text("SELECT razon_social, nombre_fantasia, ruc, direccion, ciudad, logo_url FROM companies WHERE id = :cid"),
+        {"cid": company_id}
+    )
+    row = r.first()
+    if row:
+        return {
+            "razon_social": row.razon_social or "GRUPO SANTA TERESA E.A.S.",
+            "nombre_fantasia": row.nombre_fantasia or "EXTRA SUPERMERCADO MAYORISTA",
+            "ruc": row.ruc or "80150377-9",
+            "direccion": row.direccion or "Alejo Garcia esq. Carlos Antonio López",
+            "ciudad": row.ciudad or "Pedro Juan Caballero",
+            "logo_url": row.logo_url,
+        }
+    return {
+        "razon_social": "GRUPO SANTA TERESA E.A.S.",
+        "nombre_fantasia": "EXTRA SUPERMERCADO MAYORISTA",
+        "ruc": "80150377-9",
+        "direccion": "Alejo Garcia esq. Carlos Antonio López",
+        "ciudad": "Pedro Juan Caballero",
+    }
+
+
+def _pdf_response(pdf_bytes: bytes, filename: str) -> StreamingResponse:
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Content-Length": str(len(pdf_bytes)),
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @router.get("/cash-registers", response_model=list[CashRegisterResponse])
 async def list_registers(
     branch_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
 ):
-    return await service.list_registers(db, branch_id)
+    return await service.list_registers(db, user["company_id"], branch_id)
 
 
 @router.get("/cash-registers/{register_id}", response_model=CashRegisterResponse)
-async def get_register(register_id: str, db: AsyncSession = Depends(get_db)):
-    result = await service.get_register(db, register_id)
+async def get_register(register_id: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.get_register(db, register_id, user["company_id"])
     if not result:
         raise HTTPException(status_code=404, detail="Caja no encontrada")
     return result
 
 
 @router.post("/cash-registers", response_model=CashRegisterResponse, status_code=status.HTTP_201_CREATED)
-async def create_register(body: CashRegisterCreate, db: AsyncSession = Depends(get_db)):
-    return await service.create_register(db, body.model_dump())
+async def create_register(body: CashRegisterCreate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    return await service.create_register(db, {**body.model_dump(), "company_id": user["company_id"]})
 
 
 @router.put("/cash-registers/{register_id}", response_model=CashRegisterResponse)
-async def update_register(register_id: str, body: CashRegisterUpdate, db: AsyncSession = Depends(get_db)):
-    result = await service.update_register(db, register_id, body.model_dump(exclude_unset=True))
+async def update_register(register_id: str, body: CashRegisterUpdate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.update_register(db, register_id, user["company_id"], body.model_dump(exclude_unset=True))
     if not result:
         raise HTTPException(status_code=404, detail="Caja no encontrada")
     return result
 
 
 @router.delete("/cash-registers/{register_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_register(register_id: str, db: AsyncSession = Depends(get_db)):
-    ok = await service.delete_register(db, register_id)
+async def delete_register(register_id: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    ok = await service.delete_register(db, register_id, user["company_id"])
     if not ok:
         raise HTTPException(status_code=404, detail="Caja no encontrada")
 
@@ -58,6 +117,7 @@ async def get_open_session(register_id: str, db: AsyncSession = Depends(get_db))
 
 @router.get("/cash-sessions")
 async def list_sessions(
+    company_id: str = Query(),
     register_id: str | None = Query(None),
     user_id: str | None = Query(None),
     estado: str | None = Query(None),
@@ -65,15 +125,113 @@ async def list_sessions(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_sessions(db, register_id, user_id, estado, limit=limit, offset=offset)
+    return await service.list_sessions(db, company_id, register_id, user_id, estado, limit=limit, offset=offset)
+
+
+@router.get("/cash-sessions/active-user")
+async def get_active_user_session(db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    return await service.get_active_user_session(db, str(user["id"]))
+
+
+@router.post("/cash-sessions/{session_id}/pause")
+async def pause_session(session_id: str, body: CashSessionPause, db: AsyncSession = Depends(get_db)):
+    result = await service.pause_session(db, session_id, body.motivo)
+    if not result:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    return {"success": True, "id": str(result.id), "estado": result.estado}
+
+
+@router.post("/cash-sessions/{session_id}/resume")
+async def resume_session(session_id: str, body: CashSessionResume, db: AsyncSession = Depends(get_db)):
+    result = await service.resume_session(
+        db,
+        session_id,
+        str(body.cash_register_id) if body.cash_register_id else None,
+        body.punto_emision,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    return {"success": True, "id": str(result.id), "estado": result.estado, "register_id": str(result.register_id)}
+
+
+@router.get("/cash-sessions/notas-credito-emitidas")
+async def list_emitted_notas_credito(
+    search: str | None = Query(None),
+    session_id: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.list_emitted_notas_credito(
+        db,
+        company_id=user["company_id"],
+        search=search,
+        session_id=session_id,
+        limit=limit,
+    )
 
 
 @router.get("/cash-sessions/{session_id}")
 async def get_session(session_id: str, db: AsyncSession = Depends(get_db)):
     result = await service.get_session_with_summary(db, session_id)
     if not result:
-        raise HTTPException(status_code=404, detail="Sesi\u00f3n no encontrada")
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
     return result
+
+
+@router.patch("/cash-sessions/{session_id}/fondo-inicial", response_model=CashSessionResponse)
+async def update_session_fondo(
+    session_id: str,
+    body: CashSessionFondoUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    user_rol = (user.get("rol") or "").lower()
+    if user_rol not in ("supervisor", "admin", "superadmin", "gerente"):
+        raise HTTPException(status_code=403, detail="Solo supervisores o administradores pueden ajustar el fondo inicial de caja")
+
+    try:
+        updated = await service.update_session_fondo_inicial(
+            db=db,
+            session_id=session_id,
+            company_id=user["company_id"],
+            monto_pyg=body.monto_apertura,
+            monto_brl=body.monto_apertura_brl,
+            monto_usd=body.monto_apertura_usd,
+            motivo=body.motivo,
+            supervisor_user=user,
+        )
+        return updated
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.patch("/cash-sessions/{session_id}/rendicion")
+async def update_session_rendicion(
+    session_id: str,
+    body: CashSessionRendicionUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    user_rol = (user.get("rol") or "").lower()
+    if user_rol not in ("supervisor", "admin", "superadmin", "gerente"):
+        raise HTTPException(status_code=403, detail="Solo supervisores o administradores pueden ajustar el monto rendido de caja")
+
+    try:
+        updated = await service.update_session_rendicion(
+            db=db,
+            session_id=session_id,
+            company_id=user["company_id"],
+            monto_cierre_real=body.monto_cierre_real,
+            monto_cierre_brl=body.monto_cierre_brl,
+            monto_cierre_usd=body.monto_cierre_usd,
+            motivo=body.motivo,
+            supervisor_user=user,
+        )
+        return updated
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
 
 
 @router.post("/cash-sessions", response_model=CashSessionResponse, status_code=status.HTTP_201_CREATED)
@@ -86,134 +244,788 @@ async def open_session(body: CashSessionCreate, db: AsyncSession = Depends(get_d
 
 
 @router.post("/cash-sessions/{session_id}/close")
-async def close_session(session_id: str, body: CashSessionClose, db: AsyncSession = Depends(get_db)):
-    result = await service.close_session(db, session_id, body.monto_cierre_real, body.observaciones)
+async def close_session(session_id: str, body: CashSessionClose, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.close_session(
+        db, session_id, body.monto_cierre_real, body.monto_cierre_usd, body.monto_cierre_brl, body.observaciones,
+        tenant_id=user.get("tenant_id"),
+    )
     if not result:
-        raise HTTPException(status_code=400, detail="No se pudo cerrar la sesi\u00f3n")
+        raise HTTPException(status_code=400, detail="No se pudo cerrar la sesión")
     return result
 
 
-@router.get("/companies/{company_id}/route-cash-settlements")
-async def list_route_settlements(
-    company_id: str,
-    fecha_desde: date | None = Query(None),
-    fecha_hasta: date | None = Query(None),
-    cobrador_codigo: str | None = Query(None),
-    cerrado: bool | None = Query(None),
+@router.get("/cash-register-movements")
+async def list_register_movements(company_id: str = Query(), tipo: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    return await service.list_register_movements(db, company_id, tipo)
+
+
+@router.get("/cash-sessions-summary")
+async def list_sessions_summary(
+    company_id: str = Query(),
+    register_id: str | None = Query(None),
+    estado: str | None = Query(None),
+    user_id: str | None = Query(None),
+    cajero_nombre: str | None = Query(None),
     search: str | None = Query(None),
-    limit: int = Query(50, le=500),
+    incluir_sin_movimiento: bool = Query(False),
+    limit: int = Query(50, le=5000),
     offset: int = Query(0, ge=0),
+    fecha_desde: str | None = Query(None),
+    fecha_hasta: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_route_settlements(
-        db, company_id, fecha_desde, fecha_hasta, cobrador_codigo, cerrado, search, limit, offset
+    parsed_fecha_desde = None
+    if fecha_desde:
+        from datetime import datetime as _dt
+        try:
+            if "T" in fecha_desde:
+                parsed_fecha_desde = _dt.fromisoformat(fecha_desde)
+            else:
+                parsed_fecha_desde = datetime.strptime(fecha_desde, "%Y-%m-%d").replace(tzinfo=PY_TZ)
+        except Exception:
+            parsed_fecha_desde = None
+
+    parsed_fecha_hasta = None
+    if fecha_hasta:
+        from datetime import datetime as _dt
+        try:
+            if "T" in fecha_hasta:
+                parsed_fecha_hasta = _dt.fromisoformat(fecha_hasta)
+            else:
+                parsed_fecha_hasta = datetime.strptime(fecha_hasta, "%Y-%m-%d").replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=PY_TZ)
+        except Exception:
+            parsed_fecha_hasta = None
+
+    return await service.list_sessions_with_totals(
+        db,
+        company_id,
+        register_id=register_id,
+        estado=estado,
+        limit=limit,
+        offset=offset,
+        fecha_desde=parsed_fecha_desde,
+        fecha_hasta=parsed_fecha_hasta,
+        cajero_nombre=cajero_nombre,
+        user_id=user_id,
+        search=search,
+        incluir_sin_movimiento=incluir_sin_movimiento,
     )
 
 
-@router.get("/companies/{company_id}/route-cash-settlements/summary")
-async def route_settlements_summary(
-    company_id: str,
-    fecha_desde: date | None = Query(None),
-    fecha_hasta: date | None = Query(None),
+@router.get("/cash-sessions/{session_id}/sales")
+async def get_cash_session_sales(
+    session_id: str,
     db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
 ):
-    return await service.get_route_settlements_summary(db, company_id, fecha_desde, fecha_hasta)
-
-
-@router.get("/companies/{company_id}/route-cash-settlements/{settlement_id}")
-async def get_route_settlement_detail(
-    company_id: str,
-    settlement_id: str,
-    db: AsyncSession = Depends(get_db),
-):
-    result = await service.get_route_settlement_detail(db, company_id, settlement_id)
+    result = await service.get_session_sales_detail(db, session_id, user["company_id"])
     if not result:
-        raise HTTPException(status_code=404, detail="Liquidación / Sesión de caja no encontrada")
+        raise HTTPException(status_code=404, detail="Sesión no encontrada o no pertenece a su empresa")
     return result
 
 
-@router.post("/companies/{company_id}/route-cash-settlements/open")
-async def open_route_settlement(
-    company_id: str,
-    body: dict,
+@router.get("/cash-sessions/{session_id}/sales/export.pdf")
+async def export_session_sales_pdf(
+    session_id: str,
     db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
 ):
-    return await service.open_route_settlement(db, company_id, body)
+    sales_detail = await service.get_session_sales_detail(db, session_id, user["company_id"])
+    if not sales_detail:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada o no pertenece a su empresa")
+
+    company = await _get_company_info(db, user["company_id"])
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = pdf_reports.generate_session_sales_pdf(
+        company,
+        sales_detail,
+        generated_by,
+    )
+    safe_cajero = (sales_detail.get("session", {}).get("cajero_nombre") or "caja").replace(" ", "_")
+    raw_fecha = sales_detail.get("session", {}).get("fecha_apertura_local") or "sesion"
+    safe_fecha = raw_fecha[:10].replace("/", "-")
+    return _pdf_response(pdf_bytes, f"ventas_{safe_cajero}_{safe_fecha}.pdf")
 
 
-@router.post("/companies/{company_id}/route-cash-settlements/{settlement_id}/close")
-async def close_route_settlement(
-    company_id: str,
-    settlement_id: str,
-    body: dict,
+@router.get("/cash-sessions/{session_id}/payment-breakdown")
+async def session_payment_breakdown(session_id: str, db: AsyncSession = Depends(get_db)):
+    return await service.get_session_payment_breakdown(db, session_id)
+
+
+@router.get("/cash-sessions/{session_id}/pre-close-summary")
+async def session_pre_close_summary(session_id: str, db: AsyncSession = Depends(get_db)):
+    result = await service.get_session_pre_close_summary(db, session_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    return result
+
+
+@router.get("/cash-sessions/{session_id}/ticket-escpos")
+async def get_session_ticket_escpos(session_id: str, db: AsyncSession = Depends(get_db)):
+    result = await service.get_session_reconciliation_data(db, session_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    return {
+        "session_id": result["session_id"],
+        "ticket_text": result["ticket_text"],
+        "ticket_escpos_b64": result["ticket_escpos_b64"],
+        "reconciliation": result,
+    }
+
+
+@router.get("/cash-sessions/{session_id}/export/cierre.pdf")
+async def export_cierre_sesion_pdf(
+    session_id: str,
     db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
 ):
-    from decimal import Decimal
-    efectivo = Decimal(str(body.get("efectivo", 0)))
-    pagares = Decimal(str(body.get("pagares", 0)))
-    descuentos = Decimal(str(body.get("descuentos", 0)))
-    otro_egreso = Decimal(str(body.get("otro_egreso", 0)))
-    anticipo = Decimal(str(body.get("anticipo", 0)))
-    observaciones = body.get("observaciones")
-    usuario = body.get("usuario", "Cajero")
+    report_data = await service.get_cierre_individual_report_data(db, session_id, user["company_id"])
+    if not report_data:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada o no pertenece a su empresa")
 
-    result = await service.close_route_settlement_with_count(
-        db, company_id, settlement_id, efectivo, pagares, descuentos, otro_egreso, anticipo, observaciones, usuario
+    company = await _get_company_info(db, user["company_id"])
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = pdf_reports.generate_cierre_sesion_individual_pdf(
+        company,
+        report_data["session_data"],
+        report_data["payments_breakdown"],
+        report_data["cash_drops"],
+        generated_by,
+    )
+    return _pdf_response(pdf_bytes, f"cierre_caja_{session_id[:8]}.pdf")
+
+
+@router.get("/cash-sessions/{session_id}/punteo")
+async def get_session_punteo(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    result = await service.get_session_punteo_data(db, session_id, user["company_id"])
+    if not result:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada o no pertenece a su empresa")
+    return result
+
+
+@router.get("/cash-sessions/{session_id}/export/punteo.pdf")
+async def export_punteo_sesion_pdf(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    report_data = await service.get_session_punteo_data(db, session_id, user["company_id"])
+    if not report_data:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada o no pertenece a su empresa")
+
+    company = await _get_company_info(db, user["company_id"])
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = pdf_reports.generate_punteo_vouchers_pdf(
+        company,
+        report_data["session_data"],
+        report_data["summary_by_method"],
+        report_data["vouchers"],
+        generated_by,
+        punteo_audit=report_data.get("punteo_audit"),
+    )
+    return _pdf_response(pdf_bytes, f"planilla_punteo_{session_id[:8]}.pdf")
+
+
+@router.get("/cash-sessions/{session_id}/export/acta-verificacion.pdf")
+async def export_acta_verificacion_sesion_pdf(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    data = await service.get_session_acta_verificacion_data(db, session_id, user["company_id"])
+    if not data:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada o no pertenece a su empresa")
+
+    sess_estado = data["session_data"].get("estado")
+    handoff_estado = (data.get("punteo_data", {}).get("handoff") or {}).get("estado")
+    if sess_estado != "verificada" and handoff_estado != "confirmado":
+        raise HTTPException(
+            status_code=400,
+            detail="El Acta Oficial de Verificación solo se emite cuando la sesión ha sido punteada y los valores confirmados por Tesorería.",
+        )
+
+    company = await _get_company_info(db, user["company_id"])
+    auditor_nombre = user.get("user_nombre") or user.get("user_email") or "Tesorería Central"
+    pdf_bytes = pdf_reports.generate_acta_verificacion_tesoreria_pdf(
+        company,
+        data["session_data"],
+        data["recon"],
+        data["punteo_data"],
+        auditor_nombre,
+    )
+    safe_cajero = (data["session_data"].get("cajero_nombre") or "caja").replace(" ", "_")
+    return _pdf_response(pdf_bytes, f"acta_verificacion_{safe_cajero}_{session_id[:8]}.pdf")
+
+
+@router.post("/cash-sessions/{session_id}/punteo/asentar")
+async def save_session_punteo_audit(
+    session_id: str,
+    body: SavePunteoAuditRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    auditor_nombre = user.get("user_nombre") or user.get("user_email") or "Auditoría de Salón"
+    user_id = user.get("user_id") or user.get("sub")
+    try:
+        return await service.save_session_punteo_audit(
+            db,
+            session_id,
+            user["company_id"],
+            auditor_nombre,
+            [it.model_dump() for it in body.items],
+            body.observaciones_dictamen,
+            body.diferencia_vouchers_gs,
+            monto_recibido_pyg=body.monto_recibido_pyg,
+            monto_recibido_brl=body.monto_recibido_brl,
+            monto_recibido_usd=body.monto_recibido_usd,
+            observaciones_efectivo=body.observaciones_efectivo,
+            user_id=str(user_id) if user_id else None,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/cash-sessions/{session_id}/confirm-cash-reception")
+async def confirm_session_cash_reception(
+    session_id: str,
+    body: ConfirmSessionCashReceptionRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    user_id = user.get("user_id") or user.get("sub") or str(uuid.uuid4())
+    user_nombre = user.get("user_nombre") or user.get("user_email") or "Tesorería Central"
+    try:
+        return await service.confirm_session_cash_reception(
+            db=db,
+            session_id=session_id,
+            company_id=user["company_id"],
+            user_id=str(user_id),
+            user_nombre=user_nombre,
+            monto_recibido_pyg=body.monto_recibido_pyg,
+            monto_recibido_brl=body.monto_recibido_brl,
+            monto_recibido_usd=body.monto_recibido_usd,
+            observaciones=body.observaciones,
+            ajustar_declarado=getattr(body, "ajustar_declarado", False) or False,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+
+@router.post("/cash-sessions/{session_id}/cash-drop", status_code=status.HTTP_201_CREATED)
+async def cash_drop(session_id: str, body: CashDropCreate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.register_cash_drop(
+        db, session_id, body.monto, body.monto_usd, body.monto_brl, body.observaciones, registrado_por=user.get("id"),
     )
     if not result:
-        raise HTTPException(status_code=404, detail="Liquidación no encontrada")
+        raise HTTPException(status_code=400, detail="No se pudo registrar el retiro (¿la sesión está abierta?)")
     return result
 
 
-@router.post("/companies/{company_id}/route-cash-settlements/{settlement_id}/authorize")
-async def authorize_route_settlement(
-    company_id: str,
-    settlement_id: str,
-    body: dict,
-    db: AsyncSession = Depends(get_db),
+@router.get("/cash-drop-requests")
+async def list_cash_drop_requests(
+    company_id: str = Query(...), estado: str | None = Query("pendiente"), db: AsyncSession = Depends(get_db),
 ):
-    usuario_tesorero = body.get("usuario_tesorero", "Tesoreria Central")
-    observaciones = body.get("observaciones")
-    result = await service.authorize_route_settlement(db, company_id, settlement_id, usuario_tesorero, observaciones)
+    return await service.list_cash_drop_requests(db, company_id, estado)
+
+
+@router.post("/cash-drop-requests/{request_id}/confirm")
+async def confirm_cash_drop_request(request_id: str, body: ConfirmCashDropRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.confirm_cash_drop_request(
+        db, request_id, user["company_id"], str(body.confirmado_por), body.confirmado_por_nombre,
+        body.monto_confirmado_pyg, body.monto_confirmado_usd, body.monto_confirmado_brl,
+    )
+    if result == "forbidden":
+        raise HTTPException(status_code=403, detail="Solo un supervisor o administrador puede confirmar un retiro")
     if not result:
-        raise HTTPException(status_code=404, detail="Liquidación no encontrada")
+        raise HTTPException(status_code=400, detail="Retiro no encontrado o ya resuelto")
     return result
 
 
-# ── Bóveda Central & Remesas de Caudales Endpoints ─────────────────────────
+@router.post("/cash-drop-requests/{request_id}/reject")
+async def reject_cash_drop_request(request_id: str, body: RejectCashDropRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.reject_cash_drop_request(db, request_id, user["company_id"], body.motivo)
+    if not result:
+        raise HTTPException(status_code=400, detail="Retiro no encontrado o ya resuelto")
+    return result
 
-@router.get("/companies/{company_id}/vault/summary")
-async def get_vault_summary(
-    company_id: str,
-    db: AsyncSession = Depends(get_db),
+
+@router.post("/cash-drop-requests/{request_id}/void")
+async def void_confirmed_cash_drop(request_id: str, body: VoidCashDropRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.void_confirmed_cash_drop(
+        db, request_id, user["company_id"], str(body.anulado_por), body.anulado_por_nombre, body.motivo,
+    )
+    if result == "forbidden":
+        raise HTTPException(status_code=403, detail="Solo un supervisor o administrador puede anular un retiro")
+    if not result:
+        raise HTTPException(status_code=400, detail="Retiro no encontrado o no esta confirmado")
+    return result
+
+
+# ── Entregas de efectivo (custodia cajera -> supervisor) ────────────────
+
+@router.get("/cash-handoffs")
+async def list_pending_handoffs(estado: str | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    return await service.list_pending_handoffs(db, user["company_id"], estado)
+
+
+@router.post("/cash-handoffs/{handoff_id}/confirm")
+async def confirm_handoff(handoff_id: str, body: ConfirmHandoffRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.confirm_handoff(
+        db, handoff_id, user["company_id"], str(body.recibido_por), body.recibido_por_nombre,
+        body.monto_confirmado_pyg, body.monto_confirmado_usd, body.monto_confirmado_brl,
+    )
+    if result == "forbidden":
+        raise HTTPException(status_code=403, detail="Solo un supervisor o administrador puede confirmar una entrega")
+    if not result:
+        raise HTTPException(status_code=400, detail="Entrega no encontrada o ya confirmada")
+    return result
+
+
+# ── Performance de cajeros ────────────────────────────────────────────
+
+@router.get("/caja/cajeros/performance")
+async def cajero_performance(db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    return await service.get_cajero_performance(db, user["company_id"])
+
+
+# ── Bóveda central ────────────────────────────────────────────────────
+
+@router.get("/vault/dashboard")
+async def vault_dashboard(db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    return await service.get_vault_dashboard(db, user["company_id"])
+
+
+@router.get("/vault/entries")
+async def vault_entries(estado: str | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    return await service.list_vault_entries(db, user["company_id"], estado)
+
+
+@router.get("/caja/export/arqueo.pdf")
+async def export_arqueo_pdf(
+    fecha_desde: date = Query(...), fecha_hasta: date = Query(...),
+    db: AsyncSession = Depends(get_db), user=Depends(require_auth),
 ):
-    return await service.get_vault_summary(db, company_id)
+    company_id = user["company_id"]
+    # Regla inmutable: Filtrar estrictamente sobre el día completo en zona horaria America/Asuncion
+    desde_dt = datetime.combine(fecha_desde, time.min).replace(tzinfo=PY_TZ)
+    hasta_dt = datetime.combine(fecha_hasta, time.max).replace(tzinfo=PY_TZ)
+    sesiones = await service.get_arqueo_diario(db, company_id, desde_dt, hasta_dt)
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = pdf_reports.generate_arqueo_diario_pdf(company, sesiones, fecha_desde, fecha_hasta, generated_by)
+    return _pdf_response(pdf_bytes, f"acta_arqueo_consolidado_{fecha_desde}_{fecha_hasta}.pdf")
 
 
-@router.get("/companies/{company_id}/vault/movements")
-async def list_vault_movements(
-    company_id: str,
-    tipo: str | None = Query(None),
-    limit: int = Query(50, le=200),
-    offset: int = Query(0, ge=0),
-    db: AsyncSession = Depends(get_db),
+@router.get("/vault/export/movimientos.pdf")
+async def export_vault_movimientos_pdf(
+    fecha_desde: date = Query(...), fecha_hasta: date = Query(...),
+    db: AsyncSession = Depends(get_db), user=Depends(require_auth),
 ):
-    return await service.list_vault_movements(db, company_id, tipo, limit, offset)
+    company_id = user["company_id"]
+    desde_dt = datetime.combine(fecha_desde, time.min).replace(tzinfo=PY_TZ)
+    hasta_dt = datetime.combine(fecha_hasta, time.max).replace(tzinfo=PY_TZ)
+    entries = await service.get_vault_movimientos(db, company_id, desde_dt, hasta_dt)
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = pdf_reports.generate_boveda_movimientos_pdf(company, entries, fecha_desde, fecha_hasta, generated_by)
+    return _pdf_response(pdf_bytes, f"movimientos_de_boveda_{fecha_desde}_{fecha_hasta}.pdf")
 
 
-@router.post("/companies/{company_id}/vault/drop-cash")
-async def create_vault_drop_cash(
-    company_id: str,
-    body: dict,
+@router.get("/caja/reports/sales-by-cashier")
+async def get_sales_by_cashier_report_endpoint(
+    fecha_desde: date = Query(...),
+    fecha_hasta: date = Query(...),
+    cajero_nombre: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
 ):
-    return await service.create_vault_drop_cash(db, company_id, body)
+    return await service.get_sales_by_cashier_report(
+        db, user["company_id"], fecha_desde, fecha_hasta, cajero_nombre
+    )
 
 
-@router.post("/companies/{company_id}/vault/dispatch-armored")
-async def create_vault_armored_dispatch(
-    company_id: str,
-    body: dict,
+@router.get("/caja/reports/sales-by-cashier/export.pdf")
+async def export_sales_by_cashier_pdf_endpoint(
+    fecha_desde: date = Query(...),
+    fecha_hasta: date = Query(...),
+    cajero_nombre: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
 ):
-    return await service.create_vault_armored_dispatch(db, company_id, body)
+    company_id = user["company_id"]
+    data = await service.get_sales_by_cashier_report(
+        db, company_id, fecha_desde, fecha_hasta, cajero_nombre
+    )
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = pdf_reports.generate_ventas_por_cajero_pdf(
+        company, data, fecha_desde, fecha_hasta, generated_by
+    )
+    return _pdf_response(pdf_bytes, f"ventas_por_cajero_{fecha_desde}_{fecha_hasta}.pdf")
+
+
+@router.get("/caja/reports/sales-by-payment-method")
+async def get_sales_by_payment_method_report_endpoint(
+    fecha_desde: date = Query(...),
+    fecha_hasta: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.get_sales_by_payment_method_report(
+        db, user["company_id"], fecha_desde, fecha_hasta
+    )
+
+
+@router.get("/caja/reports/sales-by-payment-method/export.pdf")
+async def export_sales_by_payment_method_pdf_endpoint(
+    fecha_desde: date = Query(...),
+    fecha_hasta: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    company_id = user["company_id"]
+    data = await service.get_sales_by_payment_method_report(
+        db, company_id, fecha_desde, fecha_hasta
+    )
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = pdf_reports.generate_ventas_por_medio_pago_pdf(
+        company, data, fecha_desde, fecha_hasta, generated_by
+    )
+    return _pdf_response(pdf_bytes, f"ventas_por_medio_pago_{fecha_desde}_{fecha_hasta}.pdf")
+
+
+@router.post("/vault/deposit")
+async def vault_deposit(body: DepositVaultEntriesRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.request_or_execute_vault_deposit(
+        db, user["company_id"], [str(i) for i in body.entry_ids],
+        str(body.bank_transaction_id) if body.bank_transaction_id else None,
+        user.get("id"),
+    )
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@router.get("/vault/deposit-approvals")
+async def vault_deposit_approvals(estado: str | None = Query("pendiente"), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    return await service.list_vault_deposit_approvals(db, user["company_id"], estado)
+
+
+@router.post("/vault/deposit-approvals/{request_id}/approve")
+async def approve_vault_deposit(request_id: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.approve_vault_deposit(db, request_id, user["company_id"], user.get("id"), user.get("tenant_id"))
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@router.post("/vault/deposit-approvals/{request_id}/reject")
+async def reject_vault_deposit(request_id: str, body: RejectVaultDepositRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.reject_vault_deposit(db, request_id, user["company_id"], user.get("id"), user.get("tenant_id"), body.motivo)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+# ── Remitos de Supervisión a Tesorería ─────────────────────────────────
+
+@router.get("/caja/supervisor/pending-sobres")
+async def supervisor_pending_sobres(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.list_supervisor_pending_sobres(db, user["company_id"], user.get("id"))
+
+
+@router.post("/caja/treasury-remittances")
+async def create_treasury_remittance(
+    body: CreateTreasuryRemittanceRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        sup_nombre = user.get("user_nombre") or user.get("user_email") or "Supervisora"
+        return await service.create_treasury_remittance(
+            db,
+            user["company_id"],
+            user["id"],
+            sup_nombre,
+            [str(i) for i in body.item_ids],
+            body.observaciones,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/caja/treasury-remittances")
+async def list_treasury_remittances(
+    estado: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.list_treasury_remittances(db, user["company_id"], estado)
+
+
+@router.get("/caja/treasury-remittances/{remittance_id}")
+async def get_treasury_remittance(
+    remittance_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    res = await service.get_treasury_remittance(db, user["company_id"], remittance_id)
+    if not res:
+        raise HTTPException(status_code=404, detail="Remito no encontrado")
+    return res
+
+
+@router.post("/caja/treasury-remittances/{remittance_id}/receive")
+async def receive_treasury_remittance(
+    remittance_id: str,
+    body: ReceiveTreasuryRemittanceRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        tes_nombre = user.get("user_nombre") or user.get("user_email") or "Tesorería / Bóveda"
+        return await service.receive_treasury_remittance(
+            db,
+            user["company_id"],
+            remittance_id,
+            user["id"],
+            tes_nombre,
+            body.observaciones,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/caja/treasury-remittances/{remittance_id}/export/remito.pdf")
+async def export_remito_pdf(
+    remittance_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    company_id = user["company_id"]
+    rem = await service.get_treasury_remittance(db, company_id, remittance_id)
+    if not rem:
+        raise HTTPException(status_code=404, detail="Remito no encontrado")
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = pdf_reports.generate_remito_tesoreria_pdf(company, rem, rem.get("items", []), generated_by)
+    return _pdf_response(pdf_bytes, f"remito_{rem.get('numero', remittance_id)}.pdf")
+
+
+# ── Depósito Directo de Bóveda a Banco ─────────────────────────────────
+
+@router.post("/vault/deposit-to-bank")
+async def deposit_vault_to_bank(
+    body: DepositVaultToBankRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        return await service.deposit_vault_to_bank(
+            db,
+            user["company_id"],
+            user.get("id"),
+            str(body.bank_account_id),
+            [str(i) for i in body.entry_ids],
+            body.numero_boleta,
+            body.transportadora,
+            body.fecha_deposito,
+            body.observaciones,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/vault/deposit-amount-to-bank")
+async def deposit_vault_amount_to_bank(
+    body: DepositVaultAmountToBankRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        return await service.deposit_vault_amount_to_bank(
+            db,
+            user["company_id"],
+            user.get("id"),
+            str(body.bank_account_id),
+            body.monto_pyg,
+            body.numero_boleta,
+            body.transportadora,
+            body.fecha_deposito,
+            body.observaciones,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+
+# ── Mapeo de Cuentas Bancarias para Medios de Pago Electrónicos ────────
+
+@router.get("/caja/config/bank-mappings", response_model=list[PaymentMethodBankMappingResponse])
+async def list_bank_mappings(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.list_payment_method_bank_mappings(db, user["company_id"])
+
+
+@router.put("/caja/config/bank-mappings/{canal_key}", response_model=PaymentMethodBankMappingResponse)
+async def update_bank_mapping(
+    canal_key: str,
+    body: PaymentMethodBankMappingUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.update_payment_method_bank_mapping(
+        db,
+        user["company_id"],
+        canal_key,
+        body.bank_account_id,
+        body.activo if body.activo is not None else True,
+        comision_porcentaje=body.comision_porcentaje,
+        comision_fija_gs=body.comision_fija_gs,
+        plazo_acreditacion_dias=body.plazo_acreditacion_dias,
+        tipo_plazo=body.tipo_plazo,
+    )
+
+
+# ── Configuración y Tratamiento de Faltantes hacia SueldOK ────────────
+
+@router.get("/caja/config/shortages", response_model=CashShortageConfigResponse)
+async def get_shortage_config(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.get_cash_shortage_config(db, user["company_id"])
+
+
+@router.put("/caja/config/shortages", response_model=CashShortageConfigResponse)
+async def update_shortage_config(
+    body: CashShortageConfigUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.update_cash_shortage_config(
+        db,
+        user["company_id"],
+        body.model_dump(exclude_unset=True),
+    )
+
+
+# ── Incorporación Integral de Turno a Bóveda y Bancos ──────────────────
+
+@router.post("/cash-sessions/{session_id}/incorporar-boveda-bancos")
+async def incorporate_session_vault_banks(
+    session_id: str,
+    body: IncorporateSessionVaultAndBanksRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    user_nombre = user.get("user_nombre") or user.get("user_email") or "Auditoría de Turno"
+    user_id = user.get("id") or str(uuid.uuid4())
+    try:
+        return await service.incorporate_session_to_vault_and_banks(
+            db,
+            session_id,
+            user["company_id"],
+            user_id,
+            user_nombre,
+            body.observaciones,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── Gestión de Faltantes y Sincronización con Nómina SueldOK ───────────
+
+@router.get("/caja/shortages")
+async def list_cash_shortages(
+    estado: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.list_cash_shortage_requests(db, user["company_id"], estado)
+
+
+@router.post("/caja/shortages/{request_id}/resolver")
+async def resolve_cash_shortage(
+    request_id: str,
+    body: ResolveCashShortageRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    aprobado_por = user.get("user_nombre") or user.get("user_email") or "Gerencia de Operaciones"
+    try:
+        return await service.resolve_cash_shortage_request(
+            db,
+            user["company_id"],
+            request_id,
+            body.accion,
+            body.cuotas or 1,
+            body.periodo_nomina,
+            body.observaciones,
+            aprobado_por,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── Reclasificación de Comprobantes Manuales en Tesorería ──────────────
+
+@router.post("/cash-sessions/{session_id}/punteo/ajustes")
+async def create_payment_adjustment(
+    session_id: str,
+    body: CreatePaymentAdjustmentRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    user_nombre = user.get("user_nombre") or user.get("user_email") or "Tesorería Central"
+    user_id = user.get("id") or str(uuid.uuid4())
+    try:
+        return await service.create_payment_adjustment(
+            db,
+            session_id,
+            user["company_id"],
+            user_id,
+            user_nombre,
+            body.model_dump(),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/cash-sessions/{session_id}/punteo/ajustes")
+async def list_payment_adjustments(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.list_payment_adjustments(db, session_id, user["company_id"])
+
+
+@router.delete("/cash-sessions/{session_id}/punteo/ajustes/{adjustment_id}")
+async def delete_payment_adjustment(
+    session_id: str,
+    adjustment_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        await service.delete_payment_adjustment(db, adjustment_id, session_id, user["company_id"])
+        return {"ok": True, "message": "Reclasificación eliminada con éxito"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+
+
+

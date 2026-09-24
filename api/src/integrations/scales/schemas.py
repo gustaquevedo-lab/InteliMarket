@@ -27,6 +27,7 @@ class ScaleConfigCreate(BaseModel):
     product_id: Optional[str] = None
     ruta_carga: Optional[str] = None
     sync_automatico: bool = False
+    categorias_ids: list[str] = Field(default_factory=list, description="IDs de categorias que esta balanza recibe via PLU sync; vacio = todas")
     etiqueta_formato: str = "40x30"
     etiqueta_cabecera: Optional[str] = None
     activa: bool = True
@@ -43,6 +44,7 @@ class ScaleConfigUpdate(BaseModel):
     timeout_segundos: Optional[int] = None
     activa: Optional[bool] = None
     sync_automatico: Optional[bool] = None
+    categorias_ids: Optional[list[str]] = None
 
 
 class ScaleConfigResponse(BaseModel):
@@ -58,6 +60,7 @@ class ScaleConfigResponse(BaseModel):
     puerto_tcp: int
     timeout_segundos: int
     sync_automatico: bool
+    categorias_ids: list[str] = Field(default_factory=list)
     etiqueta_formato: str
     activa: bool
     created_at: datetime

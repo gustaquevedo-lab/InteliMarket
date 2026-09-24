@@ -111,6 +111,34 @@ DEFAULT_PERMISSIONS = [
     # Verticals
     ("verticals:view", "Ver verticales", "verticals"),
     ("verticals:configure", "Configurar verticales", "verticals"),
+    # Fiscal (config, secuencias, timbrados, notas manuales -- distinto de sifen:*
+    # que es la emision automatica del dia a dia)
+    ("fiscal:configure", "Configurar timbrados, secuencias y notas fiscales", "fiscal"),
+    # CRM / Atención al Cliente
+    ("crm:view", "Ver clientes y fichas CRM", "crm"),
+    ("crm:create", "Crear clientes en CRM", "crm"),
+    ("crm:update", "Editar clientes en CRM", "crm"),
+    ("crm:campaigns", "Gestionar campañas de fidelización", "crm"),
+    # Depósito / recepción (distinto de purchases:create, que es generar la orden de compra)
+    ("purchases:receive", "Registrar recepción de mercadería en muelle", "purchases"),
+    ("inventory:cycle_count", "Realizar conteo cíclico de inventario", "inventory"),
+    ("pack_barcodes:manage", "Gestionar códigos de barra de pack/caja", "inventory"),
+    # Salón / exhibición (monitoreo de precios y promos en góndola, no las define)
+    ("salon:view_prices", "Ver precios de góndola y verificador", "salon"),
+    ("salon:view_promotions", "Ver estado de promociones y alertas de vencimiento", "salon"),
+    # Operativa real del bloque "Operaciones de Salón" del menu: carniceria/
+    # desposte, verduleria/frescos, panaderia/rotiseria, HACCP, mantenimiento
+    # de equipos, etiquetas electronicas (ESL) y registro de mermas. Es un
+    # solo permiso amplio a proposito -- todo ese bloque es el area de
+    # trabajo real del Encargado de Salón, no tiene sentido subdividirlo en
+    # 6-7 permisos finos para un solo rol que necesita las 6-7 cosas.
+    ("salon:manage", "Gestionar carnicería, frescos, panadería, HACCP, equipos y ESL", "salon"),
+    ("label_printing:manage", "Imprimir y gestionar etiquetas de góndola", "label_printing"),
+    # Control de mermas: registrar (cubierto por salon:manage) vs. autorizar
+    # que salga del stock. Antes de este permiso, la única forma de aprobar
+    # una merma era tener User.rol == "admin" -- ningún rol RBAC real podía
+    # hacerlo sin ser Administrador completo.
+    ("mermas:approve", "Aprobar o rechazar mermas antes de que descuenten stock", "salon"),
 ]
 
 DEFAULT_ROLES = [
@@ -121,13 +149,71 @@ DEFAULT_ROLES = [
         "is_default": False,
     },
     {
-        "name": "Vendedor",
-        "description": "Acceso a ventas, POS, clientes y caja",
+        # Reemplaza al antiguo "Vendedor", que nunca se uso -- el rol real que
+        # opera el POS en User.rol es "cajero", nunca "vendedor". El descuento
+        # (pos:discount) se saca de aca: en la practica siempre requiere PIN
+        # de supervisor (verify-supervisor), no es algo que el cajero autorice
+        # por su cuenta.
+        "name": "Cajero/a",
+        "description": "Acceso a punto de venta, caja y clientes en salón de ventas",
         "is_system": True,
         "is_default": True,
         "permissions": [
             "sales:view", "sales:create", "customers:view", "customers:create",
-            "pos:view", "pos:sell", "pos:discount", "caja:view",
+            "pos:view", "pos:sell", "caja:view", "caja:open", "caja:close",
+        ],
+    },
+    {
+        "name": "Supervisor",
+        "description": "Autorizaciones sobre la operación de caja y salón: descuentos, anulaciones, devoluciones, excepciones de crédito",
+        "is_system": True,
+        "is_default": False,
+        "permissions": [
+            "sales:view", "sales:create", "sales:cancel", "sales:refund",
+            "pos:view", "pos:sell", "pos:discount",
+            "caja:view", "caja:open", "caja:close", "caja:retiro",
+            "customers:view", "customers:create",
+            "credit:view", "credit:manage",
+        ],
+    },
+    {
+        "name": "Atención al Cliente",
+        "description": "Gestión de clientes, fidelización y campañas de CRM",
+        "is_system": True,
+        "is_default": False,
+        "permissions": [
+            "crm:view", "crm:create", "crm:update", "crm:campaigns",
+            "customers:view", "customers:create", "customers:update",
+        ],
+    },
+    {
+        "name": "Encargado de Salón",
+        "description": "Monitoreo de precios de góndola, exhibición y estado de promociones",
+        "is_system": True,
+        "is_default": False,
+        "permissions": [
+            "salon:view_prices", "salon:view_promotions", "salon:manage", "label_printing:manage",
+            "products:view", "price_lists:view", "inventory:view",
+        ],
+    },
+    {
+        "name": "Gerente",
+        "description": "Autoriza mermas y pérdidas de Carnicería, Panadería y Verdulería antes de que salgan de stock",
+        "is_system": True,
+        "is_default": False,
+        "permissions": [
+            "mermas:approve", "salon:manage", "inventory:view", "reports:view",
+        ],
+    },
+    {
+        "name": "Encargado de Depósito",
+        "description": "Recepción de mercadería, ajustes de inventario y transferencias entre sucursales",
+        "is_system": True,
+        "is_default": False,
+        "permissions": [
+            "inventory:view", "inventory:transfer", "inventory:adjust", "inventory:cycle_count",
+            "purchases:view", "purchases:receive", "pack_barcodes:manage",
+            "suppliers:view",
         ],
     },
     {
@@ -240,7 +326,14 @@ class UserRoleResponse(BaseModel):
     tenant_id: str
     role_id: str
     role_name: str
-    created_at: datetime
+    # get_user_roles() en service.py ahora tambien sintetiza roles "system-*"
+    # derivados de users.rol (admin/gerente/supervisor/cajero/...) para las
+    # aprobaciones financieras de caja/cuentas por cobrar/caja chica -- esas
+    # entradas no tienen fila real en rbac_user_roles, asi que no tienen
+    # created_at real. Antes esto era datetime obligatorio y rompia con 422
+    # cualquier consulta de roles de un usuario que tuviera al menos un rol
+    # simple (o sea, todos).
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

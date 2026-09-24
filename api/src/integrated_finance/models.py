@@ -92,6 +92,9 @@ class AccountingPeriod(Base):
     fecha_apertura = Column(DateTime(timezone=True), server_default=func.now())
     fecha_cierre = Column(DateTime(timezone=True))
     cerrado_por = Column(UUID(as_uuid=True))
+    reabierto_por = Column(UUID(as_uuid=True))
+    fecha_reapertura = Column(DateTime(timezone=True))
+    motivo_reapertura = Column(Text)
     observaciones = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -115,6 +118,7 @@ class AccountingEntry(Base):
     referencia_tipo = Column(String(30))
     referencia_id = Column(UUID(as_uuid=True))
     asiento_numero = Column(String(20))
+    reversa_de_asiento = Column(String(20), index=True)
     created_by = Column(UUID(as_uuid=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

@@ -87,7 +87,7 @@ export default function VerticalsPage() {
   return (
     <div className="max-w-6xl mx-auto p-6">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+        <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white mb-2">
           Gestión de Verticales
         </h1>
         <p className="text-gray-500 dark:text-gray-400">

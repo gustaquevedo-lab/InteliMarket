@@ -437,36 +437,6 @@ async def get_dashboard(db: AsyncSession, company_id: str) -> dict:
     }
 
 
-async def simulate_mqtt_reading(db: AsyncSession, company_id: str) -> dict:
-    result = await db.execute(
-        select(ColdSensor).where(ColdSensor.company_id == company_id, ColdSensor.is_active == True)
-    )
-    sensors = result.scalars().all()
-    if not sensors:
-        return {"error": "No active sensors", "readings": []}
-
-    import random
-    readings = []
-    for s in sensors:
-        temp = float(s.min_temp) + random.uniform(-1, float(s.max_temp) - float(s.min_temp) + 1)
-        if random.random() < 0.1:
-            temp = float(s.max_temp) + random.uniform(1, 4)
-
-        reading_data = {
-            "sensor_id": str(s.id),
-            "temperature": round(temp, 2),
-            "humidity": round(random.uniform(30, 80), 1),
-            "battery": max(0, (s.battery_level or 85) - random.randint(0, 3)),
-            "signal_strength": random.randint(-80, -40),
-            "read_at": datetime.now(timezone.utc),
-        }
-        result = await register_reading(db, company_id, reading_data)
-        if result:
-            readings.append(result)
-
-    return {"simulated": len(readings), "readings": readings}
-
-
 async def update_sensor_config(db: AsyncSession, company_id: str, sensor_id: str, data: dict) -> Optional[dict]:
     result = await db.execute(
         select(ColdSensor).where(ColdSensor.id == sensor_id, ColdSensor.company_id == company_id)

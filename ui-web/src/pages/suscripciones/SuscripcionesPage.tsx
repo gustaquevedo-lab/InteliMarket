@@ -147,7 +147,7 @@ export default function SuscripcionesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate flex items-center gap-2">
             <Repeat className="w-6 h-6 text-emerald-500" />
             Suscripciones & Órdenes Recurrentes
           </h1>

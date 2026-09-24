@@ -19,8 +19,15 @@ class ProductionArea(str, enum.Enum):
     carniceria = "carniceria"
     panaderia = "panaderia"
     rotiseria = "rotiseria"
+    verduleria = "verduleria"
     pre_pack = "pre_pack"
     otros = "otros"
+
+
+class WasteStatus(str, enum.Enum):
+    pendiente = "pendiente"
+    aprobada = "aprobada"
+    rechazada = "rechazada"
 
 
 class ProductionOrderStatus(str, enum.Enum):
@@ -75,13 +82,15 @@ class ProductionRecipe(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    area = Column(SAEnum(ProductionArea), nullable=False)
+    area = Column(SAEnum(ProductionArea, native_enum=False, length=20), nullable=False)
     nombre = Column(String(200), nullable=False)
     descripcion = Column(Text)
     producto_terminado_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
     cantidad_esperada = Column(Numeric(12, 3), nullable=False)
     unidad_medida = Column(String(10), default="UN")
     rendimiento_esperado = Column(Numeric(5, 2), default=100)
+    deposito_origen_id = Column(UUID(as_uuid=True), ForeignKey("warehouses.id"), nullable=True)
+    deposito_destino_id = Column(UUID(as_uuid=True), ForeignKey("warehouses.id"), nullable=True)
     activa = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -112,9 +121,12 @@ class ProductionOrder(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     receta_id = Column(UUID(as_uuid=True), ForeignKey("supermer_recipes.id"))
-    area = Column(SAEnum(ProductionArea), nullable=False)
+    area = Column(SAEnum(ProductionArea, native_enum=False, length=20), nullable=False)
     cantidad_objetivo = Column(Numeric(12, 3), nullable=False)
-    estado = Column(SAEnum(ProductionOrderStatus), nullable=False, default="planificada")
+    estado = Column(SAEnum(ProductionOrderStatus, native_enum=False, length=20), nullable=False, default="planificada")
+    deposito_origen_id = Column(UUID(as_uuid=True), ForeignKey("warehouses.id"), nullable=True)
+    deposito_destino_id = Column(UUID(as_uuid=True), ForeignKey("warehouses.id"), nullable=True)
+    lote_codigo = Column(String(50), nullable=True)
     fecha_inicio = Column(DateTime(timezone=True))
     fecha_fin = Column(DateTime(timezone=True))
     fecha_vencimiento = Column(Date)
@@ -159,19 +171,31 @@ class WasteLog(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    area = Column(SAEnum(ProductionArea), nullable=False)
+    warehouse_id = Column(UUID(as_uuid=True), ForeignKey("warehouses.id"))
+    area = Column(SAEnum(ProductionArea, native_enum=False, length=20), nullable=False)
     producto_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
     cantidad = Column(Numeric(12, 3), nullable=False)
     costo_unitario = Column(Numeric(12, 2))
     costo_total = Column(Numeric(12, 2))
-    tipo_merma = Column(SAEnum(WasteType), nullable=False)
+    tipo_merma = Column(SAEnum(WasteType, native_enum=False, length=20), nullable=False)
     motivo = Column(Text)
     fecha = Column(DateTime(timezone=True), server_default=func.now())
     registrado_por = Column(UUID(as_uuid=True), ForeignKey("users.id"))
 
+    # Control de aprobación: una merma NO descuenta stock hasta que un
+    # Gerente/Administrador la aprueba (ver service.approve_waste). Antes de
+    # esto, create_waste() era un log puramente informativo sin ningún
+    # gate -- el pedido del cliente fue justamente cerrar ese hueco.
+    estado = Column(SAEnum(WasteStatus, native_enum=False, length=20), nullable=False, default=WasteStatus.pendiente, server_default="pendiente")
+    aprobado_por = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    aprobado_at = Column(DateTime(timezone=True))
+    motivo_rechazo = Column(Text)
+    movimiento_id = Column(UUID(as_uuid=True), ForeignKey("inventory_movements.id"))
+
     __table_args__ = (
         Index("ix_supermer_waste_company_area", "company_id", "area"),
         Index("ix_supermer_waste_fecha", "fecha"),
+        Index("ix_supermer_waste_estado", "company_id", "estado"),
     )
 
 
@@ -183,7 +207,7 @@ class PerishableConfig(Base):
     producto_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False, unique=True)
     vida_util_dias = Column(Integer, nullable=False)
     requiere_markdown = Column(Boolean, default=True)
-    categoria_perecedera = Column(SAEnum(PerishableCategory), nullable=False)
+    categoria_perecedera = Column(SAEnum(PerishableCategory, native_enum=False, length=20), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -317,7 +341,7 @@ class ReceiveBatch(Base):
     proveedor_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"))
     cantidad_recibida = Column(Numeric(12, 3), nullable=False)
     cantidad_aceptada = Column(Numeric(12, 3))
-    calidad = Column(SAEnum(ReceiveQualityGrade), nullable=False, default="estandar")
+    calidad = Column(SAEnum(ReceiveQualityGrade, native_enum=False, length=20), nullable=False, default="estandar")
     precio_unitario = Column(Numeric(12, 2))
     fecha_recepcion = Column(Date, nullable=False, server_default=func.current_date())
     fecha_vencimiento_estimada = Column(Date)
@@ -344,7 +368,7 @@ class FreshnessAudit(Base):
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     producto_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
     batch_id = Column(UUID(as_uuid=True), ForeignKey("supermer_receive_batches.id"))
-    calidad_actual = Column(SAEnum(FreshnessGrade), nullable=False)
+    calidad_actual = Column(SAEnum(FreshnessGrade, native_enum=False, length=20), nullable=False)
     firmeza = Column(Integer, comment="1-5")
     color = Column(Integer, comment="1-5")
     aspecto_general = Column(Integer, comment="1-5")
@@ -400,7 +424,7 @@ class PurchaseSuggestion(Base):
     fecha_sugerida_llegada = Column(Date)
     precio_estimado = Column(Numeric(12, 2))
     costo_estimado_total = Column(Numeric(12, 2))
-    estado = Column(SAEnum(ForecastStatus), nullable=False, default="pendiente")
+    estado = Column(SAEnum(ForecastStatus, native_enum=False, length=20), nullable=False, default="pendiente")
     notas = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -451,8 +475,8 @@ class RotiseriaBatch(Base):
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     nombre = Column(String(200), nullable=False)
     descripcion = Column(Text)
-    area = Column(SAEnum(RotiseriaCookingMethod), nullable=False)
-    holding_method = Column(SAEnum(RotiseriaHoldingMethod), nullable=False)
+    area = Column(String(30), nullable=False)
+    holding_method = Column(String(20), nullable=False)
 
     # Cooking yield: 1kg raw pollo entero → 0.75kg cooked
     factor_coccion = Column(Numeric(5, 4), nullable=False, default=1.0)
@@ -509,13 +533,15 @@ class RotiseriaProductionPlan(Base):
     receta_id = Column(UUID(as_uuid=True), ForeignKey("supermer_rotiseria_recipes.id"), nullable=False)
     cantidad_objetivo = Column(Numeric(12, 3), nullable=False)
     cantidad_producida = Column(Numeric(12, 3))
-    estado = Column(SAEnum(RotiseriaProductionStatus), default="planificada")
+    estado = Column(String(20), default="planificada")
     hora_inicio = Column(DateTime(timezone=True))
     hora_fin = Column(DateTime(timezone=True))
     responsable_id = Column(UUID(as_uuid=True))
     notas = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    temperature_logs = relationship("RotiseriaTemperatureLog", backref="plan", cascade="all, delete-orphan")
+    labels = relationship("RotiseriaLabelBatch", backref="plan", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_rotiseria_plan_fecha_company", "company_id", "fecha"),
@@ -530,7 +556,7 @@ class RotiseriaTemperatureLog(Base):
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     plan_id = Column(UUID(as_uuid=True), ForeignKey("supermer_rotiseria_plans.id"), nullable=False)
     punto_control = Column(String(100), nullable=False)  # ej: "Baño María Pollos", "Vitrina Ensaladas"
-    tipo = Column(SAEnum(RotiseriaHoldingMethod), nullable=False)
+    tipo = Column(String(20), nullable=False)
     temperatura = Column(Numeric(5, 1), nullable=False)
     temp_min_requerida = Column(Numeric(5, 1))
     temp_max_requerida = Column(Numeric(5, 1))
@@ -630,8 +656,8 @@ class HaccpCriticalPoint(Base):
     plan_id = Column(UUID(as_uuid=True), ForeignKey("supermer_haccp_plans.id"), nullable=False)
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     nombre = Column(String(200), nullable=False)
-    tipo = Column(SAEnum(HaccpPointType), nullable=False)
-    riesgo = Column(SAEnum(HaccpRiskLevel), nullable=False)
+    tipo = Column(String(30), nullable=False)
+    riesgo = Column(String(20), nullable=False)
 
     # Critical limits
     limite_inferior = Column(Numeric(8, 2))     # ej: 0°C para refrigeración
@@ -744,14 +770,14 @@ class DsdReceivingSchedule(Base):
     ventana_inicio = Column(DateTime(timezone=True), nullable=False)
     ventana_fin = Column(DateTime(timezone=True), nullable=False)
     muelle = Column(String(20))
-    tipo_carga = Column(SAEnum(DsdDockType), nullable=False)
+    tipo_carga = Column(String(20), nullable=False)
     transportista = Column(String(100))
     patente = Column(String(20))
     conductor = Column(String(100))
     conductor_telefono = Column(String(20))
     total_bultos_estimado = Column(Integer)
     total_peso_estimado_kg = Column(Numeric(8, 2))
-    estado = Column(SAEnum(DsdReceivingStatus), default="programada")
+    estado = Column(String(20), default="programada")
     notas = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -777,10 +803,10 @@ class DsdReceivingLog(Base):
     total_bultos_recibidos = Column(Integer)
     total_bultos_rechazados = Column(Integer, default=0)
     temp_ambiente_descarga = Column(Numeric(4, 1))
-    temp_check_method = Column(SAEnum(DsdTemperatureCheck), default="manual")
+    temp_check_method = Column(String(20), default="manual")
     hora_inicio = Column(DateTime(timezone=True))
     hora_fin = Column(DateTime(timezone=True))
-    estado = Column(SAEnum(DsdReceivingStatus), default="en_curso")
+    estado = Column(String(20), default="en_curso")
     observaciones = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -857,16 +883,16 @@ class PhysicalCountSession(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    codigo = Column(String(20), nullable=False)
-    area = Column(String(50), nullable=False)
+    codigo = Column(String(50), nullable=False)
+    area = Column(String(100), nullable=False)
     ubicacion = Column(String(100))
     tipo = Column(String(20), default="ciclico")  # completo, ciclico, abc, por_area
-    abc_category = Column(SAEnum(AbcCategory))
+    abc_category = Column(String(1))
     contador_principal = Column(UUID(as_uuid=True))
     contador_verificador = Column(UUID(as_uuid=True))
     fecha_inicio = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     fecha_fin = Column(DateTime(timezone=True))
-    estado = Column(SAEnum(CountSessionStatus), default="abierta")
+    estado = Column(String(20), default="abierta")
     total_items_sistema = Column(Integer, default=0)
     total_items_contados = Column(Integer, default=0)
     total_discrepancias = Column(Integer, default=0)
@@ -1055,11 +1081,15 @@ class SupplierReturn(Base):
     valor_total_estimado = Column(Numeric(14, 2))
     nota_credito_numero = Column(String(50))
     nota_credito_monto = Column(Numeric(14, 2))
-    estado = Column(SAEnum(ReturnStatus), default="pendiente")
+    estado = Column(String(20), default="pendiente")
+    warehouse_id = Column(UUID(as_uuid=True), nullable=True)
     autorizado_por = Column(UUID(as_uuid=True))
     autorizado_at = Column(DateTime(timezone=True))
     completado_por = Column(UUID(as_uuid=True))
     completado_at = Column(DateTime(timezone=True))
+    rechazado_por = Column(UUID(as_uuid=True))
+    rechazado_at = Column(DateTime(timezone=True))
+    motivo_rechazo = Column(Text)
     observaciones = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -1079,11 +1109,13 @@ class SupplierReturnItem(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     return_id = Column(UUID(as_uuid=True), ForeignKey("supermer_supplier_returns.id"), nullable=False)
     producto_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
+    factura_id = Column(UUID(as_uuid=True), ForeignKey("supplier_invoices.id"), nullable=True)
+    factura_numero = Column(String(50))
     cantidad = Column(Numeric(12, 3), nullable=False)
     costo_promedio = Column(Numeric(12, 2))
     valor_unitario = Column(Numeric(12, 2))
     valor_total = Column(Numeric(14, 2))
-    motivo = Column(SAEnum(ReturnReason), nullable=False)
+    motivo = Column(String(30), nullable=False)
     lote = Column(String(50))
     fecha_vencimiento = Column(Date)
     detalle = Column(Text)
@@ -1150,7 +1182,7 @@ class StorePriceZone(Base):
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     nombre = Column(String(100), nullable=False)
     descripcion = Column(Text)
-    tipo = Column(SAEnum(PriceZoneType), nullable=False)
+    tipo = Column(String(20), nullable=False)
     activa = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -1412,8 +1444,8 @@ class StoreAuditTemplate(Base):
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     nombre = Column(String(200), nullable=False)
     descripcion = Column(Text)
-    area = Column(SAEnum(AuditArea), nullable=False, index=True)
-    schedule = Column(SAEnum(AuditSchedule), nullable=False)
+    area = Column(String(20), nullable=False, index=True)
+    schedule = Column(String(20), nullable=False)
 
     # Scoring
     peso_porcentual = Column(Numeric(5, 2), default=100.0)
@@ -1424,6 +1456,8 @@ class StoreAuditTemplate(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    items = relationship("StoreAuditTemplateItem", backref="template", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_audit_template_area_company", "company_id", "area"),
@@ -1438,7 +1472,7 @@ class StoreAuditTemplateItem(Base):
     template_id = Column(UUID(as_uuid=True), ForeignKey("supermer_audit_templates.id"), nullable=False)
     orden = Column(Integer, nullable=False)
     pregunta = Column(Text, nullable=False)
-    tipo_respuesta = Column(SAEnum(AuditResponseType), nullable=False)
+    tipo_respuesta = Column(String(20), nullable=False)
     peso = Column(Numeric(5, 2), default=1.0)  # weight for scoring
     opciones = Column(JSON)                      # for escala type: [1,2,3,4,5]
     instrucciones = Column(Text)
@@ -1473,6 +1507,7 @@ class StoreAuditExecution(Base):
     notas_generales = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    answers = relationship("StoreAuditAnswer", backref="execution", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_audit_execution_fecha", "company_id", "fecha"),
@@ -1548,7 +1583,7 @@ class StoreEquipment(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     nombre = Column(String(200), nullable=False)
-    categoria = Column(SAEnum(EquipmentCategory), nullable=False, index=True)
+    categoria = Column(String(30), nullable=False, index=True)
     marca = Column(String(100))
     modelo = Column(String(100))
     numero_serie = Column(String(100))
@@ -1592,7 +1627,7 @@ class EquipmentMaintenanceSchedule(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     equipo_id = Column(UUID(as_uuid=True), ForeignKey("supermer_equipment.id"), nullable=False)
-    tipo = Column(SAEnum(MaintenanceType), nullable=False)
+    tipo = Column(String(20), nullable=False)
 
     # Frequency
     frecuencia_dias = Column(Integer, nullable=False)
@@ -1601,12 +1636,10 @@ class EquipmentMaintenanceSchedule(Base):
     # Task definition
     tareas = Column(JSON, nullable=False)  # List of subtasks with instructions
     duracion_estimada_min = Column(Integer)
-    prioridad = Column(SAEnum(EquipmentPriority), default="media")
+    prioridad = Column(String(20), default="media")
 
     activo = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (
         Index("ix_equip_schedule_equipo", "equipo_id"),
@@ -1623,12 +1656,11 @@ class EquipmentWorkOrder(Base):
     schedule_id = Column(UUID(as_uuid=True), ForeignKey("supermer_equipment_schedules.id"))
 
     numero_ot = Column(String(50), nullable=False)
-    tipo = Column(SAEnum(MaintenanceType), nullable=False)
-    prioridad = Column(SAEnum(EquipmentPriority), default="media")
-    estado = Column(SAEnum(MaintenanceStatus), default="programado")
+    tipo = Column(String(20), nullable=False)
+    prioridad = Column(String(20), default="media")
+    estado = Column(String(20), default="programado")
 
     # Issue description (for corrective)
-    reportado_por = Column(UUID(as_uuid=True))
     descripcion_falla = Column(Text)
     sintomas = Column(JSON)  # ["ruido_anormal", "fuga_agua", "no_enfria"]
 
@@ -1650,7 +1682,7 @@ class EquipmentWorkOrder(Base):
 
     # Result
     resultado = Column(String(50))  # "resuelto", "parcial", "derivado_proveedor", "baja_equipo"
-    fecha_proximo_mantenimiento = Column(Date)
+    notas = Column(Text)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

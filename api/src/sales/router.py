@@ -2,12 +2,12 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import date, datetime, time, timezone
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.sales.schemas import (
     SaleCreate, SaleUpdate, SaleResponse, SaleWithItems,
-    SaleAddPayment, SaleLinkQuote, SaleLinkOrder,
+    SaleAddPayment, SaleLinkQuote, SaleLinkOrder, SaleAttachTicket, SaleReopenCustomer, SaleReopenPayment,
 )
 from api.src.sales import service
 from api.src.events.emitters import emit_sale_completed
@@ -16,7 +16,7 @@ from api.src.whatsapp.service import send_message_to_phone, get_wa_template, for
 from api.src.intelicont.service import generate_sale_entry
 from api.src.integrations.service import send_webhook_async
 
-router = APIRouter(prefix="/api/v1", tags=["sales"])
+router = APIRouter(prefix="/api/v1", tags=["sales"], dependencies=[Depends(require_auth)])
 
 
 async def _get_customer_email_phone(db: AsyncSession, customer_id: str) -> tuple:
@@ -31,24 +31,126 @@ async def _get_customer_email_phone(db: AsyncSession, customer_id: str) -> tuple
 async def _send_sale_wa(db: AsyncSession, sale, customer_phone: str | None, tipo: str = "venta.creada", extra: dict | None = None):
     if not customer_phone or not sale.company_id:
         return
-    from uuid import UUID
-    template = await get_wa_template(db, UUID(str(sale.company_id)), tipo)
+    template = await get_wa_template(db, sale.company_id, tipo)
     if not template:
         return
-    total_str = f"{float(sale.total):,.0f}" if sale.total else "0"
-    kwargs = {"NUMERO": sale.numero or "", "TOTAL": total_str, **(extra or {})}
+
+    from sqlalchemy import select, func, or_
+    import pytz
+    from datetime import datetime, timezone
+
+    # 1. Ticket / Número
+    nro_str = sale.numero or ""
+
+    # 2. Total / Monto (formato guaraníes con separador de miles '.')
+    total_val = float(sale.total) if sale.total else 0.0
+    total_str = f"{int(round(total_val)):,}".replace(",", ".")
+
+    # 3. Datos del cliente
+    cliente_nombre = "Cliente"
+    documento = ""
+    socio_nro = ""
+    if sale.customer_id:
+        try:
+            from api.src.customers.models import Customer
+            c_res = await db.execute(select(Customer).where(Customer.id == sale.customer_id))
+            cust = c_res.scalar_one_or_none()
+            if cust:
+                cliente_nombre = (cust.razon_social or cust.nombre or "Cliente").strip()
+                documento = (cust.ruc or cust.ci or "").strip()
+                socio_nro = str(getattr(cust, "socio_numero", "") or getattr(cust, "codigo", "") or "").strip()
+        except Exception:
+            pass
+
+    # 4. Puntos fidelidad ExtraClub ganados
+    puntos_val = getattr(sale, "puntos_ganados", None)
+    if puntos_val is None and sale.customer_id:
+        try:
+            from api.src.loyalty.models import LoyaltyPoints
+            res_pts = await db.execute(
+                select(func.coalesce(func.sum(LoyaltyPoints.puntos), 0)).where(
+                    LoyaltyPoints.referencia_tipo == "sale",
+                    LoyaltyPoints.referencia_id == str(sale.id),
+                    LoyaltyPoints.tipo == "ganado"
+                )
+            )
+            puntos_val = res_pts.scalar() or 0
+        except Exception:
+            puntos_val = 0
+    g_x_p = 100
+    try:
+        from api.src.loyalty.models import LoyaltyConfig
+        l_cfg_res = await db.execute(select(LoyaltyConfig).where(LoyaltyConfig.company_id == sale.company_id))
+        l_cfg = l_cfg_res.scalar_one_or_none()
+        if l_cfg and l_cfg.guarani_por_punto:
+            g_x_p = int(l_cfg.guarani_por_punto)
+    except Exception:
+        pass
+    valor_monetario_str = f"{puntos_int * g_x_p:,}".replace(",", ".")
+
+    # 5. Cupones de Sorteo generados
+    cupones_gen = 0
+    cupones_tot = 0
+    campana_sorteo = "Gran Sorteo Extra Supermercado"
+    try:
+        from api.src.cupones.models import CuponTicket
+        ct_res = await db.execute(
+            select(CuponTicket).where(
+                or_(
+                    CuponTicket.sale_id == sale.id,
+                    CuponTicket.nro_ticket == sale.numero
+                )
+            )
+        )
+        ct = ct_res.scalars().first()
+        if ct:
+            cupones_gen = ct.cantidad
+            campana_sorteo = ct.campana_nombre or campana_sorteo
+            tot_res = await db.execute(
+                select(func.coalesce(func.sum(CuponTicket.cantidad), 0)).where(
+                    CuponTicket.cliente_id == ct.cliente_id
+                )
+            )
+            cupones_tot = tot_res.scalar() or cupones_gen
+    except Exception:
+        pass
+
+    # 6. Fecha local Paraguay (America/Asuncion)
+    py_tz = pytz.timezone("America/Asuncion")
+    sale_date = getattr(sale, "created_at", None) or datetime.now(timezone.utc)
+    if sale_date.tzinfo is None:
+        sale_date = pytz.utc.localize(sale_date).astimezone(py_tz)
+    else:
+        sale_date = sale_date.astimezone(py_tz)
+    fecha_str = sale_date.strftime("%d/%m/%Y %H:%M")
+
+    kwargs = {
+        "ticket": nro_str,
+        "numero": nro_str,
+        "monto": total_str,
+        "total": total_str,
+        "puntos": puntos_str,
+        "cliente": cliente_nombre,
+        "nombre": cliente_nombre,
+        "documento": documento,
+        "socio_numero": socio_nro,
+        "valor_monetario": valor_monetario_str,
+        "fecha": fecha_str,
+        "cupones_generados": str(cupones_gen),
+        "cupones_totales": str(cupones_tot),
+        "campana_sorteo": campana_sorteo,
+        "guarani_por_punto": str(g_x_p),
+        **(extra or {}),
+    }
     message = format_wa_template(template, **kwargs)
     await send_message_to_phone(db, sale.company_id, customer_phone, message)
 
 
-@router.post("/sales", response_model=SaleResponse, status_code=status.HTTP_201_CREATED)
-async def create_sale(body: SaleCreate, db: AsyncSession = Depends(get_db)):
-    from api.src.credit_accounts.service import CreditAuthorizationRequired
-    try:
-        sale = await service.create_sale(db, body)
-    except CreditAuthorizationRequired as e:
-        raise HTTPException(status_code=409, detail={"requiere_autorizacion": True, **e.details})
-    
+async def fire_sale_side_effects(db: AsyncSession, sale, tipo_comprobante: str) -> None:
+    """Email de recibo, WhatsApp, asiento contable InteliCont, emision SIFEN
+    y webhook. Solo debe dispararse para una venta realmente confirmada — si
+    queda 'pend_aprob_credito' (excede limite de credito, retenida
+    para Supervisor+Gerente) todavia no hay nada que facturar ni emitir."""
     try:
         await emit_sale_completed(
             company_id=sale.company_id,
@@ -58,11 +160,11 @@ async def create_sale(body: SaleCreate, db: AsyncSession = Depends(get_db)):
         )
     except Exception:
         pass
-    
+
     customer_email, customer_phone = None, None
     if sale.customer_id:
         customer_email, customer_phone = await _get_customer_email_phone(db, str(sale.customer_id))
-    
+
     # Send receipt email
     if customer_email:
         try:
@@ -75,27 +177,24 @@ async def create_sale(body: SaleCreate, db: AsyncSession = Depends(get_db)):
             )
         except Exception:
             pass
-    
+
     # WhatsApp notification
-    try:
-        await _send_sale_wa(db, sale, customer_phone)
-    except Exception:
-        pass
+    await _send_sale_wa(db, sale, customer_phone)
 
     # Auto-generate InteliCont entry
     try:
         await generate_sale_entry(db, str(sale.id))
     except Exception:
         pass
-    
+
     # Auto-fire SIFEN for POS sales
-    if body.tipo_comprobante in ("ticket", "factura"):
+    if tipo_comprobante in ("ticket", "factura"):
         try:
             from api.src.sifen.service import send_sale_to_sifen
             await send_sale_to_sifen(db, str(sale.id))
         except Exception:
             pass
-    
+
     # Fire webhook event
     try:
         await send_webhook_async(db, "venta.creada", {
@@ -107,7 +206,41 @@ async def create_sale(body: SaleCreate, db: AsyncSession = Depends(get_db)):
         })
     except Exception:
         pass
-    
+
+
+@router.post("/sales", response_model=SaleResponse, status_code=status.HTTP_201_CREATED)
+async def create_sale(body: SaleCreate, db: AsyncSession = Depends(get_db)):
+    try:
+        sale = await service.create_sale(db, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Commit inmediato: la venta tiene que quedar guardada pase lo que pase
+    # despues. fire_sale_side_effects hace varias escrituras propias (evento,
+    # asiento contable InteliCont) cada una con su try/except -- pero un
+    # rollback() disparado adentro de cualquiera de esas ramas corre sobre
+    # esta MISMA sesion y se llevaba puesta la venta todavia no comprometida,
+    # aunque el except la atajara y el endpoint respondiera 201 igual. Asi
+    # confirmamos: create_sale devolvia 201 con todos los datos, pero la fila
+    # nunca aparecia en la base -- el commit de get_db() al final del
+    # request terminaba comprometiendo una transaccion ya vaciada.
+    await db.commit()
+    await db.refresh(sale)
+
+    # Si es una venta ya existente devuelta por idempotencia, retornar directamente
+    # sin re-ejecutar asientos contables, envios a SIFEN ni webhooks duplicados.
+    if getattr(sale, "_is_existing", False):
+        return sale
+
+    if sale.estado == "pend_aprob_credito":
+        return sale
+
+    try:
+        await fire_sale_side_effects(db, sale, body.tipo_comprobante)
+    except Exception:
+        # La venta ya esta guardada (commit de arriba); un efecto secundario
+        # que falle no debe convertirse en un 500 para el cajero.
+        pass
     return sale
 
 
@@ -116,17 +249,40 @@ async def list_sales(
     company_id: str,
     customer_id: str | None = Query(None),
     estado: str | None = Query(None),
-    fecha_desde: date | None = Query(None),
-    fecha_hasta: date | None = Query(None),
-    numero: str | None = Query(None),
-    branch_id: str | None = Query(None),
-    limit: int = Query(50, le=500),
+    user_id: str | None = Query(None),
+    session_id: str | None = Query(None),
+    search: str | None = Query(None, description="Búsqueda por número comprobante, RUC/CI o nombre del cliente"),
+    punto_emision: str | None = Query(None),
+    condicion: str | None = Query(None),
+    tipo_comprobante: str | None = Query(None),
+    fecha_desde: str | None = Query(None),
+    fecha_hasta: str | None = Query(None),
+    desde: str | None = Query(None),
+    hasta: str | None = Query(None),
+    all_dates: bool = Query(False, description="Ignorar rango de fechas al buscar"),
+    limit: int = Query(50, le=1000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    dt_desde = datetime.combine(fecha_desde, time.min, tzinfo=timezone.utc) if fecha_desde else None
-    dt_hasta = datetime.combine(fecha_hasta, time.max, tzinfo=timezone.utc) if fecha_hasta else None
-    return await service.list_sales(db, company_id, customer_id, estado, dt_desde, dt_hasta, numero, branch_id=branch_id, limit=limit, offset=offset)
+    f_desde = fecha_desde or desde
+    f_hasta = fecha_hasta or hasta
+    return await service.list_sales(
+        db,
+        company_id,
+        customer_id=customer_id,
+        estado=estado,
+        fecha_desde=f_desde,
+        fecha_hasta=f_hasta,
+        user_id=user_id,
+        session_id=session_id,
+        search=search,
+        punto_emision=punto_emision,
+        condicion=condicion,
+        tipo_comprobante=tipo_comprobante,
+        all_dates=all_dates,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/sales/{sale_id}", response_model=SaleResponse)
@@ -135,6 +291,56 @@ async def get_sale(sale_id: str, db: AsyncSession = Depends(get_db)):
     if not sale:
         raise HTTPException(status_code=404, detail="Venta no encontrada")
     return sale
+
+
+@router.patch("/sales/{sale_id}/ticket")
+async def attach_ticket(sale_id: str, body: SaleAttachTicket, db: AsyncSession = Depends(get_db)):
+    """Adjunta el ticket ESC/POS ya armado (base64) a una venta que se
+    guardó primero sin él -- permite reimprimir después exactamente lo mismo
+    que salió por la impresora térmica, sin recalcular nada."""
+    ok = await service.attach_escpos_ticket(db, sale_id, body.recibo_escpos_b64)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Venta no encontrada")
+    return {"success": True}
+
+
+@router.patch("/sales/{sale_id}/customer", response_model=SaleResponse)
+async def reopen_sale_customer(sale_id: str, body: SaleReopenCustomer, db: AsyncSession = Depends(get_db)):
+    result = await service.reopen_sale_customer(
+        db, sale_id, str(body.customer_id) if body.customer_id else None, str(body.autorizado_por_id), body.autorizado_por_nombre,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Venta no encontrada")
+    return result
+
+
+@router.patch("/sales/{sale_id}/payment-method", response_model=SaleResponse)
+async def reopen_sale_payment(sale_id: str, body: SaleReopenPayment, db: AsyncSession = Depends(get_db)):
+    """Cambia la forma de pago de una venta ya cerrada.
+    ⚠️ Operación de alto riesgo — requiere autorización de supervisor y motivo descriptivo.
+    Deja trazabilidad completa en el campo `observaciones` de la venta.
+    """
+    try:
+        result = await service.reopen_sale_payment(
+            db,
+            sale_id,
+            body.forma_pago,
+            body.motivo,
+            str(body.autorizado_por_id),
+            body.autorizado_por_nombre,
+            str(body.customer_id) if body.customer_id else None,
+            voucher=body.voucher,
+            lote=body.lote,
+            tarjeta_marca=body.tarjeta_marca,
+            terminal_ip=body.terminal_ip,
+            moneda=body.moneda,
+            monto_moneda=body.monto_moneda,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not result:
+        raise HTTPException(status_code=404, detail="Venta no encontrada")
+    return result
 
 
 @router.get("/companies/{company_id}/sales/today")
@@ -147,7 +353,17 @@ async def cancel_sale(sale_id: str, db: AsyncSession = Depends(get_db)):
     result = await service.cancel_sale(db, sale_id)
     if not result:
         raise HTTPException(status_code=400, detail="No se pudo cancelar la venta")
-    # WhatsApp cancellation notice
+    # Mismo patron que create_sale: comprometer la reversion (stock, credito,
+    # cuenta por cobrar, puntos) ANTES de los efectos secundarios. Antes, un
+    # fallo en la notificacion de WhatsApp (que ya paso, ver el fix de
+    # _send_sale_wa mas arriba) hacia ROLLBACK de toda la cancelacion sin
+    # avisar -- la API respondia error pero quedaba en un estado ambiguo, y
+    # si el error se hubiera tragado en silencio la venta hubiera quedado
+    # "cancelada" en la respuesta sin que ninguna reversion real se haya
+    # guardado.
+    await db.commit()
+    await db.refresh(result)
+
     if result.customer_id:
         try:
             _, customer_phone = await _get_customer_email_phone(db, str(result.customer_id))
@@ -185,6 +401,10 @@ async def add_payment_to_sale(sale_id: str, body: SaleAddPayment, db: AsyncSessi
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     sale = result["sale"]
+    # Mismo motivo que cancel_sale: comprometer el pago ya registrado antes
+    # de que una notificacion pueda hacer rollback de todo.
+    await db.commit()
+    await db.refresh(sale)
     # WhatsApp payment notification
     if sale.customer_id:
         try:
@@ -225,3 +445,20 @@ async def link_order(sale_id: str, body: SaleLinkOrder, db: AsyncSession = Depen
     if not result:
         raise HTTPException(status_code=404, detail="Venta o pedido no encontrado")
     return {"message": "Pedido vinculado", "sale_id": sale_id, "order_id": str(body.order_id)}
+
+
+@router.get("/sales/customer-offers/{customer_id}")
+async def get_active_customer_offers_for_pos(
+    customer_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Consulta ofertas 1-a-1 activas para aplicar en el POS al ingresar el documento del cliente."""
+    from api.src.customer360.service import get_customer_offers
+    try:
+        offers = await get_customer_offers(db, str(user["company_id"]), customer_id)
+        # Filtrar solo aquellas ofertas vigentes y no usadas
+        return [o for o in offers if o.get("is_active")]
+    except Exception as e:
+        return []
+

@@ -1,6 +1,7 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react"
+import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react"
 import { offlineDB, type PendingSale, type OfflineCartItem, type CachedProduct, type CachedCustomer, type CachedReceipt } from "../utils/offlineDB"
-import { syncFullCatalog, getCachedCatalog, syncPendingSales, scheduleSyncRetry, cancelSyncRetry, saveOfflineReceipt, getOfflineReceipt, generateOfflineReceipt } from "../utils/syncManager"
+import { syncFullCatalog, getCachedCatalog, syncPendingSales, syncPendingCupones, scheduleSyncRetry, cancelSyncRetry, saveOfflineReceipt, getOfflineReceipt, generateOfflineReceipt } from "../utils/syncManager"
+import { syncSupervisorPins } from "../utils/localAuth"
 import { api } from "../api"
 
 interface OfflineContextType {
@@ -18,9 +19,102 @@ interface OfflineContextType {
   generateReceipt: (saleNumber: string, items: Array<{ nombre: string; cantidad: number; precio: number; total: number }>, total: number, iva10: number, iva5: number, paymentMethod: string, customerName: string | null, branchName: string) => { html: string; print: () => void }
   saveReceipt: (saleId: string, saleNumber: string, html: string) => Promise<void>
   getReceipt: (saleId: string) => Promise<CachedReceipt | null>
+  // Extra Club offline: saldo cacheado del cliente, ajustado por lo que
+  // cualquier caja de la malla LAN (incluida esta) le vendio a credito y
+  // todavia no se confirmo sincronizado con el servidor. Ver peer-mesh.cjs.
+  getExtraClubOfflineBalance: (customerId: string) => Promise<{ limite_credito: number; saldo_disponible: number; saldo_utilizado: number; activo: boolean } | null>
+  recordExtraClubOfflineConsumption: (customerId: string, monto: number, clientSaleId: string) => Promise<void>
 }
 
 const OfflineContext = createContext<OfflineContextType | null>(null)
+
+// navigator.onLine solo detecta cable/wifi desconectado -- NO detecta el
+// caso mas comun en la practica (API caida o colgada con la red local
+// intacta, ej. uvicorn crasheado o la DB bloqueada). Por eso isOnline se
+// decide con un heartbeat real contra el propio backend, no con esa
+// propiedad del navegador.
+const HEARTBEAT_INTERVAL_MS = 15000
+const HEARTBEAT_TIMEOUT_MS = 4000
+const FAILS_TO_GO_OFFLINE = 2
+
+// crypto.randomUUID() exige "contexto seguro" (HTTPS o localhost) -- las
+// cajas reales cargan por HTTP plano en la LAN (http://192.168.0.10:5173),
+// asi que ahi NO existe y tira TypeError. Mismo patron ya usado en
+// CustomersPage.tsx para el mismo problema.
+function generarUUIDLocal(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID()
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    const v = c === "x" ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
+
+// Malla LAN entre cajas: solo existe dentro del POS de Electron (ver
+// electron/preload.cjs -- window.electronAPI.peerMesh). En cualquier otro
+// contexto (navegador suelto, portal de proveedores, etc.) esto no existe
+// y las funciones de mas abajo quedan como no-ops seguros.
+function getPeerMeshAPI(): {
+  port: number
+  getMyState: () => Promise<any>
+  mergeState: (s: unknown) => Promise<unknown>
+  recordExtraClubDelta: (d: unknown) => Promise<unknown>
+  confirmSynced: (id: string) => Promise<unknown>
+  getExtraClubAdjustment: (customerId: string) => Promise<number>
+} | null {
+  const api = (window as any).electronAPI
+  return api?.peerMesh || null
+}
+
+const GOSSIP_INTERVAL_MS = 10000
+const GOSSIP_TIMEOUT_MS = 1500
+
+async function gossipTick(): Promise<void> {
+  const mesh = getPeerMeshAPI()
+  if (!mesh) return
+  const terminals = await offlineDB.terminals.getAll().catch(() => [])
+  const peers = terminals.filter((t) => t.activo && t.ip_address)
+  if (peers.length === 0) return
+
+  await Promise.all(peers.map(async (peer) => {
+    try {
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), GOSSIP_TIMEOUT_MS)
+      const res = await fetch(`http://${peer.ip_address}:${mesh.port}/peer/state`, { signal: ctrl.signal, cache: "no-store" })
+      clearTimeout(timer)
+      if (res.ok) await mesh.mergeState(await res.json())
+    } catch { /* esa caja no responde en este intento -- se reintenta solo en el proximo tick, cada 10s */ }
+  }))
+
+  try {
+    const mine = await mesh.getMyState()
+    await Promise.all(peers.map((peer) => {
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), GOSSIP_TIMEOUT_MS)
+      return fetch(`http://${peer.ip_address}:${mesh.port}/peer/state`, {
+        method: "POST",
+        signal: ctrl.signal,
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(mine),
+      }).catch(() => {}).finally(() => clearTimeout(timer))
+    }))
+  } catch { /* sin estado propio para compartir en este tick, no es grave */ }
+}
+
+async function checkServerReachable(): Promise<boolean> {
+  try {
+    const ctrl = new AbortController()
+    const t = setTimeout(() => ctrl.abort(), HEARTBEAT_TIMEOUT_MS)
+    const res = await fetch("/api/health", { signal: ctrl.signal, cache: "no-store" })
+    clearTimeout(t)
+    return res.ok
+  } catch {
+    return false
+  }
+}
 
 export function OfflineProvider({ children }: { children: ReactNode }) {
   const [isOnline, setIsOnline] = useState(navigator.onLine)
@@ -29,15 +123,42 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   const [cachedProducts, setCachedProducts] = useState<CachedProduct[]>([])
   const [cachedCustomers, setCachedCustomers] = useState<CachedCustomer[]>([])
   const [lastSync, setLastSync] = useState<string | null>(null)
+  const consecutiveFailsRef = useRef(0)
 
   useEffect(() => {
-    const onOnline = () => setIsOnline(true)
-    const onOffline = () => setIsOnline(false)
-    window.addEventListener("online", onOnline)
-    window.addEventListener("offline", onOffline)
+    let cancelled = false
+    const tick = async () => {
+      const ok = await checkServerReachable()
+      if (cancelled) return
+      if (ok) {
+        consecutiveFailsRef.current = 0
+        setIsOnline(true)
+      } else {
+        consecutiveFailsRef.current += 1
+        // No basta un solo fallo (podria ser una request puntual lenta) --
+        // se piden FAILS_TO_GO_OFFLINE seguidos antes de declarar offline,
+        // para no parpadear entre modos por un timeout aislado.
+        if (consecutiveFailsRef.current >= FAILS_TO_GO_OFFLINE) setIsOnline(false)
+      }
+    }
+    tick()
+    const interval = setInterval(tick, HEARTBEAT_INTERVAL_MS)
+    // El evento 'offline' del navegador (cable/wifi caido) es una señal
+    // valida e inmediata -- se respeta sin esperar al heartbeat. El evento
+    // 'online', en cambio, solo dispara un chequeo real: que el sistema
+    // operativo vea red de nuevo no significa que el servidor responda.
+    const onBrowserOffline = () => {
+      consecutiveFailsRef.current = FAILS_TO_GO_OFFLINE
+      setIsOnline(false)
+    }
+    const onBrowserOnline = () => { tick() }
+    window.addEventListener("online", onBrowserOnline)
+    window.addEventListener("offline", onBrowserOffline)
     return () => {
-      window.removeEventListener("online", onOnline)
-      window.removeEventListener("offline", onOffline)
+      cancelled = true
+      clearInterval(interval)
+      window.removeEventListener("online", onBrowserOnline)
+      window.removeEventListener("offline", onBrowserOffline)
     }
   }, [])
 
@@ -48,7 +169,10 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
         offlineDB.cart.getAll(),
         getCachedCatalog(),
       ])
-      setPendingSales(sales)
+      // Filtra registros null/corruptos de IndexedDB -- un solo registro asi
+      // (visto en Caja 3, 17-sep) rompia el render de TODA la app, incluido
+      // /login, porque este Provider envuelve el arbol entero.
+      setPendingSales(sales.filter((s): s is PendingSale => !!s))
       setOfflineCart(cart)
       setCachedProducts(catalog.products)
       setCachedCustomers(catalog.customers)
@@ -59,7 +183,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   useEffect(() => { loadOfflineData() }, [])
 
   const syncCatalogFn = useCallback(async (): Promise<boolean> => {
-    if (!navigator.onLine) return false
+    if (!navigator.onLine || !localStorage.getItem("access_token")) return false
     const result = await syncFullCatalog()
     if (result.success) {
       const catalog = await getCachedCatalog()
@@ -82,13 +206,35 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     return () => cancelSyncRetry()
   }, [isOnline])
 
+  // Refresco periodico de los PINs de autorizacion de supervisor, sin
+  // depender de que la conexion "flapee" -- si la caja queda online varias
+  // horas seguidas (turno completo), igual conviene refrescar de tanto en
+  // tanto para reflejar PINs nuevos o cuentas dadas de baja.
+  useEffect(() => {
+    if (!isOnline) return
+    const t = setInterval(() => { syncSupervisorPins().catch(() => {}) }, 10 * 60 * 1000)
+    return () => clearInterval(t)
+  }, [isOnline])
+
+  // Chismorreo entre cajas: SOLO mientras el servidor central no responde.
+  // Con el servidor arriba, este es el que manda -- no tiene sentido gastar
+  // ciclos en la red local (y evita divergencias innecesarias).
+  useEffect(() => {
+    if (isOnline) return
+    let cancelled = false
+    const tick = () => { if (!cancelled) gossipTick().catch(() => {}) }
+    tick()
+    const interval = setInterval(tick, GOSSIP_INTERVAL_MS)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [isOnline])
+
   const saveCartOffline = async (items: OfflineCartItem[]) => {
     setOfflineCart(items)
     await offlineDB.cart.set(items)
   }
 
   const addPendingSale = async (data: unknown): Promise<string> => {
-    const id = crypto.randomUUID()
+    const id = generarUUIDLocal()
     const now = new Date().toISOString()
     const sale: PendingSale = {
       id,
@@ -105,11 +251,43 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   }
 
   const doSyncPendingSales = async (): Promise<number> => {
-    const result = await syncPendingSales()
+    const [salesResult] = await Promise.allSettled([
+      syncPendingSales(),
+      syncPendingCupones()
+    ])
     const sales = await offlineDB.pendingSales.getAll()
     setPendingSales(sales)
-    return result.synced
+    return salesResult.status === "fulfilled" ? salesResult.value.synced : 0
   }
+
+  // Saldo Extra Club offline: el ultimo saldo sincronizado del cliente,
+  // menos lo que cualquier caja de la malla (incluida esta) le vendio a
+  // credito y todavia no confirmo el servidor. Sin tope -- si el saldo da
+  // negativo, se permite igual (decision del negocio) pero la venta debe
+  // quedar marcada para revision (eso lo hace quien llama a esta funcion).
+  const getExtraClubOfflineBalance = useCallback(async (customerId: string) => {
+    const cached = await offlineDB.creditAccounts.getByCustomer(customerId)
+    if (!cached) return null
+    const mesh = getPeerMeshAPI()
+    const adjustment = mesh ? await mesh.getExtraClubAdjustment(customerId).catch(() => 0) : 0
+    return {
+      limite_credito: cached.limite_credito,
+      saldo_disponible: cached.saldo_disponible - adjustment,
+      saldo_utilizado: cached.saldo_utilizado + adjustment,
+      activo: cached.activo,
+    }
+  }, [])
+
+  const recordExtraClubOfflineConsumption = useCallback(async (customerId: string, monto: number, clientSaleId: string) => {
+    const mesh = getPeerMeshAPI()
+    if (!mesh) return
+    await mesh.recordExtraClubDelta({
+      id: `xc-${clientSaleId}`,
+      customerId,
+      monto,
+      saleClientId: clientSaleId,
+    }).catch(() => {})
+  }, [])
 
   const generateReceipt = (
     saleNumber: string,
@@ -137,7 +315,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
 
   return (
     <OfflineContext.Provider value={{
-      isOnline, lastSync, pendingSalesCount: pendingSales.filter(s => s.status === "pending").length,
+      isOnline, lastSync, pendingSalesCount: pendingSales.filter(s => s && (s.status === "pending" || s.status === "error")).length,
       pendingSales, offlineCart, cachedProducts, cachedCustomers,
       saveCartOffline, addPendingSale,
       syncPendingSales: doSyncPendingSales,
@@ -145,6 +323,8 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
       generateReceipt,
       saveReceipt: saveOfflineReceipt,
       getReceipt: getOfflineReceipt,
+      getExtraClubOfflineBalance,
+      recordExtraClubOfflineConsumption,
     }}>
       {children}
     </OfflineContext.Provider>

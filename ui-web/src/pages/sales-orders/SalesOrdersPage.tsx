@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react"
 import { Search, ClipboardList, Plus, Eye, X, Loader2, CheckCircle, XCircle, Send, Truck, Package, FileText, Check, AlertTriangle, Ban, ChevronRight } from "lucide-react"
 import { api, type SalesOrder, type Customer, type Product } from "../../api"
 import { useToast } from "../../context/ToastContext"
+import { useAuth } from "../../context/AuthContext"
 import { useConfirm } from "../../components/ConfirmDialog"
 import { StatusBadge } from "../../components/DataTable"
 import { Modal } from "../../components/Modal"
@@ -46,6 +47,7 @@ export default function SalesOrdersPage() {
 
   const toast = useToast()
   const confirm = useConfirm()
+  const { user } = useAuth()
 
   const fetchOrders = useCallback(async () => {
     setLoading(true)
@@ -138,7 +140,7 @@ export default function SalesOrdersPage() {
 
     setSubmitting(true)
     try {
-      await api.salesOrders.approve(order.id, "current_user")
+      await api.salesOrders.approve(order.id, user?.id || user?.email || "desconocido")
       toast.success("Aprobado", `Pedido ${order.numero} aprobado`)
       fetchOrders()
     } catch {
@@ -153,7 +155,7 @@ export default function SalesOrdersPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-2">
             <ClipboardList className="w-6 h-6 text-primary" /> Pedidos de Venta
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{orders.length} pedidos registrados</p>

@@ -38,8 +38,14 @@ async def update_company(db: AsyncSession, company_id: str, data: CompanyUpdate)
         return None
 
     update_data = data.model_dump(exclude_unset=True)
+    if "nombre" in update_data and update_data["nombre"]:
+        update_data["nombre_fantasia"] = update_data["nombre"]
+    if "nombre" in update_data:
+        update_data.pop("nombre", None)
+
     for key, value in update_data.items():
-        setattr(company, key, value)
+        if hasattr(company, key):
+            setattr(company, key, value)
 
     await db.flush()
     await db.refresh(company)

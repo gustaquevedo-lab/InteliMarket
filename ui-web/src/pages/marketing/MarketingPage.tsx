@@ -1,13 +1,6 @@
-import { useState, useEffect, useRef } from "react"
-import {
-  Megaphone, Sparkles, Send, Loader2, Bot, Target, Users,
-  ShoppingBag, ArrowUpRight, CheckCircle2, MessageSquare, Copy,
-  Check, Share2, Layers, ShieldCheck, Flame, RefreshCw, Zap,
-  TrendingUp, Award, ExternalLink, HelpCircle
-} from "lucide-react"
-import { api } from "../../api"
-import { useAuth } from "../../context/AuthContext"
-import { useScrollToTop } from "../../hooks/useScrollToTop"
+import { useEntityLookup, getCustomerName } from "../../hooks/useEntityLookup"
+import { useState, useEffect } from "react"
+import { useFeatures } from "../../context/FeatureContext"
 
 interface MarketingComboItem {
   product_id: string
@@ -67,248 +60,43 @@ interface ChatMsg {
   campana?: MarketingCampaignSuggestion
 }
 
+
+
+
 export default function MarketingPage() {
-  const { user } = useAuth()
-  const rawName = user?.nombre || user?.email?.split("@")[0] || "Gustavo"
-  const userName = rawName.toLowerCase().includes("admin") || rawName.toLowerCase().includes("casa") ? "Gustavo" : rawName
-
-  const [activeTab, setActiveTab] = useState<"ai" | "campaigns" | "segments">("ai")
-  useScrollToTop()
-  const [loading, setLoading] = useState(false)
-  const [data, setData] = useState<MarketingDashboardData | null>(null)
-  const [copiedId, setCopiedId] = useState<string | null>(null)
-  const [activatedId, setActivatedId] = useState<string | null>(null)
-  const [useGemini, setUseGemini] = useState(false)
-
-  // Chat State
-  const [chatHistory, setChatHistory] = useState<ChatMsg[]>([
-    {
-      id: "welcome",
-      isUser: false,
-      text: `### 🚀 Tracción & Demanda Comercial — Casa Gonzalito S.R.L.
-Saludos, ${userName}. Soy el Gerente de Marketing IA de Casa Gonzalito.
-
-Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brechas de metas y rebates) y al **Gerente Financiero** (para blindar ofertas a crédito y cuidar la caja). Además, cuento con **Google Gemini** para traer ideas innovadoras de afuera y el pulso del mercado de consumo masivo internacional.
-
-• **Campañas de Rebate:** Diseñadas para empujar los volúmenes exactos de PARESA, Chortitzer y Trociuk.
-• **Combos Ancla:** Vinculan productos estrella con artículos de baja rotación en depósito central.
-• **Filtro Financiero:** Segmentación por solvencia crediticia (crédito a 15-30d vs solo contado/Pix).
-• **Gemini Pulso Exterior:** Análisis de tendencias FMCG, benchmark de precios y psicología promocional para despensas.`,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      model_used: "local"
-    }
-  ])
-  const [query, setQuery] = useState("")
-  const [sendingChat, setSendingChat] = useState(false)
-  const chatContainerRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    loadData()
-  }, [])
-
-  useEffect(() => {
-    if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight
-    }
-  }, [chatHistory, sendingChat])
-
-  const loadData = async () => {
-    setLoading(true)
-    try {
-      const res = await api.marketingAgent.dashboard()
-      if (res) setData(res)
-    } catch (e) {
-      console.error("Error loading marketing agent data", e)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleSendChat = async (e?: React.FormEvent, presetQuery?: string, forceGemini?: boolean) => {
-    if (e) e.preventDefault()
-    const textToSend = presetQuery || query
-    if (!textToSend.trim() || sendingChat) return
-
-    const activeGemini = forceGemini !== undefined ? forceGemini : useGemini
-    setQuery("")
-    const userMsg: ChatMsg = {
-      id: Date.now().toString(),
-      isUser: true,
-      text: textToSend,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    }
-    setChatHistory(prev => [...prev, userMsg])
-    setSendingChat(true)
-
-    try {
-      const res = await api.marketingAgent.chat(textToSend, userName, activeGemini)
-      const botMsg: ChatMsg = {
-        id: (Date.now() + 1).toString(),
-        isUser: false,
-        text: res.response,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        model_used: res.model_used,
-        campana: res.campana_generada
-      }
-      setChatHistory(prev => [...prev, botMsg])
-    } catch (err: any) {
-      setChatHistory(prev => [
-        ...prev,
-        {
-          id: (Date.now() + 1).toString(),
-          isUser: false,
-          text: "Ocurrió un inconveniente al consultar con el Gerente de Marketing. Por favor intenta nuevamente.",
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        }
-      ])
-    } finally {
-      setSendingChat(false)
-    }
-  }
-
-  const handleCopyCopy = (id: string, textToCopy: string) => {
-    navigator.clipboard.writeText(textToCopy)
-    setCopiedId(id)
-    setTimeout(() => setCopiedId(null), 2500)
-  }
-
-  const handleActivateCampaign = async (id: string) => {
-    try {
-      await api.marketingAgent.activateCampaign(id)
-      setActivatedId(id)
-      setTimeout(() => setActivatedId(null), 3000)
-      if (data) {
-        setData({
-          ...data,
-          campanas_sugeridas: data.campanas_sugeridas.map(c => c.id === id ? { ...c, estado: "activa" } : c)
-        })
-      }
-    } catch (e) {
-      console.error("Error activating campaign", e)
-    }
-  }
-
-  const formatPYG = (val: number) => {
-    return `Gs. ${Math.round(val || 0).toLocaleString('es-PY')}`
-  }
-
-  const cleanText = (str: string) => {
-    return str.replace(/\*\*/g, "").replace(/\*/g, "").replace(/`/g, "").trim()
-  }
-
-  const renderInlineFormatting = (str: string) => {
-    const parts = str.split(/(\*\*.*?\*\*)/g)
-    return parts.map((part, i) => {
-      if (part.startsWith("**") && part.endsWith("**")) {
-        const text = part.slice(2, -2).replace(/\*/g, "")
-        return <strong key={i} className="font-bold text-gray-900 dark:text-white">{text}</strong>
-      }
-      const clean = part.replace(/\*/g, "")
-      return <span key={i}>{clean}</span>
-    })
-  }
-
-  const renderMarkdownText = (content: string) => {
-    const lines = content.split('\n').filter(l => l.trim().length > 0)
-    return (
-      <div className="space-y-2 text-xs leading-relaxed text-gray-800 dark:text-gray-200">
-        {lines.map((line, idx) => {
-          const trimmed = line.trim()
-          
-          if (trimmed.startsWith('###') || trimmed.startsWith('##')) {
-            const hText = cleanText(trimmed.replace(/^#+\s*/, ''))
-            return (
-              <h4 key={idx} className="font-bold text-gray-900 dark:text-white text-xs mt-2.5 mb-1.5 flex items-center gap-1.5 border-b border-gray-200 dark:border-gray-700 pb-1">
-                <span>{hText}</span>
-              </h4>
-            )
-          }
-
-          if (trimmed.startsWith('•') || trimmed.startsWith('-') || (trimmed.startsWith('*') && !trimmed.startsWith('**'))) {
-            const bulletContent = trimmed.replace(/^[•\-*]\s*/, '')
-            return (
-              <div key={idx} className="flex items-start gap-2 p-2.5 bg-gray-50 dark:bg-gray-750/70 rounded-xl border border-gray-200/70 dark:border-gray-700 shadow-2xs">
-                <span className="w-2 h-2 rounded-full bg-violet-500 mt-1 flex-shrink-0"></span>
-                <div className="flex-1 text-gray-800 dark:text-gray-200 leading-snug">
-                  {renderInlineFormatting(bulletContent)}
-                </div>
-              </div>
-            )
-          }
-
-          const numMatch = trimmed.match(/^(\d+)\.\s*(.*)/)
-          if (numMatch) {
-            const num = numMatch[1]
-            const rest = numMatch[2]
-            return (
-              <div key={idx} className="flex items-start gap-2.5 p-2.5 bg-gray-50 dark:bg-gray-750/70 rounded-xl border border-gray-200/70 dark:border-gray-700 shadow-2xs">
-                <span className="w-4 h-4 rounded-md bg-violet-500/20 text-violet-600 dark:text-violet-300 font-bold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
-                  {num}
-                </span>
-                <div className="flex-1 text-gray-800 dark:text-gray-200 leading-snug">
-                  {renderInlineFormatting(rest)}
-                </div>
-              </div>
-            )
-          }
-
-          if (trimmed === '---' || trimmed === '--') {
-            return <hr key={idx} className="border-gray-200 dark:border-gray-700 my-2" />
-          }
-
-          return (
-            <p key={idx} className="text-gray-800 dark:text-gray-200">
-              {renderInlineFormatting(trimmed)}
-            </p>
-          )
-        })}
+  useEntityLookup()
+  const [activeTab, setActiveTab] = useState("dashboard")
+  const [loading, setLoading] = useState(true)
+  const [dashboard, setDashboard] = useState<any>(null)
+  return (
+    <div className="space-y-6 animate-fade-in-up">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">Automatización de Marketing</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Segmentación, campañas, alertas, ofertas y encuestas</p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="relative space-y-6 animate-in fade-in duration-300 pb-12">
-      {/* Glassmorphism — Ambient background */}
-      <div className="fixed inset-0 -z-10 pointer-events-none bg-gradient-to-br from-slate-100 via-white to-slate-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950" />
-      <div className="fixed inset-0 -z-10 pointer-events-none overflow-hidden">
-        <div className="absolute -top-24 left-1/4 w-[500px] h-[500px] rounded-full bg-violet-400/10 dark:bg-violet-500/15 blur-3xl" />
-        <div className="absolute bottom-1/4 right-1/6 w-[400px] h-[400px] rounded-full bg-indigo-400/8 dark:bg-indigo-500/10 blur-3xl" />
-      </div>
-
-      {/* Header Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-slate-950/95 via-slate-900/95 to-violet-950/95 backdrop-blur-xl p-6 rounded-3xl border border-white/[0.12] shadow-2xl text-white">
-        <div className="flex items-center gap-4">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-violet-500 to-indigo-500 text-white flex items-center justify-center shadow-lg shadow-indigo-500/20 font-black">
-            <Megaphone className="w-7 h-7 stroke-[2.5]" />
-          </div>
-          <div>
-            <div className="flex flex-wrap items-center gap-2.5">
-              <h1 className="text-2xl font-black text-white tracking-tight">Gerente de Marketing IA</h1>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-violet-500/20 text-violet-300 border border-violet-500/40">
-                TRACCIÓN & DEMANDA B2B
-              </span>
-            </div>
-            <p className="text-xs text-slate-300 mt-1">
-              Sincronización de Campañas de Rebate, Combos Ancla y Filtro de Riesgo Crediticio con Finanzas
-            </p>
-          </div>
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="card p-5">
+          <p className="text-sm text-gray-500">Segmentos</p>
+          <p className="text-lg sm:text-xl xl:text-xl 2xl:text-2xl font-black font-mono tracking-tight truncate text-blue-600 mt-1">{data?.segment_count || 0}</p>
         </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => handleSendChat(undefined, "Generar plan de campañas para cerrar metas de rebate este mes")}
-            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-bold text-xs transition flex items-center gap-2 shadow-lg shadow-indigo-500/20 hover:scale-[1.02] cursor-pointer"
-          >
-            <Sparkles className="w-4 h-4" />
-            <span>Generar Campañas IA</span>
-          </button>
-          <button
-            onClick={loadData}
-            className="px-4 py-2.5 bg-white/10 hover:bg-white/20 rounded-xl text-xs font-bold transition flex items-center gap-2 border border-white/10 text-white"
-          >
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-            <span>Actualizar</span>
-          </button>
+        <div className="card p-5">
+          <p className="text-sm text-gray-500">Campañas Totales</p>
+          <p className="text-lg sm:text-xl xl:text-xl 2xl:text-2xl font-black font-mono tracking-tight truncate text-green-600 mt-1">{data?.campaign_count || 0}</p>
+        </div>
+        <div className="card p-5">
+          <p className="text-sm text-gray-500">Alertas Activas</p>
+          <p className="text-lg sm:text-xl xl:text-xl 2xl:text-2xl font-black font-mono tracking-tight truncate text-purple-600 mt-1">{data?.alert_count || 0}</p>
+        </div>
+        <div className="card p-5">
+          <p className="text-sm text-gray-500">Ofertas Activas</p>
+          <p className="text-lg sm:text-xl xl:text-xl 2xl:text-2xl font-black font-mono tracking-tight truncate text-amber-600 mt-1">{data?.offer_count || 0}</p>
         </div>
       </div>
 
@@ -735,13 +523,278 @@ Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brech
                     Segmento: <strong className="text-gray-700 dark:text-gray-300">{camp.segmento_objetivo}</strong>
                   </span>
 
-                  <button
-                    onClick={() => handleActivateCampaign(camp.id)}
-                    className="px-4 py-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm shadow-indigo-500/20 cursor-pointer"
-                  >
-                    {activatedId === camp.id ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
-                    <span>{activatedId === camp.id ? "¡Programada!" : "Lanzar en WhatsApp / App"}</span>
-                  </button>
+  const load = () => apiGet("/stock-alerts").then(setAlerts).catch(() => {})
+
+  useEffect(() => { load() }, [])
+
+  const handleCreate = async () => {
+    try {
+      await apiPost("/stock-alerts", { customer_id: customerId, product_id: productId })
+      await load(); setShowForm(false); setCustomerId(""); setProductId("")
+    } catch {}
+  }
+
+  const handleDelete = async (id: string) => {
+    try { await apiDelete(`/stock-alerts/${id}`); await load() } catch {}
+  }
+
+  const handleCheck = async () => {
+    try {
+      const result = await apiPost("/stock-alerts/check")
+      alert(`Notificaciones generadas: ${JSON.stringify(result)}`)
+    } catch {}
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Alertas de Stock para Clientes</h2>
+        <div className="flex gap-2">
+          <button onClick={handleCheck} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium rounded-lg transition">
+            Verificar Stock
+          </button>
+          <button onClick={() => setShowForm(!showForm)} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition">
+            + Nueva Alerta
+          </button>
+        </div>
+      </div>
+
+      {showForm && (
+        <div className="card p-5 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">ID Cliente</label>
+              <input value={customerId} onChange={(e) => setCustomerId(e.target.value)} className="input-field w-full" placeholder="UUID del cliente" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">ID Producto</label>
+              <input value={productId} onChange={(e) => setProductId(e.target.value)} className="input-field w-full" placeholder="UUID del producto" />
+            </div>
+          </div>
+          <button onClick={handleCreate} className="btn-primary px-6">Crear Alerta</button>
+        </div>
+      )}
+
+      <div className="card overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 dark:bg-gray-700/50">
+            <tr>
+              <th className="text-left px-5 py-3 text-gray-500 font-medium">Cliente</th>
+              <th className="text-left px-5 py-3 text-gray-500 font-medium">Producto</th>
+              <th className="text-left px-5 py-3 text-gray-500 font-medium">Activo</th>
+              <th className="text-left px-5 py-3 text-gray-500 font-medium">Última Notificación</th>
+              <th className="text-right px-5 py-3 text-gray-500 font-medium">Acción</th>
+            </tr>
+          </thead>
+          <tbody>
+            {alerts.map((a) => (
+              <tr key={a.id} className="border-t border-gray-100 dark:border-gray-700">
+                <td className="px-5 py-3 font-mono text-xs">{a.customer_id}</td>
+                <td className="px-5 py-3 font-mono text-xs">{a.product_id}</td>
+                <td className="px-5 py-3"><span className={`px-2 py-0.5 rounded-full text-xs ${a.activo ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>{a.activo ? "Activo" : "Inactivo"}</span></td>
+                <td className="px-5 py-3 text-gray-500">{a.last_notified_at ? new Date(a.last_notified_at).toLocaleString("es-PY") : "—"}</td>
+                <td className="px-5 py-3 text-right">
+                  <button onClick={() => handleDelete(a.id)} className="text-xs text-red-600 hover:underline">Eliminar</button>
+                </td>
+              </tr>
+            ))}
+            {alerts.length === 0 && <tr><td colSpan={5} className="px-5 py-8 text-center text-gray-400">Sin alertas configuradas</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+/* ── Offers Tab ───────────────────────────────────────────────── */
+function OffersTab() {
+  const [offers, setOffers] = useState<any[]>([])
+  const [showForm, setShowForm] = useState(false)
+  const [customerId, setCustomerId] = useState("")
+  const [productId, setProductId] = useState("")
+  const [titulo, setTitulo] = useState("")
+  const [descripcion, setDescripcion] = useState("")
+  const [tipo, setTipo] = useState("descuento")
+  const [valor, setValor] = useState("")
+  const [codigoCupon, setCodigoCupon] = useState("")
+  const [validoHasta, setValidoHasta] = useState("")
+
+  const load = () => apiGet("/offers").then(setOffers).catch(() => {})
+
+  useEffect(() => { load() }, [])
+
+  const handleCreate = async () => {
+    try {
+      await apiPost("/offers", {
+        customer_id: customerId, product_id: productId || null, titulo, descripcion,
+        tipo, valor: parseFloat(valor) || 0, codigo_cupon: codigoCupon || null,
+        valido_hasta: validoHasta ? new Date(validoHasta).toISOString() : null,
+      })
+      await load(); setShowForm(false); setCustomerId(""); setProductId(""); setTitulo(""); setDescripcion(""); setTipo("descuento"); setValor(""); setCodigoCupon(""); setValidoHasta("")
+    } catch {}
+  }
+
+  const handleGenerate = async () => {
+    try { await apiPost("/offers/generate"); await load() } catch {}
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Ofertas Personalizadas</h2>
+        <div className="flex gap-2">
+          <button onClick={handleGenerate} className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium rounded-lg transition">
+            Generar Automáticas
+          </button>
+          <button onClick={() => setShowForm(!showForm)} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition">
+            + Nueva Oferta
+          </button>
+        </div>
+      </div>
+
+      {showForm && (
+        <div className="card p-5 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">ID Cliente</label>
+              <input value={customerId} onChange={(e) => setCustomerId(e.target.value)} className="input-field w-full" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">ID Producto (opcional)</label>
+              <input value={productId} onChange={(e) => setProductId(e.target.value)} className="input-field w-full" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Título</label>
+              <input value={titulo} onChange={(e) => setTitulo(e.target.value)} className="input-field w-full" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Tipo</label>
+              <select value={tipo} onChange={(e) => setTipo(e.target.value)} className="input-field w-full">
+                <option value="descuento">Descuento</option>
+                <option value="2x1">2x1</option>
+                <option value="gratis">Gratis</option>
+                <option value="volumen">Volumen</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Valor</label>
+              <input type="number" value={valor} onChange={(e) => setValor(e.target.value)} className="input-field w-full" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Código Cupón</label>
+              <input value={codigoCupon} onChange={(e) => setCodigoCupon(e.target.value)} className="input-field w-full" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Válido hasta</label>
+              <input type="datetime-local" value={validoHasta} onChange={(e) => setValidoHasta(e.target.value)} className="input-field w-full" />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium mb-1">Descripción</label>
+              <textarea value={descripcion} onChange={(e) => setDescripcion(e.target.value)} rows={2} className="input-field w-full" />
+            </div>
+          </div>
+          <button onClick={handleCreate} className="btn-primary px-6">Crear Oferta</button>
+        </div>
+      )}
+
+      <div className="card overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 dark:bg-gray-700/50">
+            <tr>
+              <th className="text-left px-5 py-3 text-gray-500 font-medium">Título</th>
+              <th className="text-left px-5 py-3 text-gray-500 font-medium">Tipo</th>
+              <th className="text-right px-5 py-3 text-gray-500 font-medium">Valor</th>
+              <th className="text-left px-5 py-3 text-gray-500 font-medium">Cupón</th>
+              <th className="text-left px-5 py-3 text-gray-500 font-medium">Cliente</th>
+              <th className="text-left px-5 py-3 text-gray-500 font-medium">Válido hasta</th>
+              <th className="text-left px-5 py-3 text-gray-500 font-medium">Usado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {offers.map((o) => (
+              <tr key={o.id} className="border-t border-gray-100 dark:border-gray-700">
+                <td className="px-5 py-3 font-medium">{o.titulo}</td>
+                <td className="px-5 py-3"><span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">{o.tipo}</span></td>
+                <td className="px-5 py-3 text-right font-medium">{o.valor || "—"}</td>
+                <td className="px-5 py-3 font-mono text-xs">{o.codigo_cupon || "—"}</td>
+                <td className="px-5 py-3 font-mono text-xs">{getCustomerName(o.customer_id)}</td>
+                <td className="px-5 py-3 text-gray-500">{o.valido_hasta ? new Date(o.valido_hasta).toLocaleDateString("es-PY") : "—"}</td>
+                <td className="px-5 py-3"><span className={`px-2 py-0.5 rounded-full text-xs ${o.usado ? "bg-gray-100 text-gray-500" : "bg-green-100 text-green-700"}`}>{o.usado ? "Usado" : "Disponible"}</span></td>
+              </tr>
+            ))}
+            {offers.length === 0 && <tr><td colSpan={7} className="px-5 py-8 text-center text-gray-400">Sin ofertas</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+/* ── Surveys Tab ──────────────────────────────────────────────── */
+function SurveysTab() {
+  
+  const [surveys, setSurveys] = useState<any[]>([])
+  const [responses, setResponses] = useState<any[] | null>(null)
+  const [selectedSurveyId, setSelectedSurveyId] = useState<string | null>(null)
+  const [showForm, setShowForm] = useState(false)
+  const [nombre, setNombre] = useState("")
+  const [preguntas, setPreguntas] = useState('[{"pregunta": "¿Qué tal fue tu experiencia?", "tipo": "rating"}]')
+
+  const load = () => apiGet("/surveys").then(setSurveys).catch(() => {})
+
+  useEffect(() => { load() }, [])
+
+  const handleCreate = async () => {
+    try {
+      await apiPost("/surveys", { nombre, preguntas: JSON.parse(preguntas) })
+      await load(); setShowForm(false); setNombre(""); setPreguntas('[{"pregunta": "¿Qué tal fue tu experiencia?", "tipo": "rating"}]')
+    } catch {}
+  }
+
+  const loadResponses = async (id: string) => {
+    try {
+      const r = await apiGet(`/surveys/${id}/responses`)
+      setResponses(r); setSelectedSurveyId(id)
+    } catch {}
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Encuestas de Satisfacción</h2>
+        <button onClick={() => setShowForm(!showForm)} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition">
+          + Nueva Encuesta
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="card p-5 space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Nombre</label>
+            <input value={nombre} onChange={(e) => setNombre(e.target.value)} className="input-field w-full" placeholder="Ej: Encuesta post-entrega" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Preguntas (JSON)</label>
+            <textarea value={preguntas} onChange={(e) => setPreguntas(e.target.value)} rows={5} className="input-field w-full font-mono text-xs"
+              placeholder='[{"pregunta": "Texto", "tipo": "rating/opciones/texto", "opciones": ["Op1","Op2"]}]' />
+          </div>
+          <button onClick={handleCreate} className="btn-primary px-6">Crear Encuesta</button>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="card overflow-hidden">
+          <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+            <h3 className="font-semibold text-gray-900 dark:text-white">Encuestas</h3>
+          </div>
+          <div className="divide-y divide-gray-100 dark:divide-gray-700">
+            {surveys.length === 0 ? (
+              <p className="px-5 py-8 text-center text-gray-400">Sin encuestas</p>
+            ) : surveys.map((s) => (
+              <div key={s.id} className={`px-5 py-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 transition ${selectedSurveyId === s.id ? "bg-blue-50 dark:bg-blue-900/20" : ""}`} onClick={() => loadResponses(s.id)}>
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-gray-900 dark:text-white">{s.nombre}</span>
+                  <span className={`px-2 py-0.5 rounded-full text-xs ${s.activo ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>{s.activo ? "Activa" : "Inactiva"}</span>
                 </div>
               </div>
             ))}
@@ -749,20 +802,18 @@ Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brech
         </div>
       )}
 
-      {/* TAB 3: SEGMENTOS PREDICTIVOS */}
-      {activeTab === "segments" && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {(data?.segmentos || []).map((seg) => (
-              <div key={seg.id} className="p-5 bg-white dark:bg-gray-800 rounded-3xl border border-gray-200 dark:border-gray-700 shadow-sm space-y-3 border-l-4 border-l-indigo-500">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="font-bold text-sm text-gray-900 dark:text-white">{seg.nombre}</h3>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{seg.descripcion}</p>
-                  </div>
-                  <span className="px-2.5 py-1 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-bold text-xs">
-                    {seg.total_clientes} Clientes
-                  </span>
+        <div className="card p-5">
+          {!selectedSurveyId || responses === null ? (
+            <p className="text-gray-400 text-center py-12">Seleccioná una encuesta para ver respuestas</p>
+          ) : responses.length === 0 ? (
+            <p className="text-gray-400 text-center py-12">Sin respuestas aún</p>
+          ) : (
+            <div className="space-y-3">
+              <h3 className="font-semibold text-gray-900 dark:text-white">Respuestas ({responses.length})</h3>
+              {responses.map((r: any, i: number) => (
+                <div key={i} className="bg-gray-50 dark:bg-gray-700/30 rounded-lg p-3 text-sm">
+                  <p className="text-xs text-gray-500 mb-1">Cliente: {getCustomerName(r.customer_id)} · {new Date(r.created_at).toLocaleDateString("es-PY")}</p>
+                  <pre className="text-xs font-mono whitespace-pre-wrap">{JSON.stringify(r.respuestas, null, 2)}</pre>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 pt-2 border-t border-gray-100 dark:border-gray-700 text-xs">

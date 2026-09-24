@@ -7,7 +7,7 @@ import {
   Search, X, Loader2, RefreshCw, Phone, Star, ChevronRight, Eye, TrendingUp, Users,
   Map, Target, BarChart3, Fuel, Wrench, DollarSign, ClipboardList, Battery,
   Settings, Play, Square, Maximize2, Layers, ChevronDown, ChevronUp, Plus,
-  Trash2, Edit3, Filter, ArrowUpDown, Gauge, Zap, Activity, CheckSquare,
+  Trash2, Edit3, Filter, ArrowUpDown, Gauge as GaugeIcon, Zap, Activity, CheckSquare,
   FileDown, FileText,
 } from "lucide-react"
 
@@ -340,7 +340,7 @@ export default function InteliEntregasPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-2">
             <Truck className="w-6 h-6 text-blue-600" />
             InteliEntregas
           </h1>
@@ -371,7 +371,7 @@ export default function InteliEntregasPage() {
             <div className="card p-4 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border-blue-200 dark:border-blue-800/50">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">{analytics?.today_deliveries ?? stats?.pending ?? "—"}</p>
+                  <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">{analytics?.today_deliveries ?? stats?.pending ?? "—"}</p>
                   <p className="text-xs text-gray-500 mt-0.5">Entregas Hoy</p>
                 </div>
                 <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600"><Package className="w-5 h-5" /></div>
@@ -384,7 +384,7 @@ export default function InteliEntregasPage() {
             <div className="card p-4 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-green-200 dark:border-green-800/50">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">{analytics?.on_time_rate ?? 0}%</p>
+                  <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">{analytics?.on_time_rate ?? 0}%</p>
                   <p className="text-xs text-gray-500 mt-0.5">Tasa a Tiempo</p>
                 </div>
                 <div className="w-10 h-10 rounded-xl bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-green-600"><CheckCircle className="w-5 h-5" /></div>
@@ -396,7 +396,7 @@ export default function InteliEntregasPage() {
             <div className="card p-4 bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 border-purple-200 dark:border-purple-800/50">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">{drivers.length}</p>
+                  <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">{drivers.length}</p>
                   <p className="text-xs text-gray-500 mt-0.5">Repartidores</p>
                 </div>
                 <div className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center text-purple-600"><Users className="w-5 h-5" /></div>
@@ -409,7 +409,7 @@ export default function InteliEntregasPage() {
             <div className="card p-4 bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 border-amber-200 dark:border-amber-800/50">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">{routes.length}</p>
+                  <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">{routes.length}</p>
                   <p className="text-xs text-gray-500 mt-0.5">Rutas</p>
                 </div>
                 <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center text-amber-600"><Route className="w-5 h-5" /></div>
@@ -445,7 +445,7 @@ export default function InteliEntregasPage() {
               </div>
             </div>
             <div className="card p-5">
-              <h3 className="font-semibold text-sm mb-4 flex items-center gap-2"><Gauge className="w-4 h-4 text-blue-500" /> Rendimiento</h3>
+              <h3 className="font-semibold text-sm mb-4 flex items-center gap-2"><GaugeIcon className="w-4 h-4 text-blue-500" /> Rendimiento</h3>
               <div className="flex justify-around">
                 <Gauge value={analytics?.on_time_rate ?? 0} label="A Tiempo" color="#22c55e" />
                 <Gauge value={stats && stats.delivered + stats.failed > 0 ? Math.round(stats.delivered / (stats.delivered + stats.failed) * 100) : 0} label="Entrega" color="#3b82f6" />
@@ -764,7 +764,7 @@ export default function InteliEntregasPage() {
               }} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-50 dark:bg-red-900/30 text-red-600 hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors">
                 <FileText className="w-3 h-3" /> PDF
               </button>
-              <button onClick={() => setLoadingAnalytics(true) || Promise.all([
+              <button onClick={() => { setLoadingAnalytics(true); Promise.all([
                 intelientregasApi.analytics.profitability(analyticsDays),
                 intelientregasApi.analytics.marginsRoutes(analyticsDays, 10),
                 intelientregasApi.analytics.marginsDrivers(analyticsDays, 10),
@@ -775,7 +775,7 @@ export default function InteliEntregasPage() {
               ]).then(([p, mr, md, mv, mz, bl, k]) => {
                 setProfitability(p); setMarginRoutes(mr); setMarginDrivers(md)
                 setMarginVehicles(mv); setMarginZones(mz); setBusinessLines(bl); setDeliveryKpi(k)
-              }).catch(() => {}).finally(() => setLoadingAnalytics(false))}
+              }).catch(() => {}).finally(() => setLoadingAnalytics(false)); }}
                 className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500" title="Recargar analytics">
                 <RefreshCw className={`w-4 h-4 ${loadingAnalytics ? "animate-spin" : ""}`} />
               </button>
@@ -806,7 +806,7 @@ export default function InteliEntregasPage() {
                     <p className="text-[10px] text-gray-500 mt-0.5">Margen Bruto</p>
                   </div>
                   <div className={`card p-4 ${profitability.margin_pct >= 0 ? "bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20" : "bg-gradient-to-br from-red-50 to-rose-50 dark:from-red-900/20 dark:to-rose-900/20"}`}>
-                    <p className={`text-2xl font-bold ${profitability.margin_pct >= 0 ? "text-green-600" : "text-red-600"}`}>{profitability.margin_pct}%</p>
+                    <p className={`text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate ${profitability.margin_pct >= 0 ? "text-green-600" : "text-red-600"}`}>{profitability.margin_pct}%</p>
                     <p className="text-[10px] text-gray-500 mt-0.5">Margen %</p>
                   </div>
                 </div>
@@ -845,7 +845,7 @@ export default function InteliEntregasPage() {
                 )}
                 {deliveryKpi && (
                   <div className="card p-5">
-                    <h3 className="font-semibold text-sm mb-4 flex items-center gap-2"><Gauge className="w-4 h-4 text-blue-500" /> KPIs de Entregas</h3>
+                    <h3 className="font-semibold text-sm mb-4 flex items-center gap-2"><GaugeIcon className="w-4 h-4 text-blue-500" /> KPIs de Entregas</h3>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="flex flex-col items-center p-3 rounded-xl bg-gray-50 dark:bg-slate-800/50">
                         <Gauge value={deliveryKpi.delivery_rate} label="Tasa Entrega" color="#22c55e" />

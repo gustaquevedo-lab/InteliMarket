@@ -39,6 +39,7 @@ async def create_tenant_with_schema(
     )
 
     user = User(
+        id=uuid.uuid4(),  # sin id explicito user.id era None al armar UserTenant y el alta fallaba siempre
         email=user_email,
         password_hash=hash_password(user_password),
         nombre=user_nombre,
@@ -56,8 +57,15 @@ async def create_tenant_with_schema(
     db.add(user_tenant)
     await db.flush()
 
-    await create_tenant_schema(schema_name)
-    await seed_tenant_schema(schema_name)
+    try:
+        await create_tenant_schema(schema_name)
+        await seed_tenant_schema(schema_name)
+    except Exception:
+        # el schema se crea en otra conexion (no participa del rollback): si algo falla, no dejar uno huerfano
+        engine = __import__("api.src.db", fromlist=["engine"]).engine
+        async with engine.begin() as conn:
+            await conn.execute(text(f"DROP SCHEMA IF EXISTS {schema_name} CASCADE"))
+        raise
 
     # Seed default notification and WhatsApp templates
     try:
@@ -335,7 +343,10 @@ async def seed_tenant_schema(schema_name: str):
     """.format(schema=schema_name)
 
     async with engine.begin() as conn:
-        await conn.execute(text(tenant_tables_sql))
+        # asyncpg no acepta varias sentencias juntas en un solo execute: se ejecutan de a una
+        for stmt in (x.strip() for x in tenant_tables_sql.split(";")):
+            if stmt:
+                await conn.execute(text(stmt))
 
 
 async def get_tenant_by_id(db: AsyncSession, tenant_id: uuid.UUID) -> Tenant | None:

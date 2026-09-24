@@ -7,6 +7,7 @@ import uuid
 
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
+from api.src.rbac.deps import require_permission
 from api.src.crm import service
 from api.src.crm.schemas import (
     LeadCreate, LeadUpdate, LeadResponse,
@@ -34,6 +35,7 @@ async def create_lead(
     data: LeadCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("crm:create")),
 ):
     tenant_id = uuid.UUID(user["tenant_id"])
     company_id = uuid.UUID(user["company_id"])
@@ -59,6 +61,7 @@ async def update_lead(
     data: LeadUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("crm:update")),
 ):
     tenant_id = uuid.UUID(user["tenant_id"])
     lead = await service.update_lead(db, tenant_id, lead_id, data)
@@ -72,6 +75,7 @@ async def delete_lead(
     lead_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("crm:update")),
 ):
     tenant_id = uuid.UUID(user["tenant_id"])
     success = await service.delete_lead(db, tenant_id, lead_id)
@@ -95,6 +99,7 @@ async def create_oportunidad(
     data: OportunidadCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("crm:create")),
 ):
     tenant_id = uuid.UUID(user["tenant_id"])
     company_id = uuid.UUID(user["company_id"])
@@ -120,6 +125,7 @@ async def update_oportunidad(
     data: OportunidadUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("crm:update")),
 ):
     tenant_id = uuid.UUID(user["tenant_id"])
     opp = await service.update_oportunidad(db, tenant_id, opp_id, data)
@@ -133,6 +139,7 @@ async def delete_oportunidad(
     opp_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("crm:update")),
 ):
     tenant_id = uuid.UUID(user["tenant_id"])
     success = await service.delete_oportunidad(db, tenant_id, opp_id)
@@ -147,6 +154,7 @@ async def move_oportunidad_etapa(
     data: EtapaUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("crm:update")),
 ):
     tenant_id = uuid.UUID(user["tenant_id"])
     opp = await service.move_oportunidad_etapa(db, tenant_id, opp_id, data.etapa)
@@ -171,6 +179,7 @@ async def create_actividad(
     data: ActividadCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("crm:create")),
 ):
     tenant_id = uuid.UUID(user["tenant_id"])
     return await service.create_actividad(db, tenant_id, data)
@@ -195,6 +204,7 @@ async def update_actividad(
     data: ActividadUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("crm:update")),
 ):
     tenant_id = uuid.UUID(user["tenant_id"])
     actividad = await service.update_actividad(db, tenant_id, actividad_id, data)
@@ -208,6 +218,7 @@ async def delete_actividad(
     actividad_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("crm:update")),
 ):
     tenant_id = uuid.UUID(user["tenant_id"])
     actividad = await service.get_actividad(db, tenant_id, actividad_id)

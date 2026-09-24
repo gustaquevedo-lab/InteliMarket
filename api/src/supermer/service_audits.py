@@ -4,12 +4,12 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
-from sqlalchemy import func
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from fastapi import HTTPException
 
-from .models import AuditTemplate, AuditTemplateItem, AuditExecution, AuditAnswer
+from .models import StoreAuditTemplate, StoreAuditTemplateItem, StoreAuditExecution, StoreAuditAnswer
 
 
 # ---------------------------------------------------------------------------
@@ -17,35 +17,41 @@ from .models import AuditTemplate, AuditTemplateItem, AuditExecution, AuditAnswe
 # ---------------------------------------------------------------------------
 
 async def list_templates(company_id: UUID, db: AsyncSession, area: Optional[str] = None, activo: Optional[bool] = None):
-    q = db.query(AuditTemplate).filter(AuditTemplate.company_id == company_id)
+    q = select(StoreAuditTemplate).where(StoreAuditTemplate.company_id == company_id)
     if area:
-        q = q.filter(AuditTemplate.area == area)
+        q = q.where(StoreAuditTemplate.area == area)
     if activo is not None:
-        q = q.filter(AuditTemplate.activo == activo)
-    return q.order_by(AuditTemplate.nombre).all()
+        q = q.where(StoreAuditTemplate.activo == activo)
+    q = q.order_by(StoreAuditTemplate.nombre)
+    result = await db.execute(q)
+    return result.scalars().all()
 
 
 async def get_template(template_id: UUID, db: AsyncSession):
-    t = db.query(AuditTemplate).options(
-        selectinload(AuditTemplate.items).order_by(AuditTemplateItem.orden),
-    ).get(template_id)
+    result = await db.execute(
+        select(StoreAuditTemplate)
+        .options(selectinload(StoreAuditTemplate.items))
+        .where(StoreAuditTemplate.id == template_id)
+    )
+    t = result.scalar_one_or_none()
     if not t:
         raise HTTPException(404, "Audit template not found")
+    t.items.sort(key=lambda i: i.orden)
     return t
 
 
 async def create_template(company_id: UUID, data, db: AsyncSession):
-    t = AuditTemplate(
+    t = StoreAuditTemplate(
         company_id=company_id,
         **data.model_dump(exclude={"items"}, exclude_none=True),
     )
     db.add(t)
-    db.flush()
+    await db.flush()
     for item_data in data.items or []:
-        item = AuditTemplateItem(template_id=t.id, **item_data.model_dump())
+        item = StoreAuditTemplateItem(template_id=t.id, **item_data.model_dump())
         db.add(item)
-    db.commit()
-    db.refresh(t)
+    await db.commit()
+    await db.refresh(t)
     return await get_template(t.id, db)
 
 
@@ -53,15 +59,15 @@ async def update_template(template_id: UUID, data, db: AsyncSession):
     t = await get_template(template_id, db)
     for k, v in data.model_dump(exclude_none=True).items():
         setattr(t, k, v)
-    db.commit()
-    db.refresh(t)
+    await db.commit()
+    await db.refresh(t)
     return await get_template(template_id, db)
 
 
 async def delete_template(template_id: UUID, db: AsyncSession):
     t = await get_template(template_id, db)
-    db.delete(t)
-    db.commit()
+    await db.delete(t)
+    await db.commit()
     return {"ok": True}
 
 
@@ -71,30 +77,32 @@ async def delete_template(template_id: UUID, db: AsyncSession):
 
 async def add_template_item(template_id: UUID, data, db: AsyncSession):
     t = await get_template(template_id, db)
-    item = AuditTemplateItem(template_id=template_id, **data.model_dump())
+    item = StoreAuditTemplateItem(template_id=template_id, **data.model_dump())
     db.add(item)
-    db.commit()
-    db.refresh(item)
+    await db.commit()
+    await db.refresh(item)
     return item
 
 
 async def update_template_item(item_id: UUID, data, db: AsyncSession):
-    item = db.query(AuditTemplateItem).get(item_id)
+    result = await db.execute(select(StoreAuditTemplateItem).where(StoreAuditTemplateItem.id == item_id))
+    item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(404, "Template item not found")
     for k, v in data.model_dump(exclude_none=True).items():
         setattr(item, k, v)
-    db.commit()
-    db.refresh(item)
+    await db.commit()
+    await db.refresh(item)
     return item
 
 
 async def delete_template_item(item_id: UUID, db: AsyncSession):
-    item = db.query(AuditTemplateItem).get(item_id)
+    result = await db.execute(select(StoreAuditTemplateItem).where(StoreAuditTemplateItem.id == item_id))
+    item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(404, "Template item not found")
-    db.delete(item)
-    db.commit()
+    await db.delete(item)
+    await db.commit()
     return {"ok": True}
 
 
@@ -108,22 +116,29 @@ async def list_executions(
     fecha: Optional[date] = None,
     estado: Optional[str] = None,
 ):
-    q = db.query(AuditExecution).join(AuditTemplate).filter(
-        AuditTemplate.company_id == company_id,
+    q = select(StoreAuditExecution).join(
+        StoreAuditTemplate, StoreAuditExecution.template_id == StoreAuditTemplate.id
+    ).where(
+        StoreAuditTemplate.company_id == company_id,
     )
     if area:
-        q = q.filter(AuditTemplate.area == area)
+        q = q.where(StoreAuditTemplate.area == area)
     if fecha:
-        q = q.filter(AuditExecution.fecha == fecha)
+        q = q.where(StoreAuditExecution.fecha == fecha)
     if estado:
-        q = q.filter(AuditExecution.estado == estado)
-    return q.order_by(AuditExecution.fecha.desc(), AuditExecution.hora.desc()).all()
+        q = q.where(StoreAuditExecution.estado == estado)
+    q = q.order_by(StoreAuditExecution.fecha.desc(), StoreAuditExecution.hora.desc())
+    result = await db.execute(q)
+    return result.scalars().all()
 
 
 async def get_execution(execution_id: UUID, db: AsyncSession):
-    e = db.query(AuditExecution).options(
-        selectinload(AuditExecution.answers),
-    ).get(execution_id)
+    result = await db.execute(
+        select(StoreAuditExecution)
+        .options(selectinload(StoreAuditExecution.answers))
+        .where(StoreAuditExecution.id == execution_id)
+    )
+    e = result.scalar_one_or_none()
     if not e:
         raise HTTPException(404, "Audit execution not found")
     return e
@@ -131,7 +146,7 @@ async def get_execution(execution_id: UUID, db: AsyncSession):
 
 async def start_execution(company_id: UUID, user_id: UUID, data, db: AsyncSession):
     t = await get_template(data.template_id, db)
-    e = AuditExecution(
+    e = StoreAuditExecution(
         company_id=company_id,
         template_id=data.template_id,
         ejecutado_por=user_id,
@@ -141,23 +156,25 @@ async def start_execution(company_id: UUID, user_id: UUID, data, db: AsyncSessio
         **data.model_dump(exclude={"template_id"}, exclude_none=True),
     )
     db.add(e)
-    db.commit()
-    db.refresh(e)
+    await db.commit()
+    await db.refresh(e)
     return await get_execution(e.id, db)
 
 
 async def submit_answers(execution_id: UUID, user_id: UUID, answers_data: list, db: AsyncSession):
     e = await get_execution(execution_id, db)
     e.ejecutado_por = user_id
-    db.query(AuditAnswer).filter(AuditAnswer.execution_id == execution_id).delete()
+    await db.execute(
+        StoreAuditAnswer.__table__.delete().where(StoreAuditAnswer.execution_id == execution_id)
+    )
     for ans in answers_data:
-        answer = AuditAnswer(
+        answer = StoreAuditAnswer(
             execution_id=execution_id,
             **ans.model_dump(),
         )
         db.add(answer)
-    db.commit()
-    db.refresh(e)
+    await db.commit()
+    await db.refresh(e)
     return await get_execution(execution_id, db)
 
 
@@ -182,8 +199,8 @@ async def complete_execution(execution_id: UUID, db: AsyncSession):
     e.porcentaje = round(pct, 2)
     e.aprobado = pct >= t.puntaje_minimo_aprobacion
     e.estado = "completado"
-    db.commit()
-    db.refresh(e)
+    await db.commit()
+    await db.refresh(e)
     return await get_execution(execution_id, db)
 
 
@@ -193,17 +210,26 @@ async def complete_execution(execution_id: UUID, db: AsyncSession):
 
 async def audit_dashboard(company_id: UUID, db: AsyncSession):
     today = date.today()
-    executions_today = db.query(AuditExecution).join(AuditTemplate).filter(
-        AuditTemplate.company_id == company_id,
-        AuditExecution.fecha == today,
-    ).count()
+    executions_today = (await db.execute(
+        select(func.count()).select_from(StoreAuditExecution).join(
+            StoreAuditTemplate, StoreAuditExecution.template_id == StoreAuditTemplate.id
+        ).where(
+            StoreAuditTemplate.company_id == company_id,
+            StoreAuditExecution.fecha == today,
+        )
+    )).scalar()
     week_ago = date.today()
     from datetime import timedelta
     week_ago = today - timedelta(days=7)
-    all_executions = db.query(AuditExecution).join(AuditTemplate).filter(
-        AuditTemplate.company_id == company_id,
-        AuditExecution.estado == "completado",
-    ).all()
+    result = await db.execute(
+        select(StoreAuditExecution).join(
+            StoreAuditTemplate, StoreAuditExecution.template_id == StoreAuditTemplate.id
+        ).where(
+            StoreAuditTemplate.company_id == company_id,
+            StoreAuditExecution.estado == "completado",
+        )
+    )
+    all_executions = result.scalars().all()
     approved = sum(1 for e in all_executions if e.aprobado)
     rejected = sum(1 for e in all_executions if e.aprobado is False)
     avg = Decimal("0")

@@ -1,14 +1,50 @@
-import { useState, useEffect } from "react"
-import { Search, ShoppingCart, TrendingUp, Eye, Loader2, FileDown, Download, Filter, X, DollarSign, CreditCard, Link2, Plus, RotateCcw, MessageCircle, Send } from "lucide-react"
-import { api, type Sale, type PaymentMethod } from "../../api"
+import React, { useState, useEffect, useMemo, useCallback } from "react"
+import {
+  Search, ShoppingCart, TrendingUp, Eye, Loader2, FileDown, Download, Filter,
+  X, DollarSign, CreditCard, Plus, RotateCcw, Printer, FileText,
+  Receipt, ShieldCheck, FileSpreadsheet, Layers, CheckCircle2, AlertTriangle,
+  Calendar, ArrowUpRight, Banknote, Award, RefreshCw, Clock, Building,
+  Check, ChevronRight, Database
+} from "lucide-react"
+import { api, type Sale, type Customer } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { useBranch } from "../../context/BranchContext"
 import { useConfirm } from "../../components/ConfirmDialog"
-import { StatusBadge } from "../../components/DataTable"
-import { Modal } from "../../components/Modal"
 import { formatPYG, formatDate } from "../../utils/format"
+import FacturaA4Modal from "./FacturaA4Modal"
+import Rg90ExportModal from "./Rg90ExportModal"
 
-type TabType = "todas" | "pendientes" | "pagadas" | "canceladas"
+type SalesTab = "comprobantes" | "cierres_caja" | "notas_credito" | "extra_club_credito"
+type StatusFilter = "todas" | "contado" | "credito" | "canceladas"
+
+const FORMA_PAGO_LABELS: Record<string, string> = {
+  EFECTIVO: "🇵🇾 Efectivo",
+  TARJETA_BANCARD: "💳 Tarjeta Bancard",
+  TARJETA_DINELCO: "💳 Tarjeta Dinelco",
+  "TARJETA CREDITO": "💳 Tarjeta Crédito",
+  "TARJETA DEBITO": "💳 Tarjeta Débito",
+  QR: "📱 QR Bancard / Dinelco",
+  "QR CODE": "📱 QR Code",
+  PIX: "📱 Pix (Brasil)",
+  EXTRA_CLUB: "⭐ Extra Club (Crédito)",
+  "TRANF. BANCARIA": "🏦 Transferencia Bancaria",
+  CHEQUES: "🧾 Cheques",
+  "VALE COMPRA": "🎟️ Vale de Compra",
+}
+
+const PUNTOS_EMISION = [
+  { id: "todos", nombre: "Todos los Puntos de Emisión" },
+  { id: "001-011", nombre: "Caja 01 · Salón Central (Boca 011)" },
+  { id: "001-012", nombre: "Caja 02 · Salón Central (Boca 012)" },
+  { id: "001-013", nombre: "Caja 03 · Salón Central (Boca 013)" },
+  { id: "001-014", nombre: "Caja 04 · Salón Central (Boca 014)" },
+  { id: "001-015", nombre: "Caja 05 · Salón Central (Boca 015)" },
+  { id: "001-016", nombre: "Caja 06 · Salón Central (Boca 016)" },
+  { id: "001-017", nombre: "Caja 07 · Línea de Caja (Boca 017)" },
+  { id: "001-018", nombre: "Caja 08 · Mayorista (Boca 018)" },
+  { id: "001-019", nombre: "Caja 09 · Esquina / Administración (Boca 019)" },
+  { id: "001-020", nombre: "Caja 10 · Esquina / Refuerzo (Boca 020)" },
+]
 
 interface SalesSummary {
   total_ventas: number
@@ -20,454 +56,789 @@ interface SalesSummary {
 }
 
 export default function SalesPage() {
-  const { selectedBranch } = useBranch()
+  const [activeTab, setActiveTab] = useState<SalesTab>("comprobantes")
   const [sales, setSales] = useState<Sale[]>([])
-  const [summary, setSummary] = useState<SalesSummary | null>(null)
-  const [tab, setTab] = useState<TabType>("todas")
-  const [search, setSearch] = useState("")
-  const [dateFrom, setDateFrom] = useState("")
-  const [dateTo, setDateTo] = useState("")
+  const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
+
+  // Filtros
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("todas")
+  const [selectedPunto, setSelectedPunto] = useState<string>("todos")
+  const [search, setSearch] = useState("")
+  const [debouncedSearch, setDebouncedSearch] = useState("")
+  const [allDates, setAllDates] = useState(false)
+  const [dateFrom, setDateFrom] = useState(() => {
+    const d = new Date()
+    d.setDate(d.getDate() - 30)
+    return d.toISOString().split("T")[0]
+  })
+  const [dateTo, setDateTo] = useState(() => new Date().toISOString().split("T")[0])
+
+  // Modales
   const [viewingSale, setViewingSale] = useState<Sale | null>(null)
-  const [saleItems, setSaleItems] = useState<any[]>([])
-  const [waMessage, setWaMessage] = useState("")
-  const [waSending, setWaSending] = useState(false)
-  const [waOpen, setWaOpen] = useState(false)
-  const [paymentModal, setPaymentModal] = useState<Sale | null>(null)
-  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
-  const [payAmount, setPayAmount] = useState("")
-  const [payMethod, setPayMethod] = useState("")
-  const [payRef, setPayRef] = useState("")
-  const [checkNumero, setCheckNumero] = useState("")
-  const [checkBanco, setCheckBanco] = useState("")
-  const [checkTitular, setCheckTitular] = useState("")
-  const [checkVencimiento, setCheckVencimiento] = useState("")
-  const [paying, setPaying] = useState(false)
-  const [linkModal, setLinkModal] = useState<{ sale: Sale; type: "quote" | "order" } | null>(null)
-  const [linkId, setLinkId] = useState("")
+  const [anularModal, setAnularModal] = useState<Sale | null>(null)
+  const [anularMotivo, setAnularMotivo] = useState("")
+  const [anulando, setAnulando] = useState(false)
+
+  // Cierre de Caja X/Z
+  const [cierreTipo, setCierreTipo] = useState<"X" | "Z">("Z")
+  const [showCierreModal, setShowCierreModal] = useState(false)
+  const [showRg90Modal, setShowRg90Modal] = useState(false)
+  const [paymentBreakdown, setPaymentBreakdown] = useState<{ forma_pago: string; monto: number; cantidad: number }[]>([])
+  const [loadingBreakdown, setLoadingBreakdown] = useState(false)
+  const [rates, setRates] = useState({ BRL: 1380, USD: 7550 })
+
   const toast = useToast()
   const confirm = useConfirm()
 
-  // El listado siempre trae como maximo 500 filas (limite del backend) —
-  // las tarjetas de totales NO pueden salir de sumar esas filas locales,
-  // porque con volumen real (millones de ventas historicas) esas 500 no son
-  // representativas del periodo filtrado. Se piden por separado al agregado
-  // real del backend (api.reports.salesSummary), que suma TODO el periodo.
-  const fetchData = async () => {
+  const timbradoFacturas = "18545636"
+  const timbradoNC = "18545636"
+  const timbradoVencimiento = "31/12/2026"
+
+  // Debounce para búsqueda en vivo directamente contra PostgreSQL
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search)
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [search])
+
+  const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const [data, sum] = await Promise.all([
+      const isSearchActive = Boolean(debouncedSearch.trim())
+      const [salesData, customersData] = await Promise.allSettled([
         api.sales.list({
-          fecha_desde: dateFrom || undefined,
-          fecha_hasta: dateTo || undefined,
-          branch_id: selectedBranch?.id || undefined,
-          limit: 500,
+          desde: allDates ? undefined : (dateFrom || undefined),
+          hasta: allDates ? undefined : (dateTo || undefined),
+          search: isSearchActive ? debouncedSearch.trim() : undefined,
+          punto_emision: selectedPunto !== "todos" ? selectedPunto : undefined,
+          condicion: statusFilter !== "todas" ? statusFilter : undefined,
+          tipo_comprobante: activeTab === "notas_credito" ? "nota_credito" : undefined,
+          all_dates: allDates,
+          limit: isSearchActive ? 200 : 100,
         }),
-        api.reports.salesSummary({
-          fecha_desde: dateFrom || undefined,
-          fecha_hasta: dateTo || undefined,
-          branch_id: selectedBranch?.id || undefined,
-        }),
+        customers.length === 0 ? api.customers.list() : Promise.resolve(customers),
       ])
-      setSales(data)
-      setSummary(sum)
-    } catch { setSales([]); setSummary(null) }
-    finally { setLoading(false) }
-  }
 
-  useEffect(() => { fetchData() }, [dateFrom, dateTo, selectedBranch])
-
-  const filtered = sales.filter(s => {
-    if (tab === "pendientes") { if (s.estado !== "confirmado" && s.estado !== "parcial" && s.estado !== "pendiente") return false }
-    if (tab === "pagadas") { if (s.estado !== "pagado" && s.estado !== "completado") return false }
-    if (tab === "canceladas") { if (s.estado !== "cancelado" && s.estado !== "devuelto") return false }
-    if (search && !(s.numero ?? "").toLowerCase().includes(search.toLowerCase()) && !(s.customer?.razon_social || "").toLowerCase().includes(search.toLowerCase())) return false
-    return true
-  })
-
-  const active = sales.filter(s => s.estado !== "cancelado" && s.estado !== "devuelto")
-  const totalVentas = summary?.monto_total ?? 0
-  const totalIva = (summary?.monto_iva_10 ?? 0) + (summary?.monto_iva_5 ?? 0)
-  const totalTransacciones = summary?.total_ventas ?? active.length
-
-  const handleViewSale = async (sale: Sale) => {
-    setViewingSale(sale)
-    try { setSaleItems(await api.sales.getItems(sale.id)) }
-    catch { setSaleItems([]) }
-  }
-
-  const handleCancelSale = async (sale: Sale) => {
-    const ok = await confirm({ title: "¿Anular venta?", message: `Se revertirá el stock de la venta ${sale.numero}` })
-    if (!ok) return
-    try {
-      await api.sales.cancel(sale.id)
-      toast.success("Anulada", `Venta ${sale.numero} anulada`)
-      fetchData()
-    } catch { toast.error("Error", "No se pudo anular la venta") }
-  }
-
-  const openPaymentModal = async (sale: Sale) => {
-    setPaymentModal(sale)
-    setPayAmount(String(sale.saldo || sale.total))
-    setPayMethod("")
-    setPayRef("")
-    setCheckNumero("")
-    setCheckBanco("")
-    setCheckTitular("")
-    setCheckVencimiento("")
-      try { setPaymentMethods(await api.paymentMethods.list()) }
-    catch { setPaymentMethods([]) }
-  }
-
-  const payMethodTipo = paymentMethods.find(m => m.id === payMethod)?.tipo
-  const isCheckPayment = payMethodTipo === "cheque" || payMethodTipo === "pagare"
-
-  const handleAddPayment = async () => {
-    if (!paymentModal || !payMethod || !payAmount) return
-    if (isCheckPayment && (!checkNumero || !checkVencimiento)) {
-      toast.error("Error", "Ingresá número y fecha de vencimiento del cheque/pagaré")
-      return
-    }
-    setPaying(true)
-    try {
-      await api.sales.addPayment(paymentModal.id, {
-        payment_method_id: payMethod,
-        monto: Number(payAmount),
-        referencia: payRef || undefined,
-        ...(isCheckPayment ? {
-          check_numero: checkNumero,
-          check_banco: checkBanco || undefined,
-          check_titular: checkTitular || undefined,
-          check_fecha_vencimiento: checkVencimiento,
-        } : {}),
-      })
-      toast.success("Pago registrado", `Gs ${formatPYG(Number(payAmount))} aplicado a ${paymentModal.numero}`)
-      setPaymentModal(null)
-      fetchData()
-    } catch { toast.error("Error", "No se pudo registrar el pago") }
-    finally { setPaying(false) }
-  }
-
-  const openLinkModal = (sale: Sale, type: "quote" | "order") => {
-    setLinkModal({ sale, type })
-    setLinkId("")
-  }
-
-  const handleLink = async () => {
-    if (!linkModal || !linkId) return
-    try {
-      if (linkModal.type === "quote") {
-        await api.sales.linkQuote(linkModal.sale.id, linkId)
-        toast.success("Vinculada", "Cotización vinculada a la venta")
+      if (salesData.status === "fulfilled") {
+        setSales(salesData.value || [])
       } else {
-        await api.sales.linkOrder(linkModal.sale.id, linkId)
-        toast.success("Vinculado", "Pedido vinculado a la venta")
+        setSales([])
       }
-      setLinkModal(null)
+
+      if (customersData.status === "fulfilled" && customers.length === 0) {
+        setCustomers((customersData as any).value || [])
+      }
+    } catch (err: any) {
+      toast.error("Error al consultar comprobantes en base de datos", err.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [dateFrom, dateTo, debouncedSearch, selectedPunto, statusFilter, activeTab, allDates, customers.length])
+
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
+
+  useEffect(() => {
+    api.companies.list().then((comps) => {
+      const c = Array.isArray(comps) ? comps[0] : null
+      const currs = (c?.config as any)?.currencies
+      if (currs) {
+        setRates({
+          BRL: Number(currs.BRL?.venta || currs.BRL || 1380),
+          USD: Number(currs.USD?.venta || currs.USD || 7550),
+        })
+      }
+    }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (!showCierreModal) return
+    setLoadingBreakdown(true)
+    api.reports.salesByPaymentMethod({ fecha_desde: dateFrom || undefined, fecha_hasta: dateTo || undefined })
+      .then((rows) => setPaymentBreakdown(rows || []))
+      .catch(() => setPaymentBreakdown([]))
+      .finally(() => setLoadingBreakdown(false))
+  }, [showCierreModal, dateFrom, dateTo])
+
+  const customersMap = useMemo(() => {
+    const map = new Map<string, Customer>()
+    customers.forEach((c) => {
+      if (c.id) map.set(c.id, c)
+    })
+    return map
+  }, [customers])
+
+  const filteredSales = useMemo(() => {
+    return sales.filter((s: any) => {
+      if (selectedPunto !== "todos") {
+        const num = String(s.numero || "")
+        if (!num.startsWith(selectedPunto)) return false
+      }
+
+      if (activeTab === "notas_credito") {
+        if (s.tipo_comprobante !== "nota_credito" && s.estado !== "cancelado") return false
+      } else if (activeTab === "extra_club_credito") {
+        if (s.condicion !== "credito" && s.condicion !== "credito_extra_club") return false
+      }
+
+      if (statusFilter === "contado" && s.condicion !== "contado") return false
+      if (statusFilter === "credito" && s.condicion !== "credito" && s.condicion !== "credito_extra_club") return false
+      if (statusFilter === "canceladas" && s.estado !== "cancelado") return false
+
+      return true
+    })
+  }, [sales, selectedPunto, activeTab, statusFilter])
+
+  const kpis = useMemo(() => {
+    let totalMonto = 0
+    let totalIva10 = 0
+    let totalIva5 = 0
+    let totalExenta = 0
+    let totalContado = 0
+    let totalCredito = 0
+    let totalExtraClub = 0
+    let totalCanceladas = 0
+    let countValidas = 0
+
+    sales.forEach((s: any) => {
+      const tot = Number(s.total || 0)
+      if (s.estado === "cancelado") {
+        totalCanceladas += tot
+        return
+      }
+
+      countValidas++
+      totalMonto += tot
+      totalIva10 += Number(s.iva_10 || 0)
+      totalIva5 += Number(s.iva_5 || 0)
+      totalExenta += Number(s.base_exenta || 0)
+
+      if (s.condicion === "contado") totalContado += tot
+      else if (s.condicion === "credito_extra_club") {
+        totalCredito += tot
+        totalExtraClub += tot
+      } else if (s.condicion === "credito") {
+        totalCredito += tot
+      }
+    })
+
+    const avgTicket = countValidas > 0 ? Math.round(totalMonto / countValidas) : 0
+
+    return {
+      totalMonto,
+      totalIva: totalIva10 + totalIva5,
+      totalIva10,
+      totalIva5,
+      totalExenta,
+      totalContado,
+      totalCredito,
+      totalExtraClub,
+      totalCanceladas,
+      totalTickets: countValidas,
+      avgTicket,
+    }
+  }, [sales])
+
+  const handleAnularVenta = async () => {
+    if (!viewingSale) return
+    setAnulando(true)
+    try {
+      await api.sales.cancel(viewingSale.id)
+      toast.success("Nota de Crédito Emitida (DNIT)", `NC generada con Timbrado Nº ${timbradoNC} sobre comprobante #${viewingSale.numero}.`)
+      setAnularModal(null)
+      setViewingSale(null)
       fetchData()
-    } catch { toast.error("Error", "No se pudo vincular") }
+    } catch (err: any) {
+      toast.error("Error al emitir Nota de Crédito", err.message)
+    } finally {
+      setAnulando(false)
+    }
   }
-
-  const handleExportCSV = () => {
-    const headers = "Número,Fecha,Cliente,RUC,Condición,Estado,Subtotal,IVA 10%,IVA 5%,Total,Pagado,Saldo\n"
-    const rows = filtered.map(s =>
-      `${s.numero},${s.fecha},${s.customer?.razon_social || "CF"},${s.customer?.ruc || ""},${s.condicion},${s.estado},${s.subtotal},${s.iva_10 || 0},${s.iva_5 || 0},${s.total},${s.total_pagado || 0},${s.saldo || 0}`
-    ).join("\n")
-    const blob = new Blob([headers + rows], { type: "text/csv;charset=utf-8;" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url; a.download = `ventas_${new Date().toISOString().slice(0, 10)}.csv`; a.click()
-    URL.revokeObjectURL(url)
-    toast.success("Exportado", "CSV descargado")
-  }
-
-  const statusMap: Record<string, string> = {
-    confirmado: "badge-success", facturado: "badge-success", completado: "badge-success",
-    pagado: "badge-success", parcial: "badge-warning",
-    pendiente: "badge-warning", cancelado: "badge-danger", devuelto: "badge-accent",
-  }
-
-  const tabs: { key: TabType; label: string; count: number }[] = [
-    { key: "todas", label: "Todas", count: sales.length },
-    { key: "pendientes", label: "Por Cobrar", count: sales.filter(s => s.estado === "confirmado" || s.estado === "parcial" || s.estado === "pendiente").length },
-    { key: "pagadas", label: "Pagadas", count: sales.filter(s => s.estado === "pagado" || s.estado === "completado").length },
-    { key: "canceladas", label: "Canceladas", count: sales.filter(s => s.estado === "cancelado" || s.estado === "devuelto").length },
-  ]
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><ShoppingCart className="w-6 h-6 text-primary" />Ventas</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            {totalTransacciones} ventas en el período · {totalVentas > 0 ? `${formatPYG(totalVentas)} en total` : "sin datos"}
-            {sales.length >= 500 && <span className="text-amber-500"> · mostrando las 500 más recientes, filtrá por fecha para acotar</span>}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={handleExportCSV} className="btn-outline flex items-center gap-2"><Download className="w-4 h-4" />CSV</button>
-          <button onClick={fetchData} className="btn-outline"><Filter className="w-4 h-4" /></button>
-        </div>
-      </div>
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950/90 text-white p-7 border border-blue-500/20 shadow-2xl shadow-blue-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-blue-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
 
-      {/* "Por Cobrar"/"Cobrado" por venta se sacaron: total_pagado/saldo
-          quedaron en 0/sin sentido en el 100% de las ventas migradas — el
-          legacy usa un campo MODOPAGO con codigos internos (0, 153, 303,
-          803, 991...) que no corresponden a ninguna tabla de referencia
-          real, y RENDIDO esta en 0 para las 2.24M filas. No hay forma
-          confiable de saber cuanto se cobro por venta con estos datos —
-          mostrar un numero ahi seria inventarlo. El saldo real por cobrar
-          (agregado por cliente, ese si confiable) esta en la pagina de
-          Cuentas por Cobrar. */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="card p-5">
-          <div className="flex items-center gap-2 mb-1"><DollarSign className="w-4 h-4 text-green-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Total</span></div>
-          <p className="text-xl font-bold text-green-500">{formatPYG(totalVentas)}</p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-2 mb-1"><ShoppingCart className="w-4 h-4 text-primary" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Transacciones</span></div>
-          <p className="text-xl font-bold text-gray-900 dark:text-white">{totalTransacciones}</p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-2 mb-1"><CreditCard className="w-4 h-4 text-purple-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">IVA Total</span></div>
-          <p className="text-xl font-bold text-purple-500">{formatPYG(totalIva)}</p>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 dark:border-gray-700 pb-2">
-        {tabs.map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)}
-            className={`px-4 py-2 text-sm font-medium rounded-lg transition-all ${tab === t.key ? "bg-primary text-white shadow" : "text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"}`}>
-            {t.label} <span className="ml-1 text-xs opacity-70">({t.count})</span>
-          </button>
-        ))}
-      </div>
-
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input className="input-field pl-10" placeholder="Buscar por número o cliente..." value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
-        <input type="date" className="input-field w-36" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-        <input type="date" className="input-field w-36" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-        <button onClick={fetchData} className="btn-primary">Buscar</button>
-        {(search || dateFrom || dateTo) && (
-          <button onClick={() => { setSearch(""); setDateFrom(""); setDateTo("") }} className="btn-ghost text-red-500"><X className="w-4 h-4" /></button>
-        )}
-      </div>
-
-      <div className="card overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="table-header">
-              <th className="table-cell">Número</th>
-              <th className="table-cell">Cliente</th>
-              <th className="table-cell text-right">Total</th>
-              <th className="table-cell text-right">Pagado</th>
-              <th className="table-cell text-right">Saldo</th>
-              <th className="table-cell">Estado</th>
-              <th className="table-cell">Fecha</th>
-              <th className="table-cell">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={8} className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></td></tr>
-            ) : filtered.length === 0 ? (
-              <tr><td colSpan={8} className="text-center py-12 text-gray-400">No se encontraron ventas</td></tr>
-            ) : filtered.map((s) => (
-              <tr key={s.id} className="table-row">
-                <td className="table-td font-mono text-xs font-bold text-primary">{s.numero}</td>
-                <td className="table-td">
-                  <p className="text-sm font-medium">{s.customer?.razon_social || "Consumidor Final"}</p>
-                  {s.customer?.ruc && <p className="text-xs text-gray-400">{s.customer.ruc}</p>}
-                </td>
-                <td className="table-td text-right font-mono font-bold">{formatPYG(s.total)}</td>
-                <td className="table-td text-right font-mono text-green-500">{formatPYG(s.total_pagado || 0)}</td>
-                <td className="table-td text-right font-mono text-amber-500">{(s.saldo || 0) > 0 ? formatPYG(s.saldo) : "—"}</td>
-                <td className="table-td"><StatusBadge status={s.estado ?? ""} map={statusMap} /></td>
-                <td className="table-td text-sm text-gray-500">{formatDate(s.fecha)}</td>
-                <td className="table-td">
-                  <div className="flex items-center gap-1">
-                    <button className="btn-ghost" title="Ver detalle" onClick={() => handleViewSale(s)}><Eye className="w-4 h-4" /></button>
-                    <button className="btn-ghost" title="Descargar PDF" onClick={() => window.open(`${import.meta.env.VITE_API_URL || ""}${api.sales.downloadReceipt(s.id)}`, "_blank")}><FileDown className="w-4 h-4" /></button>
-                    {s.estado !== "cancelado" && s.estado !== "devuelto" && (s.saldo || 0) > 0 && (
-                      <button className="btn-ghost text-green-500" title="Registrar pago" onClick={() => openPaymentModal(s)}><Plus className="w-4 h-4" /></button>
-                    )}
-                    {s.estado !== "cancelado" && s.estado !== "devuelto" && (
-                      <button className="btn-ghost text-red-400" title="Anular venta" onClick={() => handleCancelSale(s)}><X className="w-4 h-4" /></button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Detail Modal */}
-      {viewingSale && (
-        <div className="modal-overlay" onClick={() => setViewingSale(null)}>
-          <div className="modal-content max-w-2xl max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-700">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Venta {viewingSale.numero}</h3>
-              <button onClick={() => setViewingSale(null)} className="btn-ghost"><X className="w-4 h-4" /></button>
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-500 border border-blue-400/30 text-white flex items-center justify-center shadow-lg shadow-blue-500/25">
+                  <Receipt className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-blue-500 border-2 border-slate-950"></span>
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-blue-400 uppercase bg-blue-500/10 px-2.5 py-0.5 rounded-md border border-blue-500/20">
+                    GESTIÓN FISCAL · DNIT AUTOIMPRESOR
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                    Timbrado Nº {timbradoFacturas} · Vence: {timbradoVencimiento}
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Facturación & Comprobantes de Venta
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Auditoría de tickets térmicos, liquidación de IVA 10%/5%, notas de crédito y cierres de turno de caja
+                </p>
+              </div>
             </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div><span className="text-gray-500">Estado</span><p><StatusBadge status={viewingSale.estado ?? ""} map={statusMap} /></p></div>
-                <div><span className="text-gray-500">Fecha</span><p className="font-bold">{formatDate(viewingSale.fecha)}</p></div>
-                <div><span className="text-gray-500">Cliente</span><p className="font-bold">{viewingSale.customer?.razon_social || "Consumidor Final"}</p></div>
-                <div><span className="text-gray-500">RUC</span><p className="font-mono">{viewingSale.customer?.ruc || "—"}</p></div>
-                <div><span className="text-gray-500">Condición</span><p className="font-bold capitalize">{viewingSale.condicion}</p></div>
-                <div><span className="text-gray-500">Comprobante</span><p className="font-bold capitalize">{viewingSale.tipo_comprobante}</p></div>
-              </div>
-              <div className="border-t pt-3">
-                <h4 className="text-sm font-bold mb-2">Items ({saleItems.length})</h4>
-                <table className="w-full text-sm">
-                  <thead><tr className="border-b border-gray-100 dark:border-gray-700"><th className="text-left py-1">Producto</th><th className="text-right py-1">Cant</th><th className="text-right py-1">P.U.</th><th className="text-right py-1">IVA</th><th className="text-right py-1">Total</th></tr></thead>
-                  <tbody>{saleItems.map((i: any) => (
-                    <tr key={i.id} className="border-b border-gray-50 dark:border-gray-800">
-                      <td className="py-1">{i.descripcion || i.product?.nombre || "—"}</td>
-                      <td className="text-right py-1">{i.cantidad}</td>
-                      <td className="text-right py-1 font-mono">{formatPYG(i.precio_unitario)}</td>
-                      <td className="text-right py-1 font-mono">{i.iva_tasa}%</td>
-                      <td className="text-right py-1 font-bold">{formatPYG(i.total)}</td>
-                    </tr>
-                  ))}</tbody>
-                </table>
-              </div>
-              <div className="border-t pt-3 grid grid-cols-2 gap-2 text-sm">
-                <div className="flex justify-between"><span>Subtotal</span><span className="font-mono">{formatPYG(viewingSale.subtotal)}</span></div>
-                <div className="flex justify-between"><span>Descuento</span><span className="font-mono">{formatPYG(viewingSale.descuento_total || 0)}</span></div>
-                <div className="flex justify-between"><span>IVA 10%</span><span className="font-mono">{formatPYG(viewingSale.iva_10 || 0)}</span></div>
-                <div className="flex justify-between"><span>IVA 5%</span><span className="font-mono">{formatPYG(viewingSale.iva_5 || 0)}</span></div>
-                <div className="flex justify-between col-span-2 pt-2 border-t font-bold text-lg"><span>Total</span><span>{formatPYG(viewingSale.total)}</span></div>
-                <div className="flex justify-between"><span>Pagado</span><span className="text-green-500 font-mono">{formatPYG(viewingSale.total_pagado || 0)}</span></div>
-                <div className="flex justify-between"><span>Saldo</span><span className="text-amber-500 font-mono">{formatPYG(viewingSale.saldo || 0)}</span></div>
-              </div>
-              {viewingSale.sifen_estado && (
-                <div className="border-t pt-3 text-sm">
-                  <span className="text-gray-500">SIFEN: </span>
-                  <StatusBadge status={viewingSale.sifen_estado} map={{ enviado: "badge-warning", aprobado: "badge-success", rechazado: "badge-danger" }} />
-                  {viewingSale.cdc && <p className="font-mono text-xs text-gray-400 mt-1 break-all">CDC: {viewingSale.cdc}</p>}
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado · GRUPO SANTA TERESA E.A.S. (RUC 80150377-9)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                💵 Cotización: R$ {rates.BRL} · USD {rates.USD}
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-blue-300">
+                🧾 {filteredSales.length} comprobantes en período
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={() => setShowRg90Modal(true)}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-emerald-300 hover:text-white bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/40 backdrop-blur-md transition flex items-center gap-2 shadow-sm shadow-emerald-950/40 cursor-pointer"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+              Libro Ventas RG 90 (DNIT)
+            </button>
+            <button
+              onClick={() => {
+                setCierreTipo("X")
+                setShowCierreModal(true)
+              }}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm cursor-pointer"
+            >
+              <Clock className="w-3.5 h-3.5 text-blue-400" />
+              Arqueo Parcial X
+            </button>
+            <button
+              onClick={() => {
+                setCierreTipo("Z")
+                setShowCierreModal(true)
+              }}
+              className="px-5 py-2.5 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-blue-400 to-indigo-300 hover:from-blue-300 hover:to-indigo-200 transition shadow-lg shadow-blue-500/25 flex items-center gap-2 cursor-pointer"
+            >
+              <Receipt className="w-4 h-4" />
+              Cierre de Caja Z (Fin de Turno)
+            </button>
+          </div>
+        </div>
+
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Facturación Neta</span>
+              <span className="text-[10px] font-bold text-emerald-400">Total</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+              {formatPYG(kpis.totalMonto)}
+            </p>
+            <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
+              <span>🇧🇷 R$ {(kpis.totalMonto / rates.BRL).toFixed(0)}</span>
+              <span>🇺🇸 USD {(kpis.totalMonto / rates.USD).toFixed(0)}</span>
+            </div>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">IVA Liquidado</span>
+              <span className="text-[10px] font-bold text-blue-400">DNIT</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-blue-300">
+              {formatPYG(kpis.totalIva)}
+            </p>
+            <p className="text-[11px] text-slate-400">IVA 10%: {formatPYG(kpis.totalIva10)}</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Extra Club (Crédito)</span>
+              <span className="text-[10px] font-bold text-amber-400">Afinidad</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-amber-400">
+              {formatPYG(kpis.totalExtraClub || kpis.totalCredito)}
+            </p>
+            <p className="text-[11px] text-slate-400">Cuenta corriente propia</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Volumen & Ticket Medio</span>
+              <span className="text-[10px] font-mono text-indigo-400">Promedio</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-indigo-300">
+              {kpis.totalTickets.toLocaleString()} <span className="text-sm font-semibold text-slate-400">tix</span>
+            </p>
+            <p className="text-[11px] text-emerald-400 font-mono">{formatPYG(kpis.avgTicket)} /ticket</p>
+          </div>
+        </div>
+      </div>
+
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+        {[
+          { id: "comprobantes", label: "Comprobantes Emitidos", icon: Receipt, count: sales.length },
+          { id: "cierres_caja", label: "Cierres de Caja (X / Z)", icon: Clock },
+          { id: "extra_club_credito", label: "Crédito Extra Club", icon: Award },
+          { id: "notas_credito", label: "Notas de Crédito & Anulaciones", icon: RotateCcw },
+        ].map((t) => {
+          const Icon = t.icon
+          const active = activeTab === t.id
+          return (
+            <button
+              key={t.id}
+              onClick={() => setActiveTab(t.id as any)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              <span>{t.label}</span>
+              {t.count !== undefined && (
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  active ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                }`}>
+                  {t.count}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* 🔍 BARRA DE HERRAMIENTAS & FILTROS GLASSMORPHISM */}
+      <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3.5 w-4 h-4 text-slate-400 top-3" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Consultar DB por Nº comprobante (ej: 001-015-0000146 o 146), RUC, CI o Cliente..."
+              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl pl-10 pr-24 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <div className="absolute right-3 top-2.5 flex items-center gap-1.5">
+              {loading && debouncedSearch && (
+                <div className="flex items-center gap-1 text-[10px] text-blue-500 font-medium">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span className="hidden sm:inline">DB</span>
                 </div>
               )}
-              <div className="border-t pt-3 flex flex-wrap gap-2">
-                <button className="btn-ghost flex items-center gap-1" onClick={() => { setViewingSale(null); openPaymentModal(viewingSale) }}>
-                  <Plus className="w-4 h-4" />Agregar pago
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 rounded-full hover:bg-slate-200 dark:hover:bg-slate-800"
+                  title="Limpiar búsqueda"
+                >
+                  <X className="w-3.5 h-3.5" />
                 </button>
-                <button className="btn-ghost flex items-center gap-1" onClick={() => { setViewingSale(null); openLinkModal(viewingSale, "quote") }}>
-                  <Link2 className="w-4 h-4" />Vincular cotización
-                </button>
-                <button className="btn-ghost flex items-center gap-1" onClick={() => { setViewingSale(null); openLinkModal(viewingSale, "order") }}>
-                  <RotateCcw className="w-4 h-4" />Vincular pedido
-                </button>
-                <button className="btn-ghost text-green-600 flex items-center gap-1" onClick={() => setWaOpen(!waOpen)}>
-                  <MessageCircle className="w-4 h-4" />WhatsApp
-                </button>
-              </div>
-              {waOpen && (
-                <div className="flex gap-2 mt-3">
-                  <input type="text" value={waMessage} onChange={e => setWaMessage(e.target.value)} placeholder="Mensaje WhatsApp..."
-                    className="flex-1 px-3 py-1.5 bg-gray-50 dark:bg-slate-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm" />
-                  <button onClick={async () => {
-                    if (!waMessage.trim()) return
-                    setWaSending(true)
-                    try {
-                      const phone = viewingSale.customer?.telefono || ""
-                      if (!phone) { alert("Cliente sin teléfono"); return }
-                      await api.whatsapp.testMessage({ to: phone, message: `🧾 *Factura ${viewingSale.numero}*\nTotal: ${new Intl.NumberFormat("es-PY").format(viewingSale.total || 0)} PYG\n\n${waMessage}` })
-                      setWaMessage("")
-                      setWaOpen(false)
-                    } catch { alert("Error al enviar WhatsApp") }
-                    finally { setWaSending(false) }
-                  }} disabled={!waMessage.trim() || waSending} className="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">
-                    {waSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                  </button>
-                </div>
               )}
             </div>
           </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setAllDates(!allDates)}
+              className={`px-3 py-2 rounded-2xl border text-xs font-bold transition flex items-center gap-1.5 shadow-xs ${
+                allDates
+                  ? "bg-blue-50 dark:bg-blue-950/60 border-blue-400 text-blue-700 dark:text-blue-300 ring-1 ring-blue-400"
+                  : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              }`}
+              title="Consultar en toda la base de datos sin límite de fechas (130k+ ventas)"
+            >
+              <Database className="w-3.5 h-3.5 text-blue-500" />
+              <span>{allDates ? "Todo el Historial (DB)" : "Filtrar Fechas"}</span>
+            </button>
+
+            <select
+              value={selectedPunto}
+              onChange={(e) => setSelectedPunto(e.target.value)}
+              className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
+            >
+              {PUNTOS_EMISION.map((pe) => (
+                <option key={pe.id} value={pe.id}>
+                  {pe.nombre}
+                </option>
+              ))}
+            </select>
+
+            {!allDates && (
+              <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-950 px-3 py-2 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs">
+                <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="bg-transparent font-mono text-[11px] outline-none text-slate-700 dark:text-slate-300"
+                />
+                <span className="text-slate-400">→</span>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className="bg-transparent font-mono text-[11px] outline-none text-slate-700 dark:text-slate-300"
+                />
+              </div>
+            )}
+
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as any)}
+              className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
+            >
+              <option value="todas">Todas las Condiciones</option>
+              <option value="contado">Solo Contado</option>
+              <option value="credito">Solo Crédito / Extra Club</option>
+              <option value="canceladas">Solo Anuladas</option>
+            </select>
+
+            <button
+              onClick={fetchData}
+              className="p-2.5 text-slate-400 hover:text-blue-500 rounded-2xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 transition shadow-sm"
+              title="Recargar datos de base de datos"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            </button>
+          </div>
         </div>
+
+        {debouncedSearch.trim() && (
+          <div className="flex items-center justify-between text-xs bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/50 px-3.5 py-2 rounded-xl text-blue-800 dark:text-blue-300">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Database className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+              <span>
+                Consulta directa en Base de Datos para: <strong className="font-mono">"{debouncedSearch}"</strong>
+                {allDates ? " (en todo el historial de ventas)" : ` (período ${dateFrom} al ${dateTo})`}
+                {" · "}
+                <span className="font-bold">{filteredSales.length} comprobantes encontrados</span>
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              className="text-[11px] underline font-semibold hover:text-blue-900 dark:hover:text-blue-100 shrink-0 ml-2"
+            >
+              Limpiar búsqueda
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* 📊 TABLA DE VENTAS Y COMPROBANTES */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-slate-400 border-b border-slate-200 dark:border-slate-800">
+              <tr>
+                <th className="p-4">Nº Comprobante</th>
+                <th className="p-4">Fecha / Hora</th>
+                <th className="p-4">Cajera</th>
+                <th className="p-4">Cliente</th>
+                <th className="p-4">RUC / C.I.</th>
+                <th className="p-4 text-center">Condición</th>
+                <th className="p-4 text-right">Monto Total</th>
+                <th className="p-4 text-right">IVA Liquidado</th>
+                <th className="p-4 text-center">Estado</th>
+                <th className="p-4 text-center">Acciones</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+              {loading ? (
+                <tr>
+                  <td colSpan={10} className="p-12 text-center text-slate-400">
+                    <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-blue-500" />
+                    <span>Cargando comprobantes fiscales...</span>
+                  </td>
+                </tr>
+              ) : filteredSales.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="p-12 text-center text-slate-400">
+                    No se encontraron comprobantes coincidentes con los filtros.
+                  </td>
+                </tr>
+              ) : (
+                filteredSales.map((s: any) => {
+                  const cust = customersMap.get(s.customer_id)
+                  const custName = cust?.razon_social || s.customer_name || "Consumidor Final"
+                  const custRuc = cust?.ruc || cust?.ci || s.customer_ruc || "44444401-7"
+                  const isCancelada = s.estado === "cancelado"
+                  const isExtraClub = s.condicion === "credito_extra_club"
+                  const isNC = s.tipo_comprobante === "nota_credito"
+
+                  return (
+                    <tr key={s.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                      <td className="p-4 font-mono font-bold text-slate-900 dark:text-white">
+                        <div className="flex items-center gap-2">
+                          {isNC ? (
+                            <RotateCcw className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                          ) : (
+                            <Receipt className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                          )}
+                          <span>{s.numero || `Sin numero (ID ${s.id.slice(-8)})`}</span>
+                        </div>
+                      </td>
+                      <td className="p-4 text-slate-500 font-mono text-[11px]">
+                        {s.fecha ? new Date(s.fecha).toLocaleString("es-PY") : formatDate(s.created_at)}
+                      </td>
+                      <td className="p-4 text-xs">
+                        <div className="flex flex-col">
+                          <span className="font-bold text-slate-800 dark:text-slate-200 truncate max-w-[150px]" title={s.cajero_nombre || "—"}>
+                            {s.cajero_nombre || "—"}
+                          </span>
+                          {s.caja_nombre && (
+                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-mono font-semibold">
+                              {s.caja_nombre}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-4 font-bold text-slate-800 dark:text-slate-200 max-w-[200px] truncate">
+                        {custName}
+                      </td>
+                      <td className="p-4 font-mono text-slate-500 text-[11px]">
+                        {custRuc}
+                      </td>
+                      <td className="p-4 text-center">
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                            isExtraClub
+                              ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                              : isNC
+                              ? "bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20"
+                              : s.condicion === "credito"
+                              ? "bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20"
+                              : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                          }`}
+                        >
+                          {isNC ? "Nota de Crédito" : isExtraClub ? "Extra Club" : s.condicion || "Contado"}
+                        </span>
+                      </td>
+                      <td className="p-4 text-right font-mono font-black text-slate-900 dark:text-white">
+                        {formatPYG(Number(s.total || 0))}
+                      </td>
+                      <td className="p-4 text-right font-mono text-slate-500 text-[11px]">
+                        {formatPYG(Number(s.iva_10 || 0) + Number(s.iva_5 || 0))}
+                      </td>
+                      <td className="p-4 text-center">
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                            isCancelada
+                              ? "bg-rose-500/10 text-rose-600 dark:text-rose-400"
+                              : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                          }`}
+                        >
+                          {isCancelada ? "Anulada / NC" : "Emitida / Cobrada"}
+                        </span>
+                      </td>
+                      <td className="p-4 text-center">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => setViewingSale(s)}
+                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-xl transition"
+                            title="Ver e Imprimir Factura Legal A4 (SET)"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          {!isCancelada && !isNC && (
+                            <button
+                              onClick={() => {
+                                setViewingSale(s)
+                                setAnularModal(s)
+                              }}
+                              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition"
+                              title="Anular comprobante / Emitir Nota de Crédito DNIT"
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ── MODAL OFICIAL DE FACTURA A4 (SET / DNIT) ───────────────────────── */}
+      {viewingSale && !anularModal && (
+        <FacturaA4Modal
+          sale={viewingSale}
+          customer={viewingSale.customer_id ? customersMap.get(viewingSale.customer_id) : null}
+          onClose={() => setViewingSale(null)}
+          timbrado={timbradoFacturas}
+          timbradoVencimiento={timbradoVencimiento}
+        />
       )}
 
-      {/* Payment Modal */}
-      {paymentModal && (
-        <div className="modal-overlay" onClick={() => setPaymentModal(null)}>
-          <div className="modal-content max-w-md" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-5 border-b border-gray-100 dark:border-gray-700">
-              <h3 className="font-bold text-gray-900 dark:text-white">Registrar pago</h3>
-              <button onClick={() => setPaymentModal(null)} className="btn-ghost"><X className="w-4 h-4" /></button>
+      {/* ── MODAL DE CIERRE DE CAJA X / Z ──────────────────────────────────── */}
+      {showCierreModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md p-6 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Receipt className="w-5 h-5 text-blue-500" />
+                <h3 className="font-black text-base text-slate-900 dark:text-white">
+                  Reporte de Cierre de Caja {cierreTipo}
+                </h3>
+              </div>
+              <button onClick={() => setShowCierreModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
             </div>
-            <div className="p-5 space-y-4">
-              <p className="text-sm">Venta: <span className="font-bold">{paymentModal.numero}</span></p>
-              <p className="text-sm">Saldo pendiente: <span className="font-bold text-amber-500">{formatPYG(paymentModal.saldo || paymentModal.total)}</span></p>
-              <div>
-                <label className="label-field">Monto</label>
-                <input className="input-field" type="number" min="0" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
-              </div>
-              <div>
-                <label className="label-field">Método de pago</label>
-                <select className="input-field" value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
-                  <option value="">Seleccionar...</option>
-                  {paymentMethods.map(pm => <option key={pm.id} value={pm.id}>{pm.nombre}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="label-field">Referencia (opcional)</label>
-                <input className="input-field" placeholder="Nro. transferencia..." value={payRef} onChange={(e) => setPayRef(e.target.value)} />
-              </div>
-              {isCheckPayment && (
-                <div className="space-y-3 border-t border-gray-100 dark:border-gray-700 pt-4">
-                  <p className="text-xs font-black uppercase tracking-widest text-gray-400">Datos del {payMethodTipo}</p>
-                  <div>
-                    <label className="label-field">Número</label>
-                    <input className="input-field" value={checkNumero} onChange={(e) => setCheckNumero(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="label-field">Banco</label>
-                    <input className="input-field" value={checkBanco} onChange={(e) => setCheckBanco(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="label-field">Titular</label>
-                    <input className="input-field" value={checkTitular} onChange={(e) => setCheckTitular(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="label-field">Fecha de vencimiento (cobro)</label>
-                    <input className="input-field" type="date" value={checkVencimiento} onChange={(e) => setCheckVencimiento(e.target.value)} />
-                  </div>
+
+            <div className="space-y-2 text-xs">
+              <div className="p-3.5 bg-slate-50 dark:bg-slate-800/70 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Tipo de Reporte:</span>
+                  <strong className="text-blue-600 dark:text-blue-400">{cierreTipo === "Z" ? "Cierre Definitivo Z" : "Arqueo Parcial X"}</strong>
                 </div>
-              )}
-              <button onClick={handleAddPayment} disabled={!payMethod || !payAmount || paying} className="btn-primary w-full">
-                {paying ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "Registrar pago"}
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Puntos de Emisión:</span>
+                  <span className="font-mono text-slate-700 dark:text-slate-300">{selectedPunto === "todos" ? "Consolidado Todas las Cajas" : selectedPunto}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Fecha / Hora:</span>
+                  <span className="font-mono text-slate-700 dark:text-slate-300">{new Date().toLocaleString("es-PY")}</span>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 dark:bg-slate-800/70 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+                  Recaudación Desglosada (real)
+                </span>
+                {loadingBreakdown ? (
+                  <div className="flex items-center justify-center py-3 text-slate-400">
+                    <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                  </div>
+                ) : paymentBreakdown.length === 0 ? (
+                  <p className="text-[11px] text-slate-400">Sin pagos registrados en el rango seleccionado.</p>
+                ) : (
+                  paymentBreakdown.map((p) => {
+                    const label = FORMA_PAGO_LABELS[p.forma_pago] || p.forma_pago
+                    return (
+                      <div key={p.forma_pago} className="flex justify-between font-mono">
+                        <span>{label}:</span>
+                        <strong>{formatPYG(p.monto)}</strong>
+                      </div>
+                    )
+                  })
+                )}
+                <div className="flex justify-between font-black text-sm text-slate-900 dark:text-white pt-2 border-t border-slate-200 dark:border-slate-700">
+                  <span>TOTAL GENERAL:</span>
+                  <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                    {formatPYG(paymentBreakdown.reduce((s, p) => s + p.monto, 0))}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                onClick={() => setShowCierreModal(false)}
+                className="w-1/3 py-3 rounded-2xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300"
+              >
+                Cerrar
+              </button>
+              <button
+                onClick={() => {
+                  window.print()
+                  toast.success("Cierre Emitido", `Reporte ${cierreTipo} impreso en la ticketera.`)
+                  setShowCierreModal(false)
+                }}
+                className="w-2/3 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-2xl font-bold text-xs shadow-md shadow-blue-500/25 flex items-center justify-center gap-2 transition"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Imprimir Reporte {cierreTipo} (80mm)</span>
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Link Modal */}
-      {linkModal && (
-        <div className="modal-overlay" onClick={() => setLinkModal(null)}>
-          <div className="modal-content max-w-md" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-5 border-b border-gray-100 dark:border-gray-700">
-              <h3 className="font-bold text-gray-900 dark:text-white">
-                Vincular {linkModal.type === "quote" ? "cotización" : "pedido"}
-              </h3>
-              <button onClick={() => setLinkModal(null)} className="btn-ghost"><X className="w-4 h-4" /></button>
-            </div>
-            <div className="p-5 space-y-4">
-              <p className="text-sm">Venta: <span className="font-bold">{linkModal.sale.numero}</span></p>
+      {/* ── MODAL DE NOTA DE CRÉDITO & ANULACIÓN DNIT ────────────────────────── */}
+      {anularModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md p-6 bg-white dark:bg-slate-900 rounded-3xl border-2 border-rose-500 shadow-2xl space-y-4">
+            <div className="flex items-center gap-2.5 text-rose-600">
+              <AlertTriangle className="w-6 h-6 shrink-0" />
               <div>
-                <label className="label-field">ID de {linkModal.type === "quote" ? "cotización" : "pedido"}</label>
-                <input className="input-field" placeholder="Ingrese el ID..." value={linkId} onChange={(e) => setLinkId(e.target.value)} />
+                <h3 className="font-black text-base text-slate-900 dark:text-white">
+                  Emitir Nota de Crédito DNIT
+                </h3>
+                <span className="text-[10px] font-mono text-slate-400">
+                  Timbrado NC Nº {timbradoNC} · Punto 001-001
+                </span>
               </div>
-              <button onClick={handleLink} disabled={!linkId} className="btn-primary w-full">Vincular</button>
+            </div>
+
+            <p className="text-xs text-slate-500">
+              Se emitirá una Nota de Crédito oficial por <strong>{formatPYG(Number(anularModal.total || 0))}</strong> anulando el comprobante <strong>#{anularModal.numero || anularModal.id}</strong>. Esta acción reingresará el stock al inventario.
+            </p>
+
+            <div>
+              <label className="text-[10px] font-bold text-slate-400 mb-1 block">Motivo de Devolución / Anulación (Auditoría DNIT)</label>
+              <input
+                type="text"
+                value={anularMotivo}
+                onChange={(e) => setAnularMotivo(e.target.value)}
+                placeholder="Ej: Devolución de mercadería, error de caja, cambio..."
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-xs outline-none focus:border-rose-500 text-slate-900 dark:text-white"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                onClick={() => setAnularModal(null)}
+                className="w-1/2 py-3 rounded-2xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleAnularVenta}
+                disabled={anulando}
+                className="w-1/2 bg-rose-600 hover:bg-rose-700 text-white py-3 rounded-2xl font-bold text-xs shadow-md shadow-rose-600/20 flex items-center justify-center gap-2 transition"
+              >
+                {anulando ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+                <span>Emitir NC DNIT</span>
+              </button>
             </div>
           </div>
         </div>
       )}
+      {/* ── MODAL LIBRO DE VENTAS RG 90 (DNIT / MARANGATÚ) ───────────────────── */}
+      <Rg90ExportModal
+        isOpen={showRg90Modal}
+        onClose={() => setShowRg90Modal(false)}
+        initialFechaDesde={allDates ? undefined : dateFrom}
+        initialFechaHasta={allDates ? undefined : dateTo}
+        timbrado={timbradoFacturas}
+      />
     </div>
   )
 }
