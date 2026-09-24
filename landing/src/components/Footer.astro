@@ -1,5 +1,6 @@
 ---
 // Footer: Official IntelliHouse backing and enterprise navigation
+import Logo from './Logo.astro';
 ---
 
 <footer class="bg-surface-container-lowest border-t border-outline-variant/20 pt-16 pb-12 transition-colors duration-200">
@@ -7,14 +8,9 @@
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-10 pb-12 border-b border-outline-variant/20">
       <!-- Col 1: Brand & Backing (2 cols on lg) -->
       <div class="lg:col-span-2">
-        <a href="#" class="flex items-center gap-3 mb-4">
-          <div class="w-10 h-10 rounded-xl bg-surface-container-high border border-outline-variant/30 flex items-center justify-center">
-            <span class="material-symbols-outlined text-brand-mint text-[24px]">point_of_sale</span>
-          </div>
-          <span class="font-headline text-xl font-bold tracking-tight text-on-surface">
-            InteliMarket
-          </span>
-        </a>
+        <div class="mb-4">
+          <Logo showTagline={false} />
+        </div>
         <p class="text-xs sm:text-sm text-on-surface-variant leading-relaxed max-w-sm mb-6">
           El sistema operativo de misión crítica para supermercados, mayoristas y retail en Paraguay. Diseñado para garantizar cero caídas, cumplimiento SIFEN y control total de rentabilidad.
         </p>
