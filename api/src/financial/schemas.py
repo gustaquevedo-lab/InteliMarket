@@ -588,8 +588,38 @@ class SupplierPaymentOrderCreate(BaseModel):
     fecha_emision: Optional[date] = None
     observaciones: Optional[str] = None
     recibo_proveedor: Optional[str] = None
+    estado: Optional[str] = "registrado"  # "registrado", "aguardando_pago", etc.
     allocations: list[PaymentOrderAllocationCreate]
     disbursements: Optional[list[PaymentOrderDisbursementCreate]] = None
+
+
+class PaymentProposalItem(BaseModel):
+    invoice_id: str
+    numero_factura: str
+    timbrado: Optional[str] = None
+    fecha_emision: Optional[str] = None
+    fecha_vencimiento: Optional[str] = None
+    monto_total: float
+    monto_a_pagar: float
+
+
+class PaymentProposalCreditNote(BaseModel):
+    id: str
+    tipo: str = "nc_fiscal"  # "nc_fiscal" o "devolucion"
+    numero: str
+    fecha: Optional[str] = None
+    motivo: Optional[str] = None
+    monto: float
+
+
+class PaymentProposalPdfRequest(BaseModel):
+    supplier_id: str
+    supplier_nombre: str
+    supplier_ruc: Optional[str] = None
+    fecha_propuesta: Optional[str] = None
+    observaciones: Optional[str] = None
+    invoices: list[PaymentProposalItem]
+    credit_notes: Optional[list[PaymentProposalCreditNote]] = None
 
 
 class SupplierPaymentOrderDisburse(BaseModel):

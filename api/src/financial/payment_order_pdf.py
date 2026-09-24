@@ -868,3 +868,251 @@ def generate_batch_payment_report_pdf(
     doc.build(story, canvasmaker=lambda *args, **kwargs: _NumberedCanvas(*args, footer_left=footer_text, **kwargs))
     return buffer.getvalue()
 
+
+def generate_payment_proposal_pdf(
+    company: dict,
+    proposal: dict,
+    generated_by: str = ""
+) -> bytes:
+    """Genera el comprobante PDF proforma de preparación de pago / OP provisoria."""
+    buffer = BytesIO()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=15 * mm,
+        rightMargin=15 * mm,
+        topMargin=15 * mm,
+        bottomMargin=18 * mm,
+        title="Proforma_Preparacion_Pago",
+    )
+
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle("DocTitleProp", fontName=FONT_BOLD, fontSize=13, leading=16, textColor=PRIMARY_COLOR, alignment=TA_RIGHT))
+    styles.add(ParagraphStyle("DocSubProp", fontName=FONT_REGULAR, fontSize=8, leading=10, textColor=GRAY_MEDIUM, alignment=TA_RIGHT))
+    styles.add(ParagraphStyle("CompanyTitleProp", fontName=FONT_BOLD, fontSize=11, leading=14, textColor=PRIMARY_COLOR))
+    styles.add(ParagraphStyle("CompanyMetaProp", fontName=FONT_REGULAR, fontSize=8, leading=11, textColor=GRAY_MEDIUM))
+    styles.add(ParagraphStyle("SectionTitleProp", fontName=FONT_BOLD, fontSize=9.5, leading=12, textColor=PRIMARY_COLOR, spaceBefore=7, spaceAfter=3))
+    styles.add(ParagraphStyle("CellTProp", fontName=FONT_REGULAR, fontSize=7.5, leading=9.5, textColor=GRAY_DARK))
+    styles.add(ParagraphStyle("CellBProp", fontName=FONT_BOLD, fontSize=7.5, leading=9.5, textColor=GRAY_DARK))
+    styles.add(ParagraphStyle("CellRProp", fontName=FONT_REGULAR, fontSize=7.5, leading=9.5, textColor=GRAY_DARK, alignment=TA_RIGHT))
+    styles.add(ParagraphStyle("CellRBProp", fontName=FONT_BOLD, fontSize=7.5, leading=9.5, textColor=GRAY_DARK, alignment=TA_RIGHT))
+    styles.add(ParagraphStyle("CellCProp", fontName=FONT_REGULAR, fontSize=7.5, leading=9.5, textColor=GRAY_DARK, alignment=TA_CENTER))
+
+    story = []
+
+    # 1. ENCABEZADO INSTITUCIONAL
+    razon_social = company.get("razon_social") or "GRUPO SANTA TERESA E.A.S."
+    nombre_fantasia = company.get("nombre_fantasia") or "Extra Supermercado Mayorista"
+    ruc_empresa = company.get("ruc") or "80150377-9"
+    timbrado = company.get("timbrado") or "18545636"
+    direccion = company.get("direccion") or "Av. República de Colombia c/ Calle 4, CDE - Paraguay"
+    telefono = company.get("telefono") or "+595 983 000000"
+
+    header_left = [
+        Paragraph(f"<b>{nombre_fantasia.upper()}</b>", styles["CompanyTitleProp"]),
+        Paragraph(f"<b>Razón Social:</b> {razon_social}", styles["CompanyMetaProp"]),
+        Paragraph(f"<b>RUC:</b> {ruc_empresa} | <b>Timbrado:</b> {timbrado}", styles["CompanyMetaProp"]),
+        Paragraph(f"{direccion} — Tel: {telefono}", styles["CompanyMetaProp"]),
+    ]
+
+    fecha_prop = proposal.get("fecha_propuesta") or datetime.now(ASUNCION_TZ).strftime("%d/%m/%Y")
+    header_right = [
+        Paragraph("PREPARACIÓN DE PAGO / OP", styles["DocTitleProp"]),
+        Paragraph("<b>PROFORMA DE LIQUIDACIÓN</b>", styles["DocTitleProp"]),
+        Spacer(1, 2 * mm),
+        Paragraph("<font color='#D97706'><b>ESTADO: AGUARDANDO PAGO</b></font>", styles["DocSubProp"]),
+        Paragraph(f"Fecha de Emisión: {fecha_prop}", styles["DocSubProp"]),
+        Paragraph("Cuentas por Pagar & Tesorería", styles["DocSubProp"]),
+    ]
+
+    t_header = Table([[header_left, header_right]], colWidths=[105 * mm, 75 * mm])
+    t_header.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    story.append(t_header)
+    story.append(Spacer(1, 3 * mm))
+    story.append(HRFlowable(width="100%", thickness=1, color=GRAY_BORDER, spaceAfter=6))
+
+    # 2. DATOS DEL PROVEEDOR
+    prov_nombre = proposal.get("supplier_nombre") or "PROVEEDOR GENERAL"
+    prov_ruc = proposal.get("supplier_ruc") or "—"
+    observaciones = proposal.get("observaciones") or "Preparación y verificación previa para emisión de orden de pago."
+
+    info_data = [
+        [
+            Paragraph(f"<b>BENEFICIARIO / PROVEEDOR:</b><br/>{prov_nombre}", styles["CellTProp"]),
+            Paragraph(f"<b>RUC / DOCUMENTO:</b><br/>{prov_ruc}", styles["CellTProp"]),
+            Paragraph("<b>MONEDA:</b><br/>PYG (Guaraníes)", styles["CellTProp"]),
+            Paragraph("<b>DESTINO:</b><br/>Tesorería / Pagos", styles["CellTProp"]),
+        ]
+    ]
+    t_info = Table(info_data, colWidths=[70 * mm, 45 * mm, 35 * mm, 30 * mm])
+    t_info.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), GRAY_LIGHT),
+        ("BOX", (0, 0), (-1, -1), 0.5, GRAY_BORDER),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(t_info)
+    story.append(Spacer(1, 3 * mm))
+
+    # 3. TABLA DE FACTURAS SELECCIONADAS
+    invoices = proposal.get("invoices") or []
+    story.append(Paragraph(f"1. FACTURAS SELECCIONADAS PARA PAGO ({len(invoices)} comprobantes)", styles["SectionTitleProp"]))
+
+    headers_fac = [
+        Paragraph("<b>N° Factura</b>", styles["CellBProp"]),
+        Paragraph("<b>Timbrado</b>", styles["CellBProp"]),
+        Paragraph("<b>Emisión</b>", styles["CellCProp"]),
+        Paragraph("<b>Vencimiento</b>", styles["CellCProp"]),
+        Paragraph("<b>Total Factura</b>", styles["CellRProp"]),
+        Paragraph("<b>Monto a Pagar</b>", styles["CellRBProp"]),
+    ]
+    fac_rows = [headers_fac]
+    total_fac_pagar = Decimal("0")
+
+    for inv in invoices:
+        m_pagar = Decimal(str(inv.get("monto_a_pagar") or inv.get("saldo_pendiente") or inv.get("monto_total") or 0))
+        m_tot = Decimal(str(inv.get("monto_total") or m_pagar))
+        total_fac_pagar += m_pagar
+
+        fac_rows.append([
+            Paragraph(str(inv.get("numero_factura") or "—"), styles["CellTProp"]),
+            Paragraph(str(inv.get("timbrado") or "—"), styles["CellTProp"]),
+            Paragraph(_format_date(inv.get("fecha_emision")), styles["CellCProp"]),
+            Paragraph(_format_date(inv.get("fecha_vencimiento")), styles["CellCProp"]),
+            Paragraph(_format_gs(m_tot), styles["CellRProp"]),
+            Paragraph(_format_gs(m_pagar), styles["CellRBProp"]),
+        ])
+
+    fac_rows.append([
+        Paragraph("<b>SUBTOTAL FACTURAS A PAGAR</b>", styles["CellBProp"]),
+        Paragraph("", styles["CellTProp"]),
+        Paragraph("", styles["CellCProp"]),
+        Paragraph("", styles["CellCProp"]),
+        Paragraph("", styles["CellRProp"]),
+        Paragraph(f"<b>₲ {_format_gs(total_fac_pagar)}</b>", styles["CellRBProp"]),
+    ])
+
+    t_fac = Table(fac_rows, colWidths=[40 * mm, 30 * mm, 25 * mm, 25 * mm, 30 * mm, 30 * mm])
+    t_fac.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), GRAY_LIGHT),
+        ("BOX", (0, 0), (-1, -1), 0.5, GRAY_BORDER),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, GRAY_BORDER),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("BACKGROUND", (0, -1), (-1, -1), HexColor("#F8FAFC")),
+    ]))
+    story.append(t_fac)
+    story.append(Spacer(1, 3 * mm))
+
+    # 4. TABLA DE NOTAS DE CRÉDITO Y DEVOLUCIONES A COMPENSAR
+    credit_notes = proposal.get("credit_notes") or []
+    total_nc_deducir = Decimal("0")
+
+    if credit_notes:
+        story.append(Paragraph(f"2. NOTAS DE CRÉDITO Y DEVOLUCIONES A COMPENSAR ({len(credit_notes)} comprobantes)", styles["SectionTitleProp"]))
+        headers_nc = [
+            Paragraph("<b>Tipo de Saldo a Favor</b>", styles["CellBProp"]),
+            Paragraph("<b>N° Comprobante / Remito</b>", styles["CellBProp"]),
+            Paragraph("<b>Fecha</b>", styles["CellCProp"]),
+            Paragraph("<b>Concepto / Motivo</b>", styles["CellTProp"]),
+            Paragraph("<b>Monto a Deducir</b>", styles["CellRBProp"]),
+        ]
+        nc_rows = [headers_nc]
+
+        for cn in credit_notes:
+            m_nc = Decimal(str(cn.get("monto") or 0))
+            total_nc_deducir += m_nc
+            tipo_label = "NC FISCAL REGISTRADA" if cn.get("tipo") == "nc_fiscal" else "NC PENDIENTE (DEVOLUCIÓN)"
+            color_badge = "#059669" if cn.get("tipo") == "nc_fiscal" else "#D97706"
+
+            nc_rows.append([
+                Paragraph(f"<font color='{color_badge}'><b>{tipo_label}</b></font>", styles["CellTProp"]),
+                Paragraph(str(cn.get("numero") or "—"), styles["CellBProp"]),
+                Paragraph(_format_date(cn.get("fecha")), styles["CellCProp"]),
+                Paragraph(str(cn.get("motivo") or "Compensación comercial"), styles["CellTProp"]),
+                Paragraph(f"- ₲ {_format_gs(m_nc)}", styles["CellRBProp"]),
+            ])
+
+        nc_rows.append([
+            Paragraph("<b>TOTAL NOTAS DE CRÉDITO A DEDUCIR</b>", styles["CellBProp"]),
+            Paragraph("", styles["CellTProp"]),
+            Paragraph("", styles["CellCProp"]),
+            Paragraph("", styles["CellTProp"]),
+            Paragraph(f"<b>- ₲ {_format_gs(total_nc_deducir)}</b>", styles["CellRBProp"]),
+        ])
+
+        t_nc = Table(nc_rows, colWidths=[50 * mm, 38 * mm, 22 * mm, 42 * mm, 28 * mm])
+        t_nc.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), GRAY_LIGHT),
+            ("BOX", (0, 0), (-1, -1), 0.5, GRAY_BORDER),
+            ("INNERGRID", (0, 0), (-1, -1), 0.5, GRAY_BORDER),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("BACKGROUND", (0, -1), (-1, -1), HexColor("#F0FDF4")),
+        ]))
+        story.append(t_nc)
+        story.append(Spacer(1, 3 * mm))
+
+    # 5. RESUMEN DE LIQUIDACIÓN Y NETO A DESEMBOLSAR
+    total_neto = max(Decimal("0"), total_fac_pagar - total_nc_deducir)
+    resumen_data = [
+        [
+            Paragraph(f"<b>OBSERVACIONES / CONDICIONES:</b><br/>{observaciones}", styles["CellTProp"]),
+            Paragraph(
+                f"<b>Subtotal Facturas:</b> ₲ {_format_gs(total_fac_pagar)}<br/>"
+                f"<b>Compensación NC / Devoluciones:</b> -₲ {_format_gs(total_nc_deducir)}<br/>"
+                f"<font size=10 color='#0F172A'><b>NETO ESTIMADO A PAGAR: ₲ {_format_gs(total_neto)}</b></font>",
+                styles["CellRProp"]
+            )
+        ]
+    ]
+    t_res = Table(resumen_data, colWidths=[110 * mm, 70 * mm])
+    t_res.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F8FAFC")),
+        ("BOX", (0, 0), (-1, -1), 0.5, GRAY_BORDER),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(t_res)
+    story.append(Spacer(1, 6 * mm))
+
+    # 6. FIRMAS DE AUTORIZACIÓN PREVIA
+    firmas = [
+        [
+            Paragraph("____________________________<br/><b>PREPARADO POR</b><br/>Cuentas por Pagar (AP)", styles["CellCProp"]),
+            Paragraph("____________________________<br/><b>AUTORIZADO POR</b><br/>Gerencia / Administración", styles["CellCProp"]),
+            Paragraph("____________________________<br/><b>PROCESADO EN</b><br/>Tesorería / Pagos", styles["CellCProp"]),
+        ]
+    ]
+    t_firmas = Table(firmas, colWidths=[60 * mm, 60 * mm, 60 * mm])
+    t_firmas.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    story.append(KeepTogether([t_firmas]))
+
+    footer_text = f"Proforma de Preparación de Pago — Extra Supermercado Mayorista — Generado {datetime.now(ASUNCION_TZ).strftime('%d/%m/%Y %H:%M')}"
+    doc.build(story, canvasmaker=lambda *args, **kwargs: _NumberedCanvas(*args, footer_left=footer_text, **kwargs))
+    return buffer.getvalue()
+

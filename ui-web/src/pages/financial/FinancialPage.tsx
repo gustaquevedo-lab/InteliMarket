@@ -10,7 +10,9 @@ import {
   ArrowUpRight, ArrowDownRight, Eye, Trash2, CreditCard, Ban, FileSpreadsheet,
   FileDown, RefreshCw, Sparkles, Filter, ChevronRight, ChevronDown, CheckCircle2, AlertCircle,
   Layers, ShieldCheck, Check, Phone, ArrowRight, HelpCircle, Download,
-  Upload, Paperclip, ExternalLink, Wallet
+  Upload, Paperclip, ExternalLink, Wallet, ArrowLeft, CheckSquare, Square,
+  PackageMinus, Truck, Printer, Users, CheckCheck, FileCheck, CalendarClock,
+  LayoutGrid, ListFilter
 } from "lucide-react"
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -67,6 +69,19 @@ export default function FinancialPage() {
   const companyId = (user as any)?.company_id || FALLBACK_COMPANY_ID
 
   // Filtros y Búsqueda AP
+  const [apViewMode, setApViewMode] = useState<"cards" | "table">("cards")
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null)
+  const [apSupplierSearch, setApSupplierSearch] = useState("")
+  const [apSupplierFilter, setApSupplierFilter] = useState<"todos" | "con_vencidas" | "con_nc" | "con_devoluciones">("todos")
+  const [apSupplierSort, setApSupplierSort] = useState<"deuda_desc" | "vencimiento_asc" | "nombre_asc" | "facturas_desc">("deuda_desc")
+  const [selectedOpInvoiceIds, setSelectedOpInvoiceIds] = useState<Set<string>>(new Set())
+  const [selectedOpCreditNoteIds, setSelectedOpCreditNoteIds] = useState<Set<string>>(new Set())
+  const [selectedOpReturnIds, setSelectedOpReturnIds] = useState<Set<string>>(new Set())
+  const [opObservaciones, setOpObservaciones] = useState("")
+  const [creatingOp, setCreatingOp] = useState(false)
+  const [generatingProformaPdf, setGeneratingProformaPdf] = useState(false)
+  const [supermerReturns, setSupermerReturns] = useState<any[]>([])
+
   const [search, setSearch] = useState("")
   const [filterEstado, setFilterEstado] = useState("todos")
   const [filterRubro, setFilterRubro] = useState("todos")
@@ -178,6 +193,7 @@ export default function FinancialPage() {
         banksData,
         supsData,
         fundsData,
+        smerRetData,
       ] = await Promise.allSettled([
         api.financial.apDashboard(),
         api.financial.invoices.list({ limit: 2500 }),
@@ -192,6 +208,7 @@ export default function FinancialPage() {
         api.financial.banks.list().catch(() => []),
         api.purchases.suppliers().catch(() => []),
         api.expenses.funds.list().catch(() => []),
+        api.supplierReturns.list().catch(() => []),
       ])
 
       if (dashData.status === "fulfilled") setDashboard(dashData.value)
@@ -210,6 +227,7 @@ export default function FinancialPage() {
       if (banksData.status === "fulfilled") setBanks(banksData.value)
       if (supsData.status === "fulfilled") setAllSuppliers(supsData.value || [])
       if (fundsData.status === "fulfilled") setFunds(fundsData.value || [])
+      if (smerRetData.status === "fulfilled") setSupermerReturns(Array.isArray(smerRetData.value) ? smerRetData.value : [])
     } catch {
       toast.error("Error", "No se pudieron sincronizar los datos financieros")
     } finally {
@@ -558,6 +576,429 @@ export default function FinancialPage() {
     }
   }
 
+  // ── Agrupación de Proveedores para Cards de Cuentas por Pagar ──
+  const suppliersCardList = useMemo(() => {
+    const today = getTodayAsuncion()
+    const map = new Map<string, {
+      supplier_id: string
+      supplier_nombre: string
+      ruc: string
+      telefono?: string
+      invoices: SupplierInvoice[]
+      pendingInvoices: SupplierInvoice[]
+      deudaConsolidada: number
+      creditNotes: any[]
+      ncConsolidada: number
+      devolucionesPendientes: any[]
+      ncNoRegistrada: number
+      vencimientoMasCercano: string | null
+      vencimientoMasLejano: string | null
+      tieneVencidas: boolean
+      montoVencido: number
+      cantidadFacturasPendientes: number
+      cantidadFacturasTotal: number
+      netoExigible: number
+    }>()
+
+    // 1. Sembrar desde allSuppliers para datos limpios
+    allSuppliers.forEach((s: any) => {
+      if (s.id) {
+        map.set(s.id, {
+          supplier_id: s.id,
+          supplier_nombre: s.nombre || s.razon_social || "Proveedor",
+          ruc: s.ruc || "",
+          telefono: s.telefono || "",
+          invoices: [],
+          pendingInvoices: [],
+          deudaConsolidada: 0,
+          creditNotes: [],
+          ncConsolidada: 0,
+          devolucionesPendientes: [],
+          ncNoRegistrada: 0,
+          vencimientoMasCercano: null,
+          vencimientoMasLejano: null,
+          tieneVencidas: false,
+          montoVencido: 0,
+          cantidadFacturasPendientes: 0,
+          cantidadFacturasTotal: 0,
+          netoExigible: 0,
+        })
+      }
+    })
+
+    // 2. Acumular Facturas
+    invoices.forEach(inv => {
+      const supId = inv.supplier_id || "sin_id"
+      let item = map.get(supId)
+      if (!item) {
+        item = {
+          supplier_id: supId,
+          supplier_nombre: inv.supplier_nombre || "Proveedor Desconocido",
+          ruc: (inv as any).supplier_ruc || "",
+          invoices: [],
+          pendingInvoices: [],
+          deudaConsolidada: 0,
+          creditNotes: [],
+          ncConsolidada: 0,
+          devolucionesPendientes: [],
+          ncNoRegistrada: 0,
+          vencimientoMasCercano: null,
+          vencimientoMasLejano: null,
+          tieneVencidas: false,
+          montoVencido: 0,
+          cantidadFacturasPendientes: 0,
+          cantidadFacturasTotal: 0,
+          netoExigible: 0,
+        }
+        map.set(supId, item)
+      }
+
+      item.invoices.push(inv)
+      item.cantidadFacturasTotal += 1
+
+      const isPendiente = !!inv.estado && ["pendiente", "aprobada", "parcial"].includes(inv.estado) && Number(inv.saldo_pendiente ?? inv.total ?? 0) > 0
+      if (isPendiente) {
+        item.pendingInvoices.push(inv)
+        const saldo = Number(inv.saldo_pendiente ?? inv.total ?? 0)
+        item.deudaConsolidada += saldo
+        item.cantidadFacturasPendientes += 1
+
+        const vto = inv.fecha_vencimiento ? String(inv.fecha_vencimiento).slice(0, 10) : null
+        if (vto) {
+          if (!item.vencimientoMasCercano || vto < item.vencimientoMasCercano) {
+            item.vencimientoMasCercano = vto
+          }
+          if (!item.vencimientoMasLejano || vto > item.vencimientoMasLejano) {
+            item.vencimientoMasLejano = vto
+          }
+          if (vto < today) {
+            item.tieneVencidas = true
+            item.montoVencido += saldo
+          }
+        }
+      }
+    })
+
+    // 3. Acumular NCs Fiscales con saldo disponible
+    creditNotes.forEach(cn => {
+      const supId = cn.supplier_id
+      if (!supId) return
+      let item = map.get(supId)
+      if (!item) {
+        item = {
+          supplier_id: supId,
+          supplier_nombre: cn.supplier_nombre || "Proveedor",
+          ruc: "",
+          invoices: [],
+          pendingInvoices: [],
+          deudaConsolidada: 0,
+          creditNotes: [],
+          ncConsolidada: 0,
+          devolucionesPendientes: [],
+          ncNoRegistrada: 0,
+          vencimientoMasCercano: null,
+          vencimientoMasLejano: null,
+          tieneVencidas: false,
+          montoVencido: 0,
+          cantidadFacturasPendientes: 0,
+          cantidadFacturasTotal: 0,
+          netoExigible: 0,
+        }
+        map.set(supId, item)
+      }
+      const saldoNC = Number(cn.saldo_disponible !== undefined ? cn.saldo_disponible : cn.monto || 0)
+      if (saldoNC > 0) {
+        item.creditNotes.push(cn)
+        item.ncConsolidada += saldoNC
+      }
+    })
+
+    // 4. Acumular Devoluciones de Mercadería pendientes de entrega de NC fiscal ("NC Pendiente de Proveedor")
+    const allReturns = [...supplierReturns, ...supermerReturns]
+    const seenReturnIds = new Set<string>()
+
+    allReturns.forEach(ret => {
+      const retId = ret.id
+      if (retId && seenReturnIds.has(retId)) return
+      if (retId) seenReturnIds.add(retId)
+
+      const supId = ret.supplier_id || ret.proveedor_id
+      if (!supId) return
+      const hasNC = !!(ret.numero_nota_credito || ret.nota_credito_numero)
+      if (hasNC) return // Ya fue entregada la NC fiscal
+
+      let item = map.get(supId)
+      if (!item) {
+        item = {
+          supplier_id: supId,
+          supplier_nombre: ret.supplier_nombre || ret.proveedor_nombre || "Proveedor",
+          ruc: "",
+          invoices: [],
+          pendingInvoices: [],
+          deudaConsolidada: 0,
+          creditNotes: [],
+          ncConsolidada: 0,
+          devolucionesPendientes: [],
+          ncNoRegistrada: 0,
+          vencimientoMasCercano: null,
+          vencimientoMasLejano: null,
+          tieneVencidas: false,
+          montoVencido: 0,
+          cantidadFacturasPendientes: 0,
+          cantidadFacturasTotal: 0,
+          netoExigible: 0,
+        }
+        map.set(supId, item)
+      }
+
+      const montoDev = Number(ret.monto || ret.total || ret.total_costo || 0)
+      if (montoDev > 0) {
+        item.devolucionesPendientes.push(ret)
+        item.ncNoRegistrada += montoDev
+      }
+    })
+
+    // 5. Filtrar proveedores con saldo o movimientos y calcular neto
+    const list = Array.from(map.values())
+      .filter(item => item.deudaConsolidada > 0 || item.ncConsolidada > 0 || item.ncNoRegistrada > 0 || item.pendingInvoices.length > 0)
+      .map(item => ({
+        ...item,
+        netoExigible: Math.max(0, item.deudaConsolidada - item.ncConsolidada - item.ncNoRegistrada)
+      }))
+
+    // Filtros y Búsqueda en los Cards
+    return list.filter(item => {
+      const matchSearch =
+        !apSupplierSearch ||
+        item.supplier_nombre.toLowerCase().includes(apSupplierSearch.toLowerCase()) ||
+        item.ruc.toLowerCase().includes(apSupplierSearch.toLowerCase())
+
+      let matchFilter = true
+      if (apSupplierFilter === "con_vencidas") matchFilter = item.tieneVencidas
+      if (apSupplierFilter === "con_nc") matchFilter = item.ncConsolidada > 0
+      if (apSupplierFilter === "con_devoluciones") matchFilter = item.ncNoRegistrada > 0
+
+      return matchSearch && matchFilter
+    }).sort((a, b) => {
+      if (apSupplierSort === "deuda_desc") return b.deudaConsolidada - a.deudaConsolidada
+      if (apSupplierSort === "nombre_asc") return a.supplier_nombre.localeCompare(b.supplier_nombre)
+      if (apSupplierSort === "facturas_desc") return b.cantidadFacturasPendientes - a.cantidadFacturasPendientes
+      if (apSupplierSort === "vencimiento_asc") {
+        if (!a.vencimientoMasCercano) return 1
+        if (!b.vencimientoMasCercano) return -1
+        return a.vencimientoMasCercano.localeCompare(b.vencimientoMasCercano)
+      }
+      return 0
+    })
+  }, [allSuppliers, invoices, creditNotes, supplierReturns, supermerReturns, apSupplierSearch, apSupplierFilter, apSupplierSort])
+
+  // Proveedor actualmente seleccionado para ver detalle y armar lote de pago / OP
+  const currentSelectedSupplier = useMemo(() => {
+    if (!selectedSupplierId) return null
+    return suppliersCardList.find(s => s.supplier_id === selectedSupplierId) || null
+  }, [selectedSupplierId, suppliersCardList])
+
+  const handleSelectSupplierForDetail = (sup: any) => {
+    setSelectedSupplierId(sup.supplier_id)
+    // Pre-seleccionar todas las facturas pendientes
+    setSelectedOpInvoiceIds(new Set(sup.pendingInvoices.map((i: any) => i.id)))
+    // Pre-seleccionar todas las NCs disponibles para compensación automática
+    setSelectedOpCreditNoteIds(new Set(sup.creditNotes.map((n: any) => n.id)))
+    // Pre-seleccionar todas las devoluciones pendientes
+    setSelectedOpReturnIds(new Set(sup.devolucionesPendientes.map((r: any) => r.id)))
+    setOpObservaciones("")
+  }
+
+  // Manejo de selecciones en la vista detalle del proveedor
+  const handleToggleOpInvoice = (id: string) => {
+    const next = new Set(selectedOpInvoiceIds)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setSelectedOpInvoiceIds(next)
+  }
+
+  const handleSelectAllOpInvoices = () => {
+    if (!currentSelectedSupplier) return
+    if (selectedOpInvoiceIds.size === currentSelectedSupplier.pendingInvoices.length) {
+      setSelectedOpInvoiceIds(new Set())
+    } else {
+      setSelectedOpInvoiceIds(new Set(currentSelectedSupplier.pendingInvoices.map(i => i.id)))
+    }
+  }
+
+  const handleToggleOpCreditNote = (id: string) => {
+    const next = new Set(selectedOpCreditNoteIds)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setSelectedOpCreditNoteIds(next)
+  }
+
+  const handleSelectAllOpCreditNotes = () => {
+    if (!currentSelectedSupplier) return
+    if (selectedOpCreditNoteIds.size === currentSelectedSupplier.creditNotes.length) {
+      setSelectedOpCreditNoteIds(new Set())
+    } else {
+      setSelectedOpCreditNoteIds(new Set(currentSelectedSupplier.creditNotes.map(n => n.id)))
+    }
+  }
+
+  const handleToggleOpReturn = (id: string) => {
+    const next = new Set(selectedOpReturnIds)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setSelectedOpReturnIds(next)
+  }
+
+  const handleSelectAllOpReturns = () => {
+    if (!currentSelectedSupplier) return
+    if (selectedOpReturnIds.size === currentSelectedSupplier.devolucionesPendientes.length) {
+      setSelectedOpReturnIds(new Set())
+    } else {
+      setSelectedOpReturnIds(new Set(currentSelectedSupplier.devolucionesPendientes.map(r => r.id)))
+    }
+  }
+
+  // Totales en vivo de la liquidación / armado de OP
+  const selectedFacturasTotal = useMemo(() => {
+    if (!currentSelectedSupplier) return 0
+    return currentSelectedSupplier.pendingInvoices
+      .filter(i => selectedOpInvoiceIds.has(i.id))
+      .reduce((sum, i) => sum + Number(i.saldo_pendiente ?? i.total ?? 0), 0)
+  }, [currentSelectedSupplier, selectedOpInvoiceIds])
+
+  const selectedNcTotal = useMemo(() => {
+    if (!currentSelectedSupplier) return 0
+    return currentSelectedSupplier.creditNotes
+      .filter(n => selectedOpCreditNoteIds.has(n.id))
+      .reduce((sum, n) => sum + Number(n.saldo_disponible !== undefined ? n.saldo_disponible : n.monto || 0), 0)
+  }, [currentSelectedSupplier, selectedOpCreditNoteIds])
+
+  const selectedReturnsTotal = useMemo(() => {
+    if (!currentSelectedSupplier) return 0
+    return currentSelectedSupplier.devolucionesPendientes
+      .filter(r => selectedOpReturnIds.has(r.id))
+      .reduce((sum, r) => sum + Number(r.monto || r.total || r.total_costo || 0), 0)
+  }, [currentSelectedSupplier, selectedOpReturnIds])
+
+  const totalNetoOP = useMemo(() => {
+    return Math.max(0, selectedFacturasTotal - selectedNcTotal - selectedReturnsTotal)
+  }, [selectedFacturasTotal, selectedNcTotal, selectedReturnsTotal])
+
+  // Generar Reporte / Proforma PDF oficial con 3 firmas
+  const handleGenerateProformaPdf = async () => {
+    if (!currentSelectedSupplier) return
+    if (selectedOpInvoiceIds.size === 0) {
+      toast.error("Selección vacía", "Debe seleccionar al menos una factura para generar la proforma")
+      return
+    }
+
+    setGeneratingProformaPdf(true)
+    try {
+      const facturasPayload = currentSelectedSupplier.pendingInvoices
+        .filter(i => selectedOpInvoiceIds.has(i.id))
+        .map(i => ({
+          invoice_id: i.id,
+          numero_factura: i.numero_factura,
+          timbrado: i.timbrado,
+          fecha_emision: i.fecha_emision,
+          fecha_vencimiento: i.fecha_vencimiento,
+          total: Number(i.total || 0),
+          saldo_pendiente: Number(i.saldo_pendiente ?? i.total ?? 0),
+          monto_a_pagar: Number(i.saldo_pendiente ?? i.total ?? 0),
+        }))
+
+      const ncPayload = [
+        ...currentSelectedSupplier.creditNotes
+          .filter(n => selectedOpCreditNoteIds.has(n.id))
+          .map(n => ({
+            credit_note_id: n.id,
+            tipo: "nc_fiscal",
+            numero: n.numero,
+            timbrado: n.timbrado,
+            fecha: n.fecha,
+            motivo: n.motivo || "Ajuste / Bonificación",
+            monto: Number(n.saldo_disponible !== undefined ? n.saldo_disponible : n.monto || 0),
+            saldo_aplicado: Number(n.saldo_disponible !== undefined ? n.saldo_disponible : n.monto || 0),
+          })),
+        ...currentSelectedSupplier.devolucionesPendientes
+          .filter(r => selectedOpReturnIds.has(r.id))
+          .map(r => ({
+            credit_note_id: r.id,
+            tipo: "devolucion_fisica",
+            numero: r.numero_devolucion || (r.id ? String(r.id).slice(0, 8) : "DEV-PEND"),
+            timbrado: null,
+            fecha: r.fecha || r.created_at,
+            motivo: r.motivo || "Devolución Física de Mercadería (NC Pendiente de Proveedor)",
+            monto: Number(r.monto || r.total || r.total_costo || 0),
+            saldo_aplicado: Number(r.monto || r.total || r.total_costo || 0),
+          })),
+      ]
+
+      await api.financial.paymentOrders.downloadProformaPdf({
+        supplier_id: currentSelectedSupplier.supplier_id,
+        supplier_nombre: currentSelectedSupplier.supplier_nombre,
+        supplier_ruc: currentSelectedSupplier.ruc,
+        observaciones: opObservaciones || undefined,
+        invoices: facturasPayload,
+        credit_notes: ncPayload,
+      }, `proforma_pago_${currentSelectedSupplier.supplier_nombre.replace(/\s+/g, "_")}_${getTodayAsuncion()}.pdf`)
+
+      toast.success("Proforma Descargada", "Reporte PDF oficial generado con cuadro de firmas de autorización")
+    } catch (err: any) {
+      toast.error("Error al generar proforma", err.message || "No se pudo generar el reporte PDF")
+    } finally {
+      setGeneratingProformaPdf(false)
+    }
+  }
+
+  // Crear Orden de Pago formal en estado "aguardando_pago"
+  const handleCreateOpAguardandoPago = async () => {
+    if (!currentSelectedSupplier) return
+    if (selectedOpInvoiceIds.size === 0) {
+      toast.error("Selección vacía", "Debe seleccionar al menos una factura para armar la Orden de Pago")
+      return
+    }
+
+    setCreatingOp(true)
+    try {
+      const allocations = currentSelectedSupplier.pendingInvoices
+        .filter(i => selectedOpInvoiceIds.has(i.id))
+        .map(i => ({
+          invoice_id: i.id,
+          monto_imputado: Number(i.saldo_pendiente ?? i.total ?? 0),
+          moneda: i.moneda || "PYG",
+          observaciones: "Imputación en preparación de pago (Aguardando Pago)",
+        }))
+
+      const res = await api.financial.paymentOrders.create({
+        supplier_id: currentSelectedSupplier.supplier_id,
+        fecha_emision: getTodayAsuncion(),
+        estado: "aguardando_pago",
+        observaciones: opObservaciones ? `[AGUARDANDO PAGO] ${opObservaciones}` : "[AGUARDANDO PAGO] Orden de pago generada desde preparación de liquidación AP",
+        allocations,
+        disbursements: [],
+      })
+
+      toast.success("Orden de Pago Creada", `Se generó la OP ${(res as any)?.numero_orden || ""} en estado AGUARDANDO PAGO`)
+      setSelectedSupplierId(null)
+      fetchAll()
+    } catch (err: any) {
+      toast.error("Error al crear OP", err.message || "No se pudo crear la Orden de Pago")
+    } finally {
+      setCreatingOp(false)
+    }
+  }
+
+  const getDaysDiffText = (dateStr: string | null) => {
+    if (!dateStr) return null
+    const today = new Date(`${getTodayAsuncion()}T00:00:00`).getTime()
+    const target = new Date(`${dateStr.slice(0, 10)}T00:00:00`).getTime()
+    const diffDays = Math.round((target - today) / (1000 * 60 * 60 * 24))
+    if (diffDays === 0) return "Vence hoy"
+    if (diffDays < 0) return `Venció hace ${Math.abs(diffDays)}d`
+    return `En ${diffDays}d`
+  }
+
   return (
     <div className="space-y-6 min-w-0 animate-fade-in-up pb-16">
       {/* 🌟 LUXURY COMMAND DECK HEADER */}
@@ -825,239 +1266,1000 @@ export default function FinancialPage() {
 
           {/* TAB 2: CUENTAS POR PAGAR (AP) */}
           {tab === "ap" && (
-            <div className="space-y-5">
-              {/* Barra de Filtros y Búsqueda */}
-              <div className="card p-4 space-y-3">
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="w-44">
-                    <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Estado</label>
-                    <select className="input-field w-full text-xs" value={filterEstado} onChange={e => setFilterEstado(e.target.value)}>
-                      <option value="todos">Todas las Facturas</option>
-                      <option value="pendiente">Solo Pendientes</option>
-                      <option value="vencida">Solo Vencidas</option>
-                      <option value="pagada">Solo Pagadas</option>
-                    </select>
-                  </div>
+            <div className="space-y-6">
+              {/* ── DETALLE DEL PROVEEDOR SELECCIONADO (ARMADO DE OP / PREPARACIÓN DE PAGO) ── */}
+              {selectedSupplierId && currentSelectedSupplier ? (
+                <div className="space-y-6 animate-fade-in">
+                  {/* Top Bar Navegación & Datos del Proveedor */}
+                  <div className="card p-6 bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950/70 border border-indigo-500/30 text-white shadow-xl">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div className="space-y-2">
+                        <button
+                          onClick={() => setSelectedSupplierId(null)}
+                          className="inline-flex items-center gap-2 text-xs font-semibold text-indigo-300 hover:text-white transition py-1 px-2.5 rounded-lg bg-indigo-950/60 border border-indigo-500/30 hover:bg-indigo-900/60"
+                        >
+                          <ArrowLeft className="w-3.5 h-3.5" />
+                          Volver a Todos los Proveedores
+                        </button>
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <div className="w-12 h-12 rounded-xl bg-indigo-600/30 border border-indigo-400/40 text-indigo-300 flex items-center justify-center font-bold text-lg">
+                            <Building2 className="w-6 h-6" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="text-xl font-extrabold text-white">
+                                {currentSelectedSupplier.supplier_nombre}
+                              </h3>
+                              {currentSelectedSupplier.ruc && (
+                                <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-gray-300">
+                                  RUC: {currentSelectedSupplier.ruc}
+                                </span>
+                              )}
+                              <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-semibold">
+                                {currentSelectedSupplier.pendingInvoices.length} factura(s) pendiente(s)
+                              </span>
+                            </div>
+                            <p className="text-xs text-gray-400 mt-0.5">
+                              Seleccioná las facturas y compensaciones con Notas de Crédito para generar la Proforma o emitir la Orden de Pago (OP).
+                            </p>
+                          </div>
+                        </div>
+                      </div>
 
-                  <div className="w-56">
-                    <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Proveedor</label>
-                    <select className="input-field w-full text-xs" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
-                      <option value="todos">Todos los Proveedores ({availableSuppliers.length})</option>
-                      {availableSuppliers.map(s => (
-                        <option key={s.id} value={s.id}>{s.nombre}</option>
-                      ))}
-                    </select>
-                  </div>
+                      <div className="flex items-center gap-2 self-start md:self-center">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (currentSelectedSupplier.supplier_id) {
+                              setSelected360SupplierId(currentSelectedSupplier.supplier_id)
+                              setSelected360SupplierNombre(currentSelectedSupplier.supplier_nombre)
+                            }
+                          }}
+                          className="btn-ghost text-xs text-indigo-300 hover:text-white border border-indigo-500/30 py-2 px-3"
+                          title="Abrir Historial y Visión 360°"
+                        >
+                          <Eye className="w-4 h-4 mr-1.5" /> Visión 360°
+                        </button>
+                      </div>
+                    </div>
 
-                  <div className="w-40">
-                    <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Fecha de Corte</label>
-                    <input
-                      type="date"
-                      className="input-field w-full text-xs"
-                      value={filterFechaCorte}
-                      onChange={e => setFilterFechaCorte(e.target.value)}
-                      title="Consultar saldos acumulados emitidos hasta esta fecha"
-                    />
-                  </div>
+                    {/* Resumen Financiero Consolidado del Proveedor */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-5 border-t border-slate-700/60">
+                      <div className="bg-slate-950/50 p-3.5 rounded-xl border border-slate-800">
+                        <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider block">Deuda Consolidada</span>
+                        <span className="text-lg font-bold font-mono text-white block mt-1">
+                          {formatPYG(currentSelectedSupplier.deudaConsolidada)}
+                        </span>
+                        <span className="text-[11px] text-gray-500">
+                          {currentSelectedSupplier.pendingInvoices.length} comprobantes exigibles
+                        </span>
+                      </div>
 
-                  <div className="flex-1 min-w-[220px]">
-                    <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Buscar</label>
-                    <div className="relative">
-                      <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
-                      <input
-                        type="text"
-                        placeholder="Proveedor, RUC, N° factura, timbrado..."
-                        className="input-field pl-9 w-full text-xs"
-                        value={search}
-                        onChange={e => setSearch(e.target.value)}
-                      />
+                      <div className="bg-slate-950/50 p-3.5 rounded-xl border border-purple-900/30">
+                        <span className="text-[10px] uppercase font-bold text-purple-400 tracking-wider block">NC Fiscales Disponibles</span>
+                        <span className="text-lg font-bold font-mono text-purple-300 block mt-1">
+                          {formatPYG(currentSelectedSupplier.ncConsolidada)}
+                        </span>
+                        <span className="text-[11px] text-purple-400/80">
+                          {currentSelectedSupplier.creditNotes.length} NCs a favor con saldo
+                        </span>
+                      </div>
+
+                      <div className="bg-slate-950/50 p-3.5 rounded-xl border border-amber-900/30">
+                        <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider block" title="Devoluciones físicas de mercadería sin comprobante fiscal de NC entregado aún">
+                          NC Pendiente de Proveedor
+                        </span>
+                        <span className="text-lg font-bold font-mono text-amber-300 block mt-1">
+                          {formatPYG(currentSelectedSupplier.ncNoRegistrada)}
+                        </span>
+                        <span className="text-[11px] text-amber-400/80">
+                          {currentSelectedSupplier.devolucionesPendientes.length} devolución(es) en reclamo
+                        </span>
+                      </div>
+
+                      <div className="bg-emerald-950/30 p-3.5 rounded-xl border border-emerald-500/30">
+                        <span className="text-[10px] uppercase font-bold text-emerald-400 tracking-wider block">Neto Exigible Teórico</span>
+                        <span className="text-lg font-bold font-mono text-emerald-300 block mt-1">
+                          {formatPYG(currentSelectedSupplier.netoExigible)}
+                        </span>
+                        <span className="text-[11px] text-emerald-400/80">
+                          Deuda neta deduciendo NCs
+                        </span>
+                      </div>
                     </div>
                   </div>
 
-                  {(filterEstado !== "todos" || filterSupplier !== "todos" || filterFechaCorte || search) && (
-                    <div className="self-end">
+                  {/* ── BLOQUE 1: FACTURAS PENDIENTES DEL PROVEEDOR ── */}
+                  <div className="card p-0 overflow-hidden border border-gray-200 dark:border-gray-800 shadow-sm">
+                    <div className="p-4 bg-gray-50 dark:bg-slate-800/80 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Receipt className="w-4 h-4 text-indigo-500" />
+                          <h4 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider">
+                            Facturas Pendientes de Pago
+                          </h4>
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300 font-bold">
+                            {selectedOpInvoiceIds.size} de {currentSelectedSupplier.pendingInvoices.length} seleccionadas
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          Tildá las facturas que conformarán la Orden de Pago (OP) o la liquidación actual.
+                        </p>
+                      </div>
+
                       <button
-                        onClick={() => { setFilterEstado("todos"); setFilterSupplier("todos"); setFilterFechaCorte(""); setSearch(""); }}
-                        className="btn-ghost text-xs py-2 text-gray-400 hover:text-gray-200"
+                        type="button"
+                        onClick={handleSelectAllOpInvoices}
+                        className="btn-ghost text-xs py-1.5 px-3 flex items-center gap-1.5 self-start sm:self-center border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200"
                       >
-                        Limpiar filtros
+                        <CheckCheck className="w-3.5 h-3.5 text-indigo-500" />
+                        {selectedOpInvoiceIds.size === currentSelectedSupplier.pendingInvoices.length ? "Deseleccionar Todas" : "Marcar Todas las Facturas"}
                       </button>
                     </div>
-                  )}
-                </div>
 
-                <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-800 text-xs text-gray-500">
-                  <span>Mostrando <b>{filteredInvoices.length}</b> facturas de <b>{invoices.length}</b> totales</span>
-                  <span>Total Saldo Pendiente Filtrado: <b className="text-gray-900 dark:text-white font-mono">{formatPYG(filteredInvoices.filter(i => !!i.estado && ["pendiente", "aprobada", "parcial"].includes(i.estado)).reduce((acc, i) => acc + Number(i.saldo_pendiente ?? i.total ?? 0), 0))}</b></span>
-                </div>
-              </div>
-
-              {/* Tabla de Facturas Proveedores con Acordeón de Notas de Crédito */}
-              <div className="card p-0 overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="bg-gray-50 dark:bg-slate-800/80 text-[11px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 dark:border-gray-700">
-                        <th className="p-3.5 w-10"></th>
-                        <th className="p-3.5">Proveedor</th>
-                        <th className="p-3.5">N° Factura</th>
-                        <th className="p-3.5">Timbrado</th>
-                        <th className="p-3.5">Emisión</th>
-                        <th className="p-3.5">Vencimiento</th>
-                        <th className="p-3.5">Monto Total</th>
-                        <th className="p-3.5">Saldo Pendiente</th>
-                        <th className="p-3.5">Estado</th>
-                        <th className="p-3.5 text-right">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700 text-sm">
-                      {filteredInvoices.map(inv => {
-                        const isVencida = inv.estado === "pendiente" && inv.fecha_vencimiento && new Date(inv.fecha_vencimiento) < new Date()
-                        const isExpanded = expandedInvoiceId === inv.id
-                        // Notas de crédito vinculadas por número de factura origen o coincidencia
-                        const linkedNCs = creditNotes.filter(cn => 
-                          (cn.numero_factura_origen && inv.numero_factura && cn.numero_factura_origen.trim() === inv.numero_factura.trim()) ||
-                          (cn.supplier_id === inv.supplier_id && cn.numero_factura_origen === inv.numero_factura)
-                        )
-                        const totalNCAplicadas = linkedNCs.reduce((sum, n) => sum + Number(n.monto || 0), 0)
-                        const saldoResultante = Math.max(0, Number(inv.total || 0) - totalNCAplicadas)
-
-                        return (
-                          <>
-                            <tr key={inv.id} className={`hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors ${isExpanded ? "bg-slate-800/40" : ""}`}>
-                              <td className="p-3.5 text-center">
-                                <button
-                                  onClick={() => setExpandedInvoiceId(isExpanded ? null : inv.id)}
-                                  className="p-1 text-gray-400 hover:text-white rounded hover:bg-slate-700/50 transition"
-                                  title="Ver notas de crédito y detalle"
-                                >
-                                  {isExpanded ? <ChevronDown className="w-4 h-4 text-primary" /> : <ChevronRight className="w-4 h-4" />}
-                                </button>
-                              </td>
-                              <td className="p-3.5 font-bold text-gray-900 dark:text-white max-w-xs truncate" title={inv.supplier_nombre}>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (inv.supplier_id) {
-                                      setSelected360SupplierId(inv.supplier_id)
-                                      setSelected360SupplierNombre(inv.supplier_nombre || null)
-                                    }
-                                  }}
-                                  className="text-left group hover:text-rose-600 transition flex items-center gap-1.5"
-                                  title="Abrir Visión 360° del Proveedor"
-                                >
-                                  <span className="group-hover:underline">{inv.supplier_nombre || "Proveedor General"}</span>
-                                  <span className="p-1 rounded-md bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 group-hover:bg-rose-600 group-hover:text-white transition">
-                                    <Eye className="w-3 h-3" />
-                                  </span>
-                                </button>
-                                {linkedNCs.length > 0 && (
-                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-purple-600 dark:text-purple-400 mt-0.5">
-                                    <FileText className="w-3 h-3" /> {linkedNCs.length} NC vinculada(s)
-                                  </span>
-                                )}
-                              </td>
-                              <td className="p-3.5 font-mono font-bold text-xs text-gray-900 dark:text-white">
-                                {inv.numero_factura || "—"}
-                              </td>
-                              <td className="p-3.5 font-mono text-xs text-gray-500">
-                                {inv.timbrado || "—"}
-                              </td>
-                              <td className="p-3.5 text-xs text-gray-500 font-mono">
-                                {inv.fecha_emision ? new Date(inv.fecha_emision).toLocaleDateString("es-PY") : "—"}
-                              </td>
-                              <td className="p-3.5 text-xs font-mono">
-                                <span className={isVencida ? "text-red-600 font-bold" : "text-gray-600 dark:text-gray-300"}>
-                                  {inv.fecha_vencimiento ? new Date(inv.fecha_vencimiento).toLocaleDateString("es-PY") : "—"}
-                                </span>
-                              </td>
-                              <td className="p-3.5 font-mono text-gray-600 dark:text-gray-300">
-                                {formatPYG(inv.total)}
-                              </td>
-                              <td className="p-3.5 font-mono font-bold text-gray-900 dark:text-white">
-                                {formatPYG(inv.saldo_pendiente ?? inv.total)}
-                              </td>
-                              <td className="p-3.5">
-                                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
-                                  inv.estado === "pagada"
-                                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-200"
-                                    : isVencida
-                                    ? "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-200"
-                                    : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200"
-                                }`}>
-                                  {inv.estado === "pagada" ? "Pagada" : isVencida ? "Vencida" : "Pendiente"}
-                                </span>
-                              </td>
-                              <td className="p-3.5 text-right whitespace-nowrap">
-                                {inv.estado === "pendiente" && (
-                                  <button
-                                    onClick={() => handleOpenPayModal(inv)}
-                                    className="btn-primary py-1 px-2.5 text-xs"
-                                  >
-                                    Pagar
-                                  </button>
-                                )}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left">
+                        <thead>
+                          <tr className="bg-gray-100/70 dark:bg-slate-800/50 text-[11px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-200 dark:border-gray-700">
+                            <th className="p-3.5 w-12 text-center">
+                              <span className="sr-only">Selección</span>
+                            </th>
+                            <th className="p-3.5">N° Factura</th>
+                            <th className="p-3.5">Timbrado</th>
+                            <th className="p-3.5">Emisión</th>
+                            <th className="p-3.5">Vencimiento</th>
+                            <th className="p-3.5 text-right">Monto Original</th>
+                            <th className="p-3.5 text-right">Saldo Pendiente</th>
+                            <th className="p-3.5 text-center">Estado</th>
+                            <th className="p-3.5 text-right">Acción</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-sm">
+                          {currentSelectedSupplier.pendingInvoices.length === 0 ? (
+                            <tr>
+                              <td colSpan={9} className="p-6 text-center text-xs text-gray-400">
+                                No hay facturas pendientes para este proveedor.
                               </td>
                             </tr>
+                          ) : (
+                            currentSelectedSupplier.pendingInvoices.map(inv => {
+                              const isSelected = selectedOpInvoiceIds.has(inv.id)
+                              const today = getTodayAsuncion()
+                              const isVencida = inv.fecha_vencimiento && inv.fecha_vencimiento < today
+                              const vtoText = getDaysDiffText(inv.fecha_vencimiento || null)
 
-                            {/* FILA ACORDEÓN: Notas de Crédito vinculadas a esta factura */}
-                            {isExpanded && (
-                              <tr className="bg-slate-900/70 border-b border-gray-700/60">
-                                <td colSpan={10} className="p-4 pl-12">
-                                  <div className="rounded-xl border border-indigo-500/20 bg-slate-950/60 p-4 space-y-3">
-                                    <div className="flex items-center justify-between flex-wrap gap-2">
+                              return (
+                                <tr
+                                  key={inv.id}
+                                  className={`transition-colors cursor-pointer ${
+                                    isSelected
+                                      ? "bg-indigo-50/60 dark:bg-indigo-950/30 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
+                                      : "hover:bg-gray-50 dark:hover:bg-slate-800/40"
+                                  }`}
+                                  onClick={() => handleToggleOpInvoice(inv.id)}
+                                >
+                                  <td className="p-3.5 text-center" onClick={e => e.stopPropagation()}>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleOpInvoice(inv.id)}
+                                      className="text-indigo-600 dark:text-indigo-400 hover:scale-110 transition"
+                                      title={isSelected ? "Deseleccionar de la OP" : "Incluir en la OP"}
+                                    >
+                                      {isSelected ? (
+                                        <CheckSquare className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                                      ) : (
+                                        <Square className="w-5 h-5 text-gray-400" />
+                                      )}
+                                    </button>
+                                  </td>
+                                  <td className="p-3.5 font-mono font-bold text-gray-900 dark:text-white">
+                                    {inv.numero_factura || "—"}
+                                  </td>
+                                  <td className="p-3.5 font-mono text-xs text-gray-500">
+                                    {inv.timbrado || "—"}
+                                  </td>
+                                  <td className="p-3.5 text-xs text-gray-500 font-mono">
+                                    {inv.fecha_emision ? formatDate(inv.fecha_emision) : "—"}
+                                  </td>
+                                  <td className="p-3.5 text-xs font-mono">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className={isVencida ? "text-red-600 dark:text-red-400 font-bold" : "text-gray-600 dark:text-gray-300"}>
+                                        {inv.fecha_vencimiento ? formatDate(inv.fecha_vencimiento) : "—"}
+                                      </span>
+                                      {vtoText && (
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                                          isVencida
+                                            ? "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-400 border border-red-200 dark:border-red-900/40"
+                                            : "bg-gray-100 text-gray-600 dark:bg-slate-800 dark:text-gray-400"
+                                        }`}>
+                                          {vtoText}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="p-3.5 font-mono text-right text-gray-500 text-xs">
+                                    {formatPYG(inv.total)}
+                                  </td>
+                                  <td className="p-3.5 font-mono font-bold text-right text-gray-900 dark:text-white">
+                                    {formatPYG(inv.saldo_pendiente ?? inv.total)}
+                                  </td>
+                                  <td className="p-3.5 text-center">
+                                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                                      isVencida
+                                        ? "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-200"
+                                        : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200"
+                                    }`}>
+                                      {isVencida ? "Vencida" : "Pendiente"}
+                                    </span>
+                                  </td>
+                                  <td className="p-3.5 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenPayModal(inv)}
+                                      className="btn-ghost text-xs py-1 px-2.5 text-indigo-600 hover:text-indigo-800 dark:text-indigo-400"
+                                      title="Pagar individualmente esta factura"
+                                    >
+                                      Pagar Directo
+                                    </button>
+                                  </td>
+                                </tr>
+                              )
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* ── BLOQUE 2: COMPENSACIONES CON NOTAS DE CRÉDITO & DEVOLUCIONES ── */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                    {/* Sub-bloque 2.1: Notas de Crédito Fiscales */}
+                    <div className="card p-0 overflow-hidden border border-purple-200 dark:border-purple-900/40">
+                      <div className="p-4 bg-purple-50/60 dark:bg-purple-950/30 border-b border-purple-100 dark:border-purple-900/40 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                          <div>
+                            <h5 className="text-xs font-bold uppercase tracking-wider text-purple-900 dark:text-purple-200">
+                              Notas de Crédito Fiscales con Saldo
+                            </h5>
+                            <span className="text-[11px] text-purple-700 dark:text-purple-400">
+                              Comprobantes legales de crédito a favor emitidos por el proveedor
+                            </span>
+                          </div>
+                        </div>
+                        {currentSelectedSupplier.creditNotes.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleSelectAllOpCreditNotes}
+                            className="text-xs text-purple-700 dark:text-purple-300 hover:underline font-semibold"
+                          >
+                            {selectedOpCreditNoteIds.size === currentSelectedSupplier.creditNotes.length ? "Desmarcar" : "Marcar Todas"}
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="p-0">
+                        {currentSelectedSupplier.creditNotes.length === 0 ? (
+                          <div className="p-5 text-center text-xs text-gray-400 italic">
+                            Sin Notas de Crédito fiscales con saldo a favor disponible.
+                          </div>
+                        ) : (
+                          <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                            {currentSelectedSupplier.creditNotes.map(nc => {
+                              const isChecked = selectedOpCreditNoteIds.has(nc.id)
+                              const saldoNC = Number(nc.saldo_disponible !== undefined ? nc.saldo_disponible : nc.monto || 0)
+                              return (
+                                <div
+                                  key={nc.id}
+                                  onClick={() => handleToggleOpCreditNote(nc.id)}
+                                  className={`p-3.5 flex items-center justify-between gap-3 cursor-pointer transition ${
+                                    isChecked ? "bg-purple-50/50 dark:bg-purple-950/20" : "hover:bg-gray-50 dark:hover:bg-slate-800/30"
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <button
+                                      type="button"
+                                      onClick={e => { e.stopPropagation(); handleToggleOpCreditNote(nc.id); }}
+                                      className="text-purple-600 dark:text-purple-400"
+                                    >
+                                      {isChecked ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4 text-gray-400" />}
+                                    </button>
+                                    <div>
                                       <div className="flex items-center gap-2">
-                                        <FileText className="w-4 h-4 text-purple-400" />
-                                        <h5 className="text-xs font-bold uppercase tracking-wider text-white">
-                                          Notas de Crédito Imputadas a la Factura N° {inv.numero_factura}
-                                        </h5>
+                                        <span className="font-mono font-bold text-xs text-gray-900 dark:text-white">NC N° {nc.numero}</span>
+                                        {nc.timbrado && <span className="text-[10px] text-gray-400 font-mono">Timb: {nc.timbrado}</span>}
                                       </div>
-                                      <div className="text-xs font-mono text-gray-400">
-                                        Saldo original: <b className="text-white">{formatPYG(inv.total)}</b> · Deducciones NC: <b className="text-purple-400">{formatPYG(totalNCAplicadas)}</b> · Saldo Resultante: <b className="text-emerald-400">{formatPYG(saldoResultante)}</b>
+                                      <span className="text-[11px] text-gray-500 block">
+                                        {nc.fecha ? formatDate(nc.fecha) : ""} · {nc.motivo || "Ajuste / Bonificación"}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="text-right">
+                                    <span className="font-mono font-bold text-xs text-purple-600 dark:text-purple-400 block">
+                                      -{formatPYG(saldoNC)}
+                                    </span>
+                                    <span className="text-[10px] text-gray-400">Saldo a favor</span>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Sub-bloque 2.2: Devoluciones Físicas / NC Pendiente de Proveedor */}
+                    <div className="card p-0 overflow-hidden border border-amber-200 dark:border-amber-900/40">
+                      <div className="p-4 bg-amber-50/60 dark:bg-amber-950/30 border-b border-amber-100 dark:border-amber-900/40 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <PackageMinus className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                          <div>
+                            <h5 className="text-xs font-bold uppercase tracking-wider text-amber-900 dark:text-amber-200">
+                              NC Pendiente de Proveedor (Devoluciones)
+                            </h5>
+                            <span className="text-[11px] text-amber-700 dark:text-amber-400">
+                              Mercadería devuelta por el súper pendiente de entrega de NC legal
+                            </span>
+                          </div>
+                        </div>
+                        {currentSelectedSupplier.devolucionesPendientes.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleSelectAllOpReturns}
+                            className="text-xs text-amber-700 dark:text-amber-300 hover:underline font-semibold"
+                          >
+                            {selectedOpReturnIds.size === currentSelectedSupplier.devolucionesPendientes.length ? "Desmarcar" : "Marcar Todas"}
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="p-0">
+                        {currentSelectedSupplier.devolucionesPendientes.length === 0 ? (
+                          <div className="p-5 text-center text-xs text-gray-400 italic">
+                            Sin devoluciones de mercadería pendientes de NC fiscal para este proveedor.
+                          </div>
+                        ) : (
+                          <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                            {currentSelectedSupplier.devolucionesPendientes.map((ret, idx) => {
+                              const isChecked = selectedOpReturnIds.has(ret.id)
+                              const montoDev = Number(ret.monto || ret.total || ret.total_costo || 0)
+                              return (
+                                <div
+                                  key={ret.id || idx}
+                                  onClick={() => handleToggleOpReturn(ret.id)}
+                                  className={`p-3.5 flex items-center justify-between gap-3 cursor-pointer transition ${
+                                    isChecked ? "bg-amber-50/50 dark:bg-amber-950/20" : "hover:bg-gray-50 dark:hover:bg-slate-800/30"
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <button
+                                      type="button"
+                                      onClick={e => { e.stopPropagation(); handleToggleOpReturn(ret.id); }}
+                                      className="text-amber-600 dark:text-amber-400"
+                                    >
+                                      {isChecked ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4 text-gray-400" />}
+                                    </button>
+                                    <div>
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-mono font-bold text-xs text-gray-900 dark:text-white">
+                                          Guía Dev #{ret.numero_devolucion || (ret.id ? String(ret.id).slice(0, 8) : "REC")}
+                                        </span>
+                                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 font-semibold">
+                                          Reclamo Físico
+                                        </span>
+                                      </div>
+                                      <span className="text-[11px] text-gray-500 block">
+                                        {ret.fecha || ret.created_at ? formatDate(ret.fecha || ret.created_at) : ""} · {ret.motivo || ret.observaciones || "Devolución por rotura / caducidad"}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="text-right">
+                                    <span className="font-mono font-bold text-xs text-amber-600 dark:text-amber-400 block">
+                                      -{formatPYG(montoDev)}
+                                    </span>
+                                    <span className="text-[10px] text-gray-400">A deducir</span>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ── BARRA FLOTANTE INFERIOR (STICKY SETTLEMENT DECK) ── */}
+                  <div className="sticky bottom-4 z-30 bg-slate-950/95 dark:bg-slate-900/95 backdrop-blur-md border border-indigo-500/40 rounded-2xl p-4 shadow-2xl text-white">
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                      {/* Desglose Matemático */}
+                      <div className="flex items-center gap-5 flex-wrap">
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Facturas Marcadas</span>
+                          <span className="font-mono font-bold text-sm text-indigo-300">
+                            +{formatPYG(selectedFacturasTotal)}
+                          </span>
+                          <span className="text-[10px] text-gray-500 block">({selectedOpInvoiceIds.size} seleccionadas)</span>
+                        </div>
+
+                        <div className="text-gray-500 font-bold text-lg hidden sm:block">−</div>
+
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Deducciones (NCs + Devs)</span>
+                          <span className="font-mono font-bold text-sm text-purple-300">
+                            -{formatPYG(selectedNcTotal + selectedReturnsTotal)}
+                          </span>
+                          <span className="text-[10px] text-gray-500 block">({selectedOpCreditNoteIds.size + selectedOpReturnIds.size} compensaciones)</span>
+                        </div>
+
+                        <div className="text-gray-500 font-bold text-lg hidden sm:block">=</div>
+
+                        <div className="bg-slate-900/80 px-4 py-2 rounded-xl border border-emerald-500/40">
+                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400 block">Total Neto a Pagar</span>
+                          <span className="font-mono font-extrabold text-xl text-emerald-300">
+                            {formatPYG(totalNetoOP)}
+                          </span>
+                        </div>
+
+                        {/* Input de Observaciones de la OP */}
+                        <div className="flex-1 min-w-[200px]">
+                          <input
+                            type="text"
+                            placeholder="Observaciones o notas para la OP / Proforma..."
+                            className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-500 w-full focus:outline-none focus:border-indigo-500"
+                            value={opObservaciones}
+                            onChange={e => setOpObservaciones(e.target.value)}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Botones de Acción */}
+                      <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+                        {/* 1. Generar Proforma PDF */}
+                        <button
+                          type="button"
+                          onClick={handleGenerateProformaPdf}
+                          disabled={generatingProformaPdf || selectedOpInvoiceIds.size === 0}
+                          className="btn-ghost bg-indigo-950/60 border border-indigo-400/40 hover:bg-indigo-900/60 text-white text-xs py-2 px-3.5 flex items-center gap-1.5 disabled:opacity-50"
+                          title="Descargar proforma en PDF con cuadro de firmas de autorización"
+                        >
+                          {generatingProformaPdf ? (
+                            <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+                          ) : (
+                            <Printer className="w-4 h-4 text-indigo-400" />
+                          )}
+                          <span>Reporte Proforma PDF</span>
+                        </button>
+
+                        {/* 2. Crear OP formal en estado "Aguardando Pago" */}
+                        <button
+                          type="button"
+                          onClick={handleCreateOpAguardandoPago}
+                          disabled={creatingOp || selectedOpInvoiceIds.size === 0}
+                          className="btn-primary text-xs py-2 px-4 flex items-center gap-2 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-950 font-extrabold disabled:opacity-50 shadow-lg shadow-amber-950/40"
+                          title="Generar la Orden de Pago (OP) en estado intermedio Aguardando Pago para que Tesorería la abone luego"
+                        >
+                          {creatingOp ? (
+                            <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                          ) : (
+                            <Clock className="w-4 h-4 text-slate-950" />
+                          )}
+                          <span>Crear OP · Aguardando Pago</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* ── VISTA PRINCIPAL DE CUENTAS POR PAGAR (CARDS DE PROVEEDORES O TABLA) ── */
+                <div className="space-y-6">
+                  {/* Barra de Filtros, Modos de Vista y Búsqueda */}
+                  <div className="card p-4 space-y-4">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      {/* Switch de Modo de Vista */}
+                      <div className="flex items-center gap-1 p-1 bg-gray-100 dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-gray-700 self-start">
+                        <button
+                          type="button"
+                          onClick={() => setApViewMode("cards")}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition ${
+                            apViewMode === "cards"
+                              ? "bg-white dark:bg-indigo-600 text-indigo-900 dark:text-white shadow-sm"
+                              : "text-gray-500 hover:text-gray-900 dark:hover:text-white"
+                          }`}
+                        >
+                          <LayoutGrid className="w-3.5 h-3.5" />
+                          Cards por Proveedor ({suppliersCardList.length})
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setApViewMode("table")}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition ${
+                            apViewMode === "table"
+                              ? "bg-white dark:bg-indigo-600 text-indigo-900 dark:text-white shadow-sm"
+                              : "text-gray-500 hover:text-gray-900 dark:hover:text-white"
+                          }`}
+                        >
+                          <ListFilter className="w-3.5 h-3.5" />
+                          Lista Plana de Facturas ({invoices.length})
+                        </button>
+                      </div>
+
+                      {/* Resumen Superior Rápido */}
+                      <div className="flex items-center gap-4 text-xs font-mono text-gray-500 flex-wrap">
+                        <span>Total Deuda AP: <b className="text-gray-900 dark:text-white">{formatPYG(totalDeudaAP)}</b></span>
+                        <span className="hidden sm:inline">|</span>
+                        <span>Total NCs Registradas: <b className="text-purple-600 dark:text-purple-400">{formatPYG(totalSaldoDisponibleNC)}</b></span>
+                        <span className="hidden sm:inline">|</span>
+                        <span>Total NCs Pendientes: <b className="text-amber-600 dark:text-amber-400">{formatPYG(suppliersCardList.reduce((acc, s) => acc + s.ncNoRegistrada, 0))}</b></span>
+                      </div>
+                    </div>
+
+                    {/* Filtros específicos según el modo de vista */}
+                    {apViewMode === "cards" ? (
+                      <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-gray-100 dark:border-gray-800">
+                        {/* Buscador de Proveedor */}
+                        <div className="flex-1 min-w-[240px]">
+                          <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Buscar Proveedor</label>
+                          <div className="relative">
+                            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
+                            <input
+                              type="text"
+                              placeholder="Nombre de proveedor, RUC..."
+                              className="input-field pl-9 w-full text-xs"
+                              value={apSupplierSearch}
+                              onChange={e => setApSupplierSearch(e.target.value)}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Filtro por Condición */}
+                        <div className="w-48">
+                          <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Filtro Rápido</label>
+                          <select
+                            className="input-field w-full text-xs"
+                            value={apSupplierFilter}
+                            onChange={e => setApSupplierFilter(e.target.value as any)}
+                          >
+                            <option value="todos">Todos los Proveedores</option>
+                            <option value="con_vencidas">Con Facturas Vencidas</option>
+                            <option value="con_nc">Con NC Fiscal Disponible</option>
+                            <option value="con_devoluciones">Con NC Pendiente (Devolución)</option>
+                          </select>
+                        </div>
+
+                        {/* Ordenar por */}
+                        <div className="w-48">
+                          <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Ordenar Por</label>
+                          <select
+                            className="input-field w-full text-xs"
+                            value={apSupplierSort}
+                            onChange={e => setApSupplierSort(e.target.value as any)}
+                          >
+                            <option value="deuda_desc">Mayor Deuda Consolidada</option>
+                            <option value="vencimiento_asc">Vencimiento Más Próximo</option>
+                            <option value="nombre_asc">Nombre Proveedor (A - Z)</option>
+                            <option value="facturas_desc">Mayor Cantidad de Facturas</option>
+                          </select>
+                        </div>
+
+                        {(apSupplierSearch || apSupplierFilter !== "todos") && (
+                          <div className="self-end">
+                            <button
+                              type="button"
+                              onClick={() => { setApSupplierSearch(""); setApSupplierFilter("todos"); }}
+                              className="btn-ghost text-xs py-2 text-gray-400 hover:text-gray-200"
+                            >
+                              Limpiar
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      /* Filtros Modo Tabla Plana */
+                      <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-gray-100 dark:border-gray-800">
+                        <div className="w-44">
+                          <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Estado</label>
+                          <select className="input-field w-full text-xs" value={filterEstado} onChange={e => setFilterEstado(e.target.value)}>
+                            <option value="todos">Todas las Facturas</option>
+                            <option value="pendiente">Solo Pendientes</option>
+                            <option value="vencida">Solo Vencidas</option>
+                            <option value="pagada">Solo Pagadas</option>
+                          </select>
+                        </div>
+
+                        <div className="w-56">
+                          <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Proveedor</label>
+                          <select className="input-field w-full text-xs" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
+                            <option value="todos">Todos los Proveedores ({availableSuppliers.length})</option>
+                            {availableSuppliers.map(s => (
+                              <option key={s.id} value={s.id}>{s.nombre}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="w-40">
+                          <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Fecha de Corte</label>
+                          <input
+                            type="date"
+                            className="input-field w-full text-xs"
+                            value={filterFechaCorte}
+                            onChange={e => setFilterFechaCorte(e.target.value)}
+                            title="Consultar saldos acumulados emitidos hasta esta fecha"
+                          />
+                        </div>
+
+                        <div className="flex-1 min-w-[220px]">
+                          <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Buscar</label>
+                          <div className="relative">
+                            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
+                            <input
+                              type="text"
+                              placeholder="Proveedor, RUC, N° factura, timbrado..."
+                              className="input-field pl-9 w-full text-xs"
+                              value={search}
+                              onChange={e => setSearch(e.target.value)}
+                            />
+                          </div>
+                        </div>
+
+                        {(filterEstado !== "todos" || filterSupplier !== "todos" || filterFechaCorte || search) && (
+                          <div className="self-end">
+                            <button
+                              onClick={() => { setFilterEstado("todos"); setFilterSupplier("todos"); setFilterFechaCorte(""); setSearch(""); }}
+                              className="btn-ghost text-xs py-2 text-gray-400 hover:text-gray-200"
+                            >
+                              Limpiar filtros
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── MODO 1: CARDS DE PROVEEDORES (NUEVO) ── */}
+                  {apViewMode === "cards" && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+                      {suppliersCardList.length === 0 ? (
+                        <div className="col-span-full card p-12 text-center text-gray-400 space-y-3">
+                          <Building2 className="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600" />
+                          <h4 className="text-base font-bold text-gray-900 dark:text-white">No se encontraron proveedores con los filtros seleccionados</h4>
+                          <p className="text-xs text-gray-500">Probá modificando los criterios de búsqueda o limpiando los filtros.</p>
+                        </div>
+                      ) : (
+                        suppliersCardList.map(sup => {
+                          const vtoCercanoText = getDaysDiffText(sup.vencimientoMasCercano)
+                          return (
+                            <div
+                              key={sup.supplier_id}
+                              className={`card p-5 flex flex-col justify-between transition-all duration-200 hover:shadow-xl hover:border-indigo-500/50 group relative overflow-hidden ${
+                                sup.tieneVencidas ? "border-l-4 border-l-red-500" : "border-l-4 border-l-emerald-500"
+                              }`}
+                            >
+                              {/* Top Header Card */}
+                              <div className="space-y-3">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0 flex-1">
+                                    <h4
+                                      className="font-bold text-base text-gray-900 dark:text-white truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition"
+                                      title={sup.supplier_nombre}
+                                    >
+                                      {sup.supplier_nombre}
+                                    </h4>
+                                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                      {sup.ruc && (
+                                        <span className="text-[11px] font-mono text-gray-500">
+                                          RUC: {sup.ruc}
+                                        </span>
+                                      )}
+                                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 dark:bg-slate-800 dark:text-gray-300">
+                                        {sup.cantidadFacturasPendientes} facturas
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {/* Badge de Alerta o Al Día */}
+                                  {sup.tieneVencidas ? (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-400 border border-red-200 dark:border-red-900/40 shrink-0">
+                                      <AlertTriangle className="w-3 h-3" />
+                                      Vencido: {formatPYG(sup.montoVencido)}
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/40 shrink-0">
+                                      <CheckCircle2 className="w-3 h-3" />
+                                      Al día
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Métricas Financieras Principales del Card */}
+                                <div className="space-y-2.5 pt-2">
+                                  {/* Deuda Consolidada */}
+                                  <div className="p-3 rounded-xl bg-gray-50 dark:bg-slate-800/70 border border-gray-100 dark:border-gray-800">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                                        Deuda Consolidada
+                                      </span>
+                                      <span className="text-xs text-gray-400 font-mono">
+                                        Total Facturas
+                                      </span>
+                                    </div>
+                                    <span className="text-lg font-bold font-mono text-gray-900 dark:text-white block mt-0.5">
+                                      {formatPYG(sup.deudaConsolidada)}
+                                    </span>
+                                  </div>
+
+                                  {/* 2 Columnas: NC Registrada vs NC Pendiente de Proveedor */}
+                                  <div className="grid grid-cols-2 gap-2">
+                                    {/* NC Fiscal Consolidada */}
+                                    <div className="p-2.5 rounded-lg bg-purple-50/70 dark:bg-purple-950/30 border border-purple-100 dark:border-purple-900/40">
+                                      <span className="text-[9px] font-bold uppercase tracking-wider text-purple-700 dark:text-purple-300 block">
+                                        NC Registrada
+                                      </span>
+                                      <span className="text-xs font-bold font-mono text-purple-800 dark:text-purple-200 block mt-0.5">
+                                        {formatPYG(sup.ncConsolidada)}
+                                      </span>
+                                      <span className="text-[10px] text-purple-600/80 dark:text-purple-400">
+                                        {sup.creditNotes.length} NCs legales
+                                      </span>
+                                    </div>
+
+                                    {/* NC Pendiente de Proveedor (Devoluciones) */}
+                                    <div
+                                      className="p-2.5 rounded-lg bg-amber-50/70 dark:bg-amber-950/30 border border-amber-100 dark:border-amber-900/40"
+                                      title="Devoluciones físicas de mercadería realizadas por nosotros pendientes de entrega de NC legal por el proveedor"
+                                    >
+                                      <span className="text-[9px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300 block truncate">
+                                        NC Pend. Proveedor
+                                      </span>
+                                      <span className="text-xs font-bold font-mono text-amber-800 dark:text-amber-200 block mt-0.5">
+                                        {formatPYG(sup.ncNoRegistrada)}
+                                      </span>
+                                      <span className="text-[10px] text-amber-600/80 dark:text-amber-400 truncate block">
+                                        {sup.devolucionesPendientes.length} devs. reclamo
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {/* Neto Exigible Teórico */}
+                                  <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200/50 dark:border-emerald-800/30">
+                                    <span className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
+                                      Neto Exigible Estimado:
+                                    </span>
+                                    <span className="font-mono font-bold text-xs text-emerald-700 dark:text-emerald-300">
+                                      {formatPYG(sup.netoExigible)}
+                                    </span>
+                                  </div>
+
+                                  {/* Fechas de Vencimiento: Más cercano y Más lejano */}
+                                  <div className="pt-2 border-t border-gray-100 dark:border-gray-800 text-[11px] text-gray-500 space-y-1">
+                                    <div className="flex items-center justify-between">
+                                      <span className="flex items-center gap-1">
+                                        <CalendarClock className="w-3.5 h-3.5 text-gray-400" />
+                                        Vto. más cercano:
+                                      </span>
+                                      <div className="flex items-center gap-1.5 font-mono">
+                                        <span className={sup.tieneVencidas ? "text-red-600 dark:text-red-400 font-bold" : "text-gray-700 dark:text-gray-300"}>
+                                          {sup.vencimientoMasCercano ? formatDate(sup.vencimientoMasCercano) : "Sin vencimiento"}
+                                        </span>
+                                        {vtoCercanoText && (
+                                          <span className="text-[10px] font-bold text-gray-400">
+                                            ({vtoCercanoText})
+                                          </span>
+                                        )}
                                       </div>
                                     </div>
 
-                                    {linkedNCs.length === 0 ? (
-                                      <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-800 text-xs text-gray-400 text-center">
-                                        Sin Notas de Crédito imputadas a este comprobante.
-                                      </div>
-                                    ) : (
-                                      <table className="w-full text-xs text-left">
-                                        <thead>
-                                          <tr className="text-gray-400 border-b border-gray-800 font-semibold">
-                                            <th className="pb-2">N° Nota de Crédito</th>
-                                            <th className="pb-2">Timbrado</th>
-                                            <th className="pb-2">Fecha</th>
-                                            <th className="pb-2">Motivo</th>
-                                            <th className="pb-2 text-right">Importe NC</th>
-                                            <th className="pb-2 text-right">Saldo Resultante</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-gray-800/60 font-mono">
-                                          {linkedNCs.map((nc, idx) => (
-                                            <tr key={nc.id || idx} className="text-gray-300">
-                                              <td className="py-2 text-purple-300 font-bold">{nc.numero}</td>
-                                              <td className="py-2 text-gray-400">{nc.timbrado || "—"}</td>
-                                              <td className="py-2 text-gray-400">{nc.fecha ? new Date(nc.fecha).toLocaleDateString("es-PY") : "—"}</td>
-                                              <td className="py-2 font-sans text-gray-300">{nc.motivo || "Ajuste / Bonificación"}</td>
-                                              <td className="py-2 text-right text-purple-400 font-bold">-{formatPYG(nc.monto)}</td>
-                                              <td className="py-2 text-right text-emerald-400 font-bold">{formatPYG(saldoResultante)}</td>
-                                            </tr>
-                                          ))}
-                                        </tbody>
-                                      </table>
-                                    )}
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-gray-400">Vto. más lejano:</span>
+                                      <span className="font-mono text-gray-600 dark:text-gray-300">
+                                        {sup.vencimientoMasLejano ? formatDate(sup.vencimientoMasLejano) : "—"}
+                                      </span>
+                                    </div>
                                   </div>
-                                </td>
-                              </tr>
-                            )}
-                          </>
-                        )
-                      })}
-                    </tbody>
-                  </table>
+                                </div>
+                              </div>
+
+                              {/* Footer Acciones Card */}
+                              <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (sup.supplier_id) {
+                                      setSelected360SupplierId(sup.supplier_id)
+                                      setSelected360SupplierNombre(sup.supplier_nombre)
+                                    }
+                                  }}
+                                  className="btn-ghost text-xs py-1.5 px-2.5 text-gray-500 hover:text-gray-900 dark:hover:text-white"
+                                  title="Abrir Visión 360°"
+                                >
+                                  360°
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectSupplierForDetail(sup)}
+                                  className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg shadow-sm"
+                                >
+                                  <span>Ver Detalle & Armar Pago</span>
+                                  <ArrowRight className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        })
+                      )}
+                    </div>
+                  )}
+
+                  {/* ── MODO 2: TABLA PLANA TRADICIONAL DE FACTURAS ── */}
+                  {apViewMode === "table" && (
+                    <div className="card p-0 overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left">
+                          <thead>
+                            <tr className="bg-gray-50 dark:bg-slate-800/80 text-[11px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 dark:border-gray-700">
+                              <th className="p-3.5 w-10"></th>
+                              <th className="p-3.5">Proveedor</th>
+                              <th className="p-3.5">N° Factura</th>
+                              <th className="p-3.5">Timbrado</th>
+                              <th className="p-3.5">Emisión</th>
+                              <th className="p-3.5">Vencimiento</th>
+                              <th className="p-3.5">Monto Total</th>
+                              <th className="p-3.5">Saldo Pendiente</th>
+                              <th className="p-3.5">Estado</th>
+                              <th className="p-3.5 text-right">Acciones</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100 dark:divide-gray-700 text-sm">
+                            {filteredInvoices.map(inv => {
+                              const isVencida = inv.estado === "pendiente" && inv.fecha_vencimiento && new Date(inv.fecha_vencimiento) < new Date()
+                              const isExpanded = expandedInvoiceId === inv.id
+                              const linkedNCs = creditNotes.filter(cn => 
+                                (cn.numero_factura_origen && inv.numero_factura && cn.numero_factura_origen.trim() === inv.numero_factura.trim()) ||
+                                (cn.supplier_id === inv.supplier_id && cn.numero_factura_origen === inv.numero_factura)
+                              )
+                              const totalNCAplicadas = linkedNCs.reduce((sum, n) => sum + Number(n.monto || 0), 0)
+                              const saldoResultante = Math.max(0, Number(inv.total || 0) - totalNCAplicadas)
+
+                              return (
+                                <>
+                                  <tr key={inv.id} className={`hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors ${isExpanded ? "bg-slate-800/40" : ""}`}>
+                                    <td className="p-3.5 text-center">
+                                      <button
+                                        onClick={() => setExpandedInvoiceId(isExpanded ? null : inv.id)}
+                                        className="p-1 text-gray-400 hover:text-white rounded hover:bg-slate-700/50 transition"
+                                        title="Ver notas de crédito y detalle"
+                                      >
+                                        {isExpanded ? <ChevronDown className="w-4 h-4 text-primary" /> : <ChevronRight className="w-4 h-4" />}
+                                      </button>
+                                    </td>
+                                    <td className="p-3.5 font-bold text-gray-900 dark:text-white max-w-xs truncate" title={inv.supplier_nombre}>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          if (inv.supplier_id) {
+                                            setSelected360SupplierId(inv.supplier_id)
+                                            setSelected360SupplierNombre(inv.supplier_nombre || null)
+                                          }
+                                        }}
+                                        className="text-left group hover:text-rose-600 transition flex items-center gap-1.5"
+                                        title="Abrir Visión 360° del Proveedor"
+                                      >
+                                        <span className="group-hover:underline">{inv.supplier_nombre || "Proveedor General"}</span>
+                                        <span className="p-1 rounded-md bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 group-hover:bg-rose-600 group-hover:text-white transition">
+                                          <Eye className="w-3 h-3" />
+                                        </span>
+                                      </button>
+                                      {linkedNCs.length > 0 && (
+                                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-purple-600 dark:text-purple-400 mt-0.5">
+                                          <FileText className="w-3 h-3" /> {linkedNCs.length} NC vinculada(s)
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="p-3.5 font-mono font-bold text-xs text-gray-900 dark:text-white">
+                                      {inv.numero_factura || "—"}
+                                    </td>
+                                    <td className="p-3.5 font-mono text-xs text-gray-500">
+                                      {inv.timbrado || "—"}
+                                    </td>
+                                    <td className="p-3.5 text-xs text-gray-500 font-mono">
+                                      {inv.fecha_emision ? new Date(inv.fecha_emision).toLocaleDateString("es-PY") : "—"}
+                                    </td>
+                                    <td className="p-3.5 text-xs font-mono">
+                                      <span className={isVencida ? "text-red-600 font-bold" : "text-gray-600 dark:text-gray-300"}>
+                                        {inv.fecha_vencimiento ? new Date(inv.fecha_vencimiento).toLocaleDateString("es-PY") : "—"}
+                                      </span>
+                                    </td>
+                                    <td className="p-3.5 font-mono text-gray-600 dark:text-gray-300">
+                                      {formatPYG(inv.total)}
+                                    </td>
+                                    <td className="p-3.5 font-mono font-bold text-gray-900 dark:text-white">
+                                      {formatPYG(inv.saldo_pendiente ?? inv.total)}
+                                    </td>
+                                    <td className="p-3.5">
+                                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                                        inv.estado === "pagada"
+                                          ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-200"
+                                          : isVencida
+                                          ? "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-200"
+                                          : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200"
+                                      }`}>
+                                        {inv.estado === "pagada" ? "Pagada" : isVencida ? "Vencida" : "Pendiente"}
+                                      </span>
+                                    </td>
+                                    <td className="p-3.5 text-right whitespace-nowrap">
+                                      {inv.estado === "pendiente" && (
+                                        <button
+                                          onClick={() => handleOpenPayModal(inv)}
+                                          className="btn-primary py-1 px-2.5 text-xs"
+                                        >
+                                          Pagar
+                                        </button>
+                                      )}
+                                    </td>
+                                  </tr>
+
+                                  {/* FILA ACORDEÓN: Notas de Crédito vinculadas a esta factura */}
+                                  {isExpanded && (
+                                    <tr className="bg-slate-900/70 border-b border-gray-700/60">
+                                      <td colSpan={10} className="p-4 pl-12">
+                                        <div className="rounded-xl border border-indigo-500/20 bg-slate-950/60 p-4 space-y-3">
+                                          <div className="flex items-center justify-between flex-wrap gap-2">
+                                            <div className="flex items-center gap-2">
+                                              <FileText className="w-4 h-4 text-purple-400" />
+                                              <h5 className="text-xs font-bold uppercase tracking-wider text-white">
+                                                Notas de Crédito Imputadas a la Factura N° {inv.numero_factura}
+                                              </h5>
+                                            </div>
+                                            <div className="text-xs font-mono text-gray-400">
+                                              Saldo original: <b className="text-white">{formatPYG(inv.total)}</b> · Deducciones NC: <b className="text-purple-400">{formatPYG(totalNCAplicadas)}</b> · Saldo Resultante: <b className="text-emerald-400">{formatPYG(saldoResultante)}</b>
+                                            </div>
+                                          </div>
+
+                                          {linkedNCs.length === 0 ? (
+                                            <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-800 text-xs text-gray-400 text-center">
+                                              Sin Notas de Crédito imputadas a este comprobante.
+                                            </div>
+                                          ) : (
+                                            <table className="w-full text-xs text-left">
+                                              <thead>
+                                                <tr className="text-gray-400 border-b border-gray-800 font-semibold">
+                                                  <th className="pb-2">N° Nota de Crédito</th>
+                                                  <th className="pb-2">Timbrado</th>
+                                                  <th className="pb-2">Fecha</th>
+                                                  <th className="pb-2">Motivo</th>
+                                                  <th className="pb-2 text-right">Importe NC</th>
+                                                  <th className="pb-2 text-right">Saldo Resultante</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody className="divide-y divide-gray-800/60 font-mono">
+                                                {linkedNCs.map((nc, idx) => (
+                                                  <tr key={nc.id || idx} className="text-gray-300">
+                                                    <td className="py-2 text-purple-300 font-bold">{nc.numero}</td>
+                                                    <td className="py-2 text-gray-400">{nc.timbrado || "—"}</td>
+                                                    <td className="py-2 text-gray-400">{nc.fecha ? new Date(nc.fecha).toLocaleDateString("es-PY") : "—"}</td>
+                                                    <td className="py-2 font-sans text-gray-300">{nc.motivo || "Ajuste / Bonificación"}</td>
+                                                    <td className="py-2 text-right text-purple-400 font-bold">-{formatPYG(nc.monto)}</td>
+                                                    <td className="py-2 text-right text-emerald-400 font-bold">{formatPYG(saldoResultante)}</td>
+                                                  </tr>
+                                                ))}
+                                              </tbody>
+                                            </table>
+                                          )}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
+              )}
             </div>
           )}
 

@@ -3194,7 +3194,7 @@ async def create_supplier_payment_order(
         supplier_id=sup_id,
         numero_orden=num_orden,
         fecha_emision=data.fecha_emision or _today(),
-        estado="registrado",
+        estado=data.estado or "registrado",
         moneda="PYG",
         monto_total=monto_total,
         monto_retenido=monto_retenido,

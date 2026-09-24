@@ -1323,7 +1323,7 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                               <td className="p-3 text-right font-mono font-black text-slate-900 dark:text-white">{formatPYG(ch.monto)}</td>
                               <td className="p-3 text-center">
                                 <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
-                                  ch.estado === "compensado"
+                                  ch.estado === "compensado" || ch.estado === "cobrado"
                                     ? "bg-emerald-100 text-emerald-700"
                                     : ch.estado === "anulado"
                                     ? "bg-red-100 text-red-700"

@@ -228,6 +228,40 @@ export async function downloadAuthenticated(path: string, params: Record<string,
   setTimeout(() => URL.revokeObjectURL(blobUrl), 20000)
 }
 
+export async function downloadAuthenticatedPost(path: string, body: any, filename: string) {
+  const token = localStorage.getItem("access_token")
+  const normalizedPath = path.startsWith("/api") ? path.substring(4) : path
+  const cleanPath = normalizedPath.startsWith("/") ? normalizedPath : `/${normalizedPath}`
+  const url = `${API_BASE}${cleanPath}`
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify(body)
+    })
+  } catch (err: any) {
+    if (err?.name === "TypeError" || String(err?.message || "").toLowerCase().includes("failed to fetch")) {
+      throw new Error("Error de conexión con el servidor central al descargar el archivo. Verifique su red local.")
+    }
+    throw err
+  }
+  if (!res.ok) throw new Error(`No se pudo generar el archivo (${res.status})`)
+  const blob = await res.blob()
+  const fileBlob = new Blob([blob], { type: "application/pdf" })
+  const blobUrl = URL.createObjectURL(fileBlob)
+  const a = document.createElement("a")
+  a.href = blobUrl
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 20000)
+}
+
 // ========== TYPE STUBS ==========
 export interface Product { id: string; sku: string; nombre: string; descripcion?: string | null; categoria_id?: string | null; supplier_id?: string; supplier_nombre?: string; codigo_barra?: string; unidad_medida?: string; tipo?: string; tipo_producto?: "producto" | "materia_prima" | "insumo" | "servicio"; tipo_venta?: string; iva_tasa?: number; stock_minimo?: number; stock_maximo?: number; peso_kg?: number; plu_balanza?: number | null; es_pesable?: boolean; tiene_vencimiento?: boolean; tiene_lotes?: boolean; imagen_url?: string | null; precio_venta?: number; precio_regular?: number; precio_promo?: number; en_promocion?: boolean; promocion_id?: string | null; promocion_nombre?: string | null; promo_dias_semana?: number[] | null; promo_valido_hasta?: string | null; promo_horario_desde?: string | null; promo_horario_hasta?: string | null; precio_mayorista?: number | null; precio_mayorista_min_qty?: number | null; precio_promedio_real?: number | null; costo_promedio?: number; ultimo_costo?: number; costo_landed?: number; costo_unitario?: number; precio_costo?: number; activo?: boolean; created_at?: string; updated_at?: string; precio?: number; categoria?: Category; stock?: number }
 export interface Category { id: string; nombre: string; codigo?: string; parent_id?: string; company_id?: string; activo?: boolean; created_at?: string }
@@ -3643,7 +3677,7 @@ export const api = {
         client.get<{ items: SupplierPaymentOrder[]; total: number }>("/v1/financial/payment-orders", { company_id: COMPANY_ID, ...params } as any),
       get: (orderId: string) =>
         client.get<SupplierPaymentOrder>(`/v1/financial/payment-orders/${orderId}`, { company_id: COMPANY_ID } as any),
-      create: (data: { supplier_id: string; fecha_emision?: string; observaciones?: string; recibo_proveedor?: string; allocations: any[]; disbursements?: any[] }) =>
+      create: (data: { supplier_id: string; fecha_emision?: string; observaciones?: string; recibo_proveedor?: string; estado?: string; allocations: any[]; disbursements?: any[] }) =>
         client.post<SupplierPaymentOrder>(`/v1/financial/payment-orders?company_id=${COMPANY_ID}`, data),
       disburse: (orderId: string, data: { fecha_pago?: string; recibo_proveedor?: string; observaciones?: string; disbursements: any[] }) =>
         client.post<SupplierPaymentOrder>(`/v1/financial/payment-orders/${orderId}/disburse?company_id=${COMPANY_ID}`, data),
@@ -3666,6 +3700,8 @@ export const api = {
         const defaultFilename = filename || `reporte_lote_pago_${new Date().toISOString().slice(0, 10)}.pdf`
         return downloadAuthenticated("/v1/financial/payment-orders/batch/report.pdf", queryParams, defaultFilename)
       },
+      downloadProformaPdf: (data: any, filename?: string) =>
+        downloadAuthenticatedPost(`/v1/financial/payment-orders/proforma/pdf?company_id=${COMPANY_ID}`, data, filename || `proforma_pago_${new Date().toISOString().slice(0, 10)}.pdf`),
     },
     receptions: {
       unbilled: (params?: { supplier_id?: string }) =>

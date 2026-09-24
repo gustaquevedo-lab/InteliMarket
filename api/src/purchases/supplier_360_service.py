@@ -198,7 +198,7 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
         if is_diferido and estado in ("pendiente", "entregado"):
             cheques_diferidos_pendientes_monto += monto
             cheques_diferidos_pendientes_count += 1
-        elif estado == "compensado":
+        elif estado in ("compensado", "cobrado"):
             cheques_compensados_monto += monto
 
         cheques_list.append({

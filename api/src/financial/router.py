@@ -29,6 +29,7 @@ from api.src.financial.schemas import (
     CashFlowAlertConfig,
     SupplierCreditNoteCreate, SupplierCreditNoteApply,
     SupplierPaymentOrderCreate, SupplierPaymentOrderDisburse,
+    PaymentProposalPdfRequest,
     MultiSupplierPaymentBatchCreate,
     SettleValesAndPayRequest,
 )
@@ -960,6 +961,29 @@ async def get_batch_payment_order_report_pdf(
     raw_id = batch_data.get("identificador", "operacion")
     clean_id = "".join(c for c in raw_id if c.isalnum() or c in ("-", "_")).strip()
     filename = f"reporte_lote_{clean_id}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename={filename}", "Content-Length": str(len(pdf_bytes))}
+    )
+
+
+@router.post("/payment-orders/proforma/pdf")
+async def get_payment_proposal_proforma_pdf(
+    body: PaymentProposalPdfRequest,
+    company_id: str = Query(...),
+    user_nombre: str | None = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    company = await _get_company_info(db, company_id)
+    proposal_dict = body.model_dump()
+    pdf_bytes = payment_order_pdf.generate_payment_proposal_pdf(
+        company=company,
+        proposal=proposal_dict,
+        generated_by=user_nombre or "",
+    )
+    prov_clean = "".join(c for c in (body.supplier_nombre or "proveedor") if c.isalnum() or c in ("-", "_")).strip()
+    filename = f"proforma_pago_{prov_clean}_{date.today().isoformat()}.pdf"
     return StreamingResponse(
         iter([pdf_bytes]),
         media_type="application/pdf",
