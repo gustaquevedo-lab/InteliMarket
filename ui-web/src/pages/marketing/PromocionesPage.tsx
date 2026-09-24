@@ -898,7 +898,7 @@ export default function PromocionesPage() {
     setNewHorarioHasta(promo.horario_hasta ? String(promo.horario_hasta).slice(0, 5) : "21:00")
     setNewDiasSemana(promo.dias_semana && promo.dias_semana.length > 0 ? promo.dias_semana : [0, 1, 2, 3, 4, 5, 6])
     // Precargar productos seleccionados a partir de productos_detalle
-    const prodsDetalle = (promo as any).productos_detalle as Array<{ id: string; nombre: string; sku?: string; codigo_barra?: string; precio_venta?: number; costo_promedio?: number }> | undefined
+    const prodsDetalle = (promo as any).productos_detalle as Array<{ id: string; nombre: string; sku?: string; codigo_barra?: string; precio_venta?: number; costo_promedio?: number; precio_regular?: number }> | undefined
     const savedPrecios = (promo as any).precios_por_producto as Record<string, number> | undefined
     const batchMap = new Map<string, SelectedPromoProduct>()
     if (prodsDetalle && prodsDetalle.length > 0) {
