@@ -17,6 +17,7 @@ from api.src.petty_cash.schemas import (
     ExpenseApprovalConfig, ExpenseRejectBody, FundReplenishRequest,
     ExpenseVoidBody, ComprobanteUploadResponse,
     ExpenseRevertPaymentRequest, ExpenseBatchRevertPaymentRequest,
+    ExpenseBatchAssignInvoiceRequest,
     FundCountCreate, FundCountConfirm, PettyCashFundCountResponse,
     PettyCashRendicionCreate, PettyCashRendicionAuditRequest, PettyCashRendicionReplenishRequest,
     PettyCashRendicionResponse, PettyCashRendicionDetailResponse,
@@ -543,6 +544,27 @@ async def revert_expenses_batch(
         nuevo_estado=body.nuevo_estado or "aprobado",
         motivo=body.motivo,
     )
+
+
+@router.post("/batch-assign-invoice")
+async def batch_assign_invoice(
+    body: ExpenseBatchAssignInvoiceRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Asigna múltiples comprobantes o notas de control interno a una factura comercial
+    de compras en Cuentas por Pagar como Pago a Proveedor."""
+    try:
+        return await service.batch_assign_invoice(
+            db=db,
+            company_id=user["company_id"],
+            expense_ids=body.expense_ids,
+            supplier_invoice_id=body.supplier_invoice_id,
+            notas=body.notas,
+        )
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err))
+
 
 
 

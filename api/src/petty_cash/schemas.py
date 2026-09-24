@@ -169,6 +169,7 @@ class ExpenseUpdate(BaseModel):
     es_pago_proveedor: Optional[bool] = None
     supplier_id: Optional[str] = None
     supplier_invoice_id: Optional[str] = None
+    grouped_expense_ids: Optional[list[str]] = None
     # Clasificación Anticipo de Sueldo (Nómina / SueldOK)
     es_anticipo_sueldo: Optional[bool] = None
     employee_id: Optional[str] = None
@@ -178,6 +179,12 @@ class ExpenseUpdate(BaseModel):
     cuotas_anticipo: Optional[int] = None
     monto_brl: Optional[Decimal] = None
     fecha_gasto: Optional[date] = None
+    notas: Optional[str] = None
+
+
+class ExpenseBatchAssignInvoiceRequest(BaseModel):
+    expense_ids: list[str]
+    supplier_invoice_id: str
     notas: Optional[str] = None
 
 

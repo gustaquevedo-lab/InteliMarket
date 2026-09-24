@@ -3613,6 +3613,11 @@ export const api = {
     void: (id: string, motivo: string) => client.post<Expense>(`/v1/expenses/${id}/void`, { motivo }),
     revertPayment: (id: string, data?: { fund_id?: string; nuevo_estado?: string; motivo?: string }) => client.post<Expense>(`/v1/expenses/${id}/revert-payment`, data || {}),
     batchRevertPayments: (data: { expense_ids: string[]; fund_id?: string; nuevo_estado?: string; motivo?: string }) => client.post<{ success: boolean; reverted_count: number; reverted_ids: string[]; errors: any[] }>("/v1/expenses/batch-revert-payments", data),
+    batchAssignInvoice: (data: { expense_ids: string[]; supplier_invoice_id: string; notas?: string }) =>
+      client.post<{ success: boolean; assigned_count: number; assigned_ids: string[]; total_aplicado: number; invoice_saldo_remanente: number; invoice_estado: string }>(
+        "/v1/expenses/batch-assign-invoice",
+        data
+      ),
     disburse: (id: string, data: { fecha_pago?: string; disbursements: any[]; notas?: string }) => client.post<Expense>(`/v1/expenses/${id}/disburse`, data),
     getDisbursements: (id: string) => client.get<any[]>(`/v1/expenses/${id}/disbursements`),
     downloadPdf: (id: string) => downloadAuthenticated(`/v1/expenses/${id}/pdf`, {}, `recibo_gasto_${id.slice(0, 8)}.pdf`),

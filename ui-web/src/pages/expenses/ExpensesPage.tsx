@@ -174,6 +174,18 @@ export default function ExpensesPage() {
   const [batchRevertMotivo, setBatchRevertMotivo] = useState<string>("")
   const [batchReverting, setBatchReverting] = useState<boolean>(false)
 
+  // Agrupación de comprobantes / notas de control interno en modal de gasto
+  const [groupedExpenseIds, setGroupedExpenseIds] = useState<string[]>([])
+  const [groupedExpenseSearch, setGroupedExpenseSearch] = useState<string>("")
+  const [showGroupedExpensesSelector, setShowGroupedExpensesSelector] = useState<boolean>(false)
+
+  // Asignación de lote a factura de proveedor desde la tabla
+  const [selectedTableExpenseIds, setSelectedTableExpenseIds] = useState<string[]>([])
+  const [showBatchAssignInvoiceModal, setShowBatchAssignInvoiceModal] = useState<boolean>(false)
+  const [batchAssignSearchQuery, setBatchAssignSearchQuery] = useState<string>("")
+  const [batchAssignSelectedInvoice, setBatchAssignSelectedInvoice] = useState<any | null>(null)
+  const [batchAssigning, setBatchAssigning] = useState<boolean>(false)
+
   // Autocomplete proveedores en modal de gasto
   const [suppliersList, setSuppliersList] = useState<any[]>([])
   const [supplierSearch, setSupplierSearch] = useState("")
@@ -318,6 +330,52 @@ export default function ExpensesPage() {
       return rs.includes(q) || nf.includes(q) || ruc.includes(q) || (qClean && rucClean.includes(qClean))
     }).slice(0, 5)
   }, [suppliersList, invoiceSearchQuery])
+
+  // Comprobantes candidatos a agrupar en el modal de gasto
+  const candidateGroupedExpenses = useMemo(() => {
+    if (!form.supplier_invoice_id) return []
+    const q = groupedExpenseSearch.trim().toLowerCase()
+    return expenses.filter(e => {
+      if (editingExpenseId && e.id === editingExpenseId) return false
+      if (e.anulado || e.estado === "anulado") return false
+      if (!q) return true
+      const desc = (e.descripcion || "").toLowerCase()
+      const prov = (e.proveedor || "").toLowerCase()
+      const fac = (e.numero_factura || "").toLowerCase()
+      const montoStr = String(e.monto || "")
+      return desc.includes(q) || prov.includes(q) || fac.includes(q) || montoStr.includes(q)
+    })
+  }, [expenses, editingExpenseId, form.supplier_invoice_id, groupedExpenseSearch])
+
+  // Total acumulado de comprobantes adicionales agrupados en el modal
+  const additionalGroupedTotal = useMemo(() => {
+    return groupedExpenseIds.reduce((acc, id) => {
+      const exp = expenses.find(e => e.id === id)
+      return acc + (exp ? Number(exp.monto || 0) : 0)
+    }, 0)
+  }, [groupedExpenseIds, expenses])
+
+  // Total a imputar combinando el comprobante actual + los agrupados
+  const totalComprobantesImputar = useMemo(() => {
+    const mainMonto = Number(form.monto || 0)
+    return mainMonto + additionalGroupedTotal
+  }, [form.monto, additionalGroupedTotal])
+
+  // Total acumulado de comprobantes seleccionados en la tabla
+  const selectedTableExpensesTotal = useMemo(() => {
+    return selectedTableExpenseIds.reduce((acc, id) => {
+      const e = expenses.find(x => x.id === id)
+      return acc + (e ? Number(e.monto || 0) : 0)
+    }, 0)
+  }, [selectedTableExpenseIds, expenses])
+
+  // Conteo de seleccionados elegibles para reversión de pago
+  const eligiblePaidCount = useMemo(() => {
+    return selectedTableExpenseIds.filter(id => {
+      const e = expenses.find(x => x.id === id)
+      return e?.estado === "pagado" && !e?.rendicion_id
+    }).length
+  }, [selectedTableExpenseIds, expenses])
 
   const toast = useToast()
   const { user } = useAuth()
@@ -573,6 +631,17 @@ export default function ExpensesPage() {
 
   const handleOpenEdit = (e: Expense) => {
     setEditingExpenseId(e.id)
+    const currentInvId = (e as any).supplier_invoice_id
+    if (currentInvId) {
+      const alreadyGrouped = expenses
+        .filter(other => other.id !== e.id && (other as any).supplier_invoice_id === currentInvId)
+        .map(o => o.id)
+      setGroupedExpenseIds(alreadyGrouped)
+    } else {
+      setGroupedExpenseIds([])
+    }
+    setGroupedExpenseSearch("")
+    setShowGroupedExpensesSelector(false)
     setForm({
       monto: String(e.monto || ""),
       descripcion: e.descripcion || "",
@@ -671,6 +740,7 @@ export default function ExpensesPage() {
           es_pago_proveedor: form.es_anticipo_sueldo ? false : (form.es_pago_proveedor || false),
           supplier_id: form.es_anticipo_sueldo ? undefined : (form.supplier_id || undefined),
           supplier_invoice_id: form.es_anticipo_sueldo ? undefined : (form.supplier_invoice_id || undefined),
+          grouped_expense_ids: form.es_pago_proveedor && form.supplier_invoice_id && groupedExpenseIds.length > 0 ? groupedExpenseIds : undefined,
           monto_brl: form.moneda === "BRL" && form.monto_brl ? Number(form.monto_brl) : undefined,
           es_anticipo_sueldo: form.es_anticipo_sueldo || false,
           employee_id: form.es_anticipo_sueldo ? (form.employee_id || undefined) : undefined,
@@ -711,11 +781,21 @@ export default function ExpensesPage() {
           sueldok_sync_id: form.es_anticipo_sueldo ? (form.sueldok_sync_id || undefined) : undefined,
           comprobante_url
         })
+        if (form.es_pago_proveedor && form.supplier_invoice_id && groupedExpenseIds.length > 0) {
+          await api.expenses.batchAssignInvoice({
+            expense_ids: groupedExpenseIds,
+            supplier_invoice_id: form.supplier_invoice_id,
+            notas: "Imputación agrupada con nuevo comprobante",
+          })
+        }
         toast.success("Comprobante Registrado", "El gasto quedó en estado Pendiente de Aprobación. Aprobalo para luego asignar la forma de pago.")
       }
 
       setShowForm(false)
       setEditingExpenseId(null)
+      setGroupedExpenseIds([])
+      setShowGroupedExpensesSelector(false)
+      fetchAll()
       setForm({
         monto: "",
         descripcion: "",
@@ -2065,6 +2145,62 @@ export default function ExpensesPage() {
                 </div>
               </div>
 
+              {/* Barra de Acciones Masivas para Comprobantes Seleccionados */}
+              {selectedTableExpenseIds.length > 0 && (
+                <div className="p-3 bg-gradient-to-r from-purple-900 via-indigo-950 to-slate-900 text-white rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2 border border-purple-700/50">
+                  <div className="flex items-center gap-3">
+                    <span className="px-2.5 py-1 rounded-lg bg-white/10 font-mono font-bold text-xs">
+                      {selectedTableExpenseIds.length} comprobante{selectedTableExpenseIds.length > 1 ? "s" : ""} seleccionado{selectedTableExpenseIds.length > 1 ? "s" : ""}
+                    </span>
+                    <span className="text-xs text-purple-200">
+                      Total: <strong className="text-white font-mono text-sm">{formatPYG(selectedTableExpensesTotal)}</strong>
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBatchAssignSearchQuery("")
+                        setBatchAssignSelectedInvoice(null)
+                        setShowBatchAssignInvoiceModal(true)
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-purple-500 hover:bg-purple-400 text-white rounded-xl text-xs font-bold transition shadow-md"
+                    >
+                      <Package className="w-4 h-4" />
+                      <span>Asignar Pago a Proveedor (Agrupar en Factura)</span>
+                    </button>
+
+                    {eligiblePaidCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedPaidExpenseIds(selectedTableExpenseIds.filter(id => {
+                            const e = expenses.find(x => x.id === id)
+                            return e?.estado === "pagado" && !e?.rendicion_id
+                          }))
+                          setBatchRevertFundId(funds[0]?.id || "")
+                          setBatchRevertMotivo("Reversión masiva para rendición de cuentas")
+                          setShowBatchRevertModal(true)
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-white rounded-xl text-xs font-bold transition shadow-md"
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                        <span>Revertir Pagos ({eligiblePaidCount})</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTableExpenseIds([])}
+                      className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-semibold transition"
+                    >
+                      Deseleccionar
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Tabla Enterprise de Gastos */}
               <div className="card p-0 overflow-hidden bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700/60">
                 <div className="overflow-x-auto">
@@ -2074,24 +2210,20 @@ export default function ExpensesPage() {
                         <th className="p-3.5 w-8 text-center">
                           <input
                             type="checkbox"
-                            className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                            className="rounded border-slate-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
                             checked={
-                              filteredExpenses.filter(e => e.estado === "pagado" && !e.rendicion_id).length > 0 &&
-                              filteredExpenses
-                                .filter(e => e.estado === "pagado" && !e.rendicion_id)
-                                .every(e => selectedPaidExpenseIds.includes(e.id))
+                              filteredExpenses.length > 0 &&
+                              filteredExpenses.every(e => selectedTableExpenseIds.includes(e.id))
                             }
                             onChange={(ev) => {
-                              const eligibleIds = filteredExpenses
-                                .filter(e => e.estado === "pagado" && !e.rendicion_id)
-                                .map(e => e.id)
+                              const allIds = filteredExpenses.map(e => e.id)
                               if (ev.target.checked) {
-                                setSelectedPaidExpenseIds(Array.from(new Set([...selectedPaidExpenseIds, ...eligibleIds])))
+                                setSelectedTableExpenseIds(Array.from(new Set([...selectedTableExpenseIds, ...allIds])))
                               } else {
-                                setSelectedPaidExpenseIds(selectedPaidExpenseIds.filter(id => !eligibleIds.includes(id)))
+                                setSelectedTableExpenseIds(selectedTableExpenseIds.filter(id => !allIds.includes(id)))
                               }
                             }}
-                            title="Seleccionar todos los gastos pagados sin rendición"
+                            title="Seleccionar todos los comprobantes filtrados"
                           />
                         </th>
                         <th className="p-3.5">Fecha</th>
@@ -2114,28 +2246,23 @@ export default function ExpensesPage() {
                         const rendId = e.rendicion_id || rend?.id
                         const rendFecha = e.rendicion_fecha || rend?.fecha_presentacion || rend?.created_at
                         const rendCustodio = rend?.custodio_nombre
-                        const isEligibleForRevert = e.estado === "pagado" && !e.rendicion_id
 
                         return (
                           <tr key={e.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                             <td className="p-3.5 text-center">
-                              {isEligibleForRevert ? (
-                                <input
-                                  type="checkbox"
-                                  className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                                  checked={selectedPaidExpenseIds.includes(e.id)}
-                                  onChange={(ev) => {
-                                    if (ev.target.checked) {
-                                      setSelectedPaidExpenseIds(prev => [...prev, e.id])
-                                    } else {
-                                      setSelectedPaidExpenseIds(prev => prev.filter(id => id !== e.id))
-                                    }
-                                  }}
-                                  title="Seleccionar para revertir lote"
-                                />
-                              ) : (
-                                <span className="text-slate-300 dark:text-slate-600 text-xs">•</span>
-                              )}
+                              <input
+                                type="checkbox"
+                                className="rounded border-slate-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
+                                checked={selectedTableExpenseIds.includes(e.id)}
+                                onChange={(ev) => {
+                                  if (ev.target.checked) {
+                                    setSelectedTableExpenseIds(prev => [...prev, e.id])
+                                  } else {
+                                    setSelectedTableExpenseIds(prev => prev.filter(id => id !== e.id))
+                                  }
+                                }}
+                                title="Seleccionar comprobante para agrupar o gestionar"
+                              />
                             </td>
                             <td className="p-3.5 font-mono text-gray-500 whitespace-nowrap">
                               {e.fecha_gasto ? new Date(e.fecha_gasto).toLocaleDateString("es-PY") : "—"}
@@ -3404,11 +3531,173 @@ export default function ExpensesPage() {
                                 supplier_id: "",
                               }))
                               setInvoiceSearchQuery("")
+                              setGroupedExpenseIds([])
+                              setShowGroupedExpensesSelector(false)
                             }}
                             className="text-rose-600 hover:text-rose-800 dark:text-rose-400 dark:hover:text-rose-200 text-[11px] font-medium flex items-center gap-1"
                           >
                             <X className="w-3.5 h-3.5" /> Desvincular Factura
                           </button>
+                        </div>
+
+                        {/* Panel de Agrupación de Comprobantes / Notas de Control Interno */}
+                        <div className="pt-3 border-t border-purple-200/80 dark:border-purple-800/60 space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5">
+                              <Layers className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                              <span className="font-bold text-xs text-purple-900 dark:text-purple-200">
+                                Agrupar otros Comprobantes / Notas de Control Interno
+                              </span>
+                              {groupedExpenseIds.length > 0 && (
+                                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-extrabold bg-purple-200 dark:bg-purple-900 text-purple-900 dark:text-purple-200">
+                                  +{groupedExpenseIds.length} agrupado{groupedExpenseIds.length > 1 ? "s" : ""}
+                                </span>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setShowGroupedExpensesSelector(!showGroupedExpensesSelector)}
+                              className="text-xs text-purple-700 dark:text-purple-300 font-semibold hover:underline flex items-center gap-1"
+                            >
+                              {showGroupedExpensesSelector ? "Ocultar comprobantes" : (groupedExpenseIds.length > 0 ? "Modificar comprobantes agrupados" : "+ Seleccionar comprobantes a agrupar")}
+                            </button>
+                          </div>
+
+                          {/* Resumen de Liquidación Acumulada */}
+                          <div className="p-2.5 bg-white/80 dark:bg-slate-900/60 rounded-lg border border-purple-100 dark:border-purple-900/50 space-y-1.5 text-xs">
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center sm:text-left">
+                              <div>
+                                <span className="text-[10px] text-gray-400 block uppercase font-medium">Este Comprobante</span>
+                                <span className="font-mono font-bold text-gray-800 dark:text-gray-200">
+                                  {formatPYG(Number(form.monto || 0))}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] text-gray-400 block uppercase font-medium">Adicionales ({groupedExpenseIds.length})</span>
+                                <span className="font-mono font-bold text-purple-700 dark:text-purple-300">
+                                  +{formatPYG(additionalGroupedTotal)}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] text-gray-400 block uppercase font-medium">Total Imputado</span>
+                                <span className="font-mono font-black text-emerald-700 dark:text-emerald-400">
+                                  {formatPYG(totalComprobantesImputar)}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] text-gray-400 block uppercase font-medium">Saldo Factura</span>
+                                <span className="font-mono font-bold text-gray-900 dark:text-gray-100">
+                                  {formatPYG(selectedPendingInvoice?.saldo_pendiente ?? 0)}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Badge de coincidencia */}
+                            <div className="pt-1 flex items-center justify-between text-[11px] font-medium">
+                              {totalComprobantesImputar === Number(selectedPendingInvoice?.saldo_pendiente ?? 0) ? (
+                                <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300 font-bold">
+                                  <Check className="w-3.5 h-3.5 text-emerald-600" /> Cubre exactamente el 100% del saldo pendiente de la factura
+                                </span>
+                              ) : totalComprobantesImputar < Number(selectedPendingInvoice?.saldo_pendiente ?? 0) ? (
+                                <span className="text-blue-700 dark:text-blue-300">
+                                  ℹ️ Amortización parcial. Quedará un saldo remanente de <strong>{formatPYG(Number(selectedPendingInvoice?.saldo_pendiente ?? 0) - totalComprobantesImputar)}</strong>
+                                </span>
+                              ) : (
+                                <span className="text-amber-700 dark:text-amber-300">
+                                  ⚠️ El total imputado supera el saldo de la factura por <strong>{formatPYG(totalComprobantesImputar - Number(selectedPendingInvoice?.saldo_pendiente ?? 0))}</strong>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Selector desplegable de comprobantes candidatos */}
+                          {showGroupedExpensesSelector && (
+                            <div className="mt-2 p-2.5 bg-slate-50 dark:bg-slate-900/80 rounded-lg border border-slate-200 dark:border-slate-800 space-y-2">
+                              <div className="flex items-center gap-2">
+                                <div className="relative flex-1">
+                                  <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                                  <input
+                                    type="text"
+                                    placeholder="Buscar nota de control interno por concepto, N° o monto..."
+                                    value={groupedExpenseSearch}
+                                    onChange={e => setGroupedExpenseSearch(e.target.value)}
+                                    className="input-field w-full pl-8 py-1 text-xs"
+                                  />
+                                </div>
+                                {groupedExpenseIds.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setGroupedExpenseIds([])}
+                                    className="text-[11px] text-gray-500 hover:text-rose-600 font-medium px-2 py-1 rounded hover:bg-slate-200 dark:hover:bg-slate-800"
+                                  >
+                                    Limpiar ({groupedExpenseIds.length})
+                                  </button>
+                                )}
+                              </div>
+
+                              <div className="max-h-48 overflow-y-auto space-y-1 pr-1 divide-y divide-slate-100 dark:divide-slate-800">
+                                {candidateGroupedExpenses.length === 0 ? (
+                                  <p className="text-[11px] text-gray-400 py-3 text-center">
+                                    No se encontraron otros comprobantes para agrupar.
+                                  </p>
+                                ) : (
+                                  candidateGroupedExpenses.map(item => {
+                                    const isChecked = groupedExpenseIds.includes(item.id)
+                                    return (
+                                      <label
+                                        key={item.id}
+                                        className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition text-xs ${
+                                          isChecked
+                                            ? "bg-purple-100/70 dark:bg-purple-900/40 border border-purple-200 dark:border-purple-800"
+                                            : "hover:bg-white dark:hover:bg-slate-800"
+                                        }`}
+                                      >
+                                        <div className="flex items-center gap-2.5 min-w-0">
+                                          <input
+                                            type="checkbox"
+                                            checked={isChecked}
+                                            onChange={e => {
+                                              if (e.target.checked) {
+                                                setGroupedExpenseIds(prev => [...prev, item.id])
+                                              } else {
+                                                setGroupedExpenseIds(prev => prev.filter(id => id !== item.id))
+                                              }
+                                            }}
+                                            className="rounded border-slate-300 text-purple-600 focus:ring-purple-500"
+                                          />
+                                          <div className="min-w-0">
+                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                              <span className="font-semibold text-gray-900 dark:text-gray-100 truncate">
+                                                {item.descripcion}
+                                              </span>
+                                              {item.tipo_comprobante && (
+                                                <span className="text-[9px] uppercase px-1.5 py-0.2 rounded font-bold bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
+                                                  {item.tipo_comprobante.replace("_", " ")}
+                                                </span>
+                                              )}
+                                              {item.numero_factura && (
+                                                <span className="text-[10px] font-mono text-purple-700 dark:text-purple-300">
+                                                  N° {item.numero_factura}
+                                                </span>
+                                              )}
+                                            </div>
+                                            <div className="text-[10px] text-gray-500 flex items-center gap-2 mt-0.5">
+                                              <span>{item.fecha_gasto ? new Date(item.fecha_gasto).toLocaleDateString("es-PY") : ""}</span>
+                                              {item.proveedor && <span>• {item.proveedor}</span>}
+                                              {item.fund_id && <span>• {fundName(item.fund_id)}</span>}
+                                            </div>
+                                          </div>
+                                        </div>
+                                        <div className="text-right shrink-0 font-mono font-bold text-gray-900 dark:text-white pl-2">
+                                          {formatPYG(item.monto)}
+                                        </div>
+                                      </label>
+                                    )
+                                  })
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ) : form.supplier_id && !form.supplier_invoice_id && !invoiceDropdownOpen ? (
@@ -5195,6 +5484,251 @@ export default function ExpensesPage() {
           </div>
         </div>
       )}
+
+      {/* MODAL: ASIGNACIÓN Y AGRUPACIÓN EN LOTE A FACTURA DE PROVEEDOR */}
+      {showBatchAssignInvoiceModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-2xl w-full border border-slate-200 dark:border-slate-800 overflow-hidden space-y-0">
+            <div className="p-4 bg-gradient-to-r from-purple-700 to-indigo-800 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center">
+                  <Package className="w-5 h-5 text-purple-200" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white">
+                    Asignar Pago a Proveedor y Agrupar Comprobantes
+                  </h3>
+                  <p className="text-[11px] text-purple-200">
+                    Imputa {selectedTableExpenseIds.length} comprobantes / notas de control interno contra una factura comercial
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowBatchAssignInvoiceModal(false)}
+                disabled={batchAssigning}
+                className="p-1 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto text-xs">
+              {/* 1. Comprobantes seleccionados a agrupar */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider text-[10px]">
+                    Comprobantes / Notas de Control Interno Seleccionados ({selectedTableExpenseIds.length})
+                  </span>
+                  <span className="font-mono font-bold text-xs text-purple-700 dark:text-purple-300">
+                    Total: {formatPYG(selectedTableExpensesTotal)}
+                  </span>
+                </div>
+                <div className="max-h-36 overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-xl divide-y divide-slate-100 dark:divide-slate-800 bg-slate-50 dark:bg-slate-950/40">
+                  {selectedTableExpenseIds.map(id => {
+                    const exp = expenses.find(e => e.id === id)
+                    if (!exp) return null
+                    return (
+                      <div key={id} className="p-2.5 flex items-center justify-between gap-3 text-xs">
+                        <div className="min-w-0">
+                          <div className="font-semibold text-gray-900 dark:text-gray-100 truncate">
+                            {exp.descripcion}
+                          </div>
+                          <div className="text-[10px] text-gray-500 font-mono flex items-center gap-1.5 flex-wrap">
+                            <span>{exp.fecha_gasto ? new Date(exp.fecha_gasto).toLocaleDateString("es-PY") : ""}</span>
+                            {exp.tipo_comprobante && (
+                              <span className="uppercase text-[9px] px-1 py-0.2 bg-slate-200 dark:bg-slate-700 rounded font-bold">
+                                {exp.tipo_comprobante.replace("_", " ")}
+                              </span>
+                            )}
+                            {exp.proveedor && <span>• {exp.proveedor}</span>}
+                            {exp.numero_factura && <span>• N° {exp.numero_factura}</span>}
+                          </div>
+                        </div>
+                        <div className="font-mono font-bold text-gray-800 dark:text-gray-200 shrink-0">
+                          {formatPYG(exp.monto)}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* 2. Factura Comercial de Compra */}
+              <div className="space-y-2">
+                <label className="font-bold text-purple-900 dark:text-purple-200 block text-[11px]">
+                  Factura Comercial de Compra en Cuentas por Pagar *
+                </label>
+
+                {batchAssignSelectedInvoice ? (
+                  <div className="p-3 bg-purple-50 dark:bg-purple-950/50 border border-purple-200 dark:border-purple-800 rounded-xl flex items-center justify-between gap-3">
+                    <div className="space-y-1 min-w-0">
+                      <div className="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-1.5 truncate">
+                        <Building2 className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
+                        <span>{batchAssignSelectedInvoice.supplier_nombre || "Proveedor"}</span>
+                      </div>
+                      <div className="text-xs text-gray-600 dark:text-gray-300 font-mono">
+                        Factura: <strong>{batchAssignSelectedInvoice.numero_factura}</strong>
+                        {batchAssignSelectedInvoice.timbrado && ` • Timb: ${batchAssignSelectedInvoice.timbrado}`}
+                        {batchAssignSelectedInvoice.supplier_ruc && ` • RUC: ${batchAssignSelectedInvoice.supplier_ruc}`}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0 flex items-center gap-3">
+                      <div>
+                        <div className="text-[10px] text-gray-400 font-bold uppercase">Saldo Pendiente</div>
+                        <div className="text-sm font-black font-mono text-purple-700 dark:text-purple-300">
+                          {formatPYG(batchAssignSelectedInvoice.saldo_pendiente ?? batchAssignSelectedInvoice.total ?? 0)}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setBatchAssignSelectedInvoice(null)}
+                        className="p-1 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/50"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-purple-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        placeholder="Buscar por Proveedor, N° de Factura (ej: 001-001-...) o RUC..."
+                        value={batchAssignSearchQuery}
+                        onChange={e => setBatchAssignSearchQuery(e.target.value)}
+                        className="input-field w-full pl-9 text-xs"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="max-h-44 overflow-y-auto border border-purple-200 dark:border-purple-800 rounded-xl divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
+                      {pendingInvoices.filter((inv: any) => {
+                        if (!batchAssignSearchQuery.trim()) return true
+                        const q = batchAssignSearchQuery.toLowerCase()
+                        const num = (inv.numero_factura || "").toLowerCase()
+                        const sup = (inv.supplier_nombre || "").toLowerCase()
+                        const ruc = (inv.supplier_ruc || "").toLowerCase()
+                        return num.includes(q) || sup.includes(q) || ruc.includes(q)
+                      }).length === 0 ? (
+                        <div className="p-3 text-center text-xs text-gray-400">
+                          No se encontraron facturas comerciales pendientes con ese criterio.
+                        </div>
+                      ) : (
+                        pendingInvoices
+                          .filter((inv: any) => {
+                            if (!batchAssignSearchQuery.trim()) return true
+                            const q = batchAssignSearchQuery.toLowerCase()
+                            const num = (inv.numero_factura || "").toLowerCase()
+                            const sup = (inv.supplier_nombre || "").toLowerCase()
+                            const ruc = (inv.supplier_ruc || "").toLowerCase()
+                            return num.includes(q) || sup.includes(q) || ruc.includes(q)
+                          })
+                          .slice(0, 30)
+                          .map((inv: any) => (
+                            <div
+                              key={inv.id}
+                              onClick={() => setBatchAssignSelectedInvoice(inv)}
+                              className="p-2.5 hover:bg-purple-50 dark:hover:bg-purple-950/40 cursor-pointer flex items-center justify-between gap-3 transition"
+                            >
+                              <div className="min-w-0">
+                                <div className="font-bold text-gray-900 dark:text-white truncate flex items-center gap-1.5">
+                                  <Building2 className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
+                                  <span>{inv.supplier_nombre || "Proveedor"}</span>
+                                </div>
+                                <div className="text-[11px] text-gray-500 font-mono">
+                                  Fac: <strong>{inv.numero_factura}</strong> • Timb: {inv.timbrado || "—"}
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <div className="text-[10px] text-gray-400 font-bold">Saldo</div>
+                                <div className="font-mono font-bold text-purple-700 dark:text-purple-300">
+                                  {formatPYG(inv.saldo_pendiente ?? inv.total ?? 0)}
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 3. Comparación y Resumen de Amortización */}
+              {batchAssignSelectedInvoice && (
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-1 text-xs">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-500">Monto total comprobantes a imputar:</span>
+                    <span className="font-mono font-bold text-gray-900 dark:text-white">{formatPYG(selectedTableExpensesTotal)}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-500">Saldo pendiente de la factura:</span>
+                    <span className="font-mono font-bold text-purple-700 dark:text-purple-300">
+                      {formatPYG(batchAssignSelectedInvoice.saldo_pendiente ?? batchAssignSelectedInvoice.total ?? 0)}
+                    </span>
+                  </div>
+                  <div className="pt-1.5 border-t border-slate-200 dark:border-slate-700 flex justify-between items-center font-bold">
+                    <span>Resultado previsto:</span>
+                    {selectedTableExpensesTotal >= Number(batchAssignSelectedInvoice.saldo_pendiente ?? batchAssignSelectedInvoice.total ?? 0) ? (
+                      <span className="text-emerald-600 dark:text-emerald-400">
+                        Factura quedará 100% CANCELADA / PAGADA
+                      </span>
+                    ) : (
+                      <span className="text-blue-600 dark:text-blue-400">
+                        Factura quedará con saldo de {formatPYG(Number(batchAssignSelectedInvoice.saldo_pendiente ?? batchAssignSelectedInvoice.total ?? 0) - selectedTableExpensesTotal)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setShowBatchAssignInvoiceModal(false)}
+                disabled={batchAssigning}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 hover:bg-slate-200 dark:text-gray-300 dark:hover:bg-slate-800 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={!batchAssignSelectedInvoice || batchAssigning}
+                onClick={async () => {
+                  if (!batchAssignSelectedInvoice) return
+                  setBatchAssigning(true)
+                  try {
+                    const res = await api.expenses.batchAssignInvoice({
+                      expense_ids: selectedTableExpenseIds,
+                      supplier_invoice_id: batchAssignSelectedInvoice.id,
+                      notas: "Imputación agrupada de notas de control interno",
+                    })
+                    toast.success(
+                      "Comprobantes Agrupados Exitosamente",
+                      `Se asignaron ${res.assigned_count} comprobantes a la factura ${batchAssignSelectedInvoice.numero_factura} como Pago a Proveedor.`
+                    )
+                    setShowBatchAssignInvoiceModal(false)
+                    setSelectedTableExpenseIds([])
+                    setBatchAssignSelectedInvoice(null)
+                    fetchAll()
+                  } catch (err: any) {
+                    toast.error("Error al asignar comprobantes", err.message)
+                  } finally {
+                    setBatchAssigning(false)
+                  }
+                }}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 transition shadow-md"
+              >
+                {batchAssigning ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                <span>Confirmar Asignación Agrupada</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+
+

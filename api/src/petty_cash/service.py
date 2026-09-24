@@ -1136,6 +1136,106 @@ async def revert_expenses_batch(
     }
 
 
+async def batch_assign_invoice(
+    db: AsyncSession,
+    company_id: str,
+    expense_ids: list[str],
+    supplier_invoice_id: str,
+    notas: str | None = None,
+) -> dict:
+    from api.src.financial.models import SupplierInvoice, SupplierInvoicePayment
+    from api.src.purchases.models import Supplier
+
+    inv_res = await db.execute(
+        select(SupplierInvoice).where(
+            SupplierInvoice.id == uuid.UUID(str(supplier_invoice_id)),
+            SupplierInvoice.company_id == uuid.UUID(str(company_id)),
+        )
+    )
+    target_inv = inv_res.scalar_one_or_none()
+    if not target_inv:
+        raise ValueError("Factura de compra no encontrada en Cuentas por Pagar.")
+
+    sup_res = await db.execute(select(Supplier).where(Supplier.id == target_inv.supplier_id))
+    supplier = sup_res.scalar_one_or_none()
+    sup_name = supplier.razon_social or supplier.nombre_fantasia if supplier else None
+    sup_ruc = supplier.ruc if supplier else None
+
+    uuids = []
+    for eid in expense_ids:
+        try:
+            uuids.append(uuid.UUID(str(eid)))
+        except ValueError:
+            pass
+
+    exp_res = await db.execute(
+        select(Expense).where(
+            Expense.id.in_(uuids),
+            Expense.company_id == uuid.UUID(str(company_id)),
+        )
+    )
+    expenses = exp_res.scalars().all()
+
+    assigned = []
+    total_aplicado = Decimal("0")
+
+    for exp in expenses:
+        if exp.supplier_invoice_id == target_inv.id:
+            assigned.append(str(exp.id))
+            continue
+
+        monto_gasto = Decimal(str(exp.monto or 0))
+        monto_aplicar = min(monto_gasto, target_inv.saldo_pendiente)
+
+        target_inv.saldo_pendiente = max(Decimal("0"), target_inv.saldo_pendiente - monto_aplicar)
+        if target_inv.saldo_pendiente <= Decimal("0"):
+            target_inv.saldo_pendiente = Decimal("0")
+            target_inv.estado = "pagada"
+        else:
+            target_inv.estado = "parcial"
+
+        if monto_aplicar > 0:
+            payment = SupplierInvoicePayment(
+                invoice_id=target_inv.id,
+                payment_method="fondo_fijo",
+                monto=monto_aplicar,
+                moneda=target_inv.moneda or "PYG",
+                fecha_pago=exp.fecha_gasto or date.today(),
+                referencia=f"Imputación agrupada comprobante {exp.numero_factura or str(exp.id)[:8]} ({notas or 'Control interno'})",
+                petty_cash_fund_id=exp.fund_id,
+                estado="conciliado",
+            )
+            db.add(payment)
+            total_aplicado += monto_aplicar
+
+        exp.es_pago_proveedor = True
+        exp.supplier_id = target_inv.supplier_id
+        exp.supplier_invoice_id = target_inv.id
+        if sup_name:
+            exp.proveedor = sup_name
+        if sup_ruc:
+            exp.ruc = sup_ruc
+        if target_inv.numero_factura:
+            exp.numero_factura = target_inv.numero_factura
+        if target_inv.timbrado:
+            exp.timbrado = target_inv.timbrado
+
+        assigned.append(str(exp.id))
+
+    await db.commit()
+    await db.refresh(target_inv)
+
+    return {
+        "success": True,
+        "assigned_count": len(assigned),
+        "assigned_ids": assigned,
+        "total_aplicado": float(total_aplicado),
+        "invoice_saldo_remanente": float(target_inv.saldo_pendiente),
+        "invoice_estado": target_inv.estado,
+    }
+
+
+
 
 async def list_expenses(
     db: AsyncSession, company_id: str, branch_id: str | None = None,
@@ -1358,33 +1458,101 @@ async def update_expense(db: AsyncSession, expense_id: str, data: ExpenseUpdate)
 
     # Si se asocia a una factura comercial pendiente mediante edición/reclasificación
     target_invoice_id = update_data.get("supplier_invoice_id")
-    if target_invoice_id and exp.supplier_invoice_id != target_invoice_id:
+    grouped_ids = update_data.pop("grouped_expense_ids", None)
+    if target_invoice_id:
         from api.src.financial.models import SupplierInvoice, SupplierInvoicePayment
+        from api.src.purchases.models import Supplier
+
         inv_res = await db.execute(select(SupplierInvoice).where(SupplierInvoice.id == target_invoice_id))
         target_inv = inv_res.scalar_one_or_none()
         if target_inv:
-            monto_aplicar = min(Decimal(str(exp.monto)), target_inv.saldo_pendiente)
-            target_inv.saldo_pendiente -= monto_aplicar
-            if target_inv.saldo_pendiente <= 0:
-                target_inv.saldo_pendiente = Decimal("0")
-                target_inv.estado = "pagada"
-            else:
-                target_inv.estado = "parcial"
+            sup_res = await db.execute(select(Supplier).where(Supplier.id == target_inv.supplier_id))
+            supplier = sup_res.scalar_one_or_none()
+            sup_name = supplier.razon_social or supplier.nombre_fantasia if supplier else None
+            sup_ruc = supplier.ruc if supplier else None
 
-            payment = SupplierInvoicePayment(
-                invoice_id=target_inv.id,
-                payment_method="fondo_fijo",
-                monto=monto_aplicar,
-                moneda="PYG",
-                fecha_pago=exp.fecha_gasto or date.today(),
-                referencia=f"Reclasificación comprobante gasto {exp.numero_factura or exp.id}",
-                petty_cash_fund_id=exp.fund_id,
-                estado="conciliado",
-            )
-            db.add(payment)
-            update_data["es_pago_proveedor"] = True
-            if target_inv.supplier_id:
-                update_data["supplier_id"] = target_inv.supplier_id
+            # Si el comprobante actual no estaba vinculado previamente a esta factura
+            if exp.supplier_invoice_id != target_invoice_id:
+                monto_val = Decimal(str(update_data.get("monto") if update_data.get("monto") is not None else exp.monto))
+                monto_aplicar = min(monto_val, target_inv.saldo_pendiente)
+                target_inv.saldo_pendiente = max(Decimal("0"), target_inv.saldo_pendiente - monto_aplicar)
+                if target_inv.saldo_pendiente <= 0:
+                    target_inv.saldo_pendiente = Decimal("0")
+                    target_inv.estado = "pagada"
+                else:
+                    target_inv.estado = "parcial"
+
+                if monto_aplicar > 0:
+                    payment = SupplierInvoicePayment(
+                        invoice_id=target_inv.id,
+                        payment_method="fondo_fijo",
+                        monto=monto_aplicar,
+                        moneda=target_inv.moneda or "PYG",
+                        fecha_pago=exp.fecha_gasto or date.today(),
+                        referencia=f"Reclasificación comprobante gasto {exp.numero_factura or exp.id}",
+                        petty_cash_fund_id=exp.fund_id,
+                        estado="conciliado",
+                    )
+                    db.add(payment)
+
+                update_data["es_pago_proveedor"] = True
+                if target_inv.supplier_id:
+                    update_data["supplier_id"] = target_inv.supplier_id
+                if sup_name:
+                    update_data["proveedor"] = sup_name
+                if sup_ruc:
+                    update_data["ruc"] = sup_ruc
+                if target_inv.numero_factura:
+                    update_data["numero_factura"] = target_inv.numero_factura
+                if target_inv.timbrado:
+                    update_data["timbrado"] = target_inv.timbrado
+
+            # Si se indicaron comprobantes adicionales a agrupar a esta misma factura
+            if grouped_ids:
+                for gid in grouped_ids:
+                    if str(gid) == str(exp.id):
+                        continue
+                    try:
+                        g_uuid = uuid.UUID(str(gid))
+                    except ValueError:
+                        continue
+                    g_res = await db.execute(select(Expense).where(Expense.id == g_uuid))
+                    g_exp = g_res.scalar_one_or_none()
+                    if g_exp and g_exp.supplier_invoice_id != target_invoice_id:
+                        g_monto = Decimal(str(g_exp.monto or 0))
+                        g_monto_aplicar = min(g_monto, target_inv.saldo_pendiente)
+                        target_inv.saldo_pendiente = max(Decimal("0"), target_inv.saldo_pendiente - g_monto_aplicar)
+                        if target_inv.saldo_pendiente <= 0:
+                            target_inv.saldo_pendiente = Decimal("0")
+                            target_inv.estado = "pagada"
+                        else:
+                            target_inv.estado = "parcial"
+
+                        if g_monto_aplicar > 0:
+                            g_payment = SupplierInvoicePayment(
+                                invoice_id=target_inv.id,
+                                payment_method="fondo_fijo",
+                                monto=g_monto_aplicar,
+                                moneda=target_inv.moneda or "PYG",
+                                fecha_pago=g_exp.fecha_gasto or date.today(),
+                                referencia=f"Imputación agrupada comprobante {g_exp.numero_factura or str(g_exp.id)[:8]}",
+                                petty_cash_fund_id=g_exp.fund_id,
+                                estado="conciliado",
+                            )
+                            db.add(g_payment)
+
+                        g_exp.es_pago_proveedor = True
+                        g_exp.supplier_id = target_inv.supplier_id
+                        g_exp.supplier_invoice_id = target_inv.id
+                        if sup_name:
+                            g_exp.proveedor = sup_name
+                        if sup_ruc:
+                            g_exp.ruc = sup_ruc
+                        if target_inv.numero_factura:
+                            g_exp.numero_factura = target_inv.numero_factura
+                        if target_inv.timbrado:
+                            g_exp.timbrado = target_inv.timbrado
+
 
     for field, value in update_data.items():
         if value is not None:
