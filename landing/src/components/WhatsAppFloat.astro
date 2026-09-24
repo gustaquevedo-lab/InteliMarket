@@ -1,0 +1,26 @@
+---
+// WhatsAppFloat: Floating direct action button
+---
+
+<aside aria-label="Contacto directo" class="fixed bottom-6 right-6 z-50 flex items-center gap-3">
+  <!-- Interactive speech bubble (visible on desktop) -->
+  <div class="hidden sm:flex items-center gap-2 px-3.5 py-2 rounded-xl bg-surface-container-high border border-outline-variant/40 shadow-xl text-xs font-headline font-bold text-on-surface animate-bounce">
+    <span class="w-2 h-2 rounded-full bg-brand-mint"></span>
+    ¿Dudas sobre tu supermercado? Hablá con nosotros
+  </div>
+
+  <a
+    href="https://wa.me/595994516360?text=Hola%20InteliMarket,%20quisiera%20consultar%20sobre%20el%20sistema%20para%20mi%20comercio"
+    target="_blank"
+    rel="noopener noreferrer"
+    aria-label="Contactar por WhatsApp"
+    class="relative w-14 h-14 rounded-full bg-brand-mint text-brand-dark flex items-center justify-center shadow-[0_4px_20px_rgba(78,222,163,0.4)] hover:scale-110 active:scale-95 transition-all duration-300 group cursor-pointer"
+  >
+    <span class="material-symbols-outlined text-[32px] group-hover:rotate-12 transition-transform">
+      chat
+    </span>
+    <!-- Ping ring -->
+    <span class="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-400 animate-ping"></span>
+    <span class="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-surface"></span>
+  </a>
+</aside>
