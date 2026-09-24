@@ -81,6 +81,7 @@ export default function FinancialPage() {
   const [creatingOp, setCreatingOp] = useState(false)
   const [generatingProformaPdf, setGeneratingProformaPdf] = useState(false)
   const [supermerReturns, setSupermerReturns] = useState<any[]>([])
+  const [detailDocFilter, setDetailDocFilter] = useState<"todos" | "facturas" | "notas_credito" | "devoluciones">("todos")
 
   const [search, setSearch] = useState("")
   const [filterEstado, setFilterEstado] = useState("todos")
@@ -706,8 +707,12 @@ export default function FinancialPage() {
         }
         map.set(supId, item)
       }
-      const saldoNC = Number(cn.saldo_disponible !== undefined ? cn.saldo_disponible : cn.monto || 0)
-      if (saldoNC > 0) {
+      // Saldo de la NC: si tiene saldo_disponible > 0, tomamos ese saldo.
+      // Si en la base de datos figura con 0 (debido a la importación histórica del legado que
+      // las importó forzando saldo=0 sin registrar aplicaciones), tomamos su monto registrado
+      // para que el usuario pueda visualizarlas, cotejarlas y compensarlas en la liquidación.
+      const saldoNC = Number(cn.saldo_disponible) > 0 ? Number(cn.saldo_disponible) : Number(cn.monto || 0)
+      if (saldoNC > 0 || Number(cn.monto || 0) > 0) {
         item.creditNotes.push(cn)
         item.ncConsolidada += saldoNC
       }
@@ -800,14 +805,91 @@ export default function FinancialPage() {
 
   const handleSelectSupplierForDetail = (sup: any) => {
     setSelectedSupplierId(sup.supplier_id)
-    // Pre-seleccionar todas las facturas pendientes
     setSelectedOpInvoiceIds(new Set(sup.pendingInvoices.map((i: any) => i.id)))
-    // Pre-seleccionar todas las NCs disponibles para compensación automática
     setSelectedOpCreditNoteIds(new Set(sup.creditNotes.map((n: any) => n.id)))
-    // Pre-seleccionar todas las devoluciones pendientes
     setSelectedOpReturnIds(new Set(sup.devolucionesPendientes.map((r: any) => r.id)))
+    setDetailDocFilter("todos")
     setOpObservaciones("")
   }
+
+  // Lista unificada de todos los comprobantes del proveedor (Facturas + NCs + Devoluciones)
+  const unifiedSupplierDocs = useMemo(() => {
+    if (!currentSelectedSupplier) return []
+    const docs: Array<{
+      id: string
+      docType: "factura" | "nota_credito" | "devolucion"
+      numero: string
+      timbrado: string | null
+      fechaEmision: string | null
+      fechaVencimiento: string | null
+      montoOriginal: number
+      saldoEfectivo: number
+      estado: string
+      isSelected: boolean
+      raw: any
+    }> = []
+
+    // 1. Facturas Pendientes
+    currentSelectedSupplier.pendingInvoices.forEach(inv => {
+      docs.push({
+        id: inv.id,
+        docType: "factura",
+        numero: inv.numero_factura || "—",
+        timbrado: inv.timbrado || "—",
+        fechaEmision: inv.fecha_emision ? String(inv.fecha_emision) : null,
+        fechaVencimiento: inv.fecha_vencimiento ? String(inv.fecha_vencimiento) : null,
+        montoOriginal: Number(inv.total || 0),
+        saldoEfectivo: Number(inv.saldo_pendiente ?? inv.total ?? 0),
+        estado: inv.estado || "pendiente",
+        isSelected: selectedOpInvoiceIds.has(inv.id),
+        raw: inv,
+      })
+    })
+
+    // 2. Notas de Crédito Registradas
+    currentSelectedSupplier.creditNotes.forEach(nc => {
+      const saldoNC = Number(nc.saldo_disponible) > 0 ? Number(nc.saldo_disponible) : Number(nc.monto || 0)
+      docs.push({
+        id: nc.id,
+        docType: "nota_credito",
+        numero: nc.numero || "—",
+        timbrado: nc.timbrado || "—",
+        fechaEmision: nc.fecha ? String(nc.fecha) : null,
+        fechaVencimiento: null,
+        montoOriginal: -Number(nc.monto || saldoNC),
+        saldoEfectivo: -saldoNC,
+        estado: Number(nc.saldo_disponible) > 0 ? "Saldo Disponible" : "Crédito Registrado",
+        isSelected: selectedOpCreditNoteIds.has(nc.id),
+        raw: nc,
+      })
+    })
+
+    // 3. Devoluciones de Mercadería (NC Pendiente de Proveedor)
+    currentSelectedSupplier.devolucionesPendientes.forEach(ret => {
+      const montoDev = Number(ret.monto || ret.total || ret.total_costo || 0)
+      docs.push({
+        id: ret.id,
+        docType: "devolucion",
+        numero: ret.numero_devolucion || (ret.id ? `DEV-${String(ret.id).slice(0, 8)}` : "DEV-PEND"),
+        timbrado: null,
+        fechaEmision: ret.fecha || ret.created_at ? String(ret.fecha || ret.created_at) : null,
+        fechaVencimiento: null,
+        montoOriginal: -montoDev,
+        saldoEfectivo: -montoDev,
+        estado: "NC Pendiente (Reclamo Físico)",
+        isSelected: selectedOpReturnIds.has(ret.id),
+        raw: ret,
+      })
+    })
+
+    // Filtrado por tab activo
+    let filtered = docs
+    if (detailDocFilter === "facturas") filtered = docs.filter(d => d.docType === "factura")
+    else if (detailDocFilter === "notas_credito") filtered = docs.filter(d => d.docType === "nota_credito")
+    else if (detailDocFilter === "devoluciones") filtered = docs.filter(d => d.docType === "devolucion")
+
+    return filtered
+  }, [currentSelectedSupplier, selectedOpInvoiceIds, selectedOpCreditNoteIds, selectedOpReturnIds, detailDocFilter])
 
   // Manejo de selecciones en la vista detalle del proveedor
   const handleToggleOpInvoice = (id: string) => {
@@ -858,6 +940,39 @@ export default function FinancialPage() {
     }
   }
 
+  // Marcar / desmarcar todos los comprobantes que están visibles en la grilla
+  const handleToggleAllVisibleDocs = () => {
+    if (!currentSelectedSupplier) return
+    const allSelected = unifiedSupplierDocs.every(d => d.isSelected)
+    if (allSelected) {
+      // Deseleccionar visibles
+      const nextInv = new Set(selectedOpInvoiceIds)
+      const nextNc = new Set(selectedOpCreditNoteIds)
+      const nextRet = new Set(selectedOpReturnIds)
+      unifiedSupplierDocs.forEach(d => {
+        if (d.docType === "factura") nextInv.delete(d.id)
+        if (d.docType === "nota_credito") nextNc.delete(d.id)
+        if (d.docType === "devolucion") nextRet.delete(d.id)
+      })
+      setSelectedOpInvoiceIds(nextInv)
+      setSelectedOpCreditNoteIds(nextNc)
+      setSelectedOpReturnIds(nextRet)
+    } else {
+      // Seleccionar visibles
+      const nextInv = new Set(selectedOpInvoiceIds)
+      const nextNc = new Set(selectedOpCreditNoteIds)
+      const nextRet = new Set(selectedOpReturnIds)
+      unifiedSupplierDocs.forEach(d => {
+        if (d.docType === "factura") nextInv.add(d.id)
+        if (d.docType === "nota_credito") nextNc.add(d.id)
+        if (d.docType === "devolucion") nextRet.add(d.id)
+      })
+      setSelectedOpInvoiceIds(nextInv)
+      setSelectedOpCreditNoteIds(nextNc)
+      setSelectedOpReturnIds(nextRet)
+    }
+  }
+
   // Totales en vivo de la liquidación / armado de OP
   const selectedFacturasTotal = useMemo(() => {
     if (!currentSelectedSupplier) return 0
@@ -870,7 +985,10 @@ export default function FinancialPage() {
     if (!currentSelectedSupplier) return 0
     return currentSelectedSupplier.creditNotes
       .filter(n => selectedOpCreditNoteIds.has(n.id))
-      .reduce((sum, n) => sum + Number(n.saldo_disponible !== undefined ? n.saldo_disponible : n.monto || 0), 0)
+      .reduce((sum, n) => {
+        const saldoNC = Number(n.saldo_disponible) > 0 ? Number(n.saldo_disponible) : Number(n.monto || 0)
+        return sum + saldoNC
+      }, 0)
   }, [currentSelectedSupplier, selectedOpCreditNoteIds])
 
   const selectedReturnsTotal = useMemo(() => {
@@ -1369,34 +1487,88 @@ export default function FinancialPage() {
                     </div>
                   </div>
 
-                  {/* ── BLOQUE 1: FACTURAS PENDIENTES DEL PROVEEDOR ── */}
+                  {/* ── TABLA DE COMPROBANTES DEL PROVEEDOR (FACTURAS, NCs Y DEVOLUCIONES) ── */}
                   <div className="card p-0 overflow-hidden border border-gray-200 dark:border-gray-800 shadow-sm">
-                    <div className="p-4 bg-gray-50 dark:bg-slate-800/80 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div>
+                    {/* Header con Tabs de Filtrado y Botón de Selección */}
+                    <div className="p-4 bg-gray-50 dark:bg-slate-800/80 border-b border-gray-200 dark:border-gray-700 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div className="space-y-1">
                         <div className="flex items-center gap-2">
                           <Receipt className="w-4 h-4 text-indigo-500" />
                           <h4 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider">
-                            Facturas Pendientes de Pago
+                            Comprobantes & Deducciones del Proveedor
                           </h4>
-                          <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300 font-bold">
-                            {selectedOpInvoiceIds.size} de {currentSelectedSupplier.pendingInvoices.length} seleccionadas
+                          <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300 font-bold">
+                            {selectedOpInvoiceIds.size} facturas + {selectedOpCreditNoteIds.size} NCs + {selectedOpReturnIds.size} devs. marcadas
                           </span>
                         </div>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                          Tildá las facturas que conformarán la Orden de Pago (OP) o la liquidación actual.
+                        <p className="text-xs text-gray-500">
+                          Seleccioná las facturas a pagar y las Notas de Crédito / Devoluciones que compensarán la Orden de Pago.
                         </p>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={handleSelectAllOpInvoices}
-                        className="btn-ghost text-xs py-1.5 px-3 flex items-center gap-1.5 self-start sm:self-center border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200"
-                      >
-                        <CheckCheck className="w-3.5 h-3.5 text-indigo-500" />
-                        {selectedOpInvoiceIds.size === currentSelectedSupplier.pendingInvoices.length ? "Deseleccionar Todas" : "Marcar Todas las Facturas"}
-                      </button>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {/* Selector de Tabs de Comprobantes */}
+                        <div className="flex items-center gap-1 p-1 bg-gray-200/70 dark:bg-slate-900 rounded-lg text-xs font-semibold">
+                          <button
+                            type="button"
+                            onClick={() => setDetailDocFilter("todos")}
+                            className={`px-2.5 py-1 rounded-md transition ${
+                              detailDocFilter === "todos"
+                                ? "bg-white dark:bg-indigo-600 text-gray-900 dark:text-white shadow-sm"
+                                : "text-gray-500 hover:text-gray-900 dark:hover:text-white"
+                            }`}
+                          >
+                            Todos ({currentSelectedSupplier.pendingInvoices.length + currentSelectedSupplier.creditNotes.length + currentSelectedSupplier.devolucionesPendientes.length})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDetailDocFilter("facturas")}
+                            className={`px-2.5 py-1 rounded-md transition ${
+                              detailDocFilter === "facturas"
+                                ? "bg-white dark:bg-indigo-600 text-gray-900 dark:text-white shadow-sm"
+                                : "text-gray-500 hover:text-gray-900 dark:hover:text-white"
+                            }`}
+                          >
+                            Facturas ({currentSelectedSupplier.pendingInvoices.length})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDetailDocFilter("notas_credito")}
+                            className={`px-2.5 py-1 rounded-md transition ${
+                              detailDocFilter === "notas_credito"
+                                ? "bg-purple-100 dark:bg-purple-600 text-purple-900 dark:text-white shadow-sm"
+                                : "text-gray-500 hover:text-purple-600 dark:hover:text-purple-300"
+                            }`}
+                          >
+                            Notas de Crédito ({currentSelectedSupplier.creditNotes.length})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDetailDocFilter("devoluciones")}
+                            className={`px-2.5 py-1 rounded-md transition ${
+                              detailDocFilter === "devoluciones"
+                                ? "bg-amber-100 dark:bg-amber-600 text-amber-900 dark:text-white shadow-sm"
+                                : "text-gray-500 hover:text-amber-600 dark:hover:text-amber-300"
+                            }`}
+                          >
+                            Devoluciones ({currentSelectedSupplier.devolucionesPendientes.length})
+                          </button>
+                        </div>
+
+                        {/* Botón Marcar / Desmarcar Visibles */}
+                        <button
+                          type="button"
+                          onClick={handleToggleAllVisibleDocs}
+                          className="btn-ghost text-xs py-1.5 px-3 flex items-center gap-1.5 border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200"
+                          title="Alternar selección de las filas visibles"
+                        >
+                          <CheckCheck className="w-3.5 h-3.5 text-indigo-500" />
+                          <span>Marcar / Desmarcar</span>
+                        </button>
+                      </div>
                     </div>
 
+                    {/* Tabla de Documentos con Columnas Separadas */}
                     <div className="overflow-x-auto">
                       <table className="w-full text-left">
                         <thead>
@@ -1404,103 +1576,194 @@ export default function FinancialPage() {
                             <th className="p-3.5 w-12 text-center">
                               <span className="sr-only">Selección</span>
                             </th>
-                            <th className="p-3.5">N° Factura</th>
-                            <th className="p-3.5">Timbrado</th>
-                            <th className="p-3.5">Emisión</th>
-                            <th className="p-3.5">Vencimiento</th>
-                            <th className="p-3.5 text-right">Monto Original</th>
-                            <th className="p-3.5 text-right">Saldo Pendiente</th>
-                            <th className="p-3.5 text-center">Estado</th>
-                            <th className="p-3.5 text-right">Acción</th>
+                            <th className="p-3.5 w-32">Tipo Documento</th>
+                            <th className="p-3.5 w-28">Timbrado</th>
+                            <th className="p-3.5 w-36">N° Documento</th>
+                            <th className="p-3.5 w-28">Emisión</th>
+                            <th className="p-3.5 w-32">Vencimiento</th>
+                            <th className="p-3.5 text-right w-36">Monto Original</th>
+                            <th className="p-3.5 text-right w-36">Saldo / Exigible</th>
+                            <th className="p-3.5 text-center w-28">Estado</th>
+                            <th className="p-3.5 text-right w-28">Acción</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-sm">
-                          {currentSelectedSupplier.pendingInvoices.length === 0 ? (
+                          {unifiedSupplierDocs.length === 0 ? (
                             <tr>
-                              <td colSpan={9} className="p-6 text-center text-xs text-gray-400">
-                                No hay facturas pendientes para este proveedor.
+                              <td colSpan={10} className="p-8 text-center text-xs text-gray-400">
+                                No se encontraron comprobantes para el filtro seleccionado.
                               </td>
                             </tr>
                           ) : (
-                            currentSelectedSupplier.pendingInvoices.map(inv => {
-                              const isSelected = selectedOpInvoiceIds.has(inv.id)
+                            unifiedSupplierDocs.map(doc => {
+                              const isFactura = doc.docType === "factura"
+                              const isNC = doc.docType === "nota_credito"
+                              const isDev = doc.docType === "devolucion"
+
                               const today = getTodayAsuncion()
-                              const isVencida = inv.fecha_vencimiento && inv.fecha_vencimiento < today
-                              const vtoText = getDaysDiffText(inv.fecha_vencimiento || null)
+                              const isVencida = isFactura && doc.fechaVencimiento && doc.fechaVencimiento < today
+                              const vtoText = isFactura ? getDaysDiffText(doc.fechaVencimiento) : null
+
+                              const handleToggle = () => {
+                                if (isFactura) handleToggleOpInvoice(doc.id)
+                                if (isNC) handleToggleOpCreditNote(doc.id)
+                                if (isDev) handleToggleOpReturn(doc.id)
+                              }
 
                               return (
                                 <tr
-                                  key={inv.id}
+                                  key={`${doc.docType}-${doc.id}`}
                                   className={`transition-colors cursor-pointer ${
-                                    isSelected
-                                      ? "bg-indigo-50/60 dark:bg-indigo-950/30 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
+                                    doc.isSelected
+                                      ? isFactura
+                                        ? "bg-indigo-50/60 dark:bg-indigo-950/30 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
+                                        : isNC
+                                        ? "bg-purple-50/60 dark:bg-purple-950/30 hover:bg-purple-50 dark:hover:bg-purple-950/40"
+                                        : "bg-amber-50/60 dark:bg-amber-950/30 hover:bg-amber-50 dark:hover:bg-amber-950/40"
                                       : "hover:bg-gray-50 dark:hover:bg-slate-800/40"
                                   }`}
-                                  onClick={() => handleToggleOpInvoice(inv.id)}
+                                  onClick={handleToggle}
                                 >
+                                  {/* 1. Checkbox */}
                                   <td className="p-3.5 text-center" onClick={e => e.stopPropagation()}>
                                     <button
                                       type="button"
-                                      onClick={() => handleToggleOpInvoice(inv.id)}
-                                      className="text-indigo-600 dark:text-indigo-400 hover:scale-110 transition"
-                                      title={isSelected ? "Deseleccionar de la OP" : "Incluir en la OP"}
+                                      onClick={handleToggle}
+                                      className="hover:scale-110 transition"
+                                      title={doc.isSelected ? "Deseleccionar de la OP" : "Incluir en la OP"}
                                     >
-                                      {isSelected ? (
-                                        <CheckSquare className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                                      {doc.isSelected ? (
+                                        <CheckSquare className={`w-5 h-5 ${
+                                          isFactura ? "text-indigo-600 dark:text-indigo-400" : isNC ? "text-purple-600 dark:text-purple-400" : "text-amber-600 dark:text-amber-400"
+                                        }`} />
                                       ) : (
                                         <Square className="w-5 h-5 text-gray-400" />
                                       )}
                                     </button>
                                   </td>
-                                  <td className="p-3.5 font-mono font-bold text-gray-900 dark:text-white">
-                                    {inv.numero_factura || "—"}
-                                  </td>
-                                  <td className="p-3.5 font-mono text-xs text-gray-500">
-                                    {inv.timbrado || "—"}
-                                  </td>
-                                  <td className="p-3.5 text-xs text-gray-500 font-mono">
-                                    {inv.fecha_emision ? formatDate(inv.fecha_emision) : "—"}
-                                  </td>
-                                  <td className="p-3.5 text-xs font-mono">
-                                    <div className="flex items-center gap-1.5">
-                                      <span className={isVencida ? "text-red-600 dark:text-red-400 font-bold" : "text-gray-600 dark:text-gray-300"}>
-                                        {inv.fecha_vencimiento ? formatDate(inv.fecha_vencimiento) : "—"}
+
+                                  {/* 2. Tipo de Documento */}
+                                  <td className="p-3.5 whitespace-nowrap">
+                                    {isFactura && (
+                                      <span className="inline-flex items-center gap-1.5 text-[11px] font-extrabold px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200 dark:border-blue-900/40">
+                                        <Receipt className="w-3.5 h-3.5" />
+                                        FACTURA
                                       </span>
-                                      {vtoText && (
-                                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                                          isVencida
-                                            ? "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-400 border border-red-200 dark:border-red-900/40"
-                                            : "bg-gray-100 text-gray-600 dark:bg-slate-800 dark:text-gray-400"
-                                        }`}>
-                                          {vtoText}
+                                    )}
+                                    {isNC && (
+                                      <span className="inline-flex items-center gap-1.5 text-[11px] font-extrabold px-2.5 py-1 rounded-md bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300 border border-purple-200 dark:border-purple-900/40">
+                                        <FileText className="w-3.5 h-3.5" />
+                                        NOTA DE CRÉDITO
+                                      </span>
+                                    )}
+                                    {isDev && (
+                                      <span className="inline-flex items-center gap-1.5 text-[11px] font-extrabold px-2.5 py-1 rounded-md bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200 dark:border-amber-900/40">
+                                        <PackageMinus className="w-3.5 h-3.5" />
+                                        DEVOLUCIÓN PEND.
+                                      </span>
+                                    )}
+                                  </td>
+
+                                  {/* 3. Timbrado */}
+                                  <td className="p-3.5 font-mono text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                                    {doc.timbrado && doc.timbrado !== "—" ? (
+                                      <span className="px-2 py-0.5 rounded bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-gray-700">
+                                        {doc.timbrado}
+                                      </span>
+                                    ) : (
+                                      <span className="text-gray-400">—</span>
+                                    )}
+                                  </td>
+
+                                  {/* 4. N° Documento */}
+                                  <td className="p-3.5 font-mono font-bold text-gray-900 dark:text-white whitespace-nowrap">
+                                    {doc.numero}
+                                  </td>
+
+                                  {/* 5. Emisión */}
+                                  <td className="p-3.5 text-xs text-gray-500 font-mono whitespace-nowrap">
+                                    {doc.fechaEmision ? formatDate(doc.fechaEmision) : "—"}
+                                  </td>
+
+                                  {/* 6. Vencimiento */}
+                                  <td className="p-3.5 text-xs font-mono whitespace-nowrap">
+                                    {isFactura ? (
+                                      <div className="flex items-center gap-1.5">
+                                        <span className={isVencida ? "text-red-600 dark:text-red-400 font-bold" : "text-gray-600 dark:text-gray-300"}>
+                                          {doc.fechaVencimiento ? formatDate(doc.fechaVencimiento) : "—"}
                                         </span>
-                                      )}
-                                    </div>
+                                        {vtoText && (
+                                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                                            isVencida
+                                              ? "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-400 border border-red-200 dark:border-red-900/40"
+                                              : "bg-gray-100 text-gray-600 dark:bg-slate-800 dark:text-gray-400"
+                                          }`}>
+                                            {vtoText}
+                                          </span>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="text-gray-400 text-[11px]">—</span>
+                                    )}
                                   </td>
-                                  <td className="p-3.5 font-mono text-right text-gray-500 text-xs">
-                                    {formatPYG(inv.total)}
+
+                                  {/* 7. Monto Original */}
+                                  <td className={`p-3.5 font-mono text-right text-xs whitespace-nowrap ${
+                                    isFactura ? "text-gray-600 dark:text-gray-400" : isNC ? "text-purple-600 dark:text-purple-400 font-semibold" : "text-amber-600 dark:text-amber-400 font-semibold"
+                                  }`}>
+                                    {isFactura ? formatPYG(doc.montoOriginal) : `-${formatPYG(Math.abs(doc.montoOriginal))}`}
                                   </td>
-                                  <td className="p-3.5 font-mono font-bold text-right text-gray-900 dark:text-white">
-                                    {formatPYG(inv.saldo_pendiente ?? inv.total)}
+
+                                  {/* 8. Saldo / Aplicable */}
+                                  <td className={`p-3.5 font-mono font-bold text-right whitespace-nowrap ${
+                                    isFactura ? "text-gray-900 dark:text-white" : isNC ? "text-purple-600 dark:text-purple-300" : "text-amber-600 dark:text-amber-300"
+                                  }`}>
+                                    {isFactura ? formatPYG(doc.saldoEfectivo) : `-${formatPYG(Math.abs(doc.saldoEfectivo))}`}
                                   </td>
-                                  <td className="p-3.5 text-center">
-                                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-                                      isVencida
-                                        ? "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-200"
-                                        : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200"
-                                    }`}>
-                                      {isVencida ? "Vencida" : "Pendiente"}
-                                    </span>
+
+                                  {/* 9. Estado */}
+                                  <td className="p-3.5 text-center whitespace-nowrap">
+                                    {isFactura ? (
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                        isVencida
+                                          ? "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-200"
+                                          : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200"
+                                      }`}>
+                                        {isVencida ? "Vencida" : "Pendiente"}
+                                      </span>
+                                    ) : isNC ? (
+                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 border border-purple-200">
+                                        Crédito a Favor
+                                      </span>
+                                    ) : (
+                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200">
+                                        Reclamo Físico
+                                      </span>
+                                    )}
                                   </td>
+
+                                  {/* 10. Acción */}
                                   <td className="p-3.5 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleOpenPayModal(inv)}
-                                      className="btn-ghost text-xs py-1 px-2.5 text-indigo-600 hover:text-indigo-800 dark:text-indigo-400"
-                                      title="Pagar individualmente esta factura"
-                                    >
-                                      Pagar Directo
-                                    </button>
+                                    {isFactura && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenPayModal(doc.raw)}
+                                        className="btn-ghost text-xs py-1 px-2.5 text-indigo-600 hover:text-indigo-800 dark:text-indigo-400"
+                                        title="Pagar individualmente esta factura"
+                                      >
+                                        Pagar
+                                      </button>
+                                    )}
+                                    {isNC && (
+                                      <span className="text-[11px] text-purple-600 dark:text-purple-400 font-semibold">
+                                        Compensar
+                                      </span>
+                                    )}
+                                    {isDev && (
+                                      <span className="text-[11px] text-amber-600 dark:text-amber-400 font-semibold">
+                                        Descontar
+                                      </span>
+                                    )}
                                   </td>
                                 </tr>
                               )
@@ -1508,163 +1771,6 @@ export default function FinancialPage() {
                           )}
                         </tbody>
                       </table>
-                    </div>
-                  </div>
-
-                  {/* ── BLOQUE 2: COMPENSACIONES CON NOTAS DE CRÉDITO & DEVOLUCIONES ── */}
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                    {/* Sub-bloque 2.1: Notas de Crédito Fiscales */}
-                    <div className="card p-0 overflow-hidden border border-purple-200 dark:border-purple-900/40">
-                      <div className="p-4 bg-purple-50/60 dark:bg-purple-950/30 border-b border-purple-100 dark:border-purple-900/40 flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <FileText className="w-4 h-4 text-purple-600 dark:text-purple-400" />
-                          <div>
-                            <h5 className="text-xs font-bold uppercase tracking-wider text-purple-900 dark:text-purple-200">
-                              Notas de Crédito Fiscales con Saldo
-                            </h5>
-                            <span className="text-[11px] text-purple-700 dark:text-purple-400">
-                              Comprobantes legales de crédito a favor emitidos por el proveedor
-                            </span>
-                          </div>
-                        </div>
-                        {currentSelectedSupplier.creditNotes.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={handleSelectAllOpCreditNotes}
-                            className="text-xs text-purple-700 dark:text-purple-300 hover:underline font-semibold"
-                          >
-                            {selectedOpCreditNoteIds.size === currentSelectedSupplier.creditNotes.length ? "Desmarcar" : "Marcar Todas"}
-                          </button>
-                        )}
-                      </div>
-
-                      <div className="p-0">
-                        {currentSelectedSupplier.creditNotes.length === 0 ? (
-                          <div className="p-5 text-center text-xs text-gray-400 italic">
-                            Sin Notas de Crédito fiscales con saldo a favor disponible.
-                          </div>
-                        ) : (
-                          <div className="divide-y divide-gray-100 dark:divide-gray-800">
-                            {currentSelectedSupplier.creditNotes.map(nc => {
-                              const isChecked = selectedOpCreditNoteIds.has(nc.id)
-                              const saldoNC = Number(nc.saldo_disponible !== undefined ? nc.saldo_disponible : nc.monto || 0)
-                              return (
-                                <div
-                                  key={nc.id}
-                                  onClick={() => handleToggleOpCreditNote(nc.id)}
-                                  className={`p-3.5 flex items-center justify-between gap-3 cursor-pointer transition ${
-                                    isChecked ? "bg-purple-50/50 dark:bg-purple-950/20" : "hover:bg-gray-50 dark:hover:bg-slate-800/30"
-                                  }`}
-                                >
-                                  <div className="flex items-center gap-3">
-                                    <button
-                                      type="button"
-                                      onClick={e => { e.stopPropagation(); handleToggleOpCreditNote(nc.id); }}
-                                      className="text-purple-600 dark:text-purple-400"
-                                    >
-                                      {isChecked ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4 text-gray-400" />}
-                                    </button>
-                                    <div>
-                                      <div className="flex items-center gap-2">
-                                        <span className="font-mono font-bold text-xs text-gray-900 dark:text-white">NC N° {nc.numero}</span>
-                                        {nc.timbrado && <span className="text-[10px] text-gray-400 font-mono">Timb: {nc.timbrado}</span>}
-                                      </div>
-                                      <span className="text-[11px] text-gray-500 block">
-                                        {nc.fecha ? formatDate(nc.fecha) : ""} · {nc.motivo || "Ajuste / Bonificación"}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  <div className="text-right">
-                                    <span className="font-mono font-bold text-xs text-purple-600 dark:text-purple-400 block">
-                                      -{formatPYG(saldoNC)}
-                                    </span>
-                                    <span className="text-[10px] text-gray-400">Saldo a favor</span>
-                                  </div>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Sub-bloque 2.2: Devoluciones Físicas / NC Pendiente de Proveedor */}
-                    <div className="card p-0 overflow-hidden border border-amber-200 dark:border-amber-900/40">
-                      <div className="p-4 bg-amber-50/60 dark:bg-amber-950/30 border-b border-amber-100 dark:border-amber-900/40 flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <PackageMinus className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                          <div>
-                            <h5 className="text-xs font-bold uppercase tracking-wider text-amber-900 dark:text-amber-200">
-                              NC Pendiente de Proveedor (Devoluciones)
-                            </h5>
-                            <span className="text-[11px] text-amber-700 dark:text-amber-400">
-                              Mercadería devuelta por el súper pendiente de entrega de NC legal
-                            </span>
-                          </div>
-                        </div>
-                        {currentSelectedSupplier.devolucionesPendientes.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={handleSelectAllOpReturns}
-                            className="text-xs text-amber-700 dark:text-amber-300 hover:underline font-semibold"
-                          >
-                            {selectedOpReturnIds.size === currentSelectedSupplier.devolucionesPendientes.length ? "Desmarcar" : "Marcar Todas"}
-                          </button>
-                        )}
-                      </div>
-
-                      <div className="p-0">
-                        {currentSelectedSupplier.devolucionesPendientes.length === 0 ? (
-                          <div className="p-5 text-center text-xs text-gray-400 italic">
-                            Sin devoluciones de mercadería pendientes de NC fiscal para este proveedor.
-                          </div>
-                        ) : (
-                          <div className="divide-y divide-gray-100 dark:divide-gray-800">
-                            {currentSelectedSupplier.devolucionesPendientes.map((ret, idx) => {
-                              const isChecked = selectedOpReturnIds.has(ret.id)
-                              const montoDev = Number(ret.monto || ret.total || ret.total_costo || 0)
-                              return (
-                                <div
-                                  key={ret.id || idx}
-                                  onClick={() => handleToggleOpReturn(ret.id)}
-                                  className={`p-3.5 flex items-center justify-between gap-3 cursor-pointer transition ${
-                                    isChecked ? "bg-amber-50/50 dark:bg-amber-950/20" : "hover:bg-gray-50 dark:hover:bg-slate-800/30"
-                                  }`}
-                                >
-                                  <div className="flex items-center gap-3">
-                                    <button
-                                      type="button"
-                                      onClick={e => { e.stopPropagation(); handleToggleOpReturn(ret.id); }}
-                                      className="text-amber-600 dark:text-amber-400"
-                                    >
-                                      {isChecked ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4 text-gray-400" />}
-                                    </button>
-                                    <div>
-                                      <div className="flex items-center gap-2">
-                                        <span className="font-mono font-bold text-xs text-gray-900 dark:text-white">
-                                          Guía Dev #{ret.numero_devolucion || (ret.id ? String(ret.id).slice(0, 8) : "REC")}
-                                        </span>
-                                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 font-semibold">
-                                          Reclamo Físico
-                                        </span>
-                                      </div>
-                                      <span className="text-[11px] text-gray-500 block">
-                                        {ret.fecha || ret.created_at ? formatDate(ret.fecha || ret.created_at) : ""} · {ret.motivo || ret.observaciones || "Devolución por rotura / caducidad"}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  <div className="text-right">
-                                    <span className="font-mono font-bold text-xs text-amber-600 dark:text-amber-400 block">
-                                      -{formatPYG(montoDev)}
-                                    </span>
-                                    <span className="text-[10px] text-gray-400">A deducir</span>
-                                  </div>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        )}
-                      </div>
                     </div>
                   </div>
 
