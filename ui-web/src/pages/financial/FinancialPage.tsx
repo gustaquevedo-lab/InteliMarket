@@ -1028,12 +1028,13 @@ export default function FinancialPage() {
       const facturasPayload = currentSelectedSupplier.pendingInvoices
         .filter(i => selectedOpInvoiceIds.has(i.id))
         .map(i => ({
-          invoice_id: i.id,
-          numero_factura: i.numero_factura,
-          timbrado: i.timbrado,
-          fecha_emision: i.fecha_emision,
-          fecha_vencimiento: i.fecha_vencimiento,
-          total: Number(i.total || 0),
+          invoice_id: String(i.id),
+          numero_factura: i.numero_factura || "—",
+          timbrado: i.timbrado || null,
+          fecha_emision: i.fecha_emision ? String(i.fecha_emision) : null,
+          fecha_vencimiento: i.fecha_vencimiento ? String(i.fecha_vencimiento) : null,
+          monto_total: Number(i.total || i.saldo_pendiente || 0),
+          total: Number(i.total || i.saldo_pendiente || 0),
           saldo_pendiente: Number(i.saldo_pendiente ?? i.total ?? 0),
           monto_a_pagar: Number(i.saldo_pendiente ?? i.total ?? 0),
         }))
@@ -1041,28 +1042,36 @@ export default function FinancialPage() {
       const ncPayload = [
         ...currentSelectedSupplier.creditNotes
           .filter(n => selectedOpCreditNoteIds.has(n.id))
-          .map(n => ({
-            credit_note_id: n.id,
-            tipo: "nc_fiscal",
-            numero: n.numero,
-            timbrado: n.timbrado,
-            fecha: n.fecha,
-            motivo: n.motivo || "Ajuste / Bonificación",
-            monto: Number(n.saldo_disponible !== undefined ? n.saldo_disponible : n.monto || 0),
-            saldo_aplicado: Number(n.saldo_disponible !== undefined ? n.saldo_disponible : n.monto || 0),
-          })),
+          .map(n => {
+            const montoVal = Number(n.saldo_disponible !== undefined ? n.saldo_disponible : n.monto || 0)
+            return {
+              id: String(n.id),
+              credit_note_id: String(n.id),
+              tipo: "nc_fiscal",
+              numero: n.numero || "—",
+              timbrado: n.timbrado || null,
+              fecha: n.fecha ? String(n.fecha) : null,
+              motivo: n.motivo || "Ajuste / Bonificación",
+              monto: montoVal,
+              saldo_aplicado: montoVal,
+            }
+          }),
         ...currentSelectedSupplier.devolucionesPendientes
           .filter(r => selectedOpReturnIds.has(r.id))
-          .map(r => ({
-            credit_note_id: r.id,
-            tipo: "devolucion_fisica",
-            numero: r.numero_devolucion || (r.id ? String(r.id).slice(0, 8) : "DEV-PEND"),
-            timbrado: null,
-            fecha: r.fecha || r.created_at,
-            motivo: r.motivo || "Devolución Física de Mercadería (NC Pendiente de Proveedor)",
-            monto: Number(r.monto || r.total || r.total_costo || 0),
-            saldo_aplicado: Number(r.monto || r.total || r.total_costo || 0),
-          })),
+          .map(r => {
+            const montoVal = Number(r.monto || r.total || r.total_costo || 0)
+            return {
+              id: String(r.id),
+              credit_note_id: String(r.id),
+              tipo: "devolucion",
+              numero: r.numero_devolucion || (r.id ? String(r.id).slice(0, 8) : "DEV-PEND"),
+              timbrado: null,
+              fecha: r.fecha || r.created_at ? String(r.fecha || r.created_at) : null,
+              motivo: r.motivo || "Devolución Física de Mercadería (NC Pendiente de Proveedor)",
+              monto: montoVal,
+              saldo_aplicado: montoVal,
+            }
+          }),
       ]
 
       await api.financial.paymentOrders.downloadProformaPdf({

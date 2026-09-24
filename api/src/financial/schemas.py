@@ -1,6 +1,6 @@
 """Financial schemas — AP, banking, cash flow, budgets, payment runs, dashboards"""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional
 from datetime import datetime, date
 from uuid import UUID
@@ -600,17 +600,34 @@ class PaymentProposalItem(BaseModel):
     timbrado: Optional[str] = None
     fecha_emision: Optional[str] = None
     fecha_vencimiento: Optional[str] = None
-    monto_total: float
-    monto_a_pagar: float
+    monto_total: Optional[float] = None
+    total: Optional[float] = None
+    saldo_pendiente: Optional[float] = None
+    monto_a_pagar: float = 0.0
+
+    @model_validator(mode="after")
+    def unify_totals(self):
+        if self.monto_total is None:
+            self.monto_total = self.total if self.total is not None else self.monto_a_pagar
+        return self
 
 
 class PaymentProposalCreditNote(BaseModel):
-    id: str
-    tipo: str = "nc_fiscal"  # "nc_fiscal" o "devolucion"
+    id: Optional[str] = None
+    credit_note_id: Optional[str] = None
+    tipo: Optional[str] = "nc_fiscal"  # "nc_fiscal" o "devolucion" o "devolucion_fisica"
     numero: str
+    timbrado: Optional[str] = None
     fecha: Optional[str] = None
     motivo: Optional[str] = None
-    monto: float
+    monto: float = 0.0
+    saldo_aplicado: Optional[float] = None
+
+    @model_validator(mode="after")
+    def unify_ids(self):
+        if not self.id:
+            self.id = self.credit_note_id or self.numero
+        return self
 
 
 class PaymentProposalPdfRequest(BaseModel):

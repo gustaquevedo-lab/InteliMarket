@@ -249,7 +249,22 @@ export async function downloadAuthenticatedPost(path: string, body: any, filenam
     }
     throw err
   }
-  if (!res.ok) throw new Error(`No se pudo generar el archivo (${res.status})`)
+  if (!res.ok) {
+    let errorDetail = `No se pudo generar el archivo (${res.status})`
+    try {
+      const errJson = await res.json()
+      if (errJson && errJson.detail) {
+        if (typeof errJson.detail === "string") {
+          errorDetail = `${errJson.detail} (${res.status})`
+        } else if (Array.isArray(errJson.detail)) {
+          errorDetail = errJson.detail.map((d: any) => `${d.loc?.slice(1).join(".") || ""}: ${d.msg}`).join("; ")
+        }
+      }
+    } catch {
+      // Ignorar fallo de parseo JSON
+    }
+    throw new Error(errorDetail)
+  }
   const blob = await res.blob()
   const fileBlob = new Blob([blob], { type: "application/pdf" })
   const blobUrl = URL.createObjectURL(fileBlob)
