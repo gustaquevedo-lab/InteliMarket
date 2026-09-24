@@ -1,0 +1,64 @@
+---
+import ThemeToggle from './ThemeToggle.astro';
+---
+
+<header class="fixed top-0 left-0 w-full z-50 bg-surface/85 backdrop-blur-xl border-b border-outline-variant/20 shadow-sm transition-colors duration-200">
+  <div class="max-w-7xl mx-auto h-20 px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4">
+    <!-- Brand Logo -->
+    <a href="#" class="flex items-center gap-3 group">
+      <div class="w-10 h-10 rounded-xl bg-surface-container-high border border-outline-variant/30 flex items-center justify-center shadow-inner group-hover:border-brand-mint/50 transition-colors">
+        <span class="material-symbols-outlined text-brand-mint text-[24px]">point_of_sale</span>
+      </div>
+      <div class="flex flex-col">
+        <span class="font-headline text-xl font-bold tracking-tight text-on-surface flex items-center gap-1.5">
+          InteliMarket
+          <span class="w-1.5 h-1.5 rounded-full bg-brand-mint animate-pulse"></span>
+        </span>
+        <span class="text-[10px] tracking-wider uppercase font-semibold text-on-surface-variant font-mono">
+          Hecho para Crecer | Paraguay & LatAm
+        </span>
+      </div>
+    </a>
+
+    <!-- Desktop Navigation Links -->
+    <nav class="hidden lg:flex items-center gap-6 text-sm font-medium">
+      <a href="#problema" class="text-on-surface-variant hover:text-on-surface transition-colors py-1">
+        El Problema
+      </a>
+      <a href="#solucion" class="text-on-surface-variant hover:text-on-surface transition-colors py-1">
+        Solución por Vertical
+      </a>
+      <a href="#tecnica" class="text-on-surface-variant hover:text-on-surface transition-colors py-1">
+        Solidez Técnica
+      </a>
+      <a href="#casos" class="text-on-surface-variant hover:text-on-surface transition-colors py-1">
+        Casos Reales
+      </a>
+    </nav>
+
+    <!-- Right Cluster: Status + ThemeToggle + CTA -->
+    <div class="flex items-center gap-3">
+      <!-- Status Badges (Hidden on mobile) -->
+      <div class="hidden md:flex items-center gap-2 px-3 py-1 rounded-full bg-surface-container border border-outline-variant/30 text-xs">
+        <span class="flex items-center gap-1 text-brand-mint font-semibold">
+          <span class="w-2 h-2 rounded-full bg-brand-mint animate-pulse"></span>
+          SIFEN Activo
+        </span>
+        <span class="text-outline-variant">|</span>
+        <span class="text-on-surface-variant font-mono">Offline Ready</span>
+      </div>
+
+      <!-- Theme Switcher -->
+      <ThemeToggle />
+
+      <!-- Demo CTA -->
+      <a
+        href="#demo"
+        class="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-brand-mint text-brand-dark font-headline text-xs sm:text-sm font-bold uppercase tracking-wider hover:brightness-110 active:scale-95 transition-all shadow-glow-secondary"
+      >
+        <span class="material-symbols-outlined text-[18px]">calendar_today</span>
+        <span>Agendá una demo</span>
+      </a>
+    </div>
+  </div>
+</header>

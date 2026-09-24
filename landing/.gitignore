@@ -1,0 +1,11 @@
+# Build and cache
+dist/
+.astro/
+
+# Dependencies
+node_modules/
+
+# OS and env
+.DS_Store
+.env
+.env.*

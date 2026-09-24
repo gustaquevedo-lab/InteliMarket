@@ -1,0 +1,241 @@
+---
+// ContactForm: High-intent lead capture without prices
+---
+
+<section id="demo" class="py-20 lg:py-28 bg-surface border-t border-outline-variant/15 transition-colors duration-200">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+      <!-- Left side: Direct contact channels & Guarantee -->
+      <div class="lg:col-span-5">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-mint/10 border border-brand-mint/20 text-brand-mint text-xs font-headline font-bold uppercase tracking-wider mb-4">
+          <span class="material-symbols-outlined text-[16px]">support_agent</span>
+          Atención Consultiva Directa
+        </div>
+        <h2 class="font-headline text-3xl sm:text-4xl font-extrabold text-on-surface tracking-tight mb-6">
+          Blindá la rentabilidad de tu supermercado hoy mismo
+        </h2>
+        <p class="text-base text-on-surface-variant leading-relaxed mb-8">
+          No vendemos un software enlatado que tenés que descifrar solo. Analizamos tu flujo actual, configuramos tus balanzas y te mostramos cómo funciona en tu propio escenario comercial.
+        </p>
+
+        <!-- Direct Channel Cards -->
+        <div class="space-y-4 mb-8">
+          <a
+            href="https://wa.me/595994516360?text=Hola,%20quisiera%20agendar%20una%20demostración%20en%20vivo%20de%20InteliMarket"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex items-center gap-4 p-4 rounded-xl bg-surface-container border border-outline-variant/30 hover:border-brand-mint/40 transition-colors group"
+          >
+            <div class="w-12 h-12 rounded-xl bg-brand-mint/15 text-brand-mint flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+              <span class="material-symbols-outlined text-[24px]">chat</span>
+            </div>
+            <div>
+              <span class="text-xs uppercase font-headline font-bold text-brand-mint block">WhatsApp Directo</span>
+              <span class="text-sm font-bold text-on-surface block">+595 994 516360</span>
+              <span class="text-xs text-on-surface-variant">Respuesta inmediata de nuestro equipo</span>
+            </div>
+          </a>
+
+          <a
+            href="mailto:intelimarket@intellihouse.lat"
+            class="flex items-center gap-4 p-4 rounded-xl bg-surface-container border border-outline-variant/30 hover:border-brand-blue/40 transition-colors group"
+          >
+            <div class="w-12 h-12 rounded-xl bg-brand-blue/15 text-brand-blue flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+              <span class="material-symbols-outlined text-[24px]">mail</span>
+            </div>
+            <div>
+              <span class="text-xs uppercase font-headline font-bold text-brand-blue block">Correo Corporativo</span>
+              <span class="text-sm font-bold text-on-surface block">intelimarket@intellihouse.lat</span>
+              <span class="text-xs text-on-surface-variant">Para pliegos técnicos y requerimientos formales</span>
+            </div>
+          </a>
+        </div>
+
+        <div class="p-4 rounded-xl bg-surface-container-high/60 border border-outline-variant/20 text-xs text-on-surface-variant flex items-center gap-3">
+          <span class="material-symbols-outlined text-brand-mint text-[22px] shrink-0">verified</span>
+          <span>Desarrollado y respaldado por <strong>IntelliHouse</strong> (intellihouse.lat). Soporte técnico especializado en Paraguay.</span>
+        </div>
+      </div>
+
+      <!-- Right side: High-converting Request Form -->
+      <div class="lg:col-span-7">
+        <div class="rounded-2xl bg-surface-container p-6 sm:p-10 border border-outline-variant/30 shadow-2xl relative">
+          <div class="mb-6">
+            <h3 class="font-headline text-2xl font-bold text-on-surface">
+              Solicitar Demostración en Vivo
+            </h3>
+            <p class="text-xs sm:text-sm text-on-surface-variant mt-1">
+              Completá tus datos y coordinamos una sesión operativa personalizada de 25 minutos.
+            </p>
+          </div>
+
+          <form id="contact-form" class="space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label for="name" class="block text-xs font-semibold text-on-surface mb-1.5 font-headline">
+                  Nombre y Apellido *
+                </label>
+                <input
+                  type="text"
+                  id="name"
+                  name="name"
+                  required
+                  placeholder="Ej: Marcelo Benítez"
+                  class="w-full px-3.5 py-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/40 text-on-surface text-sm focus:outline-none focus:border-brand-mint transition-colors placeholder:text-on-surface-variant/40"
+                />
+              </div>
+
+              <div>
+                <label for="business" class="block text-xs font-semibold text-on-surface mb-1.5 font-headline">
+                  Nombre del Supermercado / Comercio *
+                </label>
+                <input
+                  type="text"
+                  id="business"
+                  name="business"
+                  required
+                  placeholder="Ej: Supermercado San José"
+                  class="w-full px-3.5 py-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/40 text-on-surface text-sm focus:outline-none focus:border-brand-mint transition-colors placeholder:text-on-surface-variant/40"
+                />
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label for="checkouts" class="block text-xs font-semibold text-on-surface mb-1.5 font-headline">
+                  Cantidad de Cajas / Sucursales *
+                </label>
+                <select
+                  id="checkouts"
+                  name="checkouts"
+                  required
+                  class="w-full px-3.5 py-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/40 text-on-surface text-sm focus:outline-none focus:border-brand-mint transition-colors"
+                >
+                  <option value="1 a 2 cajas">1 a 2 cajas</option>
+                  <option value="3 a 5 cajas">3 a 5 cajas</option>
+                  <option value="6 a 10 cajas">6 a 10 cajas</option>
+                  <option value="Más de 10 cajas / Múltiples sucursales">Más de 10 cajas / Múltiples sucursales</option>
+                  <option value="Distribuidora Mayorista">Distribuidora Mayorista</option>
+                </select>
+              </div>
+
+              <div>
+                <label for="city" class="block text-xs font-semibold text-on-surface mb-1.5 font-headline">
+                  Ciudad / Localidad *
+                </label>
+                <input
+                  type="text"
+                  id="city"
+                  name="city"
+                  required
+                  placeholder="Ej: Asunción, CDE, Encarnación..."
+                  class="w-full px-3.5 py-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/40 text-on-surface text-sm focus:outline-none focus:border-brand-mint transition-colors placeholder:text-on-surface-variant/40"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label for="phone" class="block text-xs font-semibold text-on-surface mb-1.5 font-headline">
+                Número de WhatsApp para contacto *
+              </label>
+              <input
+                type="tel"
+                id="phone"
+                name="phone"
+                required
+                placeholder="Ej: +595 981 123456"
+                class="w-full px-3.5 py-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/40 text-on-surface text-sm focus:outline-none focus:border-brand-mint transition-colors placeholder:text-on-surface-variant/40"
+              />
+            </div>
+
+            <div>
+              <label for="notes" class="block text-xs font-semibold text-on-surface mb-1.5 font-headline">
+                ¿Qué te gustaría ver en la demo? (Opcional)
+              </label>
+              <textarea
+                id="notes"
+                name="notes"
+                rows="2"
+                placeholder="Ej: Balanzas integradas, cobro en reales, compras multiproveedor..."
+                class="w-full px-3.5 py-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/40 text-on-surface text-sm focus:outline-none focus:border-brand-mint transition-colors placeholder:text-on-surface-variant/40 resize-none"
+              ></textarea>
+            </div>
+
+            <button
+              type="submit"
+              class="w-full py-4 rounded-xl bg-brand-mint text-brand-dark font-headline text-sm sm:text-base font-bold uppercase tracking-wider hover:brightness-110 active:scale-95 transition-all shadow-glow-secondary flex items-center justify-center gap-2 cursor-pointer mt-2"
+            >
+              <span class="material-symbols-outlined text-[20px]">send</span>
+              <span>Solicitar Demostración y Diagnóstico</span>
+            </button>
+
+            <p class="text-[11px] text-center text-on-surface-variant mt-2 font-mono">
+              🔒 Tus datos son confidenciales. Te responderemos en menos de 2 horas hábiles.
+            </p>
+          </form>
+
+          <!-- Success banner (hidden initially) -->
+          <div id="form-success" class="hidden text-center py-8">
+            <div class="w-14 h-14 rounded-full bg-brand-mint/20 text-brand-mint flex items-center justify-center mx-auto mb-4">
+              <span class="material-symbols-outlined text-[32px]">check_circle</span>
+            </div>
+            <h4 class="font-headline text-xl font-bold text-on-surface mb-2">
+              ¡Solicitud Recibida con Éxito!
+            </h4>
+            <p class="text-sm text-on-surface-variant max-w-md mx-auto mb-6">
+              Nos pondremos en contacto contigo de inmediato a tu WhatsApp para coordinar la demo.
+            </p>
+            <a
+              id="whatsapp-direct-link"
+              href="https://wa.me/595994516360"
+              target="_blank"
+              class="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-brand-mint text-brand-dark font-headline text-sm font-bold uppercase tracking-wider hover:brightness-110"
+            >
+              <span class="material-symbols-outlined text-[18px]">chat</span>
+              Abrir WhatsApp Ahora
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  const form = document.getElementById('contact-form') as HTMLFormElement | null;
+  const successBox = document.getElementById('form-success');
+  const directLink = document.getElementById('whatsapp-direct-link') as HTMLAnchorElement | null;
+
+  form?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const data = new FormData(form);
+    const name = data.get('name') || '';
+    const business = data.get('business') || '';
+    const checkouts = data.get('checkouts') || '';
+    const city = data.get('city') || '';
+    const phone = data.get('phone') || '';
+    const notes = data.get('notes') || '';
+
+    const text = encodeURIComponent(
+      `Hola IntelliHouse, solicito una demo de InteliMarket:\n` +
+      `• Nombre: ${name}\n` +
+      `• Comercio: ${business}\n` +
+      `• Cajas: ${checkouts}\n` +
+      `• Ciudad: ${city}\n` +
+      `• Teléfono: ${phone}\n` +
+      (notes ? `• Interés: ${notes}` : '')
+    );
+
+    const waUrl = `https://wa.me/595994516360?text=${text}`;
+
+    if (directLink) {
+      directLink.href = waUrl;
+    }
+
+    form.classList.add('hidden');
+    successBox?.classList.remove('hidden');
+
+    // Automatically open WhatsApp in new tab for immediate connection
+    window.open(waUrl, '_blank');
+  });
+</script>

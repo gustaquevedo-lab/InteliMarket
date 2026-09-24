@@ -1,0 +1,21 @@
+---
+// ThemeToggle component
+---
+
+<button
+  id="theme-toggle"
+  type="button"
+  aria-label="Alternar tema claro y oscuro"
+  class="relative p-2 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors border border-outline-variant/30 flex items-center justify-center cursor-pointer"
+>
+  <span class="material-symbols-outlined text-[20px] dark:hidden text-amber-500">light_mode</span>
+  <span class="material-symbols-outlined text-[20px] hidden dark:inline text-brand-mint">dark_mode</span>
+</button>
+
+<script>
+  const toggleBtn = document.getElementById('theme-toggle');
+  toggleBtn?.addEventListener('click', () => {
+    const isDark = document.documentElement.classList.toggle('dark');
+    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+  });
+</script>
