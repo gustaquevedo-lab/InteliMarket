@@ -2982,8 +2982,70 @@ export default function POSPage() {
     const unitPrice = Number(product.precio_venta) || 0
     const ivaTasa = Number(product.iva_tasa) || 10
     // Promo baked-in desde el catálogo (1 query en background, 0 llamadas al escanear)
-    const promoPrice = (product as any).en_promocion && (product as any).precio_promo
-      ? Number((product as any).precio_promo)
+    // ── GUARD OFFLINE DE VIGENCIA ──────────────────────────────────────────────
+    // El catálogo se cachea en IndexedDB y puede tener promos que ya vencieron
+    // (si la caja no reinició al cruzar la medianoche o el sync falló).
+    // Esta validación usa el reloj LOCAL de la PC + los metadatos de la promo
+    // ya almacenados en el cache → funciona 100% offline, sin red.
+    const isPromoVigente = (() => {
+      if (!product.en_promocion || !product.precio_promo) return false
+      try {
+        const { ZonedDate } = (() => {
+          // Obtener fecha/hora en America/Asuncion desde el reloj local
+          const now = new Date()
+          const fmt = new Intl.DateTimeFormat("en-CA", {
+            timeZone: "America/Asuncion",
+            year: "numeric", month: "2-digit", day: "2-digit",
+            hour: "2-digit", minute: "2-digit", hour12: false,
+          })
+          const parts = fmt.formatToParts(now)
+          const get = (t: string) => parts.find(p => p.type === t)?.value ?? "00"
+          const todayStr = `${get("year")}-${get("month")}-${get("day")}`
+          const hh = parseInt(get("hour"), 10)
+          const mm = parseInt(get("minute"), 10)
+          // Python weekday 0=Lun…6=Dom → convertir a legacy 0=Dom…6=Sab
+          const jsDay = new Date(`${todayStr}T12:00:00`).getDay() // 0=Dom JS
+          const legacyDow = jsDay // JS 0=Dom coincide con el legacy 0=Dom
+          return { ZonedDate: { todayStr, hh, mm, legacyDow } }
+        })()
+        const { todayStr, hh, mm, legacyDow } = ZonedDate
+
+        // 1. Fecha de vigencia
+        if (product.promo_valido_hasta && product.promo_valido_hasta < todayStr) {
+          console.info(`[POS] Promo ignorada (venció ${product.promo_valido_hasta}): ${product.nombre}`)
+          return false
+        }
+
+        // 2. Días de semana
+        const dias = product.promo_dias_semana
+        if (dias && dias.length > 0 && !dias.includes(legacyDow)) {
+          console.info(`[POS] Promo ignorada (hoy no es día de promo, dow=${legacyDow}): ${product.nombre}`)
+          return false
+        }
+
+        // 3. Horario (si la promo tiene ventana horaria configurada)
+        if (product.promo_horario_desde && product.promo_horario_hasta) {
+          const [sh, sm] = product.promo_horario_desde.split(":").map(Number)
+          const [eh, em] = product.promo_horario_hasta.split(":").map(Number)
+          const nowMins = hh * 60 + mm
+          const startMins = sh * 60 + sm
+          const endMins = eh * 60 + em
+          if (nowMins < startMins || nowMins > endMins + 60) {
+            // +60 min de tolerancia post-cierre (mismo criterio que el backend)
+            console.info(`[POS] Promo ignorada (fuera de horario ${product.promo_horario_desde}-${product.promo_horario_hasta}): ${product.nombre}`)
+            return false
+          }
+        }
+
+        return true
+      } catch {
+        // Si algo falla en la validación, aplicar la promo por defecto
+        // (no penalizar al cliente por un error de fecha)
+        return true
+      }
+    })()
+    const promoPrice = isPromoVigente && product.precio_promo
+      ? Number(product.precio_promo)
       : null
     const effectivePrice = promoPrice !== null ? promoPrice : unitPrice
     // El conector Ñemuha, cuando el producto tiene promo activa, sincroniza

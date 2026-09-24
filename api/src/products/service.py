@@ -576,6 +576,9 @@ async def annotate_products_with_promos(db: AsyncSession, company_id: str, produ
             p.__dict__["promocion_id"] = None
             p.__dict__["promocion_nombre"] = None
             p.__dict__["promo_dias_semana"] = None
+            p.__dict__["promo_valido_hasta"] = None
+            p.__dict__["promo_horario_desde"] = None
+            p.__dict__["promo_horario_hasta"] = None
             continue
 
         pv = Decimal(str(p.precio_venta)) if (p.precio_venta and p.precio_venta > 0) else Decimal("0")
@@ -587,6 +590,9 @@ async def annotate_products_with_promos(db: AsyncSession, company_id: str, produ
             p.__dict__["promocion_id"] = None
             p.__dict__["promocion_nombre"] = None
             p.__dict__["promo_dias_semana"] = None
+            p.__dict__["promo_valido_hasta"] = None
+            p.__dict__["promo_horario_desde"] = None
+            p.__dict__["promo_horario_hasta"] = None
             continue
 
         best_promo = None
@@ -642,6 +648,9 @@ async def annotate_products_with_promos(db: AsyncSession, company_id: str, produ
             p.__dict__["promocion_id"] = str(best_promo.id)
             p.__dict__["promocion_nombre"] = best_promo.nombre
             p.__dict__["promo_dias_semana"] = best_promo.dias_semana
+            p.__dict__["promo_valido_hasta"] = best_promo.valido_hasta.isoformat() if best_promo.valido_hasta else None
+            p.__dict__["promo_horario_desde"] = best_promo.horario_desde.strftime("%H:%M") if best_promo.horario_desde else None
+            p.__dict__["promo_horario_hasta"] = best_promo.horario_hasta.strftime("%H:%M") if best_promo.horario_hasta else None
             p.__dict__["precio_regular"] = best_regular_base or pv
         else:
             p.__dict__["precio_promo"] = None
@@ -649,6 +658,9 @@ async def annotate_products_with_promos(db: AsyncSession, company_id: str, produ
             p.__dict__["promocion_id"] = None
             p.__dict__["promocion_nombre"] = None
             p.__dict__["promo_dias_semana"] = None
+            p.__dict__["promo_valido_hasta"] = None
+            p.__dict__["promo_horario_desde"] = None
+            p.__dict__["promo_horario_hasta"] = None
 
 
 async def get_products_stats(db: AsyncSession, company_id: str) -> dict:
