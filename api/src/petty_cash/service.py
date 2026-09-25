@@ -907,12 +907,8 @@ async def disburse_expense(
             if not bank_acc:
                 raise HTTPException(status_code=400, detail="Cuenta bancaria no encontrada.")
 
-            if Decimal(str(bank_acc.saldo_actual)) < m_pyg:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Saldo insuficiente en cuenta '{bank_acc.banco} - {bank_acc.numero_cuenta}'. Disponible: ₲ {bank_acc.saldo_actual:,.0f} | Solicitado: ₲ {m_pyg:,.0f}"
-                )
-
+            # Al igual que en pagos a proveedores (AP), se permite debitar la cuenta
+            # bancaria aunque opere bajo sobregiro o línea de crédito en cuenta corriente.
             bank_acc.saldo_actual = Decimal(str(bank_acc.saldo_actual)) - m_pyg
 
             bt = BankTransaction(
