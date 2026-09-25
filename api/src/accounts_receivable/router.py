@@ -1,5 +1,6 @@
 from __future__ import annotations
 from datetime import date
+from typing import Optional
 import os
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
@@ -376,7 +377,7 @@ async def corporate_agreements_summary(company_id: str, db: AsyncSession = Depen
 async def corporate_agreement_pending_docs(
     company_id: str,
     empresa_nombre: str,
-    fecha_corte: Optional[date] = Query(None, description="Fecha tope de emisión de comprobantes"),
+    fecha_corte: date | None = Query(None, description="Fecha tope de emisión de comprobantes"),
     db: AsyncSession = Depends(get_db),
 ):
     """Documentos y funcionarios pendientes de corte mensual para una empresa vinculada."""
@@ -388,8 +389,8 @@ async def export_corporate_agreement_extractos_pdf(
     company_id: str,
     empresa_nombre: str,
     periodo: str = Query(..., description="Período de corte, ej. 2026-09"),
-    fecha_corte: Optional[date] = Query(None, description="Fecha tope de corte"),
-    doc_ids: Optional[str] = Query(None, description="Coma-separados IDs de accounts_receivable"),
+    fecha_corte: date | None = Query(None, description="Fecha tope de corte"),
+    doc_ids: str | None = Query(None, description="Coma-separados IDs de accounts_receivable"),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
@@ -423,8 +424,8 @@ async def export_corporate_agreement_consolidado_pdf(
     company_id: str,
     empresa_nombre: str,
     periodo: str = Query(..., description="Período de corte, ej. 2026-09"),
-    fecha_corte: Optional[date] = Query(None, description="Fecha tope de corte"),
-    doc_ids: Optional[str] = Query(None, description="Coma-separados IDs de accounts_receivable"),
+    fecha_corte: date | None = Query(None, description="Fecha tope de corte"),
+    doc_ids: str | None = Query(None, description="Coma-separados IDs de accounts_receivable"),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
