@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="es"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/><meta content="mobile_tab" name="shell-type"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script><script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        "colors": {
+          "on-primary-container": "#004b1e",
+          "primary-container": "#22c55e",
+          "primary-fixed-dim": "#4ae176",
+          "surface-bright": "#333a44",
+          "surface-container-high": "#232a34",
+          "surface-container-low": "#151c25",
+          "on-error": "#690005",
+          "tertiary-fixed": "#d5e3ff",
+          "outline": "#869585",
+          "inverse-primary": "#006e2f",
+          "surface-container-lowest": "#080f17",
+          "on-tertiary-fixed-variant": "#2d486d",
+          "error-container": "#93000a",
+          "on-background": "#dce3f0",
+          "outline-variant": "#3d4a3d",
+          "on-secondary-fixed-variant": "#173bab",
+          "surface-variant": "#2e353f",
+          "secondary": "#b8c4ff",
+          "error": "#ffb4ab",
+          "primary-fixed": "#6bff8f",
+          "on-tertiary-container": "#254166",
+          "secondary-fixed-dim": "#b8c4ff",
+          "surface-container": "#192029",
+          "surface": "#0a0f1a",
+          "on-tertiary": "#133155",
+          "secondary-fixed": "#dde1ff",
+          "surface-container-highest": "#2e353f",
+          "tertiary": "#aec8f5",
+          "on-surface-variant": "#9ca3af",
+          "on-primary-fixed": "#002109",
+          "surface-dim": "#0a0f1a",
+          "primary": "#4be277",
+          "on-secondary": "#002584",
+          "tertiary-container": "#93add9",
+          "on-tertiary-fixed": "#001c3b",
+          "on-error-container": "#ffdad6",
+          "secondary-container": "#173bab",
+          "surface-tint": "#4ae176",
+          "on-primary": "#003915",
+          "on-surface": "#f9fafb",
+          "inverse-on-surface": "#2a313b",
+          "tertiary-fixed-dim": "#adc8f5",
+          "on-primary-fixed-variant": "#005321",
+          "on-secondary-container": "#a0b1ff",
+          "on-secondary-fixed": "#001453",
+          "inverse-surface": "#dce3f0",
+          "background": "#0a0f1a"
+        },
+        "borderRadius": {
+          "DEFAULT": "0.25rem",
+          "lg": "0.375rem",
+          "xl": "0.75rem",
+          "full": "9999px"
+        },
+        "spacing": {
+          "gutter": "1rem",
+          "margin": "1rem",
+          "space-lg": "1.5rem",
+          "space-xs": "0.25rem",
+          "space-md": "1rem",
+          "space-xl": "2rem",
+          "space-sm": "0.5rem"
+        },
+        "fontFamily": {
+          "currency-display": ["Inter", "JetBrains Mono"],
+          "display": ["Inter"],
+          "body-2": ["Inter"],
+          "body-1": ["Inter"],
+          "headline-h2": ["Inter"],
+          "headline-h1": ["Inter"],
+          "label": ["Inter"],
+          "currency-sm": ["Inter", "JetBrains Mono"]
+        },
+        "fontSize": {
+          "currency-display": ["22px", { "lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "700" }],
+          "display": ["28px", { "lineHeight": "36px", "fontWeight": "700" }],
+          "body-2": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
+          "body-1": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
+          "headline-h2": ["18px", { "lineHeight": "24px", "fontWeight": "600" }],
+          "headline-h1": ["22px", { "lineHeight": "28px", "fontWeight": "700" }],
+          "label": ["12px", { "lineHeight": "16px", "letterSpacing": "0.02em", "fontWeight": "600" }],
+          "currency-sm": ["14px", { "lineHeight": "18px", "fontWeight": "600" }]
+        }
+      }
+    }
+  }
+</script><style>@layer base{html,body{width:100vw;margin:0;padding:0;background-color:#0a0f1a;}body{overscroll-behavior:none;}.pb-safe{padding-bottom:env(safe-area-inset-bottom,0px);}.pt-safe{padding-top:env(safe-area-inset-top,0px);}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+</head><body class="bg-[#0a0f1a] font-body-1 text-[#f9fafb] flex flex-col min-h-screen"><header class="fixed top-0 w-full z-50 pt-safe bg-[#0a0f1a]/95 backdrop-blur-xl border-b border-[#1f2937] shadow-lg"><div class="h-16 px-margin flex items-center justify-between"><div class="flex items-center gap-space-sm"><img alt="Inteliforce App Icon Master (1024px)" class="h-8 w-auto object-contain rounded-lg" src="https://lh3.googleusercontent.com/aida/AEtjO1W697jAnOoNd7fcHaR8XR9fy3qmgiG-g8yV7BOk-98UmBkG5_N7BHul0ABu7VHZOmrLbxee-z3T6gNmdfg2ApjO-IjrAiCCP9xTQTUev6uUIKHfJWZQPqnUl3xY7v7SxgWLiD1UkcQhOJUrwfIuGRItwz7fEsT-2DSu-lvvZgQZ5f0tuSoYB-vp4r4xDvMK0l13TsO_gBLBimZwUKMvq_lJTNoos4F4gqYoBDcYbwbsNHKeMd9jpvQ9iR1y"/><div class="flex flex-col"><span class="font-label text-[11px] uppercase text-[#9ca3af] tracking-wider leading-none">Inteliforce RTM</span><span class="font-headline-h2 text-headline-h2 text-[#f9fafb] leading-tight truncate max-w-[170px]">Inicio</span></div></div><div class="flex items-center gap-space-sm"><div class="flex items-center gap-space-xs px-2.5 py-1 rounded-full bg-[#111827] border border-[#374151]"><span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span><span class="font-label text-label text-[#f9fafb] font-medium">Online</span></div><div class="w-8 h-8 rounded-full bg-primary/20 border border-primary/40 flex items-center justify-center shrink-0"><span class="material-symbols-outlined text-primary text-[18px]">person</span></div></div></div></header><main class="flex-1 flex flex-col relative w-full pt-16 pb-24 bg-[#0a0f1a]"><div class="flex flex-col w-full">
+<!-- Rep Profile & Geolocation Header -->
+<div class="px-margin pt-space-md pb-space-sm flex flex-col gap-space-xs">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-xs bg-[#111827] border border-[#374151] px-2.5 py-1 rounded-full">
+<span class="w-2 h-2 rounded-full bg-primary animate-ping"></span>
+<span class="font-label text-label text-primary font-bold tracking-wide">● Sincronizado hace 12 min</span>
+</div>
+<div class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#111827] border border-[#374151] text-[#9ca3af] font-label text-label">
+<span class="material-symbols-outlined text-[15px] text-[#aec8f5]">near_me</span>
+<span class="font-medium text-[#dce3f0]">GPS Activo (±4m)</span>
+</div>
+</div>
+<div class="mt-space-xs">
+<h1 class="font-headline-h1 text-headline-h1 text-[#f9fafb] tracking-tight">¡Buen día, Carlos Benítez!</h1>
+<div class="flex items-center gap-1.5 mt-0.5 text-[#9ca3af]">
+<span class="material-symbols-outlined text-[16px] text-primary">route</span>
+<span class="font-body-2 text-body-2 font-medium">Ruta 04 • Asunción Centro / Sajonia</span>
+</div>
+</div>
+</div>
+<!-- Operational Sync Banner (Offline Resilience) -->
+<div class="px-margin mb-space-md">
+<div class="bg-[#111827] border border-[#374151] rounded-xl p-space-sm shadow-md flex items-center justify-between gap-space-sm transition-all hover:border-[#4b5563] cursor-pointer" id="syncBanner">
+<div class="flex items-center gap-space-sm min-w-0">
+<div class="w-9 h-9 rounded-lg bg-[#1f2937] border border-[#374151] flex items-center justify-center shrink-0 shadow-inner">
+<span class="material-symbols-outlined text-tertiary text-[20px]">cloud_sync</span>
+</div>
+<div class="flex flex-col min-w-0">
+<div class="flex items-center gap-1.5">
+<span class="font-label text-label font-bold text-[#f9fafb] uppercase tracking-wider">Modo Campo</span>
+<span class="w-1.5 h-1.5 rounded-full bg-primary"></span>
+</div>
+<p class="font-body-2 text-body-2 text-[#9ca3af] truncate text-[13px]">
+            3 pedidos guardados localmente listos para sincronizar
+          </p>
+</div>
+</div>
+<button class="shrink-0 px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/30 text-primary font-label text-label font-bold shadow-xs active:scale-95 transition-transform flex items-center gap-1 hover:bg-primary/20">
+<span>Subir</span>
+<span class="material-symbols-outlined text-[14px]">arrow_upward</span>
+</button>
+</div>
+</div>
+<!-- Main Quota Progress & Field Indicators Card -->
+<div class="px-margin mb-space-lg">
+<div class="bg-[#111827] border border-[#374151] rounded-xl p-space-md shadow-lg relative overflow-hidden">
+<!-- Ambient branding gradient edge -->
+<div class="absolute -top-10 -right-10 w-36 h-36 rounded-full bg-primary/10 blur-3xl pointer-events-none"></div>
+<div class="flex items-center justify-between mb-space-sm pb-space-xs border-b border-[#1f2937]">
+<div class="flex flex-col">
+<span class="font-label text-[11px] uppercase tracking-wider text-[#9ca3af]">Objetivo del Turno</span>
+<h2 class="font-headline-h2 text-headline-h2 text-[#f9fafb] font-bold">Meta Diaria de Facturación</h2>
+</div>
+<div class="px-2.5 py-1 rounded-full bg-primary/15 border border-primary/30 text-primary font-label text-label font-bold flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]" style="font-variation-settings: 'FILL' 1;">trending_up</span>
+<span>Ritmo Óptimo</span>
+</div>
+</div>
+<!-- Ring + Main Amount Layout -->
+<div class="flex items-center gap-space-md py-space-xs">
+<!-- SVG Gauge: 68% progress -->
+<div class="relative w-24 h-24 shrink-0 flex items-center justify-center">
+<svg class="w-full h-full -rotate-90 transform" viewbox="0 0 100 100">
+<!-- Track -->
+<circle class="text-[#1f2937]" cx="50" cy="50" fill="none" r="40" stroke="currentColor" stroke-width="9"></circle>
+<!-- Progress Arc (circumference: ~251.2; 68% filled = stroke-dashoffset ~80.4) -->
+<circle class="text-primary transition-all duration-1000 ease-out" cx="50" cy="50" fill="none" r="40" stroke="currentColor" stroke-dasharray="251.2" stroke-dashoffset="80.4" stroke-linecap="round" stroke-width="9"></circle>
+</svg>
+<div class="absolute inset-0 flex flex-col items-center justify-center">
+<span class="font-headline-h1 text-headline-h1 text-[#f9fafb] font-bold leading-none">68%</span>
+<span class="font-label text-[10px] text-[#9ca3af] font-semibold uppercase mt-0.5">Avance</span>
+</div>
+</div>
+<!-- Ledger Amounts -->
+<div class="flex flex-col justify-center min-w-0 flex-1">
+<div class="flex flex-col">
+<span class="font-label text-label text-[#9ca3af] font-medium">Facturado hoy</span>
+<div class="font-currency-display text-currency-display text-primary truncate leading-tight mt-0.5">
+              ₲ 14.850.000
+            </div>
+</div>
+<div class="mt-1.5 flex items-center gap-1 text-[#9ca3af] font-currency-sm text-currency-sm">
+<span class="text-[#6b7280] text-[12px]">Meta:</span>
+<span class="text-[#f9fafb] font-semibold">₲ 22.000.000</span>
+</div>
+</div>
+</div>
+<!-- Secondary Field Metrics -->
+<div class="grid grid-cols-2 gap-space-sm mt-space-md pt-space-sm">
+<div class="bg-[#1f2937]/80 border border-[#374151] rounded-lg p-space-sm flex items-center gap-space-sm">
+<div class="w-10 h-10 rounded-lg bg-[#111827] border border-[#374151] flex items-center justify-center text-primary shadow-xs">
+<span class="material-symbols-outlined text-[22px]">storefront</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label text-label text-[#9ca3af]">Visitas</span>
+<span class="font-headline-h2 text-headline-h2 text-[#f9fafb] font-bold">7<span class="text-[#6b7280] font-normal text-body-2">/12</span></span>
+</div>
+</div>
+<div class="bg-[#1f2937]/80 border border-[#374151] rounded-lg p-space-sm flex items-center gap-space-sm">
+<div class="w-10 h-10 rounded-lg bg-[#111827] border border-[#374151] flex items-center justify-center text-tertiary shadow-xs">
+<span class="material-symbols-outlined text-[22px]">verified</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label text-label text-[#9ca3af]">Efectividad</span>
+<span class="font-headline-h2 text-headline-h2 text-tertiary font-bold">85%</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Route Section Header with Dynamic Filters -->
+<div class="px-margin flex flex-col gap-space-sm mb-space-sm">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-xs">
+<h2 class="font-headline-h2 text-headline-h2 text-[#f9fafb] font-bold">Ruta de Hoy</h2>
+<span class="px-2 py-0.5 rounded-full bg-[#1f2937] border border-[#374151] text-[#9ca3af] font-label text-label font-bold">12 clientes</span>
+</div>
+<button class="flex items-center gap-1 text-primary font-label text-label font-bold py-1 px-2.5 rounded-lg bg-primary/10 border border-primary/20 hover:bg-primary/20 active:scale-95 transition-all">
+<span class="material-symbols-outlined text-[18px]">map</span>
+<span>Ver Mapa</span>
+</button>
+</div>
+<!-- Filter chips segmented controls -->
+<div class="flex items-center gap-space-xs overflow-x-auto pb-1 no-scrollbar" id="filterBar">
+<button class="filter-btn active-pill px-3.5 py-1.5 rounded-full bg-primary text-[#003915] font-label text-label font-bold shadow-xs shrink-0 transition-colors" data-filter="all">
+        Todos (12)
+      </button>
+<button class="filter-btn px-3.5 py-1.5 rounded-full bg-[#111827] border border-[#374151] text-[#9ca3af] font-label text-label font-semibold shrink-0 transition-colors hover:text-[#f9fafb] hover:border-[#4b5563]" data-filter="pending">
+        Pendientes (5)
+      </button>
+<button class="filter-btn px-3.5 py-1.5 rounded-full bg-[#111827] border border-[#374151] text-[#9ca3af] font-label text-label font-semibold shrink-0 transition-colors hover:text-[#f9fafb] hover:border-[#4b5563]" data-filter="completed">
+        Completados (7)
+      </button>
+</div>
+</div>
+<!-- Route Store Cards Stack (Tactical Dark Mode) -->
+<div class="px-margin flex flex-col gap-space-sm pb-space-lg" id="customerList">
+<!-- Card 1: Active / Current Target Stop -->
+<div class="client-card bg-[#111827] border border-[#374151] rounded-xl p-space-md shadow-lg relative overflow-hidden flex flex-col gap-space-sm" data-status="pending">
+<!-- 4dp vertical accent strip -->
+<div class="absolute left-0 top-0 bottom-0 w-1.5 bg-primary"></div>
+<div class="flex items-start justify-between gap-space-xs pl-1">
+<div class="flex flex-col min-w-0 pr-2">
+<div class="flex items-center gap-space-xs flex-wrap mb-1">
+<span class="px-2 py-0.5 rounded bg-primary/20 border border-primary/40 text-primary font-label text-[11px] font-bold uppercase tracking-wider flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-primary animate-ping"></span>
+              En visita
+            </span>
+<span class="font-label text-label text-[#9ca3af] font-mono">#001 • RUC 80029341-2</span>
+</div>
+<h3 class="font-body-1 text-body-1 text-[#f9fafb] font-bold truncate">Comercial San Cayetano S.R.L.</h3>
+</div>
+<button class="w-10 h-10 rounded-full bg-[#1f2937] border border-[#374151] text-primary flex items-center justify-center shrink-0 active:scale-90 transition-transform hover:border-primary/50" title="Navegar por GPS">
+<span class="material-symbols-outlined text-[20px]">directions</span>
+</button>
+</div>
+<div class="flex items-center gap-space-xs text-[#9ca3af] pl-1">
+<span class="material-symbols-outlined text-[18px] text-[#ffb4ab] shrink-0">pin_drop</span>
+<span class="font-body-2 text-body-2 text-[#9ca3af] truncate">Av. Carlos Antonio López 452 • <strong class="text-[#f9fafb] font-semibold">A 180m de ti</strong></span>
+</div>
+<!-- Quick Action CTA -->
+<div class="mt-1 pt-space-xs flex items-center gap-space-xs pl-1">
+<button class="flex-1 h-12 bg-primary text-[#003915] rounded-xl font-body-2 text-body-2 font-bold flex items-center justify-center gap-space-xs shadow-md hover:bg-primary-fixed active:scale-[0.98] transition-all">
+<span class="material-symbols-outlined text-[20px]" style="font-variation-settings: 'FILL' 1;">login</span>
+<span>Iniciar Check-in</span>
+</button>
+<button class="h-12 w-12 rounded-xl bg-[#1f2937] border border-[#374151] text-[#f9fafb] flex items-center justify-center shrink-0 active:scale-95 transition-transform hover:border-[#4b5563]" title="Llamar encargado">
+<span class="material-symbols-outlined text-[20px]">call</span>
+</button>
+</div>
+</div>
+<!-- Card 2: Queued Next Client -->
+<div class="client-card bg-[#111827] border border-[#374151] rounded-xl p-space-md shadow-md relative overflow-hidden flex flex-col gap-space-xs" data-status="pending">
+<!-- Neutral accent strip -->
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-[#374151]"></div>
+<div class="flex items-start justify-between gap-space-xs pl-1">
+<div class="flex flex-col min-w-0">
+<div class="flex items-center gap-space-xs mb-1">
+<span class="px-2 py-0.5 rounded bg-[#1f2937] border border-[#374151] text-[#9ca3af] font-label text-[11px] font-bold uppercase tracking-wider">
+              Pendiente
+            </span>
+<span class="font-label text-label text-[#9ca3af] font-mono">#002 • RUC 4392018-0</span>
+</div>
+<h3 class="font-body-1 text-body-1 text-[#f9fafb] font-bold truncate">Despensa Doña Ramona</h3>
+</div>
+<button class="w-9 h-9 rounded-full bg-[#1f2937] border border-[#374151] text-[#9ca3af] flex items-center justify-center shrink-0 hover:text-[#f9fafb] hover:border-[#4b5563] transition-colors">
+<span class="material-symbols-outlined text-[20px]">chevron_right</span>
+</button>
+</div>
+<div class="flex items-center gap-space-xs text-[#9ca3af] mt-1 pl-1">
+<span class="material-symbols-outlined text-[17px] text-[#6b7280] shrink-0">distance</span>
+<span class="font-body-2 text-body-2 truncate">Alférez Silva 890 • <span class="font-medium text-[#f9fafb]">A 650m</span></span>
+</div>
+<div class="mt-2 flex items-center justify-between pt-2 border-t border-[#1f2937] text-[#9ca3af] font-label text-label pl-1">
+<span class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px] text-[#6b7280]">history</span>
+          Último pedido: hace 7 días
+        </span>
+<span class="font-mono text-primary font-medium">Límite Crédito: OK</span>
+</div>
+</div>
+<!-- Card 3: Completed Client with Order Summary -->
+<div class="client-card bg-[#111827] border border-[#374151] rounded-xl p-space-md shadow-md relative overflow-hidden flex flex-col gap-space-xs opacity-90" data-status="completed">
+<!-- Completed blue/teal accent strip -->
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-tertiary"></div>
+<div class="flex items-start justify-between gap-space-xs pl-1">
+<div class="flex flex-col min-w-0">
+<div class="flex items-center gap-space-xs mb-1">
+<span class="px-2 py-0.5 rounded bg-[#173bab]/40 border border-tertiary/40 text-tertiary font-label text-[11px] font-bold uppercase tracking-wider flex items-center gap-1">
+<span class="material-symbols-outlined text-[12px]" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+              Completada
+            </span>
+<span class="font-label text-label text-[#9ca3af] font-mono">09:14 AM</span>
+</div>
+<h3 class="font-body-1 text-body-1 text-[#f9fafb] font-bold truncate">Autoservicio Sajonia Express</h3>
+</div>
+<div class="w-8 h-8 rounded-full bg-[#1f2937] border border-[#374151] flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[18px]">done_all</span>
+</div>
+</div>
+<div class="flex items-center gap-space-xs text-[#9ca3af] pl-1">
+<span class="material-symbols-outlined text-[17px] text-[#6b7280] shrink-0">location_on</span>
+<span class="font-body-2 text-body-2 truncate">Colón c/ Gral. Díaz</span>
+</div>
+<!-- Order Ledger Badge -->
+<div class="mt-2 p-space-xs rounded-lg bg-[#1f2937] border border-[#374151] flex items-center justify-between">
+<div class="flex items-center gap-1.5 text-[#9ca3af] font-label text-label">
+<span class="material-symbols-outlined text-[16px] text-tertiary">receipt_long</span>
+<span class="font-mono font-medium text-[#f9fafb]">Pedido #4092</span>
+</div>
+<span class="font-currency-sm text-currency-sm font-bold text-primary">₲ 3.420.000</span>
+</div>
+</div>
+<!-- Quick Insight Tip / Field Encouragement -->
+<div class="mt-space-sm p-space-md rounded-xl bg-[#111827] border border-[#374151] flex items-center gap-space-md shadow-md">
+<div class="w-10 h-10 rounded-full bg-[#1f2937] border border-[#374151] text-primary flex items-center justify-center shrink-0 shadow-xs">
+<span class="material-symbols-outlined text-[24px]">flag</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label text-label uppercase tracking-wider text-primary font-bold">Rendimiento</span>
+<p class="font-body-2 text-body-2 text-[#9ca3af] text-[13px] leading-snug">
+          Estás a sólo <strong class="text-[#f9fafb] font-bold">₲ 7.150.000</strong> de superar tu récord semanal en Sajonia.
+        </p>
+</div>
+</div>
+</div>
+</div>
+<script>
+  // High-touch operational filtering logic
+  (function initDashboardInteractions() {
+    const filterButtons = document.querySelectorAll('.filter-btn');
+    const cards = document.querySelectorAll('.client-card');
+
+    filterButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        // Reset classes
+        filterButtons.forEach(b => {
+          b.classList.remove('bg-primary', 'text-[#003915]');
+          b.classList.add('bg-[#111827]', 'border', 'border-[#374151]', 'text-[#9ca3af]');
+        });
+        
+        // Active style
+        btn.classList.remove('bg-[#111827]', 'border', 'border-[#374151]', 'text-[#9ca3af]');
+        btn.classList.add('bg-primary', 'text-[#003915]');
+
+        const filter = btn.getAttribute('data-filter');
+
+        cards.forEach(card => {
+          const status = card.getAttribute('data-status');
+          if (filter === 'all' || filter === status) {
+            card.style.display = 'flex';
+          } else {
+            card.style.display = 'none';
+          }
+        });
+      });
+    });
+
+    // Tap feedback simulation for offline sync button
+    const syncBanner = document.getElementById('syncBanner');
+    if (syncBanner) {
+      syncBanner.addEventListener('click', () => {
+        const icon = syncBanner.querySelector('.material-symbols-outlined');
+        if (icon) {
+          icon.classList.add('animate-spin');
+          setTimeout(() => {
+            icon.classList.remove('animate-spin');
+          }, 1200);
+        }
+      });
+    }
+  })();
+</script></main><nav class="fixed bottom-0 w-full z-50 pb-safe bg-[#0a0f1a]/95 backdrop-blur-xl border-t border-[#1f2937] shadow-[0_-4px_20px_rgba(0,0,0,0.5)]" data-active-classes="text-primary font-bold"><div class="h-16 px-space-xs flex items-center justify-around"><a aria-current="page" class="flex flex-col items-center justify-center flex-1 h-full min-w-[44px] min-h-[44px] transition-colors text-primary font-bold" data-path="inicio" href="#"><span class="material-symbols-outlined text-[24px]">alt_route</span><span class="font-label text-label mt-0.5">Inicio</span></a><a class="flex flex-col items-center justify-center flex-1 h-full min-w-[44px] min-h-[44px] text-[#9ca3af] hover:text-[#f9fafb] transition-colors" data-path="pedido" href="#"><span class="material-symbols-outlined text-[24px]">shopping_cart_checkout</span><span class="font-label text-label mt-0.5">Pedido</span></a><a class="flex flex-col items-center justify-center flex-1 h-full min-w-[44px] min-h-[44px] text-[#9ca3af] hover:text-[#f9fafb] transition-colors" data-path="360" href="#"><span class="material-symbols-outlined text-[24px]">badge</span><span class="font-label text-label mt-0.5">360</span></a><a class="flex flex-col items-center justify-center flex-1 h-full min-w-[44px] min-h-[44px] text-[#9ca3af] hover:text-[#f9fafb] transition-colors" data-path="metas" href="#"><span class="material-symbols-outlined text-[24px]">monitoring</span><span class="font-label text-label mt-0.5">Metas</span></a></div></nav></body></html>

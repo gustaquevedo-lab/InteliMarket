@@ -1,0 +1,70 @@
+{
+  "expo": {
+    "name": "Inteliforce",
+    "slug": "inteliforce",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "inteliforce",
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#01A751"
+    },
+    "android": {
+      "package": "py.intelimarket.inteliforce",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE"
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "backgroundColor": "#01A751"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "py.intelimarket.inteliforce",
+      "infoPlist": {
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Inteliforce registra tu ubicación para validar visitas a clientes.",
+        "NSLocationWhenInUseUsageDescription": "Inteliforce necesita tu ubicación para hacer check-in en clientes.",
+        "NSCameraUsageDescription": "Para tomar fotos y videos de evidencia durante las visitas.",
+        "NSPhotoLibraryUsageDescription": "Para adjuntar fotos desde tu galería a las visitas."
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-sqlite",
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Inteliforce necesita acceso a tu ubicación en todo momento para validar el check-in en puntos de venta."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Permite a Inteliforce tomar fotos y videos de evidencias en visitas."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Permite a Inteliforce seleccionar fotos de tu galería para adjuntarlas a la visita."
+        }
+      ]
+    ],
+    "updates": {
+      "enabled": false,
+      "checkAutomatically": "NEVER"
+    }
+  }
+}

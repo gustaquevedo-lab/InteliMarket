@@ -1,16 +1,26 @@
 """Inteliforce service — API movil para la app unificada con SueldOK"""
 
-from sqlalchemy import select, text, update
+from sqlalchemy import select, text, update, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 from math import radians, sin, cos, sqrt, atan2
+import os
+import logging
 import json
+import re
 import uuid
 import bcrypt
+import httpx
+
+logger = logging.getLogger(__name__)
+
+SUELDOK_BASE_URL = os.environ.get("SUELDOK_URL", "https://sueldok.intellihouse.lat")
+SUELDOK_API_KEY = os.environ.get("SUELDOK_API_KEY", "ifk_m953H3eJeBUZj3ITBHtNlLQPbGg-AO8FLberndVxEdE")
+_SUELDOK_CACHE: dict = {"data": None, "timestamp": 0}
 
 from api.src.inteliforce.models import (
-    InteliforceServiceKey, InteliforceDevice,
+    InteliforceServiceKey, InteliforceDevice, InteliforceSyncRecord,
     InteliforceVisit, InteliforceIncident, InteliforceMedia, InteliforceLotExpiry,
 )
 from api.src.inteliforce.schemas import SyncRecord
@@ -36,11 +46,15 @@ async def exchange_auth(db: AsyncSession, api_key: str, cedula: str) -> dict | N
     if not key:
         return None
 
+    clean_c = re.sub(r'[\.\-\s]', '', cedula.strip())
     result = await db.execute(
         select(SalesRep).where(
             SalesRep.company_id == key.company_id,
-            SalesRep.cedula == cedula,
             SalesRep.activo == True,
+            or_(
+                SalesRep.cedula == cedula.strip(),
+                func.replace(func.replace(SalesRep.cedula, '.', ''), '-', '') == clean_c,
+            ),
         )
     )
     rep = result.scalar_one_or_none()
@@ -78,11 +92,37 @@ async def get_routes_today(db: AsyncSession, company_id: str, rep: SalesRep) -> 
     # de Python es 0=Lunes..6=Domingo, hay que convertir.
     dow = (date.today().weekday() + 1) % 7
     query = text("""
-        SELECT rc.customer_id, rc.orden_visita, sr.id as route_id, sr.nombre as route_nombre,
-               c.razon_social, c.direccion, c.telefono
+        SELECT rc.customer_id,
+               CASE 
+                   WHEN rc.orden_visita > 0 THEN rc.orden_visita 
+                   ELSE ROW_NUMBER() OVER (PARTITION BY sr.id ORDER BY rc.orden_visita, c.razon_social)
+               END as orden_visita,
+               sr.id as route_id, sr.nombre as route_nombre,
+               c.razon_social, c.nombre_fantasia, c.ruc, c.ci,
+               COALESCE(c.extra_club_numero, c.ci, c.ruc) as codigo_interno,
+               c.direccion, c.telefono,
+               c.latitud::float as latitud, c.longitud::float as longitud,
+               COALESCE(ca.limite_credito, c.credito_limite, 0)::float as credito_limite,
+               COALESCE(ca.saldo_utilizado, c.credito_usado, 0)::float as credito_usado,
+               COALESCE(ca.saldo_disponible, 0)::float as saldo_disponible,
+               COALESCE(ca.dias_plazo, 30) as dias_plazo,
+               COALESCE((
+                   SELECT COUNT(*) 
+                   FROM accounts_receivable ar 
+                   WHERE ar.customer_id = c.id 
+                     AND ar.estado IN ('pendiente', 'parcial') 
+                     AND ar.fecha_vencimiento < CURRENT_DATE
+               ), 0) as documentos_vencidos,
+               COALESCE((
+                   SELECT SUM(ar.saldo_pendiente)::float 
+                   FROM accounts_receivable ar 
+                   WHERE ar.customer_id = c.id 
+                     AND ar.estado IN ('pendiente', 'parcial')
+               ), 0.0) as deuda_pendiente
         FROM sales_routes sr
         JOIN route_customers rc ON rc.route_id = sr.id
         JOIN customers c ON c.id = rc.customer_id
+        LEFT JOIN credit_accounts ca ON ca.customer_id = c.id
         WHERE sr.company_id = :company_id
         AND sr.user_id = :user_id
         AND sr.estado = 'activo'
@@ -91,6 +131,58 @@ async def get_routes_today(db: AsyncSession, company_id: str, rep: SalesRep) -> 
     """)
     result = await db.execute(query, {"company_id": company_id, "user_id": str(rep.user_id), "dow": dow})
     return [dict(row._mapping) for row in result.fetchall()]
+
+
+async def update_customer_location(
+    db: AsyncSession,
+    company_id: str,
+    customer_id: str,
+    rep: SalesRep,
+    lat: float,
+    lng: float,
+    motivo: str,
+    notas: str | None = None,
+    accuracy: float | None = None,
+) -> dict:
+    """Actualiza las coordenadas GPS del cliente en la base de datos con registro
+    de auditoría y justificación requerida por el vendedor en campo."""
+    await db.execute(
+        text("""
+            UPDATE customers
+            SET latitud = :lat, longitud = :lng, updated_at = now()
+            WHERE id = :id AND company_id = :company_id
+        """),
+        {"lat": lat, "lng": lng, "id": customer_id, "company_id": company_id},
+    )
+
+    audit_id = str(uuid.uuid4())
+    record = InteliforceSyncRecord(
+        company_id=rep.company_id,
+        record_type="location_update",
+        convex_id=f"loc_{audit_id[:16]}",
+        employee_convex_id=str(rep.id),
+        recorded_at=datetime.now(timezone.utc),
+        payload={
+            "customer_id": customer_id,
+            "sales_rep_id": str(rep.id),
+            "sales_rep_nombre": rep.nombre,
+            "coords": {"lat": lat, "lng": lng, "accuracy": accuracy},
+            "motivo": motivo,
+            "notas": notas,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    db.add(record)
+    await db.commit()
+
+    return {
+        "ok": True,
+        "customer_id": customer_id,
+        "lat": lat,
+        "lng": lng,
+        "mensaje": "Coordenadas GPS actualizadas y auditadas correctamente.",
+    }
+
 
 
 async def search_products(
@@ -154,25 +246,38 @@ async def get_targets_breakdown(db: AsyncSession, rep, periodo_inicio: date, per
 
 
 async def get_top_products(db: AsyncSession, company_id: str, customer_id: str, limit: int = 8) -> list[dict]:
+    # Optimizado: acotar a los últimos 180 días con fallback a histórico si no hay compras recientes
     query = text("""
-        SELECT si.product_id, p.nombre, SUM(si.cantidad) AS cantidad_total, MAX(s.fecha)::date AS ultima_compra
+        SELECT si.product_id, p.nombre, p.sku, SUM(si.cantidad) AS cantidad_total, MAX(s.fecha)::date AS ultima_compra
         FROM sale_items si
         JOIN sales s ON s.id = si.sale_id
         JOIN products p ON p.id = si.product_id
         WHERE s.customer_id = :customer_id AND s.company_id = :company_id AND s.estado != 'cancelado'
-        GROUP BY si.product_id, p.nombre
+          AND s.fecha > now() - interval '180 days'
+        GROUP BY si.product_id, p.nombre, p.sku
         ORDER BY cantidad_total DESC
         LIMIT :limit
     """)
     result = await db.execute(query, {"customer_id": customer_id, "company_id": company_id, "limit": limit})
-    return [dict(row._mapping) for row in result.fetchall()]
+    rows = result.fetchall()
+    if not rows:
+        query_all = text("""
+            SELECT si.product_id, p.nombre, p.sku, SUM(si.cantidad) AS cantidad_total, MAX(s.fecha)::date AS ultima_compra
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            JOIN products p ON p.id = si.product_id
+            WHERE s.customer_id = :customer_id AND s.company_id = :company_id AND s.estado != 'cancelado'
+            GROUP BY si.product_id, p.nombre, p.sku
+            ORDER BY cantidad_total DESC
+            LIMIT :limit
+        """)
+        result = await db.execute(query_all, {"customer_id": customer_id, "company_id": company_id, "limit": limit})
+        rows = result.fetchall()
+    return [dict(row._mapping) for row in rows]
 
 
 async def get_suggestions(db: AsyncSession, company_id: str, customer_id: str, limit: int = 10) -> list[dict]:
-    """Sugerencias accionables: (a) productos de sus lineas habituales que no
-    compra hace 60+ dias (win-back), (b) top-sellers de esas mismas lineas
-    que nunca compro (cross-sell). Ranking simple por frecuencia real, sin ML
-    — explicable y verificable contra los datos."""
+    """Sugerencias accionables optimizadas en tiempo de respuesta"""
     habitual_lineas = await db.execute(
         text("""
             SELECT pl.id AS linea_id, COUNT(*) AS compras
@@ -181,10 +286,11 @@ async def get_suggestions(db: AsyncSession, company_id: str, customer_id: str, l
             JOIN products p ON p.id = si.product_id
             JOIN product_lines pl ON pl.id = p.linea_id
             WHERE s.customer_id = :customer_id AND s.company_id = :company_id AND s.estado != 'cancelado'
+              AND s.fecha > now() - interval '180 days'
             GROUP BY pl.id
-            HAVING COUNT(*) >= 2
+            HAVING COUNT(*) >= 1
             ORDER BY compras DESC
-            LIMIT 8
+            LIMIT 5
         """),
         {"customer_id": customer_id, "company_id": company_id},
     )
@@ -201,9 +307,9 @@ async def get_suggestions(db: AsyncSession, company_id: str, customer_id: str, l
             JOIN products p ON p.id = si.product_id
             JOIN product_lines pl ON pl.id = p.linea_id
             WHERE s.customer_id = :customer_id AND s.company_id = :company_id AND s.estado != 'cancelado'
-            AND p.linea_id = ANY(:linea_ids) AND p.activo = true
+              AND p.linea_id = ANY(:linea_ids) AND p.activo = true
             GROUP BY p.id, p.nombre, p.sku, p.precio_venta, pl.nombre
-            HAVING MAX(s.fecha) < now() - interval '60 days'
+            HAVING MAX(s.fecha) < now() - interval '45 days'
             ORDER BY MAX(s.fecha) ASC
             LIMIT :limit
         """),
@@ -229,11 +335,11 @@ async def get_suggestions(db: AsyncSession, company_id: str, customer_id: str, l
                 JOIN products p ON p.id = si.product_id
                 JOIN product_lines pl ON pl.id = p.linea_id
                 WHERE s.company_id = :company_id AND s.fecha > now() - interval '90 days'
-                AND p.linea_id = ANY(:linea_ids) AND p.activo = true
-                AND NOT EXISTS (
-                    SELECT 1 FROM sale_items si2 JOIN sales s2 ON s2.id = si2.sale_id
-                    WHERE s2.customer_id = :customer_id AND si2.product_id = p.id
-                )
+                  AND p.linea_id = ANY(:linea_ids) AND p.activo = true
+                  AND NOT EXISTS (
+                      SELECT 1 FROM sale_items si2 JOIN sales s2 ON s2.id = si2.sale_id
+                      WHERE s2.customer_id = :customer_id AND si2.product_id = p.id
+                  )
                 GROUP BY p.id, p.nombre, p.sku, p.precio_venta, pl.nombre
                 ORDER BY ventas DESC
                 LIMIT :limit
@@ -253,47 +359,72 @@ async def get_suggestions(db: AsyncSession, company_id: str, customer_id: str, l
 
 
 async def get_customer_360(db: AsyncSession, company_id: str, customer_id: str) -> dict | None:
-    cust_result = await db.execute(
-        text("SELECT * FROM customers WHERE id = :id AND company_id = :company_id"),
-        {"id": customer_id, "company_id": company_id},
-    )
-    customer = cust_result.fetchone()
-    if not customer:
+    # 1. Datos consolidados de cliente, crédito, cuentas por cobrar y cheques en una sola pasada
+    cust_query = text("""
+        SELECT c.*,
+               ca.limite_credito, ca.saldo_utilizado, ca.saldo_disponible, ca.dias_plazo,
+               COALESCE(ar.pendiente, 0) as ar_pendiente,
+               COALESCE(ar.vencidos, 0) as ar_vencidos,
+               COALESCE(ch.cartera, 0) as checks_cartera,
+               COALESCE(ch.rechazados, 0) as checks_rechazados,
+               COALESCE(ch.pagares, 0) as pagares
+        FROM customers c
+        LEFT JOIN credit_accounts ca ON ca.customer_id = c.id
+        LEFT JOIN (
+            SELECT customer_id,
+                   SUM(saldo_pendiente) as pendiente,
+                   COUNT(CASE WHEN fecha_vencimiento < CURRENT_DATE THEN 1 END) as vencidos
+            FROM accounts_receivable
+            WHERE customer_id = :id AND estado IN ('pendiente', 'parcial')
+            GROUP BY customer_id
+        ) ar ON ar.customer_id = c.id
+        LEFT JOIN (
+            SELECT customer_id,
+                   SUM(CASE WHEN tipo = 'cheque' AND estado IN ('cartera', 'depositado') THEN monto ELSE 0 END) as cartera,
+                   SUM(CASE WHEN tipo = 'cheque' AND estado = 'rechazado' THEN monto ELSE 0 END) as rechazados,
+                   SUM(CASE WHEN tipo = 'pagare' THEN monto ELSE 0 END) as pagares
+            FROM checks
+            WHERE customer_id = :id
+            GROUP BY customer_id
+        ) ch ON ch.customer_id = c.id
+        WHERE c.id = :id AND c.company_id = :company_id
+    """)
+    cust_result = await db.execute(cust_query, {"id": customer_id, "company_id": company_id})
+    row = cust_result.fetchone()
+    if not row:
         return None
-    customer = dict(customer._mapping)
+    c_data = dict(row._mapping)
 
-    credit_result = await db.execute(
-        text("SELECT limite_credito, saldo_utilizado, saldo_disponible, dias_plazo FROM credit_accounts WHERE customer_id = :id"),
-        {"id": customer_id},
-    )
-    credit = credit_result.fetchone()
-
-    ar_result = await db.execute(
+    # 2. Facturas pendientes detalladas (máximo 15 más urgentes para no demorar la red)
+    invoices_result = await db.execute(
         text("""
-            SELECT COALESCE(SUM(saldo_pendiente), 0) as pendiente,
-                   COALESCE(SUM(CASE WHEN fecha_vencimiento < CURRENT_DATE THEN 1 ELSE 0 END), 0) as vencidos
-            FROM accounts_receivable WHERE customer_id = :id AND estado = 'pendiente'
+            SELECT id, numero_documento, fecha_emision::text as fecha_emision,
+                   fecha_vencimiento::text as fecha_vencimiento,
+                   monto_original, saldo_pendiente,
+                   GREATEST(0, (CURRENT_DATE - fecha_vencimiento)::int) as dias_mora,
+                   (fecha_vencimiento < CURRENT_DATE) as vencido
+            FROM accounts_receivable
+            WHERE customer_id = :id AND estado IN ('pendiente', 'parcial')
+            ORDER BY fecha_vencimiento ASC
+            LIMIT 15
         """),
         {"id": customer_id},
     )
-    ar = ar_result.fetchone()
+    facturas_pendientes = [
+        {
+            "id": str(r.id),
+            "numero": r.numero_documento or "S/N",
+            "fecha_emision": str(r.fecha_emision) if r.fecha_emision else None,
+            "fecha_vencimiento": str(r.fecha_vencimiento) if r.fecha_vencimiento else None,
+            "monto_total": float(r.monto_original or 0),
+            "saldo_pendiente": float(r.saldo_pendiente or 0),
+            "dias_atraso": int(r.dias_mora or 0),
+            "vencido": bool(r.vencido),
+        }
+        for r in invoices_result.fetchall()
+    ]
 
-    checks_result = await db.execute(
-        text("""
-            SELECT 
-                COALESCE(SUM(CASE WHEN tipo = 'cheque' AND estado IN ('cartera', 'depositado') THEN monto ELSE 0 END), 0) as cartera,
-                COALESCE(SUM(CASE WHEN tipo = 'cheque' AND estado = 'rechazado' THEN monto ELSE 0 END), 0) as rechazados,
-                COALESCE(SUM(CASE WHEN tipo = 'pagare' THEN monto ELSE 0 END), 0) as pagares
-            FROM checks WHERE customer_id = :id
-        """),
-        {"id": customer_id},
-    )
-    ch_row = checks_result.fetchone()
-    checks_cartera = float(ch_row.cartera) if ch_row else 0.0
-    checks_rechazados = float(ch_row.rechazados) if ch_row else 0.0
-    pagares = float(ch_row.pagares) if ch_row else 0.0
-    deuda_total_consolidada = float(ar.pendiente) + checks_cartera + checks_rechazados + pagares
-
+    # 3. Ventas recientes
     sales_result = await db.execute(
         text("""
             SELECT numero, fecha, total, estado FROM sales
@@ -302,26 +433,313 @@ async def get_customer_360(db: AsyncSession, company_id: str, customer_id: str) 
         """),
         {"id": customer_id, "company_id": company_id},
     )
-    ultimas = [dict(row._mapping) for row in sales_result.fetchall()]
+    ultimas = [dict(r._mapping) for r in sales_result.fetchall()]
+
+    # 4. Top productos y sugerencias de venta
     top_productos = await get_top_products(db, company_id, customer_id)
     sugerencias = await get_suggestions(db, company_id, customer_id)
 
+    vencidos_count = int(c_data.get("ar_vencidos") or 0)
+    saldo_disp = float(c_data.get("saldo_disponible") or 0)
+    cred_lim = float(c_data.get("limite_credito") or c_data.get("credito_limite") or 0)
+
+    estado_credito = "normal"
+    if vencidos_count > 0:
+        estado_credito = "moroso"
+    elif saldo_disp <= 0 and cred_lim > 0:
+        estado_credito = "bloqueado"
+
+    ch_cartera = float(c_data.get("checks_cartera") or 0)
+    ch_rechazados = float(c_data.get("checks_rechazados") or 0)
+    pagares_monto = float(c_data.get("pagares") or 0)
+    ar_pend = float(c_data.get("ar_pendiente") or 0)
+    deuda_total_consolidada = ar_pend + ch_cartera + ch_rechazados + pagares_monto
+
+    # 5. Diagnóstico de IA Comercial generado por Marco
+    dias_sin_compra = None
+    if ultimas and ultimas[0].get("fecha"):
+        ultima_fecha = ultimas[0]["fecha"]
+        if isinstance(ultima_fecha, datetime):
+            dias_sin_compra = (datetime.now(timezone.utc) - ultima_fecha).days
+        elif isinstance(ultima_fecha, date):
+            dias_sin_compra = (date.today() - ultima_fecha).days
+
+    marco_puntos = []
+    if vencidos_count > 0:
+        marco_puntos.append(f"Cobro prioritario: registra {vencidos_count} documento(s) vencido(s). Gestioná el cobro para liberar su crédito.")
+    elif ch_rechazados > 0:
+        marco_puntos.append(f"Alerta financiera: tiene cheques rechazados en gestión de canje.")
+    elif saldo_disp > 0:
+        marco_puntos.append(f"Crédito disponible para venta: Gs. {int(saldo_disp):,}.")
+
+    if sugerencias:
+        nombres_sug = [s["nombre"] for s in sugerencias[:3]]
+        marco_puntos.append(f"Productos sugeridos para el pedido de hoy: {', '.join(nombres_sug)}.")
+    elif top_productos:
+        nombres_top = [t["nombre"] for t in top_productos[:3]]
+        marco_puntos.append(f"Líneas habituales de alta rotación: {', '.join(nombres_top)}.")
+
+    if dias_sin_compra is not None:
+        if dias_sin_compra > 25:
+            marco_puntos.append(f"Atención: pasaron {dias_sin_compra} días desde su último pedido. Recomiendo asegurar reposición para evitar quiebre en su punto de venta.")
+        else:
+            marco_puntos.append(f"Cadencia activa: última compra hace {dias_sin_compra} días.")
+
+    marco_sugerencia_texto = " | ".join(marco_puntos) if marco_puntos else "Cliente sin historial suficiente de compras. Sugiero ofrecer los combos líderes de PARESA (Coca-Cola / Fanta) y líneas core de alta rotación."
+
     return {
-        "customer_id": customer["id"],
-        "razon_social": customer["razon_social"],
-        "ruc": customer.get("ruc"),
-        "direccion": customer.get("direccion"),
-        "telefono": customer.get("telefono"),
-        "credito_limite": float(credit.limite_credito) if credit else float(customer.get("credito_limite") or 0),
-        "credito_usado": float(credit.saldo_utilizado) if credit else float(customer.get("credito_usado") or 0),
-        "saldo_disponible": float(credit.saldo_disponible) if credit else 0,
-        "dias_plazo": credit.dias_plazo if credit else None,
-        "cuentas_por_cobrar_pendiente": float(ar.pendiente),
-        "documentos_vencidos": int(ar.vencidos),
-        "cheques_en_cartera": float(checks_cartera),
+        "customer_id": c_data["id"],
+        "razon_social": c_data["razon_social"],
+        "nombre_fantasia": c_data.get("nombre_fantasia"),
+        "ruc": c_data.get("ruc"),
+        "ci": c_data.get("ci"),
+        "codigo_interno": c_data.get("extra_club_numero") or None,
+        "direccion": c_data.get("direccion"),
+        "telefono": c_data.get("telefono"),
+        "email": c_data.get("email"),
+        "latitud": float(c_data["latitud"]) if c_data.get("latitud") is not None else None,
+        "longitud": float(c_data["longitud"]) if c_data.get("longitud") is not None else None,
+        "credito_limite": cred_lim,
+        "credito_usado": float(c_data.get("saldo_utilizado") or c_data.get("credito_usado") or 0),
+        "saldo_disponible": saldo_disp,
+        "dias_plazo": c_data.get("dias_plazo"),
+        "cuentas_por_cobrar_pendiente": ar_pend,
+        "documentos_vencidos": vencidos_count,
+        "cheques_en_cartera": ch_cartera,
+        "cheques_rechazados": ch_rechazados,
+        "pagares": pagares_monto,
+        "deuda_total_consolidada": deuda_total_consolidada,
+        "estado_credito": estado_credito,
+        "facturas_pendientes": facturas_pendientes,
         "ultimas_compras": ultimas,
         "top_productos": top_productos,
         "sugerencias": sugerencias,
+        "marco_sugerencia": f"💡 Sugerencia de Marco: {marco_sugerencia_texto}",
+        "marco_analisis": {
+            "dias_sin_compra": dias_sin_compra,
+            "nivel_riesgo": "alto" if vencidos_count > 0 or ch_rechazados > 0 else ("medio" if saldo_disp <= 0 and cred_lim > 0 else "bajo"),
+            "oportunidad_reposicion": len(sugerencias) > 0,
+            "top_linea": sugerencias[0]["linea_nombre"] if sugerencias else (top_productos[0]["sku"] if top_productos else "Línea Core"),
+        },
+    }
+
+
+# ── Asistencia y Jornada (SueldOK Integration) ──────────────────────────────
+
+async def fetch_sueldok_team_overview() -> dict:
+    """Consulta la API de SueldOK con caché ligero en memoria para no saturar la red."""
+    global _SUELDOK_CACHE
+    import time
+    now = time.time()
+    if _SUELDOK_CACHE.get("data") and (now - _SUELDOK_CACHE.get("timestamp", 0)) < 15:
+        return _SUELDOK_CACHE["data"]
+
+    url = f"{SUELDOK_BASE_URL.rstrip('/')}/http/api/intelimarket/overview?apiKey={SUELDOK_API_KEY}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            res = await client.get(url, headers={"User-Agent": "Inteliforce/1.0", "Accept": "application/json"})
+            if res.status_code == 200:
+                data = res.json()
+                _SUELDOK_CACHE = {"data": data, "timestamp": now}
+                return data
+            else:
+                logger.warning(f"SueldOK overview returned status {res.status_code}")
+    except Exception as e:
+        logger.warning(f"Error connecting to SueldOK overview: {e}")
+        if _SUELDOK_CACHE.get("data"):
+            return _SUELDOK_CACHE["data"]
+    return _SUELDOK_CACHE.get("data") or {}
+
+
+async def record_attendance_punch(
+    db: AsyncSession,
+    rep: SalesRep,
+    tipo: str,
+    lat: float | None = None,
+    lng: float | None = None,
+    accuracy: float | None = None,
+    foto_url: str | None = None,
+    notas: str | None = None,
+    battery_level: float | None = None,
+) -> dict:
+    punch_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+
+    estado_map = {
+        "entrada": "en_jornada",
+        "salida": "jornada_cerrada",
+        "almuerzo_inicio": "en_pausa",
+        "almuerzo_fin": "en_jornada",
+    }
+    estado_jornada = estado_map.get(tipo, "en_jornada")
+
+    payload = {
+        "punch_id": punch_id,
+        "tipo": tipo,
+        "recorded_at": now.isoformat(),
+        "sales_rep_id": str(rep.id),
+        "sales_rep_nombre": rep.nombre,
+        "cedula": rep.cedula,
+        "coords": {"lat": lat, "lng": lng, "accuracy": accuracy} if lat is not None else None,
+        "foto_url": foto_url,
+        "notas": notas,
+        "batteryLevel": battery_level,
+        "estado_jornada": estado_jornada,
+    }
+
+    record = InteliforceSyncRecord(
+        company_id=rep.company_id,
+        record_type="attendance",
+        convex_id=f"att_{punch_id[:16]}",
+        employee_convex_id=str(rep.id),
+        recorded_at=now,
+        payload=payload,
+    )
+    db.add(record)
+    await db.commit()
+
+    # Formato hora local Paraguay (UTC-3)
+    hora_str = (now - timedelta(hours=3)).strftime("%H:%M")
+    mensajes = {
+        "entrada": f"¡Entrada registrada a las {hora_str} hs! Buen inicio de jornada.",
+        "salida": f"Salida registrada a las {hora_str} hs. ¡Excelente labor hoy!",
+        "almuerzo_inicio": "Pausa de almuerzo iniciada.",
+        "almuerzo_fin": "Pausa finalizada. Reanudando jornada de ventas.",
+    }
+
+    return {
+        "ok": True,
+        "punch_id": punch_id,
+        "tipo": tipo,
+        "recorded_at": now.isoformat(),
+        "estado_jornada": estado_jornada,
+        "mensaje": mensajes.get(tipo, "Marcación registrada correctamente"),
+    }
+
+
+async def get_attendance_today(db: AsyncSession, rep: SalesRep) -> dict:
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    result = await db.execute(
+        text("""
+            SELECT id, recorded_at, payload
+            FROM inteliforce_sync_records
+            WHERE company_id = :cid
+              AND record_type = 'attendance'
+              AND employee_convex_id = :rep_id
+              AND recorded_at >= :today_start
+            ORDER BY recorded_at ASC
+        """),
+        {"cid": rep.company_id, "rep_id": str(rep.id), "today_start": today_start},
+    )
+    rows = result.fetchall()
+    marcaciones = []
+    hora_entrada = None
+    hora_salida = None
+    entrada_dt = None
+    estado_jornada = "sin_marcar"
+
+    for r in rows:
+        p = r.payload or {}
+        tipo = p.get("tipo")
+        # UTC-3
+        hora_py = (r.recorded_at - timedelta(hours=3)).strftime("%H:%M") if r.recorded_at else ""
+        marcaciones.append({
+            "id": str(r.id),
+            "tipo": tipo,
+            "hora": hora_py,
+            "recorded_at": r.recorded_at.isoformat() if r.recorded_at else "",
+            "coords": p.get("coords"),
+            "foto_url": p.get("foto_url"),
+            "notas": p.get("notas"),
+        })
+        if tipo == "entrada" and not hora_entrada:
+            hora_entrada = hora_py
+            entrada_dt = r.recorded_at
+            estado_jornada = "en_jornada"
+        elif tipo == "almuerzo_inicio":
+            estado_jornada = "en_pausa"
+        elif tipo == "almuerzo_fin":
+            estado_jornada = "en_jornada"
+        elif tipo == "salida":
+            hora_salida = hora_py
+            estado_jornada = "jornada_cerrada"
+
+    sueldok_data = await fetch_sueldok_team_overview()
+    employees = sueldok_data.get("employees", [])
+
+    colaborador_sueldok = None
+    for emp in employees:
+        ci_str = str(emp.get("ci") or "").strip().replace(".", "").replace("-", "")
+        rep_ci = str(rep.cedula or "").strip().replace(".", "").replace("-", "")
+        if ci_str and ci_str == rep_ci:
+            colaborador_sueldok = emp
+            break
+
+    if colaborador_sueldok and not hora_entrada:
+        if colaborador_sueldok.get("entrada") and colaborador_sueldok.get("entrada") != "—":
+            hora_entrada = colaborador_sueldok.get("entrada")
+            estado_jornada = "en_jornada"
+
+    minutos_trabajados = 0
+    if entrada_dt:
+        fin_dt = datetime.now(timezone.utc)
+        minutos_trabajados = max(0, int((fin_dt - entrada_dt).total_seconds() / 60))
+
+    colaborador_info = {
+        "nombre": rep.nombre,
+        "cedula": rep.cedula,
+        "cargo": colaborador_sueldok.get("cargo") if colaborador_sueldok else (rep.rol.upper() if rep.rol else "VENDEDOR"),
+        "departamento": colaborador_sueldok.get("depto") if colaborador_sueldok else (rep.rama.upper() if rep.rama else "AMAMBAY"),
+        "empresa": "Casa Gonzalito S.R.L.",
+        "salario": colaborador_sueldok.get("salario") if colaborador_sueldok else 0,
+        "sueldok_sync": True,
+        "horario": "08:00 - 17:00 hs",
+    }
+
+    return {
+        "estado_jornada": estado_jornada,
+        "hora_entrada": hora_entrada,
+        "hora_salida": hora_salida,
+        "minutos_trabajados": minutos_trabajados,
+        "marcaciones": marcaciones,
+        "colaborador": colaborador_info,
+        "metricas_empresa": sueldok_data.get("metrics") or {},
+    }
+
+
+async def get_team_attendance(db: AsyncSession, rep: SalesRep) -> dict:
+    sueldok_data = await fetch_sueldok_team_overview()
+    employees = sueldok_data.get("employees", [])
+    today_attendance = sueldok_data.get("todayAttendance", [])
+    metrics = sueldok_data.get("metrics", {})
+    company = sueldok_data.get("company", {})
+
+    att_map = {att.get("employeeId"): att for att in today_attendance if isinstance(att, dict)}
+
+    team_list = []
+    for emp in employees:
+        emp_id = emp.get("id")
+        att = att_map.get(emp_id)
+        team_list.append({
+            "id": emp_id,
+            "nombre": emp.get("nombre"),
+            "ci": emp.get("ci"),
+            "cargo": emp.get("cargo"),
+            "depto": emp.get("depto"),
+            "estado": emp.get("estado"),
+            "hoy": emp.get("hoy"),
+            "entrada": att.get("horaEntrada") if att else emp.get("entrada"),
+            "salida": att.get("horaSalida") if att else None,
+            "status": att.get("status") if att else ("Present" if emp.get("hoy") == "presente" else "Absent"),
+            "checkInPhotoUrl": att.get("checkInPhotoUrl") if att else None,
+            "checkOutPhotoUrl": att.get("checkOutPhotoUrl") if att else None,
+        })
+
+    return {
+        "colaboradores": team_list,
+        "metricas": metrics,
+        "empresa": company,
     }
 
 
@@ -343,11 +761,15 @@ async def set_pin(db: AsyncSession, api_key: str, cedula: str, pin: str) -> bool
     key = await get_service_key(db, api_key)
     if not key:
         return False
+    clean_c = re.sub(r'[\.\-\s]', '', cedula.strip())
     result = await db.execute(
         select(SalesRep).where(
             SalesRep.company_id == key.company_id,
-            SalesRep.cedula == cedula,
             SalesRep.activo == True,
+            or_(
+                SalesRep.cedula == cedula.strip(),
+                func.replace(func.replace(SalesRep.cedula, '.', ''), '-', '') == clean_c,
+            ),
         )
     )
     rep = result.scalar_one_or_none()
@@ -364,11 +786,15 @@ async def set_pin(db: AsyncSession, api_key: str, cedula: str, pin: str) -> bool
 
 async def direct_login(db: AsyncSession, company_id: str, cedula: str, pin: str) -> dict | None:
     """Login directo desde la app Inteliforce sin intermediario SueldOK."""
+    clean_c = re.sub(r'[\.\-\s]', '', cedula.strip())
     result = await db.execute(
         select(SalesRep).where(
             SalesRep.company_id == uuid.UUID(company_id),
-            SalesRep.cedula == cedula,
             SalesRep.activo == True,
+            or_(
+                SalesRep.cedula == cedula.strip(),
+                func.replace(func.replace(SalesRep.cedula, '.', ''), '-', '') == clean_c,
+            ),
         )
     )
     rep = result.scalar_one_or_none()
@@ -438,12 +864,12 @@ async def _get_poi_range(db: AsyncSession, customer_id: str) -> float:
 
 async def _get_customer_coords(db: AsyncSession, customer_id: str) -> tuple[float, float] | None:
     r = await db.execute(
-        text("SELECT gps_lat, gps_lng FROM customers WHERE id = :id"),
+        text("SELECT latitud, longitud FROM customers WHERE id = :id"),
         {"id": customer_id},
     )
     row = r.fetchone()
-    if row and row.gps_lat and row.gps_lng:
-        return float(row.gps_lat), float(row.gps_lng)
+    if row and row.latitud is not None and row.longitud is not None:
+        return float(row.latitud), float(row.longitud)
     return None
 
 

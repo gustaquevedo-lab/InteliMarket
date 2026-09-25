@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="es"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/><meta content="mobile_tab" name="shell-type"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script><script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        "colors": {
+          "on-primary-container": "#004b1e",
+          "primary-container": "#22c55e",
+          "primary-fixed-dim": "#4ae176",
+          "surface-bright": "#333a44",
+          "surface-container-high": "#232a34",
+          "surface-container-low": "#151c25",
+          "on-error": "#690005",
+          "tertiary-fixed": "#d5e3ff",
+          "outline": "#869585",
+          "inverse-primary": "#006e2f",
+          "surface-container-lowest": "#080f17",
+          "on-tertiary-fixed-variant": "#2d486d",
+          "error-container": "#93000a",
+          "on-background": "#dce3f0",
+          "outline-variant": "#3d4a3d",
+          "on-secondary-fixed-variant": "#173bab",
+          "surface-variant": "#2e353f",
+          "secondary": "#b8c4ff",
+          "error": "#ffb4ab",
+          "primary-fixed": "#6bff8f",
+          "on-tertiary-container": "#254166",
+          "secondary-fixed-dim": "#b8c4ff",
+          "surface-container": "#192029",
+          "surface": "#0a0f1a",
+          "on-tertiary": "#133155",
+          "secondary-fixed": "#dde1ff",
+          "surface-container-highest": "#2e353f",
+          "tertiary": "#aec8f5",
+          "on-surface-variant": "#9ca3af",
+          "on-primary-fixed": "#002109",
+          "surface-dim": "#0a0f1a",
+          "primary": "#22c55e",
+          "on-secondary": "#002584",
+          "tertiary-container": "#93add9",
+          "on-tertiary-fixed": "#001c3b",
+          "on-error-container": "#ffdad6",
+          "secondary-container": "#173bab",
+          "surface-tint": "#4ae176",
+          "on-primary": "#003915",
+          "on-surface": "#f9fafb",
+          "inverse-on-surface": "#2a313b",
+          "tertiary-fixed-dim": "#adc8f5",
+          "on-primary-fixed-variant": "#005321",
+          "on-secondary-container": "#a0b1ff",
+          "on-secondary-fixed": "#001453",
+          "inverse-surface": "#111827",
+          "background": "#0a0f1a"
+        },
+        "borderRadius": {
+          "DEFAULT": "0.25rem",
+          "lg": "0.5rem",
+          "xl": "0.75rem",
+          "full": "9999px"
+        },
+        "spacing": {
+          "gutter": "1rem",
+          "margin": "1rem",
+          "space-lg": "1.5rem",
+          "space-xs": "0.25rem",
+          "space-md": "1rem",
+          "space-xl": "2rem",
+          "space-sm": "0.5rem"
+        },
+        "fontFamily": {
+          "currency-display": ["JetBrains Mono", "monospace"],
+          "display": ["Inter", "sans-serif"],
+          "body-2": ["Inter", "sans-serif"],
+          "body-1": ["Inter", "sans-serif"],
+          "headline-h2": ["Inter", "sans-serif"],
+          "headline-h1": ["Inter", "sans-serif"],
+          "label": ["Inter", "sans-serif"],
+          "currency-sm": ["JetBrains Mono", "monospace"]
+        },
+        "fontSize": {
+          "currency-display": ["20px", { "lineHeight": "26px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+          "display": ["28px", { "lineHeight": "36px", "fontWeight": "700" }],
+          "body-2": ["14px", { "lineHeight": "20px", "fontWeight": "500" }],
+          "body-1": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
+          "headline-h2": ["18px", { "lineHeight": "24px", "fontWeight": "600" }],
+          "headline-h1": ["22px", { "lineHeight": "28px", "fontWeight": "700" }],
+          "label": ["12px", { "lineHeight": "16px", "letterSpacing": "0.04em", "fontWeight": "600" }],
+          "currency-sm": ["14px", { "lineHeight": "18px", "fontWeight": "600" }]
+        }
+      }
+    }
+  }
+</script><style>@layer base{html,body{width:100vw;margin:0;padding:0;background-color:#0a0f1a;}body{overscroll-behavior:none;}.pb-safe{padding-bottom:env(safe-area-inset-bottom,0px);}.pt-safe{padding-top:env(safe-area-inset-top,0px);}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+</head><body class="bg-[#0a0f1a] font-body-1 text-[#f9fafb] flex flex-col min-h-screen"><header class="fixed top-0 w-full z-50 pt-safe bg-[#0a0f1a]/95 backdrop-blur-xl border-b border-[#1f2937] shadow-[0_2px_10px_rgba(0,0,0,0.4)]"><div class="h-16 px-margin flex items-center justify-between"><div class="flex items-center gap-space-sm"><img alt="Inteliforce App Icon Master (1024px)" class="h-8 w-auto object-contain rounded-md" src="https://lh3.googleusercontent.com/aida/AEtjO1W697jAnOoNd7fcHaR8XR9fy3qmgiG-g8yV7BOk-98UmBkG5_N7BHul0ABu7VHZOmrLbxee-z3T6gNmdfg2ApjO-IjrAiCCP9xTQTUev6uUIKHfJWZQPqnUl3xY7v7SxgWLiD1UkcQhOJUrwfIuGRItwz7fEsT-2DSu-lvvZgQZ5f0tuSoYB-vp4r4xDvMK0l13TsO_gBLBimZwUKMvq_lJTNoos4F4gqYoBDcYbwbsNHKeMd9jpvQ9iR1y"/><div class="flex flex-col"><span class="font-label text-[11px] uppercase text-[#9ca3af] tracking-wider leading-none">Inteliforce RTM</span><span class="font-headline-h2 text-headline-h2 text-[#f9fafb] leading-tight truncate max-w-[170px]">Pedido</span></div></div><div class="flex items-center gap-space-sm"><div class="flex items-center gap-space-xs px-2.5 py-1 rounded-full bg-[#111827] border border-[#374151]"><span class="w-2 h-2 rounded-full bg-[#22c55e] animate-pulse"></span><span class="font-label text-label text-[#9ca3af] font-medium">Online</span></div><div class="w-8 h-8 rounded-full bg-[#22c55e] flex items-center justify-center shrink-0 text-[#003915]"><span class="material-symbols-outlined text-[18px]">person</span></div></div></div></header><main class="flex-1 flex flex-col relative w-full pt-16 pb-20 bg-[#0a0f1a]"><div class="flex flex-col w-full">
+<!-- Active Visit Floating Client Banner -->
+<section class="px-margin pt-space-xs pb-space-sm bg-[#0a0f1a]">
+<div class="bg-[#111827] border border-[#374151] p-space-md rounded-xl shadow-lg flex flex-col gap-space-xs relative overflow-hidden">
+<!-- Left tier accent line -->
+<div class="absolute left-0 top-0 bottom-0 w-1.5 bg-[#22c55e]"></div>
+<div class="flex items-center justify-between pl-space-xs">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-[#22c55e] text-[20px]" style="font-variation-settings: 'FILL' 1;">storefront</span>
+<span class="font-headline-h2 text-headline-h2 text-[#f9fafb] truncate max-w-[210px]">Comercial San Cayetano S.R.L.</span>
+</div>
+<span class="px-2.5 py-0.5 rounded-full bg-[#22c55e]/20 border border-[#22c55e]/40 text-[#4ade80] font-label text-label flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-[#22c55e] animate-pulse"></span>
+          En Visita
+        </span>
+</div>
+<div class="flex items-center justify-between text-[#9ca3af] pl-space-xs pt-1">
+<div class="flex items-center gap-1 font-body-2 text-body-2">
+<span class="text-[#9ca3af] font-label text-label uppercase">RUC:</span>
+<span class="font-currency-sm text-currency-sm font-semibold text-[#f9fafb]">80029384-2</span>
+</div>
+<div class="flex items-center gap-1.5 bg-[#1f2937] border border-[#374151] px-2.5 py-1 rounded-lg">
+<span class="material-symbols-outlined text-[16px] text-[#aec8f5]">payments</span>
+<span class="font-label text-label text-[#9ca3af]">Crédito:</span>
+<span class="font-currency-sm text-currency-sm text-[#4ade80] font-bold">₲ 4.500.000</span>
+</div>
+</div>
+</div>
+</section>
+<!-- Sticky Search & Quick Filter Hub -->
+<section class="sticky top-16 z-30 bg-[#0a0f1a]/95 backdrop-blur-md px-margin py-space-sm flex flex-col gap-space-sm border-b border-[#1f2937]/80">
+<!-- Barcode & Search Input -->
+<div class="relative flex items-center w-full">
+<span class="material-symbols-outlined absolute left-3.5 text-[#9ca3af] text-[22px]">search</span>
+<input class="w-full h-12 pl-11 pr-12 rounded-xl bg-[#111827] border border-[#374151] text-[#f9fafb] placeholder:text-[#9ca3af] text-body-1 font-body-1 shadow-inner focus:outline-none focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e] transition-colors" id="catalogSearch" placeholder="Buscar por nombre, código o SKU..." type="text"/>
+<button aria-label="Escanear Código de Barras" class="absolute right-1.5 w-9 h-9 rounded-lg bg-[#1f2937] border border-[#374151] flex items-center justify-center text-[#f9fafb] active:scale-95 transition-transform hover:bg-[#374151]" type="button">
+<span class="material-symbols-outlined text-[20px] text-[#22c55e]">barcode_scanner</span>
+</button>
+</div>
+<!-- Category Pills (Horizontal Scroll) -->
+<div class="flex items-center gap-space-xs overflow-x-auto no-scrollbar py-0.5">
+<button class="shrink-0 px-3.5 py-1.5 rounded-full bg-[#22c55e] text-[#003915] font-label text-label font-bold shadow-md flex items-center gap-1 active:scale-95 transition-transform">
+<span class="material-symbols-outlined text-[15px]" style="font-variation-settings: 'FILL' 1;">grid_view</span>
+        Todos
+      </button>
+<button class="shrink-0 px-3.5 py-1.5 rounded-full bg-[#111827] border border-[#374151] text-[#9ca3af] hover:text-[#f9fafb] font-label text-label shadow-sm hover:bg-[#1f2937] active:bg-[#1f2937] transition-colors">
+        Bebidas
+      </button>
+<button class="shrink-0 px-3.5 py-1.5 rounded-full bg-[#111827] border border-[#374151] text-[#9ca3af] hover:text-[#f9fafb] font-label text-label shadow-sm hover:bg-[#1f2937] active:bg-[#1f2937] transition-colors">
+        Lácteos
+      </button>
+<button class="shrink-0 px-3.5 py-1.5 rounded-full bg-[#111827] border border-[#374151] text-[#9ca3af] hover:text-[#f9fafb] font-label text-label shadow-sm hover:bg-[#1f2937] active:bg-[#1f2937] transition-colors">
+        Snacks
+      </button>
+<button class="shrink-0 px-3.5 py-1.5 rounded-full bg-[#111827] border border-[#374151] text-[#9ca3af] hover:text-[#f9fafb] font-label text-label shadow-sm hover:bg-[#1f2937] active:bg-[#1f2937] transition-colors">
+        Limpieza
+      </button>
+<button class="shrink-0 px-3.5 py-1.5 rounded-full bg-[#173bab]/40 border border-[#173bab] text-[#b8c4ff] font-label text-label shadow-sm flex items-center gap-1">
+<span class="material-symbols-outlined text-[15px] text-[#aec8f5]">local_offer</span>
+        Promociones
+      </button>
+</div>
+</section>
+<!-- Product Catalog List -->
+<div class="px-margin pt-space-sm pb-28 flex flex-col gap-space-sm">
+<!-- Product Card 1 -->
+<div class="bg-[#111827] border border-[#374151] rounded-xl p-space-md shadow-md flex flex-col gap-space-sm relative">
+<div class="flex items-start gap-space-sm">
+<div class="w-16 h-16 rounded-lg bg-[#1f2937] border border-[#374151] shrink-0 overflow-hidden relative shadow-inner">
+<img class="w-full h-full object-cover" data-alt="Pack of 6 two-liter cola soda plastic bottles wrapped in clear commercial packaging, studio lighting, crisp outdoor B2B commercial catalog aesthetic on white background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDTXUiwgFsa4v3K0sLs7LaHMcbxmJD4S76X70EMaDf2LOyUHDOewYCI1YwHu_ao_DYjavpisOPP1QfdQ4N_nLIFo8H4WSI3lNxUhENH-NQDO7XVx2b96WPI9SGlkgPuT1l8F7kZNR8deuvFVbwxoT_SPHZ7OMAV5rgp79mggweyqu-ntjqQtT5eOF1ChEIsdybQEdbLsySqUf7xa3mhvVGGrWyHvYFsHkQLygSLUGOz4kMeQBRbihqRuQ"/>
+</div>
+<div class="flex-1 min-w-0 flex flex-col">
+<div class="flex items-center justify-between gap-1 mb-0.5">
+<span class="font-currency-sm text-[11px] leading-tight px-1.5 py-0.5 rounded bg-[#1f2937] border border-[#374151] text-[#9ca3af] font-semibold">SKU-9921</span>
+<span class="font-label text-[11px] leading-none text-[#4ade80] font-bold flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-[#22c55e]"></span>
+              32 packs disp.
+            </span>
+</div>
+<h2 class="font-headline-h2 text-body-1 font-bold text-[#f9fafb] leading-snug line-clamp-2">
+            Gaseosa Cola Clásica 2L (Pack x6)
+          </h2>
+<div class="mt-1 flex items-baseline gap-1">
+<span class="font-currency-display text-currency-display text-[#22c55e] font-bold">₲ 48.000</span>
+<span class="font-label text-label text-[#9ca3af]">/ pack</span>
+</div>
+</div>
+</div>
+<!-- Action & Stepper Row -->
+<div class="flex items-center justify-between pt-1 bg-[#1f2937]/70 border-t border-[#374151] -mx-space-md -mb-space-md p-space-md rounded-b-xl">
+<div class="flex items-center gap-1 text-[#9ca3af] font-label text-label">
+<span class="text-[#9ca3af]">Subtotal:</span>
+<span class="font-currency-sm text-currency-sm font-bold text-[#f9fafb]">₲ 192.000</span>
+</div>
+<!-- Field Ergonomic Stepper (44x44 safe zone) -->
+<div class="flex items-center bg-[#111827] border border-[#374151] rounded-lg shadow-sm">
+<button aria-label="Disminuir cantidad" class="w-11 h-11 flex items-center justify-center text-[#f9fafb] active:bg-[#1f2937] hover:text-[#22c55e] rounded-l-lg transition-colors select-none" type="button">
+<span class="material-symbols-outlined text-[20px]">remove</span>
+</button>
+<span class="w-10 text-center font-currency-display text-headline-h2 text-[#f9fafb] font-bold select-none">
+            4
+          </span>
+<button aria-label="Aumentar cantidad" class="w-11 h-11 flex items-center justify-center text-[#22c55e] active:bg-[#1f2937] rounded-r-lg transition-colors select-none" type="button">
+<span class="material-symbols-outlined text-[20px] font-bold">add</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Product Card 2 -->
+<div class="bg-[#111827] border border-[#374151] rounded-xl p-space-md shadow-md flex flex-col gap-space-sm relative">
+<div class="flex items-start gap-space-sm">
+<div class="w-16 h-16 rounded-lg bg-[#1f2937] border border-[#374151] shrink-0 overflow-hidden relative shadow-inner">
+<img class="w-full h-full object-cover" data-alt="Box of twelve 1-liter whole milk Tetra Pak cartons arranged neatly, clean commercial catalog shot, high-contrast packaging with crisp dairy branding on plain background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBusAzmyXHfAuc-pNQZBcd5UPwpp4_NuaHMJp47uYW3aqDcSSyuZfOg7wXJoNZQYySdHb2xGjQBFSZkQZjDQzlm-fr4pNPVfl-uDd-lyGhwZLzF24Ug4HISTCn_bLOVRXAth7mco6-7JQHoIqa5LiarmwJNsye7sYgof8CcDmAhxdXsFW5LtAL9yAZnLp9GS2pUruwNXz26gxfWFY711btiIkCTWQzLUgKHZwcNDpPtNvKeoqRpc4hOLw"/>
+</div>
+<div class="flex-1 min-w-0 flex flex-col">
+<div class="flex items-center justify-between gap-1 mb-0.5">
+<span class="font-currency-sm text-[11px] leading-tight px-1.5 py-0.5 rounded bg-[#1f2937] border border-[#374151] text-[#9ca3af] font-semibold">SKU-4402</span>
+<span class="font-label text-[11px] leading-none text-[#4ade80] font-bold flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-[#22c55e]"></span>
+              15 cajas disp.
+            </span>
+</div>
+<h2 class="font-headline-h2 text-body-1 font-bold text-[#f9fafb] leading-snug line-clamp-2">
+            Leche Entera UHT 1L (Caja x12)
+          </h2>
+<div class="mt-1 flex items-baseline gap-1">
+<span class="font-currency-display text-currency-display text-[#22c55e] font-bold">₲ 72.000</span>
+<span class="font-label text-label text-[#9ca3af]">/ caja</span>
+</div>
+</div>
+</div>
+<!-- Action & Stepper Row -->
+<div class="flex items-center justify-between pt-1 bg-[#1f2937]/70 border-t border-[#374151] -mx-space-md -mb-space-md p-space-md rounded-b-xl">
+<div class="flex items-center gap-1 text-[#9ca3af] font-label text-label">
+<span class="text-[#9ca3af]">Subtotal:</span>
+<span class="font-currency-sm text-currency-sm font-bold text-[#f9fafb]">₲ 144.000</span>
+</div>
+<div class="flex items-center bg-[#111827] border border-[#374151] rounded-lg shadow-sm">
+<button aria-label="Disminuir cantidad" class="w-11 h-11 flex items-center justify-center text-[#f9fafb] active:bg-[#1f2937] hover:text-[#22c55e] rounded-l-lg transition-colors select-none" type="button">
+<span class="material-symbols-outlined text-[20px]">remove</span>
+</button>
+<span class="w-10 text-center font-currency-display text-headline-h2 text-[#f9fafb] font-bold select-none">
+            2
+          </span>
+<button aria-label="Aumentar cantidad" class="w-11 h-11 flex items-center justify-center text-[#22c55e] active:bg-[#1f2937] rounded-r-lg transition-colors select-none" type="button">
+<span class="material-symbols-outlined text-[20px] font-bold">add</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Product Card 3 -->
+<div class="bg-[#111827] border border-[#374151] rounded-xl p-space-md shadow-md flex flex-col gap-space-sm relative">
+<div class="flex items-start gap-space-sm">
+<div class="w-16 h-16 rounded-lg bg-[#1f2937] border border-[#374151] shrink-0 overflow-hidden relative shadow-inner">
+<img class="w-full h-full object-cover" data-alt="Commercial packet of vanilla cream filled round sandwich biscuits snacks 120 grams in vibrant yellow and blue foil wrapping, commercial product photography" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC-XFfB1uJc31bswk5SKBzpSt4M84LOlpMEPtas1mcvauo8mpy5cy3XNqcELHLisfd_JeMmyP1RPa7Hjm8joghcQOhIg1eeo0_DJHMi9rrUmIFbkEE9nb1_PPF0YrxMkJgifJG1P3EwOgee98ZwSJ3BXLNeAR-EN1AUj-7TRl1Lou2qGIbedBHa_c-M2LCVxZK2LWsSYTAoz42lQpSHKxaKmfAQE47K7yQY9rmNMc_To8w4viZFbrEehw"/>
+</div>
+<div class="flex-1 min-w-0 flex flex-col">
+<div class="flex items-center justify-between gap-1 mb-0.5">
+<span class="font-currency-sm text-[11px] leading-tight px-1.5 py-0.5 rounded bg-[#1f2937] border border-[#374151] text-[#9ca3af] font-semibold">SKU-1184</span>
+<span class="font-label text-[11px] leading-none px-2 py-0.5 rounded-full bg-[#93000a]/40 border border-[#93000a] text-[#ffb4ab] font-bold flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-[#ffb4ab]"></span>
+              Bajo stock (4 unid)
+            </span>
+</div>
+<h2 class="font-headline-h2 text-body-1 font-bold text-[#f9fafb] leading-snug line-clamp-2">
+            Galletitas Rellenas Vainilla 120g
+          </h2>
+<div class="mt-1 flex items-baseline gap-1">
+<span class="font-currency-display text-currency-display text-[#22c55e] font-bold">₲ 3.500</span>
+<span class="font-label text-label text-[#9ca3af]">/ unid</span>
+</div>
+</div>
+</div>
+<!-- Action & Direct Add Button -->
+<div class="flex items-center justify-between pt-1 bg-[#1f2937]/70 border-t border-[#374151] -mx-space-md -mb-space-md p-space-md rounded-b-xl">
+<div class="flex items-center gap-1 text-[#9ca3af] font-label text-label">
+<span class="text-[#9ca3af]">Unidades sueltas</span>
+</div>
+<button class="h-11 px-5 rounded-lg bg-[#22c55e] text-[#003915] font-headline-h2 text-body-2 font-bold shadow-md hover:bg-[#4ade80] active:scale-95 transition-all flex items-center gap-1.5" id="quickAddBtn" type="button">
+<span class="material-symbols-outlined text-[18px]">add</span>
+          Agregar
+        </button>
+</div>
+</div>
+</div>
+<!-- Sticky Bottom Cart Summary Floating Bar -->
+<aside class="fixed bottom-16 inset-x-0 z-40 p-margin bg-gradient-to-t from-[#0a0f1a] via-[#0a0f1a]/90 to-transparent pointer-events-none">
+<div class="pointer-events-auto bg-[#111827] border border-[#374151] text-[#f9fafb] rounded-xl p-space-md shadow-[0_10px_25px_rgba(0,0,0,0.6)] flex items-center justify-between gap-space-sm">
+<div class="flex flex-col min-w-0">
+<div class="flex items-center gap-1 text-[#9ca3af] font-label text-label">
+<span class="material-symbols-outlined text-[15px] text-[#4ade80]" style="font-variation-settings: 'FILL' 1;">shopping_bag</span>
+<span>6 ítems seleccionados</span>
+</div>
+<span class="font-currency-display text-headline-h1 text-[#22c55e] font-bold tracking-tight">
+          ₲ 336.000
+        </span>
+</div>
+<button class="h-12 px-space-md rounded-xl bg-[#22c55e] text-[#003915] font-headline-h2 text-body-2 font-bold shadow-md hover:bg-[#4ade80] active:scale-95 transition-transform flex items-center justify-center gap-2 shrink-0" type="button">
+<span>Confirmar</span>
+<span class="material-symbols-outlined text-[20px]">arrow_forward</span>
+</button>
+</div>
+</aside>
+</div>
+<script>
+  (function() {
+    // Micro-interaction: Active tab sync with Shell Navigation
+    const navItems = document.querySelectorAll('nav a[data-path]');
+    navItems.forEach(item => {
+      if (item.getAttribute('data-path') === 'pedido') {
+        item.classList.remove('text-[#9ca3af]');
+        item.classList.add('text-[#22c55e]', 'font-bold');
+      } else {
+        item.classList.remove('text-[#22c55e]', 'font-bold');
+        item.classList.add('text-[#9ca3af]');
+      }
+    });
+
+    // Add gentle haptic bounce to quick add button
+    const quickAddBtn = document.getElementById('quickAddBtn');
+    if (quickAddBtn) {
+      quickAddBtn.addEventListener('click', function() {
+        this.innerHTML = '<span class="material-symbols-outlined text-[18px]">done</span> Añadido';
+        this.classList.remove('bg-[#22c55e]', 'text-[#003915]');
+        this.classList.add('bg-[#15803d]', 'text-white');
+        setTimeout(() => {
+          this.innerHTML = '<span class="material-symbols-outlined text-[18px]">add</span> 1 en carro';
+          this.classList.remove('bg-[#15803d]', 'text-white');
+          this.classList.add('bg-[#22c55e]', 'text-[#003915]');
+        }, 1200);
+      });
+    }
+  })();
+</script></main><nav class="fixed bottom-0 w-full z-50 pb-safe bg-[#0a0f1a]/95 backdrop-blur-xl border-t border-[#1f2937] shadow-[0_-2px_12px_rgba(0,0,0,0.5)]" data-active-classes="text-[#22c55e] font-bold"><div class="h-16 px-space-xs flex items-center justify-around"><a class="flex flex-col items-center justify-center flex-1 h-full min-w-[44px] min-h-[44px] text-[#9ca3af] hover:text-[#f9fafb] transition-colors" data-path="inicio" href="#"><span class="material-symbols-outlined text-[24px]">alt_route</span><span class="font-label text-label mt-0.5">Inicio</span></a><a aria-current="page" class="flex flex-col items-center justify-center flex-1 h-full min-w-[44px] min-h-[44px] transition-colors text-[#22c55e] font-bold" data-path="pedido" href="#"><span class="material-symbols-outlined text-[24px]">shopping_cart_checkout</span><span class="font-label text-label mt-0.5">Pedido</span></a><a class="flex flex-col items-center justify-center flex-1 h-full min-w-[44px] min-h-[44px] text-[#9ca3af] hover:text-[#f9fafb] transition-colors" data-path="360" href="#"><span class="material-symbols-outlined text-[24px]">badge</span><span class="font-label text-label mt-0.5">360</span></a><a class="flex flex-col items-center justify-center flex-1 h-full min-w-[44px] min-h-[44px] text-[#9ca3af] hover:text-[#f9fafb] transition-colors" data-path="metas" href="#"><span class="material-symbols-outlined text-[24px]">monitoring</span><span class="font-label text-label mt-0.5">Metas</span></a></div></nav></body></html>

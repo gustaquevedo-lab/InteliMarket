@@ -33,11 +33,31 @@ class MeResponse(BaseModel):
 class RouteStopResponse(BaseModel):
     customer_id: uuid.UUID
     razon_social: str
+    nombre_fantasia: Optional[str] = None
+    ruc: Optional[str] = None
+    ci: Optional[str] = None
+    codigo_interno: Optional[str] = None
     direccion: Optional[str] = None
     telefono: Optional[str] = None
     orden_visita: int
     route_id: uuid.UUID
     route_nombre: str
+    latitud: Optional[float] = None
+    longitud: Optional[float] = None
+    credito_limite: Optional[float] = 0.0
+    credito_usado: Optional[float] = 0.0
+    saldo_disponible: Optional[float] = 0.0
+    dias_plazo: Optional[int] = 30
+    documentos_vencidos: Optional[int] = 0
+    deuda_pendiente: Optional[float] = 0.0
+
+
+class UpdateCustomerLocationRequest(BaseModel):
+    lat: float
+    lng: float
+    motivo: str  # "cambio_local" | "precision_gps" | "deposito_alternativo" | "otro"
+    notas: Optional[str] = None
+    accuracy: Optional[float] = None
 
 
 class TopProduct(BaseModel):
@@ -56,12 +76,29 @@ class SuggestedProduct(BaseModel):
     linea_nombre: Optional[str] = None
 
 
+class PendingInvoice(BaseModel):
+    id: Optional[str] = None
+    numero: Optional[str] = None
+    fecha_emision: Optional[str] = None
+    fecha_vencimiento: Optional[str] = None
+    monto_total: float = 0.0
+    saldo_pendiente: float = 0.0
+    dias_atraso: int = 0
+    vencido: bool = False
+
+
 class Customer360Response(BaseModel):
     customer_id: uuid.UUID
     razon_social: str
+    nombre_fantasia: Optional[str] = None
     ruc: Optional[str] = None
+    ci: Optional[str] = None
+    codigo_interno: Optional[str] = None
     direccion: Optional[str] = None
     telefono: Optional[str] = None
+    email: Optional[str] = None
+    latitud: Optional[float] = None
+    longitud: Optional[float] = None
     credito_limite: float
     credito_usado: float
     saldo_disponible: float
@@ -69,9 +106,51 @@ class Customer360Response(BaseModel):
     cuentas_por_cobrar_pendiente: float
     documentos_vencidos: int
     cheques_en_cartera: float
-    ultimas_compras: list[dict]
+    cheques_rechazados: float = 0.0
+    pagares: float = 0.0
+    deuda_total_consolidada: float = 0.0
+    estado_credito: str = "normal"  # normal | moroso | bloqueado
+    facturas_pendientes: list[PendingInvoice] = []
+    ultimas_compras: list[dict] = []
     top_productos: list[TopProduct] = []
     sugerencias: list[SuggestedProduct] = []
+    marco_sugerencia: Optional[str] = None
+    marco_analisis: Optional[dict] = None
+
+
+class AttendancePunchRequest(BaseModel):
+    tipo: str  # entrada | salida | almuerzo_inicio | almuerzo_fin
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    accuracy: Optional[float] = None
+    foto_url: Optional[str] = None
+    notas: Optional[str] = None
+    battery_level: Optional[float] = None
+
+
+class AttendancePunchResponse(BaseModel):
+    ok: bool
+    punch_id: str
+    tipo: str
+    recorded_at: str
+    estado_jornada: str
+    mensaje: str
+
+
+class AttendanceTodayResponse(BaseModel):
+    estado_jornada: str  # sin_marcar | en_jornada | en_pausa | jornada_cerrada
+    hora_entrada: Optional[str] = None
+    hora_salida: Optional[str] = None
+    minutos_trabajados: int = 0
+    marcaciones: list[dict] = []
+    colaborador: dict = {}
+    metricas_empresa: dict = {}
+
+
+class TeamAttendanceResponse(BaseModel):
+    colaboradores: list[dict] = []
+    metricas: dict = {}
+    empresa: dict = {}
 
 
 class MobileOrderItem(BaseModel):

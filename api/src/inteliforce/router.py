@@ -22,6 +22,9 @@ from api.src.inteliforce.schemas import (
     CheckInRequest, CheckOutRequest,
     IncidentCreate,
     LotExpiryUpsert,
+    AttendancePunchRequest, AttendancePunchResponse,
+    AttendanceTodayResponse, TeamAttendanceResponse,
+    UpdateCustomerLocationRequest,
 )
 
 router = APIRouter(prefix="/api/v1/inteliforce", tags=["inteliforce"])
@@ -104,6 +107,23 @@ async def get_customer_360(customer_id: str, db: AsyncSession = Depends(get_db),
     if not result:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     return result
+
+
+@router.put("/customers/{customer_id}/location")
+async def update_customer_location(
+    customer_id: str,
+    data: UpdateCustomerLocationRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Actualiza las coordenadas GPS del cliente con motivo auditado."""
+    rep = await _current_rep(db, user)
+    return await service.update_customer_location(
+        db, str(rep.company_id), customer_id, rep,
+        lat=data.lat, lng=data.lng,
+        motivo=data.motivo, notas=data.notas, accuracy=data.accuracy,
+    )
+
 
 
 @router.post("/orders", status_code=status.HTTP_201_CREATED)
@@ -390,3 +410,49 @@ async def get_tracking_logs(
         {"company_id": user["company_id"], "hours": str(hours)},
     )
     return [dict(row._mapping) for row in result.fetchall()]
+
+
+# ── Asistencia y Gestión de Personal ──────────────────────────────────────────
+
+@router.post("/attendance/punch", response_model=AttendancePunchResponse, status_code=status.HTTP_201_CREATED)
+async def punch_attendance(
+    data: AttendancePunchRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Registra marcación de jornada (Entrada, Salida, Inicio de Almuerzo, Fin de Almuerzo)
+    con verificación de geolocalización GPS y estado de sincronización con SueldOK."""
+    rep = await _current_rep(db, user)
+    return await service.record_attendance_punch(
+        db, rep,
+        tipo=data.tipo,
+        lat=data.lat,
+        lng=data.lng,
+        accuracy=data.accuracy,
+        foto_url=data.foto_url,
+        notas=data.notas,
+        battery_level=data.battery_level,
+    )
+
+
+@router.get("/attendance/today", response_model=AttendanceTodayResponse)
+async def get_my_attendance_today(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Retorna el estado de jornada actual del colaborador conectado, horas trabajadas
+    y ficha de personal homologada con SueldOK."""
+    rep = await _current_rep(db, user)
+    return await service.get_attendance_today(db, rep)
+
+
+@router.get("/attendance/team", response_model=TeamAttendanceResponse)
+async def get_team_attendance(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Retorna el estado de asistencia en vivo de todo el equipo de campo (33 colaboradores
+    de Casa Gonzalito) directamente desde el hub de SueldOK."""
+    rep = await _current_rep(db, user)
+    return await service.get_team_attendance(db, rep)
+

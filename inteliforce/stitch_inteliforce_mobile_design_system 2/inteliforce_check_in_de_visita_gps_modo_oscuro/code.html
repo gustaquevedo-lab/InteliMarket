@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="es"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/><meta content="mobile_stack" name="shell-type"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { "colors": { "background": "#0a0f1a", "surface": "#111827", "surface-card": "#1f2937", "surface-border": "#374151", "text-primary": "#f9fafb", "text-secondary": "#9ca3af", "primary": "#22c55e", "primary-dark": "#16a34a", "primary-container": "#14532d", "on-primary": "#ffffff" }, "borderRadius": { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" }, "spacing": { "gutter": "1rem", "margin": "1rem", "space-lg": "1.5rem", "space-xs": "0.25rem", "space-md": "1rem", "space-xl": "2rem", "space-sm": "0.5rem" }, "fontFamily": { "currency-display": ["JetBrains Mono", "monospace"], "display": ["Inter", "sans-serif"], "body-2": ["Inter", "sans-serif"], "body-1": ["Inter", "sans-serif"], "headline-h2": ["Inter", "sans-serif"], "headline-h1": ["Inter", "sans-serif"], "label": ["Inter", "sans-serif"], "currency-sm": ["JetBrains Mono", "monospace"] }, "fontSize": { "currency-display": ["20px", { "lineHeight": "26px", "letterSpacing": "-0.02em", "fontWeight": "700" }], "display": ["28px", { "lineHeight": "36px", "fontWeight": "700" }], "body-2": ["14px", { "lineHeight": "20px", "fontWeight": "500" }], "body-1": ["16px", { "lineHeight": "24px", "fontWeight": "400" }], "headline-h2": ["18px", { "lineHeight": "24px", "fontWeight": "600" }], "headline-h1": ["22px", { "lineHeight": "28px", "fontWeight": "700" }], "label": ["12px", { "lineHeight": "16px", "letterSpacing": "0.04em", "fontWeight": "600" }], "currency-sm": ["14px", { "lineHeight": "18px", "fontWeight": "600" }] } } } }</script><style>@layer base{html,body{width:100vw;margin:0;padding:0;background-color:#0a0f1a;}body{overscroll-behavior:none;}.pb-safe{padding-bottom:env(safe-area-inset-bottom,0px);}.pt-safe{padding-top:env(safe-area-inset-top,0px);}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+</head><body class="bg-[#0a0f1a] font-body-1 text-[#f9fafb] flex flex-col min-h-screen antialiased"><header class="fixed top-0 w-full z-50 pt-safe bg-[#111827]/90 backdrop-blur-xl border-b border-[#374151]/50"><div class="h-16 px-margin flex items-center justify-between gap-space-sm"><div class="flex items-center gap-space-xs min-w-0"><button aria-label="Volver" class="w-11 h-11 flex items-center justify-center rounded-full text-[#f9fafb] hover:bg-[#1f2937] active:scale-95 transition-all shrink-0" onclick="history.back()"><span class="material-symbols-outlined text-[24px]">arrow_back</span></button>https://lh3.googleusercontent.com/aida/AEtjO1VqtLvBRzmDJaaXsuEqeOdCGAfWwh1mQZsrmA5csLea4DlCeaRW0bZeQtWwwfq-CDT5hylc4LPdW9M5SBgn2VUVKLER7m4hAotSrzEXwKfkBenXVVcP92B6ab3JL7yQSkRb9w1-CTxKU1wKnF8fQGhutBazjG-_ksJCAaIkwipBpspkdtY3Uw-9Dh52LJ3dJ-x-ti74rVZ0e3_b92yxXk8TglQKCuRimpGK5tIipl2wzKRJSoAyq-MRCFvM<h1 class="font-headline-h2 text-headline-h2 text-[#f9fafb] truncate ml-1">Check In Visita</h1></div><div class="w-8 h-8 rounded-full bg-[#16a34a] flex items-center justify-center shrink-0 ring-1 ring-[#22c55e]/40"><span class="material-symbols-outlined text-white text-[18px]">person</span></div></div></header><main class="flex-1 flex flex-col relative w-full pt-16 pb-safe bg-[#0a0f1a]"><div class="flex flex-col w-full px-margin pb-space-xl space-y-space-md">
+<!-- Client Card Header -->
+<div class="bg-[#111827] border border-[#374151] rounded-xl p-space-md shadow-lg relative overflow-hidden">
+<div class="absolute left-0 top-0 bottom-0 w-1.5 bg-[#22c55e]"></div>
+<div class="flex items-start justify-between gap-space-sm pl-space-xs">
+<div class="min-w-0 flex-1">
+<div class="flex items-center gap-space-xs mb-1">
+<span class="inline-flex items-center px-2 py-0.5 rounded-full text-label font-label bg-[#1e293b] text-[#93c5fd] border border-[#3b82f6]/30">
+            RUC: 80045291-3
+          </span>
+<span class="inline-flex items-center px-2 py-0.5 rounded-full text-label font-label bg-[#14532d] text-[#86efac] border border-[#22c55e]/30">
+            Tier Gold
+          </span>
+</div>
+<h2 class="font-headline-h1 text-headline-h1 text-[#f9fafb] truncate">Comercial San Cayetano S.R.L.</h2>
+<p class="font-body-2 text-body-2 text-[#9ca3af] flex items-center gap-1 mt-0.5">
+<span class="material-symbols-outlined text-[16px] text-[#9ca3af]">location_on</span>
+<span class="truncate">Av. Carlos Antonio López 452</span>
+</p>
+<p class="font-label text-label text-[#9ca3af] mt-1.5 flex items-center gap-1">
+<span class="material-symbols-outlined text-[15px] text-[#60a5fa]">person</span>
+<span>Don Rogelio Benítez • Tel: 0981-234-567</span>
+</p>
+</div>
+<a aria-label="Llamar al cliente" class="w-11 h-11 rounded-full bg-[#1f2937] border border-[#374151] flex items-center justify-center text-[#22c55e] shrink-0 active:scale-95 hover:bg-[#374151] transition-transform" href="tel:0981234567">
+<span class="material-symbols-outlined text-[20px]">phone</span>
+</a>
+</div>
+</div>
+<!-- Interactive GPS Map View Container -->
+<div class="relative w-full h-[260px] rounded-xl overflow-hidden shadow-lg bg-[#111827] border border-[#374151]">
+<!-- Map Background Rendering with Geofence Overlay -->
+<div class="absolute inset-0 bg-cover bg-center brightness-[0.8] contrast-[1.1]" data-alt="Aerial satellite map view of Latin American city retail avenue with streets, storefronts, asphalt roads, building rooftops, and soft green terrain, rendered with clean navigational cartography aesthetics." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuA-I-i3RV_d22HTnYJnVmVEPqf78P2nIf_htNEfAaWPY5Djc3PCQ0mikfrnLUh7erX2C0CwnHQS5C0y-zF3PemS_3rdJjxDUoYpHB4dPe2sDqoPZj8c9HvFtBg6aOlNLhFV5a88Jx9aUglDzDnCVc3niojHLZOqJnEoEY2iMaRL7s6fjRHRVWY4swd-4QUfflRJ0YTRjQc6OXZ7hCZ9TXI0v6Hzx4UNqMWj2KpKfwQSzFtFZBkgpEzivA')"></div>
+<div class="absolute inset-0 bg-gradient-to-t from-[#0a0f1a]/95 via-transparent to-[#0a0f1a]/40 pointer-events-none"></div>
+<!-- Geofence 50m Simulated Graphic Overlay -->
+<div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+<!-- 50m Radius Boundary Circle with Pulse -->
+<div class="relative flex items-center justify-center">
+<div class="w-56 h-56 rounded-full bg-[#22c55e]/20 animate-ping absolute opacity-40"></div>
+<div class="w-52 h-52 rounded-full bg-[#22c55e]/25 border border-[#22c55e]/50 backdrop-blur-[0.5px] flex items-center justify-center">
+<div class="w-40 h-40 rounded-full bg-[#22c55e]/15"></div>
+</div>
+<!-- Rep Real-time Position (Green Pulsating Dot with Directional Heading) -->
+<div class="absolute -bottom-4 right-10 flex flex-col items-center">
+<div class="relative flex items-center justify-center">
+<span class="absolute w-6 h-6 rounded-full bg-[#22c55e] animate-ping opacity-60"></span>
+<div class="w-5 h-5 rounded-full bg-[#16a34a] shadow-md flex items-center justify-center ring-2 ring-white">
+<span class="w-2 h-2 rounded-full bg-white"></span>
+</div>
+</div>
+<span class="font-label text-[10px] bg-[#111827]/95 border border-[#374151] text-[#f9fafb] px-1.5 py-0.5 rounded-full mt-1 font-semibold shadow">Tú (18m)</span>
+</div>
+<!-- Client POI Target Pin (Blue InteliMarket Pin) -->
+<div class="absolute flex flex-col items-center transform -translate-y-6">
+<div class="w-11 h-11 rounded-full bg-[#1d4ed8] ring-2 ring-[#3b82f6] shadow-xl flex items-center justify-center">
+<div class="w-8 h-8 rounded-full bg-[#111827] flex items-center justify-center">
+<span class="material-symbols-outlined text-[#60a5fa] text-[20px]" style="font-variation-settings: 'FILL' 1;">storefront</span>
+</div>
+</div>
+<div class="w-2 h-2 bg-[#1d4ed8] rotate-45 -mt-1 shadow-sm"></div>
+<div class="mt-1 px-2 py-0.5 rounded-md bg-[#111827]/95 border border-[#374151] text-[#f9fafb] text-label font-label shadow flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-[#22c55e] animate-pulse"></span>
+            Punto de Venta
+          </div>
+</div>
+</div>
+</div>
+<!-- Map Floating Controls & Distance Badge -->
+<div class="absolute top-3 left-3 right-3 flex items-center justify-between">
+<div class="px-2.5 py-1.5 rounded-lg bg-[#111827]/90 backdrop-blur-md border border-[#374151] shadow-sm flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[18px] text-[#22c55e]">verified</span>
+<span class="font-label text-label text-[#f9fafb] font-semibold">Geocerca Activa (50m)</span>
+</div>
+<button aria-label="Centrar ubicación" class="w-9 h-9 rounded-lg bg-[#111827]/90 backdrop-blur-md border border-[#374151] shadow-sm flex items-center justify-center text-[#f9fafb] active:scale-95 transition-transform hover:bg-[#1f2937]">
+<span class="material-symbols-outlined text-[20px]">my_location</span>
+</button>
+</div>
+<!-- Distance Notification Strip at Map Bottom -->
+<div class="absolute bottom-3 left-3 right-3 bg-[#111827]/95 backdrop-blur-md border border-[#374151] rounded-lg p-2.5 shadow-md flex items-center justify-between">
+<div class="flex items-center gap-2 min-w-0">
+<div class="w-7 h-7 rounded-full bg-[#14532d] border border-[#22c55e]/40 flex items-center justify-center text-[#86efac] shrink-0">
+<span class="material-symbols-outlined text-[16px]">near_me</span>
+</div>
+<div class="min-w-0">
+<p class="font-body-2 text-body-2 font-semibold text-[#f9fafb] truncate">Distancia al local: 18 metros</p>
+<p class="font-label text-[11px] text-[#22c55e] font-medium">✓ Dentro del rango permitido (radio 50m)</p>
+</div>
+</div>
+<span class="font-currency-sm text-currency-sm text-[#22c55e] font-bold shrink-0">18 m</span>
+</div>
+</div>
+<!-- GPS Accuracy Status Card -->
+<div class="bg-[#111827] border border-[#374151] rounded-xl p-space-md shadow-lg space-y-2.5">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="w-8 h-8 rounded-lg bg-[#14532d] border border-[#22c55e]/40 flex items-center justify-center text-[#86efac]">
+<span class="material-symbols-outlined text-[18px]">satellite_alt</span>
+</span>
+<div>
+<div class="flex items-center gap-1.5">
+<span class="font-headline-h2 text-body-2 font-bold text-[#f9fafb]">GPS de alta precisión activo</span>
+<span class="w-2 h-2 rounded-full bg-[#22c55e] animate-pulse"></span>
+</div>
+<p class="font-label text-label text-[#9ca3af]">Tolerancia estimada: ±12m de precisión</p>
+</div>
+</div>
+<span class="px-2 py-1 rounded bg-[#1f2937] border border-[#374151] text-label font-label text-[#f9fafb] font-semibold">
+        100% Satélite
+      </span>
+</div>
+<div class="bg-[#1f2937] border border-[#374151]/60 rounded-lg p-2.5 flex items-center justify-between text-[#9ca3af] font-label text-label">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px] text-[#9ca3af]">schedule</span>
+<span>Hora detectada: <strong class="text-[#f9fafb]">10:42 AM</strong></span>
+</div>
+<span class="text-[#9ca3af] text-[11px]">Sincronizado vía red celular</span>
+</div>
+</div>
+<!-- State C Main Action Component: Enabled Check-In Button (64dp height) -->
+<div class="w-full">
+<button class="w-full min-h-[64px] h-16 py-2 px-4 rounded-xl bg-[#16a34a] hover:bg-[#22c55e] text-white shadow-lg shadow-green-950/40 active:scale-[0.98] transition-all flex flex-col items-center justify-center text-center select-none group" id="btnCheckIn">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[22px] transition-transform group-hover:scale-110">task_alt</span>
+<span class="font-headline-h2 text-headline-h2 font-bold tracking-wide text-white">CONFIRMAR CHECK-IN DE VISITA</span>
+</div>
+<span class="font-label text-label text-white/90 font-medium">Precisión: ±12m • Dentro de perímetro</span>
+</button>
+</div>
+<!-- Check-in Success Banner Toast (Hidden by default, triggered on click) -->
+<div class="hidden bg-[#16a34a] text-white p-space-md rounded-xl shadow-xl flex items-center justify-between gap-space-sm border border-[#22c55e]" id="successCheckinToast">
+<div class="flex items-center gap-2.5">
+<span class="material-symbols-outlined text-[24px]">verified</span>
+<div>
+<p class="font-headline-h2 text-body-2 font-bold">¡Check-in Certificado!</p>
+<p class="font-label text-label opacity-90">Iniciando catálogo comercial...</p>
+</div>
+</div>
+<span class="material-symbols-outlined animate-spin text-[20px]">sync</span>
+</div>
+<!-- Alternative States Reference Widget (UX Clarity for Field Reps) -->
+<div class="bg-[#111827] border border-[#374151] rounded-xl p-space-md shadow-lg space-y-space-sm">
+<div class="flex items-center justify-between">
+<h3 class="font-label text-label font-bold text-[#f9fafb] tracking-wider uppercase flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px] text-[#9ca3af]">info</span>
+        Monitoreo de Estados de Ubicación
+      </h3>
+<span class="font-label text-[11px] text-[#9ca3af] font-semibold">Guía Operativa</span>
+</div>
+<div class="grid grid-cols-1 gap-2 pt-1">
+<!-- State A: Pending GPS -->
+<div class="p-2.5 rounded-lg bg-[#1f2937] border border-[#374151]/70 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="w-2.5 h-2.5 rounded-full bg-[#60a5fa] animate-ping"></span>
+<div>
+<p class="font-body-2 text-body-2 font-semibold text-[#f9fafb]">Estado A: Obteniendo GPS...</p>
+<p class="font-label text-[11px] text-[#9ca3af]">Calibrando señal de antenas satelitales</p>
+</div>
+</div>
+<span class="px-2 py-0.5 rounded text-label font-label bg-[#1e293b] text-[#93c5fd] border border-[#3b82f6]/30">Esperando</span>
+</div>
+<!-- State B: Out of Range -->
+<div class="p-2.5 rounded-lg bg-[#1f2937] border border-[#374151]/70 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[#f87171] text-[18px]">wrong_location</span>
+<div>
+<p class="font-body-2 text-body-2 font-semibold text-[#f9fafb]">Estado B: Fuera de rango (&gt;50m)</p>
+<p class="font-label text-[11px] text-[#f87171]">Acérquese a la coordenada de la tienda</p>
+</div>
+</div>
+<span class="px-2 py-0.5 rounded text-label font-label bg-[#450a0a] text-[#fca5a5] border border-[#ef4444]/30">Bloqueado</span>
+</div>
+<!-- State D: Offline Fallback with PIN -->
+<div class="p-2.5 rounded-lg bg-[#1f2937] border border-[#374151]/70 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[#9ca3af] text-[18px]">lock_clock</span>
+<div>
+<p class="font-body-2 text-body-2 font-semibold text-[#f9fafb]">Estado D: Check-in Forzado Offline</p>
+<p class="font-label text-[11px] text-[#9ca3af]">Requiere PIN maestro del supervisor</p>
+</div>
+</div>
+<button class="px-2.5 py-1 rounded text-label font-label bg-[#374151] hover:bg-[#4b5563] text-[#f9fafb] active:bg-[#4b5563] font-semibold border border-[#4b5563]">
+          Pedir PIN
+        </button>
+</div>
+</div>
+</div>
+<!-- Security & Audit Certification Note -->
+<div class="flex items-start gap-2.5 px-2 py-1">
+<span class="material-symbols-outlined text-[18px] text-[#9ca3af] shrink-0 mt-0.5">shield</span>
+<p class="font-label text-label text-[#9ca3af] leading-tight">
+      Visita auditada por geolocalización continua. Los datos de proximidad y estampa de tiempo se certificarán con el sello digital criptográfico InteliMarket®.
+    </p>
+</div>
+</div>
+<script>
+  const checkInBtn = document.getElementById('btnCheckIn');
+  const toast = document.getElementById('successCheckinToast');
+
+  if (checkInBtn && toast) {
+    checkInBtn.addEventListener('click', () => {
+      checkInBtn.disabled = true;
+      checkInBtn.classList.add('opacity-70');
+      checkInBtn.innerHTML = `
+        <div class="flex items-center gap-2">
+          <span class="material-symbols-outlined text-[20px] animate-spin">refresh</span>
+          <span class="font-headline-h2 text-headline-h2 font-bold">CERTIFICANDO VISITA...</span>
+        </div>
+      `;
+
+      setTimeout(() => {
+        toast.classList.remove('hidden');
+        toast.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 700);
+    });
+  }
+</script></main></body></html>
