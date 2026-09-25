@@ -16,7 +16,7 @@ interface PosStaffMember {
   en_turno: boolean
 }
 
-const POS_ALLOWED_ROLES = ["cajero", "supervisor"]
+const POS_ALLOWED_ROLES = ["cajero", "cajera", "cajero/a", "supervisor", "admin"]
 
 // Orbs animados para el fondo
 function BackgroundOrbs() {
@@ -238,7 +238,9 @@ export default function Login() {
     try {
       await login(selectedStaff.email, posPassword)
       const me = await api.auth.me()
-      if (!POS_ALLOWED_ROLES.includes(me.rol)) {
+      const meRol = (me.rol || "").toLowerCase().trim()
+      const isAllowed = POS_ALLOWED_ROLES.includes(meRol) || meRol.includes("cajer") || meRol.includes("supervis") || meRol.includes("admin")
+      if (!isAllowed) {
         logout()
         setPosError("Solo cajeros y supervisores pueden ingresar a la caja.")
         setPosLoading(false)

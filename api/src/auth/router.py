@@ -4,7 +4,7 @@ import secrets
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
-from sqlalchemy import select, update, delete, text
+from sqlalchemy import select, update, delete, text, or_
 from sqlalchemy.sql import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -196,7 +196,8 @@ async def verify_supervisor(
     if not user or not user.activo or not verify_password(body.password, user.password_hash):
         return VerifySupervisorResponse(valid=False)
 
-    if user.rol not in ("admin", "supervisor") and not user.is_superadmin:
+    r = (user.rol or "").lower().strip()
+    if not ("admin" in r or "supervisor" in r or "gerente" in r) and not user.is_superadmin:
         return VerifySupervisorResponse(valid=False)
 
     return VerifySupervisorResponse(valid=True, id=str(user.id), nombre=user.nombre, rol=user.rol)
@@ -223,7 +224,8 @@ async def set_pos_pin(
     if not user or not user.activo:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
-    if user.rol not in ("admin", "supervisor") and not user.is_superadmin:
+    r = (user.rol or "").lower().strip()
+    if not ("admin" in r or "supervisor" in r or "gerente" in r) and not user.is_superadmin:
         raise HTTPException(status_code=403, detail="Solo cuentas de supervisor o administrador pueden configurar un PIN de autorizaciones.")
 
     user.pos_pin_hash = hash_password(body.pin)
@@ -245,7 +247,12 @@ async def pos_supervisor_pins(
     la contrasena real (ver set_pos_pin)."""
     result = await db.execute(
         select(User).where(
-            User.rol.in_(["admin", "supervisor"]),
+            or_(
+                func.lower(User.rol).like("%admin%"),
+                func.lower(User.rol).like("%supervisor%"),
+                func.lower(User.rol).like("%gerente%"),
+                User.is_superadmin == True,
+            ),
             User.activo == True,
             User.pos_pin_hash.isnot(None),
         )
@@ -265,7 +272,14 @@ async def list_pos_staff(db: AsyncSession = Depends(get_db)):
     ni nada sensible); el login real sigue exigiendo contraseña."""
     result = await db.execute(
         select(User)
-        .where(User.rol.in_(["cajero", "cajera", "supervisor"]), User.activo == True)
+        .where(
+            or_(
+                func.lower(User.rol).like("%cajer%"),
+                func.lower(User.rol).like("%supervisor%"),
+                func.lower(User.rol).in_(["cajero", "cajera", "supervisor", "cajero/a"]),
+            ),
+            User.activo == True,
+        )
         .order_by(User.nombre)
     )
     users = result.scalars().all()
@@ -297,7 +311,13 @@ async def list_pos_supervisors(db: AsyncSession = Depends(get_db)):
     el panel de supervisoras, no de administradores."""
     result = await db.execute(
         select(User)
-        .where(User.rol == "supervisor", User.activo == True)
+        .where(
+            or_(
+                func.lower(User.rol).like("%supervisor%"),
+                func.lower(User.rol) == "supervisor",
+            ),
+            User.activo == True,
+        )
         .order_by(User.nombre)
     )
     users = result.scalars().all()
@@ -318,7 +338,12 @@ async def list_pos_authorizers(
     result = await db.execute(
         select(User)
         .where(
-            (User.rol.in_(["supervisor", "admin", "gerente"])) | (User.is_superadmin == True),
+            or_(
+                func.lower(User.rol).like("%supervisor%"),
+                func.lower(User.rol).like("%admin%"),
+                func.lower(User.rol).like("%gerente%"),
+                User.is_superadmin == True,
+            ),
             User.activo == True,
         )
         .order_by(User.nombre)
@@ -586,12 +611,22 @@ async def admin_create_user(
         generated = secrets.token_urlsafe(9)
         password = generated
 
+    clean_rol = (body.rol or "").strip().lower()
+    if "cajer" in clean_rol:
+        clean_rol = "cajero"
+    elif "supervis" in clean_rol:
+        clean_rol = "supervisor"
+    elif "admin" in clean_rol:
+        clean_rol = "admin"
+    else:
+        clean_rol = body.rol
+
     user = User(
         email=body.email,
         password_hash=hash_password(password),
         nombre=body.nombre,
         telefono=body.telefono,
-        rol=body.rol,
+        rol=clean_rol,
         foto_url=body.foto_url,
         activo=True,
     )
@@ -601,7 +636,7 @@ async def admin_create_user(
     user_tenant = UserTenant(
         user_id=user.id,
         tenant_id=tenant_id,
-        rol=body.rol,
+        rol=clean_rol,
     )
     db.add(user_tenant)
 
@@ -657,9 +692,18 @@ async def admin_update_user(
     if body.activo is not None:
         values["activo"] = body.activo
     if body.rol is not None:
-        values["rol"] = body.rol
+        clean_rol = body.rol.strip().lower()
+        if "cajer" in clean_rol:
+            clean_rol = "cajero"
+        elif "supervis" in clean_rol:
+            clean_rol = "supervisor"
+        elif "admin" in clean_rol:
+            clean_rol = "admin"
+        else:
+            clean_rol = body.rol
+        values["rol"] = clean_rol
         if user_tenant:
-            user_tenant.rol = body.rol
+            user_tenant.rol = clean_rol
     if body.foto_url is not None:
         values["foto_url"] = body.foto_url
 

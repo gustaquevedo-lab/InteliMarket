@@ -638,9 +638,17 @@ function UserModal({ user, roles, onClose, onSubmit, submitting }: UserModalProp
   const handleRoleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selected = roleOptions.find(r => r.id === e.target.value)
     if (roles.length > 0) {
-      // Usando roles de BD: id es UUID, guardamos también un rol legible
+      // Usando roles de BD: id es UUID, guardamos también el rol canónico
       setRoleId(e.target.value)
-      setRol(selected?.name || e.target.value)
+      const roleName = (selected?.name || e.target.value).toLowerCase()
+      const normalizedSlug = roleName.includes("cajer")
+        ? "cajero"
+        : roleName.includes("supervis")
+        ? "supervisor"
+        : roleName.includes("admin")
+        ? "admin"
+        : (selected?.name || e.target.value)
+      setRol(normalizedSlug)
     } else {
       // Usando fallback estático: id es el slug del rol
       setRol(e.target.value)
