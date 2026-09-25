@@ -241,7 +241,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             dedup_window_seconds = 15   # 15s para 1 item en efectivo (doble clic)
 
         incoming_items_tuples = sorted([
-            (str(it.product_id), float(it.cantidad), float(it.precio_unitario))
+            (str(it.product_id or it.descripcion or ""), float(it.cantidad), float(it.precio_unitario))
             for it in data.items
         ])
         items_sig = hashlib.sha256(json.dumps(incoming_items_tuples).encode()).hexdigest()[:16]
@@ -434,8 +434,14 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
                     if reg_id and sess_row.register_id != reg_id:
                         sess_row.register_id = reg_id
 
+    is_admin_invoice = bool(
+        getattr(data, "es_administrativa", False)
+        or (data.punto_emision and ("011" in data.punto_emision or data.punto_emision == "001-011"))
+    )
+
     # Si aún no tiene sesión y tenemos user_id, auto-abrir la sesión de jornada para el cajero
-    if not effective_session_id and data.user_id:
+    # No aplica a facturas administrativas (se liquidan directo en Bóveda / Banco sin crear sesión de cajero nómada)
+    if not effective_session_id and data.user_id and not is_admin_invoice:
         if not reg_id:
             reg_res = await db.execute(
                 select(CashRegister.id)
@@ -479,7 +485,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
 
     # ── Validación de cordura previa para productos pesables (> 300 KG requiere autorización) ──
     for item_data in data.items:
-        if item_data.cantidad > Decimal("300"):
+        if item_data.product_id and item_data.cantidad > Decimal("300"):
             prod_stmt = select(Product).where(Product.id == item_data.product_id)
             prod_res = await db.execute(prod_stmt)
             prod_row = prod_res.scalar_one_or_none()
@@ -612,7 +618,31 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             ))
         except Exception as don_err:
             # Fallback seguro: no bloquear la venta si falla el log de donación
-            print(f"[DONACIONES] Advertencia registrando donacion: {don_err}")
+            logger.warning("Advertencia registrando donacion: %s", don_err)
+
+    # ── Liquidación de Factura Administrativa (Directo a Bóveda Central o Bancos) ──
+    if is_admin_invoice:
+        destino = (getattr(data, "destino_pago", None) or "boveda").lower()
+        if destino == "boveda" and not is_credito:
+            from api.src.caja.models import VaultEntry
+            obs_boveda = f"Cobro Factura Administrativa {sale.numero} (Punto {punto_emision_code or '011'}) - Destino Bóveda."
+            if sale.observaciones:
+                obs_boveda += f" Obs: {sale.observaciones}"
+            ve = VaultEntry(
+                company_id=sale.company_id,
+                branch_id=sale.branch_id,
+                origen="factura_admin",
+                monto_pyg=sale.total,
+                monto_usd=Decimal("0"),
+                monto_brl=Decimal("0"),
+                estado="en_boveda",
+                registrado_por=sale.user_id,
+                observaciones=obs_boveda.strip(),
+            )
+            db.add(ve)
+        elif destino in ("deposito", "transferencia", "otro") and getattr(data, "destino_referencia", None):
+            ref_info = f" [Destino: {destino.upper()} - Ref: {data.destino_referencia}]"
+            sale.observaciones = f"{(sale.observaciones or '').strip()}{ref_info}".strip()
 
     if is_credito:
         if not data.customer_id:
@@ -692,6 +722,8 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
 
 async def _deduct_stock_for_sale(db: AsyncSession, sale: Sale, data: SaleCreate) -> None:
     for item_data in data.items:
+        if not item_data.product_id:
+            continue
         qty_to_deduct = int(item_data.cantidad)
         warehouse_id = None
 

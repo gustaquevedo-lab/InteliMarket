@@ -67,7 +67,7 @@ class SaleItem(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     sale_id = Column(UUID(as_uuid=True), ForeignKey("sales.id"), nullable=False)
-    product_id = Column(UUID(as_uuid=True), nullable=False)
+    product_id = Column(UUID(as_uuid=True), nullable=True)
     variant_id = Column(UUID(as_uuid=True))
     descripcion = Column(String(300))
     cantidad = Column(Numeric(10, 3), nullable=False)

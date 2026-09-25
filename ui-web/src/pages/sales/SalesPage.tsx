@@ -10,8 +10,10 @@ import { api, type Sale, type Customer } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { useConfirm } from "../../components/ConfirmDialog"
 import { formatPYG, formatDate } from "../../utils/format"
+import { useAuth } from "../../context/AuthContext"
 import FacturaA4Modal from "./FacturaA4Modal"
 import Rg90ExportModal from "./Rg90ExportModal"
+import EmitirFacturaAdminModal from "./EmitirFacturaAdminModal"
 
 type SalesTab = "comprobantes" | "cierres_caja" | "notas_credito" | "extra_club_credito"
 type StatusFilter = "todas" | "contado" | "credito" | "canceladas"
@@ -77,6 +79,14 @@ export default function SalesPage() {
   const [paymentBreakdown, setPaymentBreakdown] = useState<{ forma_pago: string; monto: number; cantidad: number }[]>([])
   const [loadingBreakdown, setLoadingBreakdown] = useState(false)
   const [rates, setRates] = useState({ BRL: 1380, USD: 7550 })
+  const [showEmitirAdminModal, setShowEmitirAdminModal] = useState(false)
+
+  const { user } = useAuth()
+  const isAdmin = !!user && (
+    user.is_superadmin ||
+    ["admin", "administracion", "gerente", "supervisor"].includes((user.rol || "").toLowerCase()) ||
+    ["admin", "administracion"].includes(((user as any)?.tenant_rol || "").toLowerCase())
+  )
 
   const toast = useToast()
   const confirm = useConfirm()
@@ -301,6 +311,15 @@ export default function SalesPage() {
           </div>
 
           <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            {isAdmin && (
+              <button
+                onClick={() => setShowEmitirAdminModal(true)}
+                className="px-4 py-2.5 rounded-xl text-xs font-extrabold text-white bg-gradient-to-r from-blue-600 via-indigo-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-500 border border-blue-400/40 shadow-lg shadow-blue-600/30 transition flex items-center gap-2 cursor-pointer"
+              >
+                <Plus className="w-4 h-4 text-white" />
+                Nueva Factura (001-011)
+              </button>
+            )}
             <button
               onClick={() => setShowRg90Modal(true)}
               className="px-4 py-2.5 rounded-xl text-xs font-bold text-emerald-300 hover:text-white bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/40 backdrop-blur-md transition flex items-center gap-2 shadow-sm shadow-emerald-950/40 cursor-pointer"
@@ -821,6 +840,17 @@ export default function SalesPage() {
           </div>
         </div>
       )}
+      {/* ── MODAL EMISIÓN DE FACTURA ADMINISTRATIVA (001-011) ───────────────── */}
+      {showEmitirAdminModal && (
+        <EmitirFacturaAdminModal
+          onClose={() => setShowEmitirAdminModal(false)}
+          onSuccess={(newSale) => {
+            setViewingSale(newSale)
+            fetchData()
+          }}
+        />
+      )}
+
       {/* ── MODAL LIBRO DE VENTAS RG 90 (DNIT / MARANGATÚ) ───────────────────── */}
       <Rg90ExportModal
         isOpen={showRg90Modal}

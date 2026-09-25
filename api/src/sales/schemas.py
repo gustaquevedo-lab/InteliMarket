@@ -8,7 +8,7 @@ from decimal import Decimal
 
 
 class SaleItemInput(BaseModel):
-    product_id: UUID
+    product_id: Optional[UUID] = None
     variant_id: Optional[UUID] = None
     descripcion: Optional[str] = None
     cantidad: Decimal = Field(ge=Decimal("0.001"))
@@ -47,6 +47,9 @@ class SaleCreate(BaseModel):
     monto_donacion: Optional[Decimal] = Decimal("0")
     donacion_campana: Optional[str] = None
     donacion_ong: Optional[str] = None
+    es_administrativa: Optional[bool] = False
+    destino_pago: Optional[str] = "boveda"  # boveda | deposito | transferencia | otro
+    destino_referencia: Optional[str] = None
 
 
 class SaleResponse(BaseModel):
