@@ -101,7 +101,7 @@ def regla_zpl(cfg) -> str:
     return "".join(L)
 
 
-def calibrar_medio(tipo: str) -> str:
+def calibrar_medio(tipo: str, cfg=None) -> str:
     """Le pide a la impresora que aprenda el paso del papel que tiene puesto.
 
     Hace falta cada vez que se cambia de rollo: sin esto la impresora no
@@ -109,7 +109,28 @@ def calibrar_medio(tipo: str) -> str:
     trabajo -- parpadean y no imprimen.
     """
     if tipo == "zebra_zpl":
-        return "~JC"          # calibracion de medio de Zebra
+        ancho_mm = _num(getattr(cfg, "ancho_mm", None), 105.0)
+        alto_mm = _num(getattr(cfg, "alto_mm", None), 30.0)
+        dx = _num(getattr(cfg, "dpmm_x", None), 8.0) or 8.0
+        dy = _num(getattr(cfg, "dpmm_y", None), 8.0) or 8.0
+        off_y = _num(getattr(cfg, "offset_vertical_mm", None), -2.0)
+        if off_y == 0.0:
+            off_y = -2.0
+
+        ancho_dots = min(int(round(ancho_mm * dx)), MAX_ANCHO_DOTS)
+        alto_dots = int(round(alto_mm * dy))
+        lt_dots = int(round(off_y * dy))
+        lt_cmd = f"^LT{lt_dots}"
+
+        # Secuencia maestra completa:
+        # ^MTD: Térmica Directa
+        # ^MNY: Modo Gap/Web (no continuo ni black mark)
+        # ^PW: Ancho del cabezal en dots
+        # ^LL: Largo en dots
+        # ^LT: Desplazamiento hacia arriba para no pisar troquel
+        # ~JC: Calibración del sensor óptico
+        # ^JUS: Guardar permanente en memoria de la impresora
+        return f"^XA^MTD^MNY^PW{ancho_dots}^LL{alto_dots}{lt_cmd}~JC^JUS^XZ"
     return "GAPDETECT\r\n"   # equivalente en TSPL para la Pantum
 
 
@@ -125,7 +146,7 @@ def config_impresora(tipo: str) -> str:
     return "SELFTEST\r\n"
 
 
-def prueba_minima(tipo: str) -> str:
+def prueba_minima(tipo: str, cfg=None) -> str:
     """El trabajo mas simple posible que la impresora deberia entender.
 
     Sirve para separar dos causas cuando "no imprime": si esto SALE, el camino
@@ -134,5 +155,6 @@ def prueba_minima(tipo: str) -> str:
     diseno.
     """
     if tipo == "zebra_zpl":
-        return "^XA^FO40,40^A0N,40,40^FDPRUEBA OK^FS^XZ"
+        return "^XA^PW832^LL240^FO50,50^A0N,36,36^FDINTELIMARKET - PRUEBA OK^FS^FO50,110^A0N,24,24^FDZebra ZD220 Calibrada^FS^XZ"
     return 'SIZE 105 mm,22 mm\r\nGAP 2 mm,0\r\nCLS\r\nTEXT 40,40,"3",0,1,1,"PRUEBA OK"\r\nPRINT 1,1\r\n'
+
