@@ -114,7 +114,6 @@ from api.src.sales_agent.router import router as sales_agent_router
 from api.src.risk_agent.router import router as risk_agent_router
 from api.src.marketing_agent.router import router as marketing_agent_router
 from api.src.general_agent.router import router as general_agent_router
-from api.src.nemuha_connector.router import router as nemuha_connector_router
 from api.src.fiscal.router import router as fiscal_router
 from api.src.distribuidora.router import router as distribuidora_router
 from api.src.distribuidora.tracking_router import router as distribuidora_tracking_router
@@ -471,7 +470,6 @@ app.include_router(sales_agent_router)
 app.include_router(risk_agent_router)
 app.include_router(marketing_agent_router)
 app.include_router(general_agent_router)
-app.include_router(nemuha_connector_router)
 app.include_router(marketing_router)
 app.include_router(data_migration_router)
 app.include_router(distribuidora_router)
