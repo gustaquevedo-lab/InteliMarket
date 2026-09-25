@@ -11,6 +11,7 @@ from api.src.finance_agent.schemas import (
     TriggerRunRequest, FinanceAgentRunResponse, FinanceRecommendationResponse, DecisionRequest, BulkDecisionRequest,
     LiquidityControlTower, InterAgentSyncResponse, CashFlowForecastResponse, FinanceChatRequest, FinanceChatResponse
 )
+from typing import Any as FinanceExecutiveSummaryResponse  # schema pendiente
 
 router = APIRouter(prefix="/api/v1/finance-agent", tags=["finance-agent"])
 
