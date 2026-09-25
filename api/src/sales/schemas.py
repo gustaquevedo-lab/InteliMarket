@@ -50,6 +50,10 @@ class SaleCreate(BaseModel):
     es_administrativa: Optional[bool] = False
     destino_pago: Optional[str] = "boveda"  # boveda | deposito | transferencia | otro
     destino_referencia: Optional[str] = None
+    customer_nombre: Optional[str] = None
+    customer_doc: Optional[str] = None
+    customer_direccion: Optional[str] = None
+    customer_telefono: Optional[str] = None
 
 
 class SaleResponse(BaseModel):

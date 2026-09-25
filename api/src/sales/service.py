@@ -504,11 +504,58 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
         or any(p.forma_pago in ("EXTRA_CLUB", "CREDITO") for p in (data.payments or []))
     )
 
+    # ── RESOLUCIÓN INTELIGENTE DEL CLIENTE (GARANTÍA DE VINCULACIÓN A BASE DE DATOS) ──
+    final_customer_id = data.customer_id
+    cust_nombre_resuelto = data.customer_nombre
+    cust_doc_resuelto = data.customer_doc
+
+    from api.src.customers.models import Customer
+    if not final_customer_id and (data.customer_doc or data.customer_nombre):
+        doc_clean = str(data.customer_doc or "").strip()
+        nom_clean = str(data.customer_nombre or "").strip()
+        cand_q = select(Customer).where(Customer.company_id == data.company_id)
+        if doc_clean:
+            cand_q = cand_q.where(
+                or_(
+                    Customer.ruc == doc_clean,
+                    Customer.ci == doc_clean,
+                    Customer.ruc.ilike(f"{doc_clean}%"),
+                )
+            )
+        elif nom_clean:
+            cand_q = cand_q.where(Customer.razon_social.ilike(f"%{nom_clean}%"))
+
+        c_found = (await db.execute(cand_q.limit(1))).scalar_one_or_none()
+        if c_found:
+            final_customer_id = c_found.id
+            cust_nombre_resuelto = c_found.razon_social or c_found.nombre_fantasia
+            cust_doc_resuelto = c_found.ruc or c_found.ci
+        elif nom_clean:
+            # Crear cliente en la base de datos oficial
+            new_cust = Customer(
+                company_id=data.company_id,
+                ruc=doc_clean or "44444401-7",
+                razon_social=nom_clean,
+                direccion=data.customer_direccion or "Pedro Juan Caballero",
+                telefono=data.customer_telefono,
+                activo=True,
+            )
+            db.add(new_cust)
+            await db.flush()
+            final_customer_id = new_cust.id
+            cust_nombre_resuelto = new_cust.razon_social
+            cust_doc_resuelto = new_cust.ruc
+    elif final_customer_id:
+        c_exist = (await db.execute(select(Customer).where(Customer.id == final_customer_id))).scalar_one_or_none()
+        if c_exist:
+            cust_nombre_resuelto = c_exist.razon_social or c_exist.nombre_fantasia
+            cust_doc_resuelto = c_exist.ruc or c_exist.ci
+
     sale = Sale(
         id=data.id or uuid.uuid4(),
         company_id=data.company_id,
         branch_id=data.branch_id,
-        customer_id=data.customer_id,
+        customer_id=final_customer_id,
         emission_point_id=data.emission_point_id,
         numero=numero,
         numero_interno=numero_interno,
@@ -717,6 +764,8 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
     # los puntos recien ganados en la respuesta -- antes se calculaban pero
     # se perdian, asi que la cajera nunca se enteraba de que se sumaron.
     sale.puntos_ganados = puntos_ganados
+    sale.customer_nombre = cust_nombre_resuelto
+    sale.customer_doc = cust_doc_resuelto
     return sale
 
 

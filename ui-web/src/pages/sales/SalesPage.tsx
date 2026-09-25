@@ -68,6 +68,7 @@ export default function SalesPage() {
 
   // Modales
   const [viewingSale, setViewingSale] = useState<Sale | null>(null)
+  const [viewingCustomer, setViewingCustomer] = useState<Customer | null>(null)
   const [anularModal, setAnularModal] = useState<Sale | null>(null)
   const [anularMotivo, setAnularMotivo] = useState("")
   const [anulando, setAnulando] = useState(false)
@@ -698,8 +699,11 @@ export default function SalesPage() {
       {viewingSale && !anularModal && (
         <FacturaA4Modal
           sale={viewingSale}
-          customer={viewingSale.customer_id ? customersMap.get(viewingSale.customer_id) : null}
-          onClose={() => setViewingSale(null)}
+          customer={viewingCustomer || (viewingSale.customer_id ? customersMap.get(viewingSale.customer_id) : null)}
+          onClose={() => {
+            setViewingSale(null)
+            setViewingCustomer(null)
+          }}
           timbrado={timbradoFacturas}
           timbradoVencimiento={timbradoVencimiento}
         />
@@ -844,7 +848,8 @@ export default function SalesPage() {
       {showEmitirAdminModal && (
         <EmitirFacturaAdminModal
           onClose={() => setShowEmitirAdminModal(false)}
-          onSuccess={(newSale) => {
+          onSuccess={(newSale, cust) => {
+            setViewingCustomer(cust || null)
             setViewingSale(newSale)
             fetchData()
           }}

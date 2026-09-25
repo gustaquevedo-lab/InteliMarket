@@ -194,11 +194,26 @@ export default function FacturaA4Modal({
   // Timbrado oficial obtenido de Configuración
   const numTimbrado = companyData?.timbrado_numero || (companyData?.config as any)?.timbrado_dnit || timbrado || "18545636"
 
+  const [fetchedCustomer, setFetchedCustomer] = useState<Customer | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!customer && sale?.customer_id) {
+      api.customers.get(sale.customer_id)
+        .then((c) => {
+          if (!cancelled && c) setFetchedCustomer(c)
+        })
+        .catch(() => {})
+    }
+    return () => { cancelled = true }
+  }, [customer, sale?.customer_id])
+
   // Datos de cliente / receptor
-  const custName = customer?.razon_social || (sale as any).customer_nombre || (sale as any).customer_name || "CONSUMIDOR FINAL"
-  const custRuc = customer?.ruc || (sale as any).customer_doc || (sale as any).customer_ruc || "44444401-7"
-  const custAddress = customer?.direccion || "Pedro Juan Caballero, Amambay"
-  const custPhone = customer?.telefono || "—"
+  const activeCustomer = customer || fetchedCustomer
+  const custName = activeCustomer?.razon_social || (activeCustomer as any)?.nombre || (sale as any).customer_nombre || (sale as any).customer_name || "CONSUMIDOR FINAL"
+  const custRuc = activeCustomer?.ruc || (sale as any).customer_doc || (sale as any).customer_ruc || "44444401-7"
+  const custAddress = activeCustomer?.direccion || (sale as any).customer_direccion || "Pedro Juan Caballero, Amambay"
+  const custPhone = activeCustomer?.telefono || (sale as any).customer_telefono || "—"
 
   // Condición de Venta
   const isCredito = sale.condicion === "credito" || sale.condicion === "credito_extra_club"

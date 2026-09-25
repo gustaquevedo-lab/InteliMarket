@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo } from "react"
+import React, { useState, useEffect, useMemo, useRef } from "react"
 import {
   X, Plus, Trash2, Building, Receipt, FileText, Banknote, Landmark,
-  ShieldCheck, AlertCircle, CheckCircle2, ChevronDown, User, DollarSign
+  ShieldCheck, AlertCircle, CheckCircle2, ChevronDown, User, DollarSign,
+  Search, Loader2, Sparkles, Check
 } from "lucide-react"
 import { api, type Customer, type Sale } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -19,25 +20,26 @@ interface FacturaItemRow {
 
 interface EmitirFacturaAdminModalProps {
   onClose: () => void
-  onSuccess: (newSale: Sale) => void
+  onSuccess: (newSale: Sale, customerData?: Customer | null) => void
 }
 
 export default function EmitirFacturaAdminModal({ onClose, onSuccess }: EmitirFacturaAdminModalProps) {
   const { user } = useAuth()
   const toast = useToast()
 
-  // Clientes
-  const [customers, setCustomers] = useState<Customer[]>([])
-  const [loadingCustomers, setLoadingCustomers] = useState(false)
+  // ── ESTADO DEL CLIENTE (ASUME SIEMPRE LO CARGADO) ──
   const [customerSearch, setCustomerSearch] = useState("")
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
-  const [isManualCustomer, setIsManualCustomer] = useState(false)
-  const [manualCustomer, setManualCustomer] = useState({
-    ruc: "",
-    razon_social: "",
-    direccion: "",
-    telefono: "",
-  })
+  const [searchingCustomers, setSearchingCustomers] = useState(false)
+  const [searchResults, setSearchResults] = useState<Customer[]>([])
+  const [showDropdown, setShowDropdown] = useState(false)
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
+
+  // Campos reales editables que SIEMPRE se emiten
+  const [ruc, setRuc] = useState("")
+  const [razonSocial, setRazonSocial] = useState("")
+  const [direccion, setDireccion] = useState("")
+  const [telefono, setTelefono] = useState("")
+  const [lookingUpRuc, setLookingUpRuc] = useState(false)
 
   // Cabecera Factura
   const [condicion, setCondicion] = useState<"contado" | "credito">("contado")
@@ -60,33 +62,84 @@ export default function EmitirFacturaAdminModal({ onClose, onSuccess }: EmitirFa
   const [destinoReferencia, setDestinoReferencia] = useState<string>("")
   const [submitting, setSubmitting] = useState(false)
 
-  // Cargar clientes para el buscador
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  // Cierre de dropdown al hacer clic fuera
   useEffect(() => {
-    let cancelled = false
-    setLoadingCustomers(true)
-    api.customers.list({ limit: 100 })
-      .then((data) => {
-        if (!cancelled && Array.isArray(data)) {
-          setCustomers(data)
-        }
-      })
-      .catch((err) => console.warn("Error cargando clientes:", err))
-      .finally(() => {
-        if (!cancelled) setLoadingCustomers(false)
-      })
-    return () => { cancelled = true }
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowDropdown(false)
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
 
-  // Filtrado de clientes
-  const filteredCustomers = useMemo(() => {
-    if (!customerSearch.trim()) return []
-    const q = customerSearch.toLowerCase()
-    return customers.filter(c =>
-      (c.razon_social || "").toLowerCase().includes(q) ||
-      (c.nombre || "").toLowerCase().includes(q) ||
-      (c.ruc || "").toLowerCase().includes(q)
-    ).slice(0, 8)
-  }, [customers, customerSearch])
+  // ── BÚSQUEDA EN VIVO CONTRA LA BASE DE DATOS DE CLIENTES ──
+  useEffect(() => {
+    if (!customerSearch.trim() || customerSearch.length < 2) {
+      setSearchResults([])
+      setShowDropdown(false)
+      return
+    }
+
+    const timer = setTimeout(async () => {
+      setSearchingCustomers(true)
+      try {
+        const results = await api.customers.list({ search: customerSearch.trim(), limit: 15 })
+        if (Array.isArray(results)) {
+          setSearchResults(results)
+          setShowDropdown(results.length > 0)
+        }
+      } catch (err) {
+        console.warn("Error en búsqueda en vivo de clientes:", err)
+      } finally {
+        setSearchingCustomers(false)
+      }
+    }, 280)
+
+    return () => clearTimeout(timer)
+  }, [customerSearch])
+
+  // Seleccionar un cliente de la lista de base de datos
+  const handleSelectCustomer = (c: Customer) => {
+    setSelectedCustomerId(c.id)
+    setRuc(c.ruc || c.ci || "")
+    setRazonSocial(c.razon_social || c.nombre || "")
+    setDireccion(c.direccion || "")
+    setTelefono(c.telefono || "")
+    setShowDropdown(false)
+    setCustomerSearch("")
+    toast.info("Cliente Seleccionado", `${c.razon_social || c.nombre} (RUC: ${c.ruc})`)
+  }
+
+  // Consulta automática en padrón DNIT / Base Interna por RUC
+  const handleLookupRuc = async () => {
+    const doc = ruc.trim()
+    if (!doc) {
+      toast.warning("RUC requerido", "Ingresá un RUC o CI para buscar en el padrón oficial.")
+      return
+    }
+
+    setLookingUpRuc(true)
+    try {
+      const res = await api.customers.lookupRuc(doc)
+      if (res) {
+        if (res.ruc) setRuc(res.ruc)
+        if (res.razon_social || res.nombre) setRazonSocial(res.razon_social || res.nombre)
+        if (res.telefono) setTelefono(res.telefono)
+        toast.success(
+          res.encontrado_en_db ? "Cliente en Base Interna" : "Padrón DNIT Identificado",
+          `${res.razon_social || res.nombre} (DV: ${res.dv || ""})`
+        )
+      }
+    } catch (err: any) {
+      console.warn("No se pudo resolver RUC:", err)
+      toast.warning("Búsqueda RUC", "No se encontró coincidencia automática. Podés cargar la razón social manualmente.")
+    } finally {
+      setLookingUpRuc(false)
+    }
+  }
 
   // Handlers para ítems
   const handleAddItem = () => {
@@ -156,16 +209,15 @@ export default function EmitirFacturaAdminModal({ onClose, onSuccess }: EmitirFa
     }
   }, [items])
 
-  // Validación y Envío
+  // ── EMISIÓN DE FACTURA Y PERSISTENCIA ──
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    // Validar cliente
-    const rucFinal = isManualCustomer ? manualCustomer.ruc.trim() : (selectedCustomer?.ruc || "").trim()
-    const razonSocialFinal = isManualCustomer ? manualCustomer.razon_social.trim() : (selectedCustomer?.razon_social || selectedCustomer?.nombre || "").trim()
+    const rucFinal = ruc.trim()
+    const razonSocialFinal = razonSocial.trim()
 
     if (!rucFinal || !razonSocialFinal) {
-      toast.error("Datos de Cliente Incompletos", "Por favor ingresá el RUC y la Razón Social del cliente o institución.")
+      toast.error("Datos de Cliente Incompletos", "Por favor ingresá el RUC y la Razón Social del cliente o institución receptora.")
       return
     }
 
@@ -191,28 +243,41 @@ export default function EmitirFacturaAdminModal({ onClose, onSuccess }: EmitirFa
       return
     }
 
-    // Si el destino es banco o cheque, validar referencia
-    if ((destinoPago === "deposito" || destinoPago === "transferencia") && !destinoReferencia.trim()) {
-      toast.warning("Referencia Bancaria", "Se recomienda registrar el número de comprobante o banco de la transferencia.")
-    }
-
     setSubmitting(true)
     try {
-      // 1. Resolver o registrar cliente manual si no existía
-      let finalCustomerId = selectedCustomer?.id
-      if (isManualCustomer && !finalCustomerId) {
+      // 1. Resolver ID del cliente en base de datos o crearlo
+      let resolvedCustomerId = selectedCustomerId
+
+      // Si no tenemos ID seleccionado, buscar por RUC exacto en la BD
+      if (!resolvedCustomerId) {
+        try {
+          const foundList = await api.customers.list({ search: rucFinal, limit: 5 })
+          const exactMatch = foundList?.find(c =>
+            (c.ruc || "").trim() === rucFinal ||
+            (c.ruc || "").replace(/[^0-9]/g, "") === rucFinal.replace(/[^0-9]/g, "")
+          )
+          if (exactMatch) {
+            resolvedCustomerId = exactMatch.id
+          }
+        } catch (findErr) {
+          console.warn("No se pudo buscar cliente por RUC:", findErr)
+        }
+      }
+
+      // Si aún no tiene ID, crearlo en la tabla customers
+      if (!resolvedCustomerId) {
         try {
           const createdCust = await api.customers.create({
             ruc: rucFinal,
             razon_social: razonSocialFinal,
-            direccion: manualCustomer.direccion.trim() || "Pedro Juan Caballero",
-            telefono: manualCustomer.telefono.trim() || undefined,
+            direccion: direccion.trim() || "Pedro Juan Caballero",
+            telefono: telefono.trim() || undefined,
           })
           if (createdCust && createdCust.id) {
-            finalCustomerId = createdCust.id
+            resolvedCustomerId = createdCust.id
           }
         } catch (cErr) {
-          console.warn("No se pudo persistir cliente nuevo de forma explícita, continuará con datos en comprobante:", cErr)
+          console.warn("Aviso al crear cliente (se resolverá en backend con RUC/Razón Social):", cErr)
         }
       }
 
@@ -220,7 +285,11 @@ export default function EmitirFacturaAdminModal({ onClose, onSuccess }: EmitirFa
       const companyId = "00000000-0000-0000-0000-000000000010"
       const payload: any = {
         company_id: companyId,
-        customer_id: finalCustomerId || undefined,
+        customer_id: resolvedCustomerId || undefined,
+        customer_doc: rucFinal,
+        customer_nombre: razonSocialFinal,
+        customer_direccion: direccion.trim() || undefined,
+        customer_telefono: telefono.trim() || undefined,
         punto_emision: "001-011",
         tipo_comprobante: "factura",
         condicion: condicion,
@@ -249,14 +318,24 @@ export default function EmitirFacturaAdminModal({ onClose, onSuccess }: EmitirFa
 
       const resSale = await api.sales.create(payload)
 
+      // Objeto de cliente completo para alimentar inmediatamente la Factura A4
+      const customerDataToPass: Customer = {
+        id: resolvedCustomerId || resSale.customer_id || "cust-temp",
+        ruc: rucFinal,
+        razon_social: razonSocialFinal,
+        nombre: razonSocialFinal,
+        direccion: direccion.trim() || "Pedro Juan Caballero, Amambay",
+        telefono: telefono.trim() || "—",
+      } as any
+
       toast.success(
         "Factura Oficial Emitida",
-        `Factura Nº ${resSale.numero || "001-011-..."} registrada correctamente.${
-          destinoPago === "boveda" ? " El importe ingresó directamente a la Bóveda Central." : ""
+        `Factura Nº ${resSale.numero || "001-011-..."} a nombre de "${razonSocialFinal}".${
+          destinoPago === "boveda" ? " Fondos acreditados en Bóveda Central." : ""
         }`
       )
 
-      onSuccess(resSale)
+      onSuccess(resSale, customerDataToPass)
       onClose()
     } catch (err: any) {
       console.error("Error al emitir factura administrativa:", err)
@@ -309,122 +388,139 @@ export default function EmitirFacturaAdminModal({ onClose, onSuccess }: EmitirFa
         <form onSubmit={handleSubmit} className="p-5 sm:p-6 overflow-y-auto space-y-6 flex-1 text-slate-800 dark:text-slate-100">
 
           {/* 1. SECCIÓN CLIENTE / INSTITUCIÓN */}
-          <div className="bg-slate-50 dark:bg-slate-950/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-800/80 space-y-3">
+          <div className="bg-slate-50 dark:bg-slate-950/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-800/80 space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                 <User className="w-4 h-4 text-blue-500" />
-                1. Datos del Cliente / Convenio
+                1. Datos del Cliente / Convenio (Conectado a Base de Datos)
               </span>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsManualCustomer(!isManualCustomer)
-                  setSelectedCustomer(null)
-                }}
-                className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
-              >
-                {isManualCustomer ? "← Buscar en Clientes Existentes" : "+ Carga Manual Rápida"}
-              </button>
+              {selectedCustomerId && (
+                <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800">
+                  <Check className="w-3.5 h-3.5" /> Vinculado a Cliente en BD
+                </span>
+              )}
             </div>
 
-            {!isManualCustomer ? (
+            {/* BUSCADOR REACTIVO EN VIVO */}
+            <div className="relative" ref={dropdownRef}>
+              <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1 block">
+                Buscar en Base de Clientes (Escribí para buscar por Razón Social o RUC)
+              </label>
               <div className="relative">
-                <div className="flex items-center gap-2">
-                  <div className="relative flex-1">
-                    <input
-                      type="text"
-                      value={selectedCustomer ? `${selectedCustomer.razon_social || selectedCustomer.nombre} · RUC: ${selectedCustomer.ruc}` : customerSearch}
-                      onChange={(e) => {
-                        setSelectedCustomer(null)
-                        setCustomerSearch(e.target.value)
-                      }}
-                      placeholder="Buscar por RUC o Razón Social (ej: Universidad del Pacífico, Empresa...)"
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    {selectedCustomer && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedCustomer(null)
-                          setCustomerSearch("")
-                        }}
-                        className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-white"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Dropdown de resultados */}
-                {!selectedCustomer && filteredCustomers.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 z-30 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden max-h-48 overflow-y-auto">
-                    {filteredCustomers.map(c => (
-                      <div
-                        key={c.id}
-                        onClick={() => {
-                          setSelectedCustomer(c)
-                          setCustomerSearch("")
-                        }}
-                        className="p-2.5 hover:bg-blue-50 dark:hover:bg-blue-950/40 cursor-pointer flex items-center justify-between border-b border-slate-100 dark:border-slate-800 text-xs"
-                      >
-                        <div className="font-bold text-slate-900 dark:text-white">
-                          {c.razon_social || c.nombre}
-                        </div>
-                        <span className="font-mono text-blue-600 dark:text-blue-400 font-bold bg-blue-50 dark:bg-blue-900/40 px-2 py-0.5 rounded">
-                          RUC: {c.ruc}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                <input
+                  type="text"
+                  value={customerSearch}
+                  onChange={(e) => setCustomerSearch(e.target.value)}
+                  onFocus={() => {
+                    if (searchResults.length > 0) setShowDropdown(true)
+                  }}
+                  placeholder="Ej: Universidad, Pacifico, Cooperativa, RUC..."
+                  className="w-full pl-9 pr-9 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+                />
+                {searchingCustomers && (
+                  <Loader2 className="w-4 h-4 text-blue-500 animate-spin absolute right-3 top-3" />
                 )}
               </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 mb-1 block">RUC / Documento *</label>
-                  <input
-                    type="text"
-                    required
-                    value={manualCustomer.ruc}
-                    onChange={(e) => setManualCustomer({ ...manualCustomer, ruc: e.target.value })}
-                    placeholder="Ej: 80012345-6 o 44444401-7"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+
+              {/* LISTA DESPLEGABLE EN VIVO */}
+              {showDropdown && searchResults.length > 0 && (
+                <div className="absolute top-full left-0 right-0 z-30 mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl overflow-hidden max-h-56 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                  {searchResults.map(c => (
+                    <div
+                      key={c.id}
+                      onClick={() => handleSelectCustomer(c)}
+                      className="p-3 hover:bg-blue-50/80 dark:hover:bg-blue-950/50 cursor-pointer flex items-center justify-between transition"
+                    >
+                      <div>
+                        <div className="font-bold text-xs text-slate-900 dark:text-white">
+                          {c.razon_social || c.nombre}
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-2 mt-0.5">
+                          <span>{c.direccion || "Sin dirección"}</span>
+                          {c.telefono && <span>• Tel: {c.telefono}</span>}
+                        </div>
+                      </div>
+                      <span className="font-mono text-xs font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/40 px-2.5 py-1 rounded-lg border border-blue-200 dark:border-blue-800">
+                        {c.ruc}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 mb-1 block">Razón Social / Nombre Oficial *</label>
-                  <input
-                    type="text"
-                    required
-                    value={manualCustomer.razon_social}
-                    onChange={(e) => setManualCustomer({ ...manualCustomer, razon_social: e.target.value })}
-                    placeholder="Ej: UNIVERSIDAD DEL PACÍFICO"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 mb-1 block">Dirección</label>
-                  <input
-                    type="text"
-                    value={manualCustomer.direccion}
-                    onChange={(e) => setManualCustomer({ ...manualCustomer, direccion: e.target.value })}
-                    placeholder="Ej: San Martín casi España, Asunción"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 mb-1 block">Teléfono / Contacto</label>
-                  <input
-                    type="text"
-                    value={manualCustomer.telefono}
-                    onChange={(e) => setManualCustomer({ ...manualCustomer, telefono: e.target.value })}
-                    placeholder="Ej: 0983 555 123"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
+              )}
+            </div>
+
+            {/* CAMPOS REALES EDITABLES (ASUME LO CARGADO) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <div>
+                <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1 flex items-center justify-between">
+                  <span>RUC / C.I. del Cliente *</span>
+                  <button
+                    type="button"
+                    onClick={handleLookupRuc}
+                    disabled={lookingUpRuc || !ruc.trim()}
+                    className="text-[10px] font-extrabold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                  >
+                    {lookingUpRuc ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                    Verificar en SET / DNIT
+                  </button>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={ruc}
+                  onChange={(e) => {
+                    setRuc(e.target.value)
+                    setSelectedCustomerId(null) // Si edita a mano, desvincula para re-verificar
+                  }}
+                  placeholder="Ej: 80012345-6 o 44444401-7"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+                />
               </div>
-            )}
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1 block">
+                  Razón Social / Nombre Oficial *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={razonSocial}
+                  onChange={(e) => {
+                    setRazonSocial(e.target.value)
+                    setSelectedCustomerId(null)
+                  }}
+                  placeholder="Ej: UNIVERSIDAD DEL PACÍFICO"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1 block">
+                  Dirección
+                </label>
+                <input
+                  type="text"
+                  value={direccion}
+                  onChange={(e) => setDireccion(e.target.value)}
+                  placeholder="Ej: San Martín casi España, Asunción"
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1 block">
+                  Teléfono / Contacto
+                </label>
+                <input
+                  type="text"
+                  value={telefono}
+                  onChange={(e) => setTelefono(e.target.value)}
+                  placeholder="Ej: 0983 555 123"
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+                />
+              </div>
+            </div>
 
             {/* Condición de Venta */}
             <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center gap-4 text-xs font-bold">
@@ -457,7 +553,7 @@ export default function EmitirFacturaAdminModal({ onClose, onSuccess }: EmitirFa
           {/* 2. SECCIÓN ÍTEMS DE TEXTO LIBRE & EXENTAS */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                 <FileText className="w-4 h-4 text-indigo-500" />
                 2. Detalle de Ítems (Texto Libre y Tasa de IVA)
               </span>
@@ -492,7 +588,7 @@ export default function EmitirFacturaAdminModal({ onClose, onSuccess }: EmitirFa
                         value={it.descripcion}
                         onChange={(e) => handleUpdateItem(idx, "descripcion", e.target.value)}
                         placeholder="Descripción libre del servicio o convenio (ej: Cuota Septiembre Convenio Educativo...)"
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
                       />
                     </div>
 
@@ -505,7 +601,7 @@ export default function EmitirFacturaAdminModal({ onClose, onSuccess }: EmitirFa
                         required
                         value={it.cantidad}
                         onChange={(e) => handleUpdateItem(idx, "cantidad", Math.max(1, Number(e.target.value)))}
-                        className="w-full px-2.5 py-2 text-center rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
+                        className="w-full px-2.5 py-2 text-center rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
                         title="Cantidad"
                       />
                     </div>
@@ -516,7 +612,7 @@ export default function EmitirFacturaAdminModal({ onClose, onSuccess }: EmitirFa
                         value={it.precio_unitario}
                         onChangeValue={(numVal: number) => handleUpdateItem(idx, "precio_unitario", numVal)}
                         placeholder="0"
-                        className="w-full px-3 py-2 text-right rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold font-mono text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
+                        className="w-full px-3 py-2 text-right rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold font-mono text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
                       />
                     </div>
 
@@ -525,7 +621,7 @@ export default function EmitirFacturaAdminModal({ onClose, onSuccess }: EmitirFa
                       <select
                         value={it.iva_tasa}
                         onChange={(e) => handleUpdateItem(idx, "iva_tasa", Number(e.target.value) as 0 | 5 | 10)}
-                        className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                        className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-sm"
                       >
                         <option value={0}>Exenta (0%)</option>
                         <option value={5}>IVA 5%</option>
@@ -594,7 +690,7 @@ export default function EmitirFacturaAdminModal({ onClose, onSuccess }: EmitirFa
                   <select
                     value={formaPago}
                     onChange={(e) => setFormaPago(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer shadow-sm"
                   >
                     <option value="EFECTIVO">🇵🇾 Efectivo (Guaraníes)</option>
                     <option value="TRANF. BANCARIA">🏦 Transferencia Bancaria</option>
@@ -611,7 +707,7 @@ export default function EmitirFacturaAdminModal({ onClose, onSuccess }: EmitirFa
                   <select
                     value={destinoPago}
                     onChange={(e) => setDestinoPago(e.target.value as any)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer shadow-sm"
                   >
                     <option value="boveda">🏦 Bóveda Central (Ingreso directo a Tesorería)</option>
                     <option value="deposito">🏛️ Depósito Bancario</option>
@@ -639,7 +735,7 @@ export default function EmitirFacturaAdminModal({ onClose, onSuccess }: EmitirFa
                         value={destinoReferencia}
                         onChange={(e) => setDestinoReferencia(e.target.value)}
                         placeholder="Ej: Banco Continental Cta Cte Nº 123456 - Boleta Nº 987654"
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
                       />
                     </div>
                   )}
@@ -664,7 +760,7 @@ export default function EmitirFacturaAdminModal({ onClose, onSuccess }: EmitirFa
                 value={observaciones}
                 onChange={(e) => setObservaciones(e.target.value)}
                 placeholder="Ej: Convenio Marco Cuota Septiembre / Respaldo Acta Nº 14/2026..."
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
               />
             </div>
           </div>
