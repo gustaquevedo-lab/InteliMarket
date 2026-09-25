@@ -3108,19 +3108,40 @@ async def list_payroll_movements(db: AsyncSession, company_id: str, empleado_nom
 # ── Órdenes de Pago a Proveedores (AP Multifactura & Multimedio) ─────────────
 
 async def _generate_order_number(db: AsyncSession, company_id: uuid.UUID, offset: int = 0) -> str:
-    """Genera número correlativo de Orden de Pago con formato OP-YYYYMMDD-XXXX."""
+    """Genera número correlativo de Orden de Pago con formato OP-YYYYMMDD-XXXX sin saltos ni colisiones."""
     py_tz = ZoneInfo("America/Asuncion")
     today_str = datetime.now(py_tz).strftime("%Y%m%d")
     prefix = f"OP-{today_str}-"
     q = (
-        select(func.count(SupplierPaymentOrder.id))
+        select(SupplierPaymentOrder.numero_orden)
         .where(
             SupplierPaymentOrder.company_id == company_id,
             SupplierPaymentOrder.numero_orden.like(f"{prefix}%")
         )
+        .order_by(SupplierPaymentOrder.numero_orden.desc())
+        .limit(1)
     )
-    count = (await db.execute(q)).scalar_one() or 0
-    return f"{prefix}{count + 1 + offset:04d}"
+    last_num = (await db.execute(q)).scalar_one_or_none()
+    seq = 0
+    if last_num and last_num.startswith(prefix):
+        try:
+            seq = int(last_num[len(prefix):])
+        except (ValueError, IndexError):
+            seq = 0
+    candidate = seq + 1 + offset
+
+    # Blindaje contra colisiones: verificar que el correlativo no exista en la BD y avanzar si es necesario
+    while True:
+        num = f"{prefix}{candidate:04d}"
+        exists = (
+            await db.execute(
+                select(SupplierPaymentOrder.id).where(SupplierPaymentOrder.numero_orden == num).limit(1)
+            )
+        ).scalar_one_or_none()
+        if not exists:
+            return num
+        candidate += 1
+
 
 
 async def create_supplier_payment_order(
@@ -4372,7 +4393,7 @@ async def create_multi_supplier_payment_batch(
         if not sup:
             raise HTTPException(status_code=404, detail=f"Proveedor con ID {item.supplier_id} no encontrado.")
 
-        num_orden = await _generate_order_number(db, cid, offset=idx)
+        num_orden = await _generate_order_number(db, cid)
         monto_item_pyg = Decimal(str(item.monto_pyg))
         monto_moneda = Decimal(str(item.monto_moneda))
         tc = Decimal(str(item.tipo_cambio or 1))
