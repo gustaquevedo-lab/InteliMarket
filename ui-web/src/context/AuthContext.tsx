@@ -18,6 +18,8 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>
   register: (email: string, password: string, nombre: string, tenant_nombre: string) => Promise<void>
   logout: () => void
+  mustChangePassword?: boolean
+  clearMustChangePassword?: () => void
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)

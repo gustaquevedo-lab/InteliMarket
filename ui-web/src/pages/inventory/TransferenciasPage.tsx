@@ -3,7 +3,6 @@ import { ArrowLeftRight, Search, Plus, Trash2, Send, CheckCircle2, AlertTriangle
 import { api, type Branch, type BranchTransfer, type Product } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG } from "../../utils/format"
-import { api } from "../../api"
 
 export default function TransferenciasPage() {
   const [branches, setBranches] = useState<Branch[]>([])

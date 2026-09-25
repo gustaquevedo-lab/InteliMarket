@@ -189,8 +189,8 @@ function SupervisorView({ rep, periodo }: { rep: SalesRep; periodo: { inicio: st
   if (loading) return <div className="text-center py-12 text-gray-400">Cargando...</div>
   if (!cascade) return null
 
-  const totalVenta = cascade.equipo.reduce((s, p) => s + Number(p.venta_gs), 0)
-  const totalMeta = cascade.equipo.reduce((s, p) => s + Number(p.meta_gs), 0)
+  const totalVenta = cascade.equipo.reduce((s: number, p: any) => s + Number(p.venta_gs), 0)
+  const totalMeta = cascade.equipo.reduce((s: number, p: any) => s + Number(p.meta_gs), 0)
 
   return (
     <div className="space-y-6">
@@ -242,8 +242,8 @@ function GerenteView({ reps, periodo }: { reps: SalesRep[]; periodo: { inicio: s
 
   if (loading) return <div className="text-center py-12 text-gray-400">Cargando...</div>
 
-  const totalVenta = cascades.reduce((s, c) => s + c.equipo.reduce((s2, p) => s2 + Number(p.venta_gs), 0), 0)
-  const totalMeta = cascades.reduce((s, c) => s + c.equipo.reduce((s2, p) => s2 + Number(p.meta_gs), 0), 0)
+  const totalVenta = cascades.reduce((s: number, c: any) => s + c.equipo.reduce((s2: number, p: any) => s2 + Number(p.venta_gs), 0), 0)
+  const totalMeta = cascades.reduce((s: number, c: any) => s + c.equipo.reduce((s2: number, p: any) => s2 + Number(p.meta_gs), 0), 0)
   const totalVendedores = cascades.reduce((s, c) => s + c.equipo_total, 0)
   const cumplieron = cascades.reduce((s, c) => s + c.equipo_cumplieron, 0)
   const supervisoresCumplidos = cascades.filter((c) => c.cascada_cumplida).length
@@ -318,7 +318,7 @@ function GerenteView({ reps, periodo }: { reps: SalesRep[]; periodo: { inicio: s
                 {formatNumber(c.pct_equipo_cumplio, 0)}% del equipo ({c.equipo_cumplieron}/{c.equipo_total})
               </span>
             </div>
-            {c.equipo.slice(0, 5).map((p) => <RepRow key={p.sales_rep_id} p={p} />)}
+            {c.equipo.slice(0, 5).map((p: any) => <RepRow key={p.sales_rep_id} p={p} />)}
             {c.equipo.length > 5 && <p className="text-xs text-gray-400 text-center pt-2">+{c.equipo.length - 5} más</p>}
           </div>
         ))}

@@ -32,7 +32,7 @@ export default function ChangePasswordPage() {
     setLoading(true)
     try {
       await api.auth.changePassword({ current_password: currentPassword, new_password: newPassword })
-      clearMustChangePassword()
+      clearMustChangePassword?.()
       navigate("/dashboard", { replace: true })
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "No se pudo cambiar la contraseña")

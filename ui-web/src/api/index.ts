@@ -2367,6 +2367,7 @@ export const api = {
         client.patch<CustomerLostDemand>("/v1/purchases/lost-demand/" + id, data),
     },
 
+    listPurchaseSuggestions: (estado?: string) => client.get<any[]>("/v1/purchases/suggestions", estado ? { estado } : undefined),
     orders: () => client.get<PurchaseOrder[]>(`/v1/companies/${COMPANY_ID}/purchase-orders`),
     listPOs: () => client.get<PurchaseOrder[]>(`/v1/companies/${COMPANY_ID}/purchase-orders`),
     getOrder: (id: string) => client.get<PurchaseOrder>(`/v1/purchase-orders/${id}`),
@@ -3712,7 +3713,7 @@ export const api = {
     payrollByConcepto: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<{ concepto: string; es_credito: boolean; cantidad: number; monto: number; porcentaje: number | null }[]>("/v1/financial/payroll/by-concepto", { company_id: COMPANY_ID, ...params } as any),
     payrollMovements: (params?: { empleado_nombre?: string }) => client.get<{ id: string; empleado_nombre: string; concepto: string; es_credito: boolean; monto: number; fecha: string; cerrado: boolean; observaciones: string }[]>("/v1/financial/payroll-movements", { company_id: COMPANY_ID, ...params } as any),
     banks: {
-      list: () => client.get<BankAccount[]>("/v1/financial/banks", { company_id: COMPANY_ID } as any),
+      list: (_companyId?: string) => client.get<BankAccount[]>("/v1/financial/banks", { company_id: COMPANY_ID } as any),
       create: (data: any) => client.post<BankAccount>("/v1/financial/banks", { company_id: COMPANY_ID, ...data }),
       update: (id: string, data: any) => client.put<BankAccount>(`/v1/financial/banks/${id}`, data),
       delete: (id: string) => client.delete(`/v1/financial/banks/${id}`),
@@ -3760,7 +3761,7 @@ export const api = {
       list: (params?: { desde?: string; hasta?: string }) => client.get<CashFlowProjection[]>("/v1/financial/cash-flow", { company_id: COMPANY_ID, ...params } as any),
       generate: () => client.post<CashFlowProjection[]>(`/v1/financial/cash-flow/generate?company_id=${COMPANY_ID}`),
       update: (id: string, data: any) => client.post<CashFlowProjection>(`/v1/financial/cash-flow/${id}`, data),
-      dashboard: () => client.get<CashFlowDashboard>("/v1/financial/cash-flow/dashboard", { company_id: COMPANY_ID } as any),
+      dashboard: (_companyId?: string) => client.get<CashFlowDashboard>("/v1/financial/cash-flow/dashboard", { company_id: COMPANY_ID } as any),
       alertConfig: {
         get: () => client.get<{ activo: boolean; dias_horizonte: number; telefono: string | null }>("/v1/financial/cash-flow/alert-config", { company_id: COMPANY_ID } as any),
         update: (data: { activo: boolean; dias_horizonte: number; telefono?: string | null }) =>
@@ -4184,6 +4185,11 @@ export const api = {
     seedTemplates: (companyId: string) => client.post<any>("/v1/asistente-virtual/templates/seed", { company_id: companyId }),
 
     getDashboard: (companyId: string) => client.get<any>("/v1/asistente-virtual/dashboard", { company_id: companyId }),
+
+    brainStatus: (companyId: string) => client.get<any>("/v1/asistente-virtual/brain/status", { company_id: companyId }),
+    brainSpeak: (text: string, voice?: any) => client.post<any>("/v1/asistente-virtual/brain/speak", { text, voice }),
+    brainChat: (companyId: string, data: any) => client.post<any>("/v1/asistente-virtual/brain/chat", { company_id: companyId, ...data }),
+    brainVoice: (formData: any) => client.post<any>("/v1/asistente-virtual/brain/voice", formData),
   },
 
   // ===== Clientes — Fidelización & Segmentación =====
@@ -4820,7 +4826,7 @@ export const api = {
     listPeriods: (supplierId: string) => client.get<any[]>(`/v1/supplier-kpis/periods?supplier_id=${supplierId}`),
     createPeriod: (data: any) => client.post<any>("/v1/supplier-kpis/periods", data),
     getSummary: (periodId: string, branchId?: string) => client.get<any>(`/v1/supplier-kpis/periods/${periodId}/summary`, { branch_id: branchId }),
-    getDashboard: (companyId?: string) => client.get<any>("/v1/supplier-kpis/dashboard", { company_id: companyId || COMPANY_ID }),
+    getDashboard: (companyId?: string, _periodo?: string) => client.get<any>("/v1/supplier-kpis/dashboard", { company_id: companyId || COMPANY_ID }),
     updateIndicator: (id: string, data: any) => client.put<any>(`/v1/supplier-kpis/indicators/${id}`, data),
     bulkUpdateIndicators: (periodId: string, data: any) => client.put<any>(`/v1/supplier-kpis/periods/${periodId}/indicators/bulk`, data),
     deleteIndicator: (id: string) => client.delete<void>(`/v1/supplier-kpis/indicators/${id}`),
@@ -4922,6 +4928,110 @@ export const api = {
       prefijo_codigo?: string
     }) => client.post<any>("/vouchers/batch", data),
   },
+
+  // ===== Sugerencias de Compra (Distribuidora) — alias en purchases =====
+  // (api.purchases ya tiene listPurchaseSuggestions pero apunta a demandForecast)
+  purchaseSuggestions: {
+    list: (estado?: string) => client.get<any[]>("/v1/purchases/suggestions", { estado }),
+    get: (id: string) => client.get<any>(`/v1/purchases/suggestions/${id}`),
+    update: (id: string, data: any) => client.patch<any>(`/v1/purchases/suggestions/${id}`, data),
+  },
+
+  // ===== Cuentas por Pagar (Distribuidora) =====
+  accountsPayable: {
+    list: (params?: { estado?: string; supplier_id?: string; company_id?: string }) => client.get<any[]>("/v1/accounts-payable", params),
+    aging: (params?: { company_id?: string }) => client.get<any>("/v1/accounts-payable/aging", params),
+    summary: (params?: { company_id?: string }) => client.get<any>("/v1/accounts-payable/summary", params),
+    documentDetail: (id: string) => client.get<any>(`/v1/accounts-payable/${id}`),
+    createPaymentOrder: (data: any) => client.post<any>("/v1/accounts-payable/payment-orders", data),
+  },
+
+  // ===== Cheques =====
+  checks: {
+    list: (params?: { company_id?: string; estado?: string; tipo?: string }) => client.get<any[]>("/v1/checks", params),
+    summary: (params?: { company_id?: string }) => client.get<any>("/v1/checks/summary", params),
+    create: (data: any) => client.post<any>("/v1/checks", data),
+    changeStatus: (id: string, data: any) => client.patch<any>(`/v1/checks/${id}/status`, data),
+    replace: (id: string, data: any) => client.post<any>(`/v1/checks/${id}/replace`, data),
+    events: (id: string) => client.get<any[]>(`/v1/checks/${id}/events`),
+  },
+
+  // ===== Bonificaciones de Compra =====
+  purchaseBonuses: {
+    list: (params?: { company_id?: string; supplier_id?: string }) => client.get<any[]>("/v1/purchase-bonuses", params),
+    create: (data: any) => client.post<any>("/v1/purchase-bonuses", data),
+    update: (id: string, data: any) => client.put<any>(`/v1/purchase-bonuses/${id}`, data),
+    delete: (id: string) => client.delete(`/v1/purchase-bonuses/${id}`),
+    suggest: (supplierId?: string, productId?: string, cantidad?: number) => client.get<any>("/v1/purchase-bonuses/suggest", { supplier_id: supplierId, product_id: productId, cantidad }),
+  },
+
+  // ===== Agente Comercial =====
+  commercialAgent: {
+    run: () => client.post<any>("/v1/commercial-agent/run", {}),
+    recommendations: () => client.get<any[]>("/v1/commercial-agent/recommendations"),
+    approve: (id: string, approvedBy?: string, reason?: string) => client.post<any>(`/v1/commercial-agent/recommendations/${id}/approve`, { approved_by: approvedBy, reason }),
+    reject: (id: string, rejectedBy?: string, reason?: string) => client.post<any>(`/v1/commercial-agent/recommendations/${id}/reject`, { rejected_by: rejectedBy, reason }),
+    chat: (text: string, userName?: string) => client.post<any>("/v1/commercial-agent/chat", { text, user_name: userName }),
+  },
+
+  // ===== Liquidaciones de Ruta =====
+  routeCashSettlements: {
+    list: (params?: { company_id?: string; estado?: string; cobrador_codigo?: string; fecha_desde?: string; fecha_hasta?: string; limit?: number }) => client.get<any[]>("/v1/route-cash-settlements", params),
+    summary: (params?: { company_id?: string; fecha_desde?: string; fecha_hasta?: string }) => client.get<any>("/v1/route-cash-settlements/summary", params),
+    create: (data: any) => client.post<any>("/v1/route-cash-settlements", data),
+    get: (id: string) => client.get<any>(`/v1/route-cash-settlements/${id}`),
+    approve: (id: string, data?: any) => client.post<any>(`/v1/route-cash-settlements/${id}/approve`, data),
+  },
+
+  // ===== Metas de Ventas (Inteliforce) =====
+  salesTargets: {
+    listReps: (params?: { company_id?: string }) => client.get<any[]>("/v1/sales-targets/reps", params),
+    createRep: (data: any) => client.post<any>("/v1/sales-targets/reps", data),
+    updateRep: (id: string, data: any) => client.put<any>(`/v1/sales-targets/reps/${id}`, data),
+    getRepProgress: (id: string, inicio?: string, fin?: string) => client.get<any>(`/v1/sales-targets/reps/${id}/progress`, { inicio, fin }),
+    suggestTargets: (params?: Record<string, any>) => client.get<any>("/v1/sales-targets/suggest", params),
+    publishTargets: (data: any) => client.post<any>("/v1/sales-targets/publish", data),
+    getCascadeStatus: (id: string, inicio?: string, fin?: string) => client.get<any>(`/v1/sales-targets/reps/${id}/cascade-status`, { inicio, fin }),
+  },
+
+  // ===== Inteliforce (app vendedores) =====
+  inteliforce: {
+    trackingLogs: (horasAtras?: number) => client.get<any[]>("/v1/inteliforce/tracking-logs", horasAtras ? { horas_atras: horasAtras } : undefined),
+    exchangeToken: (data: any) => client.post<any>("/v1/inteliforce/auth/exchange", data),
+    getMe: () => client.get<any>("/v1/inteliforce/me"),
+    getTargets: () => client.get<any>("/v1/inteliforce/me/targets"),
+  },
+
+  // ===== Devoluciones a Proveedor (top-level alias, Distribuidora) =====
+  purchaseReturns: {
+    list: (params?: { estado?: string; supplier_id?: string }) => client.get<any[]>("/v1/purchases/returns", params),
+    get: (id: string) => client.get<any>(`/v1/purchases/returns/${id}`),
+    create: (data: any) => client.post<any>("/v1/purchases/returns", data),
+    approve: (id: string, userId?: string, warehouseId?: string) => client.post<any>(`/v1/purchases/returns/${id}/approve`, { user_id: userId, warehouse_id: warehouseId }),
+    reject: (id: string, motivo?: string) => client.post<any>(`/v1/purchases/returns/${id}/reject`, { motivo_rechazo: motivo }),
+    complete: (id: string, data?: any) => client.post<any>(`/v1/purchases/returns/${id}/complete`, data),
+  },
+
+  // ===== Inventario Supermercado (stub para distribuidora) =====
+  supermerInventory: {
+    sessions: {
+      list: (params?: any) => client.get<any[]>("/v1/supermer/inventory/sessions", params),
+      complete: (id: string) => client.post<any>(`/v1/supermer/inventory/sessions/${id}/complete`),
+    },
+    adjustments: {
+      list: (params?: any) => client.get<any[]>("/v1/supermer/inventory/adjustments", params),
+      approve: (id: string) => client.post<any>(`/v1/supermer/inventory/adjustments/${id}/approve`),
+      reject: (id: string, data?: any) => client.post<any>(`/v1/supermer/inventory/adjustments/${id}/reject`, data),
+    },
+  },
+
+  // ===== Proveedores (top-level, Distribuidora) =====
+  suppliers: {
+    list: (params?: { activo?: boolean; search?: string; company_id?: string }) => client.get<Supplier[]>(`/v1/companies/${COMPANY_ID}/suppliers`, params),
+    get: (id: string) => client.get<Supplier>(`/v1/companies/${COMPANY_ID}/suppliers/${id}`),
+    create: (data: any) => client.post<Supplier>(`/v1/companies/${COMPANY_ID}/suppliers`, data),
+    update: (id: string, data: any) => client.put<Supplier>(`/v1/companies/${COMPANY_ID}/suppliers/${id}`, data),
+  },
 }
 
 export interface DonationCampaign {
@@ -5004,4 +5114,16 @@ export type CuponStats = any
 export type SupplierKpiPeriod = any
 export type SupplierKpiSummary = any
 export type SupplierKpiIndicator = any
+
+// ===== Tipos distribuidora =====
+export type Check = any
+export type CheckEvent = any
+export type PurchaseBonusScale = any
+export type SalesRep = any
+export type RepProgress = any
+export type CascadeStatus = any
+export type SuggestedTarget = any
+export type PurchaseSuggestion = any
+export type SupplierReturn = any
+export type SupplierReturnWithItems = any
 

@@ -28,7 +28,7 @@ export default function CreditAccountsPage() {
   const [showMovementsModal, setShowMovementsModal] = useState(false)
   const [selectedAccount, setSelectedAccount] = useState<any | null>(null)
   const [movements, setMovements] = useState<CreditMovement[]>([])
-  const [form, setForm] = useState({ customer_id: "", limite_credito: "" })
+  const [form, setForm] = useState({ customer_id: "", limite_credito: "", dias_plazo: "30" })
   const [editingAccount, setEditingAccount] = useState<CreditAccount | null>(null)
   const [showEditModal, setShowEditModal] = useState(false)
   const [editForm, setEditForm] = useState({ limite_credito: "", activo: true })

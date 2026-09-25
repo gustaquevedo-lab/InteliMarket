@@ -323,6 +323,20 @@ export default function AccountsReceivablePage() {
   const [docsTotal, setDocsTotal] = useState(0)
 
   const [debouncedSearch, setDebouncedSearch] = useState(search)
+
+  // Recibo de Cobranza (distribuidora)
+  const [customers, setCustomers] = useState<any[]>([])
+  const [showReciboModal, setShowReciboModal] = useState(false)
+  const [selectedInvoice, setSelectedInvoice] = useState<any | null>(null)
+  const [selectedReciboCustomer, setSelectedReciboCustomer] = useState<any | null>(null)
+  const [reciboInvoices, setReciboInvoices] = useState<any[]>([])
+  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([])
+  const [montoCobrado, setMontoCobrado] = useState("")
+  const [medioPago, setMedioPago] = useState("efectivo")
+  const [referenciaPago, setReferenciaPago] = useState("")
+  const [submittingRecibo, setSubmittingRecibo] = useState(false)
+  const handleSelectReciboCustomer = async (_customer: any) => { setSelectedReciboCustomer(_customer) }
+  const handleEmitirRecibo = async () => { setSubmittingRecibo(false) }
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 300)
     return () => clearTimeout(t)
@@ -552,7 +566,7 @@ export default function AccountsReceivablePage() {
     setLoading(true)
     try {
       const estadoParam = filterStatus !== "todos" ? filterStatus : undefined
-      const [docsData, countData, agingData, summaryData] = await Promise.all([
+      const [docsData, countData, agingData, summaryData, custsData] = await Promise.all([
         api.accountsReceivable.list({ estado: estadoParam, search: debouncedSearch.trim() || undefined, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
         api.accountsReceivable.count({ estado: estadoParam }),
         api.accountsReceivable.aging(),
@@ -563,7 +577,7 @@ export default function AccountsReceivablePage() {
       setDocsTotal(countData.total)
       setAging(agingData)
       setSummary(summaryData)
-      setCustomers(custsData)
+      setCustomers(custsData || [])
     } catch {
       setDocs([])
       setDocsTotal(0)

@@ -19,7 +19,7 @@ import {
 
 const FALLBACK_COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
-type Tab = "dashboard" | "ap" | "pagos" | "cashflow" | "presupuestos" | "credit_notes"
+type Tab = "dashboard" | "ap" | "pagos" | "cashflow" | "presupuestos" | "credit_notes" | "pnl"
 
 const MOTIVOS_NC = [
   { id: "devolucion_rotura", label: "Devolución por Rotura / Daño Físico", defaultImpact: "recuperacion_merma" },

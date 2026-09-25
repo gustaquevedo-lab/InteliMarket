@@ -16,7 +16,6 @@ import {
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate, formatDateTime } from "../../utils/format"
-import TarjetasSocioPage from "../loyalty/TarjetasSocioPage"
 
 type CrmTab = "miembros" | "tarjetas" | "solicitudes" | "rfm" | "premios" | "reglas"
 
@@ -756,7 +755,7 @@ export default function CrmPage() {
       {/* TAB TARJETAS EXTRA CLUB (ZEBRA ZC300) */}
       {tab === "tarjetas" && (
         <div className="card bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-xl animate-fade-in">
-          <TarjetasSocioPage />
+          <div className="p-8 text-center text-slate-400">Módulo de tarjetas no disponible en esta vertical.</div>
         </div>
       )}
 

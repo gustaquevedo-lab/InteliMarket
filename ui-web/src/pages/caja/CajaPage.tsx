@@ -781,28 +781,7 @@ export default function CajaPage() {
 
   const toast = useToast()
 
-  const handlePeriodChange = (preset: "today" | "yesterday" | "week" | "month" | "all") => {
-    setPeriodPreset(preset)
-    const today = "2026-08-14"
-    if (preset === "today") {
-      setDateFrom(today)
-      setDateTo(today)
-    } else if (preset === "yesterday") {
-      setDateFrom("2026-08-13")
-      setDateTo("2026-08-13")
-    } else if (preset === "week") {
-      setDateFrom("2026-08-08")
-      setDateTo(today)
-    } else if (preset === "month") {
-      setDateFrom("2026-08-01")
-      setDateTo(today)
-    } else if (preset === "all") {
-      setDateFrom("")
-      setDateTo("")
-    }
-  }
-
-  const loadData = async () => {
+  const fetchData = async () => {
     setLoading(true)
     try {
       const [regsData, sessionsData, handoffsData] = await Promise.allSettled([
@@ -1220,14 +1199,16 @@ export default function CajaPage() {
       })
       toast.success("Caja abierta", "Turno de caja iniciado correctamente")
       setShowOpenModal(false)
-      loadData()
+      setMontoApertura("0")
+      setSelectedRegister("")
+      fetchData()
     } catch {
       toast.error("Error", "No se pudo abrir la caja")
     }
   }
 
-  const handleInspectSettlement = async (settlementId: string) => {
-    setLoadingDetail(true)
+  const handleCloseSession = async () => {
+    if (!selectedSession) return
     try {
       const result = await api.caja.sessions.close(selectedSession.id, {
         monto_cierre_real: parseFloat(montoCierre) || 0,
@@ -1245,9 +1226,7 @@ export default function CajaPage() {
       setUsarCalculadora(false)
       fetchData()
     } catch {
-      toast.error("Error", "No se pudo cargar el detalle de la sesión")
-    } finally {
-      setLoadingDetail(false)
+      toast.error("Error", "No se pudo cerrar la caja")
     }
   }
 
@@ -1402,11 +1381,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
     } catch {
       toast.error("Error", "No se pudo registrar el cash drop")
     }
-    if (activeTab === "tesoreria") {
-      return s.cerrado && !s.usuario_cierre
-    }
-    return true // historial
-  })
+  }
 
   return (
     <div className="space-y-6 min-w-0 animate-fade-in-up pb-16">
@@ -1939,11 +1914,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                   {cajerosDisponibles.map(c => (
                     <option key={c} value={c} className="dark:bg-slate-800">{c}</option>
                   ))}
-                </div>
-                <div className="flex justify-between items-center p-3 bg-amber-50 dark:bg-amber-950/20 rounded-lg border border-amber-200 dark:border-amber-900/40 mt-2">
-                  <span className="font-black text-amber-900 dark:text-amber-300">TOTAL EFECTIVO CONTADO:</span>
-                  <span className="font-mono font-black text-sm text-amber-600 dark:text-amber-400">{formatPYG(totalCashCounted)}</span>
-                </div>
+                </select>
               </div>
 
               {/* Filtro por Estado */}

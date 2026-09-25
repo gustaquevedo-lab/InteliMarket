@@ -188,7 +188,7 @@ export default function SupplierReturnsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {selected.items.map(it => (
+                  {selected.items.map((it: any) => (
                     <tr key={it.id} className="border-b border-gray-50 dark:border-gray-800">
                       <td className="py-2">{it.descripcion || it.product_id}</td>
                       <td className="py-2 font-mono">{it.cantidad}</td>

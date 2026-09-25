@@ -394,46 +394,6 @@ export default function BovedaPage() {
     )
   }
 
-  const handleCreateBlindado = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!blindadoMonto || Number(blindadoMonto) <= 0 || !blindadoBolsa) {
-      toast.error("Error", "Completá el precinto y monto de la remesa")
-      return
-    }
-    setSubmitting(true)
-    try {
-      await api.caja.vault.dispatchArmored({
-        transportadora: blindadoTransportadora,
-        precinto_bolsa: blindadoBolsa,
-        banco_destino: blindadoBanco,
-        cuenta_banco: blindadoCuenta,
-        supervisor: blindadoSupervisor,
-        monto: Number(blindadoMonto),
-        observaciones: blindadoObs,
-      })
-      toast.success("Remesa Despachada", `Bolsa de seguridad ${blindadoBolsa} entregada a ${blindadoTransportadora}.`)
-      setShowBlindadoModal(false)
-      setBlindadoMonto("")
-      setBlindadoBolsa("")
-      loadData()
-    } catch {
-      toast.error("Error", "No se pudo despachar la remesa")
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  const filteredMovements = movements.filter(m => {
-    const term = search.toLowerCase()
-    return !search || 
-      (m.origen_nombre || "").toLowerCase().includes(term) ||
-      (m.cajero || "").toLowerCase().includes(term) ||
-      (m.supervisor || "").toLowerCase().includes(term) ||
-      (m.precinto_bolsa || "").toLowerCase().includes(term) ||
-      (m.transportadora || "").toLowerCase().includes(term) ||
-      (m.observaciones || "").toLowerCase().includes(term)
-  })
-
   return (
     <div className="space-y-6 min-w-0 animate-fade-in-up">
       {/* 🌟 LUXURY COMMAND DECK HEADER */}
@@ -509,17 +469,7 @@ export default function BovedaPage() {
               {exportingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4 text-emerald-400" />}
               <span>Libro PDF</span>
             </button>
-          ))}
-        </div>
-
-        <div className="relative w-full sm:w-72">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input
-            className="input-field pl-9 text-xs font-medium w-full"
-            placeholder="Buscar por caja, precinto, transportadora..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+          </div>
         </div>
 
         {/* 📊 BARRA DE KPIS EJECUTIVOS MULTIMONEDA */}
@@ -1087,72 +1037,6 @@ export default function BovedaPage() {
                 <p className="text-xs text-gray-400">Sin clientes en mora prolongada.</p>
               )}
             </div>
-
-            <form onSubmit={handleCreateDeposit} className="p-6 space-y-4 text-xs">
-              <div>
-                <label className="block text-gray-600 dark:text-gray-400 mb-1 font-bold">Caja / Terminal POS de Origen</label>
-                <input
-                  type="text"
-                  required
-                  className="input-field text-xs w-full font-bold"
-                  value={depositCaja}
-                  onChange={e => setDepositCaja(e.target.value)}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-gray-600 dark:text-gray-400 mb-1 font-bold">Cajero / Operador</label>
-                  <input
-                    type="text"
-                    required
-                    className="input-field text-xs w-full"
-                    value={depositCajera}
-                    onChange={e => setDepositCajera(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-gray-600 dark:text-gray-400 mb-1 font-bold">Supervisor / Receptor</label>
-                  <input
-                    type="text"
-                    required
-                    className="input-field text-xs w-full"
-                    value={depositSupervisor}
-                    onChange={e => setDepositSupervisor(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-gray-600 dark:text-gray-400 mb-1 font-bold">Monto Retirado (₲ Guaraníes)</label>
-                <input
-                  type="number"
-                  min="1"
-                  required
-                  placeholder="Ej: 3000000"
-                  className="input-field font-mono font-bold text-sm w-full text-emerald-600"
-                  value={depositMonto}
-                  onChange={e => setDepositMonto(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="block text-gray-600 dark:text-gray-400 mb-1">Observaciones</label>
-                <input
-                  type="text"
-                  className="input-field text-xs w-full"
-                  value={depositObs}
-                  onChange={e => setDepositObs(e.target.value)}
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t border-gray-100 dark:border-gray-700">
-                <button type="button" onClick={() => setShowDepositModal(false)} className="btn-ghost">Cancelar</button>
-                <button type="submit" disabled={submitting} className="btn-primary bg-emerald-600 hover:bg-emerald-700">
-                  Confirmar Ingreso a Bóveda
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}

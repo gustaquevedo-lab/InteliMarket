@@ -87,10 +87,8 @@ const EquipmentPage = lazy(() => import("./pages/operations/EquipmentPage"))
 const SalonOperacionesPwaPage = lazy(() => import("./pages/operations/SalonOperacionesPwaPage"))
 const ConteoVencimientosPage = lazy(() => import("./pages/inventory-count/ConteoVencimientosPage"))
 const DepositoRecepcionPage = lazy(() => import("./pages/operations/DepositoRecepcionPage"))
-const CarniceriaTvDigitalPage = lazy(() => import("./pages/kiosk/CarniceriaTvDigitalPage"))
 const DsdPage = lazy(() => import("./pages/operations/DsdPage"))
 const EslPage = lazy(() => import("./pages/operations/EslPage"))
-const PriceCheckerKioskPage = lazy(() => import("./pages/kiosk/PriceCheckerKioskPage"))
 const SelfCheckoutPage = lazy(() => import("./pages/pos/SelfCheckoutPage"))
 const TransferenciasPage = lazy(() => import("./pages/inventory/TransferenciasPage"))
 const BovedaPage = lazy(() => import("./pages/caja/BovedaPage"))
@@ -142,7 +140,6 @@ const ImportsPage = lazy(() => import("./pages/imports/ImportsPage"))
 const EmailPage = lazy(() => import("./pages/email/EmailPage"))
 const BancardPage = lazy(() => import("./pages/bancard/BancardPage"))
 // const DinelcoPage = lazy(() => import("./pages/dinelco/DinelcoPage"))  // DESACTIVADO: checkout viejo apuntando a un host fantasma -- el terminal fisico real de Dinelco va por electron/dinelco-client.cjs, no toca esta pagina. Ver auditoria 2026-09-02
-const LoyaltyPage = lazy(() => import("./pages/loyalty/LoyaltyPage"))
 const PortalPage = lazy(() => import("./pages/portal/PortalPage"))
 const ClientAppPage = lazy(() => import("./pages/client-app/ClientAppPage"))
 const SifenAvanzadoPage = lazy(() => import("./pages/sifen-avanzado/SifenAvanzadoPage"))
@@ -262,10 +259,7 @@ function AppRoutes() {
       <Route path="/tienda/pedidos" element={<Suspense fallback={<PageLoader />}><EcommerceOrders /></Suspense>} />
       <Route path="/tienda/pedido/:id" element={<Suspense fallback={<PageLoader />}><EcommerceOrderDetail /></Suspense>} />
       <Route path="/tienda/dashboard" element={<Suspense fallback={<PageLoader />}><EcommerceOrders /></Suspense>} />
-      <Route path="/verificador" element={<Suspense fallback={<PageLoader />}><PriceCheckerKioskPage /></Suspense>} />
-      <Route path="/consulta-precios" element={<Suspense fallback={<PageLoader />}><PriceCheckerKioskPage /></Suspense>} />
       <Route path="/verificar-recibo/:paymentId" element={<Suspense fallback={<PageLoader />}><VerificarReciboPage /></Suspense>} />
-      <Route path="/tv/carniceria" element={<Suspense fallback={<PageLoader />}><CarniceriaTvDigitalPage /></Suspense>} />
 
       <Route path="/operaciones-salon" element={<Suspense fallback={<PageLoader />}><SalonOperacionesPwaPage /></Suspense>} />
       <Route path="/conteo-vencimientos" element={<Suspense fallback={<PageLoader />}><ConteoVencimientosPage /></Suspense>} />
@@ -407,7 +401,6 @@ function AppRoutes() {
         <Route path="email" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="email"><EmailPage /></FeatureRoute></Suspense>} />
         <Route path="bancard" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="bancard"><BancardPage /></FeatureRoute></Suspense>} />
         {/* <Route path="dinelco" .../> DESACTIVADO: checkout viejo sin credenciales, distinto del terminal fisico real (electron/dinelco-client.cjs). Ver auditoria 2026-09-02 */}
-        <Route path="loyalty" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="loyalty"><LoyaltyPage /></FeatureRoute></Suspense>} />
         <Route path="tarjetas-extra-club" element={<Navigate to="/crm?tab=tarjetas" replace />} />
         <Route path="portal" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="portal"><PortalPage /></FeatureRoute></Suspense>} />
         <Route path="client-app" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="client_app"><ClientAppPage /></FeatureRoute></Suspense>} />
