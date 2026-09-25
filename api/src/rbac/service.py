@@ -135,6 +135,45 @@ async def assign_user_role(db: AsyncSession, user_id: uuid.UUID, tenant_id: uuid
 
     ur = UserRole(user_id=user_id, tenant_id=tenant_id, role_id=role_id)
     db.add(ur)
+
+    # Sincronizar con user.rol y user_tenants.rol si el rol asignado tiene mayor precedencia
+    try:
+        from api.src.auth.models import User
+        from api.src.tenants.models import UserTenant
+
+        role_res = await db.execute(select(Role).where(Role.id == role_id))
+        role_obj = role_res.scalar_one_or_none()
+        if role_obj:
+            r_name = role_obj.name.lower()
+            new_rol = None
+            if "admin" in r_name:
+                new_rol = "admin"
+            elif "gerente" in r_name:
+                new_rol = "gerente"
+            elif "supervisor" in r_name:
+                new_rol = "supervisor"
+            elif "cajer" in r_name:
+                new_rol = "cajero"
+
+            if new_rol:
+                user_res = await db.execute(select(User).where(User.id == user_id))
+                u = user_res.scalar_one_or_none()
+                if u:
+                    current_rol = (u.rol or "").lower()
+                    ranks = {"admin": 4, "gerente": 3, "supervisor": 2, "cajero": 1}
+                    current_rank = ranks.get(current_rol, 0)
+                    new_rank = ranks.get(new_rol, 0)
+                    if new_rank >= current_rank or current_rank == 0:
+                        u.rol = new_rol
+                        ut_res = await db.execute(
+                            select(UserTenant).where(UserTenant.user_id == user_id, UserTenant.tenant_id == tenant_id)
+                        )
+                        ut = ut_res.scalar_one_or_none()
+                        if ut:
+                            ut.rol = new_rol
+    except Exception:
+        pass
+
     await db.commit()
     return True
 
@@ -147,6 +186,42 @@ async def remove_user_role(db: AsyncSession, user_id: uuid.UUID, tenant_id: uuid
             UserRole.role_id == role_id
         )
     )
+    if result.rowcount > 0:
+        # Si se removió un rol, recalcular rol efectivo primario para user.rol
+        try:
+            from api.src.auth.models import User
+            from api.src.tenants.models import UserTenant
+
+            rem_roles = await db.execute(
+                select(Role.name).join(UserRole, UserRole.role_id == Role.id).where(
+                    UserRole.user_id == user_id,
+                    UserRole.tenant_id == tenant_id
+                )
+            )
+            names = [r[0].lower() for r in rem_roles.all()]
+            fallback = "cajero"
+            if any("admin" in n for n in names):
+                fallback = "admin"
+            elif any("gerente" in n for n in names):
+                fallback = "gerente"
+            elif any("supervisor" in n for n in names):
+                fallback = "supervisor"
+            elif names:
+                fallback = names[0]
+
+            user_res = await db.execute(select(User).where(User.id == user_id))
+            u = user_res.scalar_one_or_none()
+            if u:
+                u.rol = fallback
+                ut_res = await db.execute(
+                    select(UserTenant).where(UserTenant.user_id == user_id, UserTenant.tenant_id == tenant_id)
+                )
+                ut = ut_res.scalar_one_or_none()
+                if ut:
+                    ut.rol = fallback
+        except Exception:
+            pass
+
     await db.commit()
     return result.rowcount > 0
 

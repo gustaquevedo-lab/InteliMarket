@@ -23,6 +23,7 @@ from api.src.auth.middleware import get_current_user
 from api.src.common.rate_limit import login_rate_limit
 from api.src.tenants.service import create_tenant_with_schema, get_user_tenants, get_tenant_by_id
 from api.src.tenants.models import UserTenant
+from api.src.rbac.models import Role, UserRole
 
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
 
@@ -119,13 +120,31 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
         if tenant:
             tenant_slug = tenant.slug
 
+    # Determinar roles asignados en RBAC y rol efectivo
+    rbac_roles_res = await db.execute(
+        select(Role.name)
+        .join(UserRole, UserRole.role_id == Role.id)
+        .where(UserRole.user_id == user.id)
+    )
+    assigned_roles = [r[0] for r in rbac_roles_res.all()]
+    assigned_lower = [name.lower() for name in assigned_roles]
+
+    effective_rol = user.rol
+    if any("admin" in ar for ar in assigned_lower):
+        effective_rol = "admin"
+    elif any("gerente" in ar for ar in assigned_lower):
+        effective_rol = "gerente"
+    elif any("supervisor" in ar for ar in assigned_lower):
+        effective_rol = "supervisor"
+
     access_token = create_access_token({
         "sub": str(user.id),
         "sid": session_id,
         "user_email": user.email,
         "user_nombre": user.nombre,
-        "rol": user.rol,
-        "is_superadmin": user.is_superadmin or user.rol == "super_admin",
+        "rol": effective_rol,
+        "roles": assigned_roles,
+        "is_superadmin": user.is_superadmin or user.rol == "super_admin" or effective_rol == "admin",
         "tenant_id": tenant_id,
         "tenant_slug": tenant_slug,
     })
@@ -159,12 +178,29 @@ async def refresh_token_endpoint(body: dict, db: AsyncSession = Depends(get_db))
                 tenant_id = str(tenant.id)
                 tenant_slug = tenant.slug
 
+        rbac_roles_res = await db.execute(
+            select(Role.name)
+            .join(UserRole, UserRole.role_id == Role.id)
+            .where(UserRole.user_id == user.id)
+        )
+        assigned_roles = [r[0] for r in rbac_roles_res.all()]
+        assigned_lower = [name.lower() for name in assigned_roles]
+
+        effective_rol = user.rol
+        if any("admin" in ar for ar in assigned_lower):
+            effective_rol = "admin"
+        elif any("gerente" in ar for ar in assigned_lower):
+            effective_rol = "gerente"
+        elif any("supervisor" in ar for ar in assigned_lower):
+            effective_rol = "supervisor"
+
         access_token = create_access_token({
             "sub": str(user.id),
             "user_email": user.email,
             "user_nombre": user.nombre,
-            "rol": user.rol,
-            "is_superadmin": user.is_superadmin or user.rol == "super_admin",
+            "rol": effective_rol,
+            "roles": assigned_roles,
+            "is_superadmin": user.is_superadmin or user.rol == "super_admin" or effective_rol == "admin",
             "tenant_id": tenant_id,
             "tenant_slug": tenant_slug,
         })
@@ -175,6 +211,28 @@ async def refresh_token_endpoint(body: dict, db: AsyncSession = Depends(get_db))
     except Exception as e:
         raise HTTPException(status_code=401, detail="Token de refresco inválido o expirado")
 
+
+
+def _supervisor_role_uids_subquery():
+    return (
+        select(UserRole.user_id)
+        .join(Role, Role.id == UserRole.role_id)
+        .where(
+            or_(
+                func.lower(Role.name).like("%admin%"),
+                func.lower(Role.name).like("%supervisor%"),
+                func.lower(Role.name).like("%gerente%"),
+            )
+        )
+    )
+
+
+def _strictly_supervisor_role_uids_subquery():
+    return (
+        select(UserRole.user_id)
+        .join(Role, Role.id == UserRole.role_id)
+        .where(func.lower(Role.name).like("%supervisor%"))
+    )
 
 
 @router.post("/verify-supervisor", response_model=VerifySupervisorResponse)
@@ -197,10 +255,28 @@ async def verify_supervisor(
         return VerifySupervisorResponse(valid=False)
 
     r = (user.rol or "").lower().strip()
-    if not ("admin" in r or "supervisor" in r or "gerente" in r) and not user.is_superadmin:
+    is_sup = ("admin" in r or "supervisor" in r or "gerente" in r) or user.is_superadmin
+    if not is_sup:
+        rbac_res = await db.execute(
+            select(UserRole.user_id)
+            .join(Role, Role.id == UserRole.role_id)
+            .where(
+                UserRole.user_id == user.id,
+                or_(
+                    func.lower(Role.name).like("%admin%"),
+                    func.lower(Role.name).like("%supervisor%"),
+                    func.lower(Role.name).like("%gerente%"),
+                ),
+            )
+        )
+        if rbac_res.first():
+            is_sup = True
+
+    if not is_sup:
         return VerifySupervisorResponse(valid=False)
 
-    return VerifySupervisorResponse(valid=True, id=str(user.id), nombre=user.nombre, rol=user.rol)
+    resolved_rol = user.rol if "supervisor" in (user.rol or "").lower() else "supervisor"
+    return VerifySupervisorResponse(valid=True, id=str(user.id), nombre=user.nombre, rol=resolved_rol)
 
 
 @router.post("/set-pos-pin")
@@ -225,7 +301,24 @@ async def set_pos_pin(
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
     r = (user.rol or "").lower().strip()
-    if not ("admin" in r or "supervisor" in r or "gerente" in r) and not user.is_superadmin:
+    is_sup = ("admin" in r or "supervisor" in r or "gerente" in r) or user.is_superadmin
+    if not is_sup:
+        rbac_res = await db.execute(
+            select(UserRole.user_id)
+            .join(Role, Role.id == UserRole.role_id)
+            .where(
+                UserRole.user_id == user.id,
+                or_(
+                    func.lower(Role.name).like("%admin%"),
+                    func.lower(Role.name).like("%supervisor%"),
+                    func.lower(Role.name).like("%gerente%"),
+                ),
+            )
+        )
+        if rbac_res.first():
+            is_sup = True
+
+    if not is_sup:
         raise HTTPException(status_code=403, detail="Solo cuentas de supervisor o administrador pueden configurar un PIN de autorizaciones.")
 
     user.pos_pin_hash = hash_password(body.pin)
@@ -245,6 +338,7 @@ async def pos_supervisor_pins(
     Requiere sesion valida (no es publico) -- se distribuye material de
     credencial aunque sea hasheado, por eso el PIN es corto y separado de
     la contrasena real (ver set_pos_pin)."""
+    subq = _supervisor_role_uids_subquery()
     result = await db.execute(
         select(User).where(
             or_(
@@ -252,6 +346,7 @@ async def pos_supervisor_pins(
                 func.lower(User.rol).like("%supervisor%"),
                 func.lower(User.rol).like("%gerente%"),
                 User.is_superadmin == True,
+                User.id.in_(subq),
             ),
             User.activo == True,
             User.pos_pin_hash.isnot(None),
@@ -270,6 +365,16 @@ async def list_pos_staff(db: AsyncSession = Depends(get_db)):
     el selector de la pantalla de login de Electron -- reemplaza tener que
     tipear el usuario. Solo expone id/email/nombre/rol/foto (nunca password
     ni nada sensible); el login real sigue exigiendo contraseña."""
+    staff_subq = (
+        select(UserRole.user_id)
+        .join(Role, Role.id == UserRole.role_id)
+        .where(
+            or_(
+                func.lower(Role.name).like("%cajer%"),
+                func.lower(Role.name).like("%supervisor%"),
+            )
+        )
+    )
     result = await db.execute(
         select(User)
         .where(
@@ -277,6 +382,7 @@ async def list_pos_staff(db: AsyncSession = Depends(get_db)):
                 func.lower(User.rol).like("%cajer%"),
                 func.lower(User.rol).like("%supervisor%"),
                 func.lower(User.rol).in_(["cajero", "cajera", "supervisor", "cajero/a"]),
+                User.id.in_(staff_subq),
             ),
             User.activo == True,
         )
@@ -309,12 +415,14 @@ async def list_pos_supervisors(db: AsyncSession = Depends(get_db)):
     diferencia de /pos-authorizers (usado DENTRO del POS ya logueado para
     elegir quien autoriza una accion), esta pantalla es especificamente
     el panel de supervisoras, no de administradores."""
+    sup_subq = _strictly_supervisor_role_uids_subquery()
     result = await db.execute(
         select(User)
         .where(
             or_(
                 func.lower(User.rol).like("%supervisor%"),
                 func.lower(User.rol) == "supervisor",
+                User.id.in_(sup_subq),
             ),
             User.activo == True,
         )
@@ -322,7 +430,14 @@ async def list_pos_supervisors(db: AsyncSession = Depends(get_db)):
     )
     users = result.scalars().all()
     return PosStaffListResponse(staff=[
-        PosStaffItem(id=str(u.id), email=u.email, nombre=u.nombre, rol=u.rol, foto_url=u.foto_url, en_turno=False)
+        PosStaffItem(
+            id=str(u.id),
+            email=u.email,
+            nombre=u.nombre,
+            rol=u.rol if "supervisor" in (u.rol or "").lower() else "supervisor",
+            foto_url=u.foto_url,
+            en_turno=False
+        )
         for u in users
     ])
 
@@ -335,6 +450,7 @@ async def list_pos_authorizers(
     """Lista de usuarios con nivel supervisor/admin/gerente, para el selector del
     modal de autorización de acciones sensibles dentro del POS (anular item,
     devolución, etc)."""
+    subq = _supervisor_role_uids_subquery()
     result = await db.execute(
         select(User)
         .where(
@@ -343,6 +459,7 @@ async def list_pos_authorizers(
                 func.lower(User.rol).like("%admin%"),
                 func.lower(User.rol).like("%gerente%"),
                 User.is_superadmin == True,
+                User.id.in_(subq),
             ),
             User.activo == True,
         )
@@ -400,13 +517,19 @@ async def get_active_supervisor(
 ):
     """Verifica si hay un supervisor con turno activo o autorizadores disponibles en el sistema
     para habilitar el flujo de autorización de acciones sensibles en el POS (devoluciones, anulaciones, etc)."""
+    subq = _supervisor_role_uids_subquery()
     # 1. Buscar si hay algún usuario con turno abierto que sea supervisor, admin o gerente
     result = await db.execute(
         select(User.nombre)
         .join(StaffShift, StaffShift.user_id == User.id)
         .where(
             StaffShift.ended_at.is_(None),
-            (StaffShift.rol_en_turno.in_(["supervisor", "admin", "gerente"])) | (User.rol.in_(["supervisor", "admin", "gerente"])) | (User.is_superadmin == True),
+            or_(
+                StaffShift.rol_en_turno.in_(["supervisor", "admin", "gerente"]),
+                User.rol.in_(["supervisor", "admin", "gerente"]),
+                User.is_superadmin == True,
+                User.id.in_(subq),
+            ),
             User.activo == True
         )
         .limit(1)
@@ -419,7 +542,11 @@ async def get_active_supervisor(
     user_res = await db.execute(
         select(User.nombre)
         .where(
-            (User.rol.in_(["supervisor", "admin", "gerente"])) | (User.is_superadmin == True),
+            or_(
+                User.rol.in_(["supervisor", "admin", "gerente"]),
+                User.is_superadmin == True,
+                User.id.in_(subq),
+            ),
             User.activo == True
         )
         .order_by(User.rol == "supervisor", User.created_at.asc())
@@ -442,12 +569,29 @@ async def get_me(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    # Si token_data tiene un rol efectivo o RBAC lo otorga:
+    effective_rol = token_data.get("rol") or user.rol
+    if effective_rol == user.rol:
+        rbac_roles_res = await db.execute(
+            select(Role.name)
+            .join(UserRole, UserRole.role_id == Role.id)
+            .where(UserRole.user_id == user.id)
+        )
+        assigned_lower = [r[0].lower() for r in rbac_roles_res.all()]
+        if any("admin" in ar for ar in assigned_lower):
+            effective_rol = "admin"
+        elif any("gerente" in ar for ar in assigned_lower):
+            effective_rol = "gerente"
+        elif any("supervisor" in ar for ar in assigned_lower):
+            effective_rol = "supervisor"
+
     return UserResponse(
         id=user.id,
         email=user.email,
         nombre=user.nombre,
         telefono=user.telefono,
-        rol=user.rol,
+        rol=effective_rol,
         activo=user.activo,
         foto_url=user.foto_url,
         tenant_id=token_data.get("tenant_id"),
