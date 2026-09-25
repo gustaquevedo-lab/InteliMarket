@@ -28,6 +28,17 @@ from api.src.petty_cash.schemas import (
 TZ_ASUNCION = ZoneInfo("America/Asuncion")
 
 
+def _safe_uuid(val: object) -> uuid.UUID | None:
+    if not val:
+        return None
+    if isinstance(val, uuid.UUID):
+        return val
+    try:
+        return uuid.UUID(str(val))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
 async def _get_user_nombre(db: AsyncSession, user_id: str | None) -> str | None:
     if not user_id:
         return None
@@ -511,15 +522,15 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
 
     cost_center_id = None
     if data.cost_center_id:
-        cost_center_id = uuid.UUID(data.cost_center_id)
+        cost_center_id = _safe_uuid(data.cost_center_id)
     elif fund and fund.cost_center_id:
         cost_center_id = fund.cost_center_id
 
     exp = Expense(
         company_id=cid,
-        branch_id=uuid.UUID(data.branch_id) if data.branch_id else (fund.branch_id if fund else None),
+        branch_id=_safe_uuid(data.branch_id) if data.branch_id else (fund.branch_id if fund else None),
         fund_id=fund.id if fund else None,
-        category_id=uuid.UUID(data.category_id) if data.category_id else None,
+        category_id=_safe_uuid(data.category_id),
         cost_center_id=cost_center_id,
         monto=monto,
         descripcion=data.descripcion,
@@ -540,8 +551,8 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
         vida_util_meses=data.vida_util_meses if data.es_inversion else None,
         categoria_activo=data.categoria_activo if data.es_inversion else None,
         es_pago_proveedor=bool(data.es_pago_proveedor),
-        supplier_id=uuid.UUID(data.supplier_id) if data.supplier_id else None,
-        supplier_invoice_id=uuid.UUID(data.supplier_invoice_id) if data.supplier_invoice_id else None,
+        supplier_id=_safe_uuid(data.supplier_id),
+        supplier_invoice_id=_safe_uuid(data.supplier_invoice_id),
         es_anticipo_sueldo=bool(data.es_anticipo_sueldo),
         employee_id=str(data.employee_id) if data.employee_id else None,
         employee_nombre=data.employee_nombre,
@@ -549,10 +560,11 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
         periodo_nomina=data.periodo_nomina,
         cuotas_anticipo=data.cuotas_anticipo or 1,
         sueldok_sync_status="pendiente",
+        sueldok_sync_id=str(data.sueldok_sync_id) if getattr(data, "sueldok_sync_id", None) else None,
         monto_brl=Decimal(str(data.monto_brl)) if data.monto_brl else None,
         auditoria_estado=auditoria_estado,
         auditoria_motivo=auditoria_motivo,
-        registrado_por=uuid.UUID(user_id),
+        registrado_por=_safe_uuid(user_id),
         estado="pendiente",  # Se carga siempre en pendiente para luego ser aprobado y pagado
         notas=data.notas,
     )
@@ -1031,7 +1043,10 @@ async def list_expense_disbursements(db: AsyncSession, expense_id: str) -> list[
 
 
 async def get_expense(db: AsyncSession, expense_id: str) -> Expense | None:
-    result = await db.execute(select(Expense).where(Expense.id == uuid.UUID(expense_id)))
+    eid = _safe_uuid(expense_id)
+    if not eid:
+        return None
+    result = await db.execute(select(Expense).where(Expense.id == eid))
     exp = result.scalar_one_or_none()
     if exp:
         exp.disbursements = await list_expense_disbursements(db, str(exp.id))
@@ -1433,7 +1448,7 @@ async def update_expense(db: AsyncSession, expense_id: str, data: ExpenseUpdate)
     for field in ("cost_center_id", "category_id", "supplier_id", "supplier_invoice_id"):
         if field in update_data:
             val = update_data[field]
-            update_data[field] = uuid.UUID(str(val)) if val else None
+            update_data[field] = _safe_uuid(val)
 
     if "employee_id" in update_data:
         val = update_data["employee_id"]

@@ -2085,12 +2085,25 @@ async def _compute_daily_cash_flow(db: AsyncSession, company_id: str, dias: int)
     )
     ar_due = {row.fecha_vencimiento: Decimal(str(row.total)) for row in ar_rows}
 
+    # Egresos por Cheques Diferidos girados a proveedores
+    from api.src.cheques.models import Cheque
+    chq_rows = await db.execute(
+        select(Cheque.fecha_pago, func.coalesce(func.sum(Cheque.monto), 0))
+        .where(
+            Cheque.company_id == cid,
+            Cheque.estado.in_(["pendiente", "entregado"]),
+            Cheque.fecha_pago.is_not(None),
+        )
+        .group_by(Cheque.fecha_pago)
+    )
+    chq_due = {row[0]: Decimal(str(row[1])) for row in chq_rows.all()}
+
     dias_calc = []
     running_balance = saldo_bancario
     for i in range(dias):
         day = today + timedelta(days=i)
         ingresos = ar_due.get(day, Decimal("0"))
-        egresos = ap_due.get(day, Decimal("0"))
+        egresos = ap_due.get(day, Decimal("0")) + chq_due.get(day, Decimal("0"))
         projected = running_balance + ingresos - egresos
         dias_calc.append({
             "fecha": day, "saldo_inicial": running_balance,

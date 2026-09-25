@@ -20,7 +20,11 @@ from api.src.inteliaudit.service import record_audit_event
 # ---------------------------------------------------------------------------
 
 async def list_count_sessions(company_id: UUID, db: AsyncSession, area: Optional[str] = None, estado: Optional[str] = None):
-    q = select(PhysicalCountSession).where(PhysicalCountSession.company_id == company_id)
+    q = (
+        select(PhysicalCountSession)
+        .options(selectinload(PhysicalCountSession.items))
+        .where(PhysicalCountSession.company_id == company_id)
+    )
     if area:
         q = q.where(PhysicalCountSession.area == area)
     if estado:

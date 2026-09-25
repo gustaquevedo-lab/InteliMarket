@@ -18,7 +18,11 @@ from .models import SupplierReturn, SupplierReturnItem, ReturnAuthorization, Bac
 # ---------------------------------------------------------------------------
 
 async def list_returns(company_id: UUID, db: AsyncSession, estado: Optional[str] = None, proveedor_id: Optional[UUID] = None):
-    q = select(SupplierReturn).where(SupplierReturn.company_id == company_id)
+    q = (
+        select(SupplierReturn)
+        .options(selectinload(SupplierReturn.items))
+        .where(SupplierReturn.company_id == company_id)
+    )
     if estado:
         q = q.where(SupplierReturn.estado == estado)
     if proveedor_id:
@@ -51,7 +55,6 @@ async def create_return(company_id: UUID, data, db: AsyncSession):
             item.valor_total = item.valor_unitario * item.cantidad
         db.add(item)
     await db.commit()
-    await db.refresh(r)
     return await get_return(r.id, db)
 
 
@@ -60,8 +63,7 @@ async def update_return(return_id: UUID, data, db: AsyncSession):
     for k, v in data.model_dump(exclude_none=True).items():
         setattr(r, k, v)
     await db.commit()
-    await db.refresh(r)
-    return r
+    return await get_return(return_id, db)
 
 
 async def authorize_return(return_id: UUID, user_id: UUID, db: AsyncSession):
@@ -70,8 +72,7 @@ async def authorize_return(return_id: UUID, user_id: UUID, db: AsyncSession):
     r.autorizado_por = user_id
     r.autorizado_at = datetime.utcnow()
     await db.commit()
-    await db.refresh(r)
-    return r
+    return await get_return(return_id, db)
 
 
 async def complete_return(return_id: UUID, user_id: UUID, db: AsyncSession):
@@ -84,8 +85,7 @@ async def complete_return(return_id: UUID, user_id: UUID, db: AsyncSession):
     r.valor_total_estimado = total
     r.total_items = len(r.items)
     await db.commit()
-    await db.refresh(r)
-    return r
+    return await get_return(return_id, db)
 
 
 # ---------------------------------------------------------------------------

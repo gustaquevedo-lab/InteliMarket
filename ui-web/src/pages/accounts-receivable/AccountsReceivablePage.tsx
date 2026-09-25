@@ -269,6 +269,11 @@ export default function AccountsReceivablePage() {
     const now = new Date()
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   })
+  const [remitFechaCorte, setRemitFechaCorte] = useState(() => getTodayAsuncion())
+  const [remitModo, setRemitModo] = useState<"completo" | "selectivo">("completo")
+  const [selectedRemitDocIds, setSelectedRemitDocIds] = useState<Set<string>>(new Set())
+  const [remitSearchFilter, setRemitSearchFilter] = useState("")
+  const [expandedFuncionarioId, setExpandedFuncionarioId] = useState<string | null>(null)
   const [remitNotas, setRemitNotas] = useState("")
   const [remitting, setRemitting] = useState(false)
   const [showPayRemissionModal, setShowPayRemissionModal] = useState<any | null>(null)
@@ -430,16 +435,17 @@ export default function AccountsReceivablePage() {
     }
   }
 
-  const handleSelectEmpresa = async (empresaNombre: string) => {
-    if (selectedEmpresa === empresaNombre) {
+  const handleSelectEmpresa = async (empresaNombre: string, fechaCorteOverride?: string) => {
+    if (selectedEmpresa === empresaNombre && !fechaCorteOverride) {
       setSelectedEmpresa("")
       setEmpresaPending(null)
       return
     }
     setSelectedEmpresa(empresaNombre)
     setEmpresaPendingLoading(true)
+    const fecha = fechaCorteOverride !== undefined ? fechaCorteOverride : remitFechaCorte
     try {
-      const data = await api.accountsReceivable.corporateAgreementPendingDocs(empresaNombre)
+      const data = await api.accountsReceivable.corporateAgreementPendingDocs(empresaNombre, fecha || undefined)
       if (data && Array.isArray(data.documentos)) {
         data.documentos.sort((a: any, b: any) => new Date(b.fecha_emision || b.created_at || 0).getTime() - new Date(a.fecha_emision || a.created_at || 0).getTime())
       }
@@ -455,6 +461,125 @@ export default function AccountsReceivablePage() {
     }
   }
 
+  const handleOpenRemitModalForEmpresa = async (empresaNombre: string) => {
+    setSelectedEmpresa(empresaNombre)
+    setEmpresaPendingLoading(true)
+    try {
+      const data = await api.accountsReceivable.corporateAgreementPendingDocs(empresaNombre, remitFechaCorte || undefined)
+      setEmpresaPending(data)
+      const allDocIds = new Set<string>()
+      data?.funcionarios?.forEach((f: any) => {
+        f.documentos?.forEach((d: any) => {
+          allDocIds.add(d.id)
+        })
+      })
+      setSelectedRemitDocIds(allDocIds)
+      setRemitModo("completo")
+      setShowRemitModal(true)
+    } catch (e: any) {
+      toast.error("Error", e.message || "No se pudieron cargar los comprobantes de la empresa")
+    } finally {
+      setEmpresaPendingLoading(false)
+    }
+  }
+
+  const handleRemitFechaCorteChange = async (newFecha: string) => {
+    setRemitFechaCorte(newFecha)
+    if (!selectedEmpresa) return
+    setEmpresaPendingLoading(true)
+    try {
+      const data = await api.accountsReceivable.corporateAgreementPendingDocs(selectedEmpresa, newFecha || undefined)
+      setEmpresaPending(data)
+      const allDocIds = new Set<string>()
+      data?.funcionarios?.forEach((f: any) => {
+        f.documentos?.forEach((d: any) => {
+          allDocIds.add(d.id)
+        })
+      })
+      setSelectedRemitDocIds(allDocIds)
+    } catch (e: any) {
+      toast.error("Error al actualizar fecha de corte", e.message)
+    } finally {
+      setEmpresaPendingLoading(false)
+    }
+  }
+
+  const toggleSelectAllDocs = (select: boolean) => {
+    if (!empresaPending?.funcionarios) return
+    if (!select) {
+      setSelectedRemitDocIds(new Set())
+      return
+    }
+    const all = new Set<string>()
+    empresaPending.funcionarios.forEach((f: any) => {
+      f.documentos?.forEach((d: any) => {
+        all.add(d.id)
+      })
+    })
+    setSelectedRemitDocIds(all)
+  }
+
+  const toggleFuncionarioDocs = (funcionario: any) => {
+    const docs = funcionario.documentos || []
+    if (docs.length === 0) return
+    const allSelected = docs.every((d: any) => selectedRemitDocIds.has(d.id))
+    const next = new Set(selectedRemitDocIds)
+    if (allSelected) {
+      docs.forEach((d: any) => next.delete(d.id))
+    } else {
+      docs.forEach((d: any) => next.add(d.id))
+    }
+    setSelectedRemitDocIds(next)
+  }
+
+  const toggleSingleDoc = (docId: string) => {
+    const next = new Set(selectedRemitDocIds)
+    if (next.has(docId)) {
+      next.delete(docId)
+    } else {
+      next.add(docId)
+    }
+    setSelectedRemitDocIds(next)
+  }
+
+  const { selectedTotalMonto, selectedFuncsCount, totalDocsInCutoff, totalFuncsInCutoff } = useMemo(() => {
+    if (!empresaPending?.funcionarios) {
+      return { selectedTotalMonto: 0, selectedFuncsCount: 0, totalDocsInCutoff: 0, totalFuncsInCutoff: 0 }
+    }
+    let totalMonto = 0
+    let funcsCount = 0
+    let allDocsCount = 0
+    empresaPending.funcionarios.forEach((f: any) => {
+      const docs = f.documentos || []
+      allDocsCount += docs.length
+      let hasSelected = false
+      docs.forEach((d: any) => {
+        if (selectedRemitDocIds.has(d.id)) {
+          totalMonto += Number(d.saldo_pendiente || 0)
+          hasSelected = true
+        }
+      })
+      if (hasSelected) funcsCount++
+    })
+    return {
+      selectedTotalMonto: totalMonto,
+      selectedFuncsCount: funcsCount,
+      totalDocsInCutoff: allDocsCount,
+      totalFuncsInCutoff: empresaPending.funcionarios.length,
+    }
+  }, [empresaPending, selectedRemitDocIds])
+
+  const filteredFuncionarios = useMemo(() => {
+    if (!empresaPending?.funcionarios) return []
+    if (!remitSearchFilter.trim()) return empresaPending.funcionarios
+    const q = remitSearchFilter.toLowerCase().trim()
+    return empresaPending.funcionarios.filter((f: any) => {
+      const name = (f.customer_name || f.customer_nombre || "").toLowerCase()
+      const ci = (f.ci_numero || f.customer_ruc || "").toLowerCase()
+      return name.includes(q) || ci.includes(q)
+    })
+  }, [empresaPending, remitSearchFilter])
+
   useEffect(() => {
     if (tab === "empresas_vinculadas" || tab === "reportes") {
       fetchAgreements()
@@ -464,11 +589,17 @@ export default function AccountsReceivablePage() {
 
   const handleExecuteRemit = async () => {
     if (!selectedEmpresa) return
+    if (remitModo === "selectivo" && selectedRemitDocIds.size === 0) {
+      toast.warning("Selección requerida", "Debes seleccionar al menos un comprobante para el corte selectivo")
+      return
+    }
     setRemitting(true)
     try {
       const res = await api.accountsReceivable.createCorporateRemission({
         empresa_vinculada_nombre: selectedEmpresa,
         periodo_mes: remitPeriodo,
+        fecha_corte: remitFechaCorte || undefined,
+        accounts_receivable_ids: remitModo === "selectivo" ? Array.from(selectedRemitDocIds) : undefined,
         notas: remitNotas || undefined,
       })
       toast.success(
@@ -477,9 +608,10 @@ export default function AccountsReceivablePage() {
       )
       setShowRemitModal(false)
       setRemitNotas("")
+      setSelectedRemitDocIds(new Set())
       fetchAgreements()
       fetchRemissions()
-      handleSelectEmpresa(selectedEmpresa)
+      handleSelectEmpresa(selectedEmpresa, remitFechaCorte)
       fetchData()
     } catch (e: any) {
       toast.error("Error al ejecutar corte", e.message || "Ocurrió un error al procesar la remisión")
@@ -1792,7 +1924,7 @@ export default function AccountsReceivablePage() {
                                   <span>{isSelected ? "Ocultar Nómina" : "Ver Nómina"}</span>
                                 </button>
                                 <button
-                                  onClick={() => api.accountsReceivable.downloadExtractosEmpresaPdf(a.empresa_vinculada_nombre, remitPeriodo)}
+                                  onClick={() => api.accountsReceivable.downloadExtractosEmpresaPdf(a.empresa_vinculada_nombre, remitPeriodo, remitFechaCorte)}
                                   className="py-1.5 px-2.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-xs font-bold transition inline-flex items-center gap-1"
                                   title="Descargar Extractos Masivos de Funcionarios con Talón de Conformidad"
                                 >
@@ -1800,10 +1932,7 @@ export default function AccountsReceivablePage() {
                                   <span>Extractos (PDF)</span>
                                 </button>
                                 <button
-                                  onClick={() => {
-                                    setSelectedEmpresa(a.empresa_vinculada_nombre)
-                                    setShowRemitModal(true)
-                                  }}
+                                  onClick={() => handleOpenRemitModalForEmpresa(a.empresa_vinculada_nombre)}
                                   className="py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition inline-flex items-center gap-1 shadow-sm"
                                   title="Cerrar período, transferir deuda a la empresa y liberar línea del funcionario"
                                 >
@@ -1834,13 +1963,24 @@ export default function AccountsReceivablePage() {
                         </h4>
                       </div>
                       <p className="text-xs text-gray-500 mt-0.5">
-                        Vales y compras a crédito que serán descontados por Recursos Humanos en el corte {remitPeriodo}.
+                        Vales y compras a crédito emitidos hasta la fecha de corte ({remitFechaCorte}) para descuento en el corte {remitPeriodo}.
                       </p>
                     </div>
 
                     <div className="flex items-center gap-2 flex-wrap">
+                      <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
+                        <Calendar className="w-3.5 h-3.5 text-indigo-500" />
+                        <span className="font-bold text-gray-500 text-[11px]">Fecha Tope:</span>
+                        <input
+                          type="date"
+                          className="bg-transparent font-bold text-gray-900 dark:text-white text-xs border-0 p-0 focus:ring-0 cursor-pointer"
+                          value={remitFechaCorte}
+                          onChange={(e) => handleRemitFechaCorteChange(e.target.value)}
+                          title="Filtrar comprobantes emitidos hasta esta fecha de corte"
+                        />
+                      </div>
                       <button
-                        onClick={() => api.accountsReceivable.downloadConsolidadoEmpresaPdf(selectedEmpresa, remitPeriodo)}
+                        onClick={() => api.accountsReceivable.downloadConsolidadoEmpresaPdf(selectedEmpresa, remitPeriodo, remitFechaCorte)}
                         className="btn-outline text-xs flex items-center gap-1.5 font-bold border-indigo-300 text-indigo-700 dark:text-indigo-300 bg-indigo-50/50 dark:bg-indigo-950/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50"
                         title="Descargar Planilla Consolidada con cuadro totalizador y espacio para firmas de RRHH / Supermercado"
                       >
@@ -1848,14 +1988,14 @@ export default function AccountsReceivablePage() {
                         <span>Planilla Consolidada con Firmas (PDF)</span>
                       </button>
                       <button
-                        onClick={() => api.accountsReceivable.downloadExtractosEmpresaPdf(selectedEmpresa, remitPeriodo)}
+                        onClick={() => api.accountsReceivable.downloadExtractosEmpresaPdf(selectedEmpresa, remitPeriodo, remitFechaCorte)}
                         className="btn-outline text-xs flex items-center gap-1.5 font-bold"
                       >
                         <FileDown className="w-4 h-4 text-indigo-500" />
                         <span>Extractos Masivos (PDF)</span>
                       </button>
                       <button
-                        onClick={() => setShowRemitModal(true)}
+                        onClick={() => handleOpenRemitModalForEmpresa(selectedEmpresa)}
                         className="btn-primary bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm"
                       >
                         <Send className="w-4 h-4" />
@@ -3398,59 +3538,321 @@ export default function AccountsReceivablePage() {
       {/* MODAL: Confirmar Corte y Remisión a Empresa Vinculada */}
       {showRemitModal && selectedEmpresa && (
         <div className="modal-overlay" onClick={() => setShowRemitModal(false)}>
-          <div className="modal-content max-w-lg" onClick={e => e.stopPropagation()}>
-            <div className="p-6 border-b">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                <Send className="w-5 h-5 text-emerald-500" />
-                Corte y Remisión a Empresa Vinculada
-              </h3>
-              <p className="text-xs text-gray-500 mt-1">
-                Traspaso formal de la deuda a la empresa y liberación inmediata de crédito para los funcionarios.
-              </p>
+          <div
+            className="modal-content max-w-2xl w-full flex flex-col max-h-[90vh] shadow-2xl rounded-2xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="p-5 border-b shrink-0 flex items-center justify-between bg-white dark:bg-slate-900">
+              <div>
+                <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <Send className="w-5 h-5 text-emerald-500" />
+                  Corte y Remisión a Empresa Vinculada
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Traspaso formal de la deuda a la empresa y liberación inmediata de crédito para los funcionarios.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRemitModal(false)}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+                title="Cerrar"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
-            <div className="p-6 space-y-4 text-xs">
+            {/* Body */}
+            <div className="p-5 space-y-4 text-xs overflow-y-auto flex-1">
+              {/* Tarjeta Empresa */}
               <div className="p-4 rounded-xl bg-slate-900 text-white space-y-2">
-                <div className="text-xs font-bold text-slate-300">Empresa Receptora</div>
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Empresa Receptora</div>
                 <div className="text-base font-black text-indigo-400">{selectedEmpresa}</div>
                 {empresaPending && (
                   <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800 text-[11px]">
-                    <div>Funcionarios: <strong className="text-white">{empresaPending.total_funcionarios ?? empresaPending.cantidad_funcionarios ?? empresaPending.funcionarios?.length ?? 0}</strong></div>
-                    <div>Total Deuda: <strong className="text-emerald-400">{formatPYG(empresaPending.total_deuda ?? 0)}</strong></div>
+                    <div>
+                      Funcionarios con deuda: <strong className="text-white">{empresaPending.total_funcionarios ?? empresaPending.cantidad_funcionarios ?? totalFuncsInCutoff}</strong>
+                    </div>
+                    <div>
+                      Total comprobantes: <strong className="text-emerald-400">{formatPYG(empresaPending.total_deuda ?? 0)}</strong>
+                    </div>
                   </div>
                 )}
               </div>
 
-              <div>
-                <label className="label-field">Período de Liquidación (Mes)</label>
-                <input
-                  type="month"
-                  className="input-field text-xs"
-                  value={remitPeriodo}
-                  onChange={e => setRemitPeriodo(e.target.value)}
-                />
+              {/* Configuración de Fechas */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="label-field">Período de Liquidación (Mes)</label>
+                  <input
+                    type="month"
+                    className="input-field text-xs font-bold"
+                    value={remitPeriodo}
+                    onChange={e => setRemitPeriodo(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="label-field flex items-center justify-between">
+                    <span>Fecha Tope de Corte</span>
+                    <span className="text-[10px] text-indigo-500 font-normal">Hasta esta fecha inclusive</span>
+                  </label>
+                  <input
+                    type="date"
+                    className="input-field text-xs font-bold cursor-pointer"
+                    value={remitFechaCorte}
+                    onChange={e => handleRemitFechaCorteChange(e.target.value)}
+                  />
+                </div>
               </div>
 
+              {/* Selector de Modalidad */}
+              <div className="space-y-1.5">
+                <label className="label-field text-gray-700 dark:text-gray-300 font-bold">
+                  Modalidad del Corte
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setRemitModo("completo")}
+                    className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
+                      remitModo === "completo"
+                        ? "border-emerald-500 bg-emerald-50/60 dark:bg-emerald-950/30 text-emerald-900 dark:text-emerald-200 ring-2 ring-emerald-500/20 shadow-sm"
+                        : "border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40 text-gray-700 dark:text-gray-300"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full mb-1">
+                      <span className="font-extrabold text-xs flex items-center gap-1.5">
+                        <Building2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                        Corte Completo (Todos)
+                      </span>
+                      {remitModo === "completo" && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+                    </div>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
+                      Incluir el 100% de los <strong>{totalDocsInCutoff} comprobantes</strong> emitidos hasta el {remitFechaCorte}.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setRemitModo("selectivo")}
+                    className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
+                      remitModo === "selectivo"
+                        ? "border-indigo-500 bg-indigo-50/60 dark:bg-indigo-950/30 text-indigo-900 dark:text-indigo-200 ring-2 ring-indigo-500/20 shadow-sm"
+                        : "border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40 text-gray-700 dark:text-gray-300"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full mb-1">
+                      <span className="font-extrabold text-xs flex items-center gap-1.5">
+                        <Filter className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                        Corte Selectivo
+                      </span>
+                      {remitModo === "selectivo" && <CheckCircle2 className="w-4 h-4 text-indigo-500" />}
+                    </div>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
+                      Elegir manualmente funcionarios o comprobantes específicos a incluir en este corte.
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              {/* Panel de Selección para Corte Selectivo */}
+              {remitModo === "selectivo" && (
+                <div className="p-3.5 rounded-xl border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/30 dark:bg-slate-900/60 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-gray-900 dark:text-white text-xs">
+                        Selección de Comprobantes
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300">
+                        {selectedFuncsCount} de {totalFuncsInCutoff} funcionarios ({selectedRemitDocIds.size} de {totalDocsInCutoff} vales)
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => toggleSelectAllDocs(true)}
+                        className="text-[11px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline"
+                      >
+                        Marcar Todos
+                      </button>
+                      <span className="text-gray-300 dark:text-gray-700">|</span>
+                      <button
+                        type="button"
+                        onClick={() => toggleSelectAllDocs(false)}
+                        className="text-[11px] text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 font-bold hover:underline"
+                      >
+                        Desmarcar Todos
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Buscador */}
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="text"
+                      className="input-field text-xs pl-8 py-1.5"
+                      placeholder="Filtrar por nombre o CI del funcionario..."
+                      value={remitSearchFilter}
+                      onChange={(e) => setRemitSearchFilter(e.target.value)}
+                    />
+                  </div>
+
+                  {/* Lista de funcionarios con desglose */}
+                  <div className="max-h-60 overflow-y-auto divide-y divide-gray-100 dark:divide-slate-800 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+                    {filteredFuncionarios.length === 0 ? (
+                      <div className="text-center py-6 text-gray-400 text-xs">
+                        No hay funcionarios que coincidan con la búsqueda.
+                      </div>
+                    ) : (
+                      filteredFuncionarios.map((f: any) => {
+                        const docs = f.documentos || []
+                        const allSelected = docs.length > 0 && docs.every((d: any) => selectedRemitDocIds.has(d.id))
+                        const someSelected = docs.some((d: any) => selectedRemitDocIds.has(d.id))
+                        const isExpanded = expandedFuncionarioId === f.customer_id
+                        const montoFuncSeleccionado = docs
+                          .filter((d: any) => selectedRemitDocIds.has(d.id))
+                          .reduce((acc: number, d: any) => acc + Number(d.saldo_pendiente || 0), 0)
+
+                        return (
+                          <div key={f.customer_id} className="p-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleFuncionarioDocs(f)}
+                                  className="p-0.5 rounded text-gray-500 hover:text-emerald-600 transition shrink-0"
+                                >
+                                  {allSelected ? (
+                                    <CheckSquare className="w-4 h-4 text-emerald-600" />
+                                  ) : someSelected ? (
+                                    <div className="w-4 h-4 border-2 border-emerald-600 rounded bg-emerald-100 dark:bg-emerald-950 flex items-center justify-center">
+                                      <div className="w-2 h-2 bg-emerald-600 rounded-sm" />
+                                    </div>
+                                  ) : (
+                                    <Square className="w-4 h-4 text-gray-400" />
+                                  )}
+                                </button>
+                                <div className="min-w-0">
+                                  <div className="font-bold text-gray-900 dark:text-white truncate text-xs flex items-center gap-1.5">
+                                    <span>{f.customer_name || f.customer_nombre || "Funcionario"}</span>
+                                    {(f.customer_ruc || f.ci_numero) && (
+                                      <span className="text-[10px] text-gray-400 font-normal">
+                                        CI: {f.ci_numero || f.customer_ruc}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[10px] text-gray-500">
+                                    {docs.length} comprobante{docs.length !== 1 ? "s" : ""}
+                                    {someSelected && (
+                                      <span className="ml-1 text-emerald-600 dark:text-emerald-400 font-semibold">
+                                        ({formatPYG(montoFuncSeleccionado)} de {formatPYG(f.saldo_total)})
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="font-mono font-bold text-xs text-gray-900 dark:text-white">
+                                  {formatPYG(f.saldo_total)}
+                                </span>
+                                {docs.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setExpandedFuncionarioId(isExpanded ? null : f.customer_id)}
+                                    className="p-1 rounded hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-400"
+                                    title="Ver comprobantes individuales"
+                                  >
+                                    {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Desglose individual expandible */}
+                            {isExpanded && (
+                              <div className="mt-2 pl-7 pr-2 py-1.5 space-y-1 bg-slate-50/70 dark:bg-slate-800/50 rounded-lg border border-slate-200/60 dark:border-slate-700/60">
+                                {docs.map((d: any) => {
+                                  const isDocSelected = selectedRemitDocIds.has(d.id)
+                                  return (
+                                    <div
+                                      key={d.id}
+                                      onClick={() => toggleSingleDoc(d.id)}
+                                      className="flex items-center justify-between py-1 px-1.5 rounded cursor-pointer hover:bg-white dark:hover:bg-slate-800 text-[11px]"
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <input
+                                          type="checkbox"
+                                          checked={isDocSelected}
+                                          onChange={() => {}}
+                                          className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                        />
+                                        <span className="font-mono font-medium text-gray-700 dark:text-gray-300">
+                                          {d.numero_documento}
+                                        </span>
+                                        <span className="text-[10px] text-gray-400">
+                                          {d.fecha_emision ? formatDate(d.fecha_emision) : ""}
+                                        </span>
+                                      </div>
+                                      <span className="font-mono font-bold text-gray-900 dark:text-white">
+                                        {formatPYG(d.saldo_pendiente)}
+                                      </span>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Notas */}
               <div>
                 <label className="label-field">Notas u Observaciones del Lote</label>
                 <textarea
-                  className="input-field text-xs h-20"
+                  className="input-field text-xs h-16"
                   placeholder="Ej: Remisión nómina mensual correspondiente a los consumos de supermercado..."
                   value={remitNotas}
                   onChange={e => setRemitNotas(e.target.value)}
                 />
               </div>
 
-              <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 text-[11px] text-emerald-900 dark:text-emerald-300 leading-relaxed font-medium">
-                ✅ <strong>Efecto Inmediato de Línea de Crédito:</strong> Al confirmar la remisión, todas las facturas del período pasarán a estado <code>REMITIDO_EMPRESA</code> y el cupo de crédito disponible de los funcionarios se reestablecerá instantáneamente para que sigan comprando.
+              {/* Resumen e Impacto de Crédito */}
+              <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 text-[11px] text-emerald-900 dark:text-emerald-300 space-y-2">
+                <div className="flex items-center justify-between font-bold border-b border-emerald-200/60 dark:border-emerald-800/60 pb-1.5">
+                  <span>Monto Total a Remitir a la Empresa:</span>
+                  <span className="font-mono text-sm font-black text-emerald-700 dark:text-emerald-300">
+                    {formatPYG(remitModo === "selectivo" ? selectedTotalMonto : (empresaPending?.total_deuda ?? 0))}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <div>
+                    Funcionarios con crédito liberado: <strong>{remitModo === "selectivo" ? selectedFuncsCount : (empresaPending?.total_funcionarios ?? totalFuncsInCutoff)}</strong>
+                  </div>
+                  <div>
+                    Comprobantes traspasados: <strong>{remitModo === "selectivo" ? selectedRemitDocIds.size : (empresaPending?.total_documentos ?? totalDocsInCutoff)}</strong>
+                  </div>
+                </div>
+                <div className="pt-1 text-[10.5px] leading-relaxed text-emerald-800 dark:text-emerald-300/90">
+                  ✅ <strong>Efecto Inmediato de Línea de Crédito:</strong> Al confirmar la remisión, los comprobantes incluidos pasarán a <code>REMITIDO_EMPRESA</code> y el cupo de crédito disponible de los funcionarios se reestablecerá instantáneamente para que sigan comprando.
+                </div>
               </div>
             </div>
 
-            <div className="p-6 border-t flex justify-end gap-3">
-              <button onClick={() => setShowRemitModal(false)} className="btn-ghost text-xs">Cancelar</button>
+            {/* Footer */}
+            <div className="p-4 border-t flex items-center justify-between shrink-0 bg-white dark:bg-slate-900">
+              <button onClick={() => setShowRemitModal(false)} className="btn-ghost text-xs">
+                Cancelar
+              </button>
               <button
                 onClick={handleExecuteRemit}
-                disabled={remitting}
+                disabled={remitting || (remitModo === "selectivo" && selectedRemitDocIds.size === 0)}
                 className="btn-primary bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-2"
               >
                 {remitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirmar y Remitir Deuda"}

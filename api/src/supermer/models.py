@@ -812,8 +812,8 @@ class DsdReceivingLog(Base):
 
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    items = relationship("DsdReceivingItem", backref="receiving")
-    rechazos = relationship("DsdReceivingRejection", backref="receiving")
+    items = relationship("DsdReceivingItem", backref="receiving", lazy="selectin")
+    rechazos = relationship("DsdReceivingRejection", backref="receiving", lazy="selectin")
 
     __table_args__ = (
         Index("ix_dsd_receiving_fecha", "company_id", "fecha_recepcion"),
@@ -903,7 +903,7 @@ class PhysicalCountSession(Base):
 
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    items = relationship("PhysicalCountItem", backref="session")
+    items = relationship("PhysicalCountItem", backref="session", lazy="selectin")
 
     __table_args__ = (
         Index("ix_count_session_area", "company_id", "area", "estado"),
@@ -1095,7 +1095,7 @@ class SupplierReturn(Base):
 
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    items = relationship("SupplierReturnItem", backref="return_ref")
+    items = relationship("SupplierReturnItem", backref="return_ref", lazy="selectin")
 
     __table_args__ = (
         Index("ix_supplier_return_proveedor", "company_id", "proveedor_id", "estado"),

@@ -60,7 +60,14 @@ async def update_dsd_schedule(schedule_id: UUID, data, db: AsyncSession):
 # ---------------------------------------------------------------------------
 
 async def list_dsd_receivings(company_id: UUID, db: AsyncSession, fecha: Optional[date] = None, estado: Optional[str] = None):
-    q = select(DsdReceivingLog).where(DsdReceivingLog.company_id == company_id)
+    q = (
+        select(DsdReceivingLog)
+        .options(
+            selectinload(DsdReceivingLog.items),
+            selectinload(DsdReceivingLog.rechazos),
+        )
+        .where(DsdReceivingLog.company_id == company_id)
+    )
     if fecha:
         q = q.where(func.date(DsdReceivingLog.fecha_recepcion) == fecha)
     if estado:

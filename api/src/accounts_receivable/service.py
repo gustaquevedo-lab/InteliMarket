@@ -1268,10 +1268,28 @@ async def get_corporate_agreements_summary(db: AsyncSession, company_id: str) ->
     return rows
 
 
-async def get_corporate_agreement_pending_docs(db: AsyncSession, company_id: str, empresa_nombre: str) -> dict:
+async def get_corporate_agreement_pending_docs(
+    db: AsyncSession,
+    company_id: str,
+    empresa_nombre: str,
+    fecha_corte: date | None = None,
+    doc_ids: list[str] | None = None,
+) -> dict:
     """Trae los funcionarios de una empresa vinculada y sus facturas pendientes
-    que aún no fueron incluidas en ninguna remisión de corte mensual."""
-    query = text("""
+    que aún no fueron incluidas en ninguna remisión de corte mensual,
+    opcionalmente filtrando por fecha_corte (inclusive) o lista específica de comprobantes."""
+    params: dict = {"company_id": company_id, "empresa_nombre": f"%{empresa_nombre.strip()}%"}
+    extra_clauses = []
+    if fecha_corte is not None:
+        extra_clauses.append("DATE(ar.fecha_emision AT TIME ZONE 'America/Asuncion') <= :fecha_corte")
+        params["fecha_corte"] = fecha_corte
+    if doc_ids:
+        extra_clauses.append("ar.id = ANY(:doc_ids)")
+        params["doc_ids"] = [str(x) for x in doc_ids]
+
+    extra_sql = ("\n          AND " + "\n          AND ".join(extra_clauses)) if extra_clauses else ""
+
+    query = text(f"""
         SELECT
             ar.id, ar.customer_id, ar.numero_documento, ar.fecha_emision, ar.fecha_vencimiento,
             ar.monto_original, ar.saldo_pendiente, ar.tipo, ar.estado,
@@ -1286,10 +1304,10 @@ async def get_corporate_agreement_pending_docs(db: AsyncSession, company_id: str
         WHERE ar.company_id = :company_id
           AND TRIM(c.empresa_vinculada_nombre) ILIKE :empresa_nombre
           AND ar.estado = 'pendiente'
-          AND ar.corporate_remission_id IS NULL
+          AND ar.corporate_remission_id IS NULL{extra_sql}
         ORDER BY COALESCE(c.razon_social, 'Funcionario') ASC, ar.fecha_vencimiento ASC NULLS LAST, ar.fecha_emision ASC
     """)
-    result = await db.execute(query, {"company_id": company_id, "empresa_nombre": f"%{empresa_nombre.strip()}%"})
+    result = await db.execute(query, params)
     rows = result.fetchall()
 
     funcionarios_dict = {}
@@ -1335,6 +1353,7 @@ async def get_corporate_agreement_pending_docs(db: AsyncSession, company_id: str
     funcionarios_list = sorted(funcionarios_dict.values(), key=lambda f: f["saldo_total"], reverse=True)
     return {
         "empresa_vinculada_nombre": empresa_nombre,
+        "fecha_corte": fecha_corte.isoformat() if fecha_corte else None,
         "total_deuda": float(total_deuda),
         "total_documentos": total_documentos,
         "cantidad_documentos": total_documentos,
@@ -1346,7 +1365,7 @@ async def get_corporate_agreement_pending_docs(db: AsyncSession, company_id: str
 
 async def create_corporate_remission(db: AsyncSession, company_id: str, data, user_id: str | None) -> dict:
     """Ejecuta el Corte y Remisión a la Empresa Vinculada:
-    1. Agrupa los comprobantes no remitidos.
+    1. Agrupa los comprobantes no remitidos (con filtro por fecha_corte o selección específica).
     2. Crea el registro consolidado ar_corporate_remissions.
     3. Pasa los comprobantes a 'REMITIDO_EMPRESA' vinculándolos a la remisión.
     4. REHABILITA INMEDIATAMENTE la línea de crédito a los funcionarios descontando su credito_usado
@@ -1372,8 +1391,9 @@ async def create_corporate_remission(db: AsyncSession, company_id: str, data, us
             JOIN customers c ON c.id = ar.customer_id
             WHERE ar.company_id = :company_id AND TRIM(c.empresa_vinculada_nombre) ILIKE :empresa
               AND ar.estado = 'pendiente' AND ar.corporate_remission_id IS NULL
+              AND DATE(ar.fecha_emision AT TIME ZONE 'America/Asuncion') <= :fecha_corte
         """)
-        r_docs = await db.execute(q_docs, {"company_id": company_id, "empresa": f"%{empresa_nombre}%"})
+        r_docs = await db.execute(q_docs, {"company_id": company_id, "empresa": f"%{empresa_nombre}%", "fecha_corte": fecha_corte})
 
     docs = r_docs.fetchall()
     if not docs:

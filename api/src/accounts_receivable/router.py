@@ -373,9 +373,14 @@ async def corporate_agreements_summary(company_id: str, db: AsyncSession = Depen
 
 
 @router.get("/companies/{company_id}/accounts-receivable/corporate-agreements/{empresa_nombre}/pending-docs")
-async def corporate_agreement_pending_docs(company_id: str, empresa_nombre: str, db: AsyncSession = Depends(get_db)):
+async def corporate_agreement_pending_docs(
+    company_id: str,
+    empresa_nombre: str,
+    fecha_corte: Optional[date] = Query(None, description="Fecha tope de emisión de comprobantes"),
+    db: AsyncSession = Depends(get_db),
+):
     """Documentos y funcionarios pendientes de corte mensual para una empresa vinculada."""
-    return await service.get_corporate_agreement_pending_docs(db, company_id, empresa_nombre)
+    return await service.get_corporate_agreement_pending_docs(db, company_id, empresa_nombre, fecha_corte=fecha_corte)
 
 
 @router.get("/companies/{company_id}/accounts-receivable/corporate-agreements/{empresa_nombre}/extractos.pdf")
@@ -383,12 +388,15 @@ async def export_corporate_agreement_extractos_pdf(
     company_id: str,
     empresa_nombre: str,
     periodo: str = Query(..., description="Período de corte, ej. 2026-09"),
+    fecha_corte: Optional[date] = Query(None, description="Fecha tope de corte"),
+    doc_ids: Optional[str] = Query(None, description="Coma-separados IDs de accounts_receivable"),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
     """Genera el cuadernillo masivo en PDF con todos los extractos individuales por funcionario
     de la empresa vinculada, cada uno en una página separada y con talón de conformidad de descuento."""
-    data = await service.get_corporate_agreement_pending_docs(db, company_id, empresa_nombre)
+    parsed_ids = [i.strip() for i in doc_ids.split(",") if i.strip()] if doc_ids else None
+    data = await service.get_corporate_agreement_pending_docs(db, company_id, empresa_nombre, fecha_corte=fecha_corte, doc_ids=parsed_ids)
     company = await _get_company_info(db, company_id)
     generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
 
@@ -415,13 +423,16 @@ async def export_corporate_agreement_consolidado_pdf(
     company_id: str,
     empresa_nombre: str,
     periodo: str = Query(..., description="Período de corte, ej. 2026-09"),
+    fecha_corte: Optional[date] = Query(None, description="Fecha tope de corte"),
+    doc_ids: Optional[str] = Query(None, description="Coma-separados IDs de accounts_receivable"),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
     """Genera la Planilla Consolidada de Nómina (PDF A4) con lista completa de funcionarios,
     comprobantes, importes, totalizado en números y letras, y el Acta Formal de Recepción
     y Compromiso de Pago Corporativo con espacio para firmas y sellos."""
-    data = await service.get_corporate_agreement_pending_docs(db, company_id, empresa_nombre)
+    parsed_ids = [i.strip() for i in doc_ids.split(",") if i.strip()] if doc_ids else None
+    data = await service.get_corporate_agreement_pending_docs(db, company_id, empresa_nombre, fecha_corte=fecha_corte, doc_ids=parsed_ids)
     company = await _get_company_info(db, company_id)
     generated_by = user.get("user_nombre") or user.get("user_email") or "Administración"
 
@@ -431,6 +442,7 @@ async def export_corporate_agreement_consolidado_pdf(
         "empresa_vinculada_nombre": empresa_nombre,
         "empresa_vinculada_ruc": func_list[0].get("empresa_vinculada_ruc", "—") if func_list else "—",
         "periodo_mes": periodo,
+        "fecha_corte": fecha_corte or date.today(),
         "fecha_remision": date.today(),
         "monto_total": data.get("total_deuda", 0),
         "saldo_pendiente": data.get("total_deuda", 0),
