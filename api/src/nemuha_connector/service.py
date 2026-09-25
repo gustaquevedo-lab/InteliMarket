@@ -439,10 +439,12 @@ async def sync_accounts_payable(db: AsyncSession, company_id: str, since: date |
 
         existing_id = await _get_mapped_target(db, company_id, "fin_conta_pagar", r["ID_CONTA_PAGAR"])
         if existing_id:
-            # Blindaje: no pisar facturas que ya tienen pagos u órdenes de pago procesadas en InteliMarket
-            has_payments = await db.execute(
+            # Blindaje: no pisar facturas que ya tienen órdenes de pago o pagos procesados nativamente en InteliMarket
+            has_native_payments = await db.execute(
                 text("""
-                    SELECT 1 FROM supplier_invoice_payments WHERE invoice_id = :id AND estado != 'anulado'
+                    SELECT 1 FROM supplier_invoice_payments sip
+                    WHERE sip.invoice_id = :id AND sip.estado != 'anulado'
+                      AND sip.id NOT IN (SELECT target_id FROM nemuha_record_map WHERE source_table = 'fin_pagamento')
                     UNION
                     SELECT 1 FROM supplier_payment_order_allocations spoa
                     JOIN supplier_payment_orders spo ON spo.id = spoa.payment_order_id
@@ -451,7 +453,7 @@ async def sync_accounts_payable(db: AsyncSession, company_id: str, since: date |
                 """),
                 {"id": str(existing_id)},
             )
-            if not has_payments.first():
+            if saldo == 0 or not has_native_payments.first():
                 await db.execute(
                     text("UPDATE supplier_invoices SET saldo_pendiente = :saldo, estado = :estado, updated_at = now() WHERE id = :id"),
                     {"saldo": saldo, "estado": estado, "id": str(existing_id)},
@@ -501,6 +503,17 @@ async def sync_supplier_invoice_payments(db: AsyncSession, company_id: str, sinc
     for r in rows:
         existing_id = await _get_mapped_target(db, company_id, "fin_pagamento", r["ID_PAGAMENTO"])
         if existing_id:
+            # Si el pago existía pero fue revertido/anulado indebidamente en InteliMarket,
+            # reactivarlo a 'pagado' dado que en Ñemuha sigue 100% activo
+            await db.execute(
+                text("""
+                    UPDATE supplier_invoice_payments
+                    SET estado = 'pagado',
+                        referencia = TRIM(REGEXP_REPLACE(COALESCE(referencia, ''), '\\[Pago revertido/anulado:[^\\]]*\\]', '', 'g'))
+                    WHERE id = :id AND estado = 'anulado'
+                """),
+                {"id": str(existing_id)},
+            )
             count += 1
             continue
 
@@ -528,6 +541,28 @@ async def sync_supplier_invoice_payments(db: AsyncSession, company_id: str, sinc
         db.add(payment)
         await db.flush()
         await _save_map(db, company_id, "fin_pagamento", r["ID_PAGAMENTO"], "supplier_invoice_payments", payment.id)
+
+        # Actualizar saldo_pendiente y estado de la factura si no tiene OP nativa en InteliMarket
+        has_native_alloc = await db.execute(
+            text("""
+                SELECT 1 FROM supplier_payment_order_allocations spoa
+                JOIN supplier_payment_orders spo ON spo.id = spoa.payment_order_id
+                WHERE spoa.invoice_id = :id AND spo.estado = 'pagado'
+                LIMIT 1
+            """),
+            {"id": str(invoice_id)},
+        )
+        if not has_native_alloc.first():
+            await db.execute(
+                text("""
+                    UPDATE supplier_invoices
+                    SET saldo_pendiente = GREATEST(0, saldo_pendiente - :monto),
+                        estado = CASE WHEN saldo_pendiente - :monto <= 0 THEN 'pagada' ELSE 'parcial' END,
+                        updated_at = now()
+                    WHERE id = :id
+                """),
+                {"id": str(invoice_id), "monto": payment.monto},
+            )
 
         if metodo == "CHEQUE":
             # El legado nunca tuvo columna de numero de cheque real (mismo
