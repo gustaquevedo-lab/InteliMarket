@@ -138,6 +138,15 @@ FORMAS_PAGO_VALIDAS = {
 }
 
 
+class SaleReopenPaymentItem(BaseModel):
+    forma_pago: str
+    monto: Decimal = Field(gt=0)
+    moneda: str = "PYG"
+    voucher: Optional[str] = None
+    lote: Optional[str] = None
+    tarjeta_marca: Optional[str] = None
+
+
 class SaleReopenPayment(BaseModel):
     """Cambio de forma de pago en una venta ya cerrada.
     Requiere autorización de supervisor y motivo descriptivo.
@@ -155,4 +164,6 @@ class SaleReopenPayment(BaseModel):
     terminal_ip: Optional[str] = None
     moneda: Optional[str] = "PYG"
     monto_moneda: Optional[Decimal] = None
+    payments: Optional[list[SaleReopenPaymentItem]] = None
+
 

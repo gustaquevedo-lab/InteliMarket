@@ -5,7 +5,7 @@ import base64
 import os
 import re
 import unicodedata
-from sqlalchemy import select, update, func, cast, Integer, text, or_
+from sqlalchemy import select, update, delete, func, cast, Integer, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
@@ -1169,7 +1169,7 @@ async def build_sale_receipt_escpos(
 
     lines.append(dashes())
     lines.append("Medios de Pago Utilizados:")
-    if nueva_forma_pago:
+    if nueva_forma_pago and nueva_forma_pago.upper() != "MIXTO":
         v_tag = f" ({voucher.strip()})" if voucher else ""
         lines.append(pad_two_col(f"  {nueva_forma_pago.upper()}{v_tag}:", f"GS. {fmt_gs(sale.total)}"))
     elif payments:
@@ -1262,6 +1262,7 @@ async def reopen_sale_payment(
     terminal_ip: str | None = None,
     moneda: str | None = "PYG",
     monto_moneda: Decimal | None = None,
+    payments: list[dict] | None = None,
 ) -> Sale | None:
     """Cambia la forma de pago de una venta ya cerrada y opcionalmente vincula al socio cliente.
 
@@ -1298,8 +1299,9 @@ async def reopen_sale_payment(
     # Obtener forma de pago anterior desde sale_payments
     pm_res = await db.execute(select(SalePayment).where(SalePayment.sale_id == sale.id))
     existing_payments = list(pm_res.scalars().all())
-    forma_pago_anterior = existing_payments[0].forma_pago if existing_payments else (
-        "EXTRA_CLUB" if sale.condicion == "credito" else "EFECTIVO"
+    forma_pago_anterior = (
+        "MIXTO" if len(existing_payments) > 1
+        else (existing_payments[0].forma_pago if existing_payments else ("EXTRA_CLUB" if sale.condicion == "credito" else "EFECTIVO"))
     )
 
     socio_nombre = ""
@@ -1312,58 +1314,96 @@ async def reopen_sale_payment(
         if cust_obj:
             socio_nombre = cust_obj.razon_social or cust_obj.nombre_fantasia or ""
 
-    if nueva_forma_pago.upper() in ("EXTRA_CLUB", "CREDITO"):
-        sale.condicion = "credito"
-    else:
-        sale.condicion = "contado"
+    # Determinar si hay pagos múltiples desglosados
+    is_multi = bool(payments and len(payments) > 0)
+    has_credit_payment = False
+    new_total_cash = Decimal("0")
 
-    # Actualizar o insertar en sale_payments
-    values_to_update: dict[str, Any] = {
-        "forma_pago": nueva_forma_pago.upper(),
-        "moneda": moneda or "PYG",
-    }
-    if voucher:
-        values_to_update["referencia"] = voucher.strip()
-
-    if existing_payments:
-        await db.execute(
-            update(SalePayment)
-            .where(SalePayment.sale_id == sale.id)
-            .values(**values_to_update)
-        )
+    if is_multi:
+        nueva_forma_pago = "MIXTO" if len(payments) > 1 else payments[0].get("forma_pago", nueva_forma_pago).upper()
+        # Borrar registros anteriores de sale_payments y reinsertar los nuevos
+        await db.execute(delete(SalePayment).where(SalePayment.sale_id == sale.id))
+        for p in payments:
+            fp = str(p.get("forma_pago", "")).upper()
+            monto_p = Decimal(str(p.get("monto", 0)))
+            mon_p = str(p.get("moneda") or "PYG").upper()
+            ref_p = p.get("voucher") or p.get("referencia")
+            if fp in ("EXTRA_CLUB", "CREDITO"):
+                has_credit_payment = True
+            if fp in ("EFECTIVO", "EFECTIVO_BRL", "EFECTIVO_USD"):
+                new_total_cash += monto_p if mon_p == "PYG" else (monto_p * (Decimal("1480") if mon_p == "BRL" else Decimal("7550")))
+            db.add(SalePayment(
+                company_id=sale.company_id,
+                sale_id=sale.id,
+                forma_pago=fp,
+                monto=monto_p,
+                moneda=mon_p,
+                referencia=str(ref_p).strip() if ref_p else None,
+                fecha=sale.fecha or datetime.now(timezone.utc),
+            ))
+        sale.condicion = "credito" if has_credit_payment else "contado"
     else:
-        db.add(SalePayment(
-            company_id=sale.company_id,
-            sale_id=sale.id,
-            forma_pago=nueva_forma_pago.upper(),
-            monto=sale.total,
-            moneda=moneda or "PYG",
-            referencia=voucher.strip() if voucher else None,
-            fecha=sale.fecha or datetime.now(timezone.utc),
-        ))
+        if nueva_forma_pago.upper() in ("EXTRA_CLUB", "CREDITO"):
+            sale.condicion = "credito"
+        else:
+            sale.condicion = "contado"
+
+        values_to_update: dict[str, Any] = {
+            "forma_pago": nueva_forma_pago.upper(),
+            "moneda": moneda or "PYG",
+        }
+        if voucher:
+            values_to_update["referencia"] = voucher.strip()
+
+        if existing_payments:
+            await db.execute(
+                update(SalePayment)
+                .where(SalePayment.sale_id == sale.id)
+                .values(**values_to_update)
+            )
+        else:
+            db.add(SalePayment(
+                company_id=sale.company_id,
+                sale_id=sale.id,
+                forma_pago=nueva_forma_pago.upper(),
+                monto=sale.total,
+                moneda=moneda or "PYG",
+                referencia=voucher.strip() if voucher else None,
+                fecha=sale.fecha or datetime.now(timezone.utc),
+            ))
 
     # Actualizar crédito del socio si corresponde
     if cust_obj:
-        if nueva_forma_pago.upper() in ("EXTRA_CLUB", "CREDITO") and forma_pago_anterior not in ("EXTRA_CLUB", "CREDITO"):
+        was_credit = forma_pago_anterior in ("EXTRA_CLUB", "CREDITO")
+        now_credit = sale.condicion == "credito" or nueva_forma_pago.upper() in ("EXTRA_CLUB", "CREDITO")
+        if now_credit and not was_credit:
             cust_obj.credito_usado = (cust_obj.credito_usado or Decimal("0")) + (sale.total or Decimal("0"))
-        elif forma_pago_anterior in ("EXTRA_CLUB", "CREDITO") and nueva_forma_pago.upper() not in ("EXTRA_CLUB", "CREDITO"):
+        elif was_credit and not now_credit:
             cust_obj.credito_usado = max(Decimal("0"), (cust_obj.credito_usado or Decimal("0")) - (sale.total or Decimal("0")))
 
-    # Reconciliar o ajustar CashCount si la sesión ya fue cerrada
+    # Reconciliar o ajustar CashCount
     if sale.session_id:
-        from api.src.caja.models import CashCount
-        cc_res = await db.execute(
-            select(CashCount)
-            .where(CashCount.session_id == sale.session_id)
-            .order_by(CashCount.created_at.desc())
+        old_cash = sum(
+            Decimal(str(p.monto or 0))
+            for p in existing_payments
+            if (p.forma_pago or "").upper() in ("EFECTIVO", "EFECTIVO_BRL", "EFECTIVO_USD")
         )
-        cc = cc_res.scalars().first()
-        if cc:
-            monto_cambio = Decimal(str(sale.total or 0))
-            if forma_pago_anterior == "EFECTIVO" and nueva_forma_pago.upper() != "EFECTIVO":
-                cc.diferencia = (cc.diferencia or Decimal("0")) + monto_cambio
-            elif forma_pago_anterior != "EFECTIVO" and nueva_forma_pago.upper() == "EFECTIVO":
-                cc.diferencia = (cc.diferencia or Decimal("0")) - monto_cambio
+        if is_multi:
+            new_cash = new_total_cash
+        else:
+            new_cash = Decimal(str(sale.total or 0)) if nueva_forma_pago.upper() in ("EFECTIVO", "EFECTIVO_BRL", "EFECTIVO_USD") else Decimal("0")
+        diff_cash = new_cash - old_cash
+
+        if diff_cash != Decimal("0"):
+            from api.src.caja.models import CashCount
+            cc_res = await db.execute(
+                select(CashCount)
+                .where(CashCount.session_id == sale.session_id)
+                .order_by(CashCount.created_at.desc())
+            )
+            cc = cc_res.scalars().first()
+            if cc:
+                cc.diferencia = (cc.diferencia or Decimal("0")) - diff_cash
 
     ts = datetime.now(timezone.utc).isoformat()
     socio_txt = f" | Socio: {socio_nombre} (ID: {customer_id})" if customer_id else ""
@@ -1372,11 +1412,20 @@ async def reopen_sale_payment(
     tarjeta_txt = f" | Tarjeta: {tarjeta_marca.strip()}" if tarjeta_marca else ""
     terminal_txt = f" | Terminal: {terminal_ip.strip()}" if terminal_ip else ""
     moneda_txt = f" | Moneda: {moneda} {monto_moneda}" if moneda and moneda != "PYG" and monto_moneda else ""
+    detalles_mixtos = ""
+    if is_multi:
+        partes = []
+        for p in payments:
+            fp_tag = p.get('forma_pago', '')
+            m_tag = p.get('monto', 0)
+            v_tag = f" (Voucher: {p['voucher']})" if p.get('voucher') else ""
+            partes.append(f"{fp_tag}: {m_tag}{v_tag}")
+        detalles_mixtos = f" | Desglose: [{', '.join(partes)}]"
     nota_auditoria = (
         f"[{ts}] ⚠️ CAMBIO DE FORMA DE PAGO — Autorizado por: {autorizado_por_nombre} "
         f"(ID: {autorizado_por_id}) | "
         f"Anterior: {forma_pago_anterior} → Nueva: {nueva_forma_pago.upper()}"
-        f"{voucher_txt}{lote_txt}{tarjeta_txt}{terminal_txt}{moneda_txt}{socio_txt} | "
+        f"{voucher_txt}{lote_txt}{tarjeta_txt}{terminal_txt}{moneda_txt}{socio_txt}{detalles_mixtos} | "
         f"Motivo: {motivo.strip()}"
     )
     sale.observaciones = (

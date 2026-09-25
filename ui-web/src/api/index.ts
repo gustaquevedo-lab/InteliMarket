@@ -1961,7 +1961,7 @@ export const api = {
     linkOrder: (id: string, orderId: string) => client.post<any>(`/v1/sales/${id}/link-order`, { order_id: orderId }),
     attachTicket: (id: string, ticketB64: string) => client.patch<any>(`/v1/sales/${id}/ticket`, { recibo_escpos_b64: ticketB64 }),
     reopenCustomer: (id: string, data: { customer_id?: string | null; autorizado_por_id: string; autorizado_por_nombre: string }) => client.patch<Sale>(`/v1/sales/${id}/customer`, data),
-    reopenPayment: (id: string, data: { forma_pago: string; motivo: string; autorizado_por_id: string; autorizado_por_nombre: string; customer_id?: string; voucher?: string; lote?: string; tarjeta_marca?: string; terminal_ip?: string; moneda?: string; monto_moneda?: number }) => client.patch<Sale>(`/v1/sales/${id}/payment-method`, data),
+    reopenPayment: (id: string, data: { forma_pago: string; motivo: string; autorizado_por_id: string; autorizado_por_nombre: string; customer_id?: string; voucher?: string; lote?: string; tarjeta_marca?: string; terminal_ip?: string; moneda?: string; monto_moneda?: number; payments?: Array<{ forma_pago: string; monto: number; moneda?: string; voucher?: string; lote?: string; tarjeta_marca?: string }> }) => client.patch<Sale>(`/v1/sales/${id}/payment-method`, data),
     downloadReceipt: (id: string) => client.get<Blob>(`/v1/receipts/${id}`),
   },
   payments: {
@@ -3114,9 +3114,20 @@ export const api = {
     documentPayments: (id: string) => client.get<{ id: string; fecha: string; forma_pago: string | null; referencia: string | null; observaciones: string | null; monto: number; created_at: string }[]>(`/v1/accounts-receivable/${id}/payments`),
     customerPayments: (customerId: string) => client.get<{ id: string; fecha: string; monto_total: number; forma_pago: string | null; referencia: string | null; observaciones: string | null; created_at: string; allocations: { accounts_receivable_id: string; numero_documento: string; monto: number }[] }[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/customers/${customerId}/payments`),
     corporateAgreementsSummary: () => client.get<any[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/summary`),
-    corporateAgreementPendingDocs: (empresa: string) => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/${encodeURIComponent(empresa)}/pending-docs`),
-    downloadExtractosEmpresaPdf: (empresa: string, periodo: string) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/${encodeURIComponent(empresa)}/extractos.pdf`, { periodo }, `extractos_${empresa.replace(/\s+/g, '_')}_${periodo}.pdf`),
-    downloadConsolidadoEmpresaPdf: (empresa: string, periodo: string) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/${encodeURIComponent(empresa)}/consolidado.pdf`, { periodo }, `consolidado_${empresa.replace(/\s+/g, '_')}_${periodo}.pdf`),
+    corporateAgreementPendingDocs: (empresa: string, fecha_corte?: string) =>
+      client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/${encodeURIComponent(empresa)}/pending-docs`, fecha_corte ? { fecha_corte } : undefined),
+    downloadExtractosEmpresaPdf: (empresa: string, periodo: string, fecha_corte?: string, doc_ids?: string[]) =>
+      downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/${encodeURIComponent(empresa)}/extractos.pdf`, {
+        periodo,
+        ...(fecha_corte ? { fecha_corte } : {}),
+        ...(doc_ids && doc_ids.length > 0 ? { doc_ids: doc_ids.join(",") } : {}),
+      }, `extractos_${empresa.replace(/\s+/g, '_')}_${periodo}.pdf`),
+    downloadConsolidadoEmpresaPdf: (empresa: string, periodo: string, fecha_corte?: string, doc_ids?: string[]) =>
+      downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/${encodeURIComponent(empresa)}/consolidado.pdf`, {
+        periodo,
+        ...(fecha_corte ? { fecha_corte } : {}),
+        ...(doc_ids && doc_ids.length > 0 ? { doc_ids: doc_ids.join(",") } : {}),
+      }, `consolidado_${empresa.replace(/\s+/g, '_')}_${periodo}.pdf`),
     createCorporateRemission: (data: { empresa_vinculada_nombre: string; periodo_mes: string; fecha_corte?: string; accounts_receivable_ids?: string[]; notas?: string }) => client.post<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/remit`, data),
     listCorporateRemissions: (empresa?: string) => client.get<any[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions`, empresa ? { empresa_nombre: empresa } : undefined),
     getCorporateRemissionDetail: (id: string) => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}`),

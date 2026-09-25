@@ -335,6 +335,7 @@ async def reopen_sale_payment(sale_id: str, body: SaleReopenPayment, db: AsyncSe
             terminal_ip=body.terminal_ip,
             moneda=body.moneda,
             monto_moneda=body.monto_moneda,
+            payments=[p.dict() for p in body.payments] if body.payments else None,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

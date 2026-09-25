@@ -831,6 +831,7 @@ export default function POSPage() {
     otrosSubtipo?: string
     otrosComprobante?: string
     otrosMonto?: number
+    payments?: Array<{ forma_pago: string; monto: number; moneda?: string; voucher?: string; lote?: string; tarjeta_marca?: string }>
   } | null>(null)
 
   const [showRemoteAuthModal, setShowRemoteAuthModal] = useState(false)
@@ -1229,6 +1230,8 @@ export default function POSPage() {
   }
   const extraLegsMontoTotal = (method: ExtraLegMethod) =>
     extraPaymentLegs.filter((l) => l.method === method && (l.txnState === "aprobada" || l.manualCupon.trim())).reduce((sum, l) => sum + (parseInt(l.montoStr.replace(/\D/g, "") || "0", 10)), 0)
+  const extraLegsMontoEntered = (method: ExtraLegMethod) =>
+    extraPaymentLegs.filter((l) => l.method === method).reduce((sum, l) => sum + (parseInt(l.montoStr.replace(/\D/g, "") || "0", 10)), 0)
   const [dinelcoTxnState, setDinelcoTxnState] = useState<"idle" | "esperando_tarjeta" | "confirmando" | "aprobada" | "error_rechazo" | "error_conexion">("idle")
   const [dinelcoTxnResult, setDinelcoTxnResult] = useState<any>(null)
   const [dinelcoTxnError, setDinelcoTxnError] = useState<string>("")
@@ -4118,6 +4121,16 @@ export default function POSPage() {
   const [reabrirPagoPosLoading, setReabrirPagoPosLoading] = useState(false)
   const [reabrirPagoPosMsg, setReabrirPagoPosMsg] = useState<string | null>(null)
   const [submittingReabrirPago, setSubmittingReabrirPago] = useState(false)
+  interface ReabrirPaymentLeg {
+    id: string
+    forma_pago: string
+    montoStr: string
+    moneda?: string
+    voucher?: string
+    lote?: string
+    tarjeta_marca?: string
+  }
+  const [reabrirPagoMixtoLegs, setReabrirPagoMixtoLegs] = useState<ReabrirPaymentLeg[]>([])
 
   // ── CUPONES DE SORTEO EN CAJA (ELECTRON / POS MULTI-CAMPAÑA) ────────────────
   const [showCuponModal, setShowCuponModal] = useState(false)
@@ -4610,6 +4623,7 @@ export default function POSPage() {
     terminalIp?: string,
     moneda?: string,
     montoMoneda?: number,
+    payments?: Array<{ forma_pago: string; monto: number; moneda?: string; voucher?: string; lote?: string; tarjeta_marca?: string }>,
   ) => {
     setSubmittingReabrirPago(true)
     try {
@@ -4625,6 +4639,7 @@ export default function POSPage() {
         terminal_ip: terminalIp,
         moneda,
         monto_moneda: montoMoneda,
+        payments,
       })
       // Actualizar el objeto en memoria con la nueva forma de pago y cliente para que
       // la reimpresión inmediata use los datos correctos.
@@ -4650,6 +4665,7 @@ export default function POSPage() {
       setReabrirPagoMoneda("PYG")
       setReabrirPagoMontoMoneda(undefined)
       setReabrirPagoPosMsg(null)
+      setReabrirPagoMixtoLegs([])
       toast.success(
         "Forma de pago actualizada",
         `Venta Nº ${sale.numero}: ${sale.forma_pago} → ${formaPago}${selectedCustomer ? ` (${selectedCustomer.nombre})` : ""}. Reimprimiendo con el dato correcto...`
@@ -5478,6 +5494,7 @@ export default function POSPage() {
         action.terminalIp,
         action.moneda,
         action.montoMoneda,
+        (action as any).payments,
       )
     } else {
       executeSupervisorAction(action, resolverId, resolverNombre)
@@ -5576,6 +5593,7 @@ export default function POSPage() {
           (action as any).terminalIp,
           (action as any).moneda,
           (action as any).montoMoneda,
+          (action as any).payments,
         )
       } else {
         executeSupervisorAction(action, user!.id, user?.nombre || "Supervisor")
@@ -5850,6 +5868,7 @@ export default function POSPage() {
             pendingSupervisorAction.terminalIp,
             pendingSupervisorAction.moneda,
             pendingSupervisorAction.montoMoneda,
+            pendingSupervisorAction.payments,
           )
         } else {
           executeSupervisorAction(pendingSupervisorAction, res.id!, res.nombre || "Supervisor")
@@ -6720,19 +6739,19 @@ export default function POSPage() {
     }
     if (activeMethods.has("bancard")) {
       recibido += (isMultiPayment || extraPaymentLegs.some((l) => l.method === "bancard")) ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-      recibido += extraLegsMontoTotal("bancard")
+      recibido += extraLegsMontoEntered("bancard")
     }
     if (activeMethods.has("dinelco")) {
       recibido += (isMultiPayment || extraPaymentLegs.some((l) => l.method === "dinelco")) ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-      recibido += extraLegsMontoTotal("dinelco")
+      recibido += extraLegsMontoEntered("dinelco")
     }
     if (activeMethods.has("qr")) {
       recibido += (isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-      recibido += extraLegsMontoTotal("qr")
+      recibido += extraLegsMontoEntered("qr")
     }
     if (activeMethods.has("plugpay") || activeMethods.has("plugpay_credito")) {
       recibido += (isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay" || l.method === "plugpay_credito")) ? parseInt((mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg).replace(/\D/g, "") || "0", 10) : totalPyg
-      recibido += extraLegsMontoTotal("plugpay") + extraLegsMontoTotal("plugpay_credito")
+      recibido += extraLegsMontoEntered("plugpay") + extraLegsMontoEntered("plugpay_credito")
     }
     if (activeMethods.has("extra_club")) {
       recibido += isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg
@@ -6759,6 +6778,41 @@ export default function POSPage() {
       vueltoPyg: Math.round(vuelto)
     }
   }, [activeMethods, isMultiPayment, payCashPyg, payCashBrl, payCashUsd, mixedCardPyg, mixedDinelcoPyg, mixedQrPyg, mixedParceladoPyg, mixedPlugPayPyg, mixedExtraClubPyg, mixedOtrosPyg, totalPyg, rates, extraPaymentLegs])
+
+  const getSaldoRestanteParaMetodo = (excluirMetodo: PosPaymentMethodType | "bancard_leg" | "dinelco_leg" | "qr_leg" | "plugpay_leg", legIdExcluir?: string) => {
+    let otros = 0
+    if (activeMethods.has("cash") && hasClickedQuickCash) {
+      otros += parseInt(payCashPyg.replace(/\D/g, "") || "0", 10)
+    }
+    const brl = (parseFloat(payCashBrl.replace(/,/g, ".") || "0") || 0) * (rates.BRL || 0)
+    const usd = (parseFloat(payCashUsd.replace(/,/g, ".") || "0") || 0) * (rates.USD || 0)
+    otros += brl + usd
+
+    if (activeMethods.has("bancard") && excluirMetodo !== "bancard") {
+      otros += parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10)
+    }
+    if (activeMethods.has("dinelco") && excluirMetodo !== "dinelco") {
+      otros += parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10)
+    }
+    if (activeMethods.has("qr") && excluirMetodo !== "qr") {
+      otros += parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)
+    }
+    if ((activeMethods.has("plugpay") || activeMethods.has("plugpay_credito")) && excluirMetodo !== "plugpay") {
+      otros += parseInt((mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg).replace(/\D/g, "") || "0", 10)
+    }
+    if (activeMethods.has("extra_club") && excluirMetodo !== "extra_club") {
+      otros += parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10)
+    }
+    if (activeMethods.has("otros") && excluirMetodo !== "otros") {
+      otros += parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10)
+    }
+
+    for (const leg of extraPaymentLegs) {
+      if (leg.id === legIdExcluir) continue
+      otros += parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+    }
+    return Math.max(0, Math.round(totalPyg - otros))
+  }
 
   // ── Detección inteligente de redondeo para Centro Amor y Esperanza ("Abre tu corazón") ──
   const montoSugeridoDonacion = useMemo(() => {
@@ -11077,7 +11131,15 @@ export default function POSPage() {
                                 ref={mixedCardPygInputRef}
                                 type="text"
                                 value={mixedCardPyg}
-                                onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedCardPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                                onChange={(e) => {
+                                  const clean = e.target.value.replace(/\D/g, "")
+                                  const valNum = clean ? parseInt(clean, 10) : 0
+                                  setMixedCardPyg(clean ? valNum.toLocaleString("es-PY") : "")
+                                  if (!hasClickedQuickCash && activeMethods.has("cash")) {
+                                    const rem = Math.max(0, totalPyg - valNum)
+                                    setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
+                                  }
+                                }}
                                 onKeyDown={(e) => handleMixedFieldKeyDown(e, setMixedCardPyg)}
                                 onFocus={(e) => e.target.select()}
                                 placeholder="0"
@@ -11086,7 +11148,14 @@ export default function POSPage() {
                               <button
                                 type="button"
                                 title="Completar con el resto"
-                                onClick={() => setMixedCardPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                                onClick={() => {
+                                  const resto = getSaldoRestanteParaMetodo("bancard")
+                                  setMixedCardPyg(resto > 0 ? resto.toLocaleString("es-PY") : "")
+                                  if (!hasClickedQuickCash && activeMethods.has("cash")) {
+                                    const rem = Math.max(0, totalPyg - resto)
+                                    setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
+                                  }
+                                }}
                                 className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
                               >
                                 Resto
@@ -11232,15 +11301,30 @@ export default function POSPage() {
                                     <button type="button" disabled={leg.txnState !== "idle"} onClick={() => updateExtraLeg(leg.id, { cardType: "debito", cardCuotas: 1 })} className={`px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer ${leg.cardType === "debito" ? "bg-blue-600 text-white" : "text-slate-600 dark:text-slate-400"}`}>Débito</button>
                                     <button type="button" disabled={leg.txnState !== "idle"} onClick={() => updateExtraLeg(leg.id, { cardType: "credito" })} className={`px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer ${leg.cardType === "credito" ? "bg-blue-600 text-white" : "text-slate-600 dark:text-slate-400"}`}>Crédito</button>
                                   </div>
-                                  <input
-                                    type="text"
-                                    value={leg.montoStr}
-                                    disabled={leg.txnState !== "idle"}
-                                    onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); updateExtraLeg(leg.id, { montoStr: clean ? parseInt(clean, 10).toLocaleString("es-PY") : "" }) }}
-                                    onFocus={(e) => e.target.select()}
-                                    placeholder="Monto ₲"
-                                    className="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums font-bold text-xs text-blue-600 dark:text-blue-400 outline-none focus:border-blue-500"
-                                  />
+                                  <div className="flex-1 flex gap-1">
+                                    <input
+                                      type="text"
+                                      value={leg.montoStr}
+                                      disabled={leg.txnState !== "idle"}
+                                      onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); updateExtraLeg(leg.id, { montoStr: clean ? parseInt(clean, 10).toLocaleString("es-PY") : "" }) }}
+                                      onFocus={(e) => e.target.select()}
+                                      placeholder="Monto ₲"
+                                      className="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums font-bold text-xs text-blue-600 dark:text-blue-400 outline-none focus:border-blue-500"
+                                    />
+                                    {leg.txnState === "idle" && (
+                                      <button
+                                        type="button"
+                                        title="Completar con el resto"
+                                        onClick={() => {
+                                          const resto = getSaldoRestanteParaMetodo("bancard_leg", leg.id)
+                                          updateExtraLeg(leg.id, { montoStr: resto > 0 ? resto.toLocaleString("es-PY") : "" })
+                                        }}
+                                        className="px-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg cursor-pointer shrink-0"
+                                      >
+                                        Resto
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
 
                                 {leg.txnState === "idle" && (
@@ -11276,20 +11360,28 @@ export default function POSPage() {
                                   <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1">
                                     <div className="font-black">⚠ {leg.txnError}</div>
                                     <button type="button" onClick={() => handleBancardChargeForLeg(leg)} className="text-[10px] font-bold underline cursor-pointer">Reintentar conexión</button>
-                                    <div>
-                                      <button type="button" onClick={() => updateExtraLeg(leg.id, { showManualFallback: !leg.showManualFallback })} className="text-[10px] font-bold underline cursor-pointer">
-                                        {leg.showManualFallback ? "Ocultar carga manual" : "Cargar voucher manualmente"}
-                                      </button>
-                                      {leg.showManualFallback && (
-                                        <input
-                                          type="text"
-                                          value={leg.manualCupon}
-                                          onChange={(e) => updateExtraLeg(leg.id, { manualCupon: e.target.value })}
-                                          placeholder="Nº Voucher"
-                                          className="mt-1 w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums text-[11px] text-emerald-600 dark:text-emerald-400 font-bold outline-none"
-                                        />
-                                      )}
-                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Respaldo manual siempre disponible si no está aprobada */}
+                                {leg.txnState !== "aprobada" && (
+                                  <div className="pt-1 border-t border-slate-200 dark:border-slate-800">
+                                    <button
+                                      type="button"
+                                      onClick={() => updateExtraLeg(leg.id, { showManualFallback: !leg.showManualFallback })}
+                                      className="text-[10px] font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                                    >
+                                      {leg.showManualFallback ? "▾ Ocultar carga manual" : (leg.manualCupon ? `✓ Voucher: ${leg.manualCupon} (editar)` : "▸ Cargar voucher manualmente")}
+                                    </button>
+                                    {(leg.showManualFallback || Boolean(leg.manualCupon)) && (
+                                      <input
+                                        type="text"
+                                        value={leg.manualCupon}
+                                        onChange={(e) => updateExtraLeg(leg.id, { manualCupon: e.target.value })}
+                                        placeholder="Nº Voucher / Cupón"
+                                        className="mt-1 w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums text-[11px] text-emerald-600 dark:text-emerald-400 font-bold outline-none"
+                                      />
+                                    )}
                                   </div>
                                 )}
                               </div>
@@ -11326,7 +11418,15 @@ export default function POSPage() {
                                   <input
                                     type="text"
                                     value={mixedQrPyg}
-                                    onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedQrPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                                    onChange={(e) => {
+                                      const clean = e.target.value.replace(/\D/g, "")
+                                      const valNum = clean ? parseInt(clean, 10) : 0
+                                      setMixedQrPyg(clean ? valNum.toLocaleString("es-PY") : "")
+                                      if (!hasClickedQuickCash && activeMethods.has("cash")) {
+                                        const rem = Math.max(0, totalPyg - valNum)
+                                        setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
+                                      }
+                                    }}
                                     onFocus={(e) => e.target.select()}
                                     placeholder="0"
                                     className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
@@ -11334,7 +11434,14 @@ export default function POSPage() {
                                   <button
                                     type="button"
                                     title="Completar con el resto"
-                                    onClick={() => setMixedQrPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                                    onClick={() => {
+                                      const resto = getSaldoRestanteParaMetodo("qr")
+                                      setMixedQrPyg(resto > 0 ? resto.toLocaleString("es-PY") : "")
+                                      if (!hasClickedQuickCash && activeMethods.has("cash")) {
+                                        const rem = Math.max(0, totalPyg - resto)
+                                        setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
+                                      }
+                                    }}
                                     className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
                                   >
                                     Resto
@@ -11452,15 +11559,30 @@ export default function POSPage() {
                                         <button type="button" onClick={() => removeExtraLeg(leg.id)} className="text-[10px] text-slate-400 hover:text-rose-500 cursor-pointer">Quitar</button>
                                       )}
                                     </div>
-                                    <input
-                                      type="text"
-                                      value={leg.montoStr}
-                                      disabled={leg.txnState !== "idle"}
-                                      onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); updateExtraLeg(leg.id, { montoStr: clean ? parseInt(clean, 10).toLocaleString("es-PY") : "" }) }}
-                                      onFocus={(e) => e.target.select()}
-                                      placeholder="Monto ₲"
-                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums font-bold text-xs text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
-                                    />
+                                    <div className="flex gap-1">
+                                      <input
+                                        type="text"
+                                        value={leg.montoStr}
+                                        disabled={leg.txnState !== "idle"}
+                                        onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); updateExtraLeg(leg.id, { montoStr: clean ? parseInt(clean, 10).toLocaleString("es-PY") : "" }) }}
+                                        onFocus={(e) => e.target.select()}
+                                        placeholder="Monto ₲"
+                                        className="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums font-bold text-xs text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
+                                      />
+                                      {leg.txnState === "idle" && (
+                                        <button
+                                          type="button"
+                                          title="Completar con el resto"
+                                          onClick={() => {
+                                            const resto = getSaldoRestanteParaMetodo("qr_leg", leg.id)
+                                            updateExtraLeg(leg.id, { montoStr: resto > 0 ? resto.toLocaleString("es-PY") : "" })
+                                          }}
+                                          className="px-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg cursor-pointer shrink-0"
+                                        >
+                                          Resto
+                                        </button>
+                                      )}
+                                    </div>
                                     {(leg.txnState === "idle" || leg.txnState === "esperando") && (
                                       <button
                                         type="button"
@@ -11488,20 +11610,28 @@ export default function POSPage() {
                                       <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1">
                                         <div className="font-black">⚠ {leg.txnError}</div>
                                         <button type="button" onClick={() => handleBancardQRForLeg(leg)} className="text-[10px] font-bold underline cursor-pointer">Reintentar conexión</button>
-                                        <div>
-                                          <button type="button" onClick={() => updateExtraLeg(leg.id, { showManualFallback: !leg.showManualFallback })} className="text-[10px] font-bold underline cursor-pointer">
-                                            {leg.showManualFallback ? "Ocultar carga manual" : "Cargar voucher manualmente"}
-                                          </button>
-                                          {leg.showManualFallback && (
-                                            <input
-                                              type="text"
-                                              value={leg.manualCupon}
-                                              onChange={(e) => updateExtraLeg(leg.id, { manualCupon: e.target.value })}
-                                              placeholder="Nº Boleta"
-                                              className="mt-1 w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums text-[11px] text-emerald-600 dark:text-emerald-400 font-bold outline-none"
-                                            />
-                                          )}
-                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Respaldo manual siempre disponible si no está aprobada */}
+                                    {leg.txnState !== "aprobada" && (
+                                      <div className="pt-1 border-t border-slate-200 dark:border-slate-800">
+                                        <button
+                                          type="button"
+                                          onClick={() => updateExtraLeg(leg.id, { showManualFallback: !leg.showManualFallback })}
+                                          className="text-[10px] font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                                        >
+                                          {leg.showManualFallback ? "▾ Ocultar carga manual" : (leg.manualCupon ? `✓ Voucher: ${leg.manualCupon} (editar)` : "▸ Cargar voucher manualmente")}
+                                        </button>
+                                        {(leg.showManualFallback || Boolean(leg.manualCupon)) && (
+                                          <input
+                                            type="text"
+                                            value={leg.manualCupon}
+                                            onChange={(e) => updateExtraLeg(leg.id, { manualCupon: e.target.value })}
+                                            placeholder="Nº Boleta / Cupón QR"
+                                            className="mt-1 w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums text-[11px] text-emerald-600 dark:text-emerald-400 font-bold outline-none"
+                                          />
+                                        )}
                                       </div>
                                     )}
                                   </div>
@@ -11540,7 +11670,15 @@ export default function POSPage() {
                                   <input
                                     type="text"
                                     value={mixedQrPyg}
-                                    onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedQrPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                                    onChange={(e) => {
+                                      const clean = e.target.value.replace(/\D/g, "")
+                                      const valNum = clean ? parseInt(clean, 10) : 0
+                                      setMixedQrPyg(clean ? valNum.toLocaleString("es-PY") : "")
+                                      if (!hasClickedQuickCash && activeMethods.has("cash")) {
+                                        const rem = Math.max(0, totalPyg - valNum)
+                                        setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
+                                      }
+                                    }}
                                     onFocus={(e) => e.target.select()}
                                     placeholder="0"
                                     className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-blue-600 dark:text-blue-400 outline-none focus:border-blue-500"
@@ -11548,7 +11686,14 @@ export default function POSPage() {
                                   <button
                                     type="button"
                                     title="Completar con el resto"
-                                    onClick={() => setMixedQrPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                                    onClick={() => {
+                                      const resto = getSaldoRestanteParaMetodo("qr")
+                                      setMixedQrPyg(resto > 0 ? resto.toLocaleString("es-PY") : "")
+                                      if (!hasClickedQuickCash && activeMethods.has("cash")) {
+                                        const rem = Math.max(0, totalPyg - resto)
+                                        setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
+                                      }
+                                    }}
                                     className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
                                   >
                                     Resto
@@ -11777,7 +11922,15 @@ export default function POSPage() {
                                 ref={mixedDinelcoPygInputRef}
                                 type="text"
                                 value={mixedDinelcoPyg}
-                                onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedDinelcoPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                                onChange={(e) => {
+                                  const clean = e.target.value.replace(/\D/g, "")
+                                  const valNum = clean ? parseInt(clean, 10) : 0
+                                  setMixedDinelcoPyg(clean ? valNum.toLocaleString("es-PY") : "")
+                                  if (!hasClickedQuickCash && activeMethods.has("cash")) {
+                                    const rem = Math.max(0, totalPyg - valNum)
+                                    setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
+                                  }
+                                }}
                                 onKeyDown={(e) => handleMixedFieldKeyDown(e, setMixedDinelcoPyg)}
                                 onFocus={(e) => e.target.select()}
                                 placeholder="0"
@@ -11786,7 +11939,14 @@ export default function POSPage() {
                               <button
                                 type="button"
                                 title="Completar con el resto"
-                                onClick={() => setMixedDinelcoPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                                onClick={() => {
+                                  const resto = getSaldoRestanteParaMetodo("dinelco")
+                                  setMixedDinelcoPyg(resto > 0 ? resto.toLocaleString("es-PY") : "")
+                                  if (!hasClickedQuickCash && activeMethods.has("cash")) {
+                                    const rem = Math.max(0, totalPyg - resto)
+                                    setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
+                                  }
+                                }}
                                 className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
                               >
                                 Resto
@@ -11918,15 +12078,30 @@ export default function POSPage() {
                                         <button type="button" disabled={leg.txnState !== "idle"} onClick={() => updateExtraLeg(leg.id, { cardType: "debito", cardCuotas: 1 })} className={`px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer ${leg.cardType === "debito" ? "bg-purple-600 text-white" : "text-slate-600 dark:text-slate-400"}`}>Débito</button>
                                         <button type="button" disabled={leg.txnState !== "idle"} onClick={() => updateExtraLeg(leg.id, { cardType: "credito" })} className={`px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer ${leg.cardType === "credito" ? "bg-purple-600 text-white" : "text-slate-600 dark:text-slate-400"}`}>Crédito</button>
                                       </div>
-                                      <input
-                                        type="text"
-                                        value={leg.montoStr}
-                                        disabled={leg.txnState !== "idle"}
-                                        onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); updateExtraLeg(leg.id, { montoStr: clean ? parseInt(clean, 10).toLocaleString("es-PY") : "" }) }}
-                                        onFocus={(e) => e.target.select()}
-                                        placeholder="Monto ₲"
-                                        className="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums font-bold text-xs text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
-                                      />
+                                      <div className="flex-1 flex gap-1">
+                                        <input
+                                          type="text"
+                                          value={leg.montoStr}
+                                          disabled={leg.txnState !== "idle"}
+                                          onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); updateExtraLeg(leg.id, { montoStr: clean ? parseInt(clean, 10).toLocaleString("es-PY") : "" }) }}
+                                          onFocus={(e) => e.target.select()}
+                                          placeholder="Monto ₲"
+                                          className="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums font-bold text-xs text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
+                                        />
+                                        {leg.txnState === "idle" && (
+                                          <button
+                                            type="button"
+                                            title="Completar con el resto"
+                                            onClick={() => {
+                                              const resto = getSaldoRestanteParaMetodo("dinelco_leg", leg.id)
+                                              updateExtraLeg(leg.id, { montoStr: resto > 0 ? resto.toLocaleString("es-PY") : "" })
+                                            }}
+                                            className="px-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg cursor-pointer shrink-0"
+                                          >
+                                            Resto
+                                          </button>
+                                        )}
+                                      </div>
                                     </div>
                                     {leg.txnState === "idle" && (
                                       <button
@@ -11961,20 +12136,28 @@ export default function POSPage() {
                                       <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1">
                                         <div className="font-black">⚠ {leg.txnError}</div>
                                         <button type="button" onClick={() => handleDinelcoChargeForLeg(leg)} className="text-[10px] font-bold underline cursor-pointer">Reintentar conexión</button>
-                                        <div>
-                                          <button type="button" onClick={() => updateExtraLeg(leg.id, { showManualFallback: !leg.showManualFallback })} className="text-[10px] font-bold underline cursor-pointer">
-                                            {leg.showManualFallback ? "Ocultar carga manual" : "Cargar voucher manualmente"}
-                                          </button>
-                                          {leg.showManualFallback && (
-                                            <input
-                                              type="text"
-                                              value={leg.manualCupon}
-                                              onChange={(e) => updateExtraLeg(leg.id, { manualCupon: e.target.value })}
-                                              placeholder="Nº Voucher"
-                                              className="mt-1 w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums text-[11px] text-emerald-600 dark:text-emerald-400 font-bold outline-none"
-                                            />
-                                          )}
-                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Respaldo manual siempre disponible si no está aprobada */}
+                                    {leg.txnState !== "aprobada" && (
+                                      <div className="pt-1 border-t border-slate-200 dark:border-slate-800">
+                                        <button
+                                          type="button"
+                                          onClick={() => updateExtraLeg(leg.id, { showManualFallback: !leg.showManualFallback })}
+                                          className="text-[10px] font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                                        >
+                                          {leg.showManualFallback ? "▾ Ocultar carga manual" : (leg.manualCupon ? `✓ Voucher: ${leg.manualCupon} (editar)` : "▸ Cargar voucher manualmente")}
+                                        </button>
+                                        {(leg.showManualFallback || Boolean(leg.manualCupon)) && (
+                                          <input
+                                            type="text"
+                                            value={leg.manualCupon}
+                                            onChange={(e) => updateExtraLeg(leg.id, { manualCupon: e.target.value })}
+                                            placeholder="Nº Voucher / Cupón"
+                                            className="mt-1 w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums text-[11px] text-emerald-600 dark:text-emerald-400 font-bold outline-none"
+                                          />
+                                        )}
                                       </div>
                                     )}
                                   </div>
@@ -12013,7 +12196,15 @@ export default function POSPage() {
                                   <input
                                     type="text"
                                     value={mixedQrPyg}
-                                    onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedQrPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                                    onChange={(e) => {
+                                      const clean = e.target.value.replace(/\D/g, "")
+                                      const valNum = clean ? parseInt(clean, 10) : 0
+                                      setMixedQrPyg(clean ? valNum.toLocaleString("es-PY") : "")
+                                      if (!hasClickedQuickCash && activeMethods.has("cash")) {
+                                        const rem = Math.max(0, totalPyg - valNum)
+                                        setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
+                                      }
+                                    }}
                                     onFocus={(e) => e.target.select()}
                                     placeholder="0"
                                     className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
@@ -12021,7 +12212,14 @@ export default function POSPage() {
                                   <button
                                     type="button"
                                     title="Completar con el resto"
-                                    onClick={() => setMixedQrPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                                    onClick={() => {
+                                      const resto = getSaldoRestanteParaMetodo("dinelco")
+                                      setMixedQrPyg(resto > 0 ? resto.toLocaleString("es-PY") : "")
+                                      if (!hasClickedQuickCash && activeMethods.has("cash")) {
+                                        const rem = Math.max(0, totalPyg - resto)
+                                        setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
+                                      }
+                                    }}
                                     className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
                                   >
                                     Resto
@@ -12219,10 +12417,15 @@ export default function POSPage() {
                                 value={mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg}
                                 onChange={(e) => {
                                   const clean = e.target.value.replace(/\D/g, "")
-                                  const val = clean ? parseInt(clean, 10).toLocaleString("es-PY") : ""
+                                  const valNum = clean ? parseInt(clean, 10) : 0
+                                  const val = clean ? valNum.toLocaleString("es-PY") : ""
                                   setMixedPlugPayPyg(val)
                                   setMixedParceladoPyg(val)
                                   setMixedQrPyg(val)
+                                  if (!hasClickedQuickCash && activeMethods.has("cash")) {
+                                    const rem = Math.max(0, totalPyg - valNum)
+                                    setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
+                                  }
                                 }}
                                 onKeyDown={(e) => handleMixedFieldKeyDown(e, (v) => { setMixedPlugPayPyg(v); setMixedParceladoPyg(v); setMixedQrPyg(v); })}
                                 onFocus={(e) => e.target.select()}
@@ -12233,10 +12436,15 @@ export default function POSPage() {
                                 type="button"
                                 title="Completar con el resto"
                                 onClick={() => {
-                                  const resto = Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt((mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg).replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY")
+                                  const restoNum = getSaldoRestanteParaMetodo("plugpay")
+                                  const resto = restoNum > 0 ? restoNum.toLocaleString("es-PY") : ""
                                   setMixedPlugPayPyg(resto)
                                   setMixedParceladoPyg(resto)
                                   setMixedQrPyg(resto)
+                                  if (!hasClickedQuickCash && activeMethods.has("cash")) {
+                                    const rem = Math.max(0, totalPyg - restoNum)
+                                    setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
+                                  }
                                 }}
                                 className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
                               >
@@ -12780,7 +12988,15 @@ export default function POSPage() {
                                   <input
                                     type="text"
                                     value={mixedExtraClubPyg}
-                                    onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedExtraClubPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                                    onChange={(e) => {
+                                      const clean = e.target.value.replace(/\D/g, "")
+                                      const valNum = clean ? parseInt(clean, 10) : 0
+                                      setMixedExtraClubPyg(clean ? valNum.toLocaleString("es-PY") : "")
+                                      if (!hasClickedQuickCash && activeMethods.has("cash")) {
+                                        const rem = Math.max(0, totalPyg - valNum)
+                                        setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
+                                      }
+                                    }}
                                     onFocus={(e) => e.target.select()}
                                     placeholder="0"
                                     className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500 text-center"
@@ -12788,7 +13004,14 @@ export default function POSPage() {
                                   <button
                                     type="button"
                                     title="Completar con el resto"
-                                    onClick={() => setMixedExtraClubPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                                    onClick={() => {
+                                      const resto = getSaldoRestanteParaMetodo("extra_club")
+                                      setMixedExtraClubPyg(resto > 0 ? resto.toLocaleString("es-PY") : "")
+                                      if (!hasClickedQuickCash && activeMethods.has("cash")) {
+                                        const rem = Math.max(0, totalPyg - resto)
+                                        setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
+                                      }
+                                    }}
                                     className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
                                   >
                                     Resto
@@ -12952,7 +13175,15 @@ export default function POSPage() {
                               <input
                                 type="text"
                                 value={mixedOtrosPyg}
-                                onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedOtrosPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                                onChange={(e) => {
+                                  const clean = e.target.value.replace(/\D/g, "")
+                                  const valNum = clean ? parseInt(clean, 10) : 0
+                                  setMixedOtrosPyg(clean ? valNum.toLocaleString("es-PY") : "")
+                                  if (!hasClickedQuickCash && activeMethods.has("cash")) {
+                                    const rem = Math.max(0, totalPyg - valNum)
+                                    setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
+                                  }
+                                }}
                                 onKeyDown={(e) => handleMixedFieldKeyDown(e, setMixedOtrosPyg)}
                                 onFocus={(e) => e.target.select()}
                                 placeholder="0"
@@ -12961,7 +13192,14 @@ export default function POSPage() {
                               <button
                                 type="button"
                                 title="Completar con el resto"
-                                onClick={() => setMixedOtrosPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                                onClick={() => {
+                                  const resto = getSaldoRestanteParaMetodo("otros")
+                                  setMixedOtrosPyg(resto > 0 ? resto.toLocaleString("es-PY") : "")
+                                  if (!hasClickedQuickCash && activeMethods.has("cash")) {
+                                    const rem = Math.max(0, totalPyg - resto)
+                                    setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
+                                  }
+                                }}
                                 className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
                               >
                                 Resto
@@ -14461,6 +14699,7 @@ export default function POSPage() {
                                 { id: "TARJETA_BANCARD", label: "💳 Tarjeta Bancard", desc: "DX8000 / Manual", color: "border-blue-500 text-blue-600 bg-blue-500/10", requiresVoucher: true, isCard: true, cardNetwork: "Bancard" },
                                 { id: "TARJETA_DINELCO", label: "💳 Tarjeta Dinelco", desc: "POS Dinelco", color: "border-indigo-500 text-indigo-600 bg-indigo-500/10", requiresVoucher: true, isCard: true, cardNetwork: "Dinelco" },
                                 { id: "QR", label: "📱 QR Zimple / PIX", desc: "Pago QR", color: "border-amber-500 text-amber-600 bg-amber-500/10", requiresVoucher: true, isCard: false, isForeign: false },
+                                { id: "MIXTO", label: "🔀 Pago Mixto", desc: "Dividir en 2+ formas", color: "border-pink-500 text-pink-600 bg-pink-500/10", requiresVoucher: false, isCard: false, isForeign: false },
                                 { id: "EXTRA_CLUB", label: "★ Extra Club", desc: "Crédito a Socio", color: "border-purple-500 text-purple-600 bg-purple-500/10", requiresVoucher: false, isCard: false, isForeign: false, requiresCustomer: true },
                                 { id: "TRANSFERENCIA", label: "🏦 Transferencia", desc: "SIPAP / Cheque", color: "border-sky-500 text-sky-600 bg-sky-500/10", requiresVoucher: true, isCard: false, isForeign: false },
                               ].map((opt) => {
@@ -14472,7 +14711,16 @@ export default function POSPage() {
                                     type="button"
                                     onClick={() => {
                                       setReabrirPagoFormaPago(opt.id)
-                                      if (opt.isForeign && opt.moneda) {
+                                      if (opt.id === "MIXTO") {
+                                        setReabrirPagoMoneda("PYG")
+                                        setReabrirPagoMontoMoneda(undefined)
+                                        if (reabrirPagoMixtoLegs.length === 0) {
+                                          setReabrirPagoMixtoLegs([
+                                            { id: "leg-1", forma_pago: "EFECTIVO", montoStr: "", moneda: "PYG" },
+                                            { id: "leg-2", forma_pago: "TARJETA_BANCARD", montoStr: "", moneda: "PYG", voucher: "" },
+                                          ])
+                                        }
+                                      } else if (opt.isForeign && opt.moneda) {
                                         setReabrirPagoMoneda(opt.moneda)
                                         const cotiz = opt.moneda === "BRL" ? (rates.BRL || 1400) : (rates.USD || 7800)
                                         setReabrirPagoMontoMoneda(Number(((sale.total || 0) / cotiz).toFixed(2)))
@@ -14497,6 +14745,160 @@ export default function POSPage() {
                               })}
                             </div>
                           </div>
+
+                          {/* Editor de Desglose para Pago Mixto en Reimpresión */}
+                          {reabrirPagoFormaPago === "MIXTO" && (
+                            <div className="bg-pink-500/5 dark:bg-pink-950/20 border border-pink-500/30 rounded-xl p-3 space-y-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[11px] font-black text-pink-700 dark:text-pink-300 uppercase tracking-wider flex items-center gap-1.5">
+                                  🔀 Desglose de Pago Mixto (Total Venta: {formatPYG(sale.total)})
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setReabrirPagoMixtoLegs(prev => [
+                                      ...prev,
+                                      { id: `leg-${Date.now()}`, forma_pago: "EFECTIVO", montoStr: "", moneda: "PYG" }
+                                    ])
+                                  }}
+                                  className="px-2.5 py-1 rounded-lg bg-pink-600 hover:bg-pink-700 text-white font-bold text-[10px] flex items-center gap-1 cursor-pointer transition-all"
+                                >
+                                  <Plus className="w-3 h-3" /> Agregar Línea
+                                </button>
+                              </div>
+
+                              <div className="space-y-2">
+                                {reabrirPagoMixtoLegs.map((leg, idx) => {
+                                  const montoNum = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+                                  const isLegForeign = leg.forma_pago === "EFECTIVO_BRL" || leg.forma_pago === "EFECTIVO_USD"
+                                  const legMoneda = isLegForeign ? (leg.forma_pago === "EFECTIVO_BRL" ? "BRL" : "USD") : "PYG"
+                                  const legRate = legMoneda === "BRL" ? (rates.BRL || 1400) : (rates.USD || 7800)
+                                  const requiresLegVoucher = ["TARJETA_BANCARD", "TARJETA_DINELCO", "TARJETA", "QR", "TRANSFERENCIA"].includes(leg.forma_pago)
+
+                                  return (
+                                    <div key={leg.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-2.5 space-y-2 shadow-xs">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className="text-[10px] font-black text-slate-500 uppercase">Línea #{idx + 1}</span>
+                                        {reabrirPagoMixtoLegs.length > 2 && (
+                                          <button
+                                            type="button"
+                                            onClick={() => setReabrirPagoMixtoLegs(prev => prev.filter(l => l.id !== leg.id))}
+                                            className="text-[10px] text-rose-500 hover:text-rose-700 font-bold px-1.5 py-0.5 rounded cursor-pointer"
+                                          >
+                                            Eliminar
+                                          </button>
+                                        )}
+                                      </div>
+
+                                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+                                        <div className="sm:col-span-4">
+                                          <label className="block text-[9px] font-bold text-slate-500 uppercase mb-0.5">Forma:</label>
+                                          <select
+                                            value={leg.forma_pago}
+                                            onChange={(e) => {
+                                              const val = e.target.value
+                                              setReabrirPagoMixtoLegs(prev => prev.map(l => l.id === leg.id ? { ...l, forma_pago: val } : l))
+                                            }}
+                                            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 text-xs font-bold text-slate-800 dark:text-slate-200 outline-none"
+                                          >
+                                            <option value="EFECTIVO">💵 Efectivo (₲)</option>
+                                            <option value="EFECTIVO_BRL">💵 Efectivo R$</option>
+                                            <option value="EFECTIVO_USD">💵 Efectivo US$</option>
+                                            <option value="TARJETA_BANCARD">💳 Tarjeta Bancard</option>
+                                            <option value="TARJETA_DINELCO">💳 Tarjeta Dinelco</option>
+                                            <option value="QR">📱 QR Zimple / PIX</option>
+                                            <option value="EXTRA_CLUB">★ Extra Club</option>
+                                            <option value="TRANSFERENCIA">🏦 Transferencia / Cheque</option>
+                                          </select>
+                                        </div>
+
+                                        <div className="sm:col-span-4">
+                                          <div className="flex justify-between items-center mb-0.5">
+                                            <label className="text-[9px] font-bold text-slate-500 uppercase">Monto (₲):</label>
+                                            {isLegForeign && montoNum > 0 && (
+                                              <span className="text-[9px] font-mono text-teal-600 dark:text-teal-400 font-bold">
+                                                ≈ {legMoneda === "BRL" ? "R$" : "US$"} {(montoNum / legRate).toFixed(2)}
+                                              </span>
+                                            )}
+                                          </div>
+                                          <div className="flex gap-1">
+                                            <input
+                                              type="text"
+                                              value={leg.montoStr}
+                                              onChange={(e) => {
+                                                const clean = e.target.value.replace(/\D/g, "")
+                                                const fmt = clean ? parseInt(clean, 10).toLocaleString("es-PY") : ""
+                                                setReabrirPagoMixtoLegs(prev => prev.map(l => l.id === leg.id ? { ...l, montoStr: fmt } : l))
+                                              }}
+                                              onFocus={(e) => e.target.select()}
+                                              placeholder="0"
+                                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 text-xs font-mono font-bold text-slate-900 dark:text-white outline-none focus:border-pink-500"
+                                            />
+                                            <button
+                                              type="button"
+                                              title="Asignar el saldo restante de la venta"
+                                              onClick={() => {
+                                                const otrasSum = reabrirPagoMixtoLegs
+                                                  .filter(l => l.id !== leg.id)
+                                                  .reduce((sum, l) => sum + parseInt(l.montoStr.replace(/\D/g, "") || "0", 10), 0)
+                                                const resto = Math.max(0, (sale.total || 0) - otrasSum)
+                                                const fmt = resto > 0 ? resto.toLocaleString("es-PY") : ""
+                                                setReabrirPagoMixtoLegs(prev => prev.map(l => l.id === leg.id ? { ...l, montoStr: fmt } : l))
+                                              }}
+                                              className="px-2 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg cursor-pointer shrink-0"
+                                            >
+                                              Resto
+                                            </button>
+                                          </div>
+                                        </div>
+
+                                        <div className="sm:col-span-4">
+                                          {requiresLegVoucher ? (
+                                            <div>
+                                              <label className="block text-[9px] font-bold text-slate-500 uppercase mb-0.5">
+                                                Voucher / Cupón <span className="text-rose-500">*</span>:
+                                              </label>
+                                              <input
+                                                type="text"
+                                                value={leg.voucher || ""}
+                                                onChange={(e) => {
+                                                  const v = e.target.value
+                                                  setReabrirPagoMixtoLegs(prev => prev.map(l => l.id === leg.id ? { ...l, voucher: v } : l))
+                                                }}
+                                                placeholder="Nº Cupón / Ref"
+                                                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 text-xs font-mono font-bold text-slate-900 dark:text-white outline-none focus:border-pink-500"
+                                              />
+                                            </div>
+                                          ) : (
+                                            <div className="text-[10px] text-slate-400 py-1.5 italic">Sin cupón requerido</div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+
+                              {(() => {
+                                const sum = reabrirPagoMixtoLegs.reduce((acc, l) => acc + parseInt(l.montoStr.replace(/\D/g, "") || "0", 10), 0)
+                                const diff = (sale.total || 0) - sum
+                                return (
+                                  <div className={`flex items-center justify-between p-2.5 rounded-xl border font-mono text-xs font-bold ${
+                                    diff === 0
+                                      ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-300"
+                                      : diff > 0
+                                      ? "bg-amber-500/10 border-amber-500/40 text-amber-700 dark:text-amber-300"
+                                      : "bg-rose-500/10 border-rose-500/40 text-rose-700 dark:text-rose-300"
+                                  }`}>
+                                    <span>Suma: {formatPYG(sum)} / Venta: {formatPYG(sale.total)}</span>
+                                    <span>
+                                      {diff === 0 ? "✓ Saldo Completo" : diff > 0 ? `Falta: ${formatPYG(diff)}` : `Excedido: ${formatPYG(Math.abs(diff))}`}
+                                    </span>
+                                  </div>
+                                )
+                              })()}
+                            </div>
+                          )}
 
                           {/* Integración POS AXIUM DX8000 para Tarjeta Bancard */}
                           {(reabrirPagoFormaPago === "TARJETA_BANCARD" || reabrirPagoFormaPago === "TARJETA") && (
@@ -14583,8 +14985,8 @@ export default function POSPage() {
                             </div>
                           )}
 
-                          {/* Selector de Socio Extra Club cuando la forma de pago elegida es EXTRA_CLUB o CREDITO */}
-                          {(reabrirPagoFormaPago === "EXTRA_CLUB" || reabrirPagoFormaPago === "CREDITO") && (
+                          {/* Selector de Socio Extra Club cuando la forma de pago elegida es EXTRA_CLUB o CREDITO, o en MIXTO si incluye Extra Club */}
+                          {(reabrirPagoFormaPago === "EXTRA_CLUB" || reabrirPagoFormaPago === "CREDITO" || (reabrirPagoFormaPago === "MIXTO" && reabrirPagoMixtoLegs.some(l => l.forma_pago === "EXTRA_CLUB"))) && (
                             <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-3 space-y-2">
                               <div className="flex items-center justify-between">
                                 <span className="text-[11px] font-black text-purple-700 dark:text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
@@ -14712,6 +15114,7 @@ export default function POSPage() {
                                 setReabrirPagoCustomer(null)
                                 setReabrirPagoCustomerSearch("")
                                 setReabrirPagoCustomerResults([])
+                                setReabrirPagoMixtoLegs([])
                               }}
                               className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 cursor-pointer"
                             >
@@ -14719,15 +15122,43 @@ export default function POSPage() {
                             </button>
                             <button
                               type="button"
-                              disabled={
-                                submittingReabrirPago ||
-                                !reabrirPagoFormaPago ||
-                                ((reabrirPagoFormaPago === "EXTRA_CLUB" || reabrirPagoFormaPago === "CREDITO") && !reabrirPagoCustomer) ||
-                                (["TARJETA_BANCARD", "TARJETA_DINELCO", "TARJETA", "QR", "TRANSFERENCIA"].includes(reabrirPagoFormaPago) && !reabrirPagoVoucher.trim()) ||
-                                (reabrirPagoFormaPago === fpActual && (!reabrirPagoCustomer || (sale.customer && String(reabrirPagoCustomer.id) === String(sale.customer.id)))) ||
-                                reabrirPagoMotivo.trim().length < 10
-                              }
+                              disabled={(() => {
+                                if (submittingReabrirPago || !reabrirPagoFormaPago || reabrirPagoMotivo.trim().length < 10) return true
+                                if (reabrirPagoFormaPago === "MIXTO") {
+                                  const sum = reabrirPagoMixtoLegs.reduce((acc, l) => acc + parseInt(l.montoStr.replace(/\D/g, "") || "0", 10), 0)
+                                  if (sum !== (sale.total || 0)) return true
+                                  const activeLegs = reabrirPagoMixtoLegs.filter(l => parseInt(l.montoStr.replace(/\D/g, "") || "0", 10) > 0)
+                                  if (activeLegs.length < 2) return true
+                                  for (const l of activeLegs) {
+                                    if (["TARJETA_BANCARD", "TARJETA_DINELCO", "TARJETA", "QR", "TRANSFERENCIA"].includes(l.forma_pago) && !l.voucher?.trim()) {
+                                      return true
+                                    }
+                                  }
+                                  if (activeLegs.some(l => l.forma_pago === "EXTRA_CLUB") && !reabrirPagoCustomer) {
+                                    return true
+                                  }
+                                  return false
+                                }
+                                if ((reabrirPagoFormaPago === "EXTRA_CLUB" || reabrirPagoFormaPago === "CREDITO") && !reabrirPagoCustomer) return true
+                                if (["TARJETA_BANCARD", "TARJETA_DINELCO", "TARJETA", "QR", "TRANSFERENCIA"].includes(reabrirPagoFormaPago) && !reabrirPagoVoucher.trim()) return true
+                                if (reabrirPagoFormaPago === fpActual && (!reabrirPagoCustomer || (sale.customer && String(reabrirPagoCustomer.id) === String(sale.customer.id)))) return true
+                                return false
+                              })()}
                               onClick={() => {
+                                const isMixto = reabrirPagoFormaPago === "MIXTO"
+                                const paymentsPayload = isMixto
+                                  ? reabrirPagoMixtoLegs
+                                      .filter(l => parseInt(l.montoStr.replace(/\D/g, "") || "0", 10) > 0)
+                                      .map(l => ({
+                                        forma_pago: l.forma_pago,
+                                        monto: parseInt(l.montoStr.replace(/\D/g, "") || "0", 10),
+                                        moneda: (l.forma_pago === "EFECTIVO_BRL" ? "BRL" : (l.forma_pago === "EFECTIVO_USD" ? "USD" : "PYG")),
+                                        voucher: l.voucher?.trim() || undefined,
+                                        lote: l.lote?.trim() || undefined,
+                                        tarjeta_marca: l.tarjeta_marca?.trim() || undefined,
+                                      }))
+                                  : undefined
+
                                 const isForeign = reabrirPagoFormaPago === "EFECTIVO_BRL" || reabrirPagoFormaPago === "EFECTIVO_USD"
                                 const moneda = isForeign ? (reabrirPagoFormaPago === "EFECTIVO_BRL" ? "BRL" : "USD") : "PYG"
                                 const rate = moneda === "BRL" ? (rates.BRL || 1400) : (rates.USD || 7800)
@@ -14745,6 +15176,7 @@ export default function POSPage() {
                                   terminalIp: activePosConfig.bancardIp || undefined,
                                   moneda,
                                   montoMoneda,
+                                  payments: paymentsPayload,
                                 } as any)
                               }}
                               className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white shadow-md cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-all"
@@ -15128,6 +15560,7 @@ export default function POSPage() {
                                   { id: "TARJETA_BANCARD", label: "💳 Tarjeta Bancard", desc: "DX8000 / Manual", color: "border-blue-500 text-blue-600 bg-blue-500/10", requiresVoucher: true, isCard: true, cardNetwork: "Bancard" },
                                   { id: "TARJETA_DINELCO", label: "💳 Tarjeta Dinelco", desc: "POS Dinelco", color: "border-indigo-500 text-indigo-600 bg-indigo-500/10", requiresVoucher: true, isCard: true, cardNetwork: "Dinelco" },
                                   { id: "QR", label: "📱 QR Zimple / PIX", desc: "Pago QR", color: "border-amber-500 text-amber-600 bg-amber-500/10", requiresVoucher: true, isCard: false, isForeign: false },
+                                  { id: "MIXTO", label: "🔀 Pago Mixto", desc: "Dividir en 2+ formas", color: "border-pink-500 text-pink-600 bg-pink-500/10", requiresVoucher: false, isCard: false, isForeign: false },
                                   { id: "EXTRA_CLUB", label: "★ Extra Club", desc: "Crédito a Socio", color: "border-purple-500 text-purple-600 bg-purple-500/10", requiresVoucher: false, isCard: false, isForeign: false, requiresCustomer: true },
                                   { id: "TRANSFERENCIA", label: "🏦 Transferencia", desc: "SIPAP / Cheque", color: "border-sky-500 text-sky-600 bg-sky-500/10", requiresVoucher: true, isCard: false, isForeign: false },
                                 ].map((opt) => {
@@ -15139,7 +15572,16 @@ export default function POSPage() {
                                       type="button"
                                       onClick={() => {
                                         setReabrirPagoFormaPago(opt.id)
-                                        if (opt.isForeign && opt.moneda) {
+                                        if (opt.id === "MIXTO") {
+                                          setReabrirPagoMoneda("PYG")
+                                          setReabrirPagoMontoMoneda(undefined)
+                                          if (reabrirPagoMixtoLegs.length === 0) {
+                                            setReabrirPagoMixtoLegs([
+                                              { id: "leg-1", forma_pago: "EFECTIVO", montoStr: "", moneda: "PYG" },
+                                              { id: "leg-2", forma_pago: "TARJETA_BANCARD", montoStr: "", moneda: "PYG", voucher: "" },
+                                            ])
+                                          }
+                                        } else if (opt.isForeign && opt.moneda) {
                                           setReabrirPagoMoneda(opt.moneda)
                                           const cotiz = opt.moneda === "BRL" ? (rates.BRL || 1400) : (rates.USD || 7800)
                                           setReabrirPagoMontoMoneda(Number(((sale.total || 0) / cotiz).toFixed(2)))
@@ -15164,6 +15606,160 @@ export default function POSPage() {
                                 })}
                               </div>
                             </div>
+
+                            {/* Editor de Desglose para Pago Mixto en Reimpresión (Supervisor) */}
+                            {reabrirPagoFormaPago === "MIXTO" && (
+                              <div className="bg-pink-500/5 dark:bg-pink-950/20 border border-pink-500/30 rounded-xl p-3 space-y-3">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[11px] font-black text-pink-700 dark:text-pink-300 uppercase tracking-wider flex items-center gap-1.5">
+                                    🔀 Desglose de Pago Mixto (Total Venta: {formatPYG(sale.total)})
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setReabrirPagoMixtoLegs(prev => [
+                                        ...prev,
+                                        { id: `leg-${Date.now()}`, forma_pago: "EFECTIVO", montoStr: "", moneda: "PYG" }
+                                      ])
+                                    }}
+                                    className="px-2.5 py-1 rounded-lg bg-pink-600 hover:bg-pink-700 text-white font-bold text-[10px] flex items-center gap-1 cursor-pointer transition-all"
+                                  >
+                                    <Plus className="w-3 h-3" /> Agregar Línea
+                                  </button>
+                                </div>
+
+                                <div className="space-y-2">
+                                  {reabrirPagoMixtoLegs.map((leg, idx) => {
+                                    const montoNum = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
+                                    const isLegForeign = leg.forma_pago === "EFECTIVO_BRL" || leg.forma_pago === "EFECTIVO_USD"
+                                    const legMoneda = isLegForeign ? (leg.forma_pago === "EFECTIVO_BRL" ? "BRL" : "USD") : "PYG"
+                                    const legRate = legMoneda === "BRL" ? (rates.BRL || 1400) : (rates.USD || 7800)
+                                    const requiresLegVoucher = ["TARJETA_BANCARD", "TARJETA_DINELCO", "TARJETA", "QR", "TRANSFERENCIA"].includes(leg.forma_pago)
+
+                                    return (
+                                      <div key={leg.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-2.5 space-y-2 shadow-xs">
+                                        <div className="flex items-center justify-between gap-2">
+                                          <span className="text-[10px] font-black text-slate-500 uppercase">Línea #{idx + 1}</span>
+                                          {reabrirPagoMixtoLegs.length > 2 && (
+                                            <button
+                                              type="button"
+                                              onClick={() => setReabrirPagoMixtoLegs(prev => prev.filter(l => l.id !== leg.id))}
+                                              className="text-[10px] text-rose-500 hover:text-rose-700 font-bold px-1.5 py-0.5 rounded cursor-pointer"
+                                            >
+                                              Eliminar
+                                            </button>
+                                          )}
+                                        </div>
+
+                                        <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+                                          <div className="sm:col-span-4">
+                                            <label className="block text-[9px] font-bold text-slate-500 uppercase mb-0.5">Forma:</label>
+                                            <select
+                                              value={leg.forma_pago}
+                                              onChange={(e) => {
+                                                const val = e.target.value
+                                                setReabrirPagoMixtoLegs(prev => prev.map(l => l.id === leg.id ? { ...l, forma_pago: val } : l))
+                                              }}
+                                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 text-xs font-bold text-slate-800 dark:text-slate-200 outline-none"
+                                            >
+                                              <option value="EFECTIVO">💵 Efectivo (₲)</option>
+                                              <option value="EFECTIVO_BRL">💵 Efectivo R$</option>
+                                              <option value="EFECTIVO_USD">💵 Efectivo US$</option>
+                                              <option value="TARJETA_BANCARD">💳 Tarjeta Bancard</option>
+                                              <option value="TARJETA_DINELCO">💳 Tarjeta Dinelco</option>
+                                              <option value="QR">📱 QR Zimple / PIX</option>
+                                              <option value="EXTRA_CLUB">★ Extra Club</option>
+                                              <option value="TRANSFERENCIA">🏦 Transferencia / Cheque</option>
+                                            </select>
+                                          </div>
+
+                                          <div className="sm:col-span-4">
+                                            <div className="flex justify-between items-center mb-0.5">
+                                              <label className="text-[9px] font-bold text-slate-500 uppercase">Monto (₲):</label>
+                                              {isLegForeign && montoNum > 0 && (
+                                                <span className="text-[9px] font-mono text-teal-600 dark:text-teal-400 font-bold">
+                                                  ≈ {legMoneda === "BRL" ? "R$" : "US$"} {(montoNum / legRate).toFixed(2)}
+                                                </span>
+                                              )}
+                                            </div>
+                                            <div className="flex gap-1">
+                                              <input
+                                                type="text"
+                                                value={leg.montoStr}
+                                                onChange={(e) => {
+                                                  const clean = e.target.value.replace(/\D/g, "")
+                                                  const fmt = clean ? parseInt(clean, 10).toLocaleString("es-PY") : ""
+                                                  setReabrirPagoMixtoLegs(prev => prev.map(l => l.id === leg.id ? { ...l, montoStr: fmt } : l))
+                                                }}
+                                                onFocus={(e) => e.target.select()}
+                                                placeholder="0"
+                                                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 text-xs font-mono font-bold text-slate-900 dark:text-white outline-none focus:border-pink-500"
+                                              />
+                                              <button
+                                                type="button"
+                                                title="Asignar el saldo restante de la venta"
+                                                onClick={() => {
+                                                  const otrasSum = reabrirPagoMixtoLegs
+                                                    .filter(l => l.id !== leg.id)
+                                                    .reduce((sum, l) => sum + parseInt(l.montoStr.replace(/\D/g, "") || "0", 10), 0)
+                                                  const resto = Math.max(0, (sale.total || 0) - otrasSum)
+                                                  const fmt = resto > 0 ? resto.toLocaleString("es-PY") : ""
+                                                  setReabrirPagoMixtoLegs(prev => prev.map(l => l.id === leg.id ? { ...l, montoStr: fmt } : l))
+                                                }}
+                                                className="px-2 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg cursor-pointer shrink-0"
+                                              >
+                                                Resto
+                                              </button>
+                                            </div>
+                                          </div>
+
+                                          <div className="sm:col-span-4">
+                                            {requiresLegVoucher ? (
+                                              <div>
+                                                <label className="block text-[9px] font-bold text-slate-500 uppercase mb-0.5">
+                                                  Voucher / Cupón <span className="text-rose-500">*</span>:
+                                                </label>
+                                                <input
+                                                  type="text"
+                                                  value={leg.voucher || ""}
+                                                  onChange={(e) => {
+                                                    const v = e.target.value
+                                                    setReabrirPagoMixtoLegs(prev => prev.map(l => l.id === leg.id ? { ...l, voucher: v } : l))
+                                                  }}
+                                                  placeholder="Nº Cupón / Ref"
+                                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 text-xs font-mono font-bold text-slate-900 dark:text-white outline-none focus:border-pink-500"
+                                                />
+                                              </div>
+                                            ) : (
+                                              <div className="text-[10px] text-slate-400 py-1.5 italic">Sin cupón requerido</div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+
+                                {(() => {
+                                  const sum = reabrirPagoMixtoLegs.reduce((acc, l) => acc + parseInt(l.montoStr.replace(/\D/g, "") || "0", 10), 0)
+                                  const diff = (sale.total || 0) - sum
+                                  return (
+                                    <div className={`flex items-center justify-between p-2.5 rounded-xl border font-mono text-xs font-bold ${
+                                      diff === 0
+                                        ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-300"
+                                        : diff > 0
+                                        ? "bg-amber-500/10 border-amber-500/40 text-amber-700 dark:text-amber-300"
+                                        : "bg-rose-500/10 border-rose-500/40 text-rose-700 dark:text-rose-300"
+                                    }`}>
+                                      <span>Suma: {formatPYG(sum)} / Venta: {formatPYG(sale.total)}</span>
+                                      <span>
+                                        {diff === 0 ? "✓ Saldo Completo" : diff > 0 ? `Falta: ${formatPYG(diff)}` : `Excedido: ${formatPYG(Math.abs(diff))}`}
+                                      </span>
+                                    </div>
+                                  )
+                                })()}
+                              </div>
+                            )}
 
                             {/* Integración POS AXIUM DX8000 para Tarjeta Bancard */}
                             {(reabrirPagoFormaPago === "TARJETA_BANCARD" || reabrirPagoFormaPago === "TARJETA") && (
@@ -15250,8 +15846,8 @@ export default function POSPage() {
                               </div>
                             )}
 
-                            {/* Selector de Socio Extra Club cuando la forma de pago elegida es EXTRA_CLUB o CREDITO */}
-                            {(reabrirPagoFormaPago === "EXTRA_CLUB" || reabrirPagoFormaPago === "CREDITO") && (
+                            {/* Selector de Socio Extra Club cuando la forma de pago elegida es EXTRA_CLUB o CREDITO, o en MIXTO si incluye Extra Club */}
+                            {(reabrirPagoFormaPago === "EXTRA_CLUB" || reabrirPagoFormaPago === "CREDITO" || (reabrirPagoFormaPago === "MIXTO" && reabrirPagoMixtoLegs.some(l => l.forma_pago === "EXTRA_CLUB"))) && (
                               <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-3 space-y-2">
                                 <div className="flex items-center justify-between">
                                   <span className="text-[11px] font-black text-purple-700 dark:text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
@@ -15379,6 +15975,7 @@ export default function POSPage() {
                                   setReabrirPagoCustomer(null)
                                   setReabrirPagoCustomerSearch("")
                                   setReabrirPagoCustomerResults([])
+                                  setReabrirPagoMixtoLegs([])
                                 }}
                                 className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 cursor-pointer"
                               >
@@ -15386,15 +15983,43 @@ export default function POSPage() {
                               </button>
                               <button
                                 type="button"
-                                disabled={
-                                  submittingReabrirPago ||
-                                  !reabrirPagoFormaPago ||
-                                  ((reabrirPagoFormaPago === "EXTRA_CLUB" || reabrirPagoFormaPago === "CREDITO") && !reabrirPagoCustomer) ||
-                                  (["TARJETA_BANCARD", "TARJETA_DINELCO", "TARJETA", "QR", "TRANSFERENCIA"].includes(reabrirPagoFormaPago) && !reabrirPagoVoucher.trim()) ||
-                                  (reabrirPagoFormaPago === fpActual && (!reabrirPagoCustomer || (sale.customer && String(reabrirPagoCustomer.id) === String(sale.customer.id)))) ||
-                                  reabrirPagoMotivo.trim().length < 10
-                                }
+                                disabled={(() => {
+                                  if (submittingReabrirPago || !reabrirPagoFormaPago || reabrirPagoMotivo.trim().length < 10) return true
+                                  if (reabrirPagoFormaPago === "MIXTO") {
+                                    const sum = reabrirPagoMixtoLegs.reduce((acc, l) => acc + parseInt(l.montoStr.replace(/\D/g, "") || "0", 10), 0)
+                                    if (sum !== (sale.total || 0)) return true
+                                    const activeLegs = reabrirPagoMixtoLegs.filter(l => parseInt(l.montoStr.replace(/\D/g, "") || "0", 10) > 0)
+                                    if (activeLegs.length < 2) return true
+                                    for (const l of activeLegs) {
+                                      if (["TARJETA_BANCARD", "TARJETA_DINELCO", "TARJETA", "QR", "TRANSFERENCIA"].includes(l.forma_pago) && !l.voucher?.trim()) {
+                                        return true
+                                      }
+                                    }
+                                    if (activeLegs.some(l => l.forma_pago === "EXTRA_CLUB") && !reabrirPagoCustomer) {
+                                      return true
+                                    }
+                                    return false
+                                  }
+                                  if ((reabrirPagoFormaPago === "EXTRA_CLUB" || reabrirPagoFormaPago === "CREDITO") && !reabrirPagoCustomer) return true
+                                  if (["TARJETA_BANCARD", "TARJETA_DINELCO", "TARJETA", "QR", "TRANSFERENCIA"].includes(reabrirPagoFormaPago) && !reabrirPagoVoucher.trim()) return true
+                                  if (reabrirPagoFormaPago === fpActual && (!reabrirPagoCustomer || (sale.customer && String(reabrirPagoCustomer.id) === String(sale.customer.id)))) return true
+                                  return false
+                                })()}
                                 onClick={() => {
+                                  const isMixto = reabrirPagoFormaPago === "MIXTO"
+                                  const paymentsPayload = isMixto
+                                    ? reabrirPagoMixtoLegs
+                                        .filter(l => parseInt(l.montoStr.replace(/\D/g, "") || "0", 10) > 0)
+                                        .map(l => ({
+                                          forma_pago: l.forma_pago,
+                                          monto: parseInt(l.montoStr.replace(/\D/g, "") || "0", 10),
+                                          moneda: (l.forma_pago === "EFECTIVO_BRL" ? "BRL" : (l.forma_pago === "EFECTIVO_USD" ? "USD" : "PYG")),
+                                          voucher: l.voucher?.trim() || undefined,
+                                          lote: l.lote?.trim() || undefined,
+                                          tarjeta_marca: l.tarjeta_marca?.trim() || undefined,
+                                        }))
+                                    : undefined
+
                                   const isForeign = reabrirPagoFormaPago === "EFECTIVO_BRL" || reabrirPagoFormaPago === "EFECTIVO_USD"
                                   const moneda = isForeign ? (reabrirPagoFormaPago === "EFECTIVO_BRL" ? "BRL" : "USD") : "PYG"
                                   const rate = moneda === "BRL" ? (rates.BRL || 1400) : (rates.USD || 7800)
@@ -15412,6 +16037,7 @@ export default function POSPage() {
                                     terminalIp: activePosConfig.bancardIp || undefined,
                                     moneda,
                                     montoMoneda,
+                                    payments: paymentsPayload,
                                   } as any)
                                 }}
                                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white shadow-md cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-all"
