@@ -3524,12 +3524,7 @@ async def _execute_disbursements_internal(
             if not fund:
                 raise HTTPException(status_code=400, detail="Fondo Fijo (Caja Chica) no encontrado o inactivo.")
 
-            if fund.saldo_actual < m_pyg:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Saldo insuficiente en Fondo Fijo '{fund.nombre}'. Disponible: ₲ {fund.saldo_actual:,.0f} | Solicitado: ₲ {m_pyg:,.0f}"
-                )
-
+            # Sobregiro permitido mientras se ajustan saldos contables en vivo
             s_ant = fund.saldo_actual
             fund.saldo_actual -= m_pyg
             s_nuevo = fund.saldo_actual

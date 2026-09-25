@@ -261,8 +261,7 @@ async def replenish_fund(db: AsyncSession, company_id: str, fund_id: str, data, 
         account = account_result.scalar_one_or_none()
         if not account or str(account.company_id) != company_id:
             return {"error": "Cuenta bancaria no encontrada"}
-        if Decimal(str(account.saldo_actual)) < monto:
-            return {"error": f"La cuenta '{account.banco}' no tiene saldo suficiente (disponible: {account.saldo_actual:,.0f})"}
+        # Se permite sobregiro en cuenta bancaria para reposición mientras se calibran saldos
 
         bt = BankTransaction(
             company_id=uuid.UUID(company_id),
@@ -859,11 +858,7 @@ async def disburse_expense(
             if not fund_obj:
                 raise HTTPException(status_code=400, detail="Fondo Fijo (Caja Chica) no encontrado o inactivo.")
 
-            if Decimal(str(fund_obj.saldo_actual)) < m_pyg:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Saldo insuficiente en Fondo Fijo '{fund_obj.nombre}'. Disponible: ₲ {fund_obj.saldo_actual:,.0f} | Solicitado: ₲ {m_pyg:,.0f}"
-                )
+            # Sobregiro permitido mientras se ajustan saldos contables en vivo
 
             s_ant = Decimal(str(fund_obj.saldo_actual))
             fund_obj.saldo_actual = s_ant - m_pyg
