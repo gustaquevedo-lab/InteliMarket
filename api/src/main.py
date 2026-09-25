@@ -76,7 +76,6 @@ from api.src.spi.router import router as spi_router
 from api.src.spi.public_router import router as spi_public_router
 from api.src.dinelco.router import router as dinelco_router
 from api.src.bancard_qr.router import router as bancard_qr_router
-from api.src.loyalty.router import router as loyalty_router
 from api.src.salud_sistema.router import router as salud_sistema_router
 from api.src.plataforma.router import router as plataforma_router
 from api.src.plataforma.monitor_router import router as monitor_router
@@ -410,7 +409,6 @@ app.include_router(spi_router)
 app.include_router(spi_public_router)
 app.include_router(dinelco_router)
 app.include_router(bancard_qr_router)
-app.include_router(loyalty_router)
 app.include_router(salud_sistema_router)
 app.include_router(plataforma_router)
 app.include_router(monitor_router)
