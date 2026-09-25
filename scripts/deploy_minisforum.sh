@@ -22,7 +22,7 @@ ssh ${HOST} "systemctl --user restart intelimarket-backend"
 echo "🩺 Verificando estado del servicio..."
 HEALTHY=false
 for i in {1..10}; do
-  STATUS=$(ssh ${HOST} "curl -s http://localhost:8000/api/v1/health | grep -o '\"status\":\"ok\"' || true")
+  STATUS=$(ssh ${HOST} "curl -s http://localhost:8000/api/health | grep -o '\"status\":\"ok\"' || true")
   if [ "$STATUS" == '"status":"ok"' ]; then
     HEALTHY=true
     break
