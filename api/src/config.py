@@ -71,6 +71,9 @@ class Settings(BaseSettings):
     # LLM del Gerente Financiero IA — "gemini" (default, más económico) o "anthropic"
     llm_provider: str = "gemini"
     anthropic_api_key: str = ""
+    ai_default_model: str = ""
+    ai_fast_model: str = ""
+    muse_spark_api_key: str = ""
     gemini_api_key: str = ""
 
     # Conector Ñemuha (ConceptoComercial/FlexPDV) — legacy MySQL del cliente, vía VM puente
