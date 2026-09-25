@@ -1,6 +1,6 @@
 """Credit account models"""
 
-from sqlalchemy import Column, String, BigInteger, Boolean, Date, DateTime, ForeignKey, Numeric, Text
+from sqlalchemy import Column, String, BigInteger, Integer, Boolean, Date, DateTime, ForeignKey, Numeric, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 
