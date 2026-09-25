@@ -1895,27 +1895,8 @@ export default function LabelsPage() {
                   </div>
                 </div>
 
-                <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3">
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleCalibrar("zebra_zpl", "medio")}
-                      disabled={calibrando === "zebra_zpl_medio"}
-                      className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500/15 border border-amber-500/40 text-[11px] font-bold text-amber-500 hover:bg-amber-500/25 disabled:opacity-60 cursor-pointer transition"
-                      title="Fuerza modo GAP, térmica directa, offset vertical y recalibra el sensor"
-                    >
-                      {calibrando === "zebra_zpl_medio" ? <RefreshCcw className="w-3.5 h-3.5 animate-spin text-amber-500" /> : <RefreshCw className="w-3.5 h-3.5 text-amber-500" />}
-                      <span>Calibrar GAP</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleCalibrar("zebra_zpl", "minimo")}
-                      disabled={calibrando === "zebra_zpl_minimo"}
-                      className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-[11px] font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60 cursor-pointer transition"
-                    >
-                      {calibrando === "zebra_zpl_minimo" ? <RefreshCcw className="w-3.5 h-3.5 animate-spin text-amber-500" /> : <Printer className="w-3.5 h-3.5 text-amber-500" />}
-                      <span>Prueba OK</span>
-                    </button>
+                <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <button
                       type="button"
                       onClick={() => handleCalibrar("zebra_zpl", "regla")}
@@ -1927,6 +1908,15 @@ export default function LabelsPage() {
                     </button>
                     <button
                       type="button"
+                      onClick={() => handleCalibrar("zebra_zpl", "medio")}
+                      disabled={calibrando === "zebra_zpl_medio"}
+                      className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-[11px] font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60 cursor-pointer transition"
+                    >
+                      {calibrando === "zebra_zpl_medio" ? <RefreshCcw className="w-3.5 h-3.5 animate-spin text-amber-500" /> : <RefreshCw className="w-3.5 h-3.5 text-amber-500" />}
+                      <span>Sensor GAP</span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => handleCalibrar("zebra_zpl", "config")}
                       disabled={calibrando === "zebra_zpl_config"}
                       className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-[11px] font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60 cursor-pointer transition"
@@ -1934,19 +1924,6 @@ export default function LabelsPage() {
                       {calibrando === "zebra_zpl_config" ? <RefreshCcw className="w-3.5 h-3.5 animate-spin text-amber-500" /> : <FileText className="w-3.5 h-3.5 text-amber-500" />}
                       <span>Hoja Config</span>
                     </button>
-                  </div>
-
-                  {/* Cuadro didáctico de solución de problemas Zebra */}
-                  <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[11px] text-amber-300 space-y-1">
-                    <div className="font-bold flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                      Guía Rápida para el Operador (Zebra ZD220)
-                    </div>
-                    <ul className="list-disc list-inside space-y-0.5 text-slate-300 dark:text-slate-300 text-[10.5px]">
-                      <li><strong>Luz roja o muchas etiquetas:</strong> toca <em>"Calibrar GAP"</em>. La impresora avanzará 2 etiquetas despacio y quedará en verde fijo.</li>
-                      <li><strong>Corte desfasado:</strong> si el contenido pisa el troquel inferior, pon <em>Offset Vertical: -2</em> y dale a <em>Guardar Zebra</em>.</li>
-                      <li><strong>Al cambiar rollo:</strong> traba la tapa con fuerza hasta escuchar clic en ambos lados para que el sensor no quede torcido.</li>
-                    </ul>
                   </div>
 
                   <button

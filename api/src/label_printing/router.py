@@ -138,9 +138,9 @@ async def imprimir_regla_calibracion(tipo: str, modo: str = "regla", db: AsyncSe
     if not cfg:
         raise HTTPException(status_code=400, detail="Esa impresora no esta configurada todavia")
     if modo == "minimo":
-        comandos = calibracion.prueba_minima(tipo, cfg)
+        comandos = calibracion.prueba_minima(tipo)
     elif modo == "medio":
-        comandos = calibracion.calibrar_medio(tipo, cfg)
+        comandos = calibracion.calibrar_medio(tipo)
     elif modo == "config":
         comandos = calibracion.config_impresora(tipo)
     else:
