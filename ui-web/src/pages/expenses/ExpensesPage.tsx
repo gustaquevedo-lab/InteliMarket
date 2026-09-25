@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react"
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import {
   Search, Plus, Loader2, DollarSign, CheckCircle2, XCircle, Wallet, TrendingUp,
   TrendingDown, BarChart3, Ban, Receipt as ReceiptIcon, Building2, Sparkles,
@@ -200,6 +200,36 @@ export default function ExpensesPage() {
   const [isAdvanceWithoutInvoice, setIsAdvanceWithoutInvoice] = useState<boolean>(false)
   const [batchAssignFilterSupplier, setBatchAssignFilterSupplier] = useState<boolean>(true)
 
+  // Facturas específicas del proveedor seleccionado
+  const [supplierInvoices, setSupplierInvoices] = useState<any[]>([])
+  const [loadingSupplierInvoices, setLoadingSupplierInvoices] = useState<boolean>(false)
+
+  const loadInvoicesForSupplier = useCallback(async (supId: string) => {
+    if (!supId) {
+      setSupplierInvoices([])
+      return
+    }
+    setLoadingSupplierInvoices(true)
+    try {
+      const res = await api.financial.invoices.list({
+        supplier_id: supId,
+        estado: "pendiente,parcial,aprobada",
+        limit: 100,
+      })
+      const items = Array.isArray(res) ? res : []
+      setSupplierInvoices(items)
+      setPendingInvoices(prev => {
+        const existingIds = new Set(prev.map(i => i.id))
+        const toAdd = items.filter(i => !existingIds.has(i.id))
+        return toAdd.length > 0 ? [...toAdd, ...prev] : prev
+      })
+    } catch (err) {
+      console.error("Error loading supplier invoices:", err)
+    } finally {
+      setLoadingSupplierInvoices(false)
+    }
+  }, [])
+
   // Buscador ágil de personal para Anticipo de Sueldo (SueldOK)
   const [staffList, setStaffList] = useState<any[]>([])
   const [staffSearchQuery, setStaffSearchQuery] = useState("")
@@ -271,11 +301,23 @@ export default function ExpensesPage() {
     })
   }, [staffList, staffSearchQuery])
 
+  // Combina pendingInvoices globales con supplierInvoices específicas
+  const combinedPendingInvoices = useMemo(() => {
+    const list = [...supplierInvoices]
+    const seen = new Set(list.map(i => i.id))
+    for (const inv of pendingInvoices) {
+      if (!seen.has(inv.id)) {
+        list.push(inv)
+      }
+    }
+    return list
+  }, [supplierInvoices, pendingInvoices])
+
   // Factura vinculada actualmente en el formulario
   const selectedPendingInvoice = useMemo(() => {
     if (!form.supplier_invoice_id) return null
-    return pendingInvoices.find((i: any) => i.id === form.supplier_invoice_id) || null
-  }, [form.supplier_invoice_id, pendingInvoices])
+    return combinedPendingInvoices.find((i: any) => i.id === form.supplier_invoice_id) || null
+  }, [form.supplier_invoice_id, combinedPendingInvoices])
 
   // Coincidencia inteligente de factura comercial contra proveedor seleccionado
   const invoiceMatchesSupplier = (inv: any, supplierId?: string, supplierName?: string, supplierRuc?: string) => {
@@ -322,24 +364,27 @@ export default function ExpensesPage() {
     return false
   }
 
+  // Facturas exclusivas del proveedor seleccionado
+  const displaySupplierInvoices = useMemo(() => {
+    if (!form.supplier_id && !form.proveedor?.trim()) return []
+    return combinedPendingInvoices.filter(inv =>
+      invoiceMatchesSupplier(inv, form.supplier_id, form.proveedor, form.ruc)
+    )
+  }, [combinedPendingInvoices, form.supplier_id, form.proveedor, form.ruc, suppliersList])
+
   // Conteo de facturas pendientes exclusivas del proveedor seleccionado
   const selectedSupplierPendingInvoicesCount = useMemo(() => {
-    if (!form.supplier_id && !form.proveedor?.trim()) return 0
-    return pendingInvoices.filter(inv =>
-      invoiceMatchesSupplier(inv, form.supplier_id, form.proveedor, form.ruc)
-    ).length
-  }, [pendingInvoices, form.supplier_id, form.proveedor, form.ruc, suppliersList])
+    return displaySupplierInvoices.length
+  }, [displaySupplierInvoices])
 
   // Filtrado ágil de facturas pendientes con filtro de proveedor seleccionado y fallback a N° Factura o RUC
   const filteredPendingInvoices = useMemo(() => {
     const hasSupplier = Boolean(form.supplier_id || form.proveedor?.trim())
     const applySupplierFilter = hasSupplier && filterBySelectedSupplier
 
-    let baseList = pendingInvoices
+    let baseList = combinedPendingInvoices
     if (applySupplierFilter) {
-      baseList = pendingInvoices.filter(inv =>
-        invoiceMatchesSupplier(inv, form.supplier_id, form.proveedor, form.ruc)
-      )
+      baseList = displaySupplierInvoices
     }
 
     const q = (invoiceSearchQuery || "").trim().toLowerCase()
@@ -347,7 +392,7 @@ export default function ExpensesPage() {
       return baseList.slice(0, 40)
     }
     const qClean = q.replace(/[^a-z0-9]/g, "")
-    return baseList.filter((inv: any) => {
+    return (applySupplierFilter ? baseList : combinedPendingInvoices).filter((inv: any) => {
       const supName = (inv.supplier_nombre || "").toLowerCase()
       const numFactura = (inv.numero_factura || "").toLowerCase()
       const numFacturaClean = numFactura.replace(/[^0-9]/g, "")
@@ -378,7 +423,7 @@ export default function ExpensesPage() {
 
       return false
     }).slice(0, 40)
-  }, [pendingInvoices, invoiceSearchQuery, suppliersList, form.supplier_id, form.proveedor, form.ruc, filterBySelectedSupplier])
+  }, [combinedPendingInvoices, displaySupplierInvoices, invoiceSearchQuery, suppliersList, form.supplier_id, form.proveedor, filterBySelectedSupplier])
 
   // Proveedores coincidentes del maestro para registrar anticipo/pago a cuenta (sin factura específica)
   const matchingSuppliersWithoutInvoice = useMemo(() => {
@@ -524,7 +569,7 @@ export default function ExpensesPage() {
         api.financial.banks.list().catch(() => []),
         api.caja.registers.list().catch(() => []),
         api.expenses.rendiciones.list().catch(() => []),
-        api.financial.invoices.list({ limit: 1000 }).catch(() => []),
+        api.financial.invoices.list({ estado: "pendiente,parcial,aprobada", limit: 2000 }).catch(() => []),
         api.purchases.listSuppliers().catch(() => []),
         api.expenses.staffCandidates().catch(() => []),
         api.expenses.sueldokAdvances().catch(() => []),
@@ -536,7 +581,7 @@ export default function ExpensesPage() {
       setBankAccounts(bAccs.filter((b: any) => b.activo))
       setCashRegisters(cRegs)
       setRendiciones(Array.isArray(rends) ? [...rends].sort((a: any, b: any) => new Date(b.fecha_presentacion || b.created_at || 0).getTime() - new Date(a.fecha_presentacion || a.created_at || 0).getTime()) : [])
-      setPendingInvoices(Array.isArray(invs) ? invs.filter((i: any) => i.estado === "pendiente" || i.estado === "parcial") : [])
+      setPendingInvoices(Array.isArray(invs) ? invs.filter((i: any) => i.estado === "pendiente" || i.estado === "parcial" || i.estado === "aprobada") : [])
       if (Array.isArray(sups)) {
         setSuppliersList(sups)
       }
@@ -743,6 +788,41 @@ export default function ExpensesPage() {
     }
     setGroupedExpenseSearch("")
     setShowGroupedExpensesSelector(false)
+
+    // Deduce supplier_id from suppliersList or pendingInvoices if missing
+    let resolvedSupplierId = (e as any).supplier_id || ""
+    const cleanRuc = (e.ruc || "").toLowerCase().replace(/[^a-z0-9]/g, "")
+    const name = (e.proveedor || "").trim().toLowerCase()
+
+    if (!resolvedSupplierId && e.proveedor && suppliersList.length > 0) {
+      const match = suppliersList.find(s => {
+        if (cleanRuc && s.ruc && s.ruc.toLowerCase().replace(/[^a-z0-9]/g, "") === cleanRuc) return true
+        const sName = (s.razon_social || s.nombre_fantasia || "").trim().toLowerCase()
+        return sName === name || (name.length > 3 && (sName.includes(name) || name.includes(sName)))
+      })
+      if (match) {
+        resolvedSupplierId = match.id
+      }
+    }
+
+    if (!resolvedSupplierId && e.proveedor && pendingInvoices.length > 0) {
+      const matchInv = pendingInvoices.find((i: any) => {
+        if (cleanRuc && (i.supplier_ruc || i.ruc) && (i.supplier_ruc || i.ruc).toLowerCase().replace(/[^a-z0-9]/g, "") === cleanRuc) return true
+        const iName = (i.supplier_nombre || "").trim().toLowerCase()
+        return iName === name || (name.length > 3 && (iName.includes(name) || name.includes(iName)))
+      })
+      if (matchInv && matchInv.supplier_id) {
+        resolvedSupplierId = matchInv.supplier_id
+      }
+    }
+
+    const isPagoProv = Boolean(
+      (e as any).es_pago_proveedor ||
+      currentInvId ||
+      resolvedSupplierId ||
+      (e.proveedor && e.proveedor.trim().length > 0)
+    )
+
     setForm({
       monto: String(e.monto || ""),
       descripcion: e.descripcion || "",
@@ -764,9 +844,9 @@ export default function ExpensesPage() {
       asset_codigo_interno: "",
       asset_categoria: e.categoria_activo || "muebles_equipos",
       asset_vida_util_meses: e.vida_util_meses || 60,
-      es_pago_proveedor: Boolean((e as any).es_pago_proveedor),
-      supplier_id: (e as any).supplier_id || "",
-      supplier_invoice_id: (e as any).supplier_invoice_id || "",
+      es_pago_proveedor: isPagoProv,
+      supplier_id: resolvedSupplierId,
+      supplier_invoice_id: currentInvId || "",
       moneda: (e as any).moneda || "PYG",
       monto_brl: (e as any).monto_brl ? String((e as any).monto_brl) : "",
       tipo_cambio: (e as any).tipo_cambio ? String((e as any).tipo_cambio) : "1350",
@@ -782,12 +862,79 @@ export default function ExpensesPage() {
     setInvoiceSearchQuery("")
     setInvoiceDropdownOpen(false)
     setFilterBySelectedSupplier(true)
-    setIsAdvanceWithoutInvoice(Boolean((e as any).supplier_id && !(e as any).supplier_invoice_id))
+    setIsAdvanceWithoutInvoice(false)
     setStaffSearchQuery("")
     setStaffDropdownOpen(false)
     setAdvanceSearchQuery("")
     setAdvanceDropdownOpen(false)
     setShowForm(true)
+
+    // Load supplier's pending invoices directly
+    if (resolvedSupplierId) {
+      loadInvoicesForSupplier(resolvedSupplierId)
+    } else if (e.proveedor && e.proveedor.trim().length > 1) {
+      api.purchases.listSuppliers({ search: e.proveedor.trim() }).then(list => {
+        if (Array.isArray(list) && list.length > 0) {
+          const s = list[0]
+          setForm((prev: any) => ({
+            ...prev,
+            supplier_id: prev.supplier_id || s.id,
+            ruc: prev.ruc || s.ruc || "",
+          }))
+          loadInvoicesForSupplier(s.id)
+        }
+      }).catch(() => {})
+    } else {
+      setSupplierInvoices([])
+    }
+
+    if (currentInvId) {
+      api.financial.invoices.get(currentInvId).then(inv => {
+        if (inv) {
+          setPendingInvoices(prev => {
+            if (prev.some(p => p.id === inv.id)) return prev
+            return [inv, ...prev]
+          })
+          setSupplierInvoices(prev => {
+            if (prev.some(p => p.id === inv.id)) return prev
+            return [inv, ...prev]
+          })
+          if (inv.supplier_id && !resolvedSupplierId) {
+            setForm((prev: any) => ({
+              ...prev,
+              supplier_id: prev.supplier_id || inv.supplier_id,
+              proveedor: prev.proveedor || inv.supplier_nombre,
+              ruc: prev.ruc || inv.supplier_ruc,
+            }))
+            loadInvoicesForSupplier(inv.supplier_id)
+          }
+        }
+      }).catch(() => {})
+    }
+  }
+
+  const handleAssignInvoice = (inv: any) => {
+    const saldo = inv.saldo_pendiente ?? inv.total ?? 0
+    setForm((prev: any) => ({
+      ...prev,
+      supplier_invoice_id: inv.id,
+      supplier_id: inv.supplier_id || prev.supplier_id || "",
+      proveedor: inv.supplier_nombre || prev.proveedor,
+      numero_factura: inv.numero_factura || prev.numero_factura,
+      ruc: inv.supplier_ruc || inv.ruc || prev.ruc,
+      timbrado: inv.timbrado || prev.timbrado,
+      moneda: inv.moneda || prev.moneda || "PYG",
+      monto: prev.monto && Number(prev.monto) > 0 ? prev.monto : String(saldo),
+      monto_brl: inv.moneda === "BRL" ? String(inv.saldo_pendiente_brl ?? inv.total_brl ?? "") : prev.monto_brl,
+      tipo_cambio: inv.tipo_cambio ? String(inv.tipo_cambio) : prev.tipo_cambio,
+      descripcion: prev.descripcion || `Pago proveedor ${inv.supplier_nombre || ''} - Factura ${inv.numero_factura}`,
+      es_pago_proveedor: true,
+    }))
+    setFilterBySelectedSupplier(true)
+    setIsAdvanceWithoutInvoice(false)
+    setInvoiceDropdownOpen(false)
+    setInvoiceSearchQuery("")
+    toast.success("Factura Asignada", `Factura N° ${inv.numero_factura} vinculada a este comprobante.`)
   }
 
   const handleCreateExpense = async (e: React.FormEvent) => {
@@ -840,9 +987,9 @@ export default function ExpensesPage() {
           es_inversion: form.es_inversion || false,
           categoria_activo: form.es_inversion ? form.asset_categoria : undefined,
           vida_util_meses: form.es_inversion && form.asset_vida_util_meses ? Number(form.asset_vida_util_meses) : undefined,
-          es_pago_proveedor: form.es_anticipo_sueldo ? false : (form.es_pago_proveedor || false),
+          es_pago_proveedor: form.es_anticipo_sueldo ? false : (form.es_pago_proveedor || Boolean(form.supplier_invoice_id) || false),
           supplier_id: form.es_anticipo_sueldo ? undefined : (form.supplier_id || undefined),
-          supplier_invoice_id: form.es_anticipo_sueldo ? undefined : (form.supplier_invoice_id || undefined),
+          supplier_invoice_id: form.es_anticipo_sueldo ? undefined : (form.supplier_invoice_id ? form.supplier_invoice_id : null),
           grouped_expense_ids: form.es_pago_proveedor && form.supplier_invoice_id && groupedExpenseIds.length > 0 ? groupedExpenseIds : undefined,
           monto_brl: form.moneda === "BRL" && form.monto_brl ? Number(form.monto_brl) : undefined,
           es_anticipo_sueldo: form.es_anticipo_sueldo || false,
@@ -3618,13 +3765,19 @@ export default function ExpensesPage() {
                           <button
                             type="button"
                             onClick={() => {
+                              setForm((prev: any) => ({
+                                ...prev,
+                                supplier_invoice_id: "",
+                              }))
+                              if (form.supplier_id) {
+                                loadInvoicesForSupplier(form.supplier_id)
+                              }
                               setFilterBySelectedSupplier(true)
                               setInvoiceSearchQuery("")
-                              setInvoiceDropdownOpen(true)
                             }}
                             className="text-purple-700 dark:text-purple-300 hover:text-purple-900 dark:hover:text-purple-100 font-semibold flex items-center gap-1 hover:underline"
                           >
-                            <Search className="w-3.5 h-3.5" /> Cambiar Factura / Buscar otra
+                            <Search className="w-3.5 h-3.5" /> Cambiar Factura / Ver facturas del proveedor
                           </button>
                           <button
                             type="button"
@@ -3637,7 +3790,7 @@ export default function ExpensesPage() {
                               setInvoiceSearchQuery("")
                               setGroupedExpenseIds([])
                               setShowGroupedExpensesSelector(false)
-                              setInvoiceDropdownOpen(true)
+                              toast.info("Factura Desvinculada", "El comprobante no imputará a ninguna factura comercial.")
                             }}
                             className="text-rose-600 hover:text-rose-800 dark:text-rose-400 dark:hover:text-rose-200 text-[11px] font-medium flex items-center gap-1"
                           >
@@ -3805,128 +3958,150 @@ export default function ExpensesPage() {
                           )}
                         </div>
                       </div>
-                    ) : (form.supplier_id || form.proveedor?.trim()) && !form.supplier_invoice_id && isAdvanceWithoutInvoice && !invoiceDropdownOpen ? (
-                      /* Caso 2: Proveedor seleccionado para pago a cuenta / anticipo (sin factura comercial) */
-                      <div className="p-3 bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl space-y-2 shadow-sm">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="space-y-1">
-                            <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-200 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200">
-                              Pago a Cuenta / Anticipo (Sin Factura)
-                            </span>
-                            <div className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5 mt-0.5">
-                              <Building2 className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                              <span>{form.proveedor}</span>
-                            </div>
-                            {form.ruc && <div className="text-xs text-gray-500 font-mono">RUC: {form.ruc}</div>}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsAdvanceWithoutInvoice(false)
-                                setFilterBySelectedSupplier(true)
-                                setInvoiceSearchQuery("")
-                                setInvoiceDropdownOpen(true)
-                              }}
-                              className="text-amber-700 dark:text-amber-300 text-xs font-semibold hover:underline flex items-center gap-1"
-                            >
-                              <Search className="w-3.5 h-3.5" /> Vincular Factura
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setForm((prev: any) => ({ ...prev, supplier_id: "", proveedor: "", ruc: "" }))
-                                setIsAdvanceWithoutInvoice(false)
-                                setInvoiceSearchQuery("")
-                              }}
-                              className="text-rose-600 hover:text-rose-800 p-1"
-                              title="Quitar proveedor"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
                     ) : (
-                      /* Caso 3: Buscador y Selector de Facturas / Proveedor */
-                      <div className="space-y-2">
-                        {/* Tarjeta de Proveedor Seleccionado y Filtro Activo */}
-                        {(form.supplier_id || form.proveedor?.trim()) && (
-                          <div className="p-2.5 bg-purple-50/90 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 rounded-xl flex items-center justify-between gap-3 shadow-xs">
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <div className="w-8 h-8 rounded-lg bg-purple-200 dark:bg-purple-900/60 flex items-center justify-center shrink-0">
-                                <Building2 className="w-4 h-4 text-purple-700 dark:text-purple-300" />
+                      /* Caso 2 & 3: Selector de Facturas Comerciales de Compra */
+                      <div className="space-y-3">
+                        {/* Tarjeta de Proveedor y Facturas Pendientes de este Proveedor */}
+                        {(form.supplier_id || form.proveedor?.trim()) ? (
+                          <div className="p-3 bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-xl space-y-2.5 shadow-xs">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="w-8 h-8 rounded-lg bg-purple-200 dark:bg-purple-900/60 flex items-center justify-center shrink-0">
+                                  <Building2 className="w-4 h-4 text-purple-700 dark:text-purple-300" />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="text-xs font-bold text-gray-900 dark:text-gray-100 truncate">
+                                    {form.proveedor || "Proveedor Seleccionado"}
+                                  </div>
+                                  <div className="text-[10px] text-gray-500 flex items-center gap-2 flex-wrap">
+                                    {form.ruc && <span className="font-mono">RUC: {form.ruc}</span>}
+                                    <span className={`font-semibold ${displaySupplierInvoices.length > 0 ? "text-purple-700 dark:text-purple-300" : "text-amber-600 dark:text-amber-400"}`}>
+                                      {loadingSupplierInvoices ? "Cargando facturas..." : displaySupplierInvoices.length > 0 
+                                        ? `${displaySupplierInvoices.length} factura${displaySupplierInvoices.length > 1 ? "s" : ""} comercial${displaySupplierInvoices.length > 1 ? "es" : ""} pendiente${displaySupplierInvoices.length > 1 ? "s" : ""}`
+                                        : "Sin facturas pendientes registradas en Cuentas por Pagar"}
+                                    </span>
+                                  </div>
+                                </div>
                               </div>
-                              <div className="min-w-0">
-                                <div className="text-xs font-bold text-gray-900 dark:text-gray-100 truncate">
-                                  {form.proveedor || "Proveedor Seleccionado"}
-                                </div>
-                                <div className="text-[10px] text-gray-500 flex items-center gap-2 flex-wrap">
-                                  {form.ruc && <span className="font-mono">RUC: {form.ruc}</span>}
-                                  <span className={`font-semibold ${selectedSupplierPendingInvoicesCount > 0 ? "text-purple-700 dark:text-purple-300" : "text-amber-600 dark:text-amber-400"}`}>
-                                    {selectedSupplierPendingInvoicesCount > 0 
-                                      ? `${selectedSupplierPendingInvoicesCount} factura${selectedSupplierPendingInvoicesCount > 1 ? "s" : ""} comercial${selectedSupplierPendingInvoicesCount > 1 ? "es" : ""} pendiente${selectedSupplierPendingInvoicesCount > 1 ? "s" : ""}`
-                                      : "Sin facturas pendientes en Cuentas por Pagar"}
-                                  </span>
-                                </div>
+
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setForm((prev: any) => ({
+                                      ...prev,
+                                      supplier_id: "",
+                                      proveedor: "",
+                                      ruc: "",
+                                      timbrado: "",
+                                      numero_factura: "",
+                                      supplier_invoice_id: "",
+                                    }))
+                                    setSupplierInvoices([])
+                                    setInvoiceSearchQuery("")
+                                    setFilterBySelectedSupplier(false)
+                                    setIsAdvanceWithoutInvoice(false)
+                                  }}
+                                  className="text-xs font-medium text-gray-400 hover:text-rose-600 p-1 rounded-md flex items-center gap-1"
+                                  title="Cambiar o quitar proveedor"
+                                >
+                                  <X className="w-3.5 h-3.5" /> <span className="text-[10px]">Cambiar Proveedor</span>
+                                </button>
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => setFilterBySelectedSupplier(!filterBySelectedSupplier)}
-                                className={`text-[10px] px-2.5 py-1 rounded-lg font-bold transition flex items-center gap-1 ${
-                                  filterBySelectedSupplier
-                                    ? "bg-purple-600 text-white shadow-xs hover:bg-purple-700"
-                                    : "bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-300"
-                                }`}
-                                title={filterBySelectedSupplier ? "Filtrando exclusivamente facturas de este proveedor" : "Mostrando facturas de todos los proveedores"}
-                              >
-                                {filterBySelectedSupplier ? (
-                                  <>
-                                    <Check className="w-3 h-3" /> Solo este Proveedor
-                                  </>
-                                ) : (
-                                  "Ver Todas las Facturas"
-                                )}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setForm((prev: any) => ({
-                                    ...prev,
-                                    supplier_id: "",
-                                    proveedor: "",
-                                    ruc: "",
-                                    timbrado: "",
-                                    numero_factura: "",
-                                    supplier_invoice_id: "",
-                                  }))
-                                  setInvoiceSearchQuery("")
-                                  setFilterBySelectedSupplier(true)
-                                  setIsAdvanceWithoutInvoice(false)
-                                }}
-                                className="text-gray-400 hover:text-rose-600 p-1 rounded-md"
-                                title="Cambiar o quitar proveedor"
-                              >
-                                <X className="w-4 h-4" />
-                              </button>
-                            </div>
+                            {/* Listado in-place de facturas del proveedor seleccionado */}
+                            {loadingSupplierInvoices ? (
+                              <div className="py-4 text-center text-xs text-purple-600 dark:text-purple-400 flex items-center justify-center gap-2">
+                                <Loader2 className="w-4 h-4 animate-spin" /> Buscando facturas pendientes del proveedor...
+                              </div>
+                            ) : displaySupplierInvoices.length > 0 ? (
+                              <div className="space-y-1.5">
+                                <div className="text-[10px] font-bold text-purple-900 dark:text-purple-300 uppercase tracking-wider flex justify-between items-center px-1">
+                                  <span>Facturas Pendientes de «{form.proveedor}» ({displaySupplierInvoices.length})</span>
+                                  <span className="text-[9px] font-normal text-purple-600 dark:text-purple-400">Hacé clic para asignar directamente</span>
+                                </div>
+                                <div className="max-h-56 overflow-y-auto space-y-1.5 p-1 bg-white/70 dark:bg-slate-900/60 border border-purple-200/70 dark:border-purple-800/50 rounded-lg">
+                                  {displaySupplierInvoices.map((inv: any) => {
+                                    const saldo = inv.saldo_pendiente ?? inv.total ?? 0
+                                    return (
+                                      <div
+                                        key={inv.id}
+                                        className="p-2 rounded-lg bg-white dark:bg-slate-800 border border-purple-100 dark:border-purple-900/40 hover:border-purple-300 dark:hover:border-purple-600 hover:shadow-xs transition flex items-center justify-between gap-3 text-xs"
+                                      >
+                                        <div className="min-w-0 space-y-0.5">
+                                          <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="font-mono font-bold text-purple-800 dark:text-purple-200">
+                                              N° {inv.numero_factura}
+                                            </span>
+                                            {inv.moneda && (
+                                              <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${
+                                                inv.moneda === "BRL" 
+                                                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300" 
+                                                  : "bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300"
+                                              }`}>
+                                                {inv.moneda}
+                                              </span>
+                                            )}
+                                            {inv.condicion && (
+                                              <span className="text-[9px] uppercase px-1 py-0.2 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                                                {inv.condicion}
+                                              </span>
+                                            )}
+                                          </div>
+                                          <div className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-2 flex-wrap">
+                                            {inv.fecha_emision && <span>Emisión: {inv.fecha_emision}</span>}
+                                            {inv.fecha_vencimiento && <span>• Venc: {inv.fecha_vencimiento}</span>}
+                                            {inv.timbrado && <span>• Timb: {inv.timbrado}</span>}
+                                          </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-2.5 shrink-0">
+                                          <div className="text-right">
+                                            <div className="text-[9px] text-gray-400 font-medium">Saldo</div>
+                                            <div className="font-mono font-bold text-purple-700 dark:text-purple-300 text-xs">
+                                              {inv.moneda === "BRL"
+                                                ? formatBRL(inv.saldo_pendiente_brl ?? inv.saldo_pendiente ?? 0)
+                                                : formatPYG(saldo)}
+                                            </div>
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleAssignInvoice(inv)}
+                                            className="px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white transition shadow-xs flex items-center gap-1 shrink-0"
+                                          >
+                                            <Check className="w-3.5 h-3.5" /> Asignar Factura
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="p-3 bg-white/80 dark:bg-slate-900/60 rounded-lg border border-amber-200/80 dark:border-amber-800/50 space-y-2 text-xs">
+                                <p className="text-amber-800 dark:text-amber-300 font-medium">
+                                  No hay facturas comerciales pendientes para «{form.proveedor}» en Cuentas por Pagar.
+                                </p>
+                                <p className="text-[11px] text-gray-500">
+                                  Podés registrar este comprobante como un pago a cuenta / anticipo directo sin factura comercial, o buscar una factura de otro proveedor abajo.
+                                </p>
+                              </div>
+                            )}
                           </div>
-                        )}
+                        ) : null}
 
-                        <div className="relative" ref={invoiceSearchRef}>
+                        {/* Buscador Universal de Facturas por N° Factura, Timbrado o RUC */}
+                        <div className="space-y-1.5" ref={invoiceSearchRef}>
+                          <label className="text-[10px] font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider block">
+                            {(form.supplier_id || form.proveedor?.trim()) ? "O buscar otra factura por N°, Timbrado o Proveedor:" : "Buscar Factura Comercial de Compra a Cancelar:"}
+                          </label>
                           <div className="relative flex items-center">
                             <Search className="w-4 h-4 text-purple-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                             <input
                               type="text"
                               className="input-field w-full pl-9 pr-8 text-xs font-medium bg-white dark:bg-slate-800 border-purple-300 dark:border-purple-700 focus:ring-2 focus:ring-purple-500"
-                              placeholder={
-                                filterBySelectedSupplier && (form.supplier_id || form.proveedor?.trim())
-                                  ? `Buscar factura de ${form.proveedor || "este proveedor"} por N°, Timbrado o Saldo...`
-                                  : "Buscar por Proveedor, N° de Factura (ej: 001-001-...) o RUC..."
-                              }
+                              placeholder="Buscar por N° de Factura (ej: 001-001-...), Timbrado, RUC o Proveedor..."
                               value={invoiceSearchQuery}
                               onFocus={() => setInvoiceDropdownOpen(true)}
                               onChange={e => {
@@ -3947,96 +4122,36 @@ export default function ExpensesPage() {
                             )}
                           </div>
 
-                          {invoiceDropdownOpen && (
-                            <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-800 rounded-xl shadow-2xl max-h-72 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 animate-in fade-in-50 zoom-in-95">
+                          {(invoiceDropdownOpen || invoiceSearchQuery.trim().length > 0) && (
+                            <div className="mt-1 bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-800 rounded-xl shadow-xl max-h-64 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
                               <div className="px-3 py-1.5 bg-purple-50/70 dark:bg-purple-950/40 text-[10px] font-bold text-purple-900 dark:text-purple-300 uppercase tracking-wider flex justify-between items-center sticky top-0 z-10 backdrop-blur-sm border-b border-purple-100 dark:border-purple-900/50">
-                                <span>
-                                  {filterBySelectedSupplier && (form.supplier_id || form.proveedor?.trim())
-                                    ? `Facturas Pendientes de ${form.proveedor || "Proveedor"} (${filteredPendingInvoices.length})`
-                                    : `Facturas Pendientes en Cuentas por Pagar (${filteredPendingInvoices.length})`}
-                                </span>
-                                <span className="text-[9px] text-purple-600 dark:text-purple-400 font-normal">
-                                  {filterBySelectedSupplier && (form.supplier_id || form.proveedor?.trim())
-                                    ? "Filtrando por proveedor seleccionado"
-                                    : "Búsqueda abierta en todas las facturas"}
-                                </span>
+                                <span>Facturas Pendientes en Cuentas por Pagar ({filteredPendingInvoices.length})</span>
+                                {invoiceSearchQuery && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setInvoiceDropdownOpen(false)}
+                                    className="text-[9px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                                  >
+                                    Cerrar
+                                  </button>
+                                )}
                               </div>
 
                               {filteredPendingInvoices.length === 0 ? (
-                                <div className="p-4 text-center text-xs text-gray-500 dark:text-gray-400 space-y-2.5">
-                                  {filterBySelectedSupplier && (form.supplier_id || form.proveedor?.trim()) ? (
-                                    <div className="space-y-2">
-                                      <p className="font-semibold text-gray-800 dark:text-gray-200">
-                                        No hay facturas comerciales pendientes para «{form.proveedor}» en Cuentas por Pagar.
-                                      </p>
-                                      <p className="text-[11px] text-gray-500">
-                                        Podés registrar el comprobante como Pago a Cuenta / Anticipo sin factura comercial, o buscar entre todas las facturas.
-                                      </p>
-                                      <div className="pt-1 flex items-center justify-center gap-2 flex-wrap">
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setIsAdvanceWithoutInvoice(true)
-                                            setInvoiceDropdownOpen(false)
-                                            setForm((prev: any) => ({
-                                              ...prev,
-                                              supplier_invoice_id: "",
-                                              descripcion: prev.descripcion || `Pago a cuenta proveedor ${prev.proveedor || ''}`,
-                                            }))
-                                          }}
-                                          className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 hover:bg-amber-200 transition shadow-xs"
-                                        >
-                                          Registrar como Pago a Cuenta (Sin Factura)
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => setFilterBySelectedSupplier(false)}
-                                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 transition"
-                                        >
-                                          Ver facturas de todos los proveedores
-                                        </button>
-                                      </div>
-                                    </div>
+                                <div className="p-4 text-center text-xs text-gray-500 dark:text-gray-400">
+                                  {invoiceSearchQuery ? (
+                                    <>No se encontraron facturas comerciales pendientes con "<strong>{invoiceSearchQuery}</strong>"</>
                                   ) : (
-                                    <div>
-                                      {invoiceSearchQuery ? (
-                                        <>No se encontraron facturas comerciales pendientes con "<strong>{invoiceSearchQuery}</strong>"</>
-                                      ) : (
-                                        <>No hay facturas pendientes registradas en Cuentas por Pagar</>
-                                      )}
-                                    </div>
+                                    <>No hay facturas pendientes registradas en Cuentas por Pagar</>
                                   )}
                                 </div>
                               ) : (
                                 filteredPendingInvoices.map((inv: any) => {
                                   const saldo = inv.saldo_pendiente ?? inv.total ?? 0
-                                  const isSelected = form.supplier_invoice_id === inv.id
                                   return (
                                     <div
                                       key={inv.id}
-                                      className={`p-2.5 text-xs hover:bg-purple-50 dark:hover:bg-purple-950/50 cursor-pointer transition flex items-center justify-between gap-3 ${
-                                        isSelected ? "bg-purple-100/60 dark:bg-purple-900/40" : ""
-                                      }`}
-                                      onMouseDown={() => {
-                                        setForm((prev: any) => ({
-                                          ...prev,
-                                          supplier_invoice_id: inv.id,
-                                          supplier_id: inv.supplier_id || prev.supplier_id || "",
-                                          proveedor: inv.supplier_nombre || prev.proveedor,
-                                          numero_factura: inv.numero_factura || prev.numero_factura,
-                                          ruc: inv.supplier_ruc || inv.ruc || prev.ruc,
-                                          timbrado: inv.timbrado || prev.timbrado,
-                                          moneda: inv.moneda || prev.moneda || "PYG",
-                                          monto: prev.monto && Number(prev.monto) > 0 ? prev.monto : String(saldo),
-                                          monto_brl: inv.moneda === "BRL" ? String(inv.saldo_pendiente_brl ?? inv.total_brl ?? "") : prev.monto_brl,
-                                          tipo_cambio: inv.tipo_cambio ? String(inv.tipo_cambio) : prev.tipo_cambio,
-                                          descripcion: prev.descripcion || `Pago proveedor ${inv.supplier_nombre || ''} - Factura ${inv.numero_factura}`,
-                                        }))
-                                        setFilterBySelectedSupplier(true)
-                                        setIsAdvanceWithoutInvoice(false)
-                                        setInvoiceDropdownOpen(false)
-                                        setInvoiceSearchQuery("")
-                                      }}
+                                      className="p-2.5 text-xs hover:bg-purple-50 dark:hover:bg-purple-950/50 transition flex items-center justify-between gap-3"
                                     >
                                       <div className="space-y-0.5 min-w-0">
                                         <div className="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5 truncate">
@@ -4061,57 +4176,26 @@ export default function ExpensesPage() {
                                         </div>
                                       </div>
 
-                                      <div className="text-right shrink-0">
-                                        <div className="text-[10px] text-gray-400 font-medium">Saldo</div>
-                                        <div className="font-black font-mono text-purple-700 dark:text-purple-300 text-xs">
-                                          {inv.moneda === "BRL"
-                                            ? formatBRL(inv.saldo_pendiente_brl ?? inv.saldo_pendiente ?? 0)
-                                            : formatPYG(saldo)}
+                                      <div className="flex items-center gap-2.5 shrink-0">
+                                        <div className="text-right">
+                                          <div className="text-[9px] text-gray-400 font-medium">Saldo</div>
+                                          <div className="font-black font-mono text-purple-700 dark:text-purple-300 text-xs">
+                                            {inv.moneda === "BRL"
+                                              ? formatBRL(inv.saldo_pendiente_brl ?? inv.saldo_pendiente ?? 0)
+                                              : formatPYG(saldo)}
+                                          </div>
                                         </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleAssignInvoice(inv)}
+                                          className="px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white transition shadow-xs flex items-center gap-1"
+                                        >
+                                          <Check className="w-3.5 h-3.5" /> Asignar Factura
+                                        </button>
                                       </div>
                                     </div>
                                   )
                                 })
-                              )}
-
-                              {/* Opción de seleccionar proveedor de la lista del maestro para acotar facturas */}
-                              {matchingSuppliersWithoutInvoice.length > 0 && !form.supplier_id && (
-                                <div className="bg-amber-50/60 dark:bg-amber-950/30 p-2 border-t border-amber-200 dark:border-amber-800/60">
-                                  <div className="text-[10px] font-bold text-amber-900 dark:text-amber-300 uppercase tracking-wider mb-1 px-1">
-                                    🏢 Proveedores coincidentes (hacé clic para ver exclusivamente sus facturas):
-                                  </div>
-                                  <div className="space-y-1">
-                                    {matchingSuppliersWithoutInvoice.map((sup: any) => (
-                                      <div
-                                        key={sup.id}
-                                        className="px-2 py-1.5 rounded-lg text-xs hover:bg-amber-100/70 dark:hover:bg-amber-900/40 cursor-pointer flex items-center justify-between"
-                                        onMouseDown={() => {
-                                          const nombre = sup.razon_social || sup.nombre_fantasia || "Proveedor"
-                                          setForm((prev: any) => ({
-                                            ...prev,
-                                            supplier_id: sup.id,
-                                            proveedor: nombre,
-                                            ruc: sup.ruc || prev.ruc,
-                                            supplier_invoice_id: "",
-                                          }))
-                                          setFilterBySelectedSupplier(true)
-                                          setIsAdvanceWithoutInvoice(false)
-                                          setInvoiceSearchQuery("")
-                                          setInvoiceDropdownOpen(true)
-                                        }}
-                                      >
-                                        <div className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
-                                          <Building2 className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                                          <span>{sup.razon_social || sup.nombre_fantasia}</span>
-                                          {sup.ruc && <span className="font-mono text-amber-700 dark:text-amber-300 text-[10px]">({sup.ruc})</span>}
-                                        </div>
-                                        <span className="text-[10px] text-amber-800 dark:text-amber-300 font-bold bg-amber-200 dark:bg-amber-900/60 px-2 py-0.5 rounded">
-                                          Ver Facturas de este Proveedor →
-                                        </span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
                               )}
                             </div>
                           )}
@@ -4659,11 +4743,13 @@ export default function ExpensesPage() {
                                     supplier_id: s.id,
                                     proveedor: nombre,
                                     ruc: s.ruc || "",
+                                    es_pago_proveedor: true,
                                   }))
                                   setFilterBySelectedSupplier(true)
                                   setIsAdvanceWithoutInvoice(false)
                                   setSupplierSearch("")
                                   setSupplierDropdownOpen(false)
+                                  loadInvoicesForSupplier(s.id)
                                 }}
                               >
                                 <span className="font-semibold text-gray-800 dark:text-gray-200">{s.razon_social || s.nombre_fantasia}</span>

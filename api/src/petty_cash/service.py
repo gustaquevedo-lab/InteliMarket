@@ -9,7 +9,7 @@ import os
 import time
 
 from fastapi import HTTPException
-from sqlalchemy import select, text, func as sa_func, and_, or_
+from sqlalchemy import select, text, func as sa_func, and_, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -1462,13 +1462,37 @@ async def update_expense(db: AsyncSession, expense_id: str, data: ExpenseUpdate)
         if update_data.get("employee_ci"):
             update_data["ruc"] = update_data["employee_ci"]
 
-    # Si se asocia a una factura comercial pendiente mediante edición/reclasificación
+    # Si se asocia, cambia o desvincula de una factura comercial pendiente mediante edición/reclasificación
+    from api.src.financial.models import SupplierInvoice, SupplierInvoicePayment
+    from api.src.purchases.models import Supplier
+
     target_invoice_id = update_data.get("supplier_invoice_id")
     grouped_ids = update_data.pop("grouped_expense_ids", None)
-    if target_invoice_id:
-        from api.src.financial.models import SupplierInvoice, SupplierInvoicePayment
-        from api.src.purchases.models import Supplier
 
+    # 1. Si tenía una factura previa diferente o se desvincula, restituir el saldo de la factura anterior
+    if exp.supplier_invoice_id and ("supplier_invoice_id" in update_data) and (target_invoice_id != exp.supplier_invoice_id):
+        old_inv_res = await db.execute(select(SupplierInvoice).where(SupplierInvoice.id == exp.supplier_invoice_id))
+        old_inv = old_inv_res.scalar_one_or_none()
+        if old_inv:
+            old_monto = Decimal(str(exp.monto or 0))
+            old_inv.saldo_pendiente = min(Decimal(str(old_inv.total)), Decimal(str(old_inv.saldo_pendiente)) + old_monto)
+            if old_inv.saldo_pendiente >= old_inv.total:
+                old_inv.estado = "pendiente"
+            elif old_inv.saldo_pendiente > 0:
+                old_inv.estado = "parcial"
+            # Anular pagos previos generados por este comprobante
+            await db.execute(
+                update(SupplierInvoicePayment)
+                .where(
+                    SupplierInvoicePayment.invoice_id == old_inv.id,
+                    SupplierInvoicePayment.referencia.ilike(f"%{exp.id}%")
+                )
+                .values(estado="anulado")
+            )
+        exp.supplier_invoice_id = None
+
+    # 2. Si se asigna una nueva factura comercial
+    if target_invoice_id:
         inv_res = await db.execute(select(SupplierInvoice).where(SupplierInvoice.id == target_invoice_id))
         target_inv = inv_res.scalar_one_or_none()
         if target_inv:
@@ -1559,9 +1583,8 @@ async def update_expense(db: AsyncSession, expense_id: str, data: ExpenseUpdate)
                         if target_inv.timbrado:
                             g_exp.timbrado = target_inv.timbrado
 
-
     for field, value in update_data.items():
-        if value is not None:
+        if value is not None or field in ("supplier_invoice_id", "supplier_id"):
             setattr(exp, field, value)
 
     await db.flush()

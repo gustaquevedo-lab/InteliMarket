@@ -107,7 +107,11 @@ async def list_invoices(
 ) -> list[SupplierInvoice]:
     query = select(SupplierInvoice).where(SupplierInvoice.company_id == uuid.UUID(company_id))
     if estado:
-        query = query.where(SupplierInvoice.estado == estado)
+        if "," in estado:
+            estados = [e.strip() for e in estado.split(",") if e.strip()]
+            query = query.where(SupplierInvoice.estado.in_(estados))
+        else:
+            query = query.where(SupplierInvoice.estado == estado)
     if supplier_id:
         query = query.where(SupplierInvoice.supplier_id == uuid.UUID(supplier_id))
     if vencidas:
