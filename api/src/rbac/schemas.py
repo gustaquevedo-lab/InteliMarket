@@ -26,6 +26,8 @@ DEFAULT_PERMISSIONS = [
     ("products:create", "Crear productos", "products"),
     ("products:update", "Actualizar productos", "products"),
     ("products:delete", "Eliminar productos", "products"),
+    ("products:edit_cost", "Modificar costo de productos", "products"),
+    ("products:edit_price", "Modificar precio de venta de productos", "products"),
     # Inventory
     ("inventory:view", "Ver inventario", "inventory"),
     ("inventory:transfer", "Transferir inventario", "inventory"),
@@ -203,6 +205,8 @@ DEFAULT_ROLES = [
         "is_default": False,
         "permissions": [
             "mermas:approve", "salon:manage", "inventory:view", "reports:view",
+            "products:view", "products:update", "products:edit_cost", "products:edit_price",
+            "price_lists:view", "price_lists:manage",
         ],
     },
     {
@@ -218,13 +222,15 @@ DEFAULT_ROLES = [
     },
     {
         "name": "Comprador",
-        "description": "Acceso a compras, inventario y proveedores",
+        "description": "Acceso a compras, inventario, precios y proveedores",
         "is_system": True,
         "is_default": False,
         "permissions": [
             "purchases:view", "purchases:create", "purchases:approve",
             "inventory:view", "inventory:transfer", "inventory:adjust",
             "suppliers:view", "suppliers:create", "suppliers:update",
+            "products:view", "products:update", "products:edit_cost", "products:edit_price",
+            "price_lists:view", "price_lists:manage",
         ],
     },
     {

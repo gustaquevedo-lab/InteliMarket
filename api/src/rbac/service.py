@@ -213,6 +213,15 @@ async def get_user_roles(db: AsyncSession, user_id: uuid.UUID, tenant_id: uuid.U
 
 
 async def check_permission(db: AsyncSession, user_id: uuid.UUID, tenant_id: uuid.UUID, permission: str) -> bool:
+    from api.src.auth.models import User
+    try:
+        user_res = await db.execute(select(User).where(User.id == user_id))
+        user_obj = user_res.scalar_one_or_none()
+        if user_obj and (user_obj.is_superadmin or (user_obj.rol or "").lower() in ("admin", "administrador")):
+            return True
+    except Exception:
+        pass
+
     result = await db.execute(
         select(Permission).join(
             RolePermission, RolePermission.permission_id == Permission.id
@@ -264,6 +273,15 @@ async def get_effective_permissions(db: AsyncSession, user_id: uuid.UUID, tenant
 
 
 async def is_administrador(db: AsyncSession, user_id: uuid.UUID, tenant_id: uuid.UUID) -> bool:
+    from api.src.auth.models import User
+    try:
+        user_res = await db.execute(select(User).where(User.id == user_id))
+        user_obj = user_res.scalar_one_or_none()
+        if user_obj and (user_obj.is_superadmin or (user_obj.rol or "").lower() in ("admin", "administrador")):
+            return True
+    except Exception:
+        pass
+
     admin_role = await db.execute(select(Role).where(Role.name == "Administrador"))
     admin = admin_role.scalar_one_or_none()
     if not admin:

@@ -7,6 +7,8 @@ import {
 } from "lucide-react"
 import { api, COMPANY_ID, type PriceList, type PriceListItem, type Product, type Customer } from "../../api"
 import { useToast } from "../../context/ToastContext"
+import { usePermissions } from "../../context/PermissionsContext"
+import CurrencyInput from "../../components/CurrencyInput"
 import { formatPYG } from "../../utils/format"
 
 export type TiersSummary = {
@@ -1635,6 +1637,8 @@ function TieredPriceFormModal({
 
 function MargenEditorTab() {
   const toast = useToast()
+  const { hasPermission, isAdministrador } = usePermissions()
+  const canEditPrice = isAdministrador || hasPermission("products:edit_price") || hasPermission("price_lists:manage")
   const [products, setProducts] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState("")
@@ -1809,7 +1813,13 @@ function MargenEditorTab() {
                       <td className="p-4 text-center">
                         <button
                           onClick={() => { setSelectedProduct(p); setNewPrice(p.precioCalculado) }}
-                          className="px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 font-bold text-[11px] transition"
+                          disabled={!canEditPrice}
+                          className={`px-3 py-1.5 rounded-xl font-bold text-[11px] transition ${
+                            canEditPrice
+                              ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 cursor-pointer"
+                              : "bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed"
+                          }`}
+                          title={canEditPrice ? "Ajustar precio de venta" : "Requiere permiso para modificar precio"}
                         >
                           Ajustar Precio
                         </button>
@@ -1840,10 +1850,10 @@ function MargenEditorTab() {
               </div>
               <div>
                 <label className="block font-black uppercase text-[10px] text-slate-400 mb-1">Nuevo Precio de Venta (₲)</label>
-                <input
-                  type="number"
+                <CurrencyInput
+                  currency="PYG"
                   value={newPrice}
-                  onChange={(e) => setNewPrice(Number(e.target.value) || 0)}
+                  onChangeValue={(num) => setNewPrice(num)}
                   className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-3 text-base font-mono font-black text-emerald-600 dark:text-emerald-400 outline-none"
                 />
               </div>

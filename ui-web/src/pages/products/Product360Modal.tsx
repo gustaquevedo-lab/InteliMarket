@@ -16,6 +16,8 @@ import {
 import { type Product360Response, api } from "../../api"
 import { formatPYG } from "../../utils/format"
 import { useToast } from "../../context/ToastContext"
+import { usePermissions } from "../../context/PermissionsContext"
+import CurrencyInput from "../../components/CurrencyInput"
 
 function formatDatePY(iso: string) {
   if (!iso) return "—"
@@ -117,6 +119,8 @@ interface Props {
 
 export default function Product360Modal({ data, onClose, onPriceUpdated }: Props) {
   const toast = useToast()
+  const { hasPermission, isAdministrador } = usePermissions()
+  const canEditPrice = isAdministrador || hasPermission("products:edit_price") || hasPermission("products:update")
   const [tab, setTab] = useState<TabKey>("overview")
   const [iaLoading, setIaLoading] = useState(false)
   const [iaText, setIaText] = useState<string | null>(null)
@@ -716,20 +720,30 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                       <p className="text-[10px] text-slate-400">{locked ? "El precio de lista está protegido contra cambios accidentales. Presioná Desbloquear para editar." : "Modificá el precio y evaluá en tiempo real los márgenes proyectados."}</p>
                     </div>
                   </div>
-                  <button onClick={() => setLocked(l => !l)} className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors ${locked ? "bg-slate-200 dark:bg-slate-800 text-slate-600 hover:bg-amber-100 hover:text-amber-700" : "bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700"}`}>
-                    {locked ? <><Unlock className="w-3.5 h-3.5" /> Desbloquear</> : <><Lock className="w-3.5 h-3.5" /> Bloquear</>}
-                  </button>
+                  {canEditPrice ? (
+                    <button onClick={() => setLocked(l => !l)} className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${locked ? "bg-slate-200 dark:bg-slate-800 text-slate-600 hover:bg-amber-100 hover:text-amber-700" : "bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700"}`}>
+                      {locked ? <><Unlock className="w-3.5 h-3.5" /> Desbloquear</> : <><Lock className="w-3.5 h-3.5" /> Bloquear</>}
+                    </button>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 rounded-xl">
+                      <Lock className="w-3 h-3 text-slate-400" /> Protegido (Sin Permiso)
+                    </span>
+                  )}
                 </div>
 
-                {!locked && (
+                {!locked && canEditPrice && (
                   <div className="space-y-4">
                     <div className="flex items-end gap-3">
                       <div className="flex-1">
                         <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Nuevo Precio de Venta Unitario de Lista (₲)</label>
-                        <input type="number" min={0} value={newPrice} onChange={e => setNewPrice(e.target.value)}
-                          className="w-full px-4 py-3 rounded-xl border-2 border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-900 font-black text-lg text-indigo-700 dark:text-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono" />
+                        <CurrencyInput
+                          currency="PYG"
+                          value={newPriceNum}
+                          onChangeValue={(num) => setNewPrice(String(num))}
+                          className="w-full px-4 py-3 rounded-xl border-2 border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-900 font-black text-lg text-indigo-700 dark:text-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+                        />
                       </div>
-                      <button onClick={handleSavePrice} disabled={savingPrice || newPriceNum <= 0} className="flex items-center gap-2 px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-bold transition-colors">
+                      <button onClick={handleSavePrice} disabled={savingPrice || newPriceNum <= 0} className="flex items-center gap-2 px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-bold transition-colors cursor-pointer">
                         {savingPrice ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}Guardar Precio
                       </button>
                     </div>

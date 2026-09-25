@@ -1,6 +1,7 @@
 """Product and category API router"""
 
 import logging
+import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
@@ -183,11 +184,49 @@ async def get_product(product_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.patch("/products/{product_id}", response_model=ProductResponse)
-async def update_product(product_id: str, body: ProductUpdate, db: AsyncSession = Depends(get_db)):
+async def update_product(
+    product_id: str,
+    body: ProductUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    dump = body.model_dump(exclude_unset=True)
+    is_admin = bool(
+        user.get("is_superadmin") or
+        (user.get("rol") or "").lower() in ("admin", "administrador", "gerente")
+    )
+    user_id = uuid.UUID(str(user["id"]))
+    tenant_id = uuid.UUID(str(user.get("tenant_id") or "00000000-0000-0000-0000-000000000001"))
+
+    # Validación de permiso para modificar precios de costo
+    cost_fields = {"costo_promedio", "ultimo_costo", "costo_landed"}
+    if any(k in dump for k in cost_fields):
+        if not is_admin:
+            from api.src.rbac import service as rbac_service
+            has_cost_perm = await rbac_service.check_permission(db, user_id, tenant_id, "products:edit_cost")
+            if not has_cost_perm:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="No tenés permiso para modificar precios de costo (products:edit_cost)"
+                )
+
+    # Validación de permiso para modificar precios de venta
+    if "precio_venta" in dump:
+        if not is_admin:
+            from api.src.rbac import service as rbac_service
+            has_price_perm = await rbac_service.check_permission(db, user_id, tenant_id, "products:edit_price")
+            if not has_price_perm:
+                has_update = await rbac_service.check_permission(db, user_id, tenant_id, "products:update")
+                if not has_update:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="No tenés permiso para modificar precios de venta (products:edit_price)"
+                    )
+
     product = await service.update_product(db, product_id, body)
     if not product:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
-    if "precio_venta" in body.model_dump(exclude_unset=True):
+    if "precio_venta" in dump:
         try:
             from api.src.integrations.scales import service as scales_service
             await scales_service.auto_sync_product(db, product.company_id, product)
