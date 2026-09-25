@@ -1,5 +1,18 @@
 import { useState, useRef, useEffect, useCallback } from "react"
 import { BrowserMultiFormatReader, DecodeHintType, BarcodeFormat } from "@zxing/library"
+import { Capacitor } from "@capacitor/core"
+import { BarcodeScanner } from "@capacitor-mlkit/barcode-scanning"
+
+// ── Por que existe la rama nativa ──────────────────────────────────────────
+// getUserMedia + <video>/ZXing/BarcodeDetector NUNCA llega a mostrar imagen
+// dentro del WebView embebido de una app Capacitor (queda un recuadro gris
+// con el icono de play, en ambas camaras) -- esto es independiente de HTTPS,
+// de permisos, y del motor de decodificacion: el WebView del sistema, a
+// diferencia de Chrome de verdad, no siempre renderiza el MediaStream de la
+// camara en un <video>. La unica forma confiable de leer un codigo desde una
+// app empaquetada es un plugin nativo que abre la camara del sistema
+// operativo por fuera del WebView (ML Kit). En navegador de escritorio
+// (donde SI funciona getUserMedia) todo sigue igual que antes.
 
 export interface UseBarcodeScannerCameraOptions {
   onScan: (code: string) => void | Promise<void>
@@ -143,8 +156,59 @@ export function useBarcodeScannerCamera(
     setHasTorch(false)
   }, [])
 
+  // ── Camino nativo: plugin ML Kit, sin getUserMedia ni <video> ──
+  // Abre la camara del sistema operativo por fuera del WebView y devuelve
+  // el codigo leido; no hay preview embebido que mantener en React, asi que
+  // cameraActive solo indica "escaneo nativo en curso" para la UI (spinner,
+  // boton deshabilitado, etc).
+  const startNativeScan = useCallback(async () => {
+    setCameraError(null)
+    setCameraLoading(true)
+    try {
+      const { camera } = await BarcodeScanner.checkPermissions()
+      if (camera !== "granted" && camera !== "limited") {
+        const req = await BarcodeScanner.requestPermissions()
+        if (req.camera !== "granted" && req.camera !== "limited") {
+          setCameraError(
+            "Permiso de cámara denegado. Habilitalo en los ajustes de la app (Configuración del teléfono → Apps → Extra → Permisos)."
+          )
+          setCameraLoading(false)
+          return
+        }
+      }
+
+      try {
+        const { available } = await BarcodeScanner.isGoogleBarcodeScannerModuleAvailable()
+        if (!available) {
+          await BarcodeScanner.installGoogleBarcodeScannerModule()
+        }
+      } catch {
+        // El modulo puede instalarse solo en el primer escaneo real; no es
+        // motivo para bloquear el flujo si esta consulta falla.
+      }
+
+      setCameraActive(true)
+      setCameraLoading(false)
+      const { barcodes } = await BarcodeScanner.scan()
+      if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
+        handleCodeScanned(barcodes[0].rawValue)
+      }
+    } catch (err: any) {
+      console.error("Error en escaneo nativo:", err)
+      setCameraError(err?.message || "No se pudo abrir el escáner de la cámara.")
+    } finally {
+      setCameraActive(false)
+      setCameraLoading(false)
+    }
+  }, [handleCodeScanned])
+
   const startCamera = useCallback(
     async (targetDeviceId?: string) => {
+      if (Capacitor.isNativePlatform()) {
+        await startNativeScan()
+        return
+      }
+
       setCameraError(null)
       setCameraLoading(true)
 
@@ -386,7 +450,7 @@ export function useBarcodeScannerCamera(
         setCameraLoading(false)
       }
     },
-    [formats, handleCodeScanned, storageKey]
+    [formats, handleCodeScanned, storageKey, startNativeScan]
   )
 
   const switchCamera = useCallback(async () => {

@@ -5,5 +5,9 @@
   "scripts": {
     "sync": "cap sync android",
     "open": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.5.1",
+    "@capacitor-mlkit/barcode-scanning": "^8.2.1"
   }
 }
