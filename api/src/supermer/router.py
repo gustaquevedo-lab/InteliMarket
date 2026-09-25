@@ -1604,7 +1604,7 @@ async def inventory_list_sessions(
     area: Optional[str] = Query(None),
     estado: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_auth),
+    user=Depends(require_permission("inventory:cycle_count")),
 ):
     return await service_inventory.list_count_sessions(user["company_id"], db, area, estado)
 
@@ -1613,9 +1613,9 @@ async def inventory_list_sessions(
 async def inventory_create_session(
     data: CountSessionCreate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_auth),
+    user=Depends(require_permission("inventory:cycle_count")),
 ):
-    return await service_inventory.create_count_session(user["company_id"], data, db)
+    return await service_inventory.create_count_session(user["company_id"], data, db, user)
 
 
 @router.get("/inventory/sessions/{session_id}", response_model=CountSessionResponse)
@@ -1641,9 +1641,9 @@ async def inventory_update_session(
 async def inventory_complete_session(
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_auth),
+    user=Depends(require_permission("inventory:cycle_count")),
 ):
-    return await service_inventory.complete_count_session(session_id, db)
+    return await service_inventory.complete_count_session(session_id, db, user)
 
 
 @router.get("/inventory/sessions/{session_id}/items", response_model=list[CountItemResponse])
@@ -1651,7 +1651,7 @@ async def inventory_list_items(
     session_id: UUID,
     requiere_ajuste: Optional[bool] = Query(None),
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_auth),
+    user=Depends(require_permission("inventory:cycle_count")),
 ):
     return await service_inventory.list_count_items(session_id, requiere_ajuste)
 
@@ -1661,9 +1661,9 @@ async def inventory_create_item(
     session_id: UUID,
     data: CountItemCreate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_auth),
+    user=Depends(require_permission("inventory:cycle_count")),
 ):
-    return await service_inventory.create_count_item(session_id, data, db)
+    return await service_inventory.create_count_item(session_id, data, db, user)
 
 
 @router.put("/inventory/items/{item_id}", response_model=CountItemResponse)
@@ -1727,7 +1727,7 @@ async def inventory_reject_adjustment(
 @router.post("/inventory/upload-evidencia", response_model=EvidenciaUploadResponse)
 async def inventory_upload_evidencia(
     file: UploadFile = File(...),
-    user=Depends(require_auth),
+    user=Depends(require_permission("inventory:cycle_count")),
 ):
     """Foto de respaldo de un item de conteo (etiqueta con lote/vencimiento, faltante, etc)."""
     content = await file.read()

@@ -364,7 +364,7 @@ function AppRoutes() {
         <Route path="servicios" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="servicios"><ServiciosPage /></FeatureRoute></Suspense>} />
         <Route path="supermer" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><SupermerPage /></FeatureRoute></Suspense>} />
         <Route path="operaciones-salon" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><SalonOperacionesPwaPage /></PermissionRoute></Suspense>} />
-        <Route path="conteo-vencimientos" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><ConteoVencimientosPage /></PermissionRoute></Suspense>} />
+        <Route path="conteo-vencimientos" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="inventory:cycle_count"><ConteoVencimientosPage /></PermissionRoute></Suspense>} />
         <Route path="deposito" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="purchases:receive"><DepositoRecepcionPage /></PermissionRoute></Suspense>} />
         <Route path="desposte" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><CarniceriaDespostePage /></PermissionRoute></Suspense>} />
         <Route path="frescos" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><VerduleriaFrescosPage /></PermissionRoute></Suspense>} />

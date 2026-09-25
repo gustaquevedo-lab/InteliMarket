@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from fastapi import HTTPException
 
 from .models import PhysicalCountSession, PhysicalCountItem, CountAdjustment
+from api.src.inteliaudit.service import record_audit_event
 
 
 # ---------------------------------------------------------------------------
@@ -41,9 +42,17 @@ async def get_count_session(session_id: UUID, db: AsyncSession):
     return s
 
 
-async def create_count_session(company_id: UUID, data, db: AsyncSession):
+async def create_count_session(company_id: UUID, data, db: AsyncSession, user: Optional[dict] = None):
     s = PhysicalCountSession(company_id=company_id, **data.model_dump(exclude_none=True))
     db.add(s)
+    await db.flush()
+    if user:
+        await record_audit_event(db, {
+            "company_id": str(company_id), "user_id": user.get("id"),
+            "accion": "conteo_sesion_iniciada", "entidad": "conteo_inventario",
+            "entidad_id": str(s.id),
+            "datos_nuevos": {"codigo": s.codigo, "area": s.area, "ubicacion": s.ubicacion, "tipo": s.tipo},
+        })
     await db.commit()
     await db.refresh(s)
     return s
@@ -58,7 +67,7 @@ async def update_count_session(session_id: UUID, data, db: AsyncSession):
     return s
 
 
-async def complete_count_session(session_id: UUID, db: AsyncSession):
+async def complete_count_session(session_id: UUID, db: AsyncSession, user: Optional[dict] = None):
     s = await get_count_session(session_id, db)
     s.estado = "completada"
     s.fecha_fin = datetime.now(timezone.utc)
@@ -72,6 +81,18 @@ async def complete_count_session(session_id: UUID, db: AsyncSession):
 
     for i in discrepancias:
         i.requiere_ajuste = True
+
+    if user:
+        await record_audit_event(db, {
+            "company_id": str(s.company_id), "user_id": user.get("id"),
+            "accion": "conteo_sesion_finalizada", "entidad": "conteo_inventario",
+            "entidad_id": str(s.id),
+            "datos_nuevos": {
+                "codigo": s.codigo, "total_items_contados": s.total_items_contados,
+                "total_discrepancias": s.total_discrepancias,
+                "valor_discrepancia_total": float(s.valor_discrepancia_total or 0),
+            },
+        })
 
     await db.commit()
     await db.refresh(s)
@@ -91,13 +112,34 @@ async def list_count_items(session_id: UUID, db: AsyncSession, requiere_ajuste: 
     return result.scalars().all()
 
 
-async def create_count_item(session_id: UUID, data, db: AsyncSession):
+async def create_count_item(session_id: UUID, data, db: AsyncSession, user: Optional[dict] = None):
     item = PhysicalCountItem(session_id=session_id, **data.model_dump(exclude_none=True))
     if item.cantidad_contada is not None and item.cantidad_sistema is not None:
         item.diferencia = item.cantidad_contada - item.cantidad_sistema
     if item.costo_promedio and item.diferencia:
         item.valor_diferencia = item.diferencia * item.costo_promedio
+    if user and item.contado_por is None:
+        item.contado_por = user.get("id")
+        item.contado_at = datetime.now(timezone.utc)
     db.add(item)
+    await db.flush()
+    if user:
+        s = await get_count_session(session_id, db)
+        await record_audit_event(db, {
+            "company_id": str(s.company_id) if s else None, "user_id": user.get("id"),
+            "accion": "conteo_item_registrado", "entidad": "conteo_inventario_item",
+            "entidad_id": str(item.id),
+            "datos_nuevos": {
+                "session_id": str(session_id), "producto_id": str(item.producto_id),
+                "codigo_barra": item.codigo_barra,
+                "cantidad_sistema": float(item.cantidad_sistema) if item.cantidad_sistema is not None else None,
+                "cantidad_contada": float(item.cantidad_contada) if item.cantidad_contada is not None else None,
+                "diferencia": float(item.diferencia) if item.diferencia is not None else None,
+                "lote": item.lote,
+                "fecha_vencimiento": item.fecha_vencimiento.isoformat() if item.fecha_vencimiento else None,
+                "foto_evidencia_url": item.foto_evidencia_url,
+            },
+        })
     await db.commit()
     await db.refresh(item)
     return item
