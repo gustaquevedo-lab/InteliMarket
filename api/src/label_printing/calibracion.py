@@ -122,15 +122,13 @@ def calibrar_medio(tipo: str, cfg=None) -> str:
         lt_dots = int(round(off_y * dy))
         lt_cmd = f"^LT{lt_dots}"
 
-        # Secuencia maestra completa:
-        # ^MTD: Térmica Directa
-        # ^MNY: Modo Gap/Web (no continuo ni black mark)
-        # ^PW: Ancho del cabezal en dots
-        # ^LL: Largo en dots
-        # ^LT: Desplazamiento hacia arriba para no pisar troquel
-        # ~JC: Calibración del sensor óptico
-        # ^JUS: Guardar permanente en memoria de la impresora
-        return f"^XA^MTD^MNY^PW{ancho_dots}^LL{alto_dots}{lt_cmd}~JC^JUS^XZ"
+        # Secuencia maestra completa ZPL II:
+        # ~JA: Cancela formatos pendientes trabados en el buffer
+        # ~PS: Reanuda si la impresora quedó pausada por error
+        # ^XA ... ^JUS^XZ: Configura termica directa (^MTD), sensor gap/web (^MNY),
+        # ancho, largo, offset y GUARDA permanente en NVRAM (^JUS).
+        # ~JC: Comando inmediato de calibracion de sensor optico (FUERA del bloque ^XA).
+        return f"~JA\r\n~PS\r\n^XA^MTD^MNY^PW{ancho_dots}^LL{alto_dots}{lt_cmd}^PR3,3^JUS^XZ\r\n~JC\r\n"
     return "GAPDETECT\r\n"   # equivalente en TSPL para la Pantum
 
 
@@ -155,6 +153,6 @@ def prueba_minima(tipo: str, cfg=None) -> str:
     diseno.
     """
     if tipo == "zebra_zpl":
-        return "^XA^PW832^LL240^FO50,50^A0N,36,36^FDINTELIMARKET - PRUEBA OK^FS^FO50,110^A0N,24,24^FDZebra ZD220 Calibrada^FS^XZ"
+        return "^XA^MTD^MNY^PW832^LL240^LT-16^FO50,50^A0N,36,36^FDINTELIMARKET - PRUEBA OK^FS^FO50,110^A0N,24,24^FDZebra ZD220 Calibrada^FS^XZ"
     return 'SIZE 105 mm,22 mm\r\nGAP 2 mm,0\r\nCLS\r\nTEXT 40,40,"3",0,1,1,"PRUEBA OK"\r\nPRINT 1,1\r\n'
 
