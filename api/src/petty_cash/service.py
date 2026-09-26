@@ -587,19 +587,22 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
             if not target_inv:
                 continue
 
+            saldo_actual = Decimal(str(target_inv.saldo_pendiente or 0))
             if data.linked_invoice_montos and idx < len(data.linked_invoice_montos):
-                monto_aplicar = min(
-                    Decimal(str(data.linked_invoice_montos[idx])),
-                    Decimal(str(target_inv.saldo_pendiente or 0))
-                )
+                monto_deseado = Decimal(str(data.linked_invoice_montos[idx]))
             else:
                 n_facturas = len(raw_invoice_ids)
-                monto_por_factura = (monto_total_exp / n_facturas).quantize(Decimal("1"))
-                monto_aplicar = min(monto_por_factura, Decimal(str(target_inv.saldo_pendiente or 0)))
+                monto_deseado = (monto_total_exp / n_facturas).quantize(Decimal("1"))
+
+            if saldo_actual > Decimal("0"):
+                monto_aplicar = min(monto_deseado, saldo_actual)
+                target_inv.saldo_pendiente = max(Decimal("0"), saldo_actual - monto_aplicar)
+                target_inv.estado = "pagada" if target_inv.saldo_pendiente <= 0 else "parcial"
+            else:
+                total_inv = Decimal(str(target_inv.total or 0))
+                monto_aplicar = min(monto_deseado, total_inv) if total_inv > Decimal("0") else monto_deseado
 
             monto_aplicar = max(Decimal("0"), monto_aplicar)
-            target_inv.saldo_pendiente = max(Decimal("0"), Decimal(str(target_inv.saldo_pendiente or 0)) - monto_aplicar)
-            target_inv.estado = "pagada" if target_inv.saldo_pendiente <= 0 else "parcial"
 
             db.add(ExpenseSupplierInvoice(
                 expense_id=exp.id,
@@ -1640,20 +1643,22 @@ async def update_expense(db: AsyncSession, expense_id: str, data: ExpenseUpdate)
                 continue
 
             # Monto a aplicar: usa el indicado por la UI o distribuye equitativamente
+            saldo_actual = Decimal(str(inv.saldo_pendiente or 0))
             if linked_invoice_montos_raw and idx < len(linked_invoice_montos_raw):
-                monto_aplicar = min(
-                    Decimal(str(linked_invoice_montos_raw[idx])),
-                    Decimal(str(inv.saldo_pendiente or 0))
-                )
+                monto_deseado = Decimal(str(linked_invoice_montos_raw[idx]))
             else:
                 n_facturas = len(new_ids)
-                monto_por_factura = (monto_total_exp / n_facturas).quantize(Decimal("1"))
-                monto_aplicar = min(monto_por_factura, Decimal(str(inv.saldo_pendiente or 0)))
+                monto_deseado = (monto_total_exp / n_facturas).quantize(Decimal("1"))
+
+            if saldo_actual > Decimal("0"):
+                monto_aplicar = min(monto_deseado, saldo_actual)
+                inv.saldo_pendiente = max(Decimal("0"), saldo_actual - monto_aplicar)
+                inv.estado = "pagada" if inv.saldo_pendiente <= 0 else "parcial"
+            else:
+                total_inv = Decimal(str(inv.total or 0))
+                monto_aplicar = min(monto_deseado, total_inv) if total_inv > Decimal("0") else monto_deseado
 
             monto_aplicar = max(Decimal("0"), monto_aplicar)
-
-            inv.saldo_pendiente = max(Decimal("0"), Decimal(str(inv.saldo_pendiente or 0)) - monto_aplicar)
-            inv.estado = "pagada" if inv.saldo_pendiente <= 0 else "parcial"
 
             db.add(ExpenseSupplierInvoice(
                 expense_id=exp.id,

@@ -211,6 +211,7 @@ export default function ExpensesPage() {
   // Facturas específicas del proveedor seleccionado
   const [supplierInvoices, setSupplierInvoices] = useState<any[]>([])
   const [loadingSupplierInvoices, setLoadingSupplierInvoices] = useState<boolean>(false)
+  const [supplierInvoiceFilterMode, setSupplierInvoiceFilterMode] = useState<"pendientes" | "todas">("pendientes")
 
   const loadInvoicesForSupplier = useCallback(async (supId: string) => {
     if (!supId) {
@@ -221,8 +222,7 @@ export default function ExpensesPage() {
     try {
       const res = await api.financial.invoices.list({
         supplier_id: supId,
-        estado: "pendiente,parcial,aprobada",
-        limit: 100,
+        limit: 200,
       })
       const items = Array.isArray(res) ? res : []
       setSupplierInvoices(items)
@@ -337,8 +337,8 @@ export default function ExpensesPage() {
     return ids.reduce((acc: number, invId: string) => {
       const inv = linkedInvoicesDetails.find(d => String(d.id || d.supplier_invoice_id) === invId) ||
                   combinedPendingInvoices.find(d => String(d.id) === invId)
-      const s = inv?.saldo_pendiente ?? inv?.total ?? 0
-      return acc + Number(s)
+      const s = Number(inv?.saldo_pendiente || 0) > 0 ? Number(inv?.saldo_pendiente) : Number(inv?.total || 0)
+      return acc + s
     }, 0)
   }, [form.linked_invoice_ids, linkedInvoicesDetails, combinedPendingInvoices])
 
@@ -419,10 +419,16 @@ export default function ExpensesPage() {
     return Array.from(map.values())
   }, [supplierInvoices, combinedPendingInvoices, form.supplier_id, form.proveedor, form.ruc, suppliersList])
 
-  // Conteo de facturas pendientes exclusivas del proveedor seleccionado
-  const selectedSupplierPendingInvoicesCount = useMemo(() => {
+  // Conteo de facturas pendientes con saldo vs total del proveedor seleccionado
+  const supplierPendingInvoicesCount = useMemo(() => {
+    return displaySupplierInvoices.filter((i: any) => Number(i.saldo_pendiente || 0) > 0).length
+  }, [displaySupplierInvoices])
+
+  const supplierTotalInvoicesCount = useMemo(() => {
     return displaySupplierInvoices.length
   }, [displaySupplierInvoices])
+
+  const selectedSupplierPendingInvoicesCount = supplierTotalInvoicesCount
 
   // Filtrado ágil de facturas pendientes con filtro de proveedor seleccionado y fallback a N° Factura o RUC
   const filteredPendingInvoices = useMemo(() => {
@@ -432,11 +438,16 @@ export default function ExpensesPage() {
     let baseList = combinedPendingInvoices
     if (applySupplierFilter) {
       baseList = displaySupplierInvoices
+      // Si el filtro está en "pendientes" y el usuario no está buscando un texto específico:
+      if (supplierInvoiceFilterMode === "pendientes" && !invoiceSearchQuery.trim()) {
+        const linkedSet = new Set((form.linked_invoice_ids || []).map(String))
+        baseList = baseList.filter((i: any) => Number(i.saldo_pendiente || 0) > 0 || linkedSet.has(String(i.id)))
+      }
     }
 
     const q = (invoiceSearchQuery || "").trim().toLowerCase()
     if (!q) {
-      return baseList.slice(0, 40)
+      return baseList.slice(0, 100)
     }
     const qClean = q.replace(/[^a-z0-9]/g, "")
     return baseList.filter((inv: any) => {
@@ -1044,7 +1055,7 @@ export default function ExpensesPage() {
       setLinkedInvoicesDetails(newDetails)
       toast.info("Factura Desvinculada", `Factura N° ${inv.numero_factura} retirada del comprobante.`)
     } else {
-      const saldo = inv.saldo_pendiente ?? inv.total ?? 0
+      const saldo = Number(inv.saldo_pendiente || 0) > 0 ? Number(inv.saldo_pendiente) : Number(inv.total || 0)
       const newIds = [...currentIds, invId]
       const newDetails = [...linkedInvoicesDetails, inv]
       const newMontos = {
@@ -4092,7 +4103,8 @@ export default function ExpensesPage() {
                           {(form.linked_invoice_ids || []).map((invId: string) => {
                             const inv = linkedInvoicesDetails.find(d => String(d.id || d.supplier_invoice_id) === invId) ||
                                         combinedPendingInvoices.find(d => String(d.id) === invId) || {}
-                            const saldo = inv.saldo_pendiente ?? inv.total ?? 0
+                            const hasSaldo = Number(inv.saldo_pendiente || 0) > 0
+                            const saldo = hasSaldo ? Number(inv.saldo_pendiente) : Number(inv.total || 0)
                             const montoImputado = form.linked_invoice_montos?.[invId] !== undefined
                               ? form.linked_invoice_montos[invId]
                               : Number(saldo)
@@ -4121,9 +4133,14 @@ export default function ExpensesPage() {
                                         {inv.moneda}
                                       </span>
                                     )}
+                                    {!hasSaldo && (
+                                      <span className="text-[9px] px-1 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 font-semibold border border-slate-200 dark:border-slate-700">
+                                        {inv.estado === "pagada" ? "Registrada" : "Saldo 0"}
+                                      </span>
+                                    )}
                                   </div>
                                   <div className="text-[10px] text-gray-500 flex items-center gap-2 flex-wrap">
-                                    <span>Saldo pendiente: <strong className="font-mono text-gray-700 dark:text-gray-300">{formatPYG(saldo)}</strong></span>
+                                    <span>{hasSaldo ? "Saldo pendiente: " : "Importe factura: "}<strong className="font-mono text-gray-700 dark:text-gray-300">{formatPYG(saldo)}</strong></span>
                                     {inv.supplier_nombre && <span>• {inv.supplier_nombre}</span>}
                                   </div>
                                 </div>
@@ -4187,21 +4204,43 @@ export default function ExpensesPage() {
                       <div className="flex items-center justify-between gap-2 flex-wrap">
                         <label className="text-[10px] font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider block">
                           {(form.supplier_id || form.proveedor?.trim())
-                            ? `Facturas Pendientes de «${form.proveedor}»`
+                            ? `Facturas de «${form.proveedor}»`
                             : "Facturas Comerciales Pendientes en Cuentas por Pagar:"}
                         </label>
                         {(form.supplier_id || form.proveedor?.trim()) && (
-                          <div className="flex items-center gap-2 text-[10px]">
+                          <div className="flex items-center gap-1.5 text-[10px] flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => setSupplierInvoiceFilterMode("pendientes")}
+                              className={`px-2.5 py-0.5 rounded-full font-bold transition flex items-center gap-1 ${
+                                supplierInvoiceFilterMode === "pendientes"
+                                  ? "bg-purple-600 text-white shadow-xs"
+                                  : "bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 hover:bg-purple-200"
+                              }`}
+                            >
+                              Con Saldo ({supplierPendingInvoicesCount})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSupplierInvoiceFilterMode("todas")}
+                              className={`px-2.5 py-0.5 rounded-full font-bold transition flex items-center gap-1 ${
+                                supplierInvoiceFilterMode === "todas"
+                                  ? "bg-purple-600 text-white shadow-xs"
+                                  : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 hover:bg-slate-200"
+                              }`}
+                            >
+                              Todas ({supplierTotalInvoicesCount})
+                            </button>
                             <button
                               type="button"
                               onClick={() => setFilterBySelectedSupplier(!filterBySelectedSupplier)}
-                              className={`px-2 py-0.5 rounded-full font-bold transition ${
-                                filterBySelectedSupplier
-                                  ? "bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-200"
-                                  : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
+                              className={`px-2 py-0.5 rounded-full font-medium transition border ${
+                                !filterBySelectedSupplier
+                                  ? "bg-amber-100 border-amber-300 text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+                                  : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500"
                               }`}
                             >
-                              {filterBySelectedSupplier ? `Solo ${form.proveedor}` : "Ver todas las empresas"}
+                              {!filterBySelectedSupplier ? "Ver todas las empresas" : "Solo este proveedor"}
                             </button>
                           </div>
                         )}
@@ -4213,7 +4252,7 @@ export default function ExpensesPage() {
                         <input
                           type="text"
                           className="input-field w-full pl-9 pr-8 text-xs font-medium bg-white dark:bg-slate-800 border-purple-200 dark:border-purple-700 focus:ring-2 focus:ring-purple-500"
-                          placeholder="Buscar por N° de Factura (ej: 001-001-...), Timbrado, RUC o Proveedor..."
+                          placeholder="Buscar por N° de Factura (ej: CP-6450, 001-001-...), Timbrado, RUC o Proveedor..."
                           value={invoiceSearchQuery}
                           onChange={e => setInvoiceSearchQuery(e.target.value)}
                         />
@@ -4231,14 +4270,15 @@ export default function ExpensesPage() {
                       {/* Lista scrolleable con Checkboxes */}
                       {loadingSupplierInvoices ? (
                         <div className="py-4 text-center text-xs text-purple-600 dark:text-purple-400 flex items-center justify-center gap-2">
-                          <Loader2 className="w-4 h-4 animate-spin" /> Buscando facturas pendientes...
+                          <Loader2 className="w-4 h-4 animate-spin" /> Buscando facturas del proveedor...
                         </div>
                       ) : filteredPendingInvoices.length > 0 ? (
                         <div className="max-h-60 overflow-y-auto space-y-1.5 p-1 bg-white/70 dark:bg-slate-900/60 border border-purple-200/70 dark:border-purple-800/50 rounded-xl">
                           {filteredPendingInvoices.map((inv: any) => {
                             const invId = String(inv.id)
                             const isChecked = (form.linked_invoice_ids || []).includes(invId)
-                            const saldo = inv.saldo_pendiente ?? inv.total ?? 0
+                            const hasSaldo = Number(inv.saldo_pendiente || 0) > 0
+                            const saldo = hasSaldo ? Number(inv.saldo_pendiente) : Number(inv.total || 0)
 
                             return (
                               <div
@@ -4281,6 +4321,11 @@ export default function ExpensesPage() {
                                           {inv.condicion}
                                         </span>
                                       )}
+                                      {!hasSaldo && (
+                                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 font-semibold border border-slate-200 dark:border-slate-700">
+                                          {inv.estado === "pagada" ? "Registrada / Pagada" : "Saldo 0"}
+                                        </span>
+                                      )}
                                     </div>
                                     <div className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-2 flex-wrap">
                                       {inv.fecha_emision && <span>Emisión: {inv.fecha_emision}</span>}
@@ -4291,10 +4336,12 @@ export default function ExpensesPage() {
                                 </div>
 
                                 <div className="text-right shrink-0">
-                                  <div className="text-[9px] text-gray-400 font-medium">Saldo Pendiente</div>
+                                  <div className="text-[9px] text-gray-400 font-medium">
+                                    {hasSaldo ? "Saldo Pendiente" : "Total Factura"}
+                                  </div>
                                   <div className="font-mono font-black text-purple-700 dark:text-purple-300 text-xs">
                                     {inv.moneda === "BRL"
-                                      ? formatBRL(inv.saldo_pendiente_brl ?? inv.saldo_pendiente ?? 0)
+                                      ? formatBRL(inv.saldo_pendiente_brl ?? saldo)
                                       : formatPYG(saldo)}
                                   </div>
                                   <span className={`text-[10px] font-bold ${isChecked ? "text-purple-700 dark:text-purple-300" : "text-gray-400"}`}>
