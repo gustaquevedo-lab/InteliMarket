@@ -289,7 +289,7 @@ export default function GondolaPage() {
       for (const item of cola) {
         renderGondola(canvas, item, diseno, anchoDots, altoDots)
         const grafico = canvasAZplGrafico(canvas)
-        const etiqueta = `^XA^PW${anchoDots}^LL${altoDots}^LH${offX},${offY}${grafico}^XZ`
+        const etiqueta = `^XA^MMT^MNY^MTD^PR3,3^PW${anchoDots}^LL${altoDots}^LH${offX},${offY}${grafico}^XZ`
         for (let n = 0; n < item.cantidad; n++) partes.push(etiqueta)
       }
       const zpl = partes.join("")

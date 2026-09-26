@@ -153,6 +153,6 @@ def prueba_minima(tipo: str, cfg=None) -> str:
     diseno.
     """
     if tipo == "zebra_zpl":
-        return "^XA^MTD^MNY^PW832^LL240^LT-16^FO50,50^A0N,36,36^FDINTELIMARKET - PRUEBA OK^FS^FO50,110^A0N,24,24^FDZebra ZD220 Calibrada^FS^XZ"
+        return "^XA^MMT^MNY^MTD^PR3,3^PW832^LL240^LT-16^FO50,50^A0N,36,36^FDINTELIMARKET - PRUEBA OK^FS^FO50,110^A0N,24,24^FDZebra ZD220 Calibrada^FS^XZ"
     return 'SIZE 105 mm,22 mm\r\nGAP 2 mm,0\r\nCLS\r\nTEXT 40,40,"3",0,1,1,"PRUEBA OK"\r\nPRINT 1,1\r\n'
 
