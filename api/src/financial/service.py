@@ -3260,6 +3260,16 @@ async def create_supplier_payment_order(
 
     await db.flush()
 
+    # 4.1 Procesar Facturas Legales de Respaldo si fueron informadas
+    if data.legal_invoices and len(data.legal_invoices) > 0:
+        await _process_payment_order_legal_invoices(
+            db=db,
+            order=order,
+            supplier=supplier,
+            legal_invoices=data.legal_invoices,
+            allocated_invoices=[item["invoice"] for item in allocations_to_create]
+        )
+
     # 5. Si vinieron medios de pago, liquidar de inmediato
     if data.disbursements and len(data.disbursements) > 0:
         disburse_payload = SupplierPaymentOrderDisburse(
@@ -3267,6 +3277,7 @@ async def create_supplier_payment_order(
             recibo_proveedor=data.recibo_proveedor,
             observaciones=data.observaciones,
             disbursements=data.disbursements,
+            legal_invoices=data.legal_invoices,
         )
         await _execute_disbursements_internal(
             db=db,
@@ -3279,6 +3290,129 @@ async def create_supplier_payment_order(
 
     await db.commit()
     return await get_supplier_payment_order_detail(db, company_id, str(order.id))
+
+
+async def _process_payment_order_legal_invoices(
+    db: AsyncSession,
+    order: SupplierPaymentOrder,
+    supplier: Supplier,
+    legal_invoices: list[SupplierLegalInvoiceInput] | None,
+    allocated_invoices: list[SupplierInvoice] | None = None
+) -> None:
+    """Procesa facturas fiscales de respaldo asociadas a tickets provisorios (ej. AUTO-REC-...)
+    amortizados en la Orden de Pago.
+    Registra la factura legal en supplier_invoices (con saldo 0 / pagada),
+    enriquece los tickets provisorios con el timbrado y referencia de la factura legal,
+    y anota la trazabilidad en la orden.
+    """
+    if not legal_invoices:
+        return
+
+    cid = order.company_id
+    sup_id = order.supplier_id
+
+    # Obtener todas las facturas/tickets vinculados a esta orden si no vienen provistos
+    if not allocated_invoices:
+        alloc_res = await db.execute(
+            select(SupplierPaymentOrderAllocation.invoice_id)
+            .where(SupplierPaymentOrderAllocation.payment_order_id == order.id)
+        )
+        inv_ids = [row[0] for row in alloc_res.all()]
+        if inv_ids:
+            inv_res = await db.execute(
+                select(SupplierInvoice).where(SupplierInvoice.id.in_(inv_ids))
+            )
+            allocated_invoices = list(inv_res.scalars().all())
+        else:
+            allocated_invoices = []
+
+    tickets_by_id = {inv.id: inv for inv in allocated_invoices}
+    notas_op = []
+
+    for leg in legal_invoices:
+        num_clean = (leg.numero_factura or "").strip()
+        timb_clean = (leg.timbrado or "").strip()
+        if not num_clean or not timb_clean:
+            continue
+
+        # Determinar qué tickets ampara esta factura legal
+        amparados = []
+        if leg.ticket_ids:
+            amparados = [tickets_by_id[t_id] for t_id in leg.ticket_ids if t_id in tickets_by_id]
+        if not amparados:
+            # Si no se especificaron ticket_ids específicos, cubre todos los tickets de la orden
+            amparados = allocated_invoices
+
+        ticket_numeros = [t.numero_factura for t in amparados]
+        tickets_str = ", ".join(ticket_numeros) if ticket_numeros else "N/A"
+
+        # 1. Enriquecer los tickets provisorios
+        for ticket in amparados:
+            # Si no tiene timbrado legal, asignarle el timbrado de la factura legal
+            if not ticket.timbrado or ticket.timbrado in ("S/T", "ST", "0", ""):
+                ticket.timbrado = timb_clean
+
+            ref_txt = f"Respaldado con Factura Fiscal: {num_clean} (Timb: {timb_clean}) - OP: {order.numero_orden}"
+            if not ticket.concepto:
+                ticket.concepto = ref_txt
+            elif num_clean not in ticket.concepto:
+                ticket.concepto += f" | {ref_txt}"
+
+        # 2. Registrar la factura legal en supplier_invoices con saldo 0
+        existing_res = await db.execute(
+            select(SupplierInvoice).where(
+                SupplierInvoice.company_id == cid,
+                SupplierInvoice.supplier_id == sup_id,
+                SupplierInvoice.numero_factura == num_clean,
+                SupplierInvoice.timbrado == timb_clean,
+            )
+        )
+        existing_legal = existing_res.scalar_one_or_none()
+
+        monto_leg = Decimal(str(leg.monto or 0))
+        f_emision = leg.fecha_emision or order.fecha_emision or _today()
+        f_venc = leg.fecha_vencimiento or f_emision
+        iva_10 = (monto_leg / Decimal("11")).quantize(Decimal("1"))
+        subtotal = monto_leg - iva_10
+
+        if not existing_legal:
+            new_legal_inv = SupplierInvoice(
+                company_id=cid,
+                supplier_id=sup_id,
+                numero_factura=num_clean,
+                timbrado=timb_clean,
+                fecha_emision=f_emision,
+                fecha_recepcion=f_emision,
+                fecha_vencimiento=f_venc,
+                subtotal=subtotal,
+                descuento=Decimal("0"),
+                iva_10=iva_10,
+                iva_5=Decimal("0"),
+                total=monto_leg,
+                saldo_pendiente=Decimal("0"),
+                moneda="PYG",
+                tipo_cambio=Decimal("1"),
+                condicion=leg.condicion or "contado",
+                tipo_comprobante="factura",
+                estado="pagada",
+                concepto=f"Factura legal en respaldo de compras/tickets ({order.numero_orden}): {tickets_str}",
+            )
+            db.add(new_legal_inv)
+        else:
+            ref_fact = f"Respalda compras/tickets ({order.numero_orden}): {tickets_str}"
+            if not existing_legal.concepto:
+                existing_legal.concepto = ref_fact
+            elif order.numero_orden not in existing_legal.concepto:
+                existing_legal.concepto += f" | {ref_fact}"
+
+        notas_op.append(f"Factura Legal: {num_clean} (Timb: {timb_clean}, ₲ {monto_leg:,.0f})")
+
+    if notas_op:
+        texto_adicional = " | ".join(notas_op)
+        if order.observaciones:
+            order.observaciones += f"\n[Respaldo Fiscal] {texto_adicional}"
+        else:
+            order.observaciones = f"[Respaldo Fiscal] {texto_adicional}"
 
 
 async def _execute_disbursements_internal(
@@ -3753,6 +3887,15 @@ async def _execute_disbursements_internal(
                 referencia=f"{order.numero_orden} (OP)",
                 estado="conciliado",
             ))
+
+    # 4.1 Procesar Facturas Legales si vienen en la liquidación
+    if payload.legal_invoices and len(payload.legal_invoices) > 0:
+        await _process_payment_order_legal_invoices(
+            db=db,
+            order=order,
+            supplier=supplier,
+            legal_invoices=payload.legal_invoices,
+        )
 
     # 5. Marcar Orden como Pagada
     order.estado = "pagado"

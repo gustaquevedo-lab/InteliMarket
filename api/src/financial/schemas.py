@@ -584,6 +584,16 @@ class PaymentOrderDisbursementCreate(BaseModel):
     observaciones: Optional[str] = None
 
 
+class SupplierLegalInvoiceInput(BaseModel):
+    numero_factura: str
+    timbrado: str
+    fecha_emision: Optional[date] = None
+    fecha_vencimiento: Optional[date] = None
+    monto: Decimal
+    condicion: Optional[str] = "contado"
+    ticket_ids: Optional[list[UUID]] = None
+
+
 class SupplierPaymentOrderCreate(BaseModel):
     supplier_id: UUID
     fecha_emision: Optional[date] = None
@@ -592,6 +602,7 @@ class SupplierPaymentOrderCreate(BaseModel):
     estado: Optional[str] = "registrado"  # "registrado", "aguardando_pago", etc.
     allocations: list[PaymentOrderAllocationCreate]
     disbursements: Optional[list[PaymentOrderDisbursementCreate]] = None
+    legal_invoices: Optional[list[SupplierLegalInvoiceInput]] = None
 
 
 class PaymentProposalItem(BaseModel):
@@ -645,6 +656,7 @@ class SupplierPaymentOrderDisburse(BaseModel):
     recibo_proveedor: Optional[str] = None
     observaciones: Optional[str] = None
     disbursements: list[PaymentOrderDisbursementCreate]
+    legal_invoices: Optional[list[SupplierLegalInvoiceInput]] = None
 
 
 class MultiSupplierBatchItem(BaseModel):

@@ -22,6 +22,14 @@ interface InvoiceToPay {
   supplier_nombre?: string
 }
 
+interface LegalInvoiceFormItem {
+  id: string
+  numero_factura: string
+  timbrado: string
+  fecha_emision: string
+  monto: number
+}
+
 interface DisbursementRow {
   forma_pago: "boveda" | "fondo_fijo" | "transferencia" | "cheque" | "nota_credito"
   monto: number
@@ -89,6 +97,9 @@ export default function SupplierPaymentOrderModal({
 
   // Desembolsos / medios de pago
   const [disbursements, setDisbursements] = useState<DisbursementRow[]>([])
+
+  // Facturas comerciales legales de respaldo (para justificar tickets provisorios/sin factura)
+  const [legalInvoices, setLegalInvoices] = useState<LegalInvoiceFormItem[]>([])
 
   // Inicializar facturas
   useEffect(() => {
@@ -176,6 +187,80 @@ export default function SupplierPaymentOrderModal({
     const neto = Math.max(0, subtotal - retenciones)
     return { subtotal, retenciones, neto }
   }, [selectedInvoicesMap])
+
+  // Detección de tickets o remitos provisorios sin factura fiscal
+  const hasUnbilledTickets = useMemo(() => {
+    return Object.values(selectedInvoicesMap).some(
+      item => !item.inv.timbrado || item.inv.timbrado === "S/T" || item.inv.numero_factura.startsWith("AUTO-REC-")
+    )
+  }, [selectedInvoicesMap])
+
+  // Total acumulado en facturas legales ingresadas
+  const totalLegalInvoices = useMemo(() => {
+    return legalInvoices.reduce((sum, item) => sum + (Number(item.monto) || 0), 0)
+  }, [legalInvoices])
+
+  // Auto-sugerir una primera factura legal si hay tickets sin timbrado y aún no se agregó ninguna
+  useEffect(() => {
+    if (step === "step1_facturas" && legalInvoices.length === 0 && summaryFacturas.neto > 0 && hasUnbilledTickets) {
+      setLegalInvoices([
+        {
+          id: Math.random().toString(36).substring(2, 9),
+          numero_factura: "",
+          timbrado: "",
+          fecha_emision: fechaEmision,
+          monto: summaryFacturas.neto,
+        }
+      ])
+    }
+  }, [hasUnbilledTickets, summaryFacturas.neto, fechaEmision, step])
+
+  const addLegalInvoiceRow = () => {
+    const currentSum = legalInvoices.reduce((s, i) => s + (Number(i.monto) || 0), 0)
+    const remaining = Math.max(0, summaryFacturas.neto - currentSum)
+    setLegalInvoices(prev => [
+      ...prev,
+      {
+        id: Math.random().toString(36).substring(2, 9),
+        numero_factura: "",
+        timbrado: "",
+        fecha_emision: fechaEmision,
+        monto: remaining > 0 ? remaining : 0,
+      }
+    ])
+  }
+
+  const removeLegalInvoiceRow = (id: string) => {
+    setLegalInvoices(prev => prev.filter(i => i.id !== id))
+  }
+
+  const updateLegalInvoiceRow = (id: string, patch: Partial<LegalInvoiceFormItem>) => {
+    setLegalInvoices(prev => prev.map(i => i.id === id ? { ...i, ...patch } : i))
+  }
+
+  const getSanitizedLegalInvoices = () => {
+    const active = legalInvoices.filter(i => i.numero_factura.trim() || i.timbrado.trim() || i.monto > 0)
+    for (const leg of active) {
+      if (!leg.numero_factura.trim()) {
+        toast.error("N° de Factura legal requerido", "Debe indicar el número de la factura legal de respaldo.")
+        return null
+      }
+      if (!leg.timbrado.trim()) {
+        toast.error("Timbrado legal requerido", `Debe indicar el timbrado de la factura legal ${leg.numero_factura}.`)
+        return null
+      }
+      if (leg.monto <= 0) {
+        toast.error("Monto inválido", `El monto de la factura legal ${leg.numero_factura} debe ser mayor a 0.`)
+        return null
+      }
+    }
+    return active.map(i => ({
+      numero_factura: i.numero_factura.trim(),
+      timbrado: i.timbrado.trim(),
+      fecha_emision: i.fecha_emision || fechaEmision,
+      monto: i.monto,
+    }))
+  }
 
   // Cotización sugerida para BRL (desde facturas o 1.450 Gs./R$)
   const defaultExchangeRateBRL = useMemo(() => {
@@ -287,6 +372,12 @@ export default function SupplierPaymentOrderModal({
       toast.error("Seleccione al menos una factura", "")
       return
     }
+
+    const validLegalInvoices = getSanitizedLegalInvoices()
+    if (validLegalInvoices === null) {
+      return
+    }
+
     setSubmitting(true)
     try {
       const allocations = Object.values(selectedInvoicesMap).map(item => ({
@@ -301,6 +392,7 @@ export default function SupplierPaymentOrderModal({
         recibo_proveedor: reciboProveedor || undefined,
         observaciones: observaciones || undefined,
         allocations,
+        legal_invoices: validLegalInvoices.length > 0 ? validLegalInvoices : undefined,
       })
 
       toast.success("Orden de Pago Registrada", `Se creó la orden ${res.numero_orden} en estado 'registrado'. Lista para su posterior asignación de medios de pago.`)
@@ -321,6 +413,11 @@ export default function SupplierPaymentOrderModal({
         "Diferencia en medios de pago",
         `El total asignado (${formatPYG(summaryDesembolsos.total)}) no coincide con el total neto (${formatPYG(summaryFacturas.neto)}). Diferencia: ${formatPYG(summaryDesembolsos.diferencia)}`
       )
+      return
+    }
+
+    const validLegalInvoices = getSanitizedLegalInvoices()
+    if (validLegalInvoices === null) {
       return
     }
 
@@ -353,6 +450,7 @@ export default function SupplierPaymentOrderModal({
           recibo_proveedor: reciboProveedor || undefined,
           observaciones: observaciones || undefined,
           disbursements: sanitizedDisbursements,
+          legal_invoices: validLegalInvoices.length > 0 ? validLegalInvoices : undefined,
         })
         toast.success("Orden de Pago Liquidada", `Se desembolsó exitosamente la orden ${res.numero_orden}. Fondos y saldos actualizados.`)
         onSuccess(res)
@@ -371,6 +469,7 @@ export default function SupplierPaymentOrderModal({
           observaciones: observaciones || undefined,
           allocations,
           disbursements: sanitizedDisbursements,
+          legal_invoices: validLegalInvoices.length > 0 ? validLegalInvoices : undefined,
         })
         toast.success("Pago Liquidado con Éxito", `Se emitió y liquidó la orden ${res.numero_orden} por ${formatPYG(summaryFacturas.neto)}.`)
         onSuccess(res)
@@ -584,6 +683,153 @@ export default function SupplierPaymentOrderModal({
                   </div>
                 </div>
               )}
+
+              {/* FACTURAS LEGALES DE RESPALDO (VINCULACIÓN DE TICKETS PROVISORIOS) */}
+              <div className={`p-4 rounded-2xl border transition-all ${
+                hasUnbilledTickets
+                  ? "bg-amber-50/70 dark:bg-amber-950/20 border-amber-300 dark:border-amber-800/80 shadow-sm"
+                  : "bg-slate-50 dark:bg-slate-850/60 border-slate-200 dark:border-slate-800"
+              }`}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold ${
+                      hasUnbilledTickets
+                        ? "bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/30"
+                        : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+                    }`}>
+                      <FileText className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-slate-100">
+                          Facturas Fiscales de Respaldo
+                        </h4>
+                        {hasUnbilledTickets && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                            Tickets sin factura
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Asigná una o más facturas comerciales legales del proveedor para justificar y respaldar estos comprobantes.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addLegalInvoiceRow}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 shadow-sm transition self-start sm:self-auto"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-rose-500" />
+                    <span>Asignar Factura Legal</span>
+                  </button>
+                </div>
+
+                {legalInvoices.length === 0 ? (
+                  <div className="p-3.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-700/80 bg-white/50 dark:bg-slate-900/40 text-center">
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      No se han asignado facturas legales todavía. Hacé clic en <span className="font-semibold text-slate-700 dark:text-slate-200">"Asignar Factura Legal"</span> para cargar el N° de Factura oficial y Timbrado.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="space-y-2.5">
+                      {legalInvoices.map((leg, idx) => (
+                        <div
+                          key={leg.id}
+                          className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center text-xs"
+                        >
+                          <div className="sm:col-span-1 text-[11px] font-mono font-bold text-slate-400">
+                            #{idx + 1}
+                          </div>
+                          <div className="sm:col-span-4">
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block mb-0.5">
+                              N° Factura Legal *
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="001-001-0001234"
+                              value={leg.numero_factura}
+                              onChange={e => updateLegalInvoiceRow(leg.id, { numero_factura: e.target.value })}
+                              className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg font-mono font-bold text-xs"
+                            />
+                          </div>
+                          <div className="sm:col-span-2">
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block mb-0.5">
+                              Timbrado *
+                            </label>
+                            <input
+                              type="text"
+                              maxLength={8}
+                              placeholder="8 dígitos"
+                              value={leg.timbrado}
+                              onChange={e => updateLegalInvoiceRow(leg.id, { timbrado: e.target.value.replace(/\D/g, "") })}
+                              className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg font-mono text-xs"
+                            />
+                          </div>
+                          <div className="sm:col-span-2">
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block mb-0.5">
+                              Fecha Emisión
+                            </label>
+                            <input
+                              type="date"
+                              value={leg.fecha_emision}
+                              onChange={e => updateLegalInvoiceRow(leg.id, { fecha_emision: e.target.value })}
+                              className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs"
+                            />
+                          </div>
+                          <div className="sm:col-span-2">
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block mb-0.5">
+                              Monto Factura *
+                            </label>
+                            <CurrencyInput
+                              currency="PYG"
+                              value={leg.monto}
+                              onChangeValue={val => updateLegalInvoiceRow(leg.id, { monto: val })}
+                              className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg font-mono font-bold text-right text-xs"
+                            />
+                          </div>
+                          <div className="sm:col-span-1 flex justify-center pt-2 sm:pt-0">
+                            <button
+                              type="button"
+                              onClick={() => removeLegalInvoiceRow(leg.id)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition"
+                              title="Quitar esta factura legal"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-2 border-t border-slate-200 dark:border-slate-800 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-500">Total Facturas Legales:</span>
+                        <span className="font-mono font-bold text-slate-900 dark:text-white">
+                          {formatPYG(totalLegalInvoices)}
+                        </span>
+                        {Math.abs(totalLegalInvoices - summaryFacturas.neto) <= 50 && totalLegalInvoices > 0 ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                            <Check className="w-3 h-3" /> Coincide con tickets amortizados
+                          </span>
+                        ) : totalLegalInvoices > 0 ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 px-2 py-0.5 rounded-full border border-amber-500/20">
+                            Diferencia: {formatPYG(Math.abs(totalLegalInvoices - summaryFacturas.neto))}
+                          </span>
+                        ) : null}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={addLegalInvoiceRow}
+                        className="text-xs font-semibold text-rose-600 dark:text-rose-400 hover:underline flex items-center gap-1"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Agregar otra factura legal
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {/* CAMPOS DE METADATOS */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">

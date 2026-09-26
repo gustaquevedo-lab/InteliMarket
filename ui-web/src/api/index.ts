@@ -3708,9 +3708,9 @@ export const api = {
         client.get<{ items: SupplierPaymentOrder[]; total: number }>("/v1/financial/payment-orders", { company_id: COMPANY_ID, ...params } as any),
       get: (orderId: string) =>
         client.get<SupplierPaymentOrder>(`/v1/financial/payment-orders/${orderId}`, { company_id: COMPANY_ID } as any),
-      create: (data: { supplier_id: string; fecha_emision?: string; observaciones?: string; recibo_proveedor?: string; estado?: string; allocations: any[]; disbursements?: any[] }) =>
+      create: (data: { supplier_id: string; fecha_emision?: string; observaciones?: string; recibo_proveedor?: string; estado?: string; allocations: any[]; disbursements?: any[]; legal_invoices?: any[] }) =>
         client.post<SupplierPaymentOrder>(`/v1/financial/payment-orders?company_id=${COMPANY_ID}`, data),
-      disburse: (orderId: string, data: { fecha_pago?: string; recibo_proveedor?: string; observaciones?: string; disbursements: any[] }) =>
+      disburse: (orderId: string, data: { fecha_pago?: string; recibo_proveedor?: string; observaciones?: string; disbursements: any[]; legal_invoices?: any[] }) =>
         client.post<SupplierPaymentOrder>(`/v1/financial/payment-orders/${orderId}/disburse?company_id=${COMPANY_ID}`, data),
       downloadPdf: (orderId: string, numOrden: string) =>
         downloadAuthenticated(`/v1/financial/payment-orders/${orderId}/pdf`, { company_id: COMPANY_ID }, `recibo_orden_pago_${numOrden}.pdf`),
