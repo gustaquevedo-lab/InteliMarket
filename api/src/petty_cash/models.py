@@ -241,6 +241,20 @@ class Expense(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class ExpenseSupplierInvoice(Base):
+    """Tabla join N:M: un gasto puede imputarse a múltiples facturas
+    comerciales de proveedores. Cada fila registra cuánto monto se
+    aplicó a esa factura específica desde ese comprobante de gasto."""
+    __tablename__ = "expense_supplier_invoices"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    expense_id = Column(UUID(as_uuid=True), ForeignKey("expenses.id", ondelete="CASCADE"), nullable=False, index=True)
+    supplier_invoice_id = Column(UUID(as_uuid=True), ForeignKey("supplier_invoices.id", ondelete="CASCADE"), nullable=False, index=True)
+    monto_aplicado = Column(Numeric(15, 2), nullable=False, default=0)
+    moneda = Column(String(3), nullable=False, server_default="PYG")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class ExpenseDisbursement(Base):
     """Línea de desembolso / medio de pago asignado a un gasto (bóveda, fondo fijo, banco, cheque, etc.)"""
     __tablename__ = "expense_disbursements"

@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 from api.src.petty_cash.models import (
     Expense, ExpenseCategory, CostCenter, PettyCashFund, PettyCashFundMovement,
-    PettyCashFundCount, PettyCashRendicion, ExpenseDisbursement,
+    PettyCashFundCount, PettyCashRendicion, ExpenseDisbursement, ExpenseSupplierInvoice,
 )
 from api.src.petty_cash.schemas import (
     ExpenseCreate, ExpenseUpdate, ExpenseSummary, CostCenterCreate, PettyCashFundCreate, PettyCashFundUpdate,
@@ -568,38 +568,73 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
         notas=data.notas,
     )
     db.add(exp)
+    await db.flush()
 
-    # Si se asocia a una factura comercial pendiente, amortizar en Cuentas por Pagar
-    if data.supplier_invoice_id:
+    # Si se asocia a facturas comerciales pendientes (multi-factura o legacy single)
+    raw_invoice_ids = data.linked_invoice_ids
+    if raw_invoice_ids is None and data.supplier_invoice_id:
+        raw_invoice_ids = [data.supplier_invoice_id]
+
+    if raw_invoice_ids:
         from api.src.financial.models import SupplierInvoice, SupplierInvoicePayment
-        inv_res = await db.execute(select(SupplierInvoice).where(SupplierInvoice.id == uuid.UUID(data.supplier_invoice_id)))
-        target_inv = inv_res.scalar_one_or_none()
-        if target_inv:
-            monto_aplicar = min(monto, target_inv.saldo_pendiente)
-            target_inv.saldo_pendiente -= monto_aplicar
-            if target_inv.saldo_pendiente <= 0:
-                target_inv.saldo_pendiente = Decimal("0")
-                target_inv.estado = "pagada"
-            else:
-                target_inv.estado = "parcial"
+        monto_total_exp = monto
+        for idx, inv_id_str in enumerate(raw_invoice_ids):
+            inv_uuid = _safe_uuid(inv_id_str)
+            if not inv_uuid:
+                continue
+            inv_res = await db.execute(select(SupplierInvoice).where(SupplierInvoice.id == inv_uuid))
+            target_inv = inv_res.scalar_one_or_none()
+            if not target_inv:
+                continue
 
-            payment = SupplierInvoicePayment(
-                invoice_id=target_inv.id,
-                payment_method="fondo_fijo",
-                monto=monto_aplicar,
-                moneda="PYG",
-                fecha_pago=data.fecha_gasto or date.today(),
-                referencia=f"Comprobante caja chica {data.numero_factura or ''}",
-                petty_cash_fund_id=fund.id if fund else None,
-                estado="conciliado",
-            )
-            db.add(payment)
-            exp.es_pago_proveedor = True
-            if target_inv.supplier_id:
-                exp.supplier_id = target_inv.supplier_id
+            if data.linked_invoice_montos and idx < len(data.linked_invoice_montos):
+                monto_aplicar = min(
+                    Decimal(str(data.linked_invoice_montos[idx])),
+                    Decimal(str(target_inv.saldo_pendiente or 0))
+                )
+            else:
+                n_facturas = len(raw_invoice_ids)
+                monto_por_factura = (monto_total_exp / n_facturas).quantize(Decimal("1"))
+                monto_aplicar = min(monto_por_factura, Decimal(str(target_inv.saldo_pendiente or 0)))
+
+            monto_aplicar = max(Decimal("0"), monto_aplicar)
+            target_inv.saldo_pendiente = max(Decimal("0"), Decimal(str(target_inv.saldo_pendiente or 0)) - monto_aplicar)
+            target_inv.estado = "pagada" if target_inv.saldo_pendiente <= 0 else "parcial"
+
+            db.add(ExpenseSupplierInvoice(
+                expense_id=exp.id,
+                supplier_invoice_id=inv_uuid,
+                monto_aplicado=monto_aplicar,
+                moneda=target_inv.moneda or "PYG",
+            ))
+
+            if monto_aplicar > 0:
+                payment = SupplierInvoicePayment(
+                    invoice_id=target_inv.id,
+                    payment_method="fondo_fijo",
+                    monto=monto_aplicar,
+                    moneda=target_inv.moneda or "PYG",
+                    fecha_pago=data.fecha_gasto or date.today(),
+                    referencia=f"Comprobante caja chica {data.numero_factura or ''} | multi-factura",
+                    petty_cash_fund_id=fund.id if fund else None,
+                    estado="conciliado",
+                )
+                db.add(payment)
+
+            if idx == 0:
+                exp.supplier_invoice_id = inv_uuid
+                if target_inv.supplier_id:
+                    exp.supplier_id = target_inv.supplier_id
+                if not exp.numero_factura:
+                    exp.numero_factura = target_inv.numero_factura
+                if not exp.timbrado:
+                    exp.timbrado = target_inv.timbrado
+
+        exp.es_pago_proveedor = True
 
     await db.commit()
     await db.refresh(exp)
+    await _populate_linked_invoices(db, exp)
     return exp
 
 
@@ -1033,6 +1068,53 @@ async def list_expense_disbursements(db: AsyncSession, expense_id: str) -> list[
 
 
 
+async def _populate_linked_invoices(db: AsyncSession, exp: Expense) -> None:
+    if not exp:
+        return
+    from api.src.financial.models import SupplierInvoice
+
+    links_res = await db.execute(
+        select(ExpenseSupplierInvoice).where(ExpenseSupplierInvoice.expense_id == exp.id)
+    )
+    links = list(links_res.scalars().all())
+    if links:
+        exp.linked_invoice_ids = [l.supplier_invoice_id for l in links]
+        inv_ids = [l.supplier_invoice_id for l in links]
+        inv_res = await db.execute(select(SupplierInvoice).where(SupplierInvoice.id.in_(inv_ids)))
+        inv_map = {i.id: i for i in inv_res.scalars().all()}
+        exp.linked_invoices = [
+            {
+                "supplier_invoice_id": str(l.supplier_invoice_id),
+                "monto_aplicado": float(l.monto_aplicado or 0),
+                "moneda": l.moneda,
+                "numero_factura": inv_map[l.supplier_invoice_id].numero_factura if l.supplier_invoice_id in inv_map else None,
+                "timbrado": inv_map[l.supplier_invoice_id].timbrado if l.supplier_invoice_id in inv_map else None,
+                "total": float(inv_map[l.supplier_invoice_id].total or 0) if l.supplier_invoice_id in inv_map else None,
+                "saldo_pendiente": float(inv_map[l.supplier_invoice_id].saldo_pendiente or 0) if l.supplier_invoice_id in inv_map else None,
+            }
+            for l in links
+        ]
+    elif exp.supplier_invoice_id:
+        exp.linked_invoice_ids = [exp.supplier_invoice_id]
+        inv_res = await db.execute(select(SupplierInvoice).where(SupplierInvoice.id == exp.supplier_invoice_id))
+        inv = inv_res.scalar_one_or_none()
+        if inv:
+            exp.linked_invoices = [{
+                "supplier_invoice_id": str(inv.id),
+                "monto_aplicado": float(exp.monto or 0),
+                "moneda": inv.moneda,
+                "numero_factura": inv.numero_factura,
+                "timbrado": inv.timbrado,
+                "total": float(inv.total or 0),
+                "saldo_pendiente": float(inv.saldo_pendiente or 0),
+            }]
+        else:
+            exp.linked_invoices = []
+    else:
+        exp.linked_invoice_ids = []
+        exp.linked_invoices = []
+
+
 async def get_expense(db: AsyncSession, expense_id: str) -> Expense | None:
     eid = _safe_uuid(expense_id)
     if not eid:
@@ -1041,6 +1123,7 @@ async def get_expense(db: AsyncSession, expense_id: str) -> Expense | None:
     exp = result.scalar_one_or_none()
     if exp:
         exp.disbursements = await list_expense_disbursements(db, str(exp.id))
+        await _populate_linked_invoices(db, exp)
     return exp
 
 
@@ -1462,83 +1545,171 @@ async def update_expense(db: AsyncSession, expense_id: str, data: ExpenseUpdate)
         if update_data.get("employee_ci"):
             update_data["ruc"] = update_data["employee_ci"]
 
-    # Si se asocia, cambia o desvincula de una factura comercial pendiente mediante edición/reclasificación
+    # ── Vinculación Multi-Factura (N:M) ────────────────────────────────────────
+    # Soporta linked_invoice_ids[] (nueva API multi-factura) Y supplier_invoice_id
+    # (retrocompatibilidad). Si llega linked_invoice_ids, tiene prioridad total.
     from api.src.financial.models import SupplierInvoice, SupplierInvoicePayment
     from api.src.purchases.models import Supplier
+    from api.src.petty_cash.models import ExpenseSupplierInvoice
 
-    target_invoice_id = update_data.get("supplier_invoice_id")
     grouped_ids = update_data.pop("grouped_expense_ids", None)
+    linked_invoice_ids_raw: list | None = update_data.pop("linked_invoice_ids", None)
+    linked_invoice_montos_raw: list | None = update_data.pop("linked_invoice_montos", None)
 
-    # 1. Si tenía una factura previa diferente o se desvincula, restituir el saldo de la factura anterior
-    if exp.supplier_invoice_id and ("supplier_invoice_id" in update_data) and (target_invoice_id != exp.supplier_invoice_id):
-        old_inv_res = await db.execute(select(SupplierInvoice).where(SupplierInvoice.id == exp.supplier_invoice_id))
-        old_inv = old_inv_res.scalar_one_or_none()
-        if old_inv:
-            old_monto = Decimal(str(exp.monto or 0))
-            old_inv.saldo_pendiente = min(Decimal(str(old_inv.total)), Decimal(str(old_inv.saldo_pendiente)) + old_monto)
-            if old_inv.saldo_pendiente >= old_inv.total:
-                old_inv.estado = "pendiente"
-            elif old_inv.saldo_pendiente > 0:
-                old_inv.estado = "parcial"
-            # Anular pagos previos generados por este comprobante
-            await db.execute(
-                update(SupplierInvoicePayment)
-                .where(
-                    SupplierInvoicePayment.invoice_id == old_inv.id,
-                    SupplierInvoicePayment.referencia.ilike(f"%{exp.id}%")
-                )
-                .values(estado="anulado")
+    # Normalizar: si viene supplier_invoice_id solo (retrocompat), convertir a lista
+    target_invoice_id_single = update_data.get("supplier_invoice_id")
+    if linked_invoice_ids_raw is None and target_invoice_id_single is not None:
+        linked_invoice_ids_raw = [str(target_invoice_id_single)] if target_invoice_id_single else []
+
+    use_multi_invoice = linked_invoice_ids_raw is not None
+
+    if use_multi_invoice:
+        # ── PASO 1: Desvincular TODAS las facturas previas de este gasto ──────
+        old_links_res = await db.execute(
+            select(ExpenseSupplierInvoice).where(ExpenseSupplierInvoice.expense_id == exp.id)
+        )
+        old_links = list(old_links_res.scalars().all())
+        old_link_invoice_ids = {str(ol.supplier_invoice_id) for ol in old_links}
+
+        for old_link in old_links:
+            old_inv_res = await db.execute(
+                select(SupplierInvoice).where(SupplierInvoice.id == old_link.supplier_invoice_id)
             )
-        exp.supplier_invoice_id = None
-
-    # 2. Si se asigna una nueva factura comercial
-    if target_invoice_id:
-        inv_res = await db.execute(select(SupplierInvoice).where(SupplierInvoice.id == target_invoice_id))
-        target_inv = inv_res.scalar_one_or_none()
-        if target_inv:
-            sup_res = await db.execute(select(Supplier).where(Supplier.id == target_inv.supplier_id))
-            supplier = sup_res.scalar_one_or_none()
-            sup_name = supplier.razon_social or supplier.nombre_fantasia if supplier else None
-            sup_ruc = supplier.ruc if supplier else None
-
-            # Si el comprobante actual no estaba vinculado previamente a esta factura
-            if exp.supplier_invoice_id != target_invoice_id:
-                monto_val = Decimal(str(update_data.get("monto") if update_data.get("monto") is not None else exp.monto))
-                monto_aplicar = min(monto_val, target_inv.saldo_pendiente)
-                target_inv.saldo_pendiente = max(Decimal("0"), target_inv.saldo_pendiente - monto_aplicar)
-                if target_inv.saldo_pendiente <= 0:
-                    target_inv.saldo_pendiente = Decimal("0")
-                    target_inv.estado = "pagada"
-                else:
-                    target_inv.estado = "parcial"
-
-                if monto_aplicar > 0:
-                    payment = SupplierInvoicePayment(
-                        invoice_id=target_inv.id,
-                        payment_method="fondo_fijo",
-                        monto=monto_aplicar,
-                        moneda=target_inv.moneda or "PYG",
-                        fecha_pago=exp.fecha_gasto or date.today(),
-                        referencia=f"Reclasificación comprobante gasto {exp.numero_factura or exp.id}",
-                        petty_cash_fund_id=exp.fund_id,
-                        estado="conciliado",
+            old_inv = old_inv_res.scalar_one_or_none()
+            if old_inv:
+                monto_restituir = Decimal(str(old_link.monto_aplicado or 0))
+                old_inv.saldo_pendiente = min(
+                    Decimal(str(old_inv.total or 0)),
+                    Decimal(str(old_inv.saldo_pendiente or 0)) + monto_restituir
+                )
+                old_inv.estado = "pendiente" if old_inv.saldo_pendiente >= Decimal(str(old_inv.total or 0)) else "parcial"
+                await db.execute(
+                    update(SupplierInvoicePayment)
+                    .where(
+                        SupplierInvoicePayment.invoice_id == old_link.supplier_invoice_id,
+                        SupplierInvoicePayment.referencia.ilike(f"%{exp.id}%")
                     )
-                    db.add(payment)
+                    .values(estado="anulado")
+                )
+            await db.delete(old_link)
 
-                update_data["es_pago_proveedor"] = True
-                if target_inv.supplier_id:
-                    update_data["supplier_id"] = target_inv.supplier_id
-                if sup_name:
-                    update_data["proveedor"] = sup_name
-                if sup_ruc:
-                    update_data["ruc"] = sup_ruc
-                if target_inv.numero_factura:
-                    update_data["numero_factura"] = target_inv.numero_factura
-                if target_inv.timbrado:
-                    update_data["timbrado"] = target_inv.timbrado
+        # Restaurar saldo de supplier_invoice_id legacy si no estaba en la tabla join
+        if exp.supplier_invoice_id and str(exp.supplier_invoice_id) not in old_link_invoice_ids:
+            legacy_inv_res = await db.execute(
+                select(SupplierInvoice).where(SupplierInvoice.id == exp.supplier_invoice_id)
+            )
+            legacy_inv = legacy_inv_res.scalar_one_or_none()
+            if legacy_inv:
+                monto_legacy = Decimal(str(exp.monto or 0))
+                legacy_inv.saldo_pendiente = min(
+                    Decimal(str(legacy_inv.total or 0)),
+                    Decimal(str(legacy_inv.saldo_pendiente or 0)) + monto_legacy
+                )
+                legacy_inv.estado = "pendiente" if legacy_inv.saldo_pendiente >= Decimal(str(legacy_inv.total or 0)) else "parcial"
+                await db.execute(
+                    update(SupplierInvoicePayment)
+                    .where(
+                        SupplierInvoicePayment.invoice_id == exp.supplier_invoice_id,
+                        SupplierInvoicePayment.referencia.ilike(f"%{exp.id}%")
+                    )
+                    .values(estado="anulado")
+                )
 
-            # Si se indicaron comprobantes adicionales a agrupar a esta misma factura
-            if grouped_ids:
+        exp.supplier_invoice_id = None
+        update_data["supplier_invoice_id"] = None
+        await db.flush()
+
+        # ── PASO 2: Vincular cada factura de la nueva lista ───────────────────
+        new_ids = [iid for iid in linked_invoice_ids_raw if iid]
+        monto_total_exp = Decimal(str(update_data.get("monto") if update_data.get("monto") is not None else exp.monto or 0))
+        first_supplier_id = None
+        first_supplier_name = None
+        first_supplier_ruc = None
+        first_inv_factura = None
+        first_inv_timbrado = None
+
+        for idx, inv_id_str in enumerate(new_ids):
+            try:
+                inv_uuid = uuid.UUID(str(inv_id_str))
+            except ValueError:
+                continue
+
+            inv_res = await db.execute(select(SupplierInvoice).where(SupplierInvoice.id == inv_uuid))
+            inv = inv_res.scalar_one_or_none()
+            if not inv:
+                continue
+
+            # Monto a aplicar: usa el indicado por la UI o distribuye equitativamente
+            if linked_invoice_montos_raw and idx < len(linked_invoice_montos_raw):
+                monto_aplicar = min(
+                    Decimal(str(linked_invoice_montos_raw[idx])),
+                    Decimal(str(inv.saldo_pendiente or 0))
+                )
+            else:
+                n_facturas = len(new_ids)
+                monto_por_factura = (monto_total_exp / n_facturas).quantize(Decimal("1"))
+                monto_aplicar = min(monto_por_factura, Decimal(str(inv.saldo_pendiente or 0)))
+
+            monto_aplicar = max(Decimal("0"), monto_aplicar)
+
+            inv.saldo_pendiente = max(Decimal("0"), Decimal(str(inv.saldo_pendiente or 0)) - monto_aplicar)
+            inv.estado = "pagada" if inv.saldo_pendiente <= 0 else "parcial"
+
+            db.add(ExpenseSupplierInvoice(
+                expense_id=exp.id,
+                supplier_invoice_id=inv_uuid,
+                monto_aplicado=monto_aplicar,
+                moneda=inv.moneda or "PYG",
+            ))
+
+            if monto_aplicar > 0:
+                db.add(SupplierInvoicePayment(
+                    invoice_id=inv.id,
+                    payment_method="fondo_fijo",
+                    monto=monto_aplicar,
+                    moneda=inv.moneda or "PYG",
+                    fecha_pago=exp.fecha_gasto or date.today(),
+                    referencia=f"Comprobante gasto {exp.numero_factura or str(exp.id)[:8]} | multi-factura",
+                    petty_cash_fund_id=exp.fund_id,
+                    estado="conciliado",
+                ))
+
+            if idx == 0:
+                exp.supplier_invoice_id = inv_uuid
+                update_data["supplier_invoice_id"] = inv_uuid
+                if inv.supplier_id:
+                    sup_res = await db.execute(select(Supplier).where(Supplier.id == inv.supplier_id))
+                    supplier = sup_res.scalar_one_or_none()
+                    first_supplier_id = inv.supplier_id
+                    first_supplier_name = (supplier.razon_social or supplier.nombre_fantasia) if supplier else None
+                    first_supplier_ruc = supplier.ruc if supplier else None
+                first_inv_factura = inv.numero_factura
+                first_inv_timbrado = inv.timbrado
+
+        if new_ids:
+            update_data["es_pago_proveedor"] = True
+            if first_supplier_id:
+                update_data["supplier_id"] = first_supplier_id
+            if first_supplier_name and not update_data.get("proveedor"):
+                update_data["proveedor"] = first_supplier_name
+            if first_supplier_ruc and not update_data.get("ruc"):
+                update_data["ruc"] = first_supplier_ruc
+            if len(new_ids) == 1:
+                if first_inv_factura and not update_data.get("numero_factura"):
+                    update_data["numero_factura"] = first_inv_factura
+                if first_inv_timbrado and not update_data.get("timbrado"):
+                    update_data["timbrado"] = first_inv_timbrado
+        else:
+            update_data["es_pago_proveedor"] = False
+            update_data["supplier_id"] = None
+            update_data["supplier_invoice_id"] = None
+
+        # Agrupación de comprobantes adicionales
+        if grouped_ids and new_ids:
+            first_inv_uuid = uuid.UUID(str(new_ids[0]))
+            t_res = await db.execute(select(SupplierInvoice).where(SupplierInvoice.id == first_inv_uuid))
+            t_inv = t_res.scalar_one_or_none()
+            if t_inv:
                 for gid in grouped_ids:
                     if str(gid) == str(exp.id):
                         continue
@@ -1548,40 +1719,25 @@ async def update_expense(db: AsyncSession, expense_id: str, data: ExpenseUpdate)
                         continue
                     g_res = await db.execute(select(Expense).where(Expense.id == g_uuid))
                     g_exp = g_res.scalar_one_or_none()
-                    if g_exp and g_exp.supplier_invoice_id != target_invoice_id:
+                    if g_exp and g_exp.supplier_invoice_id != first_inv_uuid:
                         g_monto = Decimal(str(g_exp.monto or 0))
-                        g_monto_aplicar = min(g_monto, target_inv.saldo_pendiente)
-                        target_inv.saldo_pendiente = max(Decimal("0"), target_inv.saldo_pendiente - g_monto_aplicar)
-                        if target_inv.saldo_pendiente <= 0:
-                            target_inv.saldo_pendiente = Decimal("0")
-                            target_inv.estado = "pagada"
-                        else:
-                            target_inv.estado = "parcial"
-
-                        if g_monto_aplicar > 0:
-                            g_payment = SupplierInvoicePayment(
-                                invoice_id=target_inv.id,
-                                payment_method="fondo_fijo",
-                                monto=g_monto_aplicar,
-                                moneda=target_inv.moneda or "PYG",
-                                fecha_pago=g_exp.fecha_gasto or date.today(),
-                                referencia=f"Imputación agrupada comprobante {g_exp.numero_factura or str(g_exp.id)[:8]}",
-                                petty_cash_fund_id=g_exp.fund_id,
-                                estado="conciliado",
-                            )
-                            db.add(g_payment)
-
+                        g_aplicar = min(g_monto, Decimal(str(t_inv.saldo_pendiente or 0)))
+                        t_inv.saldo_pendiente = max(Decimal("0"), Decimal(str(t_inv.saldo_pendiente or 0)) - g_aplicar)
+                        t_inv.estado = "pagada" if t_inv.saldo_pendiente <= 0 else "parcial"
+                        if g_aplicar > 0:
+                            db.add(SupplierInvoicePayment(
+                                invoice_id=t_inv.id, payment_method="fondo_fijo", monto=g_aplicar,
+                                moneda=t_inv.moneda or "PYG", fecha_pago=g_exp.fecha_gasto or date.today(),
+                                referencia=f"Imputación agrupada {g_exp.numero_factura or str(g_exp.id)[:8]}",
+                                petty_cash_fund_id=g_exp.fund_id, estado="conciliado",
+                            ))
                         g_exp.es_pago_proveedor = True
-                        g_exp.supplier_id = target_inv.supplier_id
-                        g_exp.supplier_invoice_id = target_inv.id
-                        if sup_name:
-                            g_exp.proveedor = sup_name
-                        if sup_ruc:
-                            g_exp.ruc = sup_ruc
-                        if target_inv.numero_factura:
-                            g_exp.numero_factura = target_inv.numero_factura
-                        if target_inv.timbrado:
-                            g_exp.timbrado = target_inv.timbrado
+                        g_exp.supplier_id = t_inv.supplier_id
+                        g_exp.supplier_invoice_id = first_inv_uuid
+                        if first_supplier_name:
+                            g_exp.proveedor = first_supplier_name
+                        if first_supplier_ruc:
+                            g_exp.ruc = first_supplier_ruc
 
     for field, value in update_data.items():
         if value is not None or field in ("supplier_invoice_id", "supplier_id"):
@@ -1596,6 +1752,7 @@ async def update_expense(db: AsyncSession, expense_id: str, data: ExpenseUpdate)
 
     await db.commit()
     await db.refresh(exp)
+    await _populate_linked_invoices(db, exp)
     return exp
 
 

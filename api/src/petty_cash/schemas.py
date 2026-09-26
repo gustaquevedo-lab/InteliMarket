@@ -133,6 +133,8 @@ class ExpenseCreate(BaseModel):
     es_pago_proveedor: Optional[bool] = False
     supplier_id: Optional[str] = None
     supplier_invoice_id: Optional[str] = None
+    linked_invoice_ids: Optional[list[str]] = None
+    linked_invoice_montos: Optional[list[float]] = None
     # Clasificación Anticipo de Sueldo (Nómina / SueldOK)
     es_anticipo_sueldo: Optional[bool] = False
     employee_id: Optional[str] = None
@@ -169,6 +171,11 @@ class ExpenseUpdate(BaseModel):
     es_pago_proveedor: Optional[bool] = None
     supplier_id: Optional[str] = None
     supplier_invoice_id: Optional[str] = None
+    # Multi-factura: lista de IDs de facturas comerciales a vincular a este comprobante
+    linked_invoice_ids: Optional[list[str]] = None
+    # Montos aplicados por factura (mismo orden que linked_invoice_ids). Si no se provee,
+    # se aplica el monto del gasto proporcional o min(monto_gasto, saldo_factura).
+    linked_invoice_montos: Optional[list[float]] = None
     grouped_expense_ids: Optional[list[str]] = None
     # Clasificación Anticipo de Sueldo (Nómina / SueldOK)
     es_anticipo_sueldo: Optional[bool] = None
@@ -290,6 +297,8 @@ class ExpenseResponse(BaseModel):
     es_pago_proveedor: bool = False
     supplier_id: Optional[UUID] = None
     supplier_invoice_id: Optional[UUID] = None
+    linked_invoice_ids: Optional[list[UUID]] = None
+    linked_invoices: Optional[list[dict]] = None
     # Clasificación Anticipo de Sueldo (Nómina / SueldOK)
     es_anticipo_sueldo: bool = False
     employee_id: Optional[str] = None
