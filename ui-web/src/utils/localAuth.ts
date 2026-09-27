@@ -21,7 +21,7 @@ let syncing = false
  * Se llama en segundo plano (login, ciclo periodico de syncManager) -- si
  * falla (sin conexion), simplemente deja el cache anterior como esta. */
 export async function syncSupervisorPins(): Promise<void> {
-  if (syncing) return
+  if (syncing || !localStorage.getItem("access_token")) return
   syncing = true
   try {
     const res = await api.auth.posSupervisorPins()

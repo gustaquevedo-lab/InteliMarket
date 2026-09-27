@@ -127,10 +127,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    const handleSessionExpired = () => {
+      if (localStorage.getItem("station_token")) return
+      setUser(null)
+      localStorage.removeItem("cached_user_profile")
+      if (isElectron) sessionStorage.removeItem("electron_session_initialized")
+      if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+        window.location.href = "/login?expired=1"
+      }
+    }
+
+    window.addEventListener("auth:session-expired", handleSessionExpired)
     identificar()
     return () => {
       cancelado = true
       if (reintento) clearTimeout(reintento)
+      window.removeEventListener("auth:session-expired", handleSessionExpired)
     }
   }, [])
 

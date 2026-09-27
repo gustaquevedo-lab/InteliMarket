@@ -1,5 +1,6 @@
 """Auth API router"""
 
+import logging
 import secrets
 import uuid
 from datetime import datetime, timezone
@@ -7,6 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy import select, update, delete, text, or_
 from sqlalchemy.sql import func
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from api.src.db import get_db
 from api.src.auth.models import User, StaffShift
@@ -206,9 +209,11 @@ async def refresh_token_endpoint(body: dict, db: AsyncSession = Depends(get_db))
         })
         new_refresh = create_refresh_token({"sub": str(user.id)})
         return TokenResponse(access_token=access_token, refresh_token=new_refresh)
-    except HTTPException:
+    except HTTPException as he:
+        logger.warning(f"[Auth Refresh] Falló validación de refresh token: {he.detail}")
         raise
     except Exception as e:
+        logger.warning(f"[Auth Refresh] Error inesperado en refresh token: {e}")
         raise HTTPException(status_code=401, detail="Token de refresco inválido o expirado")
 
 

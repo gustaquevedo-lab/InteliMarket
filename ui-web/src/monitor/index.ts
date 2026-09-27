@@ -115,14 +115,18 @@ function enqueue(ev: MonEvent) {
 
 export async function flush(keepalive = false) {
   if (flushing || !queue.length) return
+  if (typeof navigator !== "undefined" && !navigator.onLine) return
   const tk = token()
   if (!tk) return
   flushing = true
   const batch = queue.slice(0, 20)
+  const ctrl = typeof AbortController !== "undefined" && !keepalive ? new AbortController() : null
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), 6000) : null
   try {
     const res = await fetch(`${API_BASE}/v1/monitor/ingest`, {
       method: "POST",
       keepalive,
+      signal: ctrl?.signal,
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${tk}` },
       body: JSON.stringify({ events: batch }),
     })
@@ -130,7 +134,8 @@ export async function flush(keepalive = false) {
       queue = queue.slice(batch.length)
       storeQueue()
     }
-  } catch { /* sin red: queda en la cola y se reintenta */ } finally {
+  } catch { /* sin red o timeout: queda en la cola y se reintenta */ } finally {
+    if (timer) clearTimeout(timer)
     flushing = false
   }
 }

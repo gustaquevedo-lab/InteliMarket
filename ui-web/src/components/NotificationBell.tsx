@@ -57,6 +57,10 @@ export default function NotificationBell() {
   }, [])
 
   async function loadNotifications() {
+    if (!localStorage.getItem("access_token")) {
+      setLoading(false)
+      return
+    }
     try {
       const data = await api.notifications.listNotifications({ limit: 10 })
       setNotifications(data.notifications)

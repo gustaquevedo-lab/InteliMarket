@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { Eye, EyeOff, Loader2, User as UserIcon, ArrowLeft, ShieldCheck, Zap, RefreshCw } from "lucide-react"
 
 import { useAuth } from "../context/AuthContext"
@@ -188,8 +188,15 @@ export default function Login() {
   const [tenantNombre, setTenantNombre] = useState("")
   const { login, register, logout } = useAuth()
   const toast = useToast()
+  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const emailRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (searchParams.get("expired") === "1") {
+      setError("Tu sesión ha expirado por inactividad. Por favor ingresá nuevamente.")
+    }
+  }, [searchParams])
 
   const isElectron = typeof window !== "undefined" && !!(window as any).electronAPI
 

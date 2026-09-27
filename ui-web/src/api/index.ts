@@ -51,14 +51,33 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, fallbackValue?: 
 let isRefreshing = false
 let refreshPromise: Promise<string | null> | null = null
 
+function notifySessionExpired() {
+  if (typeof window !== "undefined" && !localStorage.getItem("station_token")) {
+    window.dispatchEvent(new CustomEvent("auth:session-expired"))
+  }
+}
+
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   let token = localStorage.getItem("access_token")
+  const cleanEndpoint = endpoint.startsWith("/api") ? endpoint.substring(4) : endpoint
+  const isPublicEndpoint =
+    cleanEndpoint.startsWith("/v1/auth/login") ||
+    cleanEndpoint.startsWith("/v1/auth/pos-staff") ||
+    cleanEndpoint.startsWith("/v1/auth/register") ||
+    cleanEndpoint.startsWith("/v1/auth/reset-password") ||
+    cleanEndpoint.startsWith("/health") ||
+    cleanEndpoint.startsWith("/uploads/")
+
+  // Si no hay token guardado ni es ruta pública o estación, no saturar la red con 401 garantizados
+  if (!token && !isPublicEndpoint && !localStorage.getItem("station_token")) {
+    throw new Error("No hay sesión activa. Por favor inicie sesión.")
+  }
+
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),
   }
   if (token) headers["Authorization"] = `Bearer ${token}`
-  const cleanEndpoint = endpoint.startsWith("/api") ? endpoint.substring(4) : endpoint
   let response: Response
   try {
     response = await fetch(`${API_BASE}${cleanEndpoint}`, { ...options, headers })
@@ -103,6 +122,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
                 localStorage.removeItem("access_token")
                 localStorage.removeItem("refresh_token")
                 localStorage.removeItem("user_email")
+                notifySessionExpired()
               }
               return null
             } else {
@@ -140,6 +160,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
         localStorage.removeItem("access_token")
         localStorage.removeItem("refresh_token")
         localStorage.removeItem("user_email")
+        notifySessionExpired()
       }
     }
   }
