@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { useTheme } from '@/hooks/useTheme';
 import { formatGS } from '@/lib/format';
+import { calculateDistanceMeters, formatDistance } from '@/lib/location';
 
 export interface RouteStop {
   customer_id: string;
@@ -35,11 +36,13 @@ export interface RouteStop {
 interface VisitCardProps {
   stop: RouteStop;
   index?: number;
+  userLocation?: { latitude: number; longitude: number } | null;
   onPress: () => void;
 }
 
-export function VisitCard({ stop, index, onPress }: VisitCardProps) {
+export function VisitCard({ stop, index, userLocation, onPress }: VisitCardProps) {
   const { theme, isDark } = useTheme();
+
   const isCompleted = stop.estado === 'cerrada';
   const isInProgress = stop.estado === 'abierta';
 
@@ -94,6 +97,19 @@ export function VisitCard({ stop, index, onPress }: VisitCardProps) {
     : stop.ci || stop.cedula
     ? `CI: ${stop.ci || stop.cedula}`
     : null;
+
+  const distanceText =
+    userLocation && stop.latitud && stop.longitud
+      ? formatDistance(
+          calculateDistanceMeters(
+            userLocation.latitude,
+            userLocation.longitude,
+            stop.latitud,
+            stop.longitud
+          )
+        )
+      : null;
+
 
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.88}>
@@ -209,24 +225,24 @@ export function VisitCard({ stop, index, onPress }: VisitCardProps) {
               </View>
             )}
 
-            {/* Chip de GPS */}
+            {/* Chip de GPS con Distancia */}
             {stop.latitud && stop.longitud ? (
               <View
                 style={[
                   styles.chipPill,
-                  { backgroundColor: isDark ? '#064E3B' : '#DCFCE7' },
+                  { backgroundColor: isDark ? 'rgba(16, 185, 129, 0.15)' : '#DCFCE7' },
                 ]}
               >
                 <Ionicons name="location" size={11} color="#10B981" />
                 <Text style={[styles.chipText, { color: '#10B981', fontWeight: '800' }]}>
-                  GPS Activo
+                  GPS Activo{distanceText ? ` • A ${distanceText}` : ''}
                 </Text>
               </View>
             ) : (
               <View
                 style={[
                   styles.chipPill,
-                  { backgroundColor: isDark ? '#78350F' : '#FEF3C7' },
+                  { backgroundColor: isDark ? 'rgba(245, 158, 11, 0.15)' : '#FEF3C7' },
                 ]}
               >
                 <Ionicons name="alert-circle" size={11} color="#F59E0B" />

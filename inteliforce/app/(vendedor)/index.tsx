@@ -17,10 +17,13 @@ import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { VisitCard, RouteStop } from '@/components/visita/VisitCard';
+import { RouteMapView } from '@/components/visita/RouteMapView';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { InteliforceLogo } from '@/components/ui/InteliforceLogo';
+import { JornadaGateBanner } from '@/components/ui/JornadaGateBanner';
 import { useAuth } from '@/hooks/useAuth';
+import { useAttendanceGuard } from '@/hooks/useAttendanceGuard';
 import { useLocation } from '@/hooks/useLocation';
 import { useOfflineQueue } from '@/hooks/useOfflineQueue';
 import { useTheme } from '@/hooks/useTheme';
@@ -59,7 +62,9 @@ export default function VendedorDashboard() {
   const { location, accuracy, requestFix, isLocating } = useLocation();
   const { isConnected, pendingCount, isSyncing, triggerSync } = useOfflineQueue();
   const { startVisit } = useVisit();
+  const { isJornadaActiva, guardAction, refetchAttendance } = useAttendanceGuard();
 
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const [filter, setFilter] = useState<'all' | 'pending' | 'completed'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -136,26 +141,6 @@ export default function VendedorDashboard() {
       }
     },
   });
-
-  // Query Asistencia del día para bloqueo de jornada comercial
-  const {
-    data: attendance,
-    isLoading: loadingAttendance,
-    refetch: refetchAttendance,
-  } = useQuery<any>({
-    queryKey: ['attendance-today'],
-    staleTime: 60 * 1000,
-    retry: 1,
-    queryFn: async () => {
-      try {
-        return await api.get<any>('/attendance/today');
-      } catch {
-        return null;
-      }
-    },
-  });
-
-  const isJornadaActiva = attendance?.estado_jornada === 'en_jornada';
 
   const onRefresh = useCallback(async () => {
     await Promise.all([refetchRoutes(), refetchTargets(), refetchAttendance()]);
@@ -368,73 +353,14 @@ export default function VendedorDashboard() {
           </View>
         )}
 
-        {/* Bloqueo estricto de jornada: Si la jornada NO ha sido iniciada, nada puede hacer hasta marcar Entrada */}
-        {attendance && !isJornadaActiva ? (
-          <View style={styles.jornadaLockContainer}>
-            <View
-              style={[
-                styles.jornadaLockCard,
-                {
-                  backgroundColor: theme.card,
-                  borderColor: isDark ? '#334155' : theme.border,
-                },
-              ]}
-            >
-              <View
-                style={[
-                  styles.lockIconCircle,
-                  { backgroundColor: isDark ? '#1E293B' : '#EFF6FF' },
-                ]}
-              >
-                <Ionicons name="time-outline" size={38} color={theme.primary} />
-              </View>
-
-              <Text style={[styles.lockTitle, { color: theme.text }]}>
-                Jornada Laboral No Iniciada
-              </Text>
-
-              <Text style={[styles.lockDesc, { color: theme.textSecondary }]}>
-                Por política de Casa Gonzalito, debes marcar tu{' '}
-                <Text style={{ fontWeight: '800', color: theme.primary }}>Entrada</Text>{' '}
-                con geolocalización en Asistencia antes de comenzar visitas, consultar clientes o registrar pedidos.
-              </Text>
-
-              <View
-                style={[
-                  styles.lockSummaryBox,
-                  { backgroundColor: isDark ? '#0F172A' : '#F8FAFC' },
-                ]}
-              >
-                <View style={styles.lockSummaryRow}>
-                  <Ionicons name="map-outline" size={16} color={theme.textMuted} />
-                  <Text style={[styles.lockSummaryText, { color: theme.textSecondary }]}>
-                    Clientes en ruta hoy: <Text style={{ fontWeight: '800', color: theme.text }}>{routes.length}</Text>
-                  </Text>
-                </View>
-                <View style={styles.lockSummaryRow}>
-                  <Ionicons name="lock-closed" size={16} color="#F59E0B" />
-                  <Text style={[styles.lockSummaryText, { color: '#F59E0B', fontWeight: '700' }]}>
-                    Ruta y operaciones bloqueadas hasta marcar
-                  </Text>
-                </View>
-              </View>
-
-              <TouchableOpacity
-                style={[styles.marcarEntradaBtn, { backgroundColor: theme.primary }]}
-                onPress={() => router.push('/(vendedor)/asistencia')}
-                activeOpacity={0.85}
-              >
-                <Ionicons name="finger-print" size={20} color={isDark ? '#002109' : '#FFFFFF'} />
-                <Text style={[styles.marcarEntradaBtnText, { color: isDark ? '#002109' : '#FFFFFF' }]}>
-                  Ir a Marcar Asistencia
-                </Text>
-                <Ionicons name="arrow-forward" size={18} color={isDark ? '#002109' : '#FFFFFF'} />
-              </TouchableOpacity>
-            </View>
+        {/* Commercial Gatekeeper Banner if attendance not started */}
+        {!isJornadaActiva && (
+          <View style={{ marginHorizontal: 16, marginBottom: 14 }}>
+            <JornadaGateBanner />
           </View>
-        ) : (
-          <>
-            {/* Quota Progress Card & Vanguard Commercial Pacing */}
+        )}
+
+        {/* Quota Progress Card & Vanguard Commercial Pacing */}
             <View style={styles.quotaSection}>
           <Card style={styles.quotaCard}>
             <View style={styles.quotaHeader}>
@@ -528,6 +454,49 @@ export default function VendedorDashboard() {
                 </Text>
               </View>
             </View>
+
+            {/* Segmented Control Lista / Mapa */}
+            <View style={styles.viewModeToggle}>
+              <TouchableOpacity
+                style={[styles.viewModeBtn, viewMode === 'list' && styles.viewModeBtnActive]}
+                onPress={() => setViewMode('list')}
+                activeOpacity={0.8}
+              >
+                <Ionicons
+                  name="list"
+                  size={14}
+                  color={viewMode === 'list' ? (isDark ? '#002109' : '#FFFFFF') : theme.textSecondary}
+                />
+                <Text
+                  style={[
+                    styles.viewModeBtnText,
+                    viewMode === 'list' && styles.viewModeBtnTextActive,
+                  ]}
+                >
+                  Lista
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.viewModeBtn, viewMode === 'map' && styles.viewModeBtnActive]}
+                onPress={() => setViewMode('map')}
+                activeOpacity={0.8}
+              >
+                <Ionicons
+                  name="map"
+                  size={14}
+                  color={viewMode === 'map' ? (isDark ? '#002109' : '#FFFFFF') : theme.textSecondary}
+                />
+                <Text
+                  style={[
+                    styles.viewModeBtnText,
+                    viewMode === 'map' && styles.viewModeBtnTextActive,
+                  ]}
+                >
+                  Mapa
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Buscador Multi-campo */}
@@ -590,42 +559,60 @@ export default function VendedorDashboard() {
           </View>
         </View>
 
-        {/* Route Stops Cards */}
-        <View style={styles.listContainer}>
-          {loadingRoutes && routes.length === 0 ? (
-            <View style={styles.centerLoading}>
-              <ActivityIndicator size="large" color={theme.primary} />
-            </View>
-          ) : filteredRoutes.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Ionicons name="search-outline" size={38} color={theme.textMuted} />
-              <Text style={styles.emptyTitle}>
-                {searchQuery.trim()
-                  ? `Sin resultados para "${searchQuery}"`
-                  : 'Sin clientes en este filtro'}
-              </Text>
-              {searchQuery.length > 0 && (
-                <TouchableOpacity
-                  onPress={() => setSearchQuery('')}
-                  style={styles.clearFilterBtn}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.clearFilterBtnText}>Limpiar búsqueda</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          ) : (
-            filteredRoutes.map((item, index) => (
-              <VisitCard
-                key={item.customer_id}
-                stop={item}
-                index={index}
-                onPress={() => setSelectedStop(item)}
-              />
-            ))
-          )}
-        </View>
-        </>
+        {/* Route Stops: List or Map View */}
+        {viewMode === 'map' ? (
+          <View style={styles.mapWrapper}>
+            <RouteMapView
+              stops={filteredRoutes}
+              userLocation={location}
+              onSelectStop={(stop) => setSelectedStop(stop)}
+              onStartVisit={(stop) => {
+                guardAction(() => {
+                  setSelectedStop(null);
+                  router.push({
+                    pathname: '/(vendedor)/visita/[id]',
+                    params: { id: stop.customer_id, razon_social: stop.razon_social },
+                  });
+                });
+              }}
+            />
+          </View>
+        ) : (
+          <View style={styles.listContainer}>
+            {loadingRoutes && routes.length === 0 ? (
+              <View style={styles.centerLoading}>
+                <ActivityIndicator size="large" color={theme.primary} />
+              </View>
+            ) : filteredRoutes.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Ionicons name="search-outline" size={38} color={theme.textMuted} />
+                <Text style={styles.emptyTitle}>
+                  {searchQuery.trim()
+                    ? `Sin resultados para "${searchQuery}"`
+                    : 'Sin clientes en este filtro'}
+                </Text>
+                {searchQuery.length > 0 && (
+                  <TouchableOpacity
+                    onPress={() => setSearchQuery('')}
+                    style={styles.clearFilterBtn}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.clearFilterBtnText}>Limpiar búsqueda</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            ) : (
+              filteredRoutes.map((item, index) => (
+                <VisitCard
+                  key={item.customer_id}
+                  stop={item}
+                  index={index}
+                  userLocation={location}
+                  onPress={() => setSelectedStop(item)}
+                />
+              ))
+            )}
+          </View>
         )}
       </ScrollView>
 
@@ -784,10 +771,12 @@ export default function VendedorDashboard() {
                   onPress={() => {
                     const stop = selectedStop;
                     if (!stop) return;
-                    setSelectedStop(null);
-                    router.push({
-                      pathname: '/(vendedor)/visita/[id]',
-                      params: { id: stop.customer_id, razon_social: stop.razon_social },
+                    guardAction(() => {
+                      setSelectedStop(null);
+                      router.push({
+                        pathname: '/(vendedor)/visita/[id]',
+                        params: { id: stop.customer_id, razon_social: stop.razon_social },
+                      });
                     });
                   }}
                   style={{ width: '100%' }}
@@ -802,13 +791,15 @@ export default function VendedorDashboard() {
                   onPress={() => {
                     const stop = selectedStop;
                     if (!stop) return;
-                    setSelectedStop(null);
-                    startVisit(
-                      `sim_${Date.now()}`,
-                      stop.customer_id,
-                      stop.nombre_fantasia || stop.razon_social
-                    );
-                    router.push('/(vendedor)/pedido');
+                    guardAction(() => {
+                      setSelectedStop(null);
+                      startVisit(
+                        `sim_${Date.now()}`,
+                        stop.customer_id,
+                        stop.nombre_fantasia || stop.razon_social
+                      );
+                      router.push('/(vendedor)/pedido');
+                    });
                   }}
                   activeOpacity={0.8}
                 >
@@ -1323,6 +1314,42 @@ const getStyles = (theme: ThemeColors, isDark: boolean) =>
       fontSize: 11,
       fontWeight: '700',
       color: theme.textSecondary,
+    },
+    viewModeToggle: {
+      flexDirection: 'row',
+      backgroundColor: isDark ? '#1E293B' : '#E2E8F0',
+      borderRadius: 10,
+      padding: 3,
+      gap: 2,
+    },
+    viewModeBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 8,
+      gap: 5,
+    },
+    viewModeBtnActive: {
+      backgroundColor: theme.primary,
+    },
+    viewModeBtnText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: theme.textSecondary,
+    },
+    viewModeBtnTextActive: {
+      color: isDark ? '#002109' : '#FFFFFF',
+      fontWeight: '800',
+    },
+    mapWrapper: {
+      height: 480,
+      marginHorizontal: 16,
+      marginTop: 12,
+      borderRadius: 16,
+      overflow: 'hidden',
+      borderWidth: 1,
+      borderColor: isDark ? '#334155' : theme.border,
     },
     searchBarContainer: {
       flexDirection: 'row',
