@@ -7,14 +7,12 @@ import {
   TouchableOpacity,
   Dimensions,
   Linking,
-  Platform,
   ActivityIndicator,
 } from 'react-native';
-import MapView, { Marker, Region, Polyline } from 'react-native-maps';
+import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
 import { RouteStop } from './VisitCard';
-import { formatGS } from '@/lib/format';
 import { calculateDistanceMeters, formatDistance } from '@/lib/location';
 import { haptic } from '@/lib/haptics';
 
@@ -42,8 +40,8 @@ export function RouteMapView({
   onOpenLocationModal,
 }: RouteMapViewProps) {
   const { theme, isDark } = useTheme();
-  const mapRef = useRef<MapView | null>(null);
-  const [mapReady, setMapReady] = useState(false);
+  const webViewRef = useRef<WebView | null>(null);
+  const [mapLoaded, setMapLoaded] = useState(false);
 
   // Mapear clientes asegurando coordenadas para visualización
   const stopsWithCoords: EnrichedStop[] = useMemo(() => {
@@ -95,87 +93,33 @@ export function RouteMapView({
     }
   }, [stopsWithCoords, activeStop]);
 
-  // Región inicial: ubicación del usuario, o primer cliente, o fallback Pedro Juan Caballero
-  const initialRegion: Region = useMemo(() => {
-    if (userLocation) {
-      return {
-        latitude: userLocation.latitude,
-        longitude: userLocation.longitude,
-        latitudeDelta: 0.035,
-        longitudeDelta: 0.035,
-      };
-    }
-    if (stopsWithCoords.length > 0) {
-      return {
-        latitude: stopsWithCoords[0].displayLat,
-        longitude: stopsWithCoords[0].displayLng,
-        latitudeDelta: 0.035,
-        longitudeDelta: 0.035,
-      };
-    }
-    // Fallback: Centro comercial de Pedro Juan Caballero / Amambay
-    return {
-      latitude: -22.548,
-      longitude: -55.728,
-      latitudeDelta: 0.06,
-      longitudeDelta: 0.06,
-    };
-  }, [userLocation, stopsWithCoords]);
-
-  // Animar hacia la región cuando el mapa esté listo
-  useEffect(() => {
-    if (mapReady && mapRef.current) {
-      if (userLocation) {
-        mapRef.current.animateToRegion(
-          {
-            latitude: userLocation.latitude,
-            longitude: userLocation.longitude,
-            latitudeDelta: 0.03,
-            longitudeDelta: 0.03,
-          },
-          600
-        );
-      } else if (stopsWithCoords.length > 0) {
-        mapRef.current.animateToRegion(
-          {
-            latitude: stopsWithCoords[0].displayLat,
-            longitude: stopsWithCoords[0].displayLng,
-            latitudeDelta: 0.03,
-            longitudeDelta: 0.03,
-          },
-          600
+  const handleMarkerSelect = (customerId: string) => {
+    haptic.light();
+    const found = stopsWithCoords.find((s) => s.customer_id === customerId);
+    if (found) {
+      setActiveStop(found);
+      if (webViewRef.current) {
+        webViewRef.current.injectJavaScript(
+          `if (window.panToMarker) { window.panToMarker('${customerId}', ${found.displayLat}, ${found.displayLng}); } true;`
         );
       }
-    }
-  }, [mapReady]);
-
-  const handleMarkerPress = (stop: EnrichedStop) => {
-    haptic.light();
-    setActiveStop(stop);
-    if (mapRef.current) {
-      mapRef.current.animateToRegion(
-        {
-          latitude: stop.displayLat,
-          longitude: stop.displayLng,
-          latitudeDelta: 0.015,
-          longitudeDelta: 0.015,
-        },
-        400
-      );
     }
   };
 
   const centerOnUser = () => {
     haptic.medium();
-    if (mapRef.current && userLocation) {
-      mapRef.current.animateToRegion(
-        {
-          latitude: userLocation.latitude,
-          longitude: userLocation.longitude,
-          latitudeDelta: 0.02,
-          longitudeDelta: 0.02,
-        },
-        500
+    if (webViewRef.current && userLocation) {
+      webViewRef.current.injectJavaScript(
+        `if (window.centerOnCoords) { window.centerOnCoords(${userLocation.latitude}, ${userLocation.longitude}); } true;`
+      );
+    }
+  };
+
+  const fitAllStops = () => {
+    haptic.light();
+    if (webViewRef.current) {
+      webViewRef.current.injectJavaScript(
+        `if (window.fitRouteBounds) { window.fitRouteBounds(); } true;`
       );
     }
   };
@@ -198,78 +142,217 @@ export function RouteMapView({
     [stopsWithCoords]
   );
 
+  // Serializar datos para Leaflet
+  const serializedStops = useMemo(() => {
+    return stopsWithCoords.map((stop, index) => {
+      const isCompleted = stop.estado === 'cerrada';
+      const isInProgress = stop.estado === 'abierta';
+      const isMoroso = (stop.documentos_vencidos ?? 0) > 0;
+
+      let pinBg = '#0284C7'; // Cyan por defecto
+      if (isCompleted) pinBg = '#10B981';
+      else if (isInProgress) pinBg = '#2563EB';
+      else if (isMoroso) pinBg = '#DC2626';
+
+      const orderNum = stop.orden_visita > 0 ? stop.orden_visita : index + 1;
+
+      return {
+        customer_id: stop.customer_id,
+        nombre: stop.nombre_fantasia || stop.razon_social,
+        displayLat: stop.displayLat,
+        displayLng: stop.displayLng,
+        hasRealGps: stop.hasRealGps,
+        pinBg,
+        orderNum,
+      };
+    });
+  }, [stopsWithCoords]);
+
+  const initialLat = userLocation?.latitude ?? (stopsWithCoords[0]?.displayLat ?? -22.548);
+  const initialLng = userLocation?.longitude ?? (stopsWithCoords[0]?.displayLng ?? -55.728);
+
+  const leafletHtml = useMemo(() => {
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { -webkit-tap-highlight-color: transparent; }
+    html, body, #map {
+      height: 100%;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      background: ${isDark ? '#0f172a' : '#f8fafc'};
+    }
+    .custom-marker {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      color: #ffffff;
+      font-weight: 800;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      box-shadow: 0 3px 6px rgba(0,0,0,0.35);
+      cursor: pointer;
+      user-select: none;
+      transition: transform 0.15s ease;
+    }
+    .custom-marker.active {
+      transform: scale(1.3);
+      border-color: #ffffff !important;
+      box-shadow: 0 5px 14px rgba(0,0,0,0.55);
+    }
+    .user-marker-pulse {
+      width: 18px;
+      height: 18px;
+      background: #0284C7;
+      border-radius: 50%;
+      border: 3px solid #ffffff;
+      box-shadow: 0 0 0 4px rgba(2, 132, 199, 0.45);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.6); }
+      70% { box-shadow: 0 0 0 10px rgba(2, 132, 199, 0); }
+      100% { box-shadow: 0 0 0 2px rgba(2, 132, 199, 0); }
+    }
+    .leaflet-control-attribution {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    var map = L.map('map', {
+      zoomControl: false,
+      attributionControl: false
+    }).setView([${initialLat}, ${initialLng}], 14);
+
+    // Mosaicos CartoDB Voyager de alta calidad
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      subdomains: 'abcd'
+    }).addTo(map);
+
+    var markerElements = {};
+    var stops = ${JSON.stringify(serializedStops)};
+    var activeId = '${activeStop?.customer_id || ''}';
+
+    // Polyline conectando la ruta en orden
+    var latlngs = stops.map(function(s) { return [s.displayLat, s.displayLng]; });
+    if (latlngs.length > 1) {
+      L.polyline(latlngs, {
+        color: '${theme.primary}',
+        weight: 4,
+        opacity: 0.85,
+        lineCap: 'round',
+        lineJoin: 'round'
+      }).addTo(map);
+    }
+
+    // Marcador de posición del vendedor
+    ${userLocation ? `
+      var userIcon = L.divIcon({
+        className: 'user-icon-wrap',
+        html: '<div class="user-marker-pulse"></div>',
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+      });
+      L.marker([${userLocation.latitude}, ${userLocation.longitude}], {
+        icon: userIcon,
+        zIndexOffset: 1000
+      }).addTo(map);
+    ` : ''}
+
+    // Marcadores numerados de paradas
+    stops.forEach(function(s) {
+      var isAct = s.customer_id === activeId;
+      var border = s.hasRealGps ? '2px solid rgba(0,0,0,0.2)' : '2.5px dashed #F59E0B';
+      if (isAct) border = '3px solid #FFFFFF';
+
+      var el = document.createElement('div');
+      el.className = 'custom-marker' + (isAct ? ' active' : '');
+      el.style.backgroundColor = s.pinBg;
+      el.style.border = border;
+      el.style.width = '28px';
+      el.style.height = '28px';
+      el.style.fontSize = '12px';
+      el.textContent = s.orderNum;
+
+      var icon = L.divIcon({
+        className: 'leaflet-marker-clean',
+        html: el.outerHTML,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14]
+      });
+
+      var m = L.marker([s.displayLat, s.displayLng], {
+        icon: icon,
+        zIndexOffset: isAct ? 500 : 100
+      }).addTo(map);
+
+      m.on('click', function() {
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'SELECT_STOP', id: s.customer_id }));
+        }
+      });
+
+      markerElements[s.customer_id] = m;
+    });
+
+    // Auto-ajustar vista para abarcar paradas
+    window.fitRouteBounds = function() {
+      if (latlngs.length > 0) {
+        var bounds = L.latLngBounds(latlngs);
+        ${userLocation ? `bounds.extend([${userLocation.latitude}, ${userLocation.longitude}]);` : ''}
+        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
+      }
+    };
+
+    window.panToMarker = function(id, lat, lng) {
+      map.setView([lat, lng], 16, { animate: true, duration: 0.5 });
+    };
+
+    window.centerOnCoords = function(lat, lng) {
+      map.setView([lat, lng], 16, { animate: true, duration: 0.5 });
+    };
+
+    // Ajuste inicial de límites
+    if (latlngs.length > 1) {
+      window.fitRouteBounds();
+    }
+  </script>
+</body>
+</html>`;
+  }, [isDark, serializedStops, initialLat, initialLng, userLocation, theme.primary]);
+
   return (
     <View style={styles.container}>
-      <MapView
-        ref={mapRef}
+      <WebView
+        ref={webViewRef}
+        originWhitelist={['*']}
+        source={{ html: leafletHtml }}
         style={styles.map}
-        initialRegion={initialRegion}
-        showsUserLocation={true}
-        showsMyLocationButton={false}
-        showsCompass={true}
-        toolbarEnabled={false}
-        scrollEnabled={true}
-        mapType="standard"
-        onMapReady={() => setMapReady(true)}
-      >
-        {/* Trazado de ruta conectando las paradas en orden de visita */}
-        {stopsWithCoords.length > 1 && (
-          <Polyline
-            coordinates={stopsWithCoords.map((s) => ({
-              latitude: s.displayLat,
-              longitude: s.displayLng,
-            }))}
-            strokeColor={theme.primary}
-            strokeWidth={3}
-          />
-        )}
-
-        {stopsWithCoords.map((stop, index) => {
-          const isSelected = activeStop?.customer_id === stop.customer_id;
-          const isCompleted = stop.estado === 'cerrada';
-          const isInProgress = stop.estado === 'abierta';
-          const isMoroso = (stop.documentos_vencidos ?? 0) > 0;
-
-          // Color del pin
-          let pinBg = '#0284C7'; // Cyan por defecto
-          if (isCompleted) pinBg = '#10B981';
-          else if (isInProgress) pinBg = '#2563EB';
-          else if (isMoroso) pinBg = '#DC2626';
-
-          const orderNum = stop.orden_visita > 0 ? stop.orden_visita : index + 1;
-
-          return (
-            <Marker
-              key={stop.customer_id}
-              coordinate={{ latitude: stop.displayLat, longitude: stop.displayLng }}
-              onPress={() => handleMarkerPress(stop)}
-              zIndex={isSelected ? 99 : 10}
-            >
-              <View
-                style={[
-                  styles.markerCircle,
-                  {
-                    backgroundColor: pinBg,
-                    borderColor: isSelected
-                      ? '#FFFFFF'
-                      : stop.hasRealGps
-                      ? 'rgba(0,0,0,0.2)'
-                      : '#F59E0B',
-                    borderWidth: stop.hasRealGps ? 2 : 2.5,
-                    borderStyle: stop.hasRealGps ? 'solid' : 'dashed',
-                    transform: [{ scale: isSelected ? 1.25 : 1.0 }],
-                  },
-                ]}
-              >
-                <Text style={styles.markerText}>{orderNum}</Text>
-              </View>
-            </Marker>
-          );
-        })}
-      </MapView>
+        javaScriptEnabled={true}
+        domStorageEnabled={true}
+        onLoadEnd={() => setMapLoaded(true)}
+        onMessage={(event) => {
+          try {
+            const data = JSON.parse(event.nativeEvent.data);
+            if (data.type === 'SELECT_STOP' && data.id) {
+              handleMarkerSelect(data.id);
+            }
+          } catch {}
+        }}
+      />
 
       {/* Indicador de carga no bloqueante */}
-      {!mapReady && (
+      {!mapLoaded && (
         <View
           style={[
             styles.loadingBadge,
@@ -284,7 +367,7 @@ export function RouteMapView({
       )}
 
       {/* Aviso informativo si hay clientes sin coordenadas GPS exactas */}
-      {unmappedCount > 0 && mapReady && (
+      {unmappedCount > 0 && mapLoaded && (
         <View style={[styles.unmappedBanner, { backgroundColor: isDark ? '#332400' : '#FEF3C7' }]}>
           <Ionicons name="information-circle" size={16} color="#D97706" />
           <Text style={[styles.unmappedText, { color: isDark ? '#FDE68A' : '#92400E' }]}>
@@ -295,16 +378,28 @@ export function RouteMapView({
         </View>
       )}
 
-      {/* Botón flotante para recentrar en mi posición */}
-      {userLocation && (
+      {/* Botones flotantes de mapa: Ajustar Ruta y Mi Posición */}
+      <View style={styles.fabControls}>
         <TouchableOpacity
-          style={[styles.recenterBtn, { backgroundColor: isDark ? '#1E293B' : '#FFFFFF' }]}
-          onPress={centerOnUser}
+          style={[styles.mapFabBtn, { backgroundColor: isDark ? '#1E293B' : '#FFFFFF' }]}
+          onPress={fitAllStops}
           activeOpacity={0.8}
+          accessibilityLabel="Ajustar mapa a la ruta"
         >
-          <Ionicons name="locate" size={22} color={theme.primary} />
+          <Ionicons name="scan-outline" size={20} color={theme.text} />
         </TouchableOpacity>
-      )}
+
+        {userLocation && (
+          <TouchableOpacity
+            style={[styles.mapFabBtn, { backgroundColor: isDark ? '#1E293B' : '#FFFFFF' }]}
+            onPress={centerOnUser}
+            activeOpacity={0.8}
+            accessibilityLabel="Centrar en mi ubicación"
+          >
+            <Ionicons name="locate" size={20} color={theme.primary} />
+          </TouchableOpacity>
+        )}
+      </View>
 
       {/* Tarjeta flotante inferior con la parada seleccionada */}
       {activeStop && (
@@ -411,6 +506,7 @@ const styles = StyleSheet.create({
   },
   map: {
     ...StyleSheet.absoluteFill,
+    backgroundColor: 'transparent',
   },
   loadingBadge: {
     position: 'absolute',
@@ -458,134 +554,113 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     flex: 1,
   },
-  markerCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 3,
-    elevation: 4,
-  },
-  markerText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '900',
-  },
-  recenterBtn: {
+  fabControls: {
     position: 'absolute',
-    right: 16,
-    top: 16,
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    right: 14,
+    top: 14,
+    gap: 10,
+    zIndex: 20,
+  },
+  mapFabBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
-    elevation: 5,
+    elevation: 4,
   },
   previewCard: {
     position: 'absolute',
-    bottom: 24,
+    bottom: 16,
     left: 16,
     right: 16,
     borderRadius: 16,
     borderWidth: 1,
     padding: 14,
+    gap: 12,
+    zIndex: 25,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.2,
     shadowRadius: 8,
-    elevation: 8,
+    elevation: 6,
   },
   previewHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginBottom: 12,
   },
   orderBadge: {
-    backgroundColor: '#0284C7',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   orderBadgeText: {
     color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '800',
+    fontSize: 13,
   },
   previewTitle: {
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   previewSub: {
     fontSize: 12,
-    fontWeight: '500',
-    marginTop: 1,
+    marginTop: 2,
   },
   moreBtn: {
     padding: 4,
   },
   actionsRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 10,
   },
   mapNavBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 16,
+    gap: 5,
+    paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 10,
-    minHeight: 44,
-    gap: 6,
   },
   mapNavBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
     color: '#0F172A',
-    fontSize: 13,
-    fontWeight: '800',
   },
   visitActionBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
     paddingVertical: 10,
     borderRadius: 10,
-    minHeight: 44,
-    gap: 8,
   },
   visitActionBtnText: {
-    color: '#FFFFFF',
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   emptyOverlay: {
-    position: 'absolute',
-    top: '35%',
-    left: 24,
-    right: 24,
-    padding: 24,
-    borderRadius: 16,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 4,
+    padding: 32,
+    gap: 12,
+    zIndex: 10,
   },
   emptyText: {
-    textAlign: 'center',
     fontSize: 14,
+    textAlign: 'center',
     fontWeight: '600',
-    marginTop: 10,
   },
 });
