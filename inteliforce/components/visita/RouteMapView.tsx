@@ -10,7 +10,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
-import MapView, { Marker, Region, UrlTile } from 'react-native-maps';
+import MapView, { Marker, Region, Polyline } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
 import { RouteStop } from './VisitCard';
@@ -33,9 +33,6 @@ interface RouteMapViewProps {
 }
 
 const { width } = Dimensions.get('window');
-
-// CartoDB Voyager tiles (Rápidas, limpias y libres para apps móviles)
-const TILE_URL_CARTO = 'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png';
 
 export function RouteMapView({
   stops,
@@ -212,17 +209,20 @@ export function RouteMapView({
         showsCompass={true}
         toolbarEnabled={false}
         scrollEnabled={true}
-        mapType={Platform.OS === 'android' ? 'none' : 'standard'}
+        mapType="standard"
         onMapReady={() => setMapReady(true)}
       >
-        {/* Capa de mosaicos raster Voyager para carga universal sin necesidad de billing de Google */}
-        <UrlTile
-          urlTemplate={TILE_URL_CARTO}
-          maximumZ={19}
-          flipY={false}
-          zIndex={-1}
-          doubleTileSize={Platform.OS === 'android'}
-        />
+        {/* Trazado de ruta conectando las paradas en orden de visita */}
+        {stopsWithCoords.length > 1 && (
+          <Polyline
+            coordinates={stopsWithCoords.map((s) => ({
+              latitude: s.displayLat,
+              longitude: s.displayLng,
+            }))}
+            strokeColor={theme.primary}
+            strokeWidth={3}
+          />
+        )}
 
         {stopsWithCoords.map((stop, index) => {
           const isSelected = activeStop?.customer_id === stop.customer_id;
@@ -268,17 +268,17 @@ export function RouteMapView({
         })}
       </MapView>
 
-      {/* Cargando inicial del mapa */}
+      {/* Indicador de carga no bloqueante */}
       {!mapReady && (
         <View
           style={[
-            styles.loadingOverlay,
-            { backgroundColor: isDark ? 'rgba(15, 23, 42, 0.9)' : 'rgba(248, 250, 252, 0.9)' },
+            styles.loadingBadge,
+            { backgroundColor: isDark ? 'rgba(30, 41, 59, 0.92)' : 'rgba(255, 255, 255, 0.92)' },
           ]}
         >
-          <ActivityIndicator size="large" color={theme.primary} />
-          <Text style={[styles.loadingText, { color: theme.textSecondary }]}>
-            Cargando mapa satelital de la ruta...
+          <ActivityIndicator size="small" color={theme.primary} />
+          <Text style={[styles.loadingBadgeText, { color: theme.textSecondary }]}>
+            Iniciando mapa...
           </Text>
         </View>
       )}
@@ -405,22 +405,32 @@ export function RouteMapView({
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
     width: '100%',
-    height: '100%',
     position: 'relative',
   },
   map: {
     ...StyleSheet.absoluteFill,
   },
-  loadingOverlay: {
-    ...StyleSheet.absoluteFill,
+  loadingBadge: {
+    position: 'absolute',
+    top: 14,
+    alignSelf: 'center',
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 10,
-    gap: 12,
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    zIndex: 30,
+    elevation: 4,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
   },
-  loadingText: {
-    fontSize: 13,
+  loadingBadgeText: {
+    fontSize: 12,
     fontWeight: '700',
   },
   unmappedBanner: {

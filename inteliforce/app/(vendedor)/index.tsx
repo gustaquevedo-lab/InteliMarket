@@ -296,9 +296,10 @@ export default function VendedorDashboard() {
         </View>
       </View>
 
-      <ScrollView
-        style={styles.scrollArea}
-        contentContainerStyle={styles.scrollContent}
+      {viewMode === 'list' ? (
+        <ScrollView
+          style={styles.scrollArea}
+          contentContainerStyle={styles.scrollContent}
         refreshControl={
           <RefreshControl
             refreshing={refetchingRoutes}
@@ -458,41 +459,31 @@ export default function VendedorDashboard() {
             {/* Segmented Control Lista / Mapa */}
             <View style={styles.viewModeToggle}>
               <TouchableOpacity
-                style={[styles.viewModeBtn, viewMode === 'list' && styles.viewModeBtnActive]}
+                style={[styles.viewModeBtn, styles.viewModeBtnActive]}
                 onPress={() => setViewMode('list')}
                 activeOpacity={0.8}
               >
                 <Ionicons
                   name="list"
                   size={14}
-                  color={viewMode === 'list' ? (isDark ? '#002109' : '#FFFFFF') : theme.textSecondary}
+                  color={isDark ? '#002109' : '#FFFFFF'}
                 />
-                <Text
-                  style={[
-                    styles.viewModeBtnText,
-                    viewMode === 'list' && styles.viewModeBtnTextActive,
-                  ]}
-                >
+                <Text style={[styles.viewModeBtnText, styles.viewModeBtnTextActive]}>
                   Lista
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.viewModeBtn, viewMode === 'map' && styles.viewModeBtnActive]}
+                style={styles.viewModeBtn}
                 onPress={() => setViewMode('map')}
                 activeOpacity={0.8}
               >
                 <Ionicons
                   name="map"
                   size={14}
-                  color={viewMode === 'map' ? (isDark ? '#002109' : '#FFFFFF') : theme.textSecondary}
+                  color={theme.textSecondary}
                 />
-                <Text
-                  style={[
-                    styles.viewModeBtnText,
-                    viewMode === 'map' && styles.viewModeBtnTextActive,
-                  ]}
-                >
+                <Text style={styles.viewModeBtnText}>
                   Mapa
                 </Text>
               </TouchableOpacity>
@@ -598,10 +589,89 @@ export default function VendedorDashboard() {
           </View>
         )}
       </ScrollView>
+    ) : (
+        <View style={styles.mapScreenContainer}>
+          {/* Header Bar para Mapa con toggle Lista/Mapa y filtros rápidos */}
+          <View style={styles.mapTopBar}>
+            <View style={styles.mapTopRow}>
+              <View style={styles.routeTitleGroup}>
+                <Text style={styles.routeSectionTitle}>Mapa de Ruta</Text>
+                <View style={styles.clientCountChip}>
+                  <Text style={styles.clientCountText}>
+                    {filteredRoutes.length} clientes
+                  </Text>
+                </View>
+              </View>
 
-      {/* ── MAPA DE RUTA (fuera del ScrollView para evitar congelamiento Android) ── */}
-      {viewMode === 'map' && (
-        <View style={styles.mapOverlay}>
+              {/* Segmented Control Lista / Mapa */}
+              <View style={styles.viewModeToggle}>
+                <TouchableOpacity
+                  style={styles.viewModeBtn}
+                  onPress={() => setViewMode('list')}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons
+                    name="list"
+                    size={14}
+                    color={theme.textSecondary}
+                  />
+                  <Text style={styles.viewModeBtnText}>
+                    Lista
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.viewModeBtn, styles.viewModeBtnActive]}
+                  onPress={() => setViewMode('map')}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons
+                    name="map"
+                    size={14}
+                    color={isDark ? '#002109' : '#FFFFFF'}
+                  />
+                  <Text style={[styles.viewModeBtnText, styles.viewModeBtnTextActive]}>
+                    Mapa
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Filter Pills rápidos sobre el mapa */}
+            <View style={[styles.filterPillsRow, { marginBottom: 2 }]}>
+              <TouchableOpacity
+                style={[styles.filterPill, filter === 'all' && styles.filterPillActive]}
+                onPress={() => setFilter('all')}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.filterPillText, filter === 'all' && styles.filterPillTextActive]}>
+                  Todos ({routes.length})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.filterPill, filter === 'pending' && styles.filterPillActive]}
+                onPress={() => setFilter('pending')}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.filterPillText, filter === 'pending' && styles.filterPillTextActive]}>
+                  Pendientes ({routes.filter((r) => r.estado !== 'cerrada').length})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.filterPill, filter === 'completed' && styles.filterPillActive]}
+                onPress={() => setFilter('completed')}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.filterPillText, filter === 'completed' && styles.filterPillTextActive]}>
+                  Completados ({completedCount})
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* El componente MapView interactivo sin interferencia de ScrollView */}
           <RouteMapView
             stops={filteredRoutes}
             userLocation={location}
@@ -1349,13 +1419,23 @@ const getStyles = (theme: ThemeColors, isDark: boolean) =>
       color: isDark ? '#002109' : '#FFFFFF',
       fontWeight: '800',
     },
-    mapOverlay: {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      zIndex: 50,
+    mapScreenContainer: {
+      flex: 1,
+      backgroundColor: theme.background,
+    },
+    mapTopBar: {
+      paddingHorizontal: 16,
+      paddingTop: 10,
+      paddingBottom: 8,
+      backgroundColor: theme.card,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.border,
+      gap: 10,
+    },
+    mapTopRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
     },
     searchBarContainer: {
       flexDirection: 'row',
