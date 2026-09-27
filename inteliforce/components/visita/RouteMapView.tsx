@@ -1,5 +1,5 @@
 // components/visita/RouteMapView.tsx
-import React, { useRef, useState, useMemo } from 'react';
+import React, { useRef, useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,8 +8,9 @@ import {
   Dimensions,
   Linking,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
-import MapView, { Marker, Region } from 'react-native-maps';
+import MapView, { Marker, Region, UrlTile } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
 import { RouteStop } from './VisitCard';
@@ -17,78 +18,148 @@ import { formatGS } from '@/lib/format';
 import { calculateDistanceMeters, formatDistance } from '@/lib/location';
 import { haptic } from '@/lib/haptics';
 
+interface EnrichedStop extends RouteStop {
+  hasRealGps: boolean;
+  displayLat: number;
+  displayLng: number;
+}
+
 interface RouteMapViewProps {
   stops: RouteStop[];
   userLocation?: { latitude: number; longitude: number } | null;
   onSelectStop: (stop: RouteStop) => void;
   onStartVisit: (stop: RouteStop) => void;
+  onOpenLocationModal?: (stop: RouteStop) => void;
 }
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
+
+// CartoDB Voyager tiles (Rápidas, limpias y libres para apps móviles)
+const TILE_URL_CARTO = 'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png';
 
 export function RouteMapView({
   stops,
   userLocation,
   onSelectStop,
   onStartVisit,
+  onOpenLocationModal,
 }: RouteMapViewProps) {
   const { theme, isDark } = useTheme();
   const mapRef = useRef<MapView | null>(null);
+  const [mapReady, setMapReady] = useState(false);
 
-  // Filtrar solo las paradas con coordenadas válidas
-  const geoStops = useMemo(() => {
-    return stops.filter(
-      (s) =>
+  // Mapear clientes asegurando coordenadas para visualización
+  const stopsWithCoords: EnrichedStop[] = useMemo(() => {
+    return stops.map((s, index) => {
+      const hasRealLat =
         s.latitud !== null &&
         s.latitud !== undefined &&
+        !isNaN(Number(s.latitud)) &&
+        Number(s.latitud) !== 0;
+      const hasRealLng =
         s.longitud !== null &&
         s.longitud !== undefined &&
-        !isNaN(Number(s.latitud)) &&
         !isNaN(Number(s.longitud)) &&
-        Number(s.latitud) !== 0 &&
-        Number(s.longitud) !== 0
-    );
-  }, [stops]);
+        Number(s.longitud) !== 0;
 
-  const [activeStop, setActiveStop] = useState<RouteStop | null>(
-    geoStops.length > 0 ? geoStops[0] : null
+      if (hasRealLat && hasRealLng) {
+        return {
+          ...s,
+          hasRealGps: true,
+          displayLat: Number(s.latitud),
+          displayLng: Number(s.longitud),
+        };
+      }
+
+      // Fallback: Si el cliente aún no tiene GPS registrado, proyectamos una posición
+      // estimada en el área comercial de Pedro Juan Caballero para que la ruta se pueda visualizar
+      const baseLat = userLocation?.latitude ?? -22.548;
+      const baseLng = userLocation?.longitude ?? -55.728;
+      const offsetLat = ((index % 5) - 2) * 0.0035;
+      const offsetLng = (Math.floor(index / 5) - 1) * 0.004;
+
+      return {
+        ...s,
+        hasRealGps: false,
+        displayLat: baseLat + offsetLat,
+        displayLng: baseLng + offsetLng,
+      };
+    });
+  }, [stops, userLocation]);
+
+  const [activeStop, setActiveStop] = useState<EnrichedStop | null>(
+    stopsWithCoords.length > 0 ? stopsWithCoords[0] : null
   );
 
-  // Región inicial: primer cliente o ubicación del usuario, o fallback Pedro Juan Caballero
+  // Sincronizar parada activa si cambian las paradas
+  useEffect(() => {
+    if (stopsWithCoords.length > 0 && !activeStop) {
+      setActiveStop(stopsWithCoords[0]);
+    }
+  }, [stopsWithCoords, activeStop]);
+
+  // Región inicial: ubicación del usuario, o primer cliente, o fallback Pedro Juan Caballero
   const initialRegion: Region = useMemo(() => {
     if (userLocation) {
       return {
         latitude: userLocation.latitude,
         longitude: userLocation.longitude,
-        latitudeDelta: 0.05,
-        longitudeDelta: 0.05,
+        latitudeDelta: 0.035,
+        longitudeDelta: 0.035,
       };
     }
-    if (geoStops.length > 0 && geoStops[0].latitud && geoStops[0].longitud) {
+    if (stopsWithCoords.length > 0) {
       return {
-        latitude: Number(geoStops[0].latitud),
-        longitude: Number(geoStops[0].longitud),
-        latitudeDelta: 0.05,
-        longitudeDelta: 0.05,
+        latitude: stopsWithCoords[0].displayLat,
+        longitude: stopsWithCoords[0].displayLng,
+        latitudeDelta: 0.035,
+        longitudeDelta: 0.035,
       };
     }
-    // Fallback: Centro de Pedro Juan Caballero / Amambay
+    // Fallback: Centro comercial de Pedro Juan Caballero / Amambay
     return {
-      latitude: -22.562,
-      longitude: -55.733,
-      latitudeDelta: 0.08,
-      longitudeDelta: 0.08,
+      latitude: -22.548,
+      longitude: -55.728,
+      latitudeDelta: 0.06,
+      longitudeDelta: 0.06,
     };
-  }, [geoStops, userLocation]);
+  }, [userLocation, stopsWithCoords]);
 
-  const handleMarkerPress = (stop: RouteStop) => {
+  // Animar hacia la región cuando el mapa esté listo
+  useEffect(() => {
+    if (mapReady && mapRef.current) {
+      if (userLocation) {
+        mapRef.current.animateToRegion(
+          {
+            latitude: userLocation.latitude,
+            longitude: userLocation.longitude,
+            latitudeDelta: 0.03,
+            longitudeDelta: 0.03,
+          },
+          600
+        );
+      } else if (stopsWithCoords.length > 0) {
+        mapRef.current.animateToRegion(
+          {
+            latitude: stopsWithCoords[0].displayLat,
+            longitude: stopsWithCoords[0].displayLng,
+            latitudeDelta: 0.03,
+            longitudeDelta: 0.03,
+          },
+          600
+        );
+      }
+    }
+  }, [mapReady]);
+
+  const handleMarkerPress = (stop: EnrichedStop) => {
     haptic.light();
     setActiveStop(stop);
-    if (mapRef.current && stop.latitud && stop.longitud) {
+    if (mapRef.current) {
       mapRef.current.animateToRegion(
         {
-          latitude: Number(stop.latitud),
-          longitude: Number(stop.longitud),
+          latitude: stop.displayLat,
+          longitude: stop.displayLng,
           latitudeDelta: 0.015,
           longitudeDelta: 0.015,
         },
@@ -113,21 +184,22 @@ export function RouteMapView({
   };
 
   const activeDistance = useMemo(() => {
-    if (
-      userLocation &&
-      activeStop?.latitud &&
-      activeStop?.longitud
-    ) {
+    if (userLocation && activeStop) {
       const dist = calculateDistanceMeters(
         userLocation.latitude,
         userLocation.longitude,
-        Number(activeStop.latitud),
-        Number(activeStop.longitud)
+        activeStop.displayLat,
+        activeStop.displayLng
       );
       return formatDistance(dist);
     }
     return null;
   }, [userLocation, activeStop]);
+
+  const unmappedCount = useMemo(
+    () => stopsWithCoords.filter((s) => !s.hasRealGps).length,
+    [stopsWithCoords]
+  );
 
   return (
     <View style={styles.container}>
@@ -139,10 +211,20 @@ export function RouteMapView({
         showsMyLocationButton={false}
         showsCompass={true}
         toolbarEnabled={false}
+        scrollEnabled={true}
+        mapType={Platform.OS === 'android' ? 'none' : 'standard'}
+        onMapReady={() => setMapReady(true)}
       >
-        {geoStops.map((stop, index) => {
-          const lat = Number(stop.latitud);
-          const lng = Number(stop.longitud);
+        {/* Capa de mosaicos raster Voyager para carga universal sin necesidad de billing de Google */}
+        <UrlTile
+          urlTemplate={TILE_URL_CARTO}
+          maximumZ={19}
+          flipY={false}
+          zIndex={-1}
+          doubleTileSize={Platform.OS === 'android'}
+        />
+
+        {stopsWithCoords.map((stop, index) => {
           const isSelected = activeStop?.customer_id === stop.customer_id;
           const isCompleted = stop.estado === 'cerrada';
           const isInProgress = stop.estado === 'abierta';
@@ -159,7 +241,7 @@ export function RouteMapView({
           return (
             <Marker
               key={stop.customer_id}
-              coordinate={{ latitude: lat, longitude: lng }}
+              coordinate={{ latitude: stop.displayLat, longitude: stop.displayLng }}
               onPress={() => handleMarkerPress(stop)}
               zIndex={isSelected ? 99 : 10}
             >
@@ -168,7 +250,13 @@ export function RouteMapView({
                   styles.markerCircle,
                   {
                     backgroundColor: pinBg,
-                    borderColor: isSelected ? '#FFFFFF' : 'rgba(0,0,0,0.2)',
+                    borderColor: isSelected
+                      ? '#FFFFFF'
+                      : stop.hasRealGps
+                      ? 'rgba(0,0,0,0.2)'
+                      : '#F59E0B',
+                    borderWidth: stop.hasRealGps ? 2 : 2.5,
+                    borderStyle: stop.hasRealGps ? 'solid' : 'dashed',
                     transform: [{ scale: isSelected ? 1.25 : 1.0 }],
                   },
                 ]}
@@ -179,6 +267,33 @@ export function RouteMapView({
           );
         })}
       </MapView>
+
+      {/* Cargando inicial del mapa */}
+      {!mapReady && (
+        <View
+          style={[
+            styles.loadingOverlay,
+            { backgroundColor: isDark ? 'rgba(15, 23, 42, 0.9)' : 'rgba(248, 250, 252, 0.9)' },
+          ]}
+        >
+          <ActivityIndicator size="large" color={theme.primary} />
+          <Text style={[styles.loadingText, { color: theme.textSecondary }]}>
+            Cargando mapa satelital de la ruta...
+          </Text>
+        </View>
+      )}
+
+      {/* Aviso informativo si hay clientes sin coordenadas GPS exactas */}
+      {unmappedCount > 0 && mapReady && (
+        <View style={[styles.unmappedBanner, { backgroundColor: isDark ? '#332400' : '#FEF3C7' }]}>
+          <Ionicons name="information-circle" size={16} color="#D97706" />
+          <Text style={[styles.unmappedText, { color: isDark ? '#FDE68A' : '#92400E' }]}>
+            {unmappedCount === stopsWithCoords.length
+              ? 'Mostrando ubicaciones estimadas en Pedro Juan Caballero'
+              : `${unmappedCount} clientes con ubicación GPS estimada`}
+          </Text>
+        </View>
+      )}
 
       {/* Botón flotante para recentrar en mi posición */}
       {userLocation && (
@@ -203,7 +318,12 @@ export function RouteMapView({
           ]}
         >
           <View style={styles.previewHeader}>
-            <View style={styles.orderBadge}>
+            <View
+              style={[
+                styles.orderBadge,
+                { backgroundColor: activeStop.hasRealGps ? '#0284C7' : '#D97706' },
+              ]}
+            >
               <Text style={styles.orderBadgeText}>
                 #{activeStop.orden_visita > 0 ? activeStop.orden_visita : 1}
               </Text>
@@ -217,8 +337,11 @@ export function RouteMapView({
                 {activeStop.nombre_fantasia || activeStop.razon_social}
               </Text>
               <Text style={[styles.previewSub, { color: theme.textSecondary }]} numberOfLines={1}>
-                {activeStop.ruc ? `RUC: ${activeStop.ruc}` : activeStop.direccion || 'Casa Gonzalito'}
-                {activeDistance ? ` • A ${activeDistance}` : ''}
+                {activeStop.hasRealGps ? (
+                  activeDistance ? `A ${activeDistance}` : activeStop.direccion || 'Ubicación GPS registrada'
+                ) : (
+                  '⚠️ GPS pendiente • Ubicación estimada'
+                )}
               </Text>
             </View>
 
@@ -233,17 +356,26 @@ export function RouteMapView({
 
           {/* Fila de Acciones rápidas en mapa */}
           <View style={styles.actionsRow}>
-            {activeStop.latitud && activeStop.longitud ? (
+            {activeStop.hasRealGps ? (
               <TouchableOpacity
                 style={[styles.mapNavBtn, { backgroundColor: '#38BDF8' }]}
                 onPress={() => {
-                  const url = `https://www.google.com/maps/search/?api=1&query=${activeStop.latitud},${activeStop.longitud}`;
+                  const url = `https://www.google.com/maps/search/?api=1&query=${activeStop.displayLat},${activeStop.displayLng}`;
                   Linking.openURL(url);
                 }}
                 activeOpacity={0.8}
               >
                 <Ionicons name="navigate" size={15} color="#0F172A" />
                 <Text style={styles.mapNavBtnText}>GPS</Text>
+              </TouchableOpacity>
+            ) : onOpenLocationModal ? (
+              <TouchableOpacity
+                style={[styles.mapNavBtn, { backgroundColor: '#F59E0B' }]}
+                onPress={() => onOpenLocationModal(activeStop)}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="location-outline" size={15} color="#0F172A" />
+                <Text style={styles.mapNavBtnText}>Fijar GPS</Text>
               </TouchableOpacity>
             ) : null}
 
@@ -259,11 +391,11 @@ export function RouteMapView({
         </View>
       )}
 
-      {geoStops.length === 0 && (
+      {stops.length === 0 && (
         <View style={[styles.emptyOverlay, { backgroundColor: theme.card }]}>
           <Ionicons name="map-outline" size={40} color={theme.textMuted} />
           <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
-            No hay clientes con coordenadas registradas en esta ruta.
+            No hay clientes en este filtro para mostrar en el mapa.
           </Text>
         </View>
       )}
@@ -273,18 +405,53 @@ export function RouteMapView({
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    width: '100%',
+    height: '100%',
     position: 'relative',
   },
   map: {
-    width: '100%',
-    height: '100%',
+    ...StyleSheet.absoluteFill,
+  },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+    gap: 12,
+  },
+  loadingText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  unmappedBanner: {
+    position: 'absolute',
+    top: 14,
+    left: 14,
+    right: 68,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+    zIndex: 15,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  unmappedText: {
+    fontSize: 11,
+    fontWeight: '700',
+    flex: 1,
   },
   markerCircle: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000000',

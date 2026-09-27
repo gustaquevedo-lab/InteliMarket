@@ -299,6 +299,7 @@ export default function VendedorDashboard() {
       <ScrollView
         style={styles.scrollArea}
         contentContainerStyle={styles.scrollContent}
+        scrollEnabled={viewMode !== 'map'}
         refreshControl={
           <RefreshControl
             refreshing={refetchingRoutes}
@@ -566,6 +567,10 @@ export default function VendedorDashboard() {
               stops={filteredRoutes}
               userLocation={location}
               onSelectStop={(stop) => setSelectedStop(stop)}
+              onOpenLocationModal={(stop) => {
+                setSelectedStop(stop);
+                setIsLocationModalOpen(true);
+              }}
               onStartVisit={(stop) => {
                 guardAction(() => {
                   setSelectedStop(null);
@@ -1343,13 +1348,15 @@ const getStyles = (theme: ThemeColors, isDark: boolean) =>
       fontWeight: '800',
     },
     mapWrapper: {
-      height: 480,
+      height: 520,
       marginHorizontal: 16,
       marginTop: 12,
+      marginBottom: 32,
       borderRadius: 16,
       overflow: 'hidden',
       borderWidth: 1,
       borderColor: isDark ? '#334155' : theme.border,
+      backgroundColor: isDark ? '#0F172A' : '#F1F5F9',
     },
     searchBarContainer: {
       flexDirection: 'row',
