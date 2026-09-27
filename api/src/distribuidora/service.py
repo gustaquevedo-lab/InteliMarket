@@ -445,11 +445,31 @@ async def get_route(db: AsyncSession, route_id: str):
 
 
 async def list_route_customers(db: AsyncSession, route_id: str):
-    result = await db.execute(
-        select(m.RouteCustomer).where(m.RouteCustomer.route_id == UUID(route_id))
+    from api.src.customers.models import Customer
+    q = (
+        select(m.RouteCustomer, Customer)
+        .outerjoin(Customer, Customer.id == m.RouteCustomer.customer_id)
+        .where(m.RouteCustomer.route_id == UUID(route_id))
         .order_by(m.RouteCustomer.orden_visita)
     )
-    return result.scalars().all()
+    result = await db.execute(q)
+    items = []
+    for rc, c in result.all():
+        has_gps = bool(c and c.latitud and c.longitud and (float(c.latitud) != 0 or float(c.longitud) != 0))
+        items.append({
+            "id": str(rc.id),
+            "route_id": str(rc.route_id),
+            "customer_id": str(rc.customer_id),
+            "orden_visita": rc.orden_visita,
+            "dia_semana": rc.dia_semana,
+            "created_at": rc.created_at.isoformat() if rc.created_at else None,
+            "customer_nombre": (c.razon_social or c.nombre) if c else "Cliente desconocido",
+            "customer_direccion": (c.direccion or "") if c else "",
+            "latitud": float(c.latitud) if c and c.latitud is not None else None,
+            "longitud": float(c.longitud) if c and c.longitud is not None else None,
+            "tiene_gps": has_gps,
+        })
+    return items
 
 
 async def add_route_customer(db: AsyncSession, route_id: str, data: dict):
@@ -468,6 +488,125 @@ async def remove_route_customer(db: AsyncSession, rc_id: str):
     await db.delete(obj)
     await db.commit()
     return True
+
+
+async def optimize_route(db: AsyncSession, route_id: str, depot_lat: float = -25.3235, depot_lng: float = -57.5641):
+    """Optimiza el orden de visita de una ruta de venta usando Google Routes API (TSP).
+    Reordena los clientes en la base de datos y envía notificación push FCM al preventista.
+    """
+    import os
+    import httpx
+    from api.src.customers.models import Customer
+    from api.src.sales_targets.models import SalesRep
+    from api.src.inteliforce import notifications
+
+    route = await db.scalar(select(m.SalesRoute).where(m.SalesRoute.id == UUID(route_id)))
+    if not route:
+        raise HTTPException(404, "Ruta no encontrada")
+
+    q = (
+        select(m.RouteCustomer, Customer)
+        .outerjoin(Customer, Customer.id == m.RouteCustomer.customer_id)
+        .where(m.RouteCustomer.route_id == UUID(route_id))
+        .order_by(m.RouteCustomer.orden_visita)
+    )
+    rows = (await db.execute(q)).all()
+    if not rows:
+        raise HTTPException(400, "La ruta no tiene clientes asignados")
+
+    gps_items = []
+    no_gps_items = []
+    for rc, c in rows:
+        lat = float(c.latitud) if c and c.latitud is not None else None
+        lng = float(c.longitud) if c and c.longitud is not None else None
+        has_gps = bool(lat and lng and (lat != 0 or lng != 0))
+        if has_gps:
+            gps_items.append((rc, c, lat, lng))
+        else:
+            no_gps_items.append((rc, c))
+
+    if len(gps_items) < 2:
+        raise HTTPException(
+            400,
+            f"Se requieren al menos 2 clientes con ubicación GPS para calcular el recorrido óptimo. Actualmente solo hay {len(gps_items)} con GPS."
+        )
+
+    api_key = os.getenv("GOOGLE_MAPS_API_KEY", "AIzaSyAcrqfAFWcq7jNQr8glEnKPsMYwxq5DvLk")
+    url = "https://routes.googleapis.com/directions/v2:computeRoutes"
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": api_key,
+        "X-Goog-FieldMask": "routes.duration,routes.distanceMeters,routes.optimizedIntermediateWaypointIndex",
+    }
+
+    body = {
+        "origin": {"location": {"latLng": {"latitude": depot_lat, "longitude": depot_lng}}},
+        "destination": {"location": {"latLng": {"latitude": depot_lat, "longitude": depot_lng}}},
+        "intermediates": [{"location": {"latLng": {"latitude": item[2], "longitude": item[3]}}} for item in gps_items],
+        "travelMode": "DRIVE",
+        "optimizeWaypointOrder": True,
+    }
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(url, headers=headers, json=body)
+        if resp.status_code != 200:
+            raise HTTPException(502, f"Error de Google Routes API: {resp.status_code} - {resp.text[:200]}")
+        data = resp.json()
+
+    routes_data = data.get("routes", [])
+    if not routes_data:
+        raise HTTPException(502, "Google Routes no retornó ninguna ruta calculada")
+
+    route_calc = routes_data[0]
+    distance_meters = route_calc.get("distanceMeters", 0)
+    duration_str = str(route_calc.get("duration", "0s")).replace("s", "")
+    duration_seconds = int(duration_str) if duration_str.isdigit() else 0
+    distance_km = round(distance_meters / 1000.0, 1)
+    duration_min = round(duration_seconds / 60)
+
+    order_indices = route_calc.get("optimizedIntermediateWaypointIndex", list(range(len(gps_items))))
+    reordered_gps = [gps_items[idx] for idx in order_indices]
+
+    current_order = 1
+    for rc, c, lat, lng in reordered_gps:
+        rc.orden_visita = current_order
+        current_order += 1
+
+    for rc, c in no_gps_items:
+        rc.orden_visita = current_order
+        current_order += 1
+
+    await db.commit()
+
+    # Notificar al preventista/vendedor asignado
+    rep = await db.scalar(
+        select(SalesRep).where(or_(SalesRep.user_id == route.user_id, SalesRep.id == route.user_id))
+    )
+    if rep:
+        try:
+            await notifications.notify_route_optimized(
+                db,
+                rep.id,
+                route.nombre,
+                len(reordered_gps),
+                distance_km=distance_km,
+                duration_min=duration_min,
+            )
+        except Exception as e:
+            pass
+
+    return {
+        "success": True,
+        "route_id": str(route.id),
+        "route_nombre": route.nombre,
+        "stops_optimized": len(reordered_gps),
+        "stops_without_gps": len(no_gps_items),
+        "total_stops": len(rows),
+        "distance_km": distance_km,
+        "duration_min": duration_min,
+        "message": f"Ruta optimizada con éxito: {len(reordered_gps)} paradas secuenciadas ({distance_km} km, ~{duration_min} min). Notificación push enviada al vendedor."
+    }
+
 
 
 async def list_visits(db: AsyncSession, company_id: str, route_id: str | None = None, fecha: str | None = None):

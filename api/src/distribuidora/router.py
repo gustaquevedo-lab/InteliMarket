@@ -329,6 +329,17 @@ async def list_route_customers(
     return await service.list_route_customers(db, route_id)
 
 
+@router.post("/routes/{route_id}/optimize")
+async def optimize_route(
+    route_id: str,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_auth),
+):
+    """Optimiza el orden de paradas de la ruta usando Google Routes API (TSP) y notifica al preventista."""
+    return await service.optimize_route(db, route_id)
+
+
+
 @router.post("/routes/{route_id}/customers", status_code=201)
 async def add_route_customer(
     route_id: str,

@@ -7,7 +7,7 @@ import {
   Search, Plus, Loader2, Ship, FileSignature, MapPin, CreditCard,
   BarChart3, Container, DollarSign, TrendingUp, Users, AlertTriangle,
   CheckCircle, XCircle, Truck, ShoppingBag, Globe, Anchor, RefreshCw,
-  ClipboardList, Handshake, Percent,
+  ClipboardList, Handshake, Percent, Sparkles, Trash2, Zap,
 } from "lucide-react"
 
 type Tab = "dashboard" | "importacion" | "acuerdos" | "rutas" | "credito"
@@ -85,6 +85,7 @@ export default function DistribuidoraPage() {
   // Selected route for customers
   const [selectedRoute, setSelectedRoute] = useState<string>("")
   const [addCustomerRoute, setAddCustomerRoute] = useState("")
+  const [optimizingRoute, setOptimizingRoute] = useState(false)
 
   const fetchAll = async () => {
     if (!companyId) return
@@ -192,6 +193,29 @@ export default function DistribuidoraPage() {
       fetchAll()
     } catch (e: any) { toast.error("Error", e.message) }
   }
+
+  const handleRemoveRouteCustomer = async (rcId: string) => {
+    try {
+      await api.distribuidora.routes.customers.remove(rcId)
+      toast.success("Cliente removido de la ruta")
+      fetchAll()
+    } catch (e: any) { toast.error("Error", e.message) }
+  }
+
+  const handleOptimizeRoute = async () => {
+    if (!selectedRoute) return
+    setOptimizingRoute(true)
+    try {
+      const res = await api.distribuidora.routes.optimize(selectedRoute)
+      toast.success("Ruta Optimizada (Google Routes TSP)", res.message || "Secuencia óptima calculada y enviada al vendedor.")
+      fetchAll()
+    } catch (e: any) {
+      toast.error("Error de Optimización", e.message || "No se pudo optimizar el recorrido")
+    } finally {
+      setOptimizingRoute(false)
+    }
+  }
+
 
   const handleCreateAuth = async () => {
     try {
@@ -378,24 +402,118 @@ export default function DistribuidoraPage() {
           <div className="col-span-2 space-y-4">
             {selectedRoute ? (
               <>
-                <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-gray-900 dark:text-white">Clientes de la ruta</h3>
-                  <div className="flex gap-2">
-                    <input className="input-field text-sm" placeholder="Customer ID" value={addCustomerRoute} onChange={e => setAddCustomerRoute(e.target.value)} />
-                    <button onClick={handleAddRouteCustomer} className="btn-primary text-xs px-3 py-1.5">Agregar</button>
+                <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+                  <div>
+                    <h3 className="font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                      Clientes de la ruta
+                      <span className="text-xs font-normal px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                        {routeCustomers.length} total
+                      </span>
+                      <span className="text-xs font-normal px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
+                        {routeCustomers.filter((rc: any) => rc.tiene_gps).length} con GPS
+                      </span>
+                    </h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      El supervisor estructura el orden óptimo; el preventista lo recibe listo en su app Inteliforce.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleOptimizeRoute}
+                      disabled={optimizingRoute || routeCustomers.filter((rc: any) => rc.tiene_gps).length < 2}
+                      className="text-xs px-3.5 py-2 rounded-lg font-semibold flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                      title={routeCustomers.filter((rc: any) => rc.tiene_gps).length < 2 ? "Se requieren al menos 2 clientes con ubicación GPS" : "Calcular el mejor camino con Google Routes API (TSP)"}
+                    >
+                      {optimizingRoute ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Calculando TSP...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                          <span>⚡ Optimizar con Google Routes</span>
+                        </>
+                      )}
+                    </button>
+                    <div className="flex gap-1.5">
+                      <input
+                        className="input-field text-xs py-1.5 px-2.5 w-36"
+                        placeholder="ID o UUID cliente"
+                        value={addCustomerRoute}
+                        onChange={e => setAddCustomerRoute(e.target.value)}
+                      />
+                      <button onClick={handleAddRouteCustomer} className="btn-primary text-xs px-3 py-1.5">
+                        Agregar
+                      </button>
+                    </div>
                   </div>
                 </div>
+
                 <div className="card overflow-hidden">
-                  <table className="w-full">
-                    <thead><tr className="table-header"><th className="table-cell">Orden</th><th className="table-cell">Cliente</th><th className="table-cell">Día</th></tr></thead>
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="table-header">
+                        <th className="table-cell w-16">Orden</th>
+                        <th className="table-cell">Cliente</th>
+                        <th className="table-cell">Dirección</th>
+                        <th className="table-cell">Ubicación GPS</th>
+                        <th className="table-cell">Día</th>
+                        <th className="table-cell text-right">Acción</th>
+                      </tr>
+                    </thead>
                     <tbody>
-                      {routeCustomers.map((rc: any) => (
-                        <tr key={rc.id} className="table-row">
-                          <td className="table-td">{rc.orden_visita}</td>
-                          <td className="table-td font-mono text-xs">{getCustomerName(rc.customer_id)}</td>
-                          <td className="table-td">{rc.dia_semana != null ? ["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"][rc.dia_semana] : "-"}</td>
+                      {routeCustomers.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="text-center py-8 text-gray-400">
+                            Esta ruta no tiene clientes asignados. Agregá clientes arriba.
+                          </td>
                         </tr>
-                      ))}
+                      ) : (
+                        routeCustomers.map((rc: any) => (
+                          <tr key={rc.id} className="table-row">
+                            <td className="table-td">
+                              <span className="font-bold font-mono text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300">
+                                #{rc.orden_visita}
+                              </span>
+                            </td>
+                            <td className="table-td">
+                              <p className="font-semibold text-xs text-gray-900 dark:text-white">
+                                {rc.customer_nombre || getCustomerName(rc.customer_id)}
+                              </p>
+                              <p className="font-mono text-[10px] text-gray-400">{rc.customer_id.slice(0, 13)}...</p>
+                            </td>
+                            <td className="table-td text-xs text-gray-500 max-w-[180px] truncate">
+                              {rc.customer_direccion || "-"}
+                            </td>
+                            <td className="table-td">
+                              {rc.tiene_gps ? (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+                                  <MapPin className="w-3 h-3 text-emerald-600" />
+                                  {rc.latitud?.toFixed(4)}, {rc.longitud?.toFixed(4)}
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                                  <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                  Sin GPS
+                                </span>
+                              )}
+                            </td>
+                            <td className="table-td text-xs">
+                              {rc.dia_semana != null ? ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"][rc.dia_semana] : "-"}
+                            </td>
+                            <td className="table-td text-right">
+                              <button
+                                onClick={() => handleRemoveRouteCustomer(rc.id)}
+                                className="p-1 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded transition-colors"
+                                title="Remover de la ruta"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>

@@ -3891,6 +3891,7 @@ export const api = {
       list: (companyId: string, user_id?: string) => client.get<SalesRoute[]>(`/v1/distribuidora/routes/${companyId}`, { user_id } as any),
       get: (id: string) => client.get<SalesRoute>(`/v1/distribuidora/routes/detail/${id}`),
       create: (companyId: string, data: any) => client.post<SalesRoute>(`/v1/distribuidora/routes/${companyId}`, data),
+      optimize: (routeId: string) => client.post<any>(`/v1/distribuidora/routes/${routeId}/optimize`),
       customers: {
         list: (routeId: string) => client.get<any[]>(`/v1/distribuidora/routes/${routeId}/customers`),
         add: (routeId: string, data: any) => client.post<any>(`/v1/distribuidora/routes/${routeId}/customers`, data),
