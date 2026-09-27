@@ -13,3 +13,17 @@
 3. **BLINDAJE GRANÍTICO DE DASHBOARD Y SIDEBAR (INTOCABLES):**
    - El **Dashboard de Distribuidora** (`ui-web/src/pages/Dashboard.tsx`) y el **Sidebar de Distribuidora** (`ui-web/src/components/Layout.tsx`) son estructuras **GRANÍTICAS DEFINITIVAS**.
    - Queda estrictamente PROHIBIDO modificar, reemplazar, resetear o sobreescribir el diseño, cálculo de números, series de Pacing, tarjetas hero o estructura de navegación del Dashboard o Sidebar sin **ADVERTIR EXPLÍCITAMENTE AL USUARIO Y OBTENER SU AUTORIZACIÓN DIRECTA PREVIA**.
+
+---
+
+## ⚡ METODOLOGÍA SUPERPOWERS Y SKILLS
+- **Rutas de Especificaciones y Planes:**
+  - Specs: `docs/superpowers/specs/YYYY-MM-DD-<nombre>.md`
+  - Implementation Plans: `docs/superpowers/plans/YYYY-MM-DD-<nombre>.md`
+- **Skills del Workspace:** Ubicadas en `.agents/skills/` (incluyendo `superpowers:*`, `ui-ux-pro-max`, `design-system`, `ui-ux`, etc.).
+- **Flujo de Trabajo:**
+  - Brainstorming previo ante nuevas características (`superpowers:brainstorming`).
+  - Planes de tareas atómicas TDD (`superpowers:writing-plans`).
+  - Depuración estructurada con hipótesis y evidencia antes de parches (`superpowers:systematic-debugging`).
+  - Verificación estricta de compilación y pruebas antes de declarar tareas completadas (`superpowers:verification-before-completion`).
+
