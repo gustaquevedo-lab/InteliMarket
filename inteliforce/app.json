@@ -28,6 +28,11 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "backgroundColor": "#01A751"
+      },
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyAcrqfAFWcq7jNQr8glEnKPsMYwxq5DvLk"
+        }
       }
     },
     "ios": {
