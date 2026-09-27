@@ -88,6 +88,15 @@ export const lightTheme = {
   info: palette.cobalt600,
   infoLight: '#dbeafe',
 
+  // Pro Max Semantics & Elevados
+  accentCyan: '#0284c7',
+  accentEmerald: '#059669',
+  accentAmber: '#d97706',
+  accentCrimson: '#dc2626',
+  cardElevated: '#f1f5f9',
+  surfaceHighlight: 'rgba(37, 99, 235, 0.08)',
+  badgeBg: '#f1f5f9',
+
   offline: palette.offlineSepia,
   offlineBg: '#fef08a',
   offlineText: '#854d0e',
@@ -106,29 +115,38 @@ export const darkTheme = {
   secondary: '#38bdf8',                        // Azul Cielo Intelimarket
   tertiary: '#60a5fa',                         // Azul Cobalto Suave
 
-  background: palette.surfaceDark,            // #0a0f1a
-  card: palette.surfaceContainerDark,         // #192029
-  cardLow: palette.surfaceContainerLowDark,   // #151c25
-  cardHigh: palette.surfaceContainerHighDark, // #232a34
+  background: palette.surfaceDark,            // #0f172a
+  card: palette.surfaceContainerDark,         // #1e293b
+  cardLow: palette.surfaceContainerLowDark,   // #131f37
+  cardHigh: palette.surfaceContainerHighDark, // #25354e
   cardHighest: palette.surfaceContainerHighestDark,
 
-  text: palette.onSurfaceDark,                // #f9fafb
-  textSecondary: palette.onSurfaceVariantDark,// #9ca3af
+  text: palette.onSurfaceDark,                // #f8fafc
+  textSecondary: palette.onSurfaceVariantDark,// #94a3b8
   textMuted: '#64748b',
   textInverse: palette.surfaceDark,
 
-  border: palette.outlineDark,                // #374151
-  borderLight: palette.outlineBorderDark,
-  borderSubtle: palette.outlineBorderDark,
+  border: palette.outlineDark,                // #334155
+  borderLight: '#23324a',
+  borderSubtle: 'rgba(255, 255, 255, 0.08)',
 
-  success: palette.primaryDark,
-  successLight: 'rgba(75, 226, 119, 0.15)',
-  warning: palette.warningDark,
-  warningLight: 'rgba(251, 191, 36, 0.15)',
-  danger: palette.errorDark,
-  dangerLight: 'rgba(255, 180, 171, 0.15)',
-  info: palette.tertiaryDark,
-  infoLight: 'rgba(174, 200, 245, 0.15)',
+  success: '#10b981',
+  successLight: 'rgba(16, 185, 129, 0.15)',
+  warning: '#f59e0b',
+  warningLight: 'rgba(245, 158, 11, 0.15)',
+  danger: '#ef4444',
+  dangerLight: 'rgba(239, 68, 68, 0.15)',
+  info: '#38bdf8',
+  infoLight: 'rgba(56, 189, 248, 0.15)',
+
+  // Pro Max Semantics & Elevados
+  accentCyan: '#38bdf8',
+  accentEmerald: '#10b981',
+  accentAmber: '#f59e0b',
+  accentCrimson: '#ef4444',
+  cardElevated: '#232e42',
+  surfaceHighlight: 'rgba(56, 189, 248, 0.12)',
+  badgeBg: 'rgba(255, 255, 255, 0.08)',
 
   offline: '#a8a29e',
   offlineBg: '#422006',
@@ -138,3 +156,4 @@ export const darkTheme = {
 // Exportación por defecto compatible
 export const colors = lightTheme;
 export type ThemeColors = typeof lightTheme | typeof darkTheme;
+
