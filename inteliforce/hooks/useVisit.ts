@@ -34,6 +34,16 @@ interface ActiveVisitState {
   updateCartQty: (productId: string, cantidad: number) => void;
   removeFromCart: (productId: string) => void;
   clearCart: () => void;
+  hydrateCartFromSuggestions: (
+    items: Array<{
+      id: string;
+      sku?: string;
+      nombre: string;
+      precio_unitario: number;
+      cantidad: number;
+      stock?: number;
+    }>
+  ) => void;
 
   // Computed total
   getCartTotal: () => number;
@@ -111,6 +121,20 @@ export const useVisit = create<ActiveVisitState>((set, get) => ({
 
   clearCart: () => {
     set({ cart: [] });
+  },
+
+  hydrateCartFromSuggestions: (items) => {
+    const newCart: CartItem[] = items.map((item) => ({
+      productId: item.id,
+      sku: item.sku,
+      nombre: item.nombre,
+      precio_unitario: item.precio_unitario,
+      cantidad: item.cantidad,
+      stock: item.stock,
+      iva_tasa: 10,
+      descuento_pct: 0,
+    }));
+    set({ cart: newCart });
   },
 
   getCartTotal: () => {

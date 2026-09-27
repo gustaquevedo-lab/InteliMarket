@@ -18,6 +18,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { useTheme } from '@/hooks/useTheme';
+import { useVisit } from '@/hooks/useVisit';
+import { useAttendanceGuard } from '@/hooks/useAttendanceGuard';
+import { haptic } from '@/lib/haptics';
 import { api } from '@/lib/api';
 import { formatGS } from '@/lib/format';
 
@@ -148,6 +151,46 @@ export default function Customer360Screen() {
       bg: isDark ? '#064E3B' : '#D1FAE5',
     };
   }, [customer, isDark]);
+
+  const { startVisit, hydrateCartFromSuggestions } = useVisit();
+  const { guardAction } = useAttendanceGuard();
+
+  const handleHydrateMarcoOrder = () => {
+    guardAction(() => {
+      haptic.success();
+      startVisit(
+        `visit_marco_${Date.now()}`,
+        customerId,
+        customer?.nombre_fantasia || customer?.razon_social || clientName
+      );
+
+      const itemsToHydrate =
+        customer?.sugerencias && customer.sugerencias.length > 0
+          ? customer.sugerencias.map((s) => ({
+              id: s.product_id,
+              sku: s.sku,
+              nombre: s.nombre,
+              precio_unitario: s.precio_venta,
+              cantidad: 1,
+            }))
+          : (customer?.top_productos || []).slice(0, 3).map((p) => ({
+              id: p.product_id,
+              sku: p.sku,
+              nombre: p.nombre,
+              precio_unitario: p.precio_habitual,
+              cantidad: 1,
+            }));
+
+      if (itemsToHydrate.length > 0) {
+        hydrateCartFromSuggestions(itemsToHydrate);
+      }
+
+      router.push({
+        pathname: '/(vendedor)/pedido',
+        params: { customerId, razon_social: clientName },
+      });
+    });
+  };
 
   const handleCall = () => {
     if (!customer?.telefono) {
@@ -401,6 +444,19 @@ export default function Customer360Screen() {
                   </Text>
                 </View>
               )}
+
+              {/* 1-Click Order Hydration Button */}
+              <TouchableOpacity
+                style={styles.marcoHydrateBtn}
+                onPress={handleHydrateMarcoOrder}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="flash" size={16} color="#002109" />
+                <Text style={styles.marcoHydrateBtnText}>
+                  ⚡ Cargar Pedido Sugerido por Marco ({customer.sugerencias?.length || (customer.top_productos?.length ? Math.min(3, customer.top_productos.length) : 0)} ítems)
+                </Text>
+                <Ionicons name="arrow-forward" size={16} color="#002109" />
+              </TouchableOpacity>
             </Card>
           )}
 
@@ -480,6 +536,53 @@ export default function Customer360Screen() {
             <>
               {/* Tarjeta de Línea de Crédito */}
               <Card style={[styles.card, { backgroundColor: isDark ? '#1E293B' : '#FFFFFF' }]}>
+                {/* Scorecard de Salud Financiera */}
+                <View style={styles.scorecardRow}>
+                  <View
+                    style={[
+                      styles.scorecardItem,
+                      { backgroundColor: isDark ? '#0F172A' : '#F8FAFC', borderColor: theme.border },
+                    ]}
+                  >
+                    <Text style={[styles.scorecardLabel, { color: theme.textMuted }]}>Estado</Text>
+                    <Text style={[styles.scorecardVal, { color: estadoBadge.color }]}>
+                      {estadoBadge.label.split(' ')[0]}
+                    </Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.scorecardItem,
+                      { backgroundColor: isDark ? '#0F172A' : '#F8FAFC', borderColor: theme.border },
+                    ]}
+                  >
+                    <Text style={[styles.scorecardLabel, { color: theme.textMuted }]}>Uso Línea</Text>
+                    <Text
+                      style={[
+                        styles.scorecardVal,
+                        { color: creditUsagePct > 80 ? '#EF4444' : '#10B981' },
+                      ]}
+                    >
+                      {creditUsagePct}%
+                    </Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.scorecardItem,
+                      { backgroundColor: isDark ? '#0F172A' : '#F8FAFC', borderColor: theme.border },
+                    ]}
+                  >
+                    <Text style={[styles.scorecardLabel, { color: theme.textMuted }]}>Vencidos</Text>
+                    <Text
+                      style={[
+                        styles.scorecardVal,
+                        { color: (customer?.documentos_vencidos || 0) > 0 ? '#EF4444' : '#10B981' },
+                      ]}
+                    >
+                      {customer?.documentos_vencidos || 0} docs
+                    </Text>
+                  </View>
+                </View>
+
                 <Text style={[styles.cardSectionTitle, { color: theme.textSecondary }]}>
                   LÍNEA DE CRÉDITO Y SALDO DISPONIBLE
                 </Text>
@@ -783,6 +886,19 @@ export default function Customer360Screen() {
               <Text style={[styles.cardSectionSub, { color: theme.textMuted }]}>
                 Sugerencias basadas en historial de recompra y productos líderes de su rubro.
               </Text>
+
+              {customer?.sugerencias && customer.sugerencias.length > 0 && (
+                <TouchableOpacity
+                  style={styles.addAllSugBtn}
+                  onPress={handleHydrateMarcoOrder}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="flash" size={16} color="#002109" />
+                  <Text style={styles.addAllSugBtnText}>
+                    ⚡ Cargar todas las oportunidades al pedido ({customer.sugerencias.length})
+                  </Text>
+                </TouchableOpacity>
+              )}
 
               {customer?.sugerencias && customer.sugerencias.length > 0 ? (
                 customer.sugerencias.map((sug) => {
@@ -1382,5 +1498,59 @@ const styles = StyleSheet.create({
   marcoMetaText: {
     fontSize: 11,
     fontWeight: '600',
+  },
+  marcoHydrateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#10B981',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    gap: 8,
+    marginTop: 10,
+  },
+  marcoHydrateBtnText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#002109',
+  },
+  addAllSugBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#10B981',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    gap: 8,
+    marginBottom: 14,
+  },
+  addAllSugBtnText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#002109',
+  },
+  scorecardRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 14,
+  },
+  scorecardItem: {
+    flex: 1,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  scorecardVal: {
+    fontSize: 14,
+    fontWeight: '800',
+    marginTop: 2,
+  },
+  scorecardLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
   },
 });
