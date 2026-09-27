@@ -57,10 +57,11 @@ graph TD
 - Modify: `inteliforce/constants/colors.ts`
 - Modify: `inteliforce/hooks/useTheme.ts`
 
-- [ ] **Step 1:** Verify existing theme tokens in `colors.ts` and add missing elevated tokens (`cardNavy: '#1E293B'`, `midnightBackground: '#0F172A'`, `satelliteCyan: '#38BDF8'`, `emeraldActive: '#10B981'`).
-- [ ] **Step 2:** Ensure contrast ratios conform to WCAG AAA for both Light and Dark modes.
-- [ ] **Step 3:** Run `npx tsc --noEmit` in `inteliforce/` to verify zero type regressions.
-- [ ] **Step 4:** Commit changes: `git commit -m "feat(theme): refine UI/UX Pro Max color tokens and elevation states"`.
+- [x] **Step 1:** Verify existing theme tokens in `colors.ts` and add missing elevated tokens (`cardNavy: '#1E293B'`, `midnightBackground: '#0F172A'`, `satelliteCyan: '#38BDF8'`, `emeraldActive: '#10B981'`).
+- [x] **Step 2:** Ensure contrast ratios conform to WCAG AAA for both Light and Dark modes.
+- [x] **Step 3:** Run `npx tsc --noEmit` in `inteliforce/` to verify zero type regressions.
+- [x] **Step 4:** Commit changes: `git commit -m "feat(theme): refine UI/UX Pro Max color tokens and elevation states"`.
+
 
 ---
 
@@ -70,10 +71,11 @@ graph TD
 - Create: `inteliforce/hooks/useAttendanceGuard.ts`
 - Create: `inteliforce/components/ui/JornadaGateBanner.tsx`
 
-- [ ] **Step 1:** Implement `useAttendanceGuard.ts` subscribing to `['attendance-today']` query. Expose `isJornadaActiva` (boolean), `loadingAttendance`, and helper `guardAction(callback, alertMessage)`.
-- [ ] **Step 2:** Implement `JornadaGateBanner.tsx` displaying a high-contrast tactical banner when `isJornadaActiva` is false, with an icon, explanatory copy, and a button navigating to `/(vendedor)/asistencia`.
-- [ ] **Step 3:** Run `npx tsc --noEmit` in `inteliforce/` to verify zero compiler errors.
-- [ ] **Step 4:** Commit changes: `git commit -m "feat(attendance): add useAttendanceGuard hook and JornadaGateBanner component"`.
+- [x] **Step 1:** Implement `useAttendanceGuard.ts` subscribing to `['attendance-today']` query. Expose `isJornadaActiva` (boolean), `loadingAttendance`, and helper `guardAction(callback, alertMessage)`.
+- [x] **Step 2:** Implement `JornadaGateBanner.tsx` displaying a high-contrast tactical banner when `isJornadaActiva` is false, with an icon, explanatory copy, and a button navigating to `/(vendedor)/asistencia`.
+- [x] **Step 3:** Run `npx tsc --noEmit` in `inteliforce/` to verify zero compiler errors.
+- [x] **Step 4:** Commit changes: `git commit -m "feat(attendance): add useAttendanceGuard hook and JornadaGateBanner component"`.
+
 
 ---
 
@@ -84,11 +86,11 @@ graph TD
 - Modify: `inteliforce/app/(vendedor)/index.tsx`
 - Modify: `inteliforce/components/visita/VisitCard.tsx`
 
-- [ ] **Step 1:** In `VisitCard.tsx`, ensure pills wrap cleanly, touch targets are at least 48dp, and display distance to current location when user location is available.
-- [ ] **Step 2:** Build `RouteMapView.tsx` using `react-native-maps` with custom circular markers numbered by `orden_visita` (#1, #2, #3...), colored by state (blue/cyan for pending, green for completed, amber/red for debts/alerts), and a bottom swipeable client preview card.
-- [ ] **Step 3:** In `app/(vendedor)/index.tsx`, insert animated segmented control `[ Lista ]` / `[ Mapa ]`, mount `JornadaGateBanner` when attendance is inactive, and wire conditional rendering between list and map.
-- [ ] **Step 4:** Run `npx tsc --noEmit` in `inteliforce/` to verify zero errors.
-- [ ] **Step 5:** Commit changes: `git commit -m "feat(routes): implement dual List/Map view and integrate attendance gatekeeper in Mi Ruta"`.
+- [x] **Step 1:** In `VisitCard.tsx`, ensure pills wrap cleanly, touch targets are at least 48dp, and display distance to current location when user location is available.
+- [x] **Step 2:** Build `RouteMapView.tsx` using `react-native-maps` with custom circular markers numbered by `orden_visita` (#1, #2, #3...), colored by state (blue/cyan for pending, green for completed, amber/red for debts/alerts), and a bottom swipeable client preview card.
+- [x] **Step 3:** In `app/(vendedor)/index.tsx`, insert animated segmented control `[ Lista ]` / `[ Mapa ]`, mount `JornadaGateBanner` when attendance is inactive, and wire conditional rendering between list and map.
+- [x] **Step 4:** Run `npx tsc --noEmit` in `inteliforce/` to verify zero errors.
+- [x] **Step 5:** Commit changes: `git commit -m "feat(routes): implement dual List/Map view and integrate attendance gatekeeper in Mi Ruta"`.
 
 ---
 
@@ -98,12 +100,12 @@ graph TD
 - Modify: `inteliforce/app/(vendedor)/clientes/[id].tsx`
 - Modify: `inteliforce/hooks/useVisit.ts`
 
-- [ ] **Step 1:** In `useVisit.ts`, add helper function `hydrateCartFromSuggestions(items: Array<{ productId: string, cantidad: number, precio: number, nombre: string }>)`.
-- [ ] **Step 2:** In `clientes/[id].tsx`, redesign the Marco IA Hero card with Tactical Dark gradient, risk level badge, days without purchase alert, and prominent action button: *"⚡ Cargar Pedido Sugerido por Marco"*.
-- [ ] **Step 3:** Hook button to hydrate the cart and navigate to `/(vendedor)/pedido/confirmar` with haptic feedback `haptic.success()`.
-- [ ] **Step 4:** Elevate the financial health section (credit limit bar, checks in wallet, rejected checks, pending bills with days past due).
-- [ ] **Step 5:** Run `npx tsc --noEmit` in `inteliforce/` to verify zero errors.
-- [ ] **Step 6:** Commit changes: `git commit -m "feat(customer360): add Marco AI 1-click cart suggestion and financial health widget"`.
+- [x] **Step 1:** In `useVisit.ts`, add helper function `hydrateCartFromSuggestions(items: Array<{ productId: string, cantidad: number, precio: number, nombre: string }>)`.
+- [x] **Step 2:** In `clientes/[id].tsx`, redesign the Marco IA Hero card with Tactical Dark gradient, risk level badge, days without purchase alert, and prominent action button: *"⚡ Cargar Pedido Sugerido por Marco"*.
+- [x] **Step 3:** Hook button to hydrate the cart and navigate to `/(vendedor)/pedido/confirmar` with haptic feedback `haptic.success()`.
+- [x] **Step 4:** Elevate the financial health section (credit limit bar, checks in wallet, rejected checks, pending bills with days past due).
+- [x] **Step 5:** Run `npx tsc --noEmit` in `inteliforce/` to verify zero errors.
+- [x] **Step 6:** Commit changes: `git commit -m "feat(customer360): add Marco AI 1-click cart suggestion and financial health widget"`.
 
 ---
 
@@ -114,12 +116,12 @@ graph TD
 - Modify: `inteliforce/components/pedido/ProductCard.tsx`
 - Modify: `inteliforce/components/pedido/CartSummary.tsx`
 
-- [ ] **Step 1:** Replace static color imports in `pedido/index.tsx` and `ProductCard.tsx` with dynamic `useTheme()`.
-- [ ] **Step 2:** Add a horizontal scrolling Category Filter Bar (`Todos`, `Lácteos`, `Embutidos`, `Bebidas`, `Secos`, `Limpieza`, etc.) with active pill styling.
-- [ ] **Step 3:** Add stock availability badge in `ProductCard.tsx` (`En Stock`, `Últimas X un.`, `Agotado`). Disable add button when stock is 0.
-- [ ] **Step 4:** Enhance `CartSummary.tsx` with live total in Gs. using `formatGS`, item count badge, and visual credit limit comparison.
-- [ ] **Step 5:** Run `npx tsc --noEmit` in `inteliforce/` to verify zero errors.
-- [ ] **Step 6:** Commit changes: `git commit -m "feat(catalog): add category filter chips, dynamic theming, stock badges and haptic stepper"`.
+- [x] **Step 1:** Replace static color imports in `pedido/index.tsx` and `ProductCard.tsx` with dynamic `useTheme()`.
+- [x] **Step 2:** Add a horizontal scrolling Category Filter Bar (`Todos`, `Lácteos`, `Embutidos`, `Bebidas`, `Secos`, `Limpieza`, etc.) with active pill styling.
+- [x] **Step 3:** Add stock availability badge in `ProductCard.tsx` (`En Stock`, `Últimas X un.`, `Agotado`). Disable add button when stock is 0.
+- [x] **Step 4:** Enhance `CartSummary.tsx` with live total in Gs. using `formatGS`, item count badge, and visual credit limit comparison.
+- [x] **Step 5:** Run `npx tsc --noEmit` in `inteliforce/` to verify zero errors.
+- [x] **Step 6:** Commit changes: `git commit -m "feat(catalog): add category filter chips, dynamic theming, stock badges and haptic stepper"`.
 
 ---
 
@@ -128,11 +130,11 @@ graph TD
 **Files:**
 - Modify: `inteliforce/app/(vendedor)/pedido/confirmar.tsx`
 
-- [ ] **Step 1:** Refactor `confirmar.tsx` to adopt `useTheme()` tokens and full safe area padding for gesture bars.
-- [ ] **Step 2:** Add payment condition radio group (Contado / Crédito with approved days plazo).
-- [ ] **Step 3:** Hook submission button to `expo-haptics` and offline queue fallback if network is interrupted.
-- [ ] **Step 4:** Run `npx tsc --noEmit` in `inteliforce/` to verify zero errors.
-- [ ] **Step 5:** Commit changes: `git commit -m "feat(order): refine checkout screen with payment condition selector and theme tokens"`.
+- [x] **Step 1:** Refactor `confirmar.tsx` to adopt `useTheme()` tokens and full safe area padding for gesture bars.
+- [x] **Step 2:** Add payment condition radio group (Contado / Crédito with approved days plazo).
+- [x] **Step 3:** Hook submission button to `expo-haptics` and offline queue fallback if network is interrupted.
+- [x] **Step 4:** Run `npx tsc --noEmit` in `inteliforce/` to verify zero errors.
+- [x] **Step 5:** Commit changes: `git commit -m "feat(order): refine checkout screen with payment condition selector and theme tokens"`.
 
 ---
 
@@ -141,11 +143,11 @@ graph TD
 **Files:**
 - Modify: `inteliforce/app/(vendedor)/metas.tsx`
 
-- [ ] **Step 1:** Add Daily Pacing comparison bar: Expected pace vs Actual pace with status badge (`+X% Adelantado` / `-Y% Retrasado`).
-- [ ] **Step 2:** Add Commission Projection Card calculating estimated earnings in Guaraníes (`formatGS`) based on current monthly sales volume and goal tier.
-- [ ] **Step 3:** Refactor layout to UI/UX Pro Max tokens and clean typography.
-- [ ] **Step 4:** Run `npx tsc --noEmit` in `inteliforce/` to verify zero compiler errors.
-- [ ] **Step 5:** Commit changes: `git commit -m "feat(metas): implement pacing analysis and monthly commission earnings estimator"`.
+- [x] **Step 1:** Add Daily Pacing comparison bar: Expected pace vs Actual pace with status badge (`+X% Adelantado` / `-Y% Retrasado`).
+- [x] **Step 2:** Add Commission Projection Card calculating estimated earnings in Guaraníes (`formatGS`) based on current monthly sales volume and goal tier.
+- [x] **Step 3:** Refactor layout to UI/UX Pro Max tokens and clean typography.
+- [x] **Step 4:** Run `npx tsc --noEmit` in `inteliforce/` to verify zero compiler errors.
+- [x] **Step 5:** Commit changes: `git commit -m "feat(metas): implement pacing analysis and monthly commission earnings estimator"`.
 
 ---
 
@@ -154,7 +156,7 @@ graph TD
 **Files:**
 - Run: `inteliforce/` validation suite
 
-- [ ] **Step 1:** Run full TypeScript compilation `npx tsc --noEmit` across `inteliforce/`.
-- [ ] **Step 2:** Validate Expo router routes with `npx expo config --json`.
-- [ ] **Step 3:** Verify git cleanliness on `vertical/distribuidora` and ensure Dashboard/Sidebar in `ui-web` remain completely untouched.
-- [ ] **Step 4:** Deploy updated backend service if needed and verify live HTTP 200 responses on `minisforum-ia`.
+- [x] **Step 1:** Run full TypeScript compilation `npx tsc --noEmit` across `inteliforce/`.
+- [x] **Step 2:** Validate Expo router routes with `npx expo config --json`.
+- [x] **Step 3:** Review `git status` to guarantee cleanliness and verify strict preservation of Dashboard and Sidebar.
+- [x] **Step 4:** Final commit marking completion.
