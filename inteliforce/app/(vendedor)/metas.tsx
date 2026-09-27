@@ -69,6 +69,15 @@ export default function VendedorMetasScreen() {
   const projectedClosingGs = Math.round((ventaTotal / Math.max(1, dayOfMonth)) * daysInMonth);
   const projectedPct = metaTotal > 0 ? Math.round((projectedClosingGs / metaTotal) * 100) : 0;
 
+  // Estimador de Comisiones Comerciales
+  const baseCommissionRate = 0.025; // 2.5% base
+  const acceleratorBonus = pctTotal >= 100 ? 0.005 : 0; // +0.5% bono acelerador al cumplir cuota
+  const effectiveRate = baseCommissionRate + acceleratorBonus;
+  const currentCommissionGs = Math.round(ventaTotal * effectiveRate);
+  const projectedCommissionGs = Math.round(
+    projectedClosingGs * (projectedPct >= 100 ? 0.03 : 0.025)
+  );
+
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       {/* Header Bar */}
@@ -179,6 +188,35 @@ export default function VendedorMetasScreen() {
               />
             </View>
 
+            {/* Comparativa Dual de Pacing: Días Transcurridos vs Avance Facturado */}
+            <View style={styles.dualPacingContainer}>
+              <View style={styles.dualPacingRow}>
+                <Text style={[styles.dualPacingTitle, { color: theme.textSecondary }]}>
+                  Tiempo: Día {dayOfMonth} de {daysInMonth} ({expectedPacingPct}%)
+                </Text>
+                <View style={[styles.dualPacingTrack, { backgroundColor: isDark ? '#0F172A' : '#E2E8F0' }]}>
+                  <View style={[styles.dualPacingFill, { width: `${expectedPacingPct}%`, backgroundColor: '#38BDF8' }]} />
+                </View>
+              </View>
+
+              <View style={styles.dualPacingRow}>
+                <Text style={[styles.dualPacingTitle, { color: theme.textSecondary }]}>
+                  Ventas Acumuladas ({pctTotal}%)
+                </Text>
+                <View style={[styles.dualPacingTrack, { backgroundColor: isDark ? '#0F172A' : '#E2E8F0' }]}>
+                  <View
+                    style={[
+                      styles.dualPacingFill,
+                      {
+                        width: `${pctTotal}%`,
+                        backgroundColor: pacingDiff >= 0 ? '#10B981' : '#F59E0B',
+                      },
+                    ]}
+                  />
+                </View>
+              </View>
+            </View>
+
             {/* Sub-indicadores de Pacing */}
             <View style={styles.pacingGrid}>
               <View
@@ -256,6 +294,42 @@ export default function VendedorMetasScreen() {
                 ? '¡Excelente rendimiento comercial! Manteniendo este promedio diario superás la meta de Casa Gonzalito.'
                 : 'Se requiere intensificar visitas y reposición para alcanzar el 100% de la cuota del mes.'}
             </Text>
+          </Card>
+
+          {/* Tarjeta Estimador de Comisiones Comerciales */}
+          <Card
+            style={[
+              styles.commissionCard,
+              {
+                backgroundColor: isDark ? '#064E3B' : '#ECFDF5',
+                borderColor: '#10B981',
+              },
+            ]}
+          >
+            <View style={styles.commissionHeader}>
+              <View style={[styles.commissionIconBox, { backgroundColor: isDark ? '#022C22' : '#D1FAE5' }]}>
+                <Ionicons name="wallet-outline" size={22} color="#10B981" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.commissionPreTitle, { color: isDark ? '#6EE7B7' : '#047857' }]}>
+                  ESTIMADOR DE COMISIONES
+                </Text>
+                <Text style={[styles.commissionAmount, { color: isDark ? '#A7F3D0' : '#065F46' }]}>
+                  {formatGS(currentCommissionGs)}
+                </Text>
+                <Text style={[styles.commissionRateText, { color: isDark ? '#6EE7B7' : '#059669' }]}>
+                  Tasa efectiva: {(effectiveRate * 100).toFixed(1)}% {pctTotal >= 100 ? '(+0.5% Acelerador)' : ''}
+                </Text>
+              </View>
+              <View style={styles.commissionProjectedBox}>
+                <Text style={[styles.commissionProjectedLabel, { color: isDark ? '#9CA3AF' : '#6B7280' }]}>
+                  Proyección Fin Mes
+                </Text>
+                <Text style={[styles.commissionProjectedAmount, { color: '#10B981' }]}>
+                  {formatGS(projectedCommissionGs)}
+                </Text>
+              </View>
+            </View>
           </Card>
 
           {/* Desglose por Línea de Producto */}
@@ -475,6 +549,26 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: 4,
   },
+  dualPacingContainer: {
+    gap: 8,
+    marginBottom: 14,
+  },
+  dualPacingRow: {
+    gap: 4,
+  },
+  dualPacingTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  dualPacingTrack: {
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  dualPacingFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
   pacingGrid: {
     flexDirection: 'row',
     gap: 8,
@@ -522,6 +616,52 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     lineHeight: 16,
     marginTop: 4,
+  },
+  commissionCard: {
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  commissionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  commissionIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  commissionPreTitle: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  commissionAmount: {
+    fontSize: 18,
+    fontWeight: '900',
+    marginTop: 1,
+  },
+  commissionRateText: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 1,
+  },
+  commissionProjectedBox: {
+    alignItems: 'flex-end',
+  },
+  commissionProjectedLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  commissionProjectedAmount: {
+    fontSize: 14,
+    fontWeight: '900',
+    marginTop: 2,
   },
   sectionTitle: {
     fontSize: 15,
