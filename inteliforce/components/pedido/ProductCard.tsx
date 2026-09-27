@@ -32,7 +32,10 @@ export function ProductCard({
   onRemove,
 }: ProductCardProps) {
   const { theme, isDark } = useTheme();
-  const hasStock = (product.stock ?? 0) > 0;
+  const stock = product.stock ?? 0;
+  const isOutOfStock = stock <= 0;
+  const isCriticalStock = stock > 0 && stock <= 5;
+  const hasStock = stock > 0;
 
   const handleAdd = () => {
     if (quantityInCart === 0) {
@@ -49,7 +52,18 @@ export function ProductCard({
   };
 
   return (
-    <Card style={styles.card}>
+    <Card
+      style={[
+        styles.card,
+        {
+          backgroundColor: isDark
+            ? (quantityInCart > 0 ? '#1E293B' : '#0F172A')
+            : (quantityInCart > 0 ? '#F0FDF4' : '#FFFFFF'),
+          borderColor: quantityInCart > 0 ? theme.primary : isDark ? '#334155' : theme.border,
+          borderWidth: quantityInCart > 0 ? 1.5 : 1,
+        },
+      ]}
+    >
       <View style={styles.header}>
         <View style={styles.info}>
           {product.linea_nombre && (
@@ -72,14 +86,37 @@ export function ProductCard({
           <Text style={[styles.price, { color: theme.primary }]}>
             {formatGS(product.precio_venta)}
           </Text>
-          <Text
+          <View
             style={[
-              styles.stock,
-              { color: hasStock ? theme.success : theme.danger },
+              styles.stockBadge,
+              {
+                backgroundColor: isOutOfStock
+                  ? (isDark ? '#450A0A' : '#FEE2E2')
+                  : isCriticalStock
+                  ? (isDark ? '#78350F' : '#FEF3C7')
+                  : (isDark ? '#064E3B' : '#D1FAE5'),
+              },
             ]}
           >
-            {hasStock ? `Stock: ${Math.round(product.stock ?? 0)} ${product.unidad_medida || 'un.'}` : 'Sin stock'}
-          </Text>
+            <Text
+              style={[
+                styles.stockBadgeText,
+                {
+                  color: isOutOfStock
+                    ? '#EF4444'
+                    : isCriticalStock
+                    ? '#F59E0B'
+                    : '#10B981',
+                },
+              ]}
+            >
+              {isOutOfStock
+                ? 'Sin stock'
+                : isCriticalStock
+                ? `Crítico: ${Math.round(stock)}`
+                : `Stock: ${Math.round(stock)} ${product.unidad_medida || 'un.'}`}
+            </Text>
+          </View>
         </View>
       </View>
 
@@ -239,6 +276,17 @@ const styles = StyleSheet.create({
   subtotalText: {
     fontSize: 13,
     marginLeft: 'auto',
+  },
+  stockBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginTop: 4,
+    alignSelf: 'flex-end',
+  },
+  stockBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
   },
 });
 
