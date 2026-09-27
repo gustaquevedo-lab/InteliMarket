@@ -171,14 +171,12 @@ export function RouteMapView({
   const initialLat = userLocation?.latitude ?? (stopsWithCoords[0]?.displayLat ?? -22.548);
   const initialLng = userLocation?.longitude ?? (stopsWithCoords[0]?.displayLng ?? -55.728);
 
-  const leafletHtml = useMemo(() => {
+  const googleMapsHtml = useMemo(() => {
     return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <style>
     * { -webkit-tap-highlight-color: transparent; }
     html, body, #map {
@@ -188,25 +186,33 @@ export function RouteMapView({
       padding: 0;
       background: ${isDark ? '#0f172a' : '#f8fafc'};
     }
-    .custom-marker {
-      display: flex;
-      align-items: center;
-      justify-content: center;
+    .custom-pin {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      width: 28px;
+      height: 28px;
       border-radius: 50%;
       color: #ffffff;
       font-weight: 800;
+      font-size: 12px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      box-shadow: 0 3px 6px rgba(0,0,0,0.35);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 3px 8px rgba(0,0,0,0.35);
       cursor: pointer;
       user-select: none;
       transition: transform 0.15s ease;
     }
-    .custom-marker.active {
-      transform: scale(1.3);
+    .custom-pin.active {
+      transform: translate(-50%, -50%) scale(1.3);
       border-color: #ffffff !important;
       box-shadow: 0 5px 14px rgba(0,0,0,0.55);
+      z-index: 9999 !important;
     }
-    .user-marker-pulse {
+    .user-pulse-dot {
+      position: absolute;
+      transform: translate(-50%, -50%);
       width: 18px;
       height: 18px;
       background: #0284C7;
@@ -220,113 +226,137 @@ export function RouteMapView({
       70% { box-shadow: 0 0 0 10px rgba(2, 132, 199, 0); }
       100% { box-shadow: 0 0 0 2px rgba(2, 132, 199, 0); }
     }
-    .leaflet-control-attribution {
-      display: none !important;
-    }
   </style>
 </head>
 <body>
   <div id="map"></div>
   <script>
-    var map = L.map('map', {
-      zoomControl: false,
-      attributionControl: false
-    }).setView([${initialLat}, ${initialLng}], 14);
-
-    // Mosaicos CartoDB Voyager de alta calidad
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      maxZoom: 19,
-      subdomains: 'abcd'
-    }).addTo(map);
-
-    var markerElements = {};
+    var map;
+    var markers = {};
     var stops = ${JSON.stringify(serializedStops)};
+    var userLoc = ${userLocation ? JSON.stringify(userLocation) : 'null'};
     var activeId = '${activeStop?.customer_id || ''}';
+    var isDark = ${isDark ? 'true' : 'false'};
 
-    // Polyline conectando la ruta en orden
-    var latlngs = stops.map(function(s) { return [s.displayLat, s.displayLng]; });
-    if (latlngs.length > 1) {
-      L.polyline(latlngs, {
-        color: '${theme.primary}',
-        weight: 4,
-        opacity: 0.85,
-        lineCap: 'round',
-        lineJoin: 'round'
-      }).addTo(map);
-    }
+    function initGoogleMap() {
+      var mapOptions = {
+        center: { lat: ${initialLat}, lng: ${initialLng} },
+        zoom: 14,
+        disableDefaultUI: true,
+        zoomControl: false,
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: false,
+        styles: isDark ? [
+          { elementType: 'geometry', stylers: [{ color: '#1e293b' }] },
+          { elementType: 'labels.text.stroke', stylers: [{ color: '#0f172a' }] },
+          { elementType: 'labels.text.fill', stylers: [{ color: '#94a3b8' }] },
+          { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#334155' }] },
+          { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#cbd5e1' }] },
+          { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0f172a' }] },
+          { featureType: 'poi', stylers: [{ visibility: 'simplified' }] }
+        ] : []
+      };
 
-    // Marcador de posición del vendedor
-    ${userLocation ? `
-      var userIcon = L.divIcon({
-        className: 'user-icon-wrap',
-        html: '<div class="user-marker-pulse"></div>',
-        iconSize: [24, 24],
-        iconAnchor: [12, 12]
-      });
-      L.marker([${userLocation.latitude}, ${userLocation.longitude}], {
-        icon: userIcon,
-        zIndexOffset: 1000
-      }).addTo(map);
-    ` : ''}
+      map = new google.maps.Map(document.getElementById('map'), mapOptions);
 
-    // Marcadores numerados de paradas
-    stops.forEach(function(s) {
-      var isAct = s.customer_id === activeId;
-      var border = s.hasRealGps ? '2px solid rgba(0,0,0,0.2)' : '2.5px dashed #F59E0B';
-      if (isAct) border = '3px solid #FFFFFF';
-
-      var el = document.createElement('div');
-      el.className = 'custom-marker' + (isAct ? ' active' : '');
-      el.style.backgroundColor = s.pinBg;
-      el.style.border = border;
-      el.style.width = '28px';
-      el.style.height = '28px';
-      el.style.fontSize = '12px';
-      el.textContent = s.orderNum;
-
-      var icon = L.divIcon({
-        className: 'leaflet-marker-clean',
-        html: el.outerHTML,
-        iconSize: [28, 28],
-        iconAnchor: [14, 14]
-      });
-
-      var m = L.marker([s.displayLat, s.displayLng], {
-        icon: icon,
-        zIndexOffset: isAct ? 500 : 100
-      }).addTo(map);
-
-      m.on('click', function() {
-        if (window.ReactNativeWebView) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'SELECT_STOP', id: s.customer_id }));
-        }
-      });
-
-      markerElements[s.customer_id] = m;
-    });
-
-    // Auto-ajustar vista para abarcar paradas
-    window.fitRouteBounds = function() {
-      if (latlngs.length > 0) {
-        var bounds = L.latLngBounds(latlngs);
-        ${userLocation ? `bounds.extend([${userLocation.latitude}, ${userLocation.longitude}]);` : ''}
-        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
+      // Custom Overlay View for HTML markers
+      function HTMLMarker(lat, lng, html) {
+        this.lat = lat;
+        this.lng = lng;
+        this.pos = new google.maps.LatLng(lat, lng);
+        this.div = html;
+        this.setMap(map);
       }
-    };
+      HTMLMarker.prototype = new google.maps.OverlayView();
+      HTMLMarker.prototype.onAdd = function() {
+        var panes = this.getPanes();
+        panes.overlayMouseTarget.appendChild(this.div);
+      };
+      HTMLMarker.prototype.draw = function() {
+        var overlayProjection = this.getProjection();
+        if (!overlayProjection) return;
+        var p = overlayProjection.fromLatLngToDivPixel(this.pos);
+        if (p) {
+          this.div.style.left = p.x + 'px';
+          this.div.style.top = p.y + 'px';
+        }
+      };
+      HTMLMarker.prototype.onRemove = function() {
+        if (this.div && this.div.parentNode) {
+          this.div.parentNode.removeChild(this.div);
+        }
+      };
 
-    window.panToMarker = function(id, lat, lng) {
-      map.setView([lat, lng], 16, { animate: true, duration: 0.5 });
-    };
+      // Marcador del vendedor
+      if (userLoc) {
+        var uEl = document.createElement('div');
+        uEl.className = 'user-pulse-dot';
+        new HTMLMarker(userLoc.latitude, userLoc.longitude, uEl);
+      }
 
-    window.centerOnCoords = function(lat, lng) {
-      map.setView([lat, lng], 16, { animate: true, duration: 0.5 });
-    };
+      // Marcadores numerados de paradas
+      var bounds = new google.maps.LatLngBounds();
+      var pathCoords = [];
 
-    // Ajuste inicial de límites
-    if (latlngs.length > 1) {
-      window.fitRouteBounds();
+      stops.forEach(function(s) {
+        var isAct = s.customer_id === activeId;
+        var border = s.hasRealGps ? '2px solid rgba(0,0,0,0.25)' : '2.5px dashed #F59E0B';
+        if (isAct) border = '3px solid #FFFFFF';
+
+        var el = document.createElement('div');
+        el.className = 'custom-pin' + (isAct ? ' active' : '');
+        el.style.backgroundColor = s.pinBg;
+        el.style.border = border;
+        el.textContent = s.orderNum;
+
+        el.addEventListener('click', function(e) {
+          e.stopPropagation();
+          if (window.ReactNativeWebView) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'SELECT_STOP', id: s.customer_id }));
+          }
+        });
+
+        markers[s.customer_id] = { marker: new HTMLMarker(s.displayLat, s.displayLng, el), el: el };
+        bounds.extend({ lat: s.displayLat, lng: s.displayLng });
+        pathCoords.push({ lat: s.displayLat, lng: s.displayLng });
+      });
+
+      // Trazado Polyline de ruta
+      if (pathCoords.length > 1) {
+        new google.maps.Polyline({
+          path: pathCoords,
+          strokeColor: '${theme.primary}',
+          strokeOpacity: 0.9,
+          strokeWeight: 4,
+          map: map
+        });
+      }
+
+      // Ajuste de encuadre
+      if (pathCoords.length > 1) {
+        if (userLoc) bounds.extend({ lat: userLoc.latitude, lng: userLoc.longitude });
+        map.fitBounds(bounds, { top: 60, right: 60, bottom: 60, left: 60 });
+      }
+
+      window.fitRouteBounds = function() {
+        if (pathCoords.length > 0) {
+          map.fitBounds(bounds, { top: 60, right: 60, bottom: 60, left: 60 });
+        }
+      };
+
+      window.panToMarker = function(id, lat, lng) {
+        map.panTo({ lat: lat, lng: lng });
+        map.setZoom(16);
+      };
+
+      window.centerOnCoords = function(lat, lng) {
+        map.panTo({ lat: lat, lng: lng });
+        map.setZoom(16);
+      };
     }
   </script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAcrqfAFWcq7jNQr8glEnKPsMYwxq5DvLk&callback=initGoogleMap&loading=async" async defer></script>
 </body>
 </html>`;
   }, [isDark, serializedStops, initialLat, initialLng, userLocation, theme.primary]);
@@ -336,7 +366,7 @@ export function RouteMapView({
       <WebView
         ref={webViewRef}
         originWhitelist={['*']}
-        source={{ html: leafletHtml }}
+        source={{ html: googleMapsHtml }}
         style={styles.map}
         javaScriptEnabled={true}
         domStorageEnabled={true}
