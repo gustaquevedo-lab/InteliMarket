@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CartItem } from '@/components/pedido/CartItem';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -24,6 +25,7 @@ import { haptic } from '@/lib/haptics';
 
 export default function ConfirmarPedidoScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { customer_id } = useLocalSearchParams<{ customer_id: string }>();
   const { theme, isDark } = useTheme();
 
@@ -135,7 +137,10 @@ export default function ConfirmarPedidoScreen() {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 32 }]}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Selector de Condición: Contado / Crédito */}
         <Card style={styles.sectionCard}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>Condición de Venta</Text>
@@ -232,14 +237,31 @@ export default function ConfirmarPedidoScreen() {
           style={[
             styles.totalCard,
             {
-              backgroundColor: isDark ? '#151C25' : '#0F1F3D',
-              borderColor: isDark ? '#232A34' : 'transparent',
+              backgroundColor: isDark ? '#1E293B' : '#0F1F3D',
+              borderColor: isDark ? '#334155' : 'transparent',
               borderWidth: isDark ? 1 : 0,
             },
           ]}
         >
+          <View style={styles.breakdownRow}>
+            <Text style={[styles.breakdownLabel, { color: isDark ? '#94A3B8' : '#CBD5E1' }]}>
+              Subtotal Gravadas (10%)
+            </Text>
+            <Text style={[styles.breakdownVal, { color: '#FFFFFF' }]}>
+              {formatGS(Math.round((total * 10) / 11))}
+            </Text>
+          </View>
+          <View style={styles.breakdownRow}>
+            <Text style={[styles.breakdownLabel, { color: isDark ? '#94A3B8' : '#CBD5E1' }]}>
+              Liquidación IVA (10%)
+            </Text>
+            <Text style={[styles.breakdownVal, { color: '#38BDF8' }]}>
+              {formatGS(Math.round(total / 11))}
+            </Text>
+          </View>
+          <View style={[styles.totalDivider, { backgroundColor: isDark ? '#334155' : 'rgba(255,255,255,0.1)' }]} />
           <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Total del Pedido</Text>
+            <Text style={styles.totalLabel}>Total a Pagar</Text>
             <Text style={[styles.totalAmount, { color: theme.primary }]}>{formatGS(total)}</Text>
           </View>
           <Text style={styles.ivaDisclaimer}>Importe en Guaraníes con IVA incluido</Text>
@@ -392,6 +414,24 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 18,
     marginTop: 8,
+  },
+  breakdownRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  breakdownLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  breakdownVal: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  totalDivider: {
+    height: 1,
+    marginVertical: 10,
   },
   totalRow: {
     flexDirection: 'row',
