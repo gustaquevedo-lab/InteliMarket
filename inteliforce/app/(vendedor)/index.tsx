@@ -299,7 +299,6 @@ export default function VendedorDashboard() {
       <ScrollView
         style={styles.scrollArea}
         contentContainerStyle={styles.scrollContent}
-        scrollEnabled={viewMode !== 'map'}
         refreshControl={
           <RefreshControl
             refreshing={refetchingRoutes}
@@ -560,29 +559,8 @@ export default function VendedorDashboard() {
           </View>
         </View>
 
-        {/* Route Stops: List or Map View */}
-        {viewMode === 'map' ? (
-          <View style={styles.mapWrapper}>
-            <RouteMapView
-              stops={filteredRoutes}
-              userLocation={location}
-              onSelectStop={(stop) => setSelectedStop(stop)}
-              onOpenLocationModal={(stop) => {
-                setSelectedStop(stop);
-                setIsLocationModalOpen(true);
-              }}
-              onStartVisit={(stop) => {
-                guardAction(() => {
-                  setSelectedStop(null);
-                  router.push({
-                    pathname: '/(vendedor)/visita/[id]',
-                    params: { id: stop.customer_id, razon_social: stop.razon_social },
-                  });
-                });
-              }}
-            />
-          </View>
-        ) : (
+        {/* Route Stops: Lista de clientes (el mapa se renderiza fuera del ScrollView) */}
+        {viewMode === 'list' && (
           <View style={styles.listContainer}>
             {loadingRoutes && routes.length === 0 ? (
               <View style={styles.centerLoading}>
@@ -620,6 +598,30 @@ export default function VendedorDashboard() {
           </View>
         )}
       </ScrollView>
+
+      {/* ── MAPA DE RUTA (fuera del ScrollView para evitar congelamiento Android) ── */}
+      {viewMode === 'map' && (
+        <View style={styles.mapOverlay}>
+          <RouteMapView
+            stops={filteredRoutes}
+            userLocation={location}
+            onSelectStop={(stop) => setSelectedStop(stop)}
+            onOpenLocationModal={(stop) => {
+              setSelectedStop(stop);
+              setIsLocationModalOpen(true);
+            }}
+            onStartVisit={(stop) => {
+              guardAction(() => {
+                setSelectedStop(null);
+                router.push({
+                  pathname: '/(vendedor)/visita/[id]',
+                  params: { id: stop.customer_id, razon_social: stop.razon_social },
+                });
+              });
+            }}
+          />
+        </View>
+      )}
 
       {/* ── MODAL FICHA INTERACTIVA DE RUTA Y KPIS DEL CLIENTE ──────────────── */}
       <Modal
@@ -1347,16 +1349,13 @@ const getStyles = (theme: ThemeColors, isDark: boolean) =>
       color: isDark ? '#002109' : '#FFFFFF',
       fontWeight: '800',
     },
-    mapWrapper: {
-      height: 520,
-      marginHorizontal: 16,
-      marginTop: 12,
-      marginBottom: 32,
-      borderRadius: 16,
-      overflow: 'hidden',
-      borderWidth: 1,
-      borderColor: isDark ? '#334155' : theme.border,
-      backgroundColor: isDark ? '#0F172A' : '#F1F5F9',
+    mapOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      zIndex: 50,
     },
     searchBarContainer: {
       flexDirection: 'row',
