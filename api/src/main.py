@@ -149,6 +149,7 @@ from api.src.servicios.router import router as servicios_router
 from api.src.cupones.router import router as cupones_router
 from api.src.donaciones.router import router as donaciones_router
 from api.src.vouchers.router import router as vouchers_router
+from api.src.inteliforce.router import router as inteliforce_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -483,4 +484,5 @@ app.include_router(cupones_router)
 app.include_router(donaciones_router)
 app.include_router(vouchers_router)
 app.include_router(vouchers_router, prefix="/api")
+app.include_router(inteliforce_router)
 
