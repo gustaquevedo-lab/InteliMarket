@@ -67,7 +67,7 @@ class Driver(Base):
     pin_hash = Column(String(255))  # For driver mobile app login
     licencia_numero = Column(String(50))
     licencia_vencimiento = Column(DateTime(timezone=True))
-    status = Column(SAEnum(DriverStatus), default=DriverStatus.available, server_default="available", index=True)
+    status = Column(SAEnum(DriverStatus, native_enum=False), default=DriverStatus.available, server_default="available", index=True)
     rating = Column(Numeric(3, 2), default=0)
     total_deliveries = Column(Integer, default=0)
     activo = Column(Boolean, default=True, server_default="true")
@@ -90,7 +90,7 @@ class Vehicle(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     driver_id = Column(UUID(as_uuid=True), ForeignKey("intelientregas_drivers.id"), nullable=True)
-    tipo = Column(SAEnum(VehicleType), nullable=False)
+    tipo = Column(SAEnum(VehicleType, native_enum=False), nullable=False)
     marca = Column(String(50))
     modelo = Column(String(50))
     color = Column(String(30))
@@ -139,8 +139,8 @@ class Delivery(Base):
     longitud = Column(Float)
 
     # Delivery details
-    estado = Column(SAEnum(DeliveryStatus), default=DeliveryStatus.pending, server_default="pending", index=True)
-    prioridad = Column(SAEnum(DeliveryPriority), default=DeliveryPriority.normal, server_default="normal")
+    estado = Column(SAEnum(DeliveryStatus, native_enum=False), default=DeliveryStatus.pending, server_default="pending", index=True)
+    prioridad = Column(SAEnum(DeliveryPriority, native_enum=False), default=DeliveryPriority.normal, server_default="normal")
     observaciones = Column(Text)
     instrucciones_entrega = Column(Text)
 
@@ -262,7 +262,7 @@ class DeliveryProof(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     delivery_id = Column(UUID(as_uuid=True), ForeignKey("intelientregas_deliveries.id"), nullable=False, index=True)
-    tipo = Column(SAEnum(ProofType), nullable=False)
+    tipo = Column(SAEnum(ProofType, native_enum=False), nullable=False)
     url = Column(Text)
     codigo_confirmacion = Column(String(10))
     nombre_recibio = Column(String(100))

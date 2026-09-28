@@ -48,8 +48,8 @@ class TieredPriceResponse(BaseModel):
     precio_unitario: float
     moneda: str
     activo: bool
-    created_at: datetime
-    updated_at: Optional[datetime]
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

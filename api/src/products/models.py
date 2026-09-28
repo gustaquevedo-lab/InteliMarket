@@ -1,5 +1,6 @@
 """Product and category models"""
 
+from decimal import Decimal
 from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Integer, Text, ForeignKey, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
@@ -67,6 +68,14 @@ class Product(Base):
     @property
     def supplier_nombre(self) -> str | None:
         return self.supplier.razon_social if self.supplier else None
+
+    @property
+    def costo_unitario(self) -> Decimal:
+        return self.ultimo_costo or self.costo_promedio or Decimal("0")
+
+    @costo_unitario.setter
+    def costo_unitario(self, val):
+        self.ultimo_costo = val
 
 
 # Alias expected by some modules (customer360, etc.)

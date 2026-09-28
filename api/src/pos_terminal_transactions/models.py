@@ -27,10 +27,10 @@ class PosTerminalTransaction(Base):
     codigo_autorizacion = Column(String(10), nullable=True)
     codigo_comercio = Column(String(15), nullable=True)
     issuer_id = Column(String(5), nullable=True)
-    nombre_tarjeta = Column(String(60), nullable=True)
+    nombre_tarjeta = Column(String(100), nullable=True)
     pan = Column(String(4), nullable=True)
-    mensaje_display = Column(String(60), nullable=True)
-    nombre_cliente = Column(String(60), nullable=True)
+    mensaje_display = Column(String(255), nullable=True)
+    nombre_cliente = Column(String(255), nullable=True)
     monto = Column(Numeric(15, 2), nullable=True)
     monto_vuelto = Column(Numeric(15, 2), nullable=True)
     monto_comision = Column(Numeric(15, 2), nullable=True)
@@ -41,7 +41,7 @@ class PosTerminalTransaction(Base):
 
     exitosa = Column(Boolean, nullable=False, default=False)
     verificado_automaticamente = Column(Boolean, nullable=False, default=True)
-    error_message = Column(String(200), nullable=True)
+    error_message = Column(Text, nullable=True)
     raw_response = Column(JSON, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 from typing import Optional
 
+import httpx
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
 from api.src.plugpay import service, transactions_service
@@ -62,7 +63,13 @@ async def pix_create(data: PixCreateRequest, db: AsyncSession = Depends(get_db),
             logger.error("Failed to log plugpay pix transaction to DB: %s", log_err)
 
         return PlugpayTransactionResponse(ok=True, data=result, transaction_log_id=txn.id if txn else None)
-    except (PlugpayNotConfigured, PlugpayApiError) as e:
+    except Exception as e:
+        if isinstance(e, (httpx.TimeoutException, httpx.RequestError)):
+            e = PlugpayApiError("Tiempo de espera agotado con la pasarela PlugPay (gateway timeout)", status_code=504)
+        elif not isinstance(e, (PlugpayNotConfigured, PlugpayApiError)):
+            logger.error("Error inesperado en pix_create: %s", e, exc_info=True)
+            e = PlugpayApiError(f"Error procesando solicitud con PlugPay: {e}", status_code=500)
+
         if isinstance(e, PlugpayApiError):
             try:
                 await transactions_service.log_transaction(

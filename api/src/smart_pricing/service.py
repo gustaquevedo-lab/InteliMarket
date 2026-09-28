@@ -127,6 +127,8 @@ async def list_tiered_prices(
                                 "precio_unitario": float(unit_p),
                                 "moneda": "PYG",
                                 "activo": True,
+                                "created_at": getattr(pr, "created_at", None),
+                                "updated_at": getattr(pr, "updated_at", None),
                             })
         except Exception as e:
             logger.warning(f"Error anexando promo virtual a list_tiered_prices: {e}")

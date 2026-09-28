@@ -1278,7 +1278,12 @@ async def get_corporate_agreement_pending_docs(
     """Trae los funcionarios de una empresa vinculada y sus facturas pendientes
     que aún no fueron incluidas en ninguna remisión de corte mensual,
     opcionalmente filtrando por fecha_corte (inclusive) o lista específica de comprobantes."""
-    params: dict = {"company_id": company_id, "empresa_nombre": f"%{empresa_nombre.strip()}%"}
+    try:
+        cid = uuid.UUID(str(company_id))
+    except (ValueError, TypeError, AttributeError):
+        return {"empresa_nombre": empresa_nombre, "total_saldo": 0, "total_documentos": 0, "total_funcionarios": 0, "items": []}
+
+    params: dict = {"company_id": cid, "empresa_nombre": f"%{empresa_nombre.strip()}%"}
     extra_clauses = []
     if fecha_corte is not None:
         extra_clauses.append("DATE(ar.fecha_emision AT TIME ZONE 'America/Asuncion') <= :fecha_corte")

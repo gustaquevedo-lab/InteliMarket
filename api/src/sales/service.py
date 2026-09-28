@@ -1419,7 +1419,6 @@ async def reopen_sale_payment(
                 forma_pago=fp,
                 monto=monto_p,
                 moneda=mon_p,
-                referencia=str(ref_p).strip() if ref_p else None,
                 fecha=sale.fecha or datetime.now(timezone.utc),
             ))
         sale.condicion = "credito" if has_credit_payment else "contado"
@@ -1433,8 +1432,6 @@ async def reopen_sale_payment(
             "forma_pago": nueva_forma_pago.upper(),
             "moneda": moneda or "PYG",
         }
-        if voucher:
-            values_to_update["referencia"] = voucher.strip()
 
         if existing_payments:
             await db.execute(
@@ -1449,7 +1446,6 @@ async def reopen_sale_payment(
                 forma_pago=nueva_forma_pago.upper(),
                 monto=sale.total,
                 moneda=moneda or "PYG",
-                referencia=voucher.strip() if voucher else None,
                 fecha=sale.fecha or datetime.now(timezone.utc),
             ))
 

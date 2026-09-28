@@ -213,7 +213,8 @@ export const client = {
     const url = params ? `${endpoint}?${new URLSearchParams(Object.entries(params).filter(([_, v]) => v !== undefined) as [string, string][])}` : endpoint
     return request<T>(url)
   },
-  post: <T>(endpoint: string, data?: unknown) => request<T>(endpoint, { method: "POST", body: JSON.stringify(data) }),
+  post: <T>(endpoint: string, data?: unknown, options?: RequestInit) =>
+    request<T>(endpoint, { method: "POST", body: data !== undefined ? JSON.stringify(data) : undefined, ...options }),
   put: <T>(endpoint: string, data?: unknown) => request<T>(endpoint, { method: "PUT", body: JSON.stringify(data) }),
   patch: <T>(endpoint: string, data?: unknown) => request<T>(endpoint, { method: "PATCH", body: JSON.stringify(data) }),
   delete: <T>(endpoint: string) => request<T>(endpoint, { method: "DELETE" }),
@@ -1806,7 +1807,7 @@ export const api = {
     startPosShift: (data?: any) => client.post<any>("/v1/auth/pos-shift/start", data),
     posAuthorizers: () => client.get<any>("/v1/auth/pos-authorizers"),
     activeSupervisor: () => client.get<any>("/v1/auth/pos-active-supervisor"),
-    endPosShift: () => client.post<any>("/v1/auth/pos-shift/end"),
+    endPosShift: () => client.post<any>("/v1/auth/pos-shift/end", undefined, { keepalive: true }),
   },
   admin: {
     tenants: (params?: { estado?: string; plan?: string; search?: string }) => client.get<Tenant[]>("/v1/admin/tenants", params),

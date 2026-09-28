@@ -196,11 +196,25 @@ export function initMonitor() {
   window.addEventListener("error", (ev) => {
     if (!ev.error && /ResizeObserver loop/i.test(ev.message || "")) return
     if (!ev.error && (ev.message === "Script error." || !ev.message)) return
+    const msg = String(ev.message || ev.error?.message || "")
+    if (/dynamically imported module|loading dynamically imported module|Importing a module script failed/i.test(msg)) {
+      addBreadcrumb("ui", `Chunk obsoleto detectado tras deploy: ${msg.slice(0, 100)}`)
+      return
+    }
     captureException(ev.error || ev.message, { file: (ev.filename || "").split("/").pop(), line: ev.lineno })
   })
   window.addEventListener("unhandledrejection", (ev) => {
     const r: any = ev.reason
     if (r && (r.name === "AbortError" || /aborted/i.test(String(r.message || "")))) return
+    const msg = String(r?.message || r || "")
+    if (/dynamically imported module|loading dynamically imported module|Importing a module script failed/i.test(msg)) {
+      addBreadcrumb("ui", `Chunk obsoleto detectado tras deploy: ${msg.slice(0, 100)}`)
+      return
+    }
+    if (/Invalid token.*expired|Error de conexión con el servidor central/i.test(msg)) {
+      addBreadcrumb("api", `Offline / Token: ${msg.slice(0, 80)}`)
+      return
+    }
     captureException(r, { tipo: "promesa rechazada" })
   })
 
@@ -234,9 +248,28 @@ export function initMonitor() {
     } catch (e: any) {
       if (isApi && !mine && e?.name !== "AbortError") {
         addBreadcrumb("api", `${method} ${pathTemplate(url)} -> SIN CONEXION`)
-        enqueue({ source: isElectron() ? "electron" : "frontend", level: "error", kind: "NetworkError", provider: undefined,
-          message: `Sin conexión con el servidor: ${method} ${pathTemplate(url)}`, http_method: method, route: pathTemplate(url),
-          duration_ms: Math.round(performance.now() - t0) })
+
+        // No inundar la consola de incidencias con falsos positivos cuando:
+        // 1. El cliente no tiene red (laptop sin wifi, suspendida o modo avión)
+        // 2. La ventana está minimizada / en suspensión (document.visibilityState === "hidden")
+        // 3. Es un sondeo periódico de fondo o healthcheck
+        // 4. Es una petición de cierre de turno ejecutada durante la recarga de la página
+        const isOffline = typeof navigator !== "undefined" && !navigator.onLine
+        const isHidden = typeof document !== "undefined" && document.visibilityState === "hidden"
+        const isBackgroundPoll = /health|notifications|supervisor-requests|deposit-approvals|cash-sessions-summary|cash-handoffs|cash-drop-requests|credit-approval-requests|low-stock|cajeros\/performance|pos-shift\/end/i.test(url)
+
+        if (!isOffline && !isHidden && !isBackgroundPoll) {
+          enqueue({
+            source: isElectron() ? "electron" : "frontend",
+            level: "error",
+            kind: "NetworkError",
+            provider: undefined,
+            message: `Sin conexión con el servidor: ${method} ${pathTemplate(url)}`,
+            http_method: method,
+            route: pathTemplate(url),
+            duration_ms: Math.round(performance.now() - t0),
+          })
+        }
       }
       throw e
     }
@@ -250,6 +283,10 @@ export function initMonitor() {
       // su propio console.error es solo para la consola del navegador, no una incidencia nueva.
       if (typeof args[0] === "string" && args[0].includes("[InteliMarket ErrorBoundary")) return
       const text = args.map((a) => (a instanceof Error ? `${a.name}: ${a.message}` : typeof a === "string" ? a : (() => { try { return JSON.stringify(a) } catch { return String(a) } })())).join(" ").slice(0, 300)
+      
+      // Filtrar ruidos esperados y no reportarlos como incidencias
+      if (/Invalid token.*expired|dynamically imported module|loading dynamically imported module|Importing a module script failed|Error de conexión con el servidor central|Línea de crédito insuficiente|El CPF.*no es válido|El CPF o CNPJ.*no está registrado|Fallo de conexión en refresh/i.test(text)) return
+
       addBreadcrumb("console", text)
       const err = args.find((a) => a instanceof Error) as Error | undefined
       enqueue({ source: isElectron() ? "electron" : "frontend", level: "warning", kind: err?.name || "console.error", message: text, stack: err?.stack })
