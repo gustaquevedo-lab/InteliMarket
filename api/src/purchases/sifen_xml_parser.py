@@ -197,6 +197,8 @@ def parse_sifen_xml(xml_content: str | bytes) -> dict[str, Any]:
                     codigo_barra_candidato = cleaned
                     break
 
+            es_bonificacion = (precio_unitario == Decimal("0")) or (total_item == Decimal("0")) or ("bonif" in descripcion.lower())
+
             items.append({
                 "codigo_proveedor": codigo_proveedor,
                 "codigo_arancelario": codigo_arancelario,
@@ -207,6 +209,7 @@ def parse_sifen_xml(xml_content: str | bytes) -> dict[str, Any]:
                 "descuento": descuento,
                 "iva_tasa": iva_tasa,
                 "total": total_item,
+                "es_bonificacion": es_bonificacion,
             })
 
     # 6. Totales
