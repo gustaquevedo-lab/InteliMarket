@@ -1546,7 +1546,14 @@ async def _resolve_deposito(db: AsyncSession, company_id: str, id_filial: int) -
     return warehouse.id
 
 
-async def sync_stock(db: AsyncSession, company_id: str, since: date | None) -> int:
+async def sync_stock(db: AsyncSession, company_id: str, since: date | None, force: bool = False) -> int:
+    if not force:
+        logger.warning(
+            "sync_stock omitido: InteliMarket es ahora la fuente autoritativa única de inventario y stock. "
+            "Para proteger el stock físico real y evitar desfasajes con el legado, sync_stock está protegido."
+        )
+        return 0
+
     cid = UUID(company_id) if isinstance(company_id, str) else company_id
 
     # Solo tomar existencias activas (BO_ATIVO = 1) agrupadas por producto y filial.
@@ -2035,7 +2042,7 @@ async def sync_purchase_receipts(db: AsyncSession, company_id: str, since: date 
     )
     po_map = {row.source_pk: row.target_id for row in po_maps_res}
 
-    from api.src.inventory.models import StockLot
+    from api.src.inventory.models import Stock, StockLot, InventoryMovement
 
     count = 0
     for r in recepciones:
@@ -2074,6 +2081,10 @@ async def sync_purchase_receipts(db: AsyncSession, company_id: str, since: date 
 
         # NR_DOCUMENTO (numero de factura del proveedor) no es único entre proveedores —
         # se guarda como referencia, no como numero interno (que sí debe ser único).
+        tiene_recibidos = any(it.cantidad_recibida > 0 for it in receipt_items)
+        cancelado = bool(r["BO_CANCELADO"])
+        estado_rec = "cancelado" if cancelado else ("completado" if (r["BO_FINALIZADO"] or tiene_recibidos) else "pendiente")
+
         receipt = PurchaseReceipt(
             company_id=company_id,
             purchase_order_id=purchase_order_id,
@@ -2083,27 +2094,77 @@ async def sync_purchase_receipts(db: AsyncSession, company_id: str, since: date 
             fecha=r["DT_CADASTRO"],
             total=Decimal(str(r["VL_RECEPCAO"] or 0)),
             proveedor_ref=r["REMITO"] or r["NR_DOCUMENTO"],
-            estado="cancelado" if r["BO_CANCELADO"] else ("completado" if r["BO_FINALIZADO"] else "pendiente"),
+            estado=estado_rec,
             observaciones=f"Factura proveedor: {r['NR_DOCUMENTO']}" if r["NR_DOCUMENTO"] else None,
         )
         receipt.items = receipt_items
         db.add(receipt)
         await db.flush()
 
-        if receipt.estado == "completado":
+        if estado_rec == "completado":
             for it_item in receipt_items:
-                if it_item.cantidad_recibida > 0:
+                qty = int(it_item.cantidad_recibida)
+                if qty > 0:
+                    cost = it_item.costo_unitario or Decimal("0")
                     db.add(StockLot(
                         company_id=cid,
                         warehouse_id=warehouse_id,
                         product_id=it_item.product_id,
-                        cantidad=int(it_item.cantidad_recibida),
-                        cantidad_disponible=int(it_item.cantidad_recibida),
-                        costo_unitario=it_item.costo_unitario,
-                        costo_total=it_item.total,
+                        cantidad=qty,
+                        cantidad_disponible=qty,
+                        costo_unitario=cost,
+                        costo_total=cost * qty,
                         referencia=f"REC-{r['ID_RECEPCAO_ORDEM_COMPRA']}",
                         fecha_ingreso=receipt.fecha,
                     ))
+
+                    stk_res = await db.execute(
+                        select(Stock).where(Stock.warehouse_id == warehouse_id, Stock.product_id == it_item.product_id)
+                    )
+                    stock_obj = stk_res.scalar_one_or_none()
+                    if not stock_obj:
+                        stock_obj = Stock(
+                            warehouse_id=warehouse_id,
+                            product_id=it_item.product_id,
+                            cantidad=qty,
+                            costo_unitario=cost,
+                        )
+                        db.add(stock_obj)
+                    else:
+                        old_qty = stock_obj.cantidad
+                        old_cost = stock_obj.costo_unitario or Decimal("0")
+                        stock_obj.cantidad += qty
+                        if old_qty + qty > 0 and cost > 0:
+                            stock_obj.costo_unitario = (
+                                (old_cost * max(0, old_qty) + cost * qty) / (max(0, old_qty) + qty)
+                            ).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+                        stock_obj.updated_at = func.now()
+
+                    db.add(InventoryMovement(
+                        company_id=cid,
+                        warehouse_id=warehouse_id,
+                        product_id=it_item.product_id,
+                        tipo="entrada_compra",
+                        cantidad=qty,
+                        costo_unitario=cost,
+                        referencia_type="purchase_receipt",
+                        referencia_id=receipt.id,
+                    ))
+
+            for it_item in receipt_items:
+                await db.execute(
+                    text("""
+                        UPDATE purchase_order_items
+                        SET cantidad_recibida = COALESCE(cantidad_recibida, 0) + :rec
+                        WHERE purchase_order_id = :po_id AND product_id = :pid
+                    """),
+                    {"rec": float(it_item.cantidad_recibida), "po_id": str(purchase_order_id), "pid": str(it_item.product_id)},
+                )
+
+            await db.execute(
+                text("UPDATE purchase_orders SET estado = 'completado', updated_at = now() WHERE id = :po_id"),
+                {"po_id": str(purchase_order_id)},
+            )
 
         await _save_map(db, company_id, "est_recepcao_ordem_compra", r["ID_RECEPCAO_ORDEM_COMPRA"], "purchase_receipts", receipt.id)
         mapped_receipt_pks.add(r["ID_RECEPCAO_ORDEM_COMPRA"])
@@ -2824,14 +2885,12 @@ FINANCE_TREASURY_MODULES = [
     "exchange_rates",
 ]
 
-# Módulos activos en sincronizaciones periódicas automáticas (1. Catálogo/Precios, 2. Stock e Inventario, 3. Compras y Proveedores)
+# Módulos activos en sincronizaciones periódicas automáticas (1. Catálogo/Precios, 2. Compras y Proveedores)
+# NOTA: Stock e inventario ya NO se sincronizan desde el legado; InteliMarket es la fuente autoritativa.
 DEFAULT_ACTIVE_MODULES = [
     # 1. Catálogo y Precios
     "catalog_prices_and_scales",
-    # 2. Stock e Inventario
-    "stock",
-    "inventory_adjustments",
-    # 3. Compras y Proveedores
+    # 2. Compras y Proveedores
     "purchase_orders",
     "purchase_receipts",
     "supplier_credit_notes",
