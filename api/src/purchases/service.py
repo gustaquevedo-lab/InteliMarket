@@ -291,11 +291,13 @@ async def create_purchase_order(db: AsyncSession, data: POCreate) -> PurchaseOrd
             )
             db.add(ph)
 
-            if getattr(data, "update_default_supplier", False):
-                prod = await db.get(Product, item.product_id)
-                if prod:
+            prod = await db.get(Product, item.product_id)
+            if prod:
+                if data.supplier_id:
                     prod.supplier_id = data.supplier_id
+                if item.precio_unitario and item.precio_unitario > Decimal("0"):
                     prod.ultimo_costo = item.precio_unitario
+                if getattr(data, "update_default_supplier", False):
                     prod.costo_unitario = item.precio_unitario
 
     await db.flush()
@@ -456,11 +458,13 @@ async def update_purchase_order(db: AsyncSession, po_id: str, data: POUpdate) ->
                 )
                 db.add(ph)
 
-                if getattr(data, "update_default_supplier", False):
-                    prod = await db.get(Product, item_data.product_id)
-                    if prod:
+                prod = await db.get(Product, item_data.product_id)
+                if prod:
+                    if order.supplier_id:
                         prod.supplier_id = order.supplier_id
+                    if item_data.precio_unitario and item_data.precio_unitario > Decimal("0"):
                         prod.ultimo_costo = item_data.precio_unitario
+                    if getattr(data, "update_default_supplier", False):
                         prod.costo_unitario = item_data.precio_unitario
 
     await db.flush()
@@ -807,6 +811,15 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
             fecha_vencimiento=item_data.fecha_vencimiento,
         )
         db.add(stock_lot)
+
+        prod_obj = await db.get(Product, item_data.product_id)
+        if prod_obj:
+            if supplier_id:
+                prod_obj.supplier_id = supplier_id
+            if cost > Decimal("0"):
+                prod_obj.ultimo_costo = cost
+                if not prod_obj.precio_costo or prod_obj.precio_costo == Decimal("0"):
+                    prod_obj.precio_costo = cost
 
         movement = InventoryMovement(
             company_id=company_id,
@@ -2791,21 +2804,7 @@ async def calculate_smart_replenishment_preview(
     
     if supplier_id:
         params["supplier_id"] = supplier_id
-        where_clauses.append("""
-            (
-                p.supplier_id = :supplier_id
-                OR last_sup.last_sup_id = :supplier_id
-                OR EXISTS (
-                    SELECT 1 FROM purchase_order_items poi2
-                    JOIN purchase_orders po2 ON po2.id = poi2.purchase_order_id
-                    WHERE po2.supplier_id = :supplier_id AND poi2.product_id = p.id
-                )
-                OR EXISTS (
-                    SELECT 1 FROM supplier_price_history sph2
-                    WHERE sph2.supplier_id = :supplier_id AND sph2.product_id = p.id
-                )
-            )
-        """)
+        where_clauses.append("COALESCE(last_sup.last_sup_id, p.supplier_id) = :supplier_id")
         
     if categoria_id:
         params["cat_id"] = categoria_id
@@ -2837,8 +2836,8 @@ async def calculate_smart_replenishment_preview(
             COALESCE(sales_4m.v_m4, 0) as v_m4,
             COALESCE(sales_4m.v_promo_qty, 0) as v_promo_qty,
             COALESCE(promo_flag.en_promo_activa, false) as en_promo_flag,
-            COALESCE(p.supplier_id, last_sup.last_sup_id) as last_sup_id,
-            COALESCE(p_sup.razon_social, last_sup.last_sup_name) as last_sup_name
+            COALESCE(last_sup.last_sup_id, p.supplier_id) as last_sup_id,
+            COALESCE(last_sup.last_sup_name, p_sup.razon_social, 'Sin Proveedor') as last_sup_name
         FROM products p
         LEFT JOIN suppliers p_sup ON p_sup.id = p.supplier_id
         LEFT JOIN (
@@ -2888,7 +2887,8 @@ async def calculate_smart_replenishment_preview(
             JOIN purchase_orders po_last ON po_last.id = poi_last.purchase_order_id
             JOIN suppliers sup_last ON sup_last.id = po_last.supplier_id
             WHERE po_last.company_id = :cid
-            ORDER BY poi_last.product_id, po_last.fecha DESC
+              AND po_last.estado != 'cancelado'
+            ORDER BY poi_last.product_id, po_last.fecha DESC, po_last.created_at DESC
         ) last_sup ON last_sup.product_id = p.id
         LEFT JOIN (
             SELECT poi.product_id, SUM(poi.cantidad - COALESCE(poi.cantidad_recibida, 0)) as total_en_transito

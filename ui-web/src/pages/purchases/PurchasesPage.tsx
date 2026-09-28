@@ -975,7 +975,10 @@ export default function PurchasesPage() {
 
   const handleOpenGenerateModal = () => {
     const itemsToOrder = (replenishmentData?.items || []).filter(
-      (it: any) => selectedItemsIA[it.product_id] && (editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida) > 0
+      (it: any) => {
+        if (selectedSupplierIA && it.ultimo_proveedor_id !== selectedSupplierIA) return false
+        return selectedItemsIA[it.product_id] && (editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida) > 0
+      }
     )
     if (itemsToOrder.length === 0) {
       toast.error("Sin ítems seleccionados", "Marcá al menos un producto con cantidad mayor a cero.")
@@ -1854,25 +1857,31 @@ export default function PurchasesPage() {
   const totalOrdenIASugerida = useMemo(() => {
     if (!replenishmentData) return 0
     return replenishmentData.items
-      .filter((it: any) => selectedItemsIA[it.product_id])
+      .filter((it: any) => {
+        if (selectedSupplierIA && it.ultimo_proveedor_id !== selectedSupplierIA) return false
+        return selectedItemsIA[it.product_id]
+      })
       .reduce((acc: number, it: any) => {
         const rawQty = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida
         const qty = Math.max(0, Number(rawQty) || 0)
         const cost = editedCosts[it.product_id] !== undefined ? Number(editedCosts[it.product_id]) : (Number(it.costo_unitario_estimado) || 0)
         return acc + (qty * cost)
       }, 0)
-  }, [replenishmentData, selectedItemsIA, editedQuantities, editedCosts])
+  }, [replenishmentData, selectedItemsIA, editedQuantities, editedCosts, selectedSupplierIA])
 
   const totalUnidadesIASugerida = useMemo(() => {
     if (!replenishmentData) return 0
     return replenishmentData.items
-      .filter((it: any) => selectedItemsIA[it.product_id])
+      .filter((it: any) => {
+        if (selectedSupplierIA && it.ultimo_proveedor_id !== selectedSupplierIA) return false
+        return selectedItemsIA[it.product_id]
+      })
       .reduce((acc: number, it: any) => {
         const rawQty = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida
         const qty = Math.max(0, Number(rawQty) || 0)
         return acc + qty
       }, 0)
-  }, [replenishmentData, selectedItemsIA, editedQuantities])
+  }, [replenishmentData, selectedItemsIA, editedQuantities, selectedSupplierIA])
 
   // Filtrado reactivo de Proveedores para el Asistente IA
   const filteredSuppliersForIA = useMemo(() => {
@@ -1888,6 +1897,11 @@ export default function PurchasesPage() {
   const displayedReplenishmentItems = useMemo(() => {
     if (!replenishmentData?.items) return []
     const filtered = replenishmentData.items.filter((it: any) => {
+      // Blindaje estricto: si se seleccionó un proveedor, descartar todo ítem que no pertenezca a ese proveedor
+      if (selectedSupplierIA && it.ultimo_proveedor_id !== selectedSupplierIA) {
+        return false
+      }
+
       const matchSearch = !searchProductIA ||
         it.nombre?.toLowerCase().includes(searchProductIA.toLowerCase()) ||
         it.sku?.toLowerCase().includes(searchProductIA.toLowerCase()) ||
@@ -1994,7 +2008,7 @@ export default function PurchasesPage() {
 
       return sortDirectionIA === "asc" ? valA - valB : valB - valA
     })
-  }, [replenishmentData, searchProductIA, filterEstadoIA, editedQuantities, editedCosts, sortColumnIA, sortDirectionIA])
+  }, [replenishmentData, searchProductIA, filterEstadoIA, editedQuantities, editedCosts, sortColumnIA, sortDirectionIA, selectedSupplierIA])
 
   // Filtrado y Paginación de Órdenes
   const filteredOrders = useMemo(() => {
