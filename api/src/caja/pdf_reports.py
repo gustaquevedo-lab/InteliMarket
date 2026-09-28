@@ -607,9 +607,24 @@ def generate_cierre_sesion_individual_pdf(
         c_total = recon.get("contado_total_gs", c_pyg + c_brl_gs + c_usd_gs)
 
         dif_consolidada = recon.get("diferencia_consolidada_gs", c_total - esp_total)
+
+        # ── Auditoría de comprobantes (se calcula aquí para poder usarla en la tabla principal) ──
+        va = recon.get("vouchers_audit") or {}
+        tiene_auditoria_vouchers = bool(va.get("auditado"))
+        dif_vouch = float(va.get("diferencia_vouchers_gs", 0)) if tiene_auditoria_vouchers else 0.0
+        dif_global = float(recon.get("diferencia_global_turno_gs", dif_consolidada + dif_vouch)) if tiene_auditoria_vouchers else float(dif_consolidada)
+        sign_g = "+" if dif_global > 0 else ""
+        color_g = "#065F46" if abs(dif_global) < 5000 else "#991B1B"
+        estado_global = "CUADRADO" if abs(dif_global) < 5000 else ("SOBRANTE" if dif_global > 0 else "FALTANTE")
+
+        # La diferencia «visible» en la tabla principal es la global cuando hay auditoría de comprobantes;
+        # así el resultado publicado siempre refleja lo actuado en el punteo de Tesorería.
+        dif_display = dif_global if tiene_auditoria_vouchers else dif_consolidada
+        estado_display = estado_global if tiene_auditoria_vouchers else ("CUADRADO" if abs(dif_consolidada) < 5000 else ("SOBRANTE" if dif_consolidada > 0 else "FALTANTE"))
         estado_cuadre = "CUADRADO" if abs(dif_consolidada) < 5000 else ("SOBRANTE" if dif_consolidada > 0 else "FALTANTE")
         signo_cons = "+" if dif_consolidada >= 0 else ""
-        dif_color_hex = "#059669" if dif_consolidada >= 0 else "#DC2626"
+        signo_display = "+" if dif_display >= 0 else ""
+        dif_color_hex = "#059669" if abs(dif_display) < 5000 else ("#D97706" if dif_display > 0 else "#DC2626")
 
         style_th = ParagraphStyle("TH", parent=styles["Normal"], fontName=FONT_BOLD, fontSize=7.5, leading=9, textColor=HexColor("#0F172A"))
         style_tl = ParagraphStyle("TL", parent=styles["Normal"], fontSize=7, leading=8.5, textColor=HexColor("#334155"))
@@ -658,7 +673,7 @@ def generate_cierre_sesion_individual_pdf(
             [Paragraph(f"Efectivo Reales ({brl_entregado_str} x {_fmt_gs(tasa_brl)}):", style_tl), Paragraph(f"{_fmt_gs(c_brl_gs)}", style_tr_num)],
             [Paragraph(f"Efectivo Dólares ({usd_entregado_str} x {_fmt_gs(tasa_usd)}):", style_tl), Paragraph(f"{_fmt_gs(c_usd_gs)}", style_tr_num)],
             [Paragraph("<b>TOTAL RENDIDO A TESORERÍA:</b>", style_th), Paragraph(f"<b>{_fmt_gs(c_total)}</b>", style_tr)],
-            [Paragraph("<b>DIFERENCIA (Rendido - Esperado):</b>", style_th), Paragraph(f"<font color='{dif_color_hex}'><b>{signo_cons}{_fmt_gs(dif_consolidada)} ({estado_cuadre})</b></font>", style_tr)],
+            [Paragraph("<b>DIFERENCIA (Rendido - Esperado):</b>", style_th), Paragraph(f"<font color='{dif_color_hex}'><b>{signo_display}{_fmt_gs(dif_display)} ({estado_display})</b></font>", style_tr)],
         ]
         t_ren = Table(ren_rows, colWidths=[61 * mm, 33 * mm])
         t_ren.setStyle(TableStyle([
@@ -713,13 +728,7 @@ def generate_cierre_sesion_individual_pdf(
         elements.append(Spacer(1, 5))
 
         # 1.C Cotejo y Auditoría de Comprobantes No Efectivo (si fue auditada en Tesorería)
-        va = recon.get("vouchers_audit") or {}
-        tiene_auditoria_vouchers = bool(va.get("auditado"))
-        dif_vouch = float(va.get("diferencia_vouchers_gs", 0)) if tiene_auditoria_vouchers else 0.0
-        dif_global = float(recon.get("diferencia_global_turno_gs", dif_consolidada + dif_vouch)) if tiene_auditoria_vouchers else float(dif_consolidada)
-        sign_g = "+" if dif_global > 0 else ""
-        color_g = "#065F46" if abs(dif_global) < 5000 else "#991B1B"
-        estado_global = "CUADRADO" if abs(dif_global) < 5000 else ("SOBRANTE" if dif_global > 0 else "FALTANTE")
+        # (va, tiene_auditoria_vouchers, dif_vouch, dif_global y demás ya calculados arriba)
 
         if tiene_auditoria_vouchers:
             c_conf = va.get("count_conformes", 0)

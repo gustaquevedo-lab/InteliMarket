@@ -5981,7 +5981,7 @@ export default function POSPage() {
   const toggleDevolucionItem = (itemId: string, maxQty: number) => {
     setDevolucionSeleccion((prev) => {
       const next = { ...prev }
-      if (next[itemId]) {
+      if (next[itemId] !== undefined) {
         delete next[itemId]
       } else {
         next[itemId] = maxQty
@@ -5992,6 +5992,32 @@ export default function POSPage() {
 
   const setDevolucionCantidad = (itemId: string, qty: number, maxQty: number) => {
     const clamped = Math.max(0, Math.min(maxQty, qty))
+    setDevolucionSeleccion((prev) => ({ ...prev, [itemId]: clamped }))
+  }
+
+  const handleDevolucionInputChange = (itemId: string, rawVal: string, maxQty: number, originalQty?: number) => {
+    const trimmed = rawVal.trim()
+    if (!trimmed) {
+      setDevolucionSeleccion((prev) => ({ ...prev, [itemId]: 0 }))
+      return
+    }
+
+    const isDecimal = maxQty % 1 !== 0 || ((originalQty ?? 0) % 1 !== 0)
+    let parsed = 0
+
+    if (isDecimal) {
+      const normalized = trimmed.replace(",", ".")
+      parsed = parseFloat(normalized)
+    } else {
+      const cleaned = trimmed.replace(/[^\d]/g, "")
+      parsed = parseInt(cleaned, 10)
+    }
+
+    if (isNaN(parsed)) {
+      parsed = 0
+    }
+
+    const clamped = Math.max(0, Math.min(maxQty, parsed))
     setDevolucionSeleccion((prev) => ({ ...prev, [itemId]: clamped }))
   }
 
@@ -10196,15 +10222,32 @@ export default function POSPage() {
                       <button
                         key={sale.id}
                         onClick={() => handleSelectVentaDevolucion(sale)}
-                        className="w-full flex items-center justify-between gap-3 py-2.5 px-1 hover:bg-slate-100 dark:hover:bg-slate-800/40 rounded-lg text-left cursor-pointer"
+                        className="w-full flex items-center justify-between gap-3 py-2.5 px-2 hover:bg-slate-100 dark:hover:bg-slate-800/40 rounded-lg text-left cursor-pointer transition-colors"
                       >
-                        <div>
-                          <div className="font-bold text-sm text-slate-900 dark:text-white">Nº {sale.numero}</div>
-                          <div className="text-[10px] font-posMono tabular-nums text-slate-500 dark:text-slate-400">
-                            {sale.fecha ? new Date(sale.fecha).toLocaleString("es-PY") : ""}
+                        <div className="min-w-0 flex-1">
+                          <div className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2 flex-wrap">
+                            <span>Nº {sale.numero}</span>
+                            {((sale as any).customer_nombre || (sale as any).customer?.razon_social || (sale as any).cliente_nombre) && (
+                              <span className="text-xs font-semibold text-rose-600 dark:text-rose-400 truncate">
+                                · {(sale as any).customer_nombre || (sale as any).customer?.razon_social || (sale as any).cliente_nombre}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] font-posMono tabular-nums text-slate-500 dark:text-slate-400 flex items-center gap-2 mt-0.5">
+                            <span>{sale.fecha ? new Date(sale.fecha).toLocaleString("es-PY") : ""}</span>
+                            {((sale as any).customer_doc || (sale as any).customer?.ruc) && (
+                              <span>· RUC/CI: {(sale as any).customer_doc || (sale as any).customer?.ruc}</span>
+                            )}
+                            {(sale as any).tipo_comprobante && (
+                              <span className="uppercase text-[9px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold">
+                                {(sale as any).tipo_comprobante.replace("_", " ")}
+                              </span>
+                            )}
                           </div>
                         </div>
-                        <div className="font-black text-rose-600 dark:text-rose-400 font-posMono tabular-nums shrink-0">{formatPYG(Number((sale as any).total) || 0)}</div>
+                        <div className="font-black text-rose-600 dark:text-rose-400 font-posMono tabular-nums shrink-0 text-sm">
+                          {formatPYG(Number((sale as any).total) || 0)}
+                        </div>
                       </button>
                     ))}
                   </div>
@@ -10248,51 +10291,128 @@ export default function POSPage() {
                         </button>
                       )}
                     </div>
-                    <div className="space-y-1.5 mb-3">
+                    <div className="space-y-2 mb-3">
                       {devolucionItems.map((it) => {
-                        const checked = !!devolucionSeleccion[it.id]
+                        const checked = devolucionSeleccion[it.id] !== undefined
                         const disponible = it.cantidad_disponible ?? it.cantidad
                         const yaDevuelto = it.cantidad_devuelta ?? 0
                         const agotado = disponible <= 0
+                        const cantidadDevolviendo = devolucionSeleccion[it.id] || 0
+                        const subtotalItem = cantidadDevolviendo * (Number(it.precio_unitario) || 0)
+
                         return (
                           <div
                             key={it.id}
-                            className={`flex items-center gap-3 rounded-lg px-3 py-2 border ${agotado ? "opacity-50 bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800" : checked ? "bg-rose-50 dark:bg-rose-500/10 border-rose-500/40" : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800"}`}
+                            className={`flex flex-col gap-2 rounded-xl p-3 border transition-all ${
+                              agotado
+                                ? "opacity-50 bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800"
+                                : checked
+                                ? "bg-rose-50/70 dark:bg-rose-500/10 border-rose-500/40 shadow-sm"
+                                : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800"
+                            }`}
                           >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              disabled={agotado}
-                              onChange={() => toggleDevolucionItem(it.id, disponible)}
-                              className="w-4 h-4 accent-rose-500 cursor-pointer disabled:cursor-not-allowed"
-                            />
-                            <div className="flex-1 min-w-0">
-                              <div className="font-bold text-xs text-slate-900 dark:text-white leading-tight">{it.productName}</div>
-                              <div className="text-[10px] font-posMono tabular-nums text-slate-500 dark:text-slate-400">
-                                Vendido: {it.cantidad} x {formatPYG(it.precio_unitario)}
-                                {yaDevuelto > 0 && (
-                                  <span className="text-amber-600 dark:text-amber-400"> · Ya devuelto: {yaDevuelto}</span>
+                            <div className="flex items-start gap-3">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                disabled={agotado}
+                                onChange={() => toggleDevolucionItem(it.id, disponible)}
+                                className="w-5 h-5 mt-0.5 accent-rose-600 rounded cursor-pointer disabled:cursor-not-allowed shrink-0"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white leading-tight">
+                                  {it.productName}
+                                </div>
+                                <div className="text-[11px] font-posMono tabular-nums text-slate-500 dark:text-slate-400 mt-0.5">
+                                  Vendido: <span className="font-bold text-slate-700 dark:text-slate-300">{it.cantidad}</span> x {formatPYG(it.precio_unitario)}
+                                  {yaDevuelto > 0 && (
+                                    <span className="text-amber-600 dark:text-amber-400 font-semibold"> · Ya devuelto: {yaDevuelto}</span>
+                                  )}
+                                </div>
+                                {agotado ? (
+                                  <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mt-0.5">
+                                    Sin cantidad disponible para devolver
+                                  </div>
+                                ) : (
+                                  <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5">
+                                    Disponible: {disponible}
+                                  </div>
                                 )}
                               </div>
-                              {agotado && (
-                                <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400">Sin cantidad disponible para devolver</div>
-                              )}
                             </div>
+
                             {checked && !agotado && (
-                              <input
-                                type="number"
-                                min={0}
-                                max={disponible}
-                                step={1}
-                                value={devolucionSeleccion[it.id]}
-                                onChange={(e) => setDevolucionCantidad(it.id, Number(e.target.value), disponible)}
-                                className="w-16 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 text-xs font-posMono tabular-nums font-bold text-slate-900 dark:text-white text-center outline-none focus:border-rose-500"
-                              />
+                              <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200 dark:border-slate-800 flex-wrap">
+                                <div className="flex items-center gap-1.5">
+                                  <div className="flex items-center bg-white dark:bg-slate-900 rounded-lg border border-slate-300 dark:border-slate-700 shadow-inner overflow-hidden">
+                                    <button
+                                      type="button"
+                                      onClick={() => setDevolucionCantidad(it.id, Math.max(0, (devolucionSeleccion[it.id] || 0) - 1), disponible)}
+                                      className="w-8 h-8 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-black text-sm flex items-center justify-center cursor-pointer select-none active:scale-95 transition-all"
+                                    >
+                                      -
+                                    </button>
+                                    <input
+                                      type="text"
+                                      inputMode="numeric"
+                                      value={devolucionSeleccion[it.id] ?? 0}
+                                      onFocus={(e) => e.target.select()}
+                                      onChange={(e) => handleDevolucionInputChange(it.id, e.target.value, disponible, it.cantidad)}
+                                      className="w-20 bg-transparent border-0 text-center font-posMono text-xs font-black text-slate-900 dark:text-white outline-none"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => setDevolucionCantidad(it.id, Math.min(disponible, (devolucionSeleccion[it.id] || 0) + 1), disponible)}
+                                      className="w-8 h-8 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-black text-sm flex items-center justify-center cursor-pointer select-none active:scale-95 transition-all"
+                                    >
+                                      +
+                                    </button>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => setDevolucionCantidad(it.id, disponible, disponible)}
+                                    className="px-2 py-1.5 rounded-lg bg-rose-100 hover:bg-rose-200 dark:bg-rose-950/60 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 font-black text-[10px] uppercase tracking-wider cursor-pointer select-none active:scale-95 transition-all"
+                                    title="Establecer al total disponible"
+                                  >
+                                    Todo ({disponible})
+                                  </button>
+                                </div>
+
+                                <div className="text-right">
+                                  <span className="text-[10px] uppercase font-bold text-slate-400 mr-1.5">Subtotal:</span>
+                                  <span className="text-xs font-black font-posMono tabular-nums text-rose-600 dark:text-rose-400">
+                                    {formatPYG(subtotalItem)}
+                                  </span>
+                                </div>
+                              </div>
                             )}
                           </div>
                         )
                       })}
                     </div>
+
+                    {/* Resumen total a devolver */}
+                    {Object.keys(devolucionSeleccion).length > 0 && (
+                      <div className="flex items-center justify-between p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-xl mb-3 shadow-sm shrink-0">
+                        <div>
+                          <div className="text-[10px] font-black uppercase tracking-wider text-rose-600 dark:text-rose-400">
+                            Total a Reembolsar / Nota de Crédito:
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                            {Object.values(devolucionSeleccion).reduce((a, b) => a + (b || 0), 0)} unidades seleccionadas
+                          </div>
+                        </div>
+                        <div className="text-lg font-black text-rose-600 dark:text-rose-400 font-posMono tabular-nums">
+                          {formatPYG(
+                            devolucionItems.reduce(
+                              (acc, it) => acc + (devolucionSeleccion[it.id] || 0) * (Number(it.precio_unitario) || 0),
+                              0
+                            )
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-2 gap-2 mb-3 shrink-0">
                       <div>
