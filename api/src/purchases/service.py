@@ -397,6 +397,7 @@ async def update_purchase_order(db: AsyncSession, po_id: str, data: POUpdate) ->
             detail=f"No se puede modificar la orden {order.numero}: ya tiene recepciones activas en muelle."
         )
 
+    order.updated_at = datetime.now(timezone.utc)
     update_fields = data.model_dump(exclude_unset=True, exclude={"items"})
     for key, value in update_fields.items():
         setattr(order, key, value)

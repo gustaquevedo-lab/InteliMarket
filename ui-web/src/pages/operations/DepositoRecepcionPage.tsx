@@ -83,6 +83,33 @@ const clearDraftFromStorage = (poId: string) => {
   } catch {}
 }
 
+const isDraftOutOfSync = (draft: any, serverPO: any): boolean => {
+  if (!draft || !serverPO) return true
+
+  // 1. Verificar timestamp de actualización
+  const draftBasePoTime = new Date(draft.poUpdatedAt || draft.po?.updated_at || draft.po?.fecha || draft.po?.created_at || 0).getTime()
+  const serverUpdatedTime = new Date(serverPO.updated_at || serverPO.fecha || serverPO.created_at || 0).getTime()
+  if (serverUpdatedTime > 0 && draftBasePoTime > 0 && serverUpdatedTime > draftBasePoTime + 1000) {
+    return true
+  }
+
+  // 2. Verificar consistencia de productos entre el borrador y la OC del servidor
+  if (Array.isArray(serverPO.items) && Array.isArray(draft.itemsDraft)) {
+    if (serverPO.items.length !== draft.itemsDraft.length) {
+      return true
+    }
+    const draftProdIds = new Set(draft.itemsDraft.map((d: any) => String(d.product_id || "")))
+    for (const sItem of serverPO.items) {
+      const sProdId = String(sItem.product_id || sItem.producto_id || "")
+      if (sProdId && !draftProdIds.has(sProdId)) {
+        return true
+      }
+    }
+  }
+
+  return false
+}
+
 export default function DepositoRecepcionPage() {
   const { user, login, logout } = useAuth()
   const toast = useToast()
@@ -201,10 +228,7 @@ export default function DepositoRecepcionPage() {
             clearDraftFromStorage(activePoId)
             return
           }
-          const draftBasePoTime = new Date(draft.poUpdatedAt || draft.po?.updated_at || draft.po?.fecha || draft.po?.created_at || 0).getTime()
-          const serverUpdatedTime = new Date(freshPO.updated_at || freshPO.fecha || freshPO.created_at || 0).getTime()
-
-          if (serverUpdatedTime > 0 && draftBasePoTime > 0 && serverUpdatedTime > draftBasePoTime + 1000) {
+          if (isDraftOutOfSync(draft, freshPO)) {
             clearDraftFromStorage(activePoId)
             toast.warning(
               "Orden Modificada en Compras",
@@ -318,11 +342,8 @@ export default function DepositoRecepcionPage() {
       if (!forceFresh && po.id) {
         const savedDraft = loadDraftFromStorage(po.id)
         if (savedDraft && Array.isArray(savedDraft.itemsDraft) && savedDraft.itemsDraft.length > 0) {
-          const serverUpdatedTime = activePO.updated_at ? new Date(activePO.updated_at).getTime() : (activePO.fecha ? new Date(activePO.fecha).getTime() : 0)
-          const draftBasePoTime = new Date(savedDraft.poUpdatedAt || savedDraft.po?.updated_at || savedDraft.po?.fecha || savedDraft.po?.created_at || 0).getTime()
-
           // Si la orden fue modificada en compras después de guardar el borrador en depósito:
-          if (serverUpdatedTime > 0 && draftBasePoTime > 0 && serverUpdatedTime > draftBasePoTime + 1000) {
+          if (isDraftOutOfSync(savedDraft, activePO)) {
             clearDraftFromStorage(po.id)
             toast.warning(
               "Orden Modificada en Compras",
