@@ -118,10 +118,28 @@ $$\text{Cantidad Sugerida} = \text{RedondearAlMúltiploSuperior}(\text{Déficit 
 
 ---
 
+### 3.5. Control de Pesaje y Capacidad de Carga en Camiones (`peso_kg`)
+
+El peso de cada producto es una variable crítica tanto para la logística de compras como para la distribución:
+1. **Catálogo con Peso Unitario (`products.peso_kg`)**:
+   - Mapeo desde el campo de peso del registro de productos legacy (`columbia.productos`).
+   - Soporte en compras para cálculo automático de peso bruto total en recepciones masivas (ej. toneladas de granos/harinas de Trociuk).
+2. **Estimación y Validación de Carga en Camión de Reparto (`rescamion`)**:
+   - Cada camión de la flota cuenta con su capacidad de carga máxima en kilos (`max_weight_kg` en `ir_vehicle_load_configs`).
+   - Al consolidar los pedidos de preventa para un viaje de reparto, el sistema calcula en vivo:
+     $$\text{Peso Total del Despacho} = \sum (\text{cantidad\_solicitada} \times \text{peso\_kg})$$
+   - **Semáforo de Carga**:
+     - *Verde*: $\text{Peso Total} \le 85\%$ de la capacidad del camión.
+     - *Ámbar*: $85\% < \text{Peso Total} \le 100\%$ (carga completa óptima).
+     - *Rojo*: $\text{Peso Total} > 100\%$ (alerta de sobrecarga por exceso de tonelaje; impide cerrar la hoja de carga sin autorización o sugiere dividir en dos viajes).
+
+---
+
 ## 4. Migración e Histórico del Sistema Legacy (`columbia`)
 
 1. **Sincronización de Proveedores**: Mapeo completo de `columbia.proveedor` a `suppliers` manteniendo el RUC-DV unificado y condiciones de pago.
-2. **Sincronización de Compras Históricas**:
+2. **Sincronización de Productos y Peso**: Lectura de `columbia.productos` asegurando la persistencia de `peso_kg`, costos de reposición y códigos de barra.
+3. **Sincronización de Compras Históricas**:
    - `columbia.fac_compras` $\rightarrow$ `purchase_orders` / `supplier_invoices`.
    - `columbia.item_compras` $\rightarrow$ `purchase_order_items` / `supplier_invoice_items`.
    - Permite que el motor de sugerencias y la comparación histórica de precios dispongan de datos reales desde el día 1 de puesta en marcha.
@@ -134,4 +152,5 @@ $$\text{Cantidad Sugerida} = \text{RedondearAlMúltiploSuperior}(\text{Déficit 
 - [ ] **Test 2**: El motor de forecast calcula la cantidad sugerida considerando tanto las ventas históricas como los pedidos pendientes de Inteliforce en calle.
 - [ ] **Test 3**: La validación de vida útil mínima de Chortitzer arroja alerta en muelle si la fecha de vencimiento es inferior al umbral configurado.
 - [ ] **Test 4**: La recepción con Lote y Vencimiento crea los registros en stock vinculados a su depósito y genera la cuenta a pagar por el saldo neto aceptado.
-- [ ] **Test 5**: La interfaz frontend (`PurchasesPage.tsx`) compila sin errores de TypeScript (`tsc -b`) y opera con inputs monetarios canónicos en Guaraníes.
+- [ ] **Test 5**: La consolidación de pedidos para carga en camión calcula el peso total exacto en kg a partir de `products.peso_kg` y alerta ante sobrecargas del vehículo.
+- [ ] **Test 6**: La interfaz frontend (`PurchasesPage.tsx`) compila sin errores de TypeScript (`tsc -b`) y opera con inputs monetarios canónicos en Guaraníes.
