@@ -6558,6 +6558,16 @@ export default function PurchasesPage() {
                             }}
                             className="input-field w-28 p-1 text-xs"
                           />
+                          {it.fecha_vencimiento && (() => {
+                            const daysLeft = Math.ceil((new Date(it.fecha_vencimiento).getTime() - new Date().setHours(0,0,0,0)) / (1000 * 60 * 60 * 24))
+                            if (daysLeft < 0) {
+                              return <div className="text-[10px] text-red-600 font-bold flex items-center gap-1 mt-0.5"><AlertTriangle className="w-3 h-3 flex-shrink-0" /> Vencido ({Math.abs(daysLeft)}d)</div>
+                            }
+                            if (daysLeft < 20) {
+                              return <div className="text-[10px] text-amber-600 font-bold flex items-center gap-1 mt-0.5"><Clock className="w-3 h-3 flex-shrink-0" /> Vida útil corta ({daysLeft}d)</div>
+                            }
+                            return <div className="text-[10px] text-emerald-600 font-medium flex items-center gap-1 mt-0.5"><CheckCircle2 className="w-3 h-3 flex-shrink-0" /> {daysLeft}d útiles</div>
+                          })()}
                         </td>
                         <td className="p-2.5 text-right">
                           <input
