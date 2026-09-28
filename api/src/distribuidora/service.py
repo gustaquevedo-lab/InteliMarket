@@ -997,3 +997,39 @@ async def get_dashboard(db: AsyncSession, company_id: str) -> dict:
         "costo_landed_pendiente": costo_pendiente,
         "po_pendientes_aprobacion": po_pendientes,
     }
+
+
+def calculate_truck_load_weight(items: list[dict], max_weight_kg: Decimal | float | int) -> dict:
+    """Calcula el peso consolidado de carga para un camión y evalúa el semáforo de sobrecarga."""
+    total_peso_kg = Decimal("0")
+    for item in items:
+        qty = Decimal(str(item.get("cantidad", 0)))
+        peso = Decimal(str(item.get("peso_kg", 0) or 0))
+        total_peso_kg += qty * peso
+
+    capacidad_maxima_kg = Decimal(str(max_weight_kg))
+    if capacidad_maxima_kg > 0:
+        utilizacion_pct = round(float((total_peso_kg / capacidad_maxima_kg) * 100), 2)
+    else:
+        utilizacion_pct = 0.0
+
+    if utilizacion_pct > 100.0:
+        semaforo = "rojo"
+        aprobado = False
+    elif utilizacion_pct > 85.0:
+        semaforo = "ambar"
+        aprobado = True
+    else:
+        semaforo = "verde"
+        aprobado = True
+
+    sobrecarga_kg = max(Decimal("0"), total_peso_kg - capacidad_maxima_kg)
+
+    return {
+        "total_peso_kg": total_peso_kg,
+        "capacidad_maxima_kg": capacidad_maxima_kg,
+        "utilizacion_pct": utilizacion_pct,
+        "semaforo": semaforo,
+        "sobrecarga_kg": sobrecarga_kg,
+        "aprobado_despacho": aprobado,
+    }
