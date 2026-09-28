@@ -440,6 +440,7 @@ async def _resolve_fund_for_branch(db: AsyncSession, company_id: str, branch_id:
         query = query.where(PettyCashFund.branch_id == uuid.UUID(branch_id))
     else:
         query = query.where(PettyCashFund.branch_id.is_(None))
+    query = query.order_by(PettyCashFund.created_at.asc())
     result = await db.execute(query.limit(1))
     return result.scalar_one_or_none()
 
@@ -452,7 +453,18 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
         if not fund or str(fund.company_id) != company_id:
             raise ValueError("Fondo de caja chica no encontrado")
     else:
-        fund = await _resolve_fund_for_branch(db, company_id, data.branch_id)
+        # Si el usuario que registra es custodio de un fondo activo, usar su fondo por defecto
+        if user_id:
+            user_fund_res = await db.execute(
+                select(PettyCashFund).where(
+                    PettyCashFund.company_id == cid,
+                    PettyCashFund.custodio_id == uuid.UUID(user_id),
+                    PettyCashFund.activo == True
+                ).order_by(PettyCashFund.created_at.asc()).limit(1)
+            )
+            fund = user_fund_res.scalar_one_or_none()
+        if not fund:
+            fund = await _resolve_fund_for_branch(db, company_id, data.branch_id)
 
     monto = Decimal(str(data.monto))
     # Nota: NO se verifica saldo del fondo aquí. El gasto se crea en estado 'pendiente'.
@@ -895,6 +907,9 @@ async def disburse_expense(
 
             if not fund_obj:
                 raise HTTPException(status_code=400, detail="Fondo Fijo (Caja Chica) no encontrado o inactivo.")
+
+            # Vincular el gasto explícitamente al fondo fijo que desembolsa el dinero
+            exp.fund_id = fund_obj.id
 
             # Sobregiro permitido mientras se ajustan saldos contables en vivo
 
