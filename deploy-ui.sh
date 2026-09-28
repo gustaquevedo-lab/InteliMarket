@@ -14,6 +14,12 @@ VITE_RELEASE=$(basename "$REL") VITE_API_PROXY_TARGET=http://127.0.0.1:8000 npm 
 
 echo "==> Copiando a $REL"
 cp -r "$SRC/../ui-web-dist" "$REL"
+
+# Preservar chunks hashed de releases previos para no romper pestañas ya abiertas en el navegador
+if [ -d "$CURRENT/assets" ]; then
+  echo "==> Preservando chunks de assets previos para sesiones activas..."
+  cp -n "$CURRENT/assets"/* "$REL/assets/" 2>/dev/null || true
+fi
 # nginx (usuario www-data) necesita poder leer estos archivos. No hace
 # falta chown a www-data para eso -- intellihouse NO pertenece a ese
 # grupo (verificado), asi que ese chown fallaria y con "set -e" tumbaria

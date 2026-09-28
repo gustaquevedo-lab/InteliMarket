@@ -20,6 +20,7 @@ interface InvoiceToPay {
   saldo_pendiente: number
   supplier_id: string
   supplier_nombre?: string
+  tipo_comprobante?: string
 }
 
 interface LegalInvoiceFormItem {
@@ -188,10 +189,12 @@ export default function SupplierPaymentOrderModal({
     return { subtotal, retenciones, neto }
   }, [selectedInvoicesMap])
 
-  // Detección de tickets o remitos provisorios sin factura fiscal
+  // Detección de tickets o remitos provisorios sin factura fiscal (ej. AUTO-REC o remitos)
   const hasUnbilledTickets = useMemo(() => {
     return Object.values(selectedInvoicesMap).some(
-      item => !item.inv.timbrado || item.inv.timbrado === "S/T" || item.inv.numero_factura.startsWith("AUTO-REC-")
+      item => (item.inv.numero_factura || "").startsWith("AUTO-REC-") ||
+              item.inv.tipo_comprobante === "remito" ||
+              item.inv.tipo_comprobante === "ticket"
     )
   }, [selectedInvoicesMap])
 
@@ -199,21 +202,6 @@ export default function SupplierPaymentOrderModal({
   const totalLegalInvoices = useMemo(() => {
     return legalInvoices.reduce((sum, item) => sum + (Number(item.monto) || 0), 0)
   }, [legalInvoices])
-
-  // Auto-sugerir una primera factura legal si hay tickets sin timbrado y aún no se agregó ninguna
-  useEffect(() => {
-    if (step === "step1_facturas" && legalInvoices.length === 0 && summaryFacturas.neto > 0 && hasUnbilledTickets) {
-      setLegalInvoices([
-        {
-          id: Math.random().toString(36).substring(2, 9),
-          numero_factura: "",
-          timbrado: "",
-          fecha_emision: fechaEmision,
-          monto: summaryFacturas.neto,
-        }
-      ])
-    }
-  }, [hasUnbilledTickets, summaryFacturas.neto, fechaEmision, step])
 
   const addLegalInvoiceRow = () => {
     const currentSum = legalInvoices.reduce((s, i) => s + (Number(i.monto) || 0), 0)
@@ -239,7 +227,8 @@ export default function SupplierPaymentOrderModal({
   }
 
   const getSanitizedLegalInvoices = () => {
-    const active = legalInvoices.filter(i => i.numero_factura.trim() || i.timbrado.trim() || i.monto > 0)
+    // Solo considerar activas las filas que el usuario efectivamente empezó a completar (número o timbrado)
+    const active = legalInvoices.filter(i => i.numero_factura.trim() || i.timbrado.trim())
     for (const leg of active) {
       if (!leg.numero_factura.trim()) {
         toast.error("N° de Factura legal requerido", "Debe indicar el número de la factura legal de respaldo.")
@@ -728,7 +717,7 @@ export default function SupplierPaymentOrderModal({
                 {legalInvoices.length === 0 ? (
                   <div className="p-3.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-700/80 bg-white/50 dark:bg-slate-900/40 text-center">
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      No se han asignado facturas legales todavía. Hacé clic en <span className="font-semibold text-slate-700 dark:text-slate-200">"Asignar Factura Legal"</span> para cargar el N° de Factura oficial y Timbrado.
+                      No se han asignado facturas legales adicionales. Si los comprobantes seleccionados son remitos provisorios y tenés la factura fiscal con timbrado, podés vincularla con <span className="font-semibold text-slate-700 dark:text-slate-200">"Asignar Factura Legal"</span>. De lo contrario, podés continuar directamente.
                     </p>
                   </div>
                 ) : (
