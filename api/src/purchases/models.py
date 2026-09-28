@@ -1,7 +1,7 @@
 """Purchase models — suppliers, orders, receipts, requisitions, contracts, forecasting, suggestions, budgets"""
 
 from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Integer, Text, Date, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID, ARRAY
+from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from api.src.db import Base
@@ -51,6 +51,12 @@ class Supplier(Base):
     retencion_iva = Column(Boolean, default=False)
     porcentaje_retencion_iva = Column(Integer, default=30)
     agente_retencion = Column(Boolean, default=False)
+    # Reglas comerciales específicas de proveedores
+    admite_bonificaciones = Column(Boolean, default=False)
+    control_envases = Column(Boolean, default=False)
+    vida_util_minima_dias = Column(Integer, default=0)
+    unidad_compra_minima = Column(String(50), default="unidad")
+    escalas_costo_volumen = Column(JSONB, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

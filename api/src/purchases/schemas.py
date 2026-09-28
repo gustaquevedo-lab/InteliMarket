@@ -48,6 +48,12 @@ class SupplierCreate(BaseModel):
     retencion_iva: bool = False
     porcentaje_retencion_iva: int = 30
     agente_retencion: bool = False
+    # Reglas comerciales específicas de proveedores (Paresa, Chortitzer, Trociuk)
+    admite_bonificaciones: bool = False
+    control_envases: bool = False
+    vida_util_minima_dias: int = 0
+    unidad_compra_minima: str = "unidad"
+    escalas_costo_volumen: Optional[dict] = None
 
 
 class SupplierUpdate(BaseModel):
@@ -89,6 +95,11 @@ class SupplierUpdate(BaseModel):
     retencion_iva: Optional[bool] = None
     porcentaje_retencion_iva: Optional[int] = None
     agente_retencion: Optional[bool] = None
+    admite_bonificaciones: Optional[bool] = None
+    control_envases: Optional[bool] = None
+    vida_util_minima_dias: Optional[int] = None
+    unidad_compra_minima: Optional[str] = None
+    escalas_costo_volumen: Optional[dict] = None
 
 
 class SupplierResponse(BaseModel):
@@ -133,6 +144,11 @@ class SupplierResponse(BaseModel):
     retencion_iva: bool = False
     porcentaje_retencion_iva: int = 30
     agente_retencion: bool = False
+    admite_bonificaciones: bool = False
+    control_envases: bool = False
+    vida_util_minima_dias: int = 0
+    unidad_compra_minima: str = "unidad"
+    escalas_costo_volumen: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
 
