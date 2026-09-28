@@ -25,6 +25,8 @@ import { useConfirm } from "../../components/ConfirmDialog"
 import { formatPYG } from "../../utils/format"
 import { Modal, ModalFooter } from "../../components/Modal"
 import { useAuth } from "../../context/AuthContext"
+import { usePermissions } from "../../context/PermissionsContext"
+import CurrencyInput from "../../components/CurrencyInput"
 import Product360Modal from "./Product360Modal"
 
 // Presets rápidos para carga veloz de códigos de pack/caja
@@ -324,11 +326,23 @@ export default function ProductsPage() {
   const toast = useToast()
   const confirm = useConfirm()
   const { user } = useAuth()
+  const { hasPermission, isAdministrador } = usePermissions()
   const isManagerOrAdmin = Boolean(
     user?.is_superadmin ||
     user?.rol === "admin" ||
     user?.rol === "gerente" ||
     user?.rol === "supervisor"
+  )
+  const canEditCost = Boolean(
+    isAdministrador ||
+    isManagerOrAdmin ||
+    hasPermission("products:edit_cost")
+  )
+  const canEditPrice = Boolean(
+    isAdministrador ||
+    isManagerOrAdmin ||
+    hasPermission("products:edit_price") ||
+    hasPermission("products:update")
   )
 
   // Pestaña Principal
@@ -3503,19 +3517,19 @@ export default function ProductsPage() {
 
                   {editingProduct && !costoUnlocked && (
                     <div className="flex items-center gap-1.5">
-                      {isManagerOrAdmin ? (
+                      {canEditCost ? (
                         <button
                           type="button"
                           onClick={() => setCostoUnlocked(true)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800 transition-colors"
+                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800 transition-colors cursor-pointer"
                         >
                           <Unlock className="w-3.5 h-3.5" />
-                          Desbloquear Costo (Gerencia)
+                          Desbloquear Costo ({isManagerOrAdmin ? "Gerencia" : "Autorizado"})
                         </button>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg">
                           <Lock className="w-3 h-3 text-slate-400" />
-                          Costo Protegido (Solo Gerencia)
+                          Costo Protegido (Requiere Permiso)
                         </span>
                       )}
                     </div>
@@ -3535,12 +3549,11 @@ export default function ProductsPage() {
                         </span>
                       )}
                     </div>
-                    <input
-                      type="number"
-                      min="0"
+                    <CurrencyInput
+                      currency="PYG"
                       disabled={editingProduct ? !costoUnlocked : false}
                       value={form.costo_promedio}
-                      onChange={(e) => setForm({ ...form, costo_promedio: Number(e.target.value) })}
+                      onChangeValue={(num) => setForm({ ...form, costo_promedio: num })}
                       className={`input-field w-full text-xs font-mono font-bold ${
                         editingProduct && !costoUnlocked
                           ? "bg-slate-100 dark:bg-slate-800/80 text-slate-500 cursor-not-allowed border-slate-200 dark:border-slate-700"
@@ -3557,17 +3570,33 @@ export default function ProductsPage() {
 
                   {/* Precio de Venta al Público */}
                   <div>
-                    <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
-                      {form.tipo_venta === "peso" ? "Precio Venta / KG (Gs.) *" : "Precio Venta Unitario (Gs.) *"}
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      required
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block">
+                        {form.tipo_venta === "peso" ? "Precio Venta / KG (Gs.) *" : "Precio Venta Unitario (Gs.) *"}
+                      </label>
+                      {editingProduct && !canEditPrice && (
+                        <span title="Modificación restringida a roles autorizados">
+                          <Lock className="w-3 h-3 text-slate-400" />
+                        </span>
+                      )}
+                    </div>
+                    <CurrencyInput
+                      currency="PYG"
+                      disabled={editingProduct ? !canEditPrice : false}
                       value={form.precio_venta}
-                      onChange={(e) => setForm({ ...form, precio_venta: Number(e.target.value) })}
-                      className="input-field w-full text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50/20 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-700"
+                      onChangeValue={(num) => setForm({ ...form, precio_venta: num })}
+                      className={`input-field w-full text-xs font-mono font-bold ${
+                        editingProduct && !canEditPrice
+                          ? "bg-slate-100 dark:bg-slate-800/80 text-slate-500 cursor-not-allowed border-slate-200 dark:border-slate-700"
+                          : "text-emerald-600 dark:text-emerald-400 bg-emerald-50/20 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-700"
+                      }`}
                     />
+                    {editingProduct && !canEditPrice && (
+                      <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
+                        <Lock className="w-3 h-3 shrink-0" />
+                        Precio de venta protegido (solo roles autorizados)
+                      </div>
+                    )}
                   </div>
 
                   {/* Tasa de IVA */}
