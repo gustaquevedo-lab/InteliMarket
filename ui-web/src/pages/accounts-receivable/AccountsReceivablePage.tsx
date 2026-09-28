@@ -8,8 +8,11 @@ import {
   Users, Send, Landmark, ArrowRight, DownloadCloud, FileCheck, Layers, Filter
 } from "lucide-react"
 import { api, type AccountsReceivable, type Sale, type SaleItem, type CreditAccount } from "../../api"
+import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate, formatPercentage, getTodayAsuncion, getAsuncionDateStr } from "../../utils/format"
+import CurrencyInput from "../../components/CurrencyInput"
+import CustomerSearchInput from "../../components/CustomerSearchInput"
 
 const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
@@ -99,6 +102,9 @@ interface CollectionAction {
 }
 
 export default function AccountsReceivablePage() {
+  const { user } = useAuth()
+  const companyId = user?.tenant_id || (user as any)?.company_id || COMPANY_ID
+
   const [tab, setTab] = useState<TabType>("documentos")
   const [docs, setDocs] = useState<AccountsReceivable[]>([])
   const [aging, setAging] = useState<AgingData | null>(null)
@@ -146,7 +152,7 @@ export default function AccountsReceivablePage() {
   const [pendingDocs, setPendingDocs] = useState<PendingDoc[]>([])
   const [pendingLoading, setPendingLoading] = useState(false)
   const [allocations, setAllocations] = useState<Record<string, string>>({})
-  const [payMontoGlobal, setPayMontoGlobal] = useState<string>("")
+  const [payMontoGlobal, setPayMontoGlobal] = useState<number | "">("")
   const [payMontoGlobalError, setPayMontoGlobalError] = useState<string | null>(null)
   const [selectedBatchDocs, setSelectedBatchDocs] = useState<Record<string, boolean>>({})
   const [completedReceipt, setCompletedReceipt] = useState<{ id: string; numero_recibo: string; monto_total: number; documentos_afectados: number } | null>(null)
@@ -335,8 +341,59 @@ export default function AccountsReceivablePage() {
   const [medioPago, setMedioPago] = useState("efectivo")
   const [referenciaPago, setReferenciaPago] = useState("")
   const [submittingRecibo, setSubmittingRecibo] = useState(false)
-  const handleSelectReciboCustomer = async (_customer: any) => { setSelectedReciboCustomer(_customer) }
-  const handleEmitirRecibo = async () => { setSubmittingRecibo(false) }
+  const handleSelectReciboCustomer = async (customerId: string) => {
+    setSelectedReciboCustomer(customerId)
+    setSelectedInvoiceIds([])
+    setMontoCobrado("")
+    if (!customerId) {
+      setReciboInvoices([])
+      return
+    }
+    try {
+      const res = await api.accountsReceivable.list({ customer_id: customerId, estado: "pendiente", limit: 100 })
+      setReciboInvoices(Array.isArray(res) ? res : (res as any)?.items || [])
+    } catch {
+      setReciboInvoices([])
+    }
+  }
+
+  const handleEmitirRecibo = async () => {
+    if (!selectedReciboCustomer) {
+      toast.warning("Cliente requerido", "Seleccioná un cliente para emitir el recibo")
+      return
+    }
+    const monto = parseFloat(montoCobrado) || 0
+    if (monto <= 0) {
+      toast.warning("Monto inválido", "Ingresá un monto a cobrar válido")
+      return
+    }
+    setSubmittingRecibo(true)
+    try {
+      const res = await api.accountsReceivable.applyGlobalPayment({
+        customer_id: selectedReciboCustomer,
+        monto_total: monto,
+        forma_pago: medioPago,
+        referencia: referenciaPago || undefined,
+        fecha: getTodayAsuncion(),
+        accounts_receivable_ids: selectedInvoiceIds.length > 0 ? selectedInvoiceIds : undefined,
+      })
+      toast.success("Recibo emitido", `Recibo #${res.numero_recibo || ""} registrado correctamente`)
+      setShowReciboModal(false)
+      if (res.numero_recibo) {
+        setCompletedReceipt({
+          id: res.id || String(Date.now()),
+          numero_recibo: res.numero_recibo,
+          monto_total: monto,
+          documentos_afectados: selectedInvoiceIds.length || 1,
+        })
+      }
+      fetchData()
+    } catch (e: any) {
+      toast.error("Error al emitir recibo", e?.message || "Ocurrió un error al procesar la cobranza")
+    } finally {
+      setSubmittingRecibo(false)
+    }
+  }
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 300)
     return () => clearTimeout(t)
@@ -595,7 +652,7 @@ export default function AccountsReceivablePage() {
   const fetchScoring = async () => {
     setScoresLoading(true)
     try {
-      const data = await api.integratedFinance.listCustomerScores(COMPANY_ID)
+      const data = await api.integratedFinance.listCustomerScores(companyId)
       setScores(data)
     } catch {
       toast.error("Error", "No se pudieron cargar los scores de crédito")
@@ -639,7 +696,7 @@ export default function AccountsReceivablePage() {
     setCollectionActions([])
     setCreditAccount(null)
     setCustomerDocs([])
-    api.integratedFinance.listCollectionActions(COMPANY_ID, customerId).then(setCollectionActions).catch(() => setCollectionActions([]))
+    api.integratedFinance.listCollectionActions(companyId, customerId).then(setCollectionActions).catch(() => setCollectionActions([]))
     api.creditAccounts.getByCustomer(customerId).then(setCreditAccount).catch(() => setCreditAccount(null))
     api.accountsReceivable.list({ customer_id: customerId, limit: 500 }).then(setCustomerDocs).catch(() => setCustomerDocs([]))
   }
@@ -719,7 +776,7 @@ export default function AccountsReceivablePage() {
 
     if (targetDoc) {
       setAllocations({ [targetDoc.id]: String(targetDoc.saldo_pendiente) })
-      setPayMontoGlobal(String(targetDoc.saldo_pendiente))
+      setPayMontoGlobal(targetDoc.saldo_pendiente)
       setSelectedBatchDocs({ [targetDoc.id]: true })
     } else {
       setAllocations({})
@@ -854,7 +911,7 @@ export default function AccountsReceivablePage() {
   }, [showPaymentModal, isAgenteRetentor, superaUmbralRetencion])
 
   const handleDistribuirFifo = (montoInput?: number) => {
-    const total = montoInput !== undefined ? montoInput : parseFloat(payMontoGlobal) || 0
+    const total = montoInput !== undefined ? montoInput : (typeof payMontoGlobal === "number" ? payMontoGlobal : parseFloat(payMontoGlobal) || 0)
     if (total <= 0) {
       setPayMontoGlobalError("Ingresá el monto que abonó el cliente para distribuirlo en cascada.")
       return
@@ -874,14 +931,15 @@ export default function AccountsReceivablePage() {
       }
     }
     setAllocations(nuevas)
-    setPayMontoGlobal(String(total))
+    setPayMontoGlobal(total)
   }
 
   const handleToggleDocBatch = (id: string) => {
     const nextState = { ...selectedBatchDocs, [id]: !selectedBatchDocs[id] }
     setSelectedBatchDocs(nextState)
-    if (payMontoGlobal && parseFloat(payMontoGlobal) > 0) {
-      let restante = parseFloat(payMontoGlobal)
+    const currentMonto = typeof payMontoGlobal === "number" ? payMontoGlobal : parseFloat(payMontoGlobal) || 0
+    if (currentMonto > 0) {
+      let restante = currentMonto
       const nuevas: Record<string, string> = {}
       const docsFiltrados = pendingDocs.filter(d => nextState[d.id] !== false)
       for (const d of docsFiltrados) {
@@ -960,7 +1018,7 @@ export default function AccountsReceivablePage() {
     if (!expandedCustomer) return
     try {
       await api.integratedFinance.createCollectionAction({
-        company_id: COMPANY_ID, customer_id: expandedCustomer,
+        company_id: companyId, customer_id: expandedCustomer,
         receivable_id: selectedDoc?.id,
         tipo: collectionForm.tipo, resultado: collectionForm.resultado || undefined,
         notas: collectionForm.notas || undefined, contacto: collectionForm.contacto || undefined,
@@ -979,7 +1037,7 @@ export default function AccountsReceivablePage() {
 
   const handleRecalculateScoring = async () => {
     try {
-      await api.integratedFinance.recalculateAllScores(COMPANY_ID)
+      await api.integratedFinance.recalculateAllScores(companyId)
       toast.success("Scoring actualizado", "Los puntajes de todos los clientes han sido recalculados")
       fetchScoring()
     } catch (e: any) {
@@ -2127,68 +2185,19 @@ export default function AccountsReceivablePage() {
                       {/* Cliente */}
                       <div>
                         <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Cliente (Opcional)</label>
-                        {reportCustomerId ? (
-                          <div className="input-field text-xs flex items-center justify-between bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800">
-                            <span className="font-bold text-emerald-800 dark:text-emerald-300 truncate">
-                              👤 {reportCustomerName}
-                            </span>
-                            <button
-                              onClick={() => {
-                                setReportCustomerId("")
-                                setReportCustomerName("")
-                                setCustomerSearchInput("")
-                              }}
-                              className="text-gray-400 hover:text-rose-500 p-0.5"
-                              title="Quitar filtro de cliente"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="relative">
-                            <input
-                              type="text"
-                              placeholder="Todos los clientes (escribí para buscar)..."
-                              className="input-field text-xs py-1.5"
-                              value={customerSearchInput}
-                              onChange={e => {
-                                setCustomerSearchInput(e.target.value)
-                              }}
-                            />
-                            {customerSearchLoading && (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                            )}
-                            {customerSearchResults.length > 0 && (
-                              <div className="absolute z-20 left-0 right-0 mt-1 max-h-40 overflow-y-auto bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg shadow-lg">
-                                {customerSearchResults.map(c => (
-                                  <div
-                                    key={c.id}
-                                    onClick={() => {
-                                      setReportCustomerId(c.id)
-                                      setReportCustomerName(c.razon_social)
-                                      setCustomerSearchResults([])
-                                      setCustomerSearchInput("")
-                                    }}
-                                    className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 cursor-pointer text-xs font-medium flex items-center justify-between"
-                                  >
-                                    <div>
-                                      <span>{c.razon_social}</span>
-                                      {c.empresa_vinculada_nombre && (
-                                        <div className="mt-0.5">
-                                          <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-                                            <Building2 className="w-2.5 h-2.5 text-indigo-500" />
-                                            {c.empresa_vinculada_nombre}
-                                          </span>
-                                        </div>
-                                      )}
-                                    </div>
-                                    {c.ruc && <span className="text-[10px] text-gray-400 font-mono">({c.ruc})</span>}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )}
+                        <CustomerSearchInput
+                          customerId={reportCustomerId}
+                          value={reportCustomerName}
+                          onSelectCustomer={(cust) => {
+                            setReportCustomerId(cust.id)
+                            setReportCustomerName(cust.razon_social || cust.nombre || "")
+                          }}
+                          onClear={() => {
+                            setReportCustomerId("")
+                            setReportCustomerName("")
+                          }}
+                          placeholder="Todos los clientes (escribí para buscar)..."
+                        />
                       </div>
 
                       {/* Empresa Vinculada */}
@@ -2778,12 +2787,12 @@ export default function AccountsReceivablePage() {
                               </button>
                             )}
                           </div>
-                          <input
-                            type="number"
+                          <CurrencyInput
+                            currency="PYG"
                             placeholder={String(montoRetencionSugerido)}
                             className="input-field text-xs font-mono font-bold text-right text-indigo-600 dark:text-indigo-400"
-                            value={montoRetencionManual !== "" ? montoRetencionManual : (montoRetencionSugerido > 0 ? String(montoRetencionSugerido) : "")}
-                            onChange={e => setMontoRetencionManual(e.target.value)}
+                            value={montoRetencionManual !== "" ? (parseFloat(montoRetencionManual) || 0) : (montoRetencionSugerido > 0 ? montoRetencionSugerido : "")}
+                            onChangeValue={(val) => setMontoRetencionManual(val > 0 ? String(val) : "")}
                           />
                         </div>
                       </div>
@@ -3052,16 +3061,15 @@ export default function AccountsReceivablePage() {
 
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                   <div className="relative flex-1">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-mono text-xs font-bold">₲</span>
-                    <input
-                      type="number"
+                    <CurrencyInput
+                      currency="PYG"
                       placeholder="Monto global que abonó el cliente..."
-                      className={`input-field text-xs pl-7 font-mono font-bold transition ${
+                      className={`input-field text-xs font-mono font-bold transition ${
                         payMontoGlobalError ? "border-rose-500 ring-2 ring-rose-200 dark:ring-rose-900/50" : ""
                       }`}
                       value={payMontoGlobal}
-                      onChange={e => {
-                        setPayMontoGlobal(e.target.value)
+                      onChangeValue={val => {
+                        setPayMontoGlobal(val)
                         if (payMontoGlobalError) setPayMontoGlobalError(null)
                       }}
                       onKeyDown={e => { if (e.key === "Enter") handleDistribuirFifo() }}
@@ -3165,13 +3173,12 @@ export default function AccountsReceivablePage() {
                         </div>
 
                         <div className="flex items-center gap-2 self-end sm:self-auto">
-                          <span className="text-gray-400 text-[11px]">₲</span>
-                          <input
-                            type="number"
+                          <CurrencyInput
+                            currency="PYG"
                             placeholder="0"
                             className="input-field text-right w-36 font-mono font-bold text-xs"
-                            value={allocations[doc.id] || ""}
-                            onChange={e => setAllocations({ ...allocations, [doc.id]: e.target.value })}
+                            value={parseFloat(allocations[doc.id] || "0") || ""}
+                            onChangeValue={(val) => setAllocations({ ...allocations, [doc.id]: val > 0 ? String(val) : "" })}
                             disabled={!isSelected}
                           />
                         </div>
@@ -3514,11 +3521,11 @@ export default function AccountsReceivablePage() {
 
               <div>
                 <label className="label-field">Monto a Cancelar (₲)</label>
-                <input
-                  type="number"
+                <CurrencyInput
+                  currency="PYG"
                   className="input-field text-xs font-mono font-bold"
-                  value={payRemForm.monto}
-                  onChange={e => setPayRemForm({ ...payRemForm, monto: e.target.value })}
+                  value={parseFloat(payRemForm.monto) || ""}
+                  onChangeValue={(val) => setPayRemForm({ ...payRemForm, monto: String(val) })}
                 />
               </div>
 
@@ -3743,16 +3750,12 @@ export default function AccountsReceivablePage() {
             <div className="p-6 space-y-5 text-xs">
               <div>
                 <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1 uppercase tracking-wider">1. Seleccionar Cliente</label>
-                <select
-                  className="input-field font-medium text-sm"
-                  value={selectedReciboCustomer}
-                  onChange={(e) => handleSelectReciboCustomer(e.target.value)}
-                >
-                  <option value="">-- Seleccionar cliente con deuda --</option>
-                  {customers.map(c => (
-                    <option key={c.id} value={c.id}>{c.razon_social} ({c.ruc || "Sin RUC"})</option>
-                  ))}
-                </select>
+                <CustomerSearchInput
+                  customerId={selectedReciboCustomer || ""}
+                  onSelectCustomer={(cust) => handleSelectReciboCustomer(cust.id)}
+                  onClear={() => handleSelectReciboCustomer("")}
+                  placeholder="Buscar cliente por nombre, razón social o RUC..."
+                />
               </div>
 
               {selectedReciboCustomer && (
@@ -3769,8 +3772,16 @@ export default function AccountsReceivablePage() {
                               type="checkbox"
                               checked={selectedInvoiceIds.includes(inv.id)}
                               onChange={(e) => {
-                                if (e.target.checked) setSelectedInvoiceIds([...selectedInvoiceIds, inv.id])
-                                else setSelectedInvoiceIds(selectedInvoiceIds.filter(id => id !== inv.id))
+                                const newIds = e.target.checked
+                                  ? [...selectedInvoiceIds, inv.id]
+                                  : selectedInvoiceIds.filter(id => id !== inv.id)
+                                setSelectedInvoiceIds(newIds)
+                                const totalSeleccionado = reciboInvoices
+                                  .filter(item => newIds.includes(item.id))
+                                  .reduce((acc, curr) => acc + (curr.saldo_pendiente || 0), 0)
+                                if (totalSeleccionado > 0) {
+                                  setMontoCobrado(String(totalSeleccionado))
+                                }
                               }}
                               className="rounded text-primary focus:ring-primary w-4 h-4"
                             />
@@ -3788,11 +3799,11 @@ export default function AccountsReceivablePage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1 uppercase tracking-wider">3. Monto Recibido (₲)</label>
-                      <input
-                        type="number"
+                      <CurrencyInput
+                        currency="PYG"
                         className="input-field font-mono font-bold text-lg text-emerald-600"
-                        value={montoCobrado}
-                        onChange={(e) => setMontoCobrado(e.target.value)}
+                        value={parseFloat(montoCobrado) || ""}
+                        onChangeValue={(val) => setMontoCobrado(String(val))}
                         placeholder="Monto total a cobrar"
                       />
                     </div>
@@ -3940,53 +3951,21 @@ export default function AccountsReceivablePage() {
                 </div>
               </div>
 
-              <div className="relative">
+              <div>
                 <label className="label-field">Cliente (opcional — dejar vacío trae todos)</label>
-                {reportCustomerId ? (
-                  <div className="input-field text-xs flex items-center justify-between">
-                    <span className="font-semibold text-gray-800 dark:text-gray-200">{reportCustomerName}</span>
-                    <button
-                      onClick={() => { setReportCustomerId(""); setReportCustomerName(""); setCustomerSearchInput("") }}
-                      className="text-gray-400 hover:text-red-500"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input
-                      className="input-field text-xs pl-8"
-                      placeholder="Buscar por nombre, razón social o RUC..."
-                      value={customerSearchInput}
-                      onChange={e => { setCustomerSearchInput(e.target.value); setCustomerSearchOpen(true) }}
-                      onFocus={() => setCustomerSearchOpen(true)}
-                    />
-                    {customerSearchOpen && customerSearchInput.trim() && (
-                      <div className="absolute z-10 mt-1 w-full max-h-52 overflow-y-auto bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg shadow-lg">
-                        {customerSearchLoading ? (
-                          <div className="p-3 text-center"><Loader2 className="w-4 h-4 animate-spin mx-auto text-gray-400" /></div>
-                        ) : customerSearchResults.length === 0 ? (
-                          <div className="p-3 text-xs text-gray-400 text-center">Sin resultados</div>
-                        ) : (
-                          customerSearchResults.map(c => (
-                            <button
-                              key={c.id}
-                              onClick={() => {
-                                setReportCustomerId(c.id); setReportCustomerName(c.razon_social)
-                                setCustomerSearchOpen(false); setCustomerSearchInput("")
-                              }}
-                              className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-slate-700 flex items-center justify-between gap-2"
-                            >
-                              <span className="font-semibold text-gray-800 dark:text-gray-200">{c.razon_social}</span>
-                              {c.ruc && <span className="text-gray-400 font-mono text-[10px]">{c.ruc}</span>}
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
+                <CustomerSearchInput
+                  customerId={reportCustomerId}
+                  value={reportCustomerName}
+                  onSelectCustomer={(cust) => {
+                    setReportCustomerId(cust.id)
+                    setReportCustomerName(cust.razon_social || cust.nombre || "")
+                  }}
+                  onClear={() => {
+                    setReportCustomerId("")
+                    setReportCustomerName("")
+                  }}
+                  placeholder="Todos los clientes (escribí para buscar)..."
+                />
               </div>
 
               <div className="relative">
@@ -4172,7 +4151,13 @@ export default function AccountsReceivablePage() {
               </div>
               <div>
                 <label className="label-field">Monto Comprometido (₲)</label>
-                <input className="input-field font-mono" type="number" value={collectionForm.monto_comprometido} onChange={e => setCollectionForm({ ...collectionForm, monto_comprometido: e.target.value })} />
+                <CurrencyInput
+                  currency="PYG"
+                  className="input-field font-mono"
+                  value={collectionForm.monto_comprometido ? parseFloat(collectionForm.monto_comprometido) : ""}
+                  onChangeValue={(val) => setCollectionForm({ ...collectionForm, monto_comprometido: val > 0 ? String(val) : "" })}
+                  placeholder="Monto comprometido (₲)"
+                />
               </div>
             </div>
             <div className="p-6 border-t flex justify-end gap-3">
