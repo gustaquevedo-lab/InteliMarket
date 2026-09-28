@@ -672,6 +672,42 @@ async def get_po_history(db: AsyncSession, po_id: str) -> list[PurchaseOrderHist
 RECEIPT_PRICE_TOLERANCE = Decimal("0.05")  # 5% de desvio vs. el precio pactado en la OC
 
 
+def validate_dock_shelf_life(
+    fecha_vencimiento: date | datetime | None,
+    vida_util_minima_dias: int = 0,
+    current_date: date | None = None,
+) -> dict[str, Any]:
+    """Valida si la fecha de vencimiento de un producto cumple con la vida útil mínima exigida al proveedor (ej. Chortitzer)."""
+    if not fecha_vencimiento:
+        return {"valido": True, "dias_restantes": None, "alerta": None}
+
+    if isinstance(fecha_vencimiento, datetime):
+        fecha_venc = fecha_vencimiento.date()
+    else:
+        fecha_venc = fecha_vencimiento
+
+    hoy = current_date or date.today()
+    dias_restantes = (fecha_venc - hoy).days
+
+    if dias_restantes < 0:
+        return {
+            "valido": False,
+            "dias_restantes": dias_restantes,
+            "alerta": f"Producto VENCIDO. Fecha de vencimiento: {fecha_venc.isoformat()} ({abs(dias_restantes)} días atrás)",
+        }
+
+    if vida_util_minima_dias > 0 and dias_restantes < vida_util_minima_dias:
+        return {
+            "valido": False,
+            "dias_restantes": dias_restantes,
+            "alerta": (
+                f"Vida útil insuficiente: {dias_restantes} días restantes vs {vida_util_minima_dias} mínimos requeridos"
+            ),
+        }
+
+    return {"valido": True, "dias_restantes": dias_restantes, "alerta": None}
+
+
 async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseReceipt:
     po = None
     if data.purchase_order_id:
@@ -682,6 +718,10 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
     supplier_id = data.supplier_id or (po.supplier_id if po else None)
     if not supplier_id:
         raise ValueError("Proveedor requerido para registrar la recepción")
+
+    # Recuperar proveedor para validar reglas comerciales (vida útil mínima Chortitzer)
+    supplier = await get_supplier(db, str(supplier_id))
+    min_shelf_life = supplier.vida_util_minima_dias if supplier and supplier.vida_util_minima_dias else 0
 
     warehouse_id = data.warehouse_id
     if not warehouse_id and po:
@@ -742,6 +782,12 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
             if desvio > RECEIPT_PRICE_TOLERANCE:
                 review_reasons.append(
                     f"Precio de {item_data.product_id} recibido a {cost} vs {po_price} pactado en la OC ({(desvio * 100).quantize(Decimal('0.1'))}% de desvio)"
+                )
+        if item_data.fecha_vencimiento:
+            check_shelf = validate_dock_shelf_life(item_data.fecha_vencimiento, min_shelf_life)
+            if not check_shelf["valido"]:
+                review_reasons.append(
+                    f"Control de Calidad Muelle ({item_data.product_id}): {check_shelf['alerta']}"
                 )
         if item_data.cantidad_rechazada:
             review_reasons.append(f"Rechazo parcial de {item_data.cantidad_rechazada} unidades de {item_data.product_id}: {item_data.motivo_rechazo or 'sin motivo especificado'}")
