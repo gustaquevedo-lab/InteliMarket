@@ -9,6 +9,7 @@ import { api, COMPANY_ID, type PriceList, type PriceListItem, type Product, type
 import { useToast } from "../../context/ToastContext"
 import { usePermissions } from "../../context/PermissionsContext"
 import CurrencyInput from "../../components/CurrencyInput"
+import CustomerSearchInput from "../../components/CustomerSearchInput"
 import { formatPYG } from "../../utils/format"
 
 export type TiersSummary = {
@@ -101,8 +102,8 @@ export default function PriceListsPage() {
 
             {/* Micro pills de estado */}
             <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
-              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
-                🏢 Extra Supermercado (Central)
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-sky-300">
+                🏢 Casa Gonzalito (Distribuidora)
               </span>
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-sky-300">
                 🏷️ {lists.length} listas configuradas
@@ -268,32 +269,15 @@ function ProductPicker({ productId, productLabel, onChange }: { productId: strin
 }
 
 function CustomerPicker({ customerId, customerLabel, onChange }: { customerId: string; customerLabel: string; onChange: (id: string, label: string) => void }) {
-  const [search, setSearch] = useState("")
-  const results = useDebouncedSearch<Customer>((q) => api.customers.list({ search: q }), search)
   return (
     <div className="relative">
-      <label className="block text-xs font-black uppercase text-slate-400 mb-1">Cliente</label>
-      <input
-        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white outline-none"
+      <CustomerSearchInput
+        label="Cliente Convenio Exclusivo"
+        customerId={customerId}
+        onSelectCustomer={(c) => onChange(c.id, resolveCustomerLabel(c as any))}
+        onClear={() => onChange("", "")}
         placeholder="Buscar cliente por Razón Social o RUC..."
-        value={customerId && !search ? customerLabel : search}
-        onChange={(e) => { setSearch(e.target.value); if (!e.target.value) onChange("", "") }}
       />
-      {results.length > 0 && (
-        <div className="absolute z-20 top-full mt-1 left-0 right-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-40 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
-          {results.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              className="w-full text-left px-3.5 py-2.5 text-xs hover:bg-slate-50 dark:hover:bg-slate-800 flex justify-between items-center"
-              onClick={() => { onChange(c.id, resolveCustomerLabel(c)); setSearch("") }}
-            >
-              <span className="font-bold text-slate-900 dark:text-white">{resolveCustomerLabel(c)}</span>
-              <span className="font-mono text-slate-400 text-[11px]">{c.ruc ? `RUC ${c.ruc}` : c.ci ? `CI ${c.ci}` : ""}</span>
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   )
 }
@@ -1619,8 +1603,13 @@ function TieredPriceFormModal({
             <input className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-2.5 text-xs font-mono font-bold" type="number" placeholder="Sin límite" value={maxQty} onChange={(e) => setMaxQty(e.target.value)} />
           </div>
           <div className="col-span-2">
-            <label className="block font-black uppercase text-[10px] text-slate-400 mb-1">Precio Unitario (₲)</label>
-            <input className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-2.5 text-xs font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm" type="number" value={precioUnitario} onChange={(e) => setPrecioUnitario(parseFloat(e.target.value) || 0)} />
+            <label className="block font-black uppercase text-[10px] text-slate-400 mb-1">Precio Unitario (₲) *</label>
+            <CurrencyInput
+              currency="PYG"
+              value={precioUnitario}
+              onChangeValue={(val) => setPrecioUnitario(val)}
+              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-2.5 text-xs font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm"
+            />
           </div>
         </div>
         <div className="flex gap-2 pt-2 justify-end">
