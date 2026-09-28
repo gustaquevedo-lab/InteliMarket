@@ -3,6 +3,7 @@
 from sqlalchemy import select, text, case, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone, date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import uuid
@@ -1411,6 +1412,69 @@ async def run_forecast(db: AsyncSession, rule_id: str) -> dict:
 
 # ── Purchase Suggestions ──────────────────────────────────────────────────────
 
+def calculate_distributor_purchase_quantity(
+    current_stock: Decimal,
+    pending_orders_qty: Decimal = Decimal("0"),
+    reorder_point: Decimal = Decimal("0"),
+    pack_multiple: int | float = 1,
+    min_order: int | float = 0,
+    max_order: int | float = 999999,
+    admite_bonificaciones: bool = False,
+    regla_bonificacion: dict | None = None,
+) -> dict:
+    available_stock = current_stock - pending_orders_qty
+    deficit = reorder_point - available_stock
+
+    if deficit <= 0:
+        return {
+            "stock_disponible": available_stock,
+            "deficit_neto": Decimal("0"),
+            "cantidad_sugerida": Decimal("0"),
+            "bultos": 0,
+            "bonificacion_sugerida": Decimal("0"),
+        }
+
+    suggested_qty = deficit
+    pack_multiple = max(1, int(pack_multiple))
+    if pack_multiple > 1:
+        packs = math.ceil(float(suggested_qty) / pack_multiple)
+        suggested_qty = Decimal(str(packs * pack_multiple))
+    else:
+        packs = int(suggested_qty)
+
+    if min_order > 0 and suggested_qty < Decimal(str(min_order)):
+        suggested_qty = Decimal(str(min_order))
+        if pack_multiple > 1:
+            packs = math.ceil(float(suggested_qty) / pack_multiple)
+            suggested_qty = Decimal(str(packs * pack_multiple))
+        else:
+            packs = int(suggested_qty)
+
+    if max_order > 0 and suggested_qty > Decimal(str(max_order)):
+        suggested_qty = Decimal(str(max_order))
+        if pack_multiple > 1:
+            packs = int(float(suggested_qty) // pack_multiple)
+            suggested_qty = Decimal(str(packs * pack_multiple))
+        else:
+            packs = int(suggested_qty)
+
+    bonus_qty = Decimal("0")
+    if admite_bonificaciones and regla_bonificacion:
+        cada = regla_bonificacion.get("cada", 0)
+        bonifica = regla_bonificacion.get("bonifica", 0)
+        if cada > 0 and bonifica > 0:
+            veces = int(float(suggested_qty) // cada)
+            bonus_qty = Decimal(str(veces * bonifica))
+
+    return {
+        "stock_disponible": available_stock,
+        "deficit_neto": deficit,
+        "cantidad_sugerida": suggested_qty,
+        "bultos": packs,
+        "bonificacion_sugerida": bonus_qty,
+    }
+
+
 async def generate_purchase_suggestions(db: AsyncSession, company_id: str) -> dict:
     rules_result = await db.execute(
         select(ForecastRule).where(
@@ -1476,6 +1540,20 @@ async def generate_purchase_suggestions(db: AsyncSession, company_id: str) -> di
             stocks = list(stock_result.scalars().all())
             current_stock = Decimal(str(sum(int(s.cantidad) for s in stocks)))
 
+            # Preventa pendiente de Inteliforce / ventas en calle
+            pending_orders_res = await db.execute(
+                text("""
+                    SELECT COALESCE(SUM(soi.cantidad), 0)
+                    FROM sales_order_items soi
+                    JOIN sales_orders so ON so.id = soi.order_id
+                    WHERE so.company_id = :cid
+                      AND soi.product_id = :pid
+                      AND so.estado IN ('borrador', 'pendiente_aprobacion', 'aprobado', 'en_preparacion', 'listo')
+                """),
+                {"cid": company_id, "pid": pid},
+            )
+            pending_orders_qty = Decimal(str(pending_orders_res.scalar() or 0))
+
             z_factor = Decimal("1.645")
             if service_level >= 99:
                 z_factor = Decimal("2.33")
@@ -1489,20 +1567,28 @@ async def generate_purchase_suggestions(db: AsyncSession, company_id: str) -> di
             safety_stock = (daily_avg * Decimal(str(lead_time)) * z_factor / Decimal("2")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
             reorder_point = safety_stock + (daily_avg * Decimal(str(lead_time))).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
 
-            if current_stock >= reorder_point:
+            # Reglas de proveedor comercial
+            admite_bonif = False
+            if preferred_supplier:
+                supp_res = await db.execute(
+                    select(Supplier.admite_bonificaciones).where(Supplier.id == preferred_supplier)
+                )
+                admite_bonif = bool(supp_res.scalar_one_or_none())
+
+            calc_res = calculate_distributor_purchase_quantity(
+                current_stock=current_stock,
+                pending_orders_qty=pending_orders_qty,
+                reorder_point=reorder_point,
+                pack_multiple=multiple,
+                min_order=min_order,
+                max_order=max_order,
+                admite_bonificaciones=admite_bonif,
+            )
+
+            if calc_res["cantidad_sugerida"] <= 0:
                 continue
 
-            suggested_qty = (reorder_point - current_stock).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
-
-            if multiple > 1:
-                rounded = math.ceil(float(suggested_qty) / multiple) * multiple
-                suggested_qty = Decimal(str(rounded))
-
-            if min_order > 0 and suggested_qty < Decimal(str(min_order)):
-                suggested_qty = Decimal(str(min_order))
-
-            if max_order > 0 and suggested_qty > Decimal(str(max_order)):
-                suggested_qty = Decimal(str(max_order))
+            suggested_qty = calc_res["cantidad_sugerida"]
 
             coverage_days = int(current_stock / daily_avg) if daily_avg > 0 else 0
             if coverage_days < lead_time:
