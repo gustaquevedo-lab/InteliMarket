@@ -1,13 +1,15 @@
 import logging
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import engine, async_session_factory
 from api.src.tenants.models import Tenant
+from api.src.products.models import Product
 from api.src.backups.service import create_backup
 from api.src.backups.models import BackupScheduleConfig
 
@@ -149,6 +151,41 @@ async def run_weekly_analytics_report():
                     logger.error(f"Failed weekly report for tenant {tenant.slug}: {e}")
         except Exception as e:
             logger.error(f"Weekly analytics report job failed: {e}")
+
+
+async def run_promotions_daily_sync():
+    """Sincroniza y activa las promociones del día (hora Paraguay)
+    y refresca los productos vinculados para que el POS offline-first y las
+    balanzas etiquetadoras mantengan las ofertas vigentes y actualicen sus caches locales."""
+    logger.info("Iniciando sincronización periódica de promociones y precios...")
+    from api.src.promotions.models import Promotion
+    from api.src.promotions.service import _touch_products_for_promo, _sync_balanza_si_aplica
+
+    async with async_session_factory() as db:
+        try:
+            # 1. Tocar las promociones activas para que el trigger PostgreSQL 'trg_sync_promo_precio_fijo'
+            # reevalúe la vigencia del día actual (valido_desde, valido_hasta, dias_semana)
+            res = await db.execute(
+                update(Promotion)
+                .where(Promotion.activo == True, Promotion.estado == "activa")
+                .values(updated_at=func.now())
+                .returning(Promotion)
+            )
+            promos = list(res.scalars().all())
+
+            # 2. Tocar los productos vinculados y sincronizar balanzas
+            for pr in promos:
+                try:
+                    await _touch_products_for_promo(db, pr)
+                    await _sync_balanza_si_aplica(db, pr)
+                except Exception as p_err:
+                    logger.warning("Error procesando productos/balanza para promo %s: %s", pr.id, p_err)
+
+            await db.commit()
+            logger.info("Sincronización de promociones completada: %d promociones evaluadas.", len(promos))
+        except Exception as e:
+            await db.rollback()
+            logger.error("Error en sincronización periódica de promociones: %s", e)
 
 
 async def export_delivery_pdf_for_tenant(db: AsyncSession, company_id: str, days: int) -> bytes | None:
@@ -294,6 +331,18 @@ def update_schedule(config: dict):
             replace_existing=True,
         )
 
+    # Sincronización continua de promociones (medianoche a las 00:01 AM y cada 30 min)
+    # Garantiza que cualquier promo que empiece o termine hoy active los triggers y refresque las cajas
+    py_tz = ZoneInfo("America/Asuncion")
+    if not scheduler.get_job("promotions_sync"):
+        scheduler.add_job(
+            run_promotions_daily_sync,
+            trigger=CronTrigger(minute="1,31", timezone=py_tz),
+            id="promotions_sync",
+            name="Promotions & Price Sync (America/Asuncion)",
+            replace_existing=True,
+        )
+
     logger.info(f"Scheduler updated: {frequency} at {hour:02d}:{minute:02d}")
 
 
@@ -308,5 +357,12 @@ def start_scheduler():
         config = {"frequency": "daily", "hour": 2, "minute": 0}
 
     update_schedule(config)
+
+    # Ejecutar sync de promociones inmediatamente al arrancar el API
+    try:
+        asyncio.create_task(run_promotions_daily_sync())
+    except Exception as e:
+        logger.warning("No se pudo iniciar sync inmediato de promociones al arrancar: %s", e)
+
     logger.info("Scheduler started.")
     return scheduler
