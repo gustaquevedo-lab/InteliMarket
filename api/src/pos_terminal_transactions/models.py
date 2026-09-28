@@ -2,7 +2,7 @@
 terminal Bancard (aprobada, rechazada, o cargada manualmente por falla de
 conexion), pensado para segmentacion de clientes ademas de auditoria de caja."""
 
-from sqlalchemy import Column, String, Boolean, DateTime, Numeric, JSON
+from sqlalchemy import Column, String, Boolean, DateTime, Numeric, JSON, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 
