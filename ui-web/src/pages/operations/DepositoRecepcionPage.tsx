@@ -55,6 +55,7 @@ const saveDraftToStorage = (po: PurchaseOrder, items: ReceptionItemDraft[], ref:
       proveedorRef: ref,
       observaciones: obs,
       savedAt: new Date().toISOString(),
+      poUpdatedAt: po.updated_at || (po as any).fecha || (po as any).created_at || null,
     }
     localStorage.setItem(STORAGE_PREFIX + po.id, JSON.stringify(data))
     localStorage.setItem(STORAGE_ACTIVE_PO_KEY, po.id)
@@ -195,24 +196,54 @@ export default function DepositoRecepcionPage() {
     if (activePoId && viewState === "orders" && !selectedPO) {
       const draft = loadDraftFromStorage(activePoId)
       if (draft && draft.po && Array.isArray(draft.itemsDraft) && draft.itemsDraft.length > 0) {
-        const validatedItems = draft.itemsDraft.map((it: any, idx: number) => ({
-          ...it,
-          draft_id: it.draft_id || `${it.product_id || "prod"}-${idx}-${Date.now()}`,
-        }))
-        setSelectedPO(draft.po)
-        setItemsDraft(validatedItems)
-        setProveedorRef(draft.proveedorRef || "")
-        setObservaciones(draft.observaciones || "")
-        setRestoredFromDraft(true)
-        setDraftLastSaved(draft.savedAt || new Date().toISOString())
-        setViewState("receiving")
-        toast.info(
-          "Recepción Restaurada",
-          `Continuando orden ${draft.po.numero || "activa"}. Lotes y fechas protegidos contra recargas.`
-        )
+        api.purchases.getOrder(activePoId).then((freshPO) => {
+          if (!freshPO) {
+            clearDraftFromStorage(activePoId)
+            return
+          }
+          const draftBasePoTime = new Date(draft.poUpdatedAt || draft.po?.updated_at || draft.po?.fecha || draft.po?.created_at || 0).getTime()
+          const serverUpdatedTime = new Date(freshPO.updated_at || freshPO.fecha || freshPO.created_at || 0).getTime()
+
+          if (serverUpdatedTime > 0 && draftBasePoTime > 0 && serverUpdatedTime > draftBasePoTime + 1000) {
+            clearDraftFromStorage(activePoId)
+            toast.warning(
+              "Orden Modificada en Compras",
+              `La orden ${freshPO.numero} fue modificada en Compras. Se descartó el borrador anterior para recepcionar la versión actualizada.`
+            )
+            fetchOrders()
+          } else {
+            const validatedItems = draft.itemsDraft.map((it: any, idx: number) => ({
+              ...it,
+              draft_id: it.draft_id || `${it.product_id || "prod"}-${idx}-${Date.now()}`,
+            }))
+            setSelectedPO(freshPO || draft.po)
+            setItemsDraft(validatedItems)
+            setProveedorRef(draft.proveedorRef || "")
+            setObservaciones(draft.observaciones || "")
+            setRestoredFromDraft(true)
+            setDraftLastSaved(draft.savedAt || new Date().toISOString())
+            setViewState("receiving")
+            toast.info(
+              "Recepción Restaurada",
+              `Continuando orden ${draft.po.numero || "activa"}. Lotes y fechas protegidos contra recargas.`
+            )
+          }
+        }).catch(() => {
+          const validatedItems = draft.itemsDraft.map((it: any, idx: number) => ({
+            ...it,
+            draft_id: it.draft_id || `${it.product_id || "prod"}-${idx}-${Date.now()}`,
+          }))
+          setSelectedPO(draft.po)
+          setItemsDraft(validatedItems)
+          setProveedorRef(draft.proveedorRef || "")
+          setObservaciones(draft.observaciones || "")
+          setRestoredFromDraft(true)
+          setDraftLastSaved(draft.savedAt || new Date().toISOString())
+          setViewState("receiving")
+        })
       }
     }
-  }, [user, viewState, selectedPO, toast])
+  }, [user, viewState, selectedPO, toast, fetchOrders])
 
   // Auto-guardado en localStorage cada vez que cambian los datos de recepción
   useEffect(() => {
@@ -275,26 +306,35 @@ export default function DepositoRecepcionPage() {
       soundAlerts.playScanSuccess()
       setSelectedPO(po)
 
-      // 1. Si existe un borrador guardado en localStorage y no se forzó inicio limpio, restaurarlo
+      // 1. Obtener la cabecera completa y la lista de ítems detallada desde el servidor
+      const [fullPO, detailedItems] = await Promise.all([
+        api.purchases.getOrder(po.id!).catch(() => null),
+        api.purchases.getOrderItems(po.id!).catch(() => []),
+      ])
+      const activePO = fullPO || po
+      setSelectedPO(activePO)
+
+      // 2. Si existe un borrador guardado en localStorage y no se forzó inicio limpio, validar si sigue vigente
       if (!forceFresh && po.id) {
         const savedDraft = loadDraftFromStorage(po.id)
         if (savedDraft && Array.isArray(savedDraft.itemsDraft) && savedDraft.itemsDraft.length > 0) {
-          const poUpdatedTime = po.updated_at ? new Date(po.updated_at).getTime() : 0
-          const draftSavedTime = savedDraft.savedAt ? new Date(savedDraft.savedAt).getTime() : 0
+          const serverUpdatedTime = activePO.updated_at ? new Date(activePO.updated_at).getTime() : (activePO.fecha ? new Date(activePO.fecha).getTime() : 0)
+          const draftBasePoTime = new Date(savedDraft.poUpdatedAt || savedDraft.po?.updated_at || savedDraft.po?.fecha || savedDraft.po?.created_at || 0).getTime()
 
           // Si la orden fue modificada en compras después de guardar el borrador en depósito:
-          if (poUpdatedTime > 0 && draftSavedTime > 0 && poUpdatedTime > draftSavedTime + 3000) {
-            toast.info(
+          if (serverUpdatedTime > 0 && draftBasePoTime > 0 && serverUpdatedTime > draftBasePoTime + 1000) {
+            clearDraftFromStorage(po.id)
+            toast.warning(
               "Orden Modificada en Compras",
-              "La orden fue modificada recientemente en el sistema. Se cargará la lista actualizada de productos desde el servidor."
+              `La orden ${activePO.numero} fue modificada en Compras. Se descartó el borrador anterior y se cargó la versión actualizada.`
             )
-            // No restaurar el borrador viejo desactualizado; dejar que cargue del servidor
+            // No retornar: continuar hacia la carga de ítems frescos desde activePO
           } else {
             const validatedItems = savedDraft.itemsDraft.map((it: any, idx: number) => ({
               ...it,
               draft_id: it.draft_id || `${it.product_id || "prod"}-${idx}-${Date.now()}`,
             }))
-            setSelectedPO(savedDraft.po || po)
+            setSelectedPO(activePO)
             setItemsDraft(validatedItems)
             setProveedorRef(savedDraft.proveedorRef || "")
             setObservaciones(savedDraft.observaciones || "")
@@ -309,14 +349,6 @@ export default function DepositoRecepcionPage() {
           }
         }
       }
-
-      // 2. Cargar la cabecera completa y la lista de ítems detallada con códigos de barra
-      const [fullPO, detailedItems] = await Promise.all([
-        api.purchases.getOrder(po.id!),
-        api.purchases.getOrderItems(po.id!).catch(() => []),
-      ])
-      const activePO = fullPO || po
-      setSelectedPO(activePO)
 
       const detailedMap = new Map<string, any>()
       ;(detailedItems || []).forEach((d: any) => {
@@ -390,6 +422,16 @@ export default function DepositoRecepcionPage() {
       handleSelectPO(selectedPO, true)
     }
   }
+
+  const handleForceReloadFromServer = () => {
+    if (!selectedPO?.id) return
+    if (window.confirm("¿Descartar el borrador local y recargar los productos y precios actualizados directamente de la Orden de Compra del servidor?")) {
+      clearDraftFromStorage(selectedPO.id)
+      setRestoredFromDraft(false)
+      handleSelectPO(selectedPO, true)
+    }
+  }
+
 
   // ---------------------------------------------------------------------------
   // 3. PROCESAMIENTO INTELIGENTE DE CÓDIGO DE BARRAS ESCANEADO
@@ -1016,8 +1058,9 @@ export default function DepositoRecepcionPage() {
             {viewState === "receiving" && (
               <button
                 onClick={() => {
-                  if (window.confirm("¿Volver a la lista de órdenes? Se perderá el avance actual.")) {
+                  if (window.confirm("¿Volver a la lista de órdenes? Si deseas descartar este borrador, puedes hacerlo luego con 'Recargar desde OC Oficial'.")) {
                     stopCamera()
+                    setSelectedPO(null)
                     setViewState("orders")
                   }
                 }}
@@ -1585,6 +1628,16 @@ export default function DepositoRecepcionPage() {
                 >
                   <Plus className="w-4 h-4" />
                   <span>+ Fuera de Orden</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleForceReloadFromServer}
+                  className="px-3 py-2 rounded-xl bg-sky-500/15 border border-sky-500/30 text-sky-700 dark:text-sky-300 hover:bg-sky-500/25 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer"
+                  title="Descartar borrador local y recargar productos oficiales de la OC desde el servidor"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-sky-500" />
+                  <span>Recargar desde OC Oficial</span>
                 </button>
               </div>
             </div>
