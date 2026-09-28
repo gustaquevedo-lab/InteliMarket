@@ -7,8 +7,12 @@ import {
   Search, Plus, Loader2, Ship, FileSignature, MapPin, CreditCard,
   BarChart3, Container, DollarSign, TrendingUp, Users, AlertTriangle,
   CheckCircle, XCircle, Truck, ShoppingBag, Globe, Anchor, RefreshCw,
-  ClipboardList, Handshake, Percent, Sparkles, Trash2, Zap,
+  ClipboardList, Handshake, Percent, Sparkles, Trash2, Zap, ShieldAlert,
+  ArrowRight, Check, Clock, User as UserIcon,
 } from "lucide-react"
+import CustomerSearchInput, { CustomerOption } from "../../components/CustomerSearchInput"
+import SupplierSearchInput from "../../components/SupplierSearchInput"
+import CurrencyInput from "../../components/CurrencyInput"
 
 type Tab = "dashboard" | "importacion" | "acuerdos" | "rutas" | "credito"
 
@@ -22,32 +26,43 @@ const formatDate = (d?: string) => {
 }
 const StatusBadge = ({ status }: { status: string }) => {
   const colors: Record<string, string> = {
-    activo: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-    borrador: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
-    pendiente: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
-    en_transito: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-    en_aduanas: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
-    nacionalizado: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-    en_almacen: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
-    distribuido: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
-    visitado: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-    no_encontrado: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-    aprobado: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-    rechazado: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+    activo: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300",
+    borrador: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
+    pendiente: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300",
+    en_transito: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
+    en_aduanas: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300",
+    nacionalizado: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300",
+    en_almacen: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300",
+    distribuido: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
+    visitado: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300",
+    no_encontrado: "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300",
+    aprobado: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
+    rechazado: "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300",
   }
-  return <span className={"px-2 py-0.5 rounded-full text-[11px] font-bold " + (colors[status] || "bg-gray-100 text-gray-600")}>{status.replace(/_/g, " ")}</span>
+  return <span className={"px-2.5 py-0.5 rounded-full text-[11px] font-bold tracking-wide " + (colors[status] || "bg-slate-100 text-slate-600")}>{status.replace(/_/g, " ")}</span>
 }
 
 
 export default function DistribuidoraPage() {
   useEntityLookup()
   const [custMap, setCustMap] = useState<Record<string, string>>({})
+  const [usersMap, setUsersMap] = useState<Record<string, string>>({})
+  const [sellersList, setSellersList] = useState<any[]>([])
+
   useEffect(() => {
-    api.customers.list({ limit: 500 }).then((res: any) => {
+    api.customers.list({ limit: 1000 }).then((res: any) => {
       const list = Array.isArray(res) ? res : res?.data || []
       const map: Record<string, string> = {}
       list.forEach((c: any) => { if (c.id) map[c.id] = c.razon_social || c.nombre || c.ruc })
       setCustMap(map)
+    }).catch(() => {})
+
+    api.auth.users.list().then((list: any) => {
+      const map: Record<string, string> = {}
+      const userArr = Array.isArray(list) ? list : []
+      userArr.forEach((u: any) => { if (u.id) map[u.id] = u.nombre || u.email })
+      setUsersMap(map)
+      setSellersList(userArr)
     }).catch(() => {})
   }, [])
 
@@ -71,21 +86,41 @@ export default function DistribuidoraPage() {
   const [showContainerForm, setShowContainerForm] = useState(false)
   const [contForm, setContForm] = useState<any>({ supplier_id: "", numero_contenedor: "", puerto_origen: "", puerto_destino: "", incoterm: "FOB", notas: "" })
   const [showAgreementForm, setShowAgreementForm] = useState(false)
-  const [agrForm, setAgrForm] = useState<any>({ customer_id: "", numero: "", nombre: "", tipo: "precio_especial", fecha_inicio: "", fecha_fin: "", descuento_general_pct: 0, plazo_pago_dias: 0, limite_credito: "" })
+  const [agrForm, setAgrForm] = useState<any>({ customer_id: "", numero: "", nombre: "", tipo: "precio_especial", fecha_inicio: "", fecha_fin: "", descuento_general_pct: 0, plazo_pago_dias: 0, limite_credito: 0 })
   const [showRouteForm, setShowRouteForm] = useState(false)
   const [routeForm, setRouteForm] = useState<any>({ nombre: "", codigo: "", user_id: "", zona: "", dias_semana: [] })
   const [showVisitModal, setShowVisitModal] = useState(false)
   const [visitForm, setVisitForm] = useState<any>({ customer_id: "", fecha_planificada: "", estado: "pendiente" })
   const [showAuthForm, setShowAuthForm] = useState(false)
-  const [authForm, setAuthForm] = useState<any>({ customer_id: "", monto_solicitado: "", motivo: "" })
+  const [authForm, setAuthForm] = useState<any>({ customer_id: "", monto_solicitado: 0, motivo: "" })
   const [showCreditForm, setShowCreditForm] = useState(false)
-  const [creditForm, setCreditForm] = useState<any>({ customer_id: "", limite_credito: "", dias_credito: 0 })
+  const [creditForm, setCreditForm] = useState<any>({ customer_id: "", limite_credito: 0, dias_credito: 30 })
   const [showContainerDetail, setShowContainerDetail] = useState<any>(null)
 
   // Selected route for customers
   const [selectedRoute, setSelectedRoute] = useState<string>("")
   const [addCustomerRoute, setAddCustomerRoute] = useState("")
+  const [selectedCustomerToAdd, setSelectedCustomerToAdd] = useState<CustomerOption | null>(null)
   const [optimizingRoute, setOptimizingRoute] = useState(false)
+
+  // Crédito tab lookup
+  const [searchedCreditCustomer, setSearchedCreditCustomer] = useState<CustomerOption | null>(null)
+  const [creditDetails, setCreditDetails] = useState<any | null>(null)
+  const [loadingCreditDetails, setLoadingCreditDetails] = useState(false)
+
+  const handleLookupCredit = async (cust: CustomerOption) => {
+    setSearchedCreditCustomer(cust)
+    if (!companyId || !cust.id) return
+    setLoadingCreditDetails(true)
+    try {
+      const res = await api.distribuidora.credit.get(companyId, cust.id)
+      setCreditDetails(res)
+    } catch (e: any) {
+      toast.error("Error al consultar crédito", e.message || String(e))
+    } finally {
+      setLoadingCreditDetails(false)
+    }
+  }
 
   const fetchAll = async () => {
     if (!companyId) return
@@ -285,19 +320,94 @@ export default function DistribuidoraPage() {
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
+        <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>
       ) : tab === "dashboard" ? (
         <div className="space-y-6">
-          <div className="grid grid-cols-4 gap-4">
-            <div className="card p-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center"><Users className="w-5 h-5 text-blue-600" /></div><div><p className="text-xs text-gray-500">Clientes</p><p className="text-xl font-bold">{dashboard?.total_clientes || 0}</p></div></div></div>
-            <div className="card p-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-green-100 dark:bg-green-900/30 flex items-center justify-center"><DollarSign className="w-5 h-5 text-green-600" /></div><div><p className="text-xs text-gray-500">Ventas del mes</p><p className="text-xl font-bold text-green-600">{formatPYG(dashboard?.ventas_mes)}</p></div></div></div>
-            <div className="card p-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-yellow-100 dark:bg-yellow-900/30 flex items-center justify-center"><AlertTriangle className="w-5 h-5 text-yellow-600" /></div><div><p className="text-xs text-gray-500">Facturas vencidas</p><p className="text-xl font-bold">{dashboard?.facturas_vencidas || 0}</p><p className="text-xs text-red-500">{formatPYG(dashboard?.monto_vencido)}</p></div></div></div>
-            <div className="card p-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center"><Ship className="w-5 h-5 text-purple-600" /></div><div><p className="text-xs text-gray-500">Contenedores en tránsito</p><p className="text-xl font-bold">{dashboard?.contenedores_en_transito || 0}</p></div></div></div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-xl bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 flex items-center justify-center shrink-0">
+                  <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Total Clientes Mayoristas</p>
+                  <p className="text-2xl font-bold font-mono text-slate-900 dark:text-white">{dashboard?.total_clientes || 0}</p>
+                </div>
+              </div>
+            </div>
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center shrink-0">
+                  <DollarSign className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Ventas del Mes</p>
+                  <p className="text-2xl font-bold font-mono text-emerald-600 dark:text-emerald-400">{formatPYG(dashboard?.ventas_mes)}</p>
+                </div>
+              </div>
+            </div>
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Facturas Vencidas</p>
+                  <div className="flex items-baseline gap-2">
+                    <p className="text-2xl font-bold font-mono text-amber-600 dark:text-amber-400">{dashboard?.facturas_vencidas || 0}</p>
+                    <span className="text-xs font-mono font-bold text-rose-500">{formatPYG(dashboard?.monto_vencido)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-xl bg-purple-50 dark:bg-purple-950/50 border border-purple-200 dark:border-purple-800 flex items-center justify-center shrink-0">
+                  <Ship className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Contenedores en Tránsito</p>
+                  <p className="text-2xl font-bold font-mono text-purple-600 dark:text-purple-400">{dashboard?.contenedores_en_transito || 0}</p>
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="card p-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-900/30 flex items-center justify-center"><AlertTriangle className="w-5 h-5 text-red-600" /></div><div><p className="text-xs text-gray-500">Clientes bloqueados</p><p className="text-xl font-bold">{dashboard?.clientes_bloqueados || 0}</p></div></div></div>
-            <div className="card p-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center"><PackageIcon className="w-5 h-5 text-orange-600" /></div><div><p className="text-xs text-gray-500">Productos bajo stock</p><p className="text-xl font-bold">{dashboard?.productos_bajo_stock || 0}</p></div></div></div>
-            <div className="card p-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center"><MapPin className="w-5 h-5 text-blue-600" /></div><div><p className="text-xs text-gray-500">Visitas hoy</p><p className="text-xl font-bold">{dashboard?.visitas_completadas_hoy || 0} / {dashboard?.visitas_hoy || 0}</p></div></div></div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 flex items-center justify-center shrink-0">
+                  <ShieldAlert className="w-5 h-5 text-rose-600 dark:text-rose-400" />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Clientes Bloqueados por Mora</p>
+                  <p className="text-xl font-bold font-mono text-rose-600 dark:text-rose-400">{dashboard?.clientes_bloqueados || 0}</p>
+                </div>
+              </div>
+            </div>
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-orange-50 dark:bg-orange-950/50 border border-orange-200 dark:border-orange-800 flex items-center justify-center shrink-0">
+                  <PackageIcon className="w-5 h-5 text-orange-600 dark:text-orange-400" />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Productos Bajo Stock de Reposición</p>
+                  <p className="text-xl font-bold font-mono text-orange-600 dark:text-orange-400">{dashboard?.productos_bajo_stock || 0}</p>
+                </div>
+              </div>
+            </div>
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 flex items-center justify-center shrink-0">
+                  <MapPin className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Visitas de Preventa Hoy</p>
+                  <p className="text-xl font-bold font-mono text-slate-900 dark:text-white">
+                    {dashboard?.visitas_completadas_hoy || 0} <span className="text-sm font-normal text-slate-400">/ {dashboard?.visitas_hoy || 0}</span>
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       ) : tab === "importacion" ? (
@@ -385,16 +495,23 @@ export default function DistribuidoraPage() {
           </table>
         </div>
       ) : tab === "rutas" ? (
-        <div className="grid grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="col-span-1 space-y-4">
-            <h3 className="font-bold text-gray-900 dark:text-white">Rutas</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-gray-900 dark:text-white">Rutas de Preventa</h3>
+              <span className="text-xs text-slate-500">{routes.length} configuradas</span>
+            </div>
             <div className="space-y-2">
               {routes.map(r => (
                 <button key={r.id} onClick={() => setSelectedRoute(r.id)}
-                  className={"w-full text-left p-3 rounded-xl border transition-all " + (selectedRoute === r.id ? "border-primary bg-primary/5" : "border-gray-200 dark:border-gray-700")}>
-                  <p className="font-bold text-sm">{r.nombre}</p>
-                  <p className="text-xs text-gray-500">{r.codigo} — {r.zona || "Sin zona"}</p>
-                  <p className="text-xs text-gray-400 mt-1">Vendedor: {r.user_id?.slice(0, 8)}</p>
+                  className={"w-full text-left p-3.5 rounded-2xl border transition-all " + (selectedRoute === r.id ? "border-blue-500 bg-blue-50/50 dark:bg-blue-950/20 shadow-sm" : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300")}>
+                  <p className="font-bold text-sm text-slate-900 dark:text-white">{r.nombre}</p>
+                  <p className="text-xs text-slate-500">{r.codigo} — {r.zona || "Sin zona asignada"}</p>
+                  <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800/80">
+                    <UserIcon className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Preventista:</span>
+                    <span className="font-bold text-slate-800 dark:text-slate-200">{usersMap[r.user_id] || r.user_id?.slice(0, 8) || "No asignado"}</span>
+                  </div>
                 </button>
               ))}
             </div>
@@ -402,26 +519,26 @@ export default function DistribuidoraPage() {
           <div className="col-span-2 space-y-4">
             {selectedRoute ? (
               <>
-                <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
-                  <div>
-                    <h3 className="font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                      Clientes de la ruta
-                      <span className="text-xs font-normal px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-                        {routeCustomers.length} total
-                      </span>
-                      <span className="text-xs font-normal px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
-                        {routeCustomers.filter((rc: any) => rc.tiene_gps).length} con GPS
-                      </span>
-                    </h3>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                      El supervisor estructura el orden óptimo; el preventista lo recibe listo en su app Inteliforce.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
+                <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                        Clientes de la ruta
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                          {routeCustomers.length} total
+                        </span>
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
+                          {routeCustomers.filter((rc: any) => rc.tiene_gps).length} con GPS
+                        </span>
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                        El supervisor estructura el orden de visita; el preventista lo recibe estructurado en su app Inteliforce.
+                      </p>
+                    </div>
                     <button
                       onClick={handleOptimizeRoute}
                       disabled={optimizingRoute || routeCustomers.filter((rc: any) => rc.tiene_gps).length < 2}
-                      className="text-xs px-3.5 py-2 rounded-lg font-semibold flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                      className="text-xs px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                       title={routeCustomers.filter((rc: any) => rc.tiene_gps).length < 2 ? "Se requieren al menos 2 clientes con ubicación GPS" : "Calcular el mejor camino con Google Routes API (TSP)"}
                     >
                       {optimizingRoute ? (
@@ -436,17 +553,34 @@ export default function DistribuidoraPage() {
                         </>
                       )}
                     </button>
-                    <div className="flex gap-1.5">
-                      <input
-                        className="input-field text-xs py-1.5 px-2.5 w-36"
-                        placeholder="ID o UUID cliente"
-                        value={addCustomerRoute}
-                        onChange={e => setAddCustomerRoute(e.target.value)}
+                  </div>
+
+                  {/* Selector ágil de cliente con búsqueda predictiva */}
+                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row gap-2 items-end sm:items-center">
+                    <div className="w-full sm:flex-1">
+                      <CustomerSearchInput
+                        placeholder="Buscar cliente por Razón Social o RUC para agregarlo a la ruta..."
+                        customerId={selectedCustomerToAdd?.id}
+                        onSelectCustomer={(c) => {
+                          setSelectedCustomerToAdd(c)
+                          setAddCustomerRoute(c.id)
+                        }}
+                        onClear={() => {
+                          setSelectedCustomerToAdd(null)
+                          setAddCustomerRoute("")
+                        }}
+                        showGpsBadge={true}
                       />
-                      <button onClick={handleAddRouteCustomer} className="btn-primary text-xs px-3 py-1.5">
-                        Agregar
-                      </button>
                     </div>
+                    <button
+                      type="button"
+                      onClick={handleAddRouteCustomer}
+                      disabled={!selectedCustomerToAdd && !addCustomerRoute}
+                      className="btn-primary text-xs px-4 py-2 shrink-0 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 font-bold"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Agregar a Ruta</span>
+                    </button>
                   </div>
                 </div>
 
@@ -549,36 +683,133 @@ export default function DistribuidoraPage() {
           </div>
         </div>
       ) : (
-        /* crédito tab */
-        <div className="grid grid-cols-2 gap-6">
+        /* crédito tab con buscador vivo y tarjetas métricas */
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-bold text-gray-900 dark:text-white">Configurar límite</h3>
-              <button onClick={() => setShowCreditForm(true)} className="btn-primary text-xs px-3 py-1.5"><Plus className="w-3 h-3 inline" /> Nuevo límite</button>
+              <div>
+                <h3 className="font-bold text-gray-900 dark:text-white">Límites de Crédito</h3>
+                <p className="text-xs text-slate-500">Consultá o asigná límites y plazos a clientes mayoristas</p>
+              </div>
+              <button
+                onClick={() => {
+                  setCreditForm({
+                    customer_id: searchedCreditCustomer?.id || "",
+                    limite_credito: creditDetails?.limite_credito || 0,
+                    dias_credito: creditDetails?.dias_credito || 30,
+                  })
+                  setShowCreditForm(true)
+                }}
+                className="btn-primary text-xs px-3.5 py-1.5 rounded-xl font-bold flex items-center gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Configurar límite</span>
+              </button>
             </div>
-            <div className="card overflow-hidden">
-              <table className="w-full">
-                <thead><tr className="table-header"><th className="table-cell">Cliente</th><th className="table-cell text-right">Límite</th><th className="table-cell text-right">Disponible</th><th className="table-cell text-right">Usado</th><th className="table-cell">Bloqueado</th></tr></thead>
-                <tbody><tr><td colSpan={5} className="text-center py-8 text-gray-400">Buscá un cliente para ver su límite</td></tr></tbody>
-              </table>
+
+            {/* Buscador interactivo de cliente para crédito */}
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+              <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
+                Buscar cliente para consultar saldo y límite:
+              </label>
+              <CustomerSearchInput
+                customerId={searchedCreditCustomer?.id}
+                onSelectCustomer={handleLookupCredit}
+                onClear={() => {
+                  setSearchedCreditCustomer(null)
+                  setCreditDetails(null)
+                }}
+                placeholder="Escribí el nombre, razón social o RUC del cliente..."
+              />
+
+              {loadingCreditDetails ? (
+                <div className="py-8 flex justify-center">
+                  <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
+                </div>
+              ) : creditDetails && searchedCreditCustomer ? (
+                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3">
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60">
+                      <span className="text-slate-500 text-[11px] block">Límite Total Aprobado</span>
+                      <span className="text-base font-bold font-mono text-slate-900 dark:text-white">
+                        {formatPYG(creditDetails.limite_credito)}
+                      </span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60">
+                      <span className="text-emerald-700 dark:text-emerald-400 text-[11px] block">Crédito Disponible</span>
+                      <span className="text-base font-bold font-mono text-emerald-700 dark:text-emerald-300">
+                        {formatPYG(creditDetails.limite_disponible)}
+                      </span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60">
+                      <span className="text-amber-700 dark:text-amber-400 text-[11px] block">Saldo en Uso / Deuda</span>
+                      <span className="text-base font-bold font-mono text-amber-700 dark:text-amber-300">
+                        {formatPYG(creditDetails.saldo_utilizado)}
+                      </span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60">
+                      <span className="text-slate-500 text-[11px] block">Estado Crediticio</span>
+                      <div className="mt-1">
+                        {creditDetails.bloqueado_por_mora ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-700 bg-rose-100 dark:bg-rose-950/60 px-2 py-0.5 rounded-full">
+                            <ShieldAlert className="w-3 h-3" /> Bloqueado por mora
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-100 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full">
+                            <Check className="w-3 h-3" /> Habilitado Normal
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end pt-1">
+                    <button
+                      onClick={() => {
+                        setCreditForm({
+                          customer_id: searchedCreditCustomer.id,
+                          limite_credito: creditDetails.limite_credito || 0,
+                          dias_credito: creditDetails.dias_credito || 30,
+                        })
+                        setShowCreditForm(true)
+                      }}
+                      className="text-xs font-bold text-blue-600 hover:text-blue-700 dark:text-blue-400 flex items-center gap-1"
+                    >
+                      <span>Modificar límite de este cliente</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-xs text-slate-400">
+                  Seleccioná un cliente arriba para ver en vivo su límite, deuda pendiente y disponibilidad para nuevos pedidos.
+                </div>
+              )}
             </div>
           </div>
+
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-bold text-gray-900 dark:text-white">Autorizaciones</h3>
-              <button onClick={() => setShowAuthForm(true)} className="btn-primary text-xs px-3 py-1.5"><Plus className="w-3 h-3 inline" /> Nueva solicitud</button>
+              <div>
+                <h3 className="font-bold text-gray-900 dark:text-white">Autorizaciones Excepcionales</h3>
+                <p className="text-xs text-slate-500">Aprobación de pedidos que exceden el límite</p>
+              </div>
+              <button onClick={() => setShowAuthForm(true)} className="btn-primary text-xs px-3.5 py-1.5 rounded-xl font-bold flex items-center gap-1.5">
+                <Plus className="w-3.5 h-3.5" />
+                <span>Nueva solicitud</span>
+              </button>
             </div>
             <div className="card overflow-hidden">
               <table className="w-full">
                 <thead><tr className="table-header"><th className="table-cell">Cliente</th><th className="table-cell text-right">Solicitado</th><th className="table-cell text-right">Autorizado</th><th className="table-cell">Estado</th><th className="table-cell">Acciones</th></tr></thead>
                 <tbody>
                   {authorizations.length === 0 ? (
-                    <tr><td colSpan={5} className="text-center py-8 text-gray-400">Sin autorizaciones</td></tr>
+                    <tr><td colSpan={5} className="text-center py-8 text-gray-400">Sin autorizaciones registradas</td></tr>
                   ) : authorizations.map(a => (
                     <tr key={a.id} className="table-row">
-                      <td className="table-td font-mono text-xs">{getCustomerName(a.customer_id)}</td>
+                      <td className="table-td font-semibold text-xs text-slate-800 dark:text-slate-200">{getCustomerName(a.customer_id)}</td>
                       <td className="table-td text-right font-mono">{formatPYG(a.monto_solicitado)}</td>
-                      <td className="table-td text-right font-mono">{a.monto_autorizado ? formatPYG(a.monto_autorizado) : "-"}</td>
+                      <td className="table-td text-right font-mono font-bold text-emerald-600">{a.monto_autorizado ? formatPYG(a.monto_autorizado) : "-"}</td>
                       <td className="table-td"><StatusBadge status={a.estado} /></td>
                       <td className="table-td">
                         {a.estado === "pendiente" && (
@@ -601,22 +832,36 @@ export default function DistribuidoraPage() {
       {showContainerForm && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowContainerForm(false)}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-lg max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <h2 className="text-lg font-bold mb-4">Nuevo contenedor</h2>
+            <h2 className="text-lg font-bold mb-4 text-slate-900 dark:text-white">Nuevo Contenedor de Importación</h2>
             <div className="space-y-3">
-              <div><label className="label-field">Proveedor ID</label><input className="input-field" value={contForm.supplier_id} onChange={e => setContForm({ ...contForm, supplier_id: e.target.value })} /></div>
-              <div><label className="label-field">Número de contenedor</label><input className="input-field" value={contForm.numero_contenedor} onChange={e => setContForm({ ...contForm, numero_contenedor: e.target.value })} /></div>
+              <SupplierSearchInput
+                label="Proveedor Internacional *"
+                supplierId={contForm.supplier_id}
+                onSelectSupplier={s => setContForm({ ...contForm, supplier_id: s.id || "" })}
+                onClear={() => setContForm({ ...contForm, supplier_id: "" })}
+                required
+              />
+              <div>
+                <label className="label-field">Número de Contenedor *</label>
+                <input
+                  className="input-field font-mono uppercase"
+                  placeholder="Ej: MSCU1234567"
+                  value={contForm.numero_contenedor}
+                  onChange={e => setContForm({ ...contForm, numero_contenedor: e.target.value })}
+                />
+              </div>
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="label-field">Puerto origen</label><input className="input-field" value={contForm.puerto_origen} onChange={e => setContForm({ ...contForm, puerto_origen: e.target.value })} /></div>
-                <div><label className="label-field">Puerto destino</label><input className="input-field" value={contForm.puerto_destino} onChange={e => setContForm({ ...contForm, puerto_destino: e.target.value })} /></div>
+                <div><label className="label-field">Puerto origen</label><input className="input-field" placeholder="Ej: Santos, Brasil" value={contForm.puerto_origen} onChange={e => setContForm({ ...contForm, puerto_origen: e.target.value })} /></div>
+                <div><label className="label-field">Puerto destino</label><input className="input-field" placeholder="Ej: Villeta, Paraguay" value={contForm.puerto_destino} onChange={e => setContForm({ ...contForm, puerto_destino: e.target.value })} /></div>
               </div>
               <div><label className="label-field">Incoterm</label><select className="input-field" value={contForm.incoterm} onChange={e => setContForm({ ...contForm, incoterm: e.target.value })}>
-                <option value="FOB">FOB</option><option value="CIF">CIF</option><option value="EXW">EXW</option><option value="DDP">DDP</option>
+                <option value="FOB">FOB (Free on Board)</option><option value="CIF">CIF (Cost, Insurance & Freight)</option><option value="EXW">EXW (Ex Works)</option><option value="DDP">DDP (Delivered Duty Paid)</option>
               </select></div>
-              <div><label className="label-field">Notas</label><textarea className="input-field" rows={3} value={contForm.notas} onChange={e => setContForm({ ...contForm, notas: e.target.value })} /></div>
+              <div><label className="label-field">Notas / Referencias</label><textarea className="input-field" rows={3} value={contForm.notas} onChange={e => setContForm({ ...contForm, notas: e.target.value })} /></div>
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={() => setShowContainerForm(false)} className="btn-secondary flex-1">Cancelar</button>
-              <button onClick={handleCreateContainer} className="btn-primary flex-1">Crear</button>
+              <button onClick={handleCreateContainer} className="btn-primary flex-1">Crear Contenedor</button>
             </div>
           </div>
         </div>
@@ -624,31 +869,62 @@ export default function DistribuidoraPage() {
 
       {showAgreementForm && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowAgreementForm(false)}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-lg" onClick={e => e.stopPropagation()}>
-            <h2 className="text-lg font-bold mb-4">Nuevo acuerdo con cliente</h2>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-lg max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-bold mb-4 text-slate-900 dark:text-white">Nuevo Acuerdo Comercial con Cliente</h2>
             <div className="space-y-3">
-              <div><label className="label-field">Cliente ID</label><input className="input-field" value={agrForm.customer_id} onChange={e => setAgrForm({ ...agrForm, customer_id: e.target.value })} /></div>
-              <div><label className="label-field">Número</label><input className="input-field" value={agrForm.numero} onChange={e => setAgrForm({ ...agrForm, numero: e.target.value })} /></div>
-              <div><label className="label-field">Nombre</label><input className="input-field" value={agrForm.nombre} onChange={e => setAgrForm({ ...agrForm, nombre: e.target.value })} /></div>
-              <div><label className="label-field">Tipo</label><select className="input-field" value={agrForm.tipo} onChange={e => setAgrForm({ ...agrForm, tipo: e.target.value })}>
-                <option value="precio_especial">Precio especial</option>
-                <option value="descuento_volumen">Descuento por volumen</option>
-                <option value="bonificacion">Bonificación</option>
-                <option value="contrato">Contrato</option>
-              </select></div>
+              <CustomerSearchInput
+                label="Cliente Mayorista *"
+                customerId={agrForm.customer_id}
+                onSelectCustomer={c => setAgrForm({ ...agrForm, customer_id: c.id })}
+                onClear={() => setAgrForm({ ...agrForm, customer_id: "" })}
+                required
+              />
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="label-field">Inicio</label><input type="date" className="input-field" value={agrForm.fecha_inicio} onChange={e => setAgrForm({ ...agrForm, fecha_inicio: e.target.value })} /></div>
-                <div><label className="label-field">Fin</label><input type="date" className="input-field" value={agrForm.fecha_fin} onChange={e => setAgrForm({ ...agrForm, fecha_fin: e.target.value })} /></div>
+                <div>
+                  <label className="label-field">N° de Acuerdo *</label>
+                  <input className="input-field font-mono" placeholder="ACU-2026-001" value={agrForm.numero} onChange={e => setAgrForm({ ...agrForm, numero: e.target.value })} />
+                </div>
+                <div>
+                  <label className="label-field">Tipo de Acuerdo</label>
+                  <select className="input-field" value={agrForm.tipo} onChange={e => setAgrForm({ ...agrForm, tipo: e.target.value })}>
+                    <option value="precio_especial">Precio especial</option>
+                    <option value="descuento_volumen">Descuento por volumen</option>
+                    <option value="bonificacion">Bonificación</option>
+                    <option value="contrato">Contrato institucional</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="label-field">Nombre Descriptivo *</label>
+                <input className="input-field" placeholder="Ej: Bonificación Trimestral Supermercados" value={agrForm.nombre} onChange={e => setAgrForm({ ...agrForm, nombre: e.target.value })} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="label-field">Fecha Inicio</label><input type="date" className="input-field" value={agrForm.fecha_inicio} onChange={e => setAgrForm({ ...agrForm, fecha_inicio: e.target.value })} /></div>
+                <div><label className="label-field">Fecha Fin</label><input type="date" className="input-field" value={agrForm.fecha_fin} onChange={e => setAgrForm({ ...agrForm, fecha_fin: e.target.value })} /></div>
               </div>
               <div className="grid grid-cols-3 gap-3">
-                <div><label className="label-field">Dto. %</label><input type="number" className="input-field" value={agrForm.descuento_general_pct} onChange={e => setAgrForm({ ...agrForm, descuento_general_pct: +e.target.value })} /></div>
-                <div><label className="label-field">Plazo días</label><input type="number" className="input-field" value={agrForm.plazo_pago_dias} onChange={e => setAgrForm({ ...agrForm, plazo_pago_dias: +e.target.value })} /></div>
-                <div><label className="label-field">Límite crédito</label><input type="number" className="input-field" value={agrForm.limite_credito} onChange={e => setAgrForm({ ...agrForm, limite_credito: e.target.value })} /></div>
+                <div>
+                  <label className="label-field">Descuento %</label>
+                  <input type="number" min={0} max={100} className="input-field" value={agrForm.descuento_general_pct} onChange={e => setAgrForm({ ...agrForm, descuento_general_pct: +e.target.value })} />
+                </div>
+                <div>
+                  <label className="label-field">Plazo Días</label>
+                  <input type="number" min={0} className="input-field" value={agrForm.plazo_pago_dias} onChange={e => setAgrForm({ ...agrForm, plazo_pago_dias: +e.target.value })} />
+                </div>
+                <div>
+                  <label className="label-field">Límite Crédito</label>
+                  <CurrencyInput
+                    currency="PYG"
+                    value={agrForm.limite_credito}
+                    onChangeValue={val => setAgrForm({ ...agrForm, limite_credito: val })}
+                    className="input-field font-mono font-bold"
+                  />
+                </div>
               </div>
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={() => setShowAgreementForm(false)} className="btn-secondary flex-1">Cancelar</button>
-              <button onClick={handleCreateAgreement} className="btn-primary flex-1">Crear</button>
+              <button onClick={handleCreateAgreement} className="btn-primary flex-1">Crear Acuerdo</button>
             </div>
           </div>
         </div>
@@ -657,29 +933,57 @@ export default function DistribuidoraPage() {
       {showRouteForm && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowRouteForm(false)}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-lg" onClick={e => e.stopPropagation()}>
-            <h2 className="text-lg font-bold mb-4">Nueva ruta</h2>
+            <h2 className="text-lg font-bold mb-4 text-slate-900 dark:text-white">Nueva Ruta de Preventa</h2>
             <div className="space-y-3">
-              <div><label className="label-field">Nombre</label><input className="input-field" value={routeForm.nombre} onChange={e => setRouteForm({ ...routeForm, nombre: e.target.value })} /></div>
-              <div><label className="label-field">Código</label><input className="input-field" value={routeForm.codigo} onChange={e => setRouteForm({ ...routeForm, codigo: e.target.value })} /></div>
-              <div><label className="label-field">Vendedor ID</label><input className="input-field" value={routeForm.user_id} onChange={e => setRouteForm({ ...routeForm, user_id: e.target.value })} /></div>
-              <div><label className="label-field">Zona</label><input className="input-field" value={routeForm.zona} onChange={e => setRouteForm({ ...routeForm, zona: e.target.value })} /></div>
-              <div><label className="label-field">Días de semana</label><div className="flex gap-2">
-                {["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"].map((d, i) => (
-                  <button key={i} onClick={() => {
-                    const arr = [...(routeForm.dias_semana || [])]
-                    const idx = arr.indexOf(i)
-                    idx >= 0 ? arr.splice(idx, 1) : arr.push(i)
-                    setRouteForm({ ...routeForm, dias_semana: arr.sort() })
-                  }}
-                    className={"w-10 h-10 rounded-full text-xs font-bold transition-all " + (routeForm.dias_semana?.includes(i) ? "bg-primary text-white" : "bg-gray-100 dark:bg-gray-700 text-gray-500")}>
-                    {d[0]}
-                  </button>
-                ))}
-              </div></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label-field">Nombre de la Ruta *</label>
+                  <input className="input-field" placeholder="Ej: Zona Norte - Mayoristas" value={routeForm.nombre} onChange={e => setRouteForm({ ...routeForm, nombre: e.target.value })} />
+                </div>
+                <div>
+                  <label className="label-field">Código de Ruta *</label>
+                  <input className="input-field font-mono uppercase" placeholder="RUT-NORTE" value={routeForm.codigo} onChange={e => setRouteForm({ ...routeForm, codigo: e.target.value })} />
+                </div>
+              </div>
+              <div>
+                <label className="label-field">Preventista Asignado *</label>
+                <select
+                  className="input-field"
+                  value={routeForm.user_id}
+                  onChange={e => setRouteForm({ ...routeForm, user_id: e.target.value })}
+                >
+                  <option value="">-- Seleccionar preventista --</option>
+                  {sellersList.map((u: any) => (
+                    <option key={u.id} value={u.id}>
+                      {u.nombre || u.email} {u.rol ? `(${u.rol})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label-field">Zona Geográfica</label>
+                <input className="input-field" placeholder="Ej: Luque / Mariano Roque Alonso" value={routeForm.zona} onChange={e => setRouteForm({ ...routeForm, zona: e.target.value })} />
+              </div>
+              <div>
+                <label className="label-field">Días de Semana de Recorrido</label>
+                <div className="flex gap-2">
+                  {["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"].map((d, i) => (
+                    <button key={i} type="button" onClick={() => {
+                      const arr = [...(routeForm.dias_semana || [])]
+                      const idx = arr.indexOf(i)
+                      idx >= 0 ? arr.splice(idx, 1) : arr.push(i)
+                      setRouteForm({ ...routeForm, dias_semana: arr.sort() })
+                    }}
+                      className={"w-10 h-10 rounded-xl text-xs font-bold transition-all " + (routeForm.dias_semana?.includes(i) ? "bg-blue-600 text-white shadow-sm" : "bg-slate-100 dark:bg-slate-700 text-slate-500 hover:text-slate-800")}>
+                      {d}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={() => setShowRouteForm(false)} className="btn-secondary flex-1">Cancelar</button>
-              <button onClick={handleCreateRoute} className="btn-primary flex-1">Crear</button>
+              <button onClick={handleCreateRoute} className="btn-primary flex-1">Crear Ruta</button>
             </div>
           </div>
         </div>
@@ -688,14 +992,24 @@ export default function DistribuidoraPage() {
       {showVisitModal && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowVisitModal(false)}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
-            <h2 className="text-lg font-bold mb-4">Planificar visita</h2>
+            <h2 className="text-lg font-bold mb-4 text-slate-900 dark:text-white">Planificar Visita de Preventa</h2>
             <div className="space-y-3">
-              <div><label className="label-field">Cliente ID</label><input className="input-field" value={visitForm.customer_id} onChange={e => setVisitForm({ ...visitForm, customer_id: e.target.value })} /></div>
-              <div><label className="label-field">Fecha planificada</label><input type="date" className="input-field" value={visitForm.fecha_planificada} onChange={e => setVisitForm({ ...visitForm, fecha_planificada: e.target.value })} /></div>
+              <CustomerSearchInput
+                label="Cliente a Visitar *"
+                customerId={visitForm.customer_id}
+                onSelectCustomer={c => setVisitForm({ ...visitForm, customer_id: c.id })}
+                onClear={() => setVisitForm({ ...visitForm, customer_id: "" })}
+                showGpsBadge={true}
+                required
+              />
+              <div>
+                <label className="label-field">Fecha Planificada *</label>
+                <input type="date" className="input-field" value={visitForm.fecha_planificada} onChange={e => setVisitForm({ ...visitForm, fecha_planificada: e.target.value })} />
+              </div>
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={() => setShowVisitModal(false)} className="btn-secondary flex-1">Cancelar</button>
-              <button onClick={handleCreateVisit} className="btn-primary flex-1">Planificar</button>
+              <button onClick={handleCreateVisit} className="btn-primary flex-1">Planificar Visita</button>
             </div>
           </div>
         </div>
@@ -704,15 +1018,38 @@ export default function DistribuidoraPage() {
       {showAuthForm && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowAuthForm(false)}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
-            <h2 className="text-lg font-bold mb-4">Solicitar autorización de crédito</h2>
+            <h2 className="text-lg font-bold mb-4 text-slate-900 dark:text-white">Solicitud de Autorización de Crédito</h2>
             <div className="space-y-3">
-              <div><label className="label-field">Cliente ID</label><input className="input-field" value={authForm.customer_id} onChange={e => setAuthForm({ ...authForm, customer_id: e.target.value })} /></div>
-              <div><label className="label-field">Monto solicitado</label><input type="number" className="input-field" value={authForm.monto_solicitado} onChange={e => setAuthForm({ ...authForm, monto_solicitado: e.target.value })} /></div>
-              <div><label className="label-field">Motivo</label><textarea className="input-field" rows={3} value={authForm.motivo} onChange={e => setAuthForm({ ...authForm, motivo: e.target.value })} /></div>
+              <CustomerSearchInput
+                label="Cliente Solicitante *"
+                customerId={authForm.customer_id}
+                onSelectCustomer={c => setAuthForm({ ...authForm, customer_id: c.id })}
+                onClear={() => setAuthForm({ ...authForm, customer_id: "" })}
+                required
+              />
+              <div>
+                <label className="label-field">Monto Solicitado (Gs) *</label>
+                <CurrencyInput
+                  currency="PYG"
+                  value={authForm.monto_solicitado}
+                  onChangeValue={val => setAuthForm({ ...authForm, monto_solicitado: val })}
+                  className="input-field font-mono font-bold text-right"
+                />
+              </div>
+              <div>
+                <label className="label-field">Motivo de la Solicitud *</label>
+                <textarea
+                  className="input-field"
+                  rows={3}
+                  placeholder="Justificación del crédito extraordinario..."
+                  value={authForm.motivo}
+                  onChange={e => setAuthForm({ ...authForm, motivo: e.target.value })}
+                />
+              </div>
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={() => setShowAuthForm(false)} className="btn-secondary flex-1">Cancelar</button>
-              <button onClick={handleCreateAuth} className="btn-primary flex-1">Solicitar</button>
+              <button onClick={handleCreateAuth} className="btn-primary flex-1">Enviar Solicitud</button>
             </div>
           </div>
         </div>
@@ -721,15 +1058,38 @@ export default function DistribuidoraPage() {
       {showCreditForm && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowCreditForm(false)}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
-            <h2 className="text-lg font-bold mb-4">Configurar límite de crédito</h2>
+            <h2 className="text-lg font-bold mb-4 text-slate-900 dark:text-white">Configurar Límite de Crédito</h2>
             <div className="space-y-3">
-              <div><label className="label-field">Cliente ID</label><input className="input-field" value={creditForm.customer_id} onChange={e => setCreditForm({ ...creditForm, customer_id: e.target.value })} /></div>
-              <div><label className="label-field">Límite de crédito (Gs)</label><input type="number" className="input-field" value={creditForm.limite_credito} onChange={e => setCreditForm({ ...creditForm, limite_credito: e.target.value })} /></div>
-              <div><label className="label-field">Días de crédito</label><input type="number" className="input-field" value={creditForm.dias_credito} onChange={e => setCreditForm({ ...creditForm, dias_credito: +e.target.value })} /></div>
+              <CustomerSearchInput
+                label="Cliente Mayorista *"
+                customerId={creditForm.customer_id}
+                onSelectCustomer={c => setCreditForm({ ...creditForm, customer_id: c.id })}
+                onClear={() => setCreditForm({ ...creditForm, customer_id: "" })}
+                required
+              />
+              <div>
+                <label className="label-field">Límite de Crédito (Gs) *</label>
+                <CurrencyInput
+                  currency="PYG"
+                  value={creditForm.limite_credito}
+                  onChangeValue={val => setCreditForm({ ...creditForm, limite_credito: val })}
+                  className="input-field font-mono font-bold text-right"
+                />
+              </div>
+              <div>
+                <label className="label-field">Días de Crédito (Plazo Máximo)</label>
+                <input
+                  type="number"
+                  min={0}
+                  className="input-field"
+                  value={creditForm.dias_credito}
+                  onChange={e => setCreditForm({ ...creditForm, dias_credito: +e.target.value })}
+                />
+              </div>
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={() => setShowCreditForm(false)} className="btn-secondary flex-1">Cancelar</button>
-              <button onClick={handleSetCredit} className="btn-primary flex-1">Guardar</button>
+              <button onClick={handleSetCredit} className="btn-primary flex-1">Guardar Límite</button>
             </div>
           </div>
         </div>

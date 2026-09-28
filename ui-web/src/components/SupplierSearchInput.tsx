@@ -12,7 +12,7 @@ export interface SupplierOption {
 }
 
 export interface SupplierSearchInputProps {
-  value: string
+  value?: string
   supplierId?: string
   onSelectSupplier: (supplier: { id?: string; name: string; ruc?: string; supplier?: SupplierOption }) => void
   onClear?: () => void
@@ -28,7 +28,7 @@ export interface SupplierSearchInputProps {
 let cachedSuppliers: SupplierOption[] | null = null
 
 export default function SupplierSearchInput({
-  value,
+  value = "",
   supplierId,
   onSelectSupplier,
   onClear,
