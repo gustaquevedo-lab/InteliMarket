@@ -326,16 +326,28 @@ def sync_productos(pg, my, cat_map):
     last_id, last_ts = get_watermark(pg, "productos")
     since = last_ts or datetime(2000, 1, 1)
     with my.cursor() as cur:
-        cur.execute(
-            "SELECT CODIGO, COD_BARRA, NOMBRE, ID_CATEGORIA, SERVICIO, INACTIVO, "
-            "FECHA, FECMOD, PRECIOCOSTO FROM productos WHERE FECMOD > %s ORDER BY FECMOD", (since,))
+        # Detectar dinámicamente si existe la columna de peso en la tabla productos de Columbia
+        cur.execute("SHOW COLUMNS FROM productos LIKE 'PESO%'")
+        peso_col_rows = cur.fetchall()
+        peso_col_name = peso_col_rows[0][0] if peso_col_rows else None
+
+        query_cols = (
+            f"SELECT CODIGO, COD_BARRA, NOMBRE, ID_CATEGORIA, SERVICIO, INACTIVO, "
+            f"FECHA, FECMOD, PRECIOCOSTO, {peso_col_name} "
+            f"FROM productos WHERE FECMOD > %s ORDER BY FECMOD"
+            if peso_col_name else
+            f"SELECT CODIGO, COD_BARRA, NOMBRE, ID_CATEGORIA, SERVICIO, INACTIVO, "
+            f"FECHA, FECMOD, PRECIOCOSTO, NULL as PESO "
+            f"FROM productos WHERE FECMOD > %s ORDER BY FECMOD"
+        )
+        cur.execute(query_cols, (since,))
         legacy_rows = cur.fetchall()
     if not legacy_rows:
         log("  productos: sin cambios")
         return set(), {}
     max_ts = since
     codigos, costos, rows = set(), {}, []
-    for (codigo, cod_barra, nombre, id_cat, servicio, inactivo, fecha, fecmod, preciocosto) in legacy_rows:
+    for (codigo, cod_barra, nombre, id_cat, servicio, inactivo, fecha, fecmod, preciocosto, peso_raw) in legacy_rows:
         cod = txt_keep(codigo, 50)
         if not cod:
             continue
@@ -343,19 +355,16 @@ def sync_productos(pg, my, cat_map):
         cat_id = cat_map.get(str(id_cat)) if id_cat else None
         costo = money(preciocosto) if preciocosto else 0
         costos[cod] = costo
-        # products.costo_promedio/ultimo_costo nunca se escribian pese a leerse
-        # aca — bug arrastrado del etl.py original (se armaba el dict "costos"
-        # y se descartaba antes del INSERT). Backfill unico ya corrido para los
-        # 11.358 productos existentes (ver backfill_costo.py); esto lo mantiene
-        # al dia para altas/cambios de aca en mas.
+        peso_kg = num3(peso_raw) if peso_raw is not None else None
+        # products.costo_promedio/ultimo_costo y peso_kg
         rows.append((uuid.uuid5(NS, f"prod:{cod}"), COMPANY_ID, cat_id, cod,
                      txt_keep(cod_barra, 50), (txt(nombre) or cod)[:200],
                      "servicio" if servicio == 1 else "producto",
-                     not bool(inactivo), costo, costo))
+                     not bool(inactivo), costo, costo, peso_kg))
         if fecmod and fecmod > max_ts:
             max_ts = fecmod
     n = upsert(pg, "products", ["id", "company_id", "category_id", "sku", "codigo_barra",
-                                 "nombre", "tipo", "activo", "costo_promedio", "ultimo_costo"], rows)
+                                 "nombre", "tipo", "activo", "costo_promedio", "ultimo_costo", "peso_kg"], rows)
     log(f"  productos: {n} filas actualizadas (FECMOD > {since})")
     set_watermark(pg, "productos", last_synced_at=max_ts)
     return codigos, costos
