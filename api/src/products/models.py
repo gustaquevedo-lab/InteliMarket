@@ -77,6 +77,15 @@ class Product(Base):
     def costo_unitario(self, val):
         self.ultimo_costo = val
 
+    @property
+    def precio_costo(self) -> Decimal:
+        return self.costo_promedio or self.ultimo_costo or Decimal("0")
+
+    @precio_costo.setter
+    def precio_costo(self, val):
+        self.costo_promedio = val
+
+
 
 # Alias expected by some modules (customer360, etc.)
 Category = ProductCategory

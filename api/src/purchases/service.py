@@ -818,8 +818,8 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
                 prod_obj.supplier_id = supplier_id
             if cost > Decimal("0"):
                 prod_obj.ultimo_costo = cost
-                if not prod_obj.precio_costo or prod_obj.precio_costo == Decimal("0"):
-                    prod_obj.precio_costo = cost
+                if not prod_obj.costo_promedio or prod_obj.costo_promedio == Decimal("0"):
+                    prod_obj.costo_promedio = cost
 
         movement = InventoryMovement(
             company_id=company_id,
