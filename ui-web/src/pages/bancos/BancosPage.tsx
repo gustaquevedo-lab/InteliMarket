@@ -1757,12 +1757,12 @@ export default function BancosPage() {
       {/* MODAL: Conciliar movimiento */}
       {reconcileModal && (
         <div className="modal-overlay" onClick={() => setReconcileModal(null)}>
-          <div className="modal-content max-w-lg" onClick={e => e.stopPropagation()}>
-            <div className="p-6 border-b">
+          <div className="modal-content max-w-lg p-0 overflow-hidden flex flex-col max-h-[85vh] border border-slate-200 dark:border-slate-800" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b border-gray-100 dark:border-gray-800 shrink-0">
               <h3 className="text-lg font-bold text-gray-900 dark:text-white">Conciliar Movimiento</h3>
               <p className="text-xs text-gray-500 mt-1">Sugerencias reales por coincidencia de monto, fecha y concepto</p>
             </div>
-            <div className="p-6 space-y-3 max-h-[60vh] overflow-y-auto">
+            <div className="p-6 space-y-3 flex-1 min-h-0 overflow-y-auto">
               {reconcileModal.loading ? (
                 <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
               ) : reconcileModal.suggestions.length === 0 ? (
@@ -1783,7 +1783,7 @@ export default function BancosPage() {
                 ))
               )}
             </div>
-            <div className="p-6 border-t flex items-center justify-between">
+            <div className="p-4 sm:p-5 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm shrink-0 sticky bottom-0 z-20 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]">
               <button onClick={() => handleReconcile(reconcileModal.txId, "manual")} className="btn-ghost text-xs text-gray-500">
                 Marcar Manual (Sin contraparte)
               </button>
@@ -1798,12 +1798,12 @@ export default function BancosPage() {
       {/* MODAL: Auto-Conciliar en lote */}
       {autoModal && (
         <div className="modal-overlay" onClick={() => setAutoModal(null)}>
-          <div className="modal-content max-w-xl" onClick={e => e.stopPropagation()}>
-            <div className="p-6 border-b">
+          <div className="modal-content max-w-xl p-0 overflow-hidden flex flex-col max-h-[85vh] border border-slate-200 dark:border-slate-800" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b border-gray-100 dark:border-gray-800 shrink-0">
               <h3 className="text-lg font-bold text-gray-900 dark:text-white">Conciliación Automática en Lote</h3>
               <p className="text-xs text-gray-500 mt-1">Coincidencias de alta confianza (monto exacto y fecha cercana)</p>
             </div>
-            <div className="p-6 space-y-2 max-h-[60vh] overflow-y-auto">
+            <div className="p-6 space-y-2 flex-1 min-h-0 overflow-y-auto">
               {autoModal.loading ? (
                 <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
               ) : autoModal.candidates.length === 0 ? (
@@ -1820,7 +1820,7 @@ export default function BancosPage() {
                 ))
               )}
             </div>
-            <div className="p-6 border-t flex justify-end gap-3">
+            <div className="p-4 sm:p-5 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm shrink-0 sticky bottom-0 z-20 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]">
               <button onClick={() => setAutoModal(null)} className="btn-ghost text-xs">Cancelar</button>
               <button onClick={confirmAutoReconcile} disabled={autoModal.loading || autoModal.candidates.every(c => !c.selected)} className="btn-primary text-xs disabled:opacity-50">
                 Conciliar {autoModal.candidates.filter(c => c.selected).length} movimientos seleccionados
@@ -1833,12 +1833,12 @@ export default function BancosPage() {
       {/* MODAL: Umbral de Alerta */}
       {umbralModal && (
         <div className="modal-overlay" onClick={() => setUmbralModal(null)}>
-          <div className="modal-content max-w-sm" onClick={e => e.stopPropagation()}>
-            <div className="p-6 border-b">
+          <div className="modal-content max-w-sm p-0 overflow-hidden flex flex-col max-h-[85vh] border border-slate-200 dark:border-slate-800" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b border-gray-100 dark:border-gray-800 shrink-0">
               <h3 className="text-lg font-bold text-gray-900 dark:text-white">Umbral de Saldo Mínimo</h3>
               <p className="text-xs text-gray-500 mt-1">Se generará una alerta si el saldo baja de este monto.</p>
             </div>
-            <div className="p-6 space-y-3">
+            <div className="p-6 space-y-3 flex-1 min-h-0 overflow-y-auto">
               <div>
                 <label className="label-field">Monto Mínimo de Alerta (Gs.)</label>
                 <CurrencyInput
@@ -1850,7 +1850,7 @@ export default function BancosPage() {
                 />
               </div>
             </div>
-            <div className="p-6 border-t flex justify-end gap-3">
+            <div className="p-4 sm:p-5 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm shrink-0 sticky bottom-0 z-20 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]">
               <button onClick={() => setUmbralModal(null)} className="btn-ghost text-xs">Cancelar</button>
               <button onClick={handleSaveUmbral} className="btn-primary text-xs">Guardar</button>
             </div>
@@ -1861,12 +1861,12 @@ export default function BancosPage() {
       {/* MODAL: Corregir Saldo */}
       {correctionModal && (
         <div className="modal-overlay" onClick={() => setCorrectionModal(null)}>
-          <div className="modal-content max-w-sm" onClick={e => e.stopPropagation()}>
-            <div className="p-6 border-b">
+          <div className="modal-content max-w-sm p-0 overflow-hidden flex flex-col max-h-[85vh] border border-slate-200 dark:border-slate-800" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b border-gray-100 dark:border-gray-800 shrink-0">
               <h3 className="text-lg font-bold text-gray-900 dark:text-white">Corregir Saldo Bancario</h3>
               <p className="text-xs text-gray-500 mt-1">Requiere aprobación de Supervisor y Gerente antes de aplicarse.</p>
             </div>
-            <div className="p-6 space-y-3">
+            <div className="p-6 space-y-3 flex-1 min-h-0 overflow-y-auto">
               <div>
                 <label className="label-field">Saldo Correcto (según extracto)</label>
                 <CurrencyInput
@@ -1881,7 +1881,7 @@ export default function BancosPage() {
                 <textarea className="input-field text-xs" rows={3} value={correctionModal.motivo} onChange={e => setCorrectionModal({ ...correctionModal, motivo: e.target.value })} placeholder="Ej: Ajuste por comisiones bancarias del extracto oficial" />
               </div>
             </div>
-            <div className="p-6 border-t flex justify-end gap-3">
+            <div className="p-4 sm:p-5 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm shrink-0 sticky bottom-0 z-20 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]">
               <button onClick={() => setCorrectionModal(null)} className="btn-ghost text-xs">Cancelar</button>
               <button onClick={handleRequestCorrection} disabled={!correctionModal.saldo_propuesto || !correctionModal.motivo.trim()} className="btn-primary text-xs disabled:opacity-50">
                 Solicitar Corrección
@@ -1894,11 +1894,11 @@ export default function BancosPage() {
       {/* MODAL: Nueva Cuenta Bancaria */}
       {showBankForm && (
         <div className="modal-overlay" onClick={() => setShowBankForm(false)}>
-          <div className="modal-content max-w-md" onClick={e => e.stopPropagation()}>
-            <div className="p-6 border-b">
+          <div className="modal-content max-w-md p-0 overflow-hidden flex flex-col max-h-[85vh] border border-slate-200 dark:border-slate-800" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b border-gray-100 dark:border-gray-800 shrink-0">
               <h3 className="text-lg font-bold text-gray-900 dark:text-white">Nueva Cuenta Bancaria</h3>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 flex-1 min-h-0 overflow-y-auto">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div><label className="label-field">Nombre del Banco *</label><input className="input-field" placeholder="Ej: Banco Itaú" value={bankForm.banco} onChange={e => setBankForm({ ...bankForm, banco: e.target.value })} /></div>
                 <div><label className="label-field">Alias / Nickname (Opcional)</label><input className="input-field" placeholder="Ej: Itaú Recaudación, Sudameris Proveedores" value={bankForm.alias} onChange={e => setBankForm({ ...bankForm, alias: e.target.value })} /></div>
@@ -1911,7 +1911,7 @@ export default function BancosPage() {
               <div><label className="label-field">Saldo Inicial</label><CurrencyInput currency={bankForm.moneda === "USD" ? "USD" : "PYG"} className="input-field font-mono text-right" value={bankForm.saldo_inicial} onChangeValue={(num, formatted) => setBankForm({ ...bankForm, saldo_inicial: String(num) })} /></div>
               <div><label className="label-field">Titular de la Cuenta</label><input className="input-field" placeholder="Ej: Extra Supermercado S.A." value={bankForm.titular} onChange={e => setBankForm({ ...bankForm, titular: e.target.value })} /></div>
             </div>
-            <div className="p-6 border-t flex justify-end gap-3">
+            <div className="p-4 sm:p-5 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm shrink-0 sticky bottom-0 z-20 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]">
               <button onClick={() => setShowBankForm(false)} className="btn-ghost text-xs">Cancelar</button>
               <button onClick={handleCreateBank} disabled={!bankForm.banco || !bankForm.numero_cuenta} className="btn-primary text-xs disabled:opacity-50">
                 Guardar Cuenta
@@ -1924,8 +1924,8 @@ export default function BancosPage() {
       {/* MODAL: Editar Cuenta Bancaria */}
       {editingBank && (
         <div className="modal-overlay" onClick={() => setEditingBank(null)}>
-          <div className="modal-content max-w-md" onClick={e => e.stopPropagation()}>
-            <div className="p-6 border-b flex items-center justify-between">
+          <div className="modal-content max-w-md p-0 overflow-hidden flex flex-col max-h-[85vh] border border-slate-200 dark:border-slate-800" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between shrink-0">
               <div>
                 <h3 className="text-lg font-bold text-gray-900 dark:text-white">Editar Cuenta Bancaria</h3>
                 <p className="text-xs text-slate-500">Modificar nickname / alias y datos de la cuenta</p>
@@ -1934,7 +1934,7 @@ export default function BancosPage() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 flex-1 min-h-0 overflow-y-auto">
               <div>
                 <label className="label-field font-bold text-indigo-600 dark:text-indigo-400">Alias / Nickname de la Cuenta</label>
                 <input
@@ -1989,7 +1989,7 @@ export default function BancosPage() {
                 </label>
               </div>
             </div>
-            <div className="p-6 border-t flex justify-between items-center">
+            <div className="p-4 sm:p-5 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm shrink-0 sticky bottom-0 z-20 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]">
               <button
                 type="button"
                 onClick={() => { const b = editingBank; setEditingBank(null); handleDeleteBank(b); }}
@@ -2017,8 +2017,8 @@ export default function BancosPage() {
       {/* MODAL: Importar Extracto Bancario */}
       {showImportBank && (
         <div className="modal-overlay" onClick={() => { setShowImportBank(false); setImportPreview(null); }}>
-          <div className="modal-content max-w-lg" onClick={e => e.stopPropagation()}>
-            <div className="p-6 border-b">
+          <div className="modal-content max-w-lg p-0 overflow-hidden flex flex-col max-h-[85vh] border border-slate-200 dark:border-slate-800" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b border-gray-100 dark:border-gray-800 shrink-0">
               <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
                 <Upload className="w-5 h-5 text-primary" />
                 Importar Extracto Bancario
@@ -2027,7 +2027,7 @@ export default function BancosPage() {
                 Subí el archivo Excel (.xlsx / .xls) o extracto bancario. Los movimientos duplicados se detectan automáticamente.
               </p>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 flex-1 min-h-0 overflow-y-auto">
               <div>
                 <label className="label-field">Cuenta Bancaria Destino *</label>
                 <select className="input-field" value={selectedBank} onChange={e => { setSelectedBank(e.target.value); setImportPreview(null); }}>
@@ -2073,7 +2073,7 @@ export default function BancosPage() {
                 </div>
               )}
             </div>
-            <div className="p-6 border-t flex justify-end gap-3">
+            <div className="p-4 sm:p-5 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm shrink-0 sticky bottom-0 z-20 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]">
               <button onClick={() => { setShowImportBank(false); setImportPreview(null); }} className="btn-ghost text-xs">Cancelar</button>
               <button onClick={handleConfirmImport} disabled={!importPreview || importLoading} className="btn-primary text-xs disabled:opacity-50 flex items-center gap-2">
                 {importLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
@@ -2095,9 +2095,9 @@ export default function BancosPage() {
 
         return (
           <div className="modal-overlay" onClick={() => setShowChequeModal(false)}>
-            <div className="modal-content max-w-2xl p-0 overflow-hidden shadow-2xl rounded-2xl border border-slate-200 dark:border-slate-800" onClick={e => e.stopPropagation()}>
+            <div className="modal-content max-w-2xl p-0 overflow-hidden shadow-2xl rounded-2xl border border-slate-200 dark:border-slate-800 flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
               {/* Header */}
-              <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gradient-to-r from-purple-500/10 via-purple-500/5 to-transparent dark:from-purple-950/40 dark:via-purple-950/20">
+              <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gradient-to-r from-purple-500/10 via-purple-500/5 to-transparent dark:from-purple-950/40 dark:via-purple-950/20 shrink-0">
                 <div className="flex items-center gap-3">
                   <div className="p-2.5 rounded-xl bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/20">
                     <Receipt className="w-5 h-5" />
@@ -2123,7 +2123,7 @@ export default function BancosPage() {
                 </button>
               </div>
 
-              <div className="p-6 space-y-5 overflow-y-auto max-h-[72vh]">
+              <div className="p-6 space-y-5 overflow-y-auto flex-1 min-h-0">
                 {/* BLOQUE 1: CUENTA BANCARIA Y NÚMERO DE CHEQUE */}
                 <div className="bg-slate-50/60 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-4">
                   <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
@@ -2371,12 +2371,12 @@ export default function BancosPage() {
               </div>
 
               {/* Footer */}
-              <div className="px-6 py-4 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gray-50/70 dark:bg-slate-900/50">
+              <div className="p-4 sm:p-5 border-t border-gray-200 dark:border-gray-800 flex flex-col sm:flex-row items-center justify-between gap-3 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm shrink-0 sticky bottom-0 z-20 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]">
                 <button
                   type="button"
                   onClick={() => setShowChequeModal(false)}
                   disabled={submittingCheque}
-                  className="btn-outline text-xs px-4 py-2"
+                  className="btn-outline text-xs px-4 py-2 w-full sm:w-auto order-2 sm:order-1"
                 >
                   Cancelar
                 </button>
@@ -2384,7 +2384,7 @@ export default function BancosPage() {
                   type="button"
                   onClick={handleCreateCheque}
                   disabled={submittingCheque || !chequeForm.numero.trim() || !chequeForm.beneficiario.trim() || montoNum <= 0 || !chequeForm.bank_account_id}
-                  className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-black transition disabled:opacity-50 flex items-center gap-2 shadow-sm"
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-black transition disabled:opacity-50 flex items-center justify-center gap-2 shadow-md order-1 sm:order-2"
                 >
                   {submittingCheque ? (
                     <>
@@ -2394,7 +2394,7 @@ export default function BancosPage() {
                   ) : (
                     <>
                       <Receipt className="w-4 h-4" />
-                      <span>Emitir Cheque {montoNum > 0 ? `(Gs. ${montoNum.toLocaleString("es-PY")})` : ""}</span>
+                      <span>Emitir Cheque {montoNum > 0 ? `(${formatGs(montoNum)})` : ""}</span>
                     </>
                   )}
                 </button>
@@ -2425,9 +2425,9 @@ export default function BancosPage() {
 
         return (
           <div className="modal-overlay" onClick={() => setShowTxModal(false)}>
-            <div className="modal-content max-w-xl p-0 overflow-hidden shadow-2xl rounded-2xl" onClick={e => e.stopPropagation()}>
+            <div className="modal-content max-w-xl p-0 overflow-hidden shadow-2xl rounded-2xl flex flex-col max-h-[85vh] border border-slate-200 dark:border-slate-800" onClick={e => e.stopPropagation()}>
               {/* Header */}
-              <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between bg-gray-50/70 dark:bg-slate-800/70">
+              <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between bg-gray-50/70 dark:bg-slate-800/70 shrink-0">
                 <div className="flex items-center gap-3">
                   <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
                     <Landmark className="w-5 h-5" />
@@ -2451,7 +2451,7 @@ export default function BancosPage() {
               </div>
 
               {/* Selector de Modo (Tabs) */}
-              <div className="flex border-b border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-slate-900/30 px-6 pt-2.5 gap-2">
+              <div className="flex border-b border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-slate-900/30 px-6 pt-2.5 gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={() => setTxMode("directo")}
@@ -2478,7 +2478,7 @@ export default function BancosPage() {
 
               {/* Formulario Modo Directo */}
               {txMode === "directo" ? (
-                <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+                <div className="p-6 space-y-4 flex-1 min-h-0 overflow-y-auto">
                   {/* Selector de Cuenta */}
                   <div>
                     <div className="flex items-center justify-between mb-1">
@@ -2698,7 +2698,7 @@ export default function BancosPage() {
                 </div>
               ) : (
                 /* Formulario Modo Transferencia entre Cuentas Propias */
-                <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+                <div className="p-6 space-y-4 flex-1 min-h-0 overflow-y-auto">
                   {/* Selector Origen y Destino */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {/* Origen */}
@@ -2859,23 +2859,38 @@ export default function BancosPage() {
               )}
 
               {/* Footer de Acciones */}
-              <div className="p-5 border-t border-gray-100 dark:border-gray-700 flex items-center justify-end gap-3 bg-gray-50/50 dark:bg-slate-850">
-                <button
-                  type="button"
-                  onClick={() => setShowTxModal(false)}
-                  className="btn-ghost text-xs"
-                >
-                  Cancelar
-                </button>
+              <div className="p-4 sm:p-5 border-t border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row items-center justify-between gap-3 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm shrink-0 sticky bottom-0 z-20 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]">
+                <div className="w-full sm:w-auto flex items-center justify-between sm:justify-start gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowTxModal(false)}
+                    className="btn-ghost text-xs"
+                  >
+                    Cancelar
+                  </button>
+                  {montoOperacion > 0 && txMode === "directo" && (
+                    <span className="text-xs font-mono font-bold text-gray-700 dark:text-gray-300">
+                      Total: {formatGs(montoOperacion + comisionOperacion)}
+                    </span>
+                  )}
+                  {montoTrf > 0 && txMode === "transferencia" && (
+                    <span className="text-xs font-mono font-bold text-gray-700 dark:text-gray-300">
+                      Transferir: {formatGs(montoTrf)}
+                    </span>
+                  )}
+                </div>
                 {txMode === "directo" ? (
                   <button
                     type="button"
                     onClick={handleSaveBankTransaction}
                     disabled={submittingTx || !txForm.bank_account_id || !txForm.monto || Number(txForm.monto) <= 0}
-                    className="btn-primary text-xs flex items-center gap-2 disabled:opacity-50"
+                    className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                   >
                     {submittingTx ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-                    Confirmar Movimiento
+                    <span>
+                      {txForm.tipo === "credito" ? "Confirmar Ingreso / Crédito" : "Confirmar Egreso / Débito"}
+                      {montoOperacion > 0 ? ` (${formatGs(montoOperacion)})` : ""}
+                    </span>
                   </button>
                 ) : (
                   <button
@@ -2889,10 +2904,13 @@ export default function BancosPage() {
                       !transferForm.monto ||
                       Number(transferForm.monto) <= 0
                     }
-                    className="btn-primary text-xs flex items-center gap-2 disabled:opacity-50"
+                    className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                   >
                     {submittingTx ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowLeftRight className="w-4 h-4" />}
-                    Confirmar Transferencia
+                    <span>
+                      Confirmar Transferencia
+                      {montoTrf > 0 ? ` (${formatGs(montoTrf)})` : ""}
+                    </span>
                   </button>
                 )}
               </div>
@@ -2904,12 +2922,12 @@ export default function BancosPage() {
       {/* MODAL: Historial del Cheque */}
       {chequeHistorial && (
         <div className="modal-overlay" onClick={() => setChequeHistorial(null)}>
-          <div className="modal-content max-w-md" onClick={e => e.stopPropagation()}>
-            <div className="p-6 border-b">
+          <div className="modal-content max-w-md p-0 overflow-hidden flex flex-col max-h-[85vh] border border-slate-200 dark:border-slate-800" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b border-gray-100 dark:border-gray-800 shrink-0">
               <h3 className="text-lg font-bold text-gray-900 dark:text-white">Trazabilidad del Cheque</h3>
               <p className="text-xs text-gray-500 mt-0.5">N° {chequeHistorial.cheque.numero} — {chequeHistorial.cheque.beneficiario}</p>
             </div>
-            <div className="p-6 space-y-3 max-h-80 overflow-y-auto">
+            <div className="p-6 space-y-3 flex-1 min-h-0 overflow-y-auto">
               {chequeHistorial.items.length === 0 ? (
                 <p className="text-xs text-gray-500 text-center py-4">Sin movimientos registrados</p>
               ) : (
@@ -2929,7 +2947,7 @@ export default function BancosPage() {
                 ))
               )}
             </div>
-            <div className="p-6 border-t flex justify-end">
+            <div className="p-4 sm:p-5 border-t border-gray-200 dark:border-gray-700 flex justify-end bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm shrink-0 sticky bottom-0 z-20 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]">
               <button onClick={() => setChequeHistorial(null)} className="btn-outline text-xs">Cerrar</button>
             </div>
           </div>
@@ -2985,9 +3003,9 @@ export default function BancosPage() {
 
         return (
           <div className="modal-overlay" onClick={() => setShowDepositModal(false)}>
-            <div className="modal-content max-w-2xl p-0 overflow-hidden shadow-2xl rounded-2xl border border-slate-200 dark:border-slate-800" onClick={e => e.stopPropagation()}>
+            <div className="modal-content max-w-2xl p-0 overflow-hidden shadow-2xl rounded-2xl border border-slate-200 dark:border-slate-800 flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
               {/* Header */}
-              <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gradient-to-r from-sky-500/10 via-sky-500/5 to-transparent dark:from-sky-950/40 dark:via-sky-950/20">
+              <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gradient-to-r from-sky-500/10 via-sky-500/5 to-transparent dark:from-sky-950/40 dark:via-sky-950/20 shrink-0">
                 <div className="flex items-center gap-3">
                   <div className="p-2.5 rounded-xl bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/20">
                     <Building2 className="w-5 h-5" />
@@ -3014,7 +3032,7 @@ export default function BancosPage() {
               </div>
 
               {/* Selector de Modo (Tabs modernas) */}
-              <div className="grid grid-cols-2 p-1.5 bg-gray-100/70 dark:bg-slate-800/60 border-b border-gray-200 dark:border-gray-800 gap-1.5">
+              <div className="grid grid-cols-2 p-1.5 bg-gray-100/70 dark:bg-slate-800/60 border-b border-gray-200 dark:border-gray-800 gap-1.5 shrink-0">
                 <button
                   type="button"
                   onClick={() => setDepositMode("boveda")}
@@ -3041,7 +3059,7 @@ export default function BancosPage() {
                 </button>
               </div>
 
-              <div className="p-6 space-y-5 overflow-y-auto max-h-[72vh]">
+              <div className="p-6 space-y-5 overflow-y-auto flex-1 min-h-0">
                 {/* Banner Contextual del Modo */}
                 {depositMode === "boveda" ? (
                   <div className="p-3.5 rounded-2xl bg-sky-50/80 dark:bg-sky-950/30 border border-sky-200/80 dark:border-sky-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -3319,12 +3337,12 @@ export default function BancosPage() {
               </div>
 
               {/* Footer */}
-              <div className="px-6 py-4 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gray-50/70 dark:bg-slate-900/50">
+              <div className="p-4 sm:p-5 border-t border-gray-200 dark:border-gray-800 flex flex-col sm:flex-row items-center justify-between gap-3 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm shrink-0 sticky bottom-0 z-20 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]">
                 <button
                   type="button"
                   onClick={() => setShowDepositModal(false)}
                   disabled={submittingDeposit}
-                  className="btn-outline text-xs px-4 py-2"
+                  className="btn-outline text-xs px-4 py-2 w-full sm:w-auto order-2 sm:order-1"
                 >
                   Cancelar
                 </button>
@@ -3337,7 +3355,7 @@ export default function BancosPage() {
                     montoNum <= 0 ||
                     (depositMode === "boveda" && !depositForm.numero_boleta.trim())
                   }
-                  className="px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-black transition disabled:opacity-50 flex items-center gap-2 shadow-sm"
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-black transition disabled:opacity-50 flex items-center justify-center gap-2 shadow-md order-1 sm:order-2"
                 >
                   {submittingDeposit ? (
                     <>
@@ -3349,8 +3367,8 @@ export default function BancosPage() {
                       <Building2 className="w-4 h-4" />
                       <span>
                         {depositMode === "boveda"
-                          ? `Registrar Depósito desde Bóveda ${montoNum > 0 ? `(Gs. ${montoNum.toLocaleString("es-PY")})` : ""}`
-                          : `Registrar Depósito Externo ${montoNum > 0 ? `(Gs. ${montoNum.toLocaleString("es-PY")})` : ""}`}
+                          ? `Registrar Depósito desde Bóveda ${montoNum > 0 ? `(${formatGs(montoNum)})` : ""}`
+                          : `Registrar Depósito Externo ${montoNum > 0 ? `(${formatGs(montoNum)})` : ""}`}
                       </span>
                     </>
                   )}

@@ -165,7 +165,7 @@
   }
 
   .modal-content {
-    @apply bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-gray-100 dark:border-slate-700 w-full overflow-hidden my-auto;
+    @apply bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-gray-100 dark:border-slate-700 w-full overflow-hidden my-auto flex flex-col;
     max-height: calc(100vh - 6.5rem) !important;
   }
 
