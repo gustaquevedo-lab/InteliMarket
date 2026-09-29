@@ -63,6 +63,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   const isPublicEndpoint =
     cleanEndpoint.startsWith("/v1/auth/login") ||
     cleanEndpoint.startsWith("/v1/auth/pos-staff") ||
+    cleanEndpoint.startsWith("/v1/auth/pos-supervisors") ||
     cleanEndpoint.startsWith("/v1/auth/register") ||
     cleanEndpoint.startsWith("/v1/auth/reset-password") ||
     cleanEndpoint.startsWith("/health") ||
@@ -2652,8 +2653,10 @@ export const api = {
         client.post<any>(`/v1/purchases/returns/${returnId}/approve`),
       reject: (returnId: string, motivo_rechazo: string) =>
         client.post<any>(`/v1/purchases/returns/${returnId}/reject`, { motivo_rechazo }),
-      complete: (returnId: string, nota_credito_numero?: string) =>
-        client.post<any>(`/v1/purchases/returns/${returnId}/complete`, { nota_credito_numero }),
+      complete: (returnId: string, nota_credito_numero?: string, notas_credito?: any[]) =>
+        client.post<any>(`/v1/purchases/returns/${returnId}/complete`, { nota_credito_numero, notas_credito }),
+      addCreditNotes: (returnId: string, notas_credito: any[]) =>
+        client.post<any>(`/v1/purchases/returns/${returnId}/credit-notes`, { notas_credito }),
     },
   },
   sifen: {
