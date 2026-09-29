@@ -1604,21 +1604,30 @@ async def list_sales(
 
     # Búsqueda directa en Base de Datos (Número comprobante, RUC/CI, CDC, Cliente o Cajero)
     if search and search.strip():
-        s_term = f"%{search.strip()}%"
-        query = query.where(
-            or_(
-                Sale.numero.ilike(s_term),
-                Sale.numero_interno.ilike(s_term),
-                Sale.cdc.ilike(s_term),
-                Customer.razon_social.ilike(s_term),
-                Customer.nombre_fantasia.ilike(s_term),
-                Customer.ruc.ilike(s_term),
-                Customer.ci.ilike(s_term),
-                Customer.telefono.ilike(s_term),
-                User.nombre.ilike(s_term),
-                CashSession.cajero_nombre.ilike(s_term),
-            )
-        )
+        s_raw = search.strip()
+        s_term = f"%{s_raw}%"
+        s_digits = re.sub(r"\D", "", s_raw)
+
+        search_clauses = [
+            Sale.numero.ilike(s_term),
+            Sale.numero_interno.ilike(s_term),
+            Sale.cdc.ilike(s_term),
+            Customer.razon_social.ilike(s_term),
+            Customer.nombre_fantasia.ilike(s_term),
+            Customer.ruc.ilike(s_term),
+            Customer.ci.ilike(s_term),
+            Customer.telefono.ilike(s_term),
+            User.nombre.ilike(s_term),
+            CashSession.cajero_nombre.ilike(s_term),
+        ]
+        if len(s_digits) >= 3:
+            s_digits_term = f"%{s_digits}%"
+            search_clauses.extend([
+                Sale.numero.ilike(s_digits_term),
+                Customer.ruc.ilike(s_digits_term),
+                Customer.ci.ilike(s_digits_term),
+            ])
+        query = query.where(or_(*search_clauses))
 
     # Filtro de fechas respetando la zona horaria del negocio America/Asuncion
     if not all_dates:

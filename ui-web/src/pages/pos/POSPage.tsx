@@ -5904,9 +5904,9 @@ export default function POSPage() {
     setDevolucionObservaciones("")
     setDevolucionSalesLoading(true)
     try {
-      // Política comercial de devoluciones: compras emitidas hasta 48 horas antes
-      const date48hAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
-      const sales = await api.sales.list({ fecha_desde: date48hAgo, limit: 100 } as any)
+      // Política comercial de devoluciones para supervisoras: hasta 7 días (168 horas) antes
+      const date7dAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+      const sales = await api.sales.list({ fecha_desde: date7dAgo, limit: 150 } as any)
       const list = Array.isArray(sales) ? sales : []
       setDevolucionSales(list)
       setDevolucionSalesRecientes(list)
@@ -6319,11 +6319,11 @@ export default function POSPage() {
     const filtered = devolucionSales.filter((s) => {
       const num = (s.numero || "").toLowerCase()
       const numInt = (s.numero_interno || "").toLowerCase()
-      const cNom = (s.customer_nombre || s.customer?.nombre || s.customer?.razon_social || "").toLowerCase()
-      const cDoc = (s.customer_doc || s.customer?.ruc || s.customer?.ci || "").toLowerCase()
-      return num.includes(q) || numInt.includes(q) || cNom.includes(q) || cDoc.includes(q) || (qNum && cDoc.includes(qNum))
+      const cNom = ((s as any).customer_nombre || (s as any).customer?.nombre || (s as any).customer?.razon_social || (s as any).cliente_nombre || "").toLowerCase()
+      const cDoc = ((s as any).customer_doc || (s as any).customer?.ruc || (s as any).customer?.ci || "").toLowerCase()
+      return num.includes(q) || numInt.includes(q) || cNom.includes(q) || cDoc.includes(q) || (qNum.length >= 3 && (cDoc.includes(qNum) || num.includes(qNum)))
     })
-    return filtered.length > 0 ? filtered : devolucionSales
+    return filtered
   }, [devolucionSales, devolucionSearch])
 
   const updateQuantity = (id: string, delta: number) => {
@@ -10195,18 +10195,27 @@ export default function POSPage() {
 
             {devolucionStep === "buscar" ? (
               <div className="flex-1 overflow-y-auto min-h-0">
-                <div className="relative mb-3 shrink-0">
+                <div className="relative mb-2 shrink-0">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                   <input
                     autoFocus
                     type="text"
                     value={devolucionSearch}
                     onChange={(e) => setDevolucionSearch(e.target.value)}
-                    placeholder="Filtrar por número de comprobante, RUC o cliente..."
+                    placeholder="Buscar por Nº factura, RUC o nombre del cliente..."
                     className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl pl-9 pr-9 py-2.5 text-sm text-slate-900 dark:text-white font-bold outline-none focus:border-rose-500"
                   />
                   {devolucionSalesLoading && (
                     <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-rose-500 animate-spin" />
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 mb-2 px-1">
+                  <span>Ventas de los últimos 7 días</span>
+                  {devolucionSearch.trim() && (
+                    <span className="text-rose-600 dark:text-rose-400 font-bold">
+                      {devolucionSalesFiltradas.length} resultado{devolucionSalesFiltradas.length === 1 ? "" : "s"}
+                    </span>
                   )}
                 </div>
 

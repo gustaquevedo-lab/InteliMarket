@@ -83,7 +83,7 @@ async def create_return(db: AsyncSession, data: ReturnCreate) -> Return:
     db.add(return_obj)
     await db.flush()
 
-    # ── Política de devolución: máximo 48 horas ─────────────────────────
+    # ── Política de devolución: máximo 7 días (168 horas) para supervisoras ──
     if data.sale_id:
         sale_res = await db.execute(select(Sale).where(Sale.id == data.sale_id))
         sale_obj = sale_res.scalar_one_or_none()
@@ -92,10 +92,11 @@ async def create_return(db: AsyncSession, data: ReturnCreate) -> Return:
             if sale_date.tzinfo is None:
                 sale_date = sale_date.replace(tzinfo=timezone.utc)
             horas_pasadas = (datetime.now(timezone.utc) - sale_date).total_seconds() / 3600.0
-            if horas_pasadas > 48.0:
+            if horas_pasadas > 168.0:
+                dias_pasados = int(horas_pasadas / 24.0)
                 raise ValueError(
                     f"La factura original {sale_obj.numero or ''} fue emitida el {sale_date.strftime('%d/%m/%Y %H:%M')}. "
-                    f"La política comercial permite devoluciones únicamente hasta 48 horas posteriores a la compra (han transcurrido {int(horas_pasadas)} horas)."
+                    f"La política comercial permite devoluciones únicamente hasta 7 días posteriores a la compra (han transcurrido {dias_pasados} días)."
                 )
 
     # ── Anti doble-devolucion ────────────────────────────────────────────
