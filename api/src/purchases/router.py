@@ -1099,11 +1099,58 @@ async def add_credit_notes_to_supplier_return_endpoint(
     return await returns_service.add_nc_to_supplier_return(db, cid, uuid.UUID(return_id), uid, ncs)
 
 
+@router.get("/purchases/returns/{return_id}")
+async def get_purchase_supplier_return_detail(
+    return_id: str,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Obtiene el detalle completo de una devolución a proveedor por ID."""
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    ret = await returns_service.get_supplier_return(db, cid, uuid.UUID(return_id))
+    if not ret:
+        raise HTTPException(status_code=404, detail="Devolución no encontrada")
+    return ret
+
+
+@router.get("/purchases/returns/{return_id}/pdf")
+async def export_purchase_supplier_return_pdf_endpoint(
+    return_id: str,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """
+    Genera y entrega el Remito Oficial de Devolución a Proveedor en PDF A4.
+    Diseño premium de Extra Supermercado con casillas oficiales de control y firmas para imprimir y remitir.
+    """
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    ret = await returns_service.get_supplier_return(db, cid, uuid.UUID(return_id))
+    if not ret:
+        raise HTTPException(status_code=404, detail="Devolución no encontrada")
+
+    company = await _get_company_info(db, str(cid))
+    user_name = user.get("nombre") or user.get("email") or "Auditoría de Compras"
+    pdf_bytes = supplier_return_pdf.generate_supplier_return_pdf(company, ret, generated_by=user_name)
+    codigo = ret.get("codigo") or f"DEV_{return_id[:8]}"
+    filename = f"Remito_{codigo}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )
+
+
 
 # ── Visión 360° Integral del Proveedor (Cuentas por Pagar & Comercial) ────────
 
 from api.src.purchases import supplier_360_service
 from api.src.purchases import supplier_360_pdf
+from api.src.purchases import supplier_return_pdf
 
 
 @router.get("/purchases/suppliers/{supplier_id}/360")

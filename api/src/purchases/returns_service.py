@@ -16,6 +16,7 @@ from api.src.products.models import Product
 from api.src.financial.models import SupplierInvoice, SupplierInvoiceItem, SupplierReturn as FinancialSupplierReturn, SupplierCreditNote, SupplierCreditNoteApplication
 from api.src.purchases.models import Supplier
 from api.src.inventory.models import Stock, InventoryMovement, Warehouse
+from api.src.auth.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -254,6 +255,145 @@ async def list_supplier_returns(
             "items": items_detail,
         })
     return out
+
+
+async def get_supplier_return(
+    db: AsyncSession,
+    company_id: uuid.UUID,
+    return_id: uuid.UUID,
+) -> Optional[Dict[str, Any]]:
+    """Obtiene el detalle completo de una devolución a proveedor para reportes, auditorías y remitos oficiales."""
+    q = select(
+        SupplierReturn,
+        Supplier.razon_social.label("proveedor_nombre"),
+        Supplier.ruc.label("proveedor_ruc"),
+        Supplier.telefono.label("proveedor_telefono"),
+        Supplier.direccion.label("proveedor_direccion"),
+        Supplier.ciudad.label("proveedor_ciudad"),
+        Warehouse.nombre.label("almacen_nombre"),
+    ).outerjoin(
+        Supplier, Supplier.id == SupplierReturn.proveedor_id
+    ).outerjoin(
+        Warehouse, Warehouse.id == SupplierReturn.warehouse_id
+    ).options(
+        selectinload(SupplierReturn.items)
+    ).where(
+        SupplierReturn.company_id == company_id,
+        SupplierReturn.id == return_id,
+    )
+    res = await db.execute(q)
+    row = res.first()
+    if not row:
+        return None
+    r, prov_nom, prov_ruc, prov_tel, prov_dir, prov_ciu, wh_nom = row
+
+    # Nombres de usuarios (autorizado_por, completado_por, rechazado_por)
+    user_ids = [uid for uid in [r.autorizado_por, r.completado_por, r.rechazado_por] if uid]
+    user_names = {}
+    if user_ids:
+        uq = select(User.id, User.nombre).where(User.id.in_(user_ids))
+        ures = await db.execute(uq)
+        for u in ures.all():
+            user_names[u.id] = u.nombre
+
+    # Productos
+    prod_ids = {it.producto_id for it in r.items}
+    prod_names = {}
+    if prod_ids:
+        pq = select(Product.id, Product.nombre, Product.sku, Product.codigo_barra).where(Product.id.in_(prod_ids))
+        pres = await db.execute(pq)
+        for p in pres.all():
+            prod_names[p.id] = {"nombre": p.nombre, "sku": p.sku, "codigo_barra": p.codigo_barra}
+
+    items_map: Dict[uuid.UUID, Dict[str, Any]] = {}
+    for it in r.items:
+        p_info = prod_names.get(it.producto_id, {})
+        pid = it.producto_id
+        cant = float(it.cantidad or 0)
+        val_u = float(it.valor_unitario or it.costo_promedio or 0)
+        val_tot = float(it.valor_total or (cant * val_u))
+
+        if pid in items_map:
+            existing = items_map[pid]
+            prev_cant = existing["cantidad"]
+            prev_tot = existing["valor_total"]
+            new_cant = prev_cant + cant
+            new_tot = prev_tot + val_tot
+            new_u = round(new_tot / new_cant, 2) if new_cant > 0 else val_u
+
+            lotes = [existing.get("lote"), it.lote]
+            unique_lotes = ", ".join(filter(None, set(lotes)))
+
+            vtos = [existing.get("fecha_vencimiento"), it.fecha_vencimiento.isoformat() if it.fecha_vencimiento else None]
+            unique_vtos = ", ".join(filter(None, set(vtos)))
+
+            facturas = [existing.get("factura_numero"), it.factura_numero]
+            unique_facturas = ", ".join(filter(None, set(facturas)))
+
+            detalles = [existing.get("detalle"), it.detalle]
+            unique_detalles = " | ".join(filter(None, set(detalles)))
+
+            existing["cantidad"] = new_cant
+            existing["valor_unitario"] = new_u
+            existing["valor_total"] = new_tot
+            existing["lote"] = unique_lotes or None
+            existing["fecha_vencimiento"] = unique_vtos or None
+            existing["factura_numero"] = unique_facturas or None
+            existing["detalle"] = unique_detalles or None
+        else:
+            items_map[pid] = {
+                "id": str(it.id),
+                "producto_id": str(it.producto_id),
+                "producto_nombre": p_info.get("nombre", "Producto"),
+                "sku": p_info.get("sku"),
+                "codigo_barra": p_info.get("codigo_barra"),
+                "factura_id": str(it.factura_id) if it.factura_id else None,
+                "factura_numero": it.factura_numero,
+                "cantidad": cant,
+                "valor_unitario": val_u,
+                "valor_total": val_tot,
+                "motivo": it.motivo,
+                "lote": it.lote,
+                "fecha_vencimiento": it.fecha_vencimiento.isoformat() if it.fecha_vencimiento else None,
+                "detalle": it.detalle,
+            }
+
+    items_detail = list(items_map.values())
+
+    prov_dir_full = (f"{prov_dir} ({prov_ciu})" if prov_ciu else prov_dir) if prov_dir else None
+
+    return {
+        "id": str(r.id),
+        "codigo": r.codigo,
+        "tipo": r.tipo or "devolucion",
+        "proveedor_id": str(r.proveedor_id),
+        "proveedor_nombre": prov_nom or "Proveedor Sin Asignar",
+        "proveedor_ruc": prov_ruc or "—",
+        "proveedor_telefono": prov_tel or "—",
+        "proveedor_direccion": prov_dir_full or "—",
+        "warehouse_id": str(r.warehouse_id) if r.warehouse_id else None,
+        "almacen_nombre": wh_nom or "Depósito Principal",
+        "fecha_creacion": r.fecha_creacion.isoformat() if r.fecha_creacion else None,
+        "fecha_estimada_retiro": r.fecha_estimada_retiro.isoformat() if r.fecha_estimada_retiro else None,
+        "total_items": len(items_detail) if items_detail else (r.total_items or 0),
+        "valor_total_estimado": float(sum(it["valor_total"] for it in items_detail)) if items_detail else float(r.valor_total_estimado or 0),
+        "nota_credito_numero": r.nota_credito_numero,
+        "nota_credito_monto": float(r.nota_credito_monto or 0) if r.nota_credito_monto else None,
+        "notas_credito": r.notas_credito or [],
+        "estado": r.estado or "pendiente",
+        "autorizado_por": str(r.autorizado_por) if r.autorizado_por else None,
+        "autorizado_por_nombre": user_names.get(r.autorizado_por),
+        "autorizado_at": r.autorizado_at.isoformat() if r.autorizado_at else None,
+        "completado_por": str(r.completado_por) if r.completado_por else None,
+        "completado_por_nombre": user_names.get(r.completado_por),
+        "completado_at": r.completado_at.isoformat() if r.completado_at else None,
+        "rechazado_por": str(r.rechazado_por) if r.rechazado_por else None,
+        "rechazado_por_nombre": user_names.get(r.rechazado_por),
+        "rechazado_at": r.rechazado_at.isoformat() if r.rechazado_at else None,
+        "motivo_rechazo": r.motivo_rechazo,
+        "observaciones": r.observaciones,
+        "items": items_detail,
+    }
 
 
 def consolidate_return_items(items: List[Any]) -> List[Dict[str, Any]]:

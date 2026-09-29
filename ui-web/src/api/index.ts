@@ -2657,6 +2657,23 @@ export const api = {
         client.post<any>(`/v1/purchases/returns/${returnId}/complete`, { nota_credito_numero, notas_credito }),
       addCreditNotes: (returnId: string, notas_credito: any[]) =>
         client.post<any>(`/v1/purchases/returns/${returnId}/credit-notes`, { notas_credito }),
+      get: (returnId: string) =>
+        client.get<any>(`/v1/purchases/returns/${returnId}`),
+      downloadPdf: (returnId: string, codigo?: string) => {
+        const clean = (codigo || "DEV").replace(/\s+/g, "_")
+        return downloadAuthenticated(`/v1/purchases/returns/${returnId}/pdf?company_id=${COMPANY_ID}`, {}, `Remito_${clean}.pdf`)
+      },
+      openPdf: async (returnId: string) => {
+        const token = localStorage.getItem("access_token")
+        const url = `${API_BASE}/v1/purchases/returns/${returnId}/pdf?company_id=${COMPANY_ID}`
+        const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+        if (!res.ok) throw new Error(`Error ${res.status} al generar el PDF del Remito`)
+        const blob = await res.blob()
+        const fileBlob = new Blob([blob], { type: "application/pdf" })
+        const blobUrl = URL.createObjectURL(fileBlob)
+        window.open(blobUrl, "_blank")
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 60000)
+      },
     },
   },
   sifen: {

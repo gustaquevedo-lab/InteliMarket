@@ -207,6 +207,7 @@ export default function PurchasesPage() {
   const [ncNumberInput, setNcNumberInput] = useState("")
   const [processingReturnAction, setProcessingReturnAction] = useState(false)
   const [printingReturnDoc, setPrintingReturnDoc] = useState<any | null>(null)
+  const [downloadingReturnPdfId, setDownloadingReturnPdfId] = useState<string | null>(null)
 
   // Facturas de Proveedores (Procure-to-Pay)
   const [allSupplierInvoices, setAllSupplierInvoices] = useState<SupplierInvoice[]>([])
@@ -2581,6 +2582,26 @@ export default function PurchasesPage() {
     }
   }
 
+  const handleDownloadReturnPdf = async (item: any) => {
+    const raw = item.raw || item
+    const retId = raw.id || item.id
+    if (!retId) return
+    setDownloadingReturnPdfId(retId)
+    try {
+      await api.purchases.returns.openPdf(retId)
+      toast.success("Remito PDF Oficial Generado", "El documento A4 se abrió en una pestaña nueva listo para imprimir y remitir.")
+    } catch (err: any) {
+      try {
+        await api.purchases.returns.downloadPdf(retId, raw.codigo)
+        toast.success("Remito PDF Oficial Descargado", "El archivo PDF en formato A4 se descargó exitosamente.")
+      } catch (err2: any) {
+        toast.error("Error al generar PDF del Remito", err.message || err2.message)
+      }
+    } finally {
+      setDownloadingReturnPdfId(null)
+    }
+  }
+
   const handleApproveReturn = async (returnId: string) => {
     setProcessingReturnAction(true)
     try {
@@ -4791,6 +4812,22 @@ export default function PurchasesPage() {
                                   title="Ver detalle de productos devueltos"
                                 >
                                   <Eye className="w-4 h-4" />
+                                </button>
+                              )}
+
+                              {/* Botón Reporte PDF Oficial Premium A4 para Imprimir y Remitir */}
+                              {isManaged && (
+                                <button
+                                  onClick={() => handleDownloadReturnPdf(item)}
+                                  disabled={downloadingReturnPdfId === (item.raw?.id || item.id)}
+                                  className="p-1.5 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40 rounded-lg transition"
+                                  title="Descargar / Imprimir Remito Oficial PDF A4 (Reporte institucional)"
+                                >
+                                  {downloadingReturnPdfId === (item.raw?.id || item.id) ? (
+                                    <Loader2 className="w-4 h-4 animate-spin text-rose-600" />
+                                  ) : (
+                                    <FileText className="w-4 h-4" />
+                                  )}
                                 </button>
                               )}
 
@@ -9276,6 +9313,20 @@ export default function PurchasesPage() {
                   className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 shadow-sm transition-colors"
                 >
                   <Printer className="w-4 h-4" /> Imprimir Remito
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadReturnPdf(viewingReturnDetail)}
+                  disabled={downloadingReturnPdfId === (viewingReturnDetail.raw?.id || viewingReturnDetail.id)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white flex items-center gap-1.5 shadow-sm transition-colors"
+                  title="Descargar Remito Oficial PDF en formato A4"
+                >
+                  {downloadingReturnPdfId === (viewingReturnDetail.raw?.id || viewingReturnDetail.id) ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <FileText className="w-4 h-4" />
+                  )}
+                  <span>PDF Remito A4</span>
                 </button>
                 <button
                   onClick={() => setViewingReturnDetail(null)}

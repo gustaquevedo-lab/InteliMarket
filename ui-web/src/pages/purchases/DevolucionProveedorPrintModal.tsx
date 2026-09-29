@@ -1,6 +1,7 @@
-import React, { useRef, useMemo } from "react"
-import { Printer, X, Truck, CheckCircle2, Clock, Ban, Building2, FileCheck, ShieldCheck, UserCheck } from "lucide-react"
+import React, { useRef, useMemo, useState } from "react"
+import { Printer, X, Truck, CheckCircle2, Clock, Ban, Building2, FileCheck, ShieldCheck, UserCheck, FileDown, Loader2 } from "lucide-react"
 import { formatDate, formatDateTime, formatPYG } from "../../utils/format"
+import { api } from "../../api"
 
 export interface DevolucionItemPrint {
   id?: string
@@ -58,6 +59,24 @@ interface Props {
 
 export const DevolucionProveedorPrintModal: React.FC<Props> = ({ devolucion, onClose }) => {
   const printAreaRef = useRef<HTMLDivElement>(null)
+  const [downloadingPdf, setDownloadingPdf] = useState(false)
+
+  const handleDownloadPdf = async () => {
+    const retId = devolucion.id || devolucion.raw?.id
+    if (!retId) return
+    setDownloadingPdf(true)
+    try {
+      await api.purchases.returns.openPdf(retId)
+    } catch {
+      try {
+        await api.purchases.returns.downloadPdf(retId, devolucion.codigo)
+      } catch (err: any) {
+        alert(err.message || "Error al descargar el PDF del remito")
+      }
+    } finally {
+      setDownloadingPdf(false)
+    }
+  }
 
   const rawItems: DevolucionItemPrint[] = devolucion.items || devolucion.raw?.items || []
 
@@ -257,6 +276,15 @@ export const DevolucionProveedorPrintModal: React.FC<Props> = ({ devolucion, onC
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={handleDownloadPdf}
+              disabled={downloadingPdf}
+              className="px-4 py-2 rounded-xl text-xs font-black bg-rose-600 hover:bg-rose-500 text-white flex items-center gap-2 shadow-lg shadow-rose-600/25 transition transform active:scale-95 disabled:opacity-50"
+              title="Descargar Remito Oficial en PDF Premium A4"
+            >
+              {downloadingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
+              <span>Descargar PDF Oficial A4</span>
+            </button>
             <button
               onClick={handlePrint}
               className="px-4 py-2 rounded-xl text-xs font-black bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-2 shadow-lg shadow-indigo-600/25 transition transform active:scale-95"
