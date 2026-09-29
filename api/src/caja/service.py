@@ -780,6 +780,7 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     total_cobrado_gs = sum(Decimal(str(r[1] or 0)) for r in sales_rows)
     total_ventas_count = len(sales_rows)
 
+    sales_map = {r[0]: Decimal(str(r[1] or 0)) for r in sales_rows}
     # Formas de pago y transacciones vinculadas
     if sale_ids:
         payments_res = await db.execute(
@@ -788,6 +789,9 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
             .order_by(SalePayment.fecha.asc())
         )
         payments_rows = list(payments_res.scalars().all())
+        sale_payments_map: dict[uuid.UUID, list] = {}
+        for p in payments_rows:
+            sale_payments_map.setdefault(p.sale_id, []).append(p)
 
         pos_res = await db.execute(
             select(PosTerminalTransaction).where(PosTerminalTransaction.sale_id.in_(sale_ids), PosTerminalTransaction.exitosa == True)
@@ -847,6 +851,7 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
             plug_map = {}
     else:
         payments_rows = []
+        sale_payments_map = {}
         pos_map = {}
         plug_map = {}
 
@@ -887,7 +892,17 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         elif ckey == "EFECTIVO_USD":
             efectivo_usd += m_dec
 
-        m_gs = m_dec * tasa_brl if mon == "BRL" else (m_dec * tasa_usd if mon == "USD" else m_dec)
+        if mon == "PYG":
+            m_gs = m_dec
+        else:
+            s_tot_gs = sales_map.get(p.sale_id, Decimal("0"))
+            sibling_pays = sale_payments_map.get(p.sale_id, [])
+            sibling_pyg = sum(Decimal(str(sp.monto or 0)) for sp in sibling_pays if (sp.moneda or "PYG").upper() == "PYG")
+            sibling_divisas = [sp for sp in sibling_pays if (sp.moneda or "PYG").upper() != "PYG"]
+            if s_tot_gs > 0 and len(sibling_divisas) == 1:
+                m_gs = max(Decimal("0"), s_tot_gs - sibling_pyg)
+            else:
+                m_gs = m_dec * tasa_brl if mon == "BRL" else (m_dec * tasa_usd if mon == "USD" else m_dec)
 
         if ckey not in channels_accum:
             channels_accum[ckey] = {
@@ -1133,33 +1148,57 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     esp_brl = max(Decimal("0"), Decimal(str(efectivo_brl)) - d_brl)
     esp_usd = max(Decimal("0"), Decimal(str(efectivo_usd)) - d_usd)
 
-    # Arqueo contado
-    if count_obj:
+    # Arqueo contado: Si Tesorería ya realizó el recuento físico y lo confirmó en Bóveda,
+    # se priorizan dichos montos formalmente verificados.
+    res_h_conf = await db.execute(
+        select(CashHandoff).where(
+            CashHandoff.session_id == session_obj.id,
+            CashHandoff.estado == "confirmado",
+            CashHandoff.monto_confirmado_pyg.isnot(None),
+        ).order_by(CashHandoff.created_at.desc()).limit(1)
+    )
+    h_confirmed = res_h_conf.scalar_one_or_none()
+
+    if h_confirmed:
+        contado_pyg = Decimal(str(h_confirmed.monto_confirmado_pyg or 0))
+        contado_brl = Decimal(str(h_confirmed.monto_confirmado_brl or 0))
+        contado_usd = Decimal(str(h_confirmed.monto_confirmado_usd or 0))
+        raw_contado_pyg = contado_pyg
+        raw_contado_brl = contado_brl
+        raw_contado_usd = contado_usd
+        fondo_pyg_en_conteo = False
+        fondo_brl_en_conteo = False
+    elif count_obj:
         raw_contado_pyg = Decimal(str(count_obj.monto_efectivo if count_obj.monto_efectivo is not None else (session_obj.monto_cierre or 0)))
         raw_contado_brl = Decimal(str(count_obj.monto_efectivo_brl or 0))
         raw_contado_usd = Decimal(str(count_obj.monto_efectivo_usd or 0))
+
+        # Si la cajera contó todo el dinero en gaveta (incluyendo el fondo inicial),
+        # el monto neto rendido a Tesorería es descontando el fondo que queda en custodia en gaveta.
+        if fondo_pyg > 0 and raw_contado_pyg >= (esp_pyg + (fondo_pyg * Decimal("0.6"))):
+            contado_pyg = raw_contado_pyg - fondo_pyg
+            fondo_pyg_en_conteo = True
+        else:
+            contado_pyg = raw_contado_pyg
+            fondo_pyg_en_conteo = False
+
+        if fondo_brl > 0 and raw_contado_brl >= (esp_brl + (fondo_brl * Decimal("0.6"))):
+            contado_brl = raw_contado_brl - fondo_brl
+            fondo_brl_en_conteo = True
+        else:
+            contado_brl = raw_contado_brl
+            fondo_brl_en_conteo = False
+
+        contado_usd = raw_contado_usd
     else:
         raw_contado_pyg = Decimal(str(session_obj.monto_cierre or 0))
         raw_contado_brl = Decimal("0")
         raw_contado_usd = Decimal("0")
-
-    # Si la cajera contó todo el dinero en gaveta (incluyendo el fondo inicial),
-    # el monto neto rendido a Tesorería es descontando el fondo que queda en custodia en gaveta.
-    if fondo_pyg > 0 and raw_contado_pyg >= (esp_pyg + (fondo_pyg * Decimal("0.6"))):
-        contado_pyg = raw_contado_pyg - fondo_pyg
-        fondo_pyg_en_conteo = True
-    else:
         contado_pyg = raw_contado_pyg
+        contado_brl = Decimal("0")
+        contado_usd = Decimal("0")
         fondo_pyg_en_conteo = False
-
-    if fondo_brl > 0 and raw_contado_brl >= (esp_brl + (fondo_brl * Decimal("0.6"))):
-        contado_brl = raw_contado_brl - fondo_brl
-        fondo_brl_en_conteo = True
-    else:
-        contado_brl = raw_contado_brl
         fondo_brl_en_conteo = False
-
-    contado_usd = raw_contado_usd
 
     contado_brl_gs = contado_brl * tasa_brl
     contado_usd_gs = contado_usd * tasa_usd
@@ -3673,6 +3712,25 @@ async def get_cierre_individual_report_data(db: AsyncSession, session_id: str, c
         for d in drops
     ]
 
+    res_h = await db.execute(
+        select(CashHandoff).where(CashHandoff.session_id == s.id).order_by(CashHandoff.created_at.desc()).limit(1)
+    )
+    h_obj = res_h.scalar_one_or_none()
+    handoff_dict = {
+        "id": str(h_obj.id) if h_obj else None,
+        "estado": h_obj.estado if h_obj else "pendiente",
+        "monto_declarado_pyg": float(h_obj.monto_pyg) if h_obj and h_obj.monto_pyg is not None else None,
+        "monto_declarado_brl": float(h_obj.monto_brl) if h_obj and h_obj.monto_brl is not None else None,
+        "monto_declarado_usd": float(h_obj.monto_usd) if h_obj and h_obj.monto_usd is not None else None,
+        "monto_confirmado_pyg": float(h_obj.monto_confirmado_pyg) if h_obj and h_obj.monto_confirmado_pyg is not None else None,
+        "monto_confirmado_brl": float(h_obj.monto_confirmado_brl) if h_obj and h_obj.monto_confirmado_brl is not None else None,
+        "monto_confirmado_usd": float(h_obj.monto_confirmado_usd) if h_obj and h_obj.monto_confirmado_usd is not None else None,
+        "discrepancia_confirmacion": h_obj.discrepancia_confirmacion if h_obj else False,
+        "recibido_por_nombre": h_obj.recibido_por_nombre if h_obj else None,
+        "fecha_confirmacion": _to_asuncion_tz(h_obj.fecha_confirmacion).strftime("%d/%m/%Y %H:%M") if h_obj and h_obj.fecha_confirmacion else None,
+        "observaciones": h_obj.observaciones if h_obj else None,
+    } if h_obj else None
+
     session_data = {
         "id": str(s.id),
         "register_nombre": reg.nombre if reg else "Caja",
@@ -3698,6 +3756,7 @@ async def get_cierre_individual_report_data(db: AsyncSession, session_id: str, c
         "observaciones": s.observaciones,
         "estado": s.estado,
         "recon": recon,
+        "handoff": handoff_dict,
     }
 
     return {

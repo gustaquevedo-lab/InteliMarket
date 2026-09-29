@@ -597,34 +597,41 @@ def generate_cierre_sesion_individual_pdf(
         drops_total = recon.get("total_drops_gs", drops_pyg)
         esp_total = recon.get("esperado_total_gs", max(0, ventas_ef_total - drops_total))
 
-        c_pyg = recon.get("contado_pyg", 0)
-        c_brl = recon.get("contado_brl", 0)
-        c_usd = recon.get("contado_usd", 0)
-        tasa_brl = recon.get("tasa_brl", 1130)
-        tasa_usd = recon.get("tasa_usd", 5840.1)
-        c_brl_gs = recon.get("contado_brl_gs", c_brl * tasa_brl)
-        c_usd_gs = recon.get("contado_usd_gs", c_usd * tasa_usd)
-        c_total = recon.get("contado_total_gs", c_pyg + c_brl_gs + c_usd_gs)
+        handoff = s.get("handoff") or recon.get("handoff") or {}
+        if handoff.get("monto_confirmado_pyg") is not None:
+            c_pyg = float(handoff.get("monto_confirmado_pyg") or 0)
+            c_brl = float(handoff.get("monto_confirmado_brl") or 0)
+            c_usd = float(handoff.get("monto_confirmado_usd") or 0)
+        elif handoff.get("monto_declarado_pyg") is not None:
+            c_pyg = float(handoff.get("monto_declarado_pyg") or 0)
+            c_brl = float(handoff.get("monto_declarado_brl") or 0)
+            c_usd = float(handoff.get("monto_declarado_usd") or 0)
+        else:
+            c_pyg = float(recon.get("contado_pyg", 0))
+            c_brl = float(recon.get("contado_brl", 0))
+            c_usd = float(recon.get("contado_usd", 0))
 
-        dif_consolidada = recon.get("diferencia_consolidada_gs", c_total - esp_total)
+        tasa_brl = float(recon.get("tasa_brl", 1130))
+        tasa_usd = float(recon.get("tasa_usd", 5840.1))
+        c_brl_gs = float(recon.get("contado_brl_gs") if (handoff.get("monto_confirmado_pyg") is None and handoff.get("monto_declarado_pyg") is None) else (c_brl * tasa_brl))
+        c_usd_gs = float(recon.get("contado_usd_gs") if (handoff.get("monto_confirmado_pyg") is None and handoff.get("monto_declarado_pyg") is None) else (c_usd * tasa_usd))
+        c_total = float(c_pyg + c_brl_gs + c_usd_gs)
+
+        dif_consolidada = float(c_total - float(esp_total))
 
         # ── Auditoría de comprobantes (se calcula aquí para poder usarla en la tabla principal) ──
         va = recon.get("vouchers_audit") or {}
         tiene_auditoria_vouchers = bool(va.get("auditado"))
         dif_vouch = float(va.get("diferencia_vouchers_gs", 0)) if tiene_auditoria_vouchers else 0.0
-        dif_global = float(recon.get("diferencia_global_turno_gs", dif_consolidada + dif_vouch)) if tiene_auditoria_vouchers else float(dif_consolidada)
+        sign_v = "+" if dif_vouch > 0 else ""
+        dif_global = float(dif_consolidada + dif_vouch) if tiene_auditoria_vouchers else float(dif_consolidada)
         sign_g = "+" if dif_global > 0 else ""
         color_g = "#065F46" if abs(dif_global) < 5000 else "#991B1B"
         estado_global = "CUADRADO" if abs(dif_global) < 5000 else ("SOBRANTE" if dif_global > 0 else "FALTANTE")
 
-        # La diferencia «visible» en la tabla principal es la global cuando hay auditoría de comprobantes;
-        # así el resultado publicado siempre refleja lo actuado en el punteo de Tesorería.
-        dif_display = dif_global if tiene_auditoria_vouchers else dif_consolidada
-        estado_display = estado_global if tiene_auditoria_vouchers else ("CUADRADO" if abs(dif_consolidada) < 5000 else ("SOBRANTE" if dif_consolidada > 0 else "FALTANTE"))
         estado_cuadre = "CUADRADO" if abs(dif_consolidada) < 5000 else ("SOBRANTE" if dif_consolidada > 0 else "FALTANTE")
         signo_cons = "+" if dif_consolidada >= 0 else ""
-        signo_display = "+" if dif_display >= 0 else ""
-        dif_color_hex = "#059669" if abs(dif_display) < 5000 else ("#D97706" if dif_display > 0 else "#DC2626")
+        dif_color_hex = "#059669" if abs(dif_consolidada) < 5000 else ("#D97706" if dif_consolidada > 0 else "#DC2626")
 
         style_th = ParagraphStyle("TH", parent=styles["Normal"], fontName=FONT_BOLD, fontSize=7.5, leading=9, textColor=HexColor("#0F172A"))
         style_tl = ParagraphStyle("TL", parent=styles["Normal"], fontSize=7, leading=8.5, textColor=HexColor("#334155"))
@@ -635,15 +642,25 @@ def generate_cierre_sesion_individual_pdf(
         cant_tickets = recon.get("total_ventas_count", 0)
         drops_p_str = f"-{_fmt_gs(drops_total)}" if drops_total > 0 else "0 Gs."
         tot_ajustes = float(recon.get("total_ajustes_reclasificados_gs") or 0)
+        tot_no_ef_pos = max(0.0, float(tot_no_ef) - tot_ajustes) if tot_ajustes > 0 else float(tot_no_ef)
+
         esp_rows = [
             [Paragraph("<b>1.A CONCILIACIÓN EFECTIVO ESPERADO (₲)</b>", style_th), ""],
             [Paragraph(f"Total Ventas Facturadas ({cant_tickets} tickets):", style_tl), Paragraph(f"{_fmt_gs(tot_facturado)}", style_tr_num)],
-            [Paragraph("(-) Medios No Efectivo (Tarjetas, QR, PIX):", style_tl), Paragraph(f"-{_fmt_gs(tot_no_ef)}", style_tr_num)],
         ]
         if tot_ajustes > 0:
             esp_rows.append([
-                Paragraph("(-) Reclasif. Tesorería (Efectivo a No Ef.):", style_tl),
+                Paragraph("(-) Medios No Efectivo POS:", style_tl),
+                Paragraph(f"-{_fmt_gs(tot_no_ef_pos)}", style_tr_num)
+            ])
+            esp_rows.append([
+                Paragraph("(-) Reclasif. Efectivo a Comprobantes:", style_tl),
                 Paragraph(f"-{_fmt_gs(tot_ajustes)}", style_tr_num)
+            ])
+        else:
+            esp_rows.append([
+                Paragraph("(-) Medios No Efectivo (Tarjetas, QR, PIX):", style_tl),
+                Paragraph(f"-{_fmt_gs(tot_no_ef)}", style_tr_num)
             ])
         esp_rows.extend([
             [Paragraph("(=) Efectivo Total por Ventas:", style_tl), Paragraph(f"{_fmt_gs(ventas_ef_total)}", style_tr_num)],
@@ -673,21 +690,32 @@ def generate_cierre_sesion_individual_pdf(
             [Paragraph(f"Efectivo Reales ({brl_entregado_str} x {_fmt_gs(tasa_brl)}):", style_tl), Paragraph(f"{_fmt_gs(c_brl_gs)}", style_tr_num)],
             [Paragraph(f"Efectivo Dólares ({usd_entregado_str} x {_fmt_gs(tasa_usd)}):", style_tl), Paragraph(f"{_fmt_gs(c_usd_gs)}", style_tr_num)],
             [Paragraph("<b>TOTAL RENDIDO A TESORERÍA:</b>", style_th), Paragraph(f"<b>{_fmt_gs(c_total)}</b>", style_tr)],
-            [Paragraph("<b>DIFERENCIA (Rendido - Esperado):</b>", style_th), Paragraph(f"<font color='{dif_color_hex}'><b>{signo_display}{_fmt_gs(dif_display)} ({estado_display})</b></font>", style_tr)],
+            [Paragraph("<b>DIFERENCIA EFECTIVO (Rendido - Esperado):</b>", style_th), Paragraph(f"<font color='{dif_color_hex}'><b>{signo_cons}{_fmt_gs(dif_consolidada)} ({estado_cuadre})</b></font>", style_tr)],
         ]
+        if tiene_auditoria_vouchers:
+            color_v_hex = "#059669" if dif_vouch == 0 else "#DC2626"
+            estado_v = "CONFORME" if dif_vouch == 0 else ("SOBRANTE" if dif_vouch > 0 else "FALTANTE")
+            color_g_hex = "#059669" if abs(dif_global) < 5000 else ("#D97706" if dif_global > 0 else "#DC2626")
+            ren_rows.extend([
+                [Paragraph("Dif. Comprobantes No Efectivo (Vouchers):", style_tl), Paragraph(f"<font color='{color_v_hex}'><b>{sign_v}{_fmt_gs(dif_vouch)} ({estado_v})</b></font>", style_tr_num)],
+                [Paragraph("<b>DIF. GLOBAL TURNO (Efectivo + Vouchers):</b>", style_th), Paragraph(f"<font color='{color_g_hex}'><b>{sign_g}{_fmt_gs(dif_global)} ({estado_global})</b></font>", style_tr)],
+            ])
         t_ren = Table(ren_rows, colWidths=[61 * mm, 33 * mm])
-        t_ren.setStyle(TableStyle([
+        ren_style = [
             ("SPAN", (0, 0), (1, 0)),
             ("BACKGROUND", (0, 0), (1, 0), HexColor("#F1F5F9")),
             ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
             ("LINEBELOW", (0, 0), (-1, 0), 1.0, HexColor("#94A3B8")),
-            ("LINEABOVE", (0, -2), (-1, -2), 0.75, HexColor("#94A3B8")),
-            ("BACKGROUND", (0, -2), (-1, -1), HexColor("#F8FAFC")),
+            ("LINEABOVE", (0, 4), (-1, 4), 0.75, HexColor("#94A3B8")),
+            ("BACKGROUND", (0, 4), (-1, -1), HexColor("#F8FAFC")),
             ("TOPPADDING", (0, 0), (-1, -1), 2.5),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
             ("LEFTPADDING", (0, 0), (-1, -1), 3.5),
             ("RIGHTPADDING", (0, 0), (-1, -1), 3.5),
-        ]))
+        ]
+        if tiene_auditoria_vouchers:
+            ren_style.append(("LINEABOVE", (0, -1), (-1, -1), 0.5, HexColor("#CBD5E1")))
+        t_ren.setStyle(TableStyle(ren_style))
 
         t_master = Table([[t_esp, t_ren]], colWidths=[92 * mm, 94 * mm])
         t_master.setStyle(TableStyle([
@@ -774,7 +802,7 @@ def generate_cierre_sesion_individual_pdf(
         if tiene_auditoria_vouchers and dif_vouch != 0:
             dif_label_p = f"<font size=5 color='{txt_color_hex}'><b>DIF. GLOBAL TURNO</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{sign_g}{_fmt_gs(dif_global)}</b></font><br/><font size=5 color='#475569'>Ef: {signo_cons}{_fmt_gs(dif_consolidada)} | Vouch: {sign_v}{_fmt_gs(dif_vouch)}</font>"
         else:
-            dif_label_p = f"<font size=5.5 color='{txt_color_hex}'><b>DIFERENCIA RENDICIÓN</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{signo_cons}{_fmt_gs(dif_consolidada)}</b></font>"
+            dif_label_p = f"<font size=5.5 color='{txt_color_hex}'><b>DIFERENCIA EFECTIVO</b></font><br/><font size=8.5 color='{txt_color_hex}'><b>{signo_cons}{_fmt_gs(dif_consolidada)}</b></font>"
 
         resumen_box = [
             [
