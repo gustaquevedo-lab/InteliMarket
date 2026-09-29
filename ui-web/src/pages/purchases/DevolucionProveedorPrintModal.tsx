@@ -38,6 +38,7 @@ export interface DevolucionDocPrint {
   monto?: number
   nota_credito_numero?: string
   nota_credito_monto?: number
+  notas_credito?: any[]
   estado: "pendiente" | "autorizado" | "completado" | "rechazado" | string
   autorizado_at?: string
   autorizado_por_nombre?: string
@@ -533,10 +534,38 @@ export const DevolucionProveedorPrintModal: React.FC<Props> = ({ devolucion, onC
                     <p className="m-0 text-[11px] leading-relaxed italic">"{devolucion.observaciones}"</p>
                   </div>
                 )}
-                {devolucion.nota_credito_numero && (
-                  <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 font-bold text-[11px] flex items-center justify-between">
-                    <span>Nota de Crédito Vinculada:</span>
-                    <span className="font-mono text-xs">{devolucion.nota_credito_numero}</span>
+                {((devolucion.notas_credito && devolucion.notas_credito.length > 0) || (devolucion.raw?.notas_credito && devolucion.raw.notas_credito.length > 0) || devolucion.nota_credito_numero) && (
+                  <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 space-y-1.5">
+                    <div className="flex items-center justify-between border-b border-emerald-200/80 pb-1 font-bold text-[10px] uppercase text-emerald-800">
+                      <span>
+                        {(devolucion.notas_credito || devolucion.raw?.notas_credito)?.length > 1
+                          ? `Notas de Crédito Vinculadas (${(devolucion.notas_credito || devolucion.raw?.notas_credito).length})`
+                          : "Nota de Crédito Vinculada"}
+                      </span>
+                      {devolucion.nota_credito_monto && (
+                        <span className="font-mono text-xs font-black text-emerald-700">
+                          Total: {formatPYG(devolucion.nota_credito_monto)}
+                        </span>
+                      )}
+                    </div>
+
+                    {(devolucion.notas_credito || devolucion.raw?.notas_credito)?.length > 0 ? (
+                      <div className="space-y-1">
+                        {(devolucion.notas_credito || devolucion.raw?.notas_credito).map((nc: any, idx: number) => (
+                          <div key={idx} className="flex items-center justify-between text-[11px] font-mono">
+                            <span className="font-semibold text-emerald-950">
+                              {nc.numero || "S/N"} {nc.timbrado ? `(Timb: ${nc.timbrado})` : ""} {nc.factura_numero ? `→ Fact: ${nc.factura_numero}` : ""}
+                            </span>
+                            <span className="font-bold text-emerald-800">{formatPYG(nc.monto || 0)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between font-mono text-xs">
+                        <span>{devolucion.nota_credito_numero}</span>
+                        {devolucion.nota_credito_monto && <span>{formatPYG(devolucion.nota_credito_monto)}</span>}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

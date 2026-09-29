@@ -471,6 +471,7 @@ class SupplierReturnResponse(BaseModel):
     valor_total_estimado: Optional[Decimal] = None
     nota_credito_numero: Optional[str] = None
     nota_credito_monto: Optional[Decimal] = None
+    notas_credito: Optional[list[dict]] = None
     estado: str
     autorizado_por: Optional[UUID] = None
     autorizado_at: Optional[datetime] = None

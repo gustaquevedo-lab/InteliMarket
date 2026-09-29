@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from api.src.supermer.models import SupplierReturn, SupplierReturnItem
 from api.src.products.models import Product
-from api.src.financial.models import SupplierInvoice, SupplierInvoiceItem, SupplierReturn as FinancialSupplierReturn
+from api.src.financial.models import SupplierInvoice, SupplierInvoiceItem, SupplierReturn as FinancialSupplierReturn, SupplierCreditNote, SupplierCreditNoteApplication
 from api.src.purchases.models import Supplier
 from api.src.inventory.models import Stock, InventoryMovement, Warehouse
 
@@ -241,6 +241,7 @@ async def list_supplier_returns(
             "valor_total_estimado": float(sum(it["valor_total"] for it in items_detail)) if items_detail else float(r.valor_total_estimado or 0),
             "nota_credito_numero": r.nota_credito_numero,
             "nota_credito_monto": float(r.nota_credito_monto or 0) if r.nota_credito_monto else None,
+            "notas_credito": r.notas_credito or [],
             "estado": r.estado or "pendiente",
             "autorizado_por": str(r.autorizado_por) if r.autorizado_por else None,
             "autorizado_at": r.autorizado_at.isoformat() if r.autorizado_at else None,
@@ -534,14 +535,16 @@ async def complete_supplier_return(
     return_id: uuid.UUID,
     user_id: uuid.UUID,
     nota_credito_numero: Optional[str] = None,
+    notas_credito: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Completa la devolución:
     1. Cambia estado a 'completado'.
     2. IMPACTO EN STOCK: Descuenta existencia del almacén y registra InventoryMovement negativo.
-    3. IMPACTO FINANCIERO:
-       - Si los ítems tienen factura de compra vinculada, descuenta el saldo pendiente de SupplierInvoice.
-       - Asienta un SupplierReturn financiero en la cuenta corriente del proveedor.
+    3. PROCESAMIENTO DE NOTAS DE CRÉDITO (1 o N notas de crédito):
+       - Registra cada NC formal en SupplierCreditNote.
+       - Si una NC afecta una factura específica o si los ítems tienen factura, aplica y descuenta saldo de factura AP.
+       - Asienta en SupplierReturn financiero.
     """
     q = select(SupplierReturn).options(selectinload(SupplierReturn.items)).where(
         SupplierReturn.id == return_id,
@@ -559,9 +562,35 @@ async def complete_supplier_return(
     sr.estado = "completado"
     sr.completado_por = user_id
     sr.completado_at = now
-    if nota_credito_numero:
-        sr.nota_credito_numero = nota_credito_numero
-        sr.nota_credito_monto = sr.valor_total_estimado
+
+    # Normalizar lista de NCs a procesar
+    nc_list_to_save: List[Dict[str, Any]] = []
+    if notas_credito and len(notas_credito) > 0:
+        for nc in notas_credito:
+            num = (nc.get("numero") or "").strip()
+            monto = Decimal(str(nc.get("monto") or 0))
+            if num or monto > 0:
+                nc_list_to_save.append({
+                    "numero": num,
+                    "timbrado": (nc.get("timbrado") or "").strip() or None,
+                    "fecha": nc.get("fecha") or date.today().isoformat(),
+                    "monto": monto,
+                    "factura_id": nc.get("factura_id"),
+                    "factura_numero": nc.get("factura_numero"),
+                    "motivo": nc.get("motivo") or f"Devolución {sr.codigo}",
+                    "observaciones": nc.get("observaciones"),
+                })
+    elif nota_credito_numero and nota_credito_numero.strip():
+        nc_list_to_save.append({
+            "numero": nota_credito_numero.strip(),
+            "timbrado": None,
+            "fecha": date.today().isoformat(),
+            "monto": sr.valor_total_estimado or Decimal(0),
+            "factura_id": None,
+            "factura_numero": None,
+            "motivo": f"Devolución {sr.codigo}",
+            "observaciones": None,
+        })
 
     # Si no tenía warehouse asignado, buscamos el depósito principal de la empresa
     wh_id = sr.warehouse_id
@@ -570,7 +599,7 @@ async def complete_supplier_return(
         wh_res = await db.execute(wh_q)
         wh_id = wh_res.scalar_one_or_none()
 
-    facturas_impactadas: Dict[uuid.UUID, Decimal] = {}
+    facturas_items: Dict[uuid.UUID, Decimal] = {}
 
     for item in sr.items:
         cant = int(item.cantidad)
@@ -608,31 +637,137 @@ async def complete_supplier_return(
 
         # Acumular monto por factura afectada
         if item.factura_id:
-            facturas_impactadas[item.factura_id] = facturas_impactadas.get(item.factura_id, Decimal(0)) + (item.valor_total or Decimal(0))
+            facturas_items[item.factura_id] = facturas_items.get(item.factura_id, Decimal(0)) + (item.valor_total or Decimal(0))
 
-    # 2. IMPACTO FINANCIERO EN FACTURAS DE PROVEEDOR
-    for inv_id, monto_devuelto in facturas_impactadas.items():
-        inv_q = select(SupplierInvoice).where(SupplierInvoice.id == inv_id, SupplierInvoice.company_id == company_id)
-        inv_res = await db.execute(inv_q)
-        inv = inv_res.scalar_one_or_none()
-        if inv:
-            nuevo_saldo = max(Decimal(0), (inv.saldo_pendiente or Decimal(0)) - monto_devuelto)
-            inv.saldo_pendiente = nuevo_saldo
-            inv.monto_retenido_nc = (inv.monto_retenido_nc or Decimal(0)) + monto_devuelto
-            if nuevo_saldo == 0 and inv.estado != "pagada":
-                inv.estado = "pagada"
-            logger.info(f"Devolución {sr.codigo}: Saldo de Factura {inv.numero_factura} reducido en {monto_devuelto}. Nuevo saldo: {nuevo_saldo}")
+    # 2. PROCESAMIENTO FINANCIERO DE NOTAS DE CRÉDITO
+    saved_ncs: List[Dict[str, Any]] = []
+    total_nc_monto = Decimal(0)
+    all_nc_numeros: List[str] = []
+
+    for nc_data in nc_list_to_save:
+        monto_nc = Decimal(str(nc_data["monto"]))
+        total_nc_monto += monto_nc
+        num_nc = nc_data["numero"]
+        if num_nc:
+            all_nc_numeros.append(num_nc)
+
+        f_fecha = nc_data["fecha"]
+        if isinstance(f_fecha, str):
+            try:
+                f_fecha_date = date.fromisoformat(f_fecha[:10])
+            except Exception:
+                f_fecha_date = date.today()
+        elif isinstance(f_fecha, date):
+            f_fecha_date = f_fecha
+        else:
+            f_fecha_date = date.today()
+
+        # Determinar factura asociada
+        target_inv_id = None
+        target_inv_num = nc_data.get("factura_numero")
+        if nc_data.get("factura_id"):
+            try:
+                target_inv_id = uuid.UUID(str(nc_data["factura_id"]))
+            except Exception:
+                target_inv_id = None
+        elif len(facturas_items) == 1:
+            target_inv_id = list(facturas_items.keys())[0]
+
+        # Crear registro formal SupplierCreditNote
+        scn = SupplierCreditNote(
+            company_id=company_id,
+            supplier_id=sr.proveedor_id,
+            numero=num_nc or f"NC-{sr.codigo}",
+            numero_factura_origen=target_inv_num or (", ".join(filter(None, {item.factura_numero for item in sr.items})) or None),
+            timbrado=nc_data.get("timbrado"),
+            fecha=f_fecha_date,
+            fecha_recepcion=f_fecha_date,
+            motivo=nc_data.get("motivo") or f"Devolución de mercadería {sr.codigo}",
+            motivo_categoria="devolucion_rotura",
+            impacto_contable="otros_ingresos",
+            monto=monto_nc,
+            saldo_disponible=monto_nc,
+            moneda="PYG",
+            observaciones=nc_data.get("observaciones") or f"Emitida por devolución {sr.codigo}",
+            cancelado=False,
+        )
+        db.add(scn)
+        await db.flush()
+
+        # Aplicar contra factura de compra si corresponde
+        if target_inv_id:
+            inv_q = select(SupplierInvoice).where(SupplierInvoice.id == target_inv_id, SupplierInvoice.company_id == company_id)
+            inv_res = await db.execute(inv_q)
+            inv = inv_res.scalar_one_or_none()
+            if inv:
+                saldo_inv = Decimal(str(inv.saldo_pendiente or 0))
+                monto_aplicar = min(saldo_inv, monto_nc)
+                if monto_aplicar > 0:
+                    inv.saldo_pendiente = max(Decimal(0), saldo_inv - monto_aplicar)
+                    inv.monto_retenido_nc = Decimal(str(inv.monto_retenido_nc or 0)) + monto_aplicar
+                    if inv.saldo_pendiente <= 0:
+                        inv.estado = "pagada"
+                    else:
+                        inv.estado = "parcial"
+
+                    scn.saldo_disponible = max(Decimal(0), scn.saldo_disponible - monto_aplicar)
+
+                    app_record = SupplierCreditNoteApplication(
+                        company_id=company_id,
+                        credit_note_id=scn.id,
+                        invoice_id=inv.id,
+                        monto_aplicado=monto_aplicar,
+                        observaciones=f"Aplicación de NC {num_nc} por Devolución {sr.codigo}",
+                    )
+                    db.add(app_record)
+
+                if not target_inv_num:
+                    target_inv_num = inv.numero_factura
+
+        saved_ncs.append({
+            "id": str(scn.id),
+            "numero": num_nc,
+            "timbrado": nc_data.get("timbrado"),
+            "fecha": f_fecha_date.isoformat(),
+            "monto": float(monto_nc),
+            "factura_id": str(target_inv_id) if target_inv_id else None,
+            "factura_numero": target_inv_num,
+            "motivo": nc_data.get("motivo"),
+            "observaciones": nc_data.get("observaciones"),
+        })
+
+    # Si NO se cargaron NCs pero había facturas vinculadas a los ítems, descontar saldo provisional
+    if not nc_list_to_save and facturas_items:
+        for inv_id, monto_devuelto in facturas_items.items():
+            inv_q = select(SupplierInvoice).where(SupplierInvoice.id == inv_id, SupplierInvoice.company_id == company_id)
+            inv_res = await db.execute(inv_q)
+            inv = inv_res.scalar_one_or_none()
+            if inv:
+                nuevo_saldo = max(Decimal(0), (inv.saldo_pendiente or Decimal(0)) - monto_devuelto)
+                inv.saldo_pendiente = nuevo_saldo
+                inv.monto_retenido_nc = (inv.monto_retenido_nc or Decimal(0)) + monto_devuelto
+                if nuevo_saldo == 0 and inv.estado != "pagada":
+                    inv.estado = "pagada"
+                logger.info(f"Devolución {sr.codigo}: Saldo de Factura {inv.numero_factura} reducido en {monto_devuelto}. Nuevo saldo: {nuevo_saldo}")
+
+    # Actualizar campos en SupplierReturn
+    sr.notas_credito = saved_ncs
+    if all_nc_numeros:
+        sr.nota_credito_numero = ", ".join(all_nc_numeros)
+        sr.nota_credito_monto = total_nc_monto
+    elif sr.valor_total_estimado:
+        sr.nota_credito_monto = sr.valor_total_estimado
 
     # 3. REGISTRO FINANCIERO EN CUENTA CORRIENTE PROVEEDOR (supplier_returns)
     fin_return = FinancialSupplierReturn(
         company_id=company_id,
         supplier_id=sr.proveedor_id,
         numero_factura_origen=", ".join(filter(None, {item.factura_numero for item in sr.items})) or None,
-        numero_nota_credito=nota_credito_numero or sr.codigo,
+        numero_nota_credito=sr.nota_credito_numero or sr.codigo,
         fecha=date.today(),
-        monto=sr.valor_total_estimado or Decimal(0),
+        monto=sr.nota_credito_monto or sr.valor_total_estimado or Decimal(0),
         moneda="PYG",
-        observaciones=f"Devolución de mercadería {sr.codigo}. Total {sr.total_items} ítems entregados al proveedor.",
+        observaciones=f"Devolución de mercadería {sr.codigo}. Total {sr.total_items} ítems entregados al proveedor." + (f" NCs: {sr.nota_credito_numero}" if sr.nota_credito_numero else ""),
     )
     db.add(fin_return)
 
@@ -641,3 +776,124 @@ async def complete_supplier_return(
 
     res_list = await list_supplier_returns(db, company_id)
     return next((r for r in res_list if r["id"] == str(return_id)), {"id": str(return_id), "estado": "completado"})
+
+
+async def add_nc_to_supplier_return(
+    db: AsyncSession,
+    company_id: uuid.UUID,
+    return_id: uuid.UUID,
+    user_id: uuid.UUID,
+    notas_credito: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Permite registrar una o más Notas de Crédito a una devolución (incluso si ya fue completada previamente).
+    Crea las entidades formales SupplierCreditNote y las aplicaciones contra factura.
+    """
+    q = select(SupplierReturn).options(selectinload(SupplierReturn.items)).where(
+        SupplierReturn.id == return_id,
+        SupplierReturn.company_id == company_id,
+    )
+    res = await db.execute(q)
+    sr = res.scalar_one_or_none()
+    if not sr:
+        raise HTTPException(404, "Devolución a proveedor no encontrada")
+
+    current_ncs: List[Dict[str, Any]] = list(sr.notas_credito or [])
+
+    for nc_data in notas_credito:
+        num = (nc_data.get("numero") or "").strip()
+        monto = Decimal(str(nc_data.get("monto") or 0))
+        if not num and monto <= 0:
+            continue
+
+        f_fecha = nc_data.get("fecha")
+        if isinstance(f_fecha, str):
+            try:
+                f_fecha_date = date.fromisoformat(f_fecha[:10])
+            except Exception:
+                f_fecha_date = date.today()
+        elif isinstance(f_fecha, date):
+            f_fecha_date = f_fecha
+        else:
+            f_fecha_date = date.today()
+
+        target_inv_id = None
+        target_inv_num = nc_data.get("factura_numero")
+        if nc_data.get("factura_id"):
+            try:
+                target_inv_id = uuid.UUID(str(nc_data["factura_id"]))
+            except Exception:
+                target_inv_id = None
+
+        scn = SupplierCreditNote(
+            company_id=company_id,
+            supplier_id=sr.proveedor_id,
+            numero=num or f"NC-{sr.codigo}",
+            numero_factura_origen=target_inv_num or (", ".join(filter(None, {item.factura_numero for item in sr.items})) or None),
+            timbrado=(nc_data.get("timbrado") or "").strip() or None,
+            fecha=f_fecha_date,
+            fecha_recepcion=f_fecha_date,
+            motivo=nc_data.get("motivo") or f"Devolución de mercadería {sr.codigo}",
+            motivo_categoria="devolucion_rotura",
+            impacto_contable="otros_ingresos",
+            monto=monto,
+            saldo_disponible=monto,
+            moneda="PYG",
+            observaciones=nc_data.get("observaciones") or f"NC agregada a devolución {sr.codigo}",
+            cancelado=False,
+        )
+        db.add(scn)
+        await db.flush()
+
+        if target_inv_id:
+            inv_q = select(SupplierInvoice).where(SupplierInvoice.id == target_inv_id, SupplierInvoice.company_id == company_id)
+            inv_res = await db.execute(inv_q)
+            inv = inv_res.scalar_one_or_none()
+            if inv:
+                saldo_inv = Decimal(str(inv.saldo_pendiente or 0))
+                monto_aplicar = min(saldo_inv, monto)
+                if monto_aplicar > 0:
+                    inv.saldo_pendiente = max(Decimal(0), saldo_inv - monto_aplicar)
+                    inv.monto_retenido_nc = Decimal(str(inv.monto_retenido_nc or 0)) + monto_aplicar
+                    if inv.saldo_pendiente <= 0:
+                        inv.estado = "pagada"
+                    else:
+                        inv.estado = "parcial"
+
+                    scn.saldo_disponible = max(Decimal(0), scn.saldo_disponible - monto_aplicar)
+
+                    app_record = SupplierCreditNoteApplication(
+                        company_id=company_id,
+                        credit_note_id=scn.id,
+                        invoice_id=inv.id,
+                        monto_aplicado=monto_aplicar,
+                        observaciones=f"Aplicación de NC {num} por Devolución {sr.codigo}",
+                    )
+                    db.add(app_record)
+
+                if not target_inv_num:
+                    target_inv_num = inv.numero_factura
+
+        current_ncs.append({
+            "id": str(scn.id),
+            "numero": num,
+            "timbrado": (nc_data.get("timbrado") or "").strip() or None,
+            "fecha": f_fecha_date.isoformat(),
+            "monto": float(monto),
+            "factura_id": str(target_inv_id) if target_inv_id else None,
+            "factura_numero": target_inv_num,
+            "motivo": nc_data.get("motivo"),
+            "observaciones": nc_data.get("observaciones"),
+        })
+
+    sr.notas_credito = current_ncs
+    all_nums = [c["numero"] for c in current_ncs if c.get("numero")]
+    if all_nums:
+        sr.nota_credito_numero = ", ".join(all_nums)
+    sr.nota_credito_monto = Decimal(str(sum(c.get("monto", 0) for c in current_ncs)))
+
+    await db.commit()
+    await db.refresh(sr)
+
+    res_list = await list_supplier_returns(db, company_id)
+    return next((r for r in res_list if r["id"] == str(return_id)), {"id": str(return_id), "notas_credito": sr.notas_credito})

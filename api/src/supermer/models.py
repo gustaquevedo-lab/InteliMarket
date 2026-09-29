@@ -1081,6 +1081,7 @@ class SupplierReturn(Base):
     valor_total_estimado = Column(Numeric(14, 2))
     nota_credito_numero = Column(String(50))
     nota_credito_monto = Column(Numeric(14, 2))
+    notas_credito = Column(JSONB, default=list)
     estado = Column(String(20), default="pendiente")
     warehouse_id = Column(UUID(as_uuid=True), nullable=True)
     autorizado_por = Column(UUID(as_uuid=True))

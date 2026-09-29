@@ -1323,8 +1323,24 @@ class SupplierReturnUpdateInput(BaseModel):
     items: List[SupplierReturnItemInput]
 
 
+class SupplierReturnNCItem(BaseModel):
+    numero: str
+    timbrado: Optional[str] = None
+    fecha: Optional[date] = None
+    monto: Decimal
+    factura_id: Optional[UUID] = None
+    factura_numero: Optional[str] = None
+    motivo: Optional[str] = None
+    observaciones: Optional[str] = None
+
+
 class SupplierReturnCompleteInput(BaseModel):
     nota_credito_numero: Optional[str] = None
+    notas_credito: Optional[List[SupplierReturnNCItem]] = None
+
+
+class SupplierReturnAddNCInput(BaseModel):
+    notas_credito: List[SupplierReturnNCItem]
 
 
 SupplierReturnItemInput.model_rebuild()
@@ -1332,6 +1348,8 @@ SupplierReturnCreateInput.model_rebuild()
 SupplierReturnUpdateInput.model_rebuild()
 SupplierReturnRejectInput.model_rebuild()
 SupplierReturnCompleteInput.model_rebuild()
+SupplierReturnNCItem.model_rebuild()
+SupplierReturnAddNCInput.model_rebuild()
 
 
 class SupplierPriceComparisonItem(BaseModel):

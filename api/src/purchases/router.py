@@ -36,6 +36,7 @@ from api.src.purchases.schemas import (
     SupplierNcRequestResponse, ResolveSupplierNcRequest,
     SupplierProductItemResponse, ProductInvoiceOptionResponse,
     SupplierReturnCreateInput, SupplierReturnUpdateInput, SupplierReturnRejectInput, SupplierReturnCompleteInput,
+    SupplierReturnNCItem, SupplierReturnAddNCInput,
     ProductSupplierComparisonResponse, SupplierPriceComparisonItem,
 )
 from api.src.purchases import service
@@ -1061,7 +1062,7 @@ async def reject_purchase_supplier_return(
 @router.post("/purchases/returns/{return_id}/complete")
 async def complete_purchase_supplier_return(
     return_id: str,
-    body: SupplierReturnCompleteInput = None,
+    body: Optional[SupplierReturnCompleteInput] = None,
     company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
@@ -1069,13 +1070,33 @@ async def complete_purchase_supplier_return(
     """
     Completa la devolución:
     - Descuenta existencias en stock de inventario (genera movimiento negativo).
-    - Descuenta saldo de la factura afectada en cuentas por pagar (si aplica).
+    - Registra 1 o N Notas de Crédito emitidas por el proveedor con sus aplicaciones contables.
+    - Descuenta saldo de las facturas afectadas en cuentas por pagar.
     - Genera crédito a favor en cuenta corriente del proveedor.
     """
     cid = uuid.UUID(user.get("company_id") or company_id)
     uid = uuid.UUID(str(user.get("id")))
     nc_num = body.nota_credito_numero if body else None
-    return await returns_service.complete_supplier_return(db, cid, uuid.UUID(return_id), uid, nc_num)
+    ncs = [nc.model_dump() for nc in body.notas_credito] if (body and body.notas_credito) else None
+    return await returns_service.complete_supplier_return(db, cid, uuid.UUID(return_id), uid, nc_num, ncs)
+
+
+@router.post("/purchases/returns/{return_id}/credit-notes")
+async def add_credit_notes_to_supplier_return_endpoint(
+    return_id: str,
+    body: SupplierReturnAddNCInput,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """
+    Agrega una o más Notas de Crédito a una devolución (incluso si ya fue completada previamente).
+    Genera las Notas de Crédito formales en Finanzas y las aplicaciones a facturas.
+    """
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    uid = uuid.UUID(str(user.get("id")))
+    ncs = [nc.model_dump() for nc in body.notas_credito]
+    return await returns_service.add_nc_to_supplier_return(db, cid, uuid.UUID(return_id), uid, ncs)
 
 
 

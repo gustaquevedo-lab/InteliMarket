@@ -180,6 +180,30 @@ export default function PurchasesPage() {
   const [rejectingReturnId, setRejectingReturnId] = useState<string | null>(null)
   const [rejectReasonInput, setRejectReasonInput] = useState("")
   const [completingReturnId, setCompletingReturnId] = useState<string | null>(null)
+  const [completingReturnItem, setCompletingReturnItem] = useState<any | null>(null)
+  const [completingReturnNcs, setCompletingReturnNcs] = useState<{
+    id?: string
+    numero: string
+    timbrado?: string
+    fecha?: string
+    monto: number
+    factura_id?: string
+    factura_numero?: string
+    motivo?: string
+    observaciones?: string
+  }[]>([])
+  const [managingNcsReturn, setManagingNcsReturn] = useState<any | null>(null)
+  const [managingNcsList, setManagingNcsList] = useState<{
+    id?: string
+    numero: string
+    timbrado?: string
+    fecha?: string
+    monto: number
+    factura_id?: string
+    factura_numero?: string
+    motivo?: string
+    observaciones?: string
+  }[]>([])
   const [ncNumberInput, setNcNumberInput] = useState("")
   const [processingReturnAction, setProcessingReturnAction] = useState(false)
   const [printingReturnDoc, setPrintingReturnDoc] = useState<any | null>(null)
@@ -2106,6 +2130,7 @@ export default function PurchasesPage() {
       almacen_nombre: r.almacen_nombre,
       total_items: r.total_items,
       motivo_rechazo: r.motivo_rechazo,
+      notas_credito: r.notas_credito || [],
       raw: r,
     }))
 
@@ -2133,7 +2158,8 @@ export default function PurchasesPage() {
         (item.numero_nota_credito?.toLowerCase().includes(searchReturns.toLowerCase())) ||
         (item.numero_factura_origen?.toLowerCase().includes(searchReturns.toLowerCase())) ||
         (item.supplier_nombre?.toLowerCase().includes(searchReturns.toLowerCase())) ||
-        (item.observaciones?.toLowerCase().includes(searchReturns.toLowerCase()))
+        (item.observaciones?.toLowerCase().includes(searchReturns.toLowerCase())) ||
+        (item.raw?.notas_credito?.some((nc: any) => (nc.numero || "").toLowerCase().includes(searchReturns.toLowerCase())))
       return matchSearch
     }).sort((a, b) => new Date(b.fecha || b.created_at || "").getTime() - new Date(a.fecha || a.created_at || "").getTime())
   }, [managedReturns, supplierReturns, supplierCreditNotes, searchReturns])
@@ -2589,24 +2615,242 @@ export default function PurchasesPage() {
     }
   }
 
+  // ── Gestores de Salida Física con Múltiples NCs ──
+  const handleOpenCompleteReturn = (item: any) => {
+    const raw = item.raw || item
+    setCompletingReturnId(item.id)
+    setCompletingReturnItem(raw)
+
+    const itemInvoices: { factura_id?: string; factura_numero?: string }[] = []
+    const seen = new Set<string>()
+    for (const it of (raw.items || [])) {
+      if (it.factura_numero && !seen.has(it.factura_numero)) {
+        seen.add(it.factura_numero)
+        itemInvoices.push({ factura_id: it.factura_id, factura_numero: it.factura_numero })
+      }
+    }
+
+    const defaultMonto = Number(raw.valor_total_estimado || raw.monto || 0)
+    const firstInv = itemInvoices[0]
+
+    // Pre-cargar 1 fila inicial por defecto con el monto total estimado (editable / divisible en 2 o más NCs)
+    setCompletingReturnNcs([
+      {
+        numero: "",
+        timbrado: "",
+        fecha: new Date().toISOString().slice(0, 10),
+        monto: defaultMonto,
+        factura_id: firstInv?.factura_id || "",
+        factura_numero: firstInv?.factura_numero || "",
+        motivo: "Devolución de mercadería",
+        observaciones: "",
+      }
+    ])
+    setNcNumberInput("")
+  }
+
+  const handleAddNcRow = () => {
+    const raw = completingReturnItem
+    const itemInvoices = (raw?.items || []).filter((it: any) => it.factura_numero)
+    const firstInv = itemInvoices[0]
+
+    // Calcular saldo remanente que aún no tiene NC asignada
+    const totalEstimado = Number(raw?.valor_total_estimado || raw?.monto || 0)
+    const sumActual = completingReturnNcs.reduce((acc, n) => acc + (Number(n.monto) || 0), 0)
+    const restante = Math.max(0, totalEstimado - sumActual)
+
+    setCompletingReturnNcs(prev => [
+      ...prev,
+      {
+        numero: "",
+        timbrado: "",
+        fecha: new Date().toISOString().slice(0, 10),
+        monto: restante,
+        factura_id: firstInv?.factura_id || "",
+        factura_numero: firstInv?.factura_numero || "",
+        motivo: "Devolución de mercadería",
+        observaciones: "",
+      }
+    ])
+  }
+
+  const handleRemoveNcRow = (idx: number) => {
+    setCompletingReturnNcs(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  const handleUpdateNcRow = (idx: number, field: string, value: any) => {
+    setCompletingReturnNcs(prev => {
+      const next = [...prev]
+      next[idx] = { ...next[idx], [field]: value }
+      return next
+    })
+  }
+
   const handleCompleteReturn = async (returnId: string) => {
     setProcessingReturnAction(true)
     try {
-      await api.purchases.returns.complete(returnId, ncNumberInput || undefined)
-      toast.success("Devolución Completada", "Se descontó la existencia de inventario y se actualizó la cuenta del proveedor.")
+      const validNcs = completingReturnNcs
+        .filter(nc => (nc.numero && nc.numero.trim()) || Number(nc.monto) > 0)
+        .map(nc => ({
+          numero: nc.numero.trim(),
+          timbrado: nc.timbrado?.trim() || undefined,
+          fecha: nc.fecha || new Date().toISOString().slice(0, 10),
+          monto: Number(nc.monto) || 0,
+          factura_id: nc.factura_id || undefined,
+          factura_numero: nc.factura_numero || undefined,
+          motivo: nc.motivo || undefined,
+          observaciones: nc.observaciones || undefined,
+        }))
+
+      const ncNumStr = validNcs.map(n => n.numero).filter(Boolean).join(", ") || ncNumberInput || undefined
+
+      await api.purchases.returns.complete(
+        returnId,
+        ncNumStr,
+        validNcs.length > 0 ? validNcs : undefined
+      )
+      toast.success(
+        "Devolución Completada",
+        `Salida física registrada con éxito.${validNcs.length > 0 ? ` Se registraron e impactaron ${validNcs.length} Nota(s) de Crédito formalmente.` : ""}`
+      )
       setCompletingReturnId(null)
+      setCompletingReturnItem(null)
+      setCompletingReturnNcs([])
       setNcNumberInput("")
-      const [updatedReturns, updatedInvoices] = await Promise.all([
+      const [updatedReturns, updatedInvoices, updatedCreditNotes] = await Promise.all([
         api.purchases.returns.list(),
         api.financial.invoices.list({ limit: 300 }),
+        api.financial.creditNotes().catch(() => []),
       ])
       setManagedReturns(updatedReturns || [])
       if (updatedInvoices) {
         setInvoices(updatedInvoices)
         setAllSupplierInvoices(updatedInvoices)
       }
+      if (updatedCreditNotes) {
+        setSupplierCreditNotes(updatedCreditNotes)
+      }
     } catch (err: any) {
       toast.error("Error al completar devolución", err.message)
+    } finally {
+      setProcessingReturnAction(false)
+    }
+  }
+
+  // ── Gestores de Consulta y Carga Posterior de NCs ──
+  const handleOpenManageNcs = (rawItem: any) => {
+    const raw = rawItem.raw || rawItem
+    setManagingNcsReturn(raw)
+
+    const itemInvoices: { factura_id?: string; factura_numero?: string }[] = []
+    const seen = new Set<string>()
+    for (const it of (raw.items || [])) {
+      if (it.factura_numero && !seen.has(it.factura_numero)) {
+        seen.add(it.factura_numero)
+        itemInvoices.push({ factura_id: it.factura_id, factura_numero: it.factura_numero })
+      }
+    }
+
+    const existingNcs = (raw.notas_credito || []).map((nc: any) => ({
+      ...nc,
+      monto: Number(nc.monto || 0),
+    }))
+
+    const firstInv = itemInvoices[0]
+    const totalEstimado = Number(raw.valor_total_estimado || raw.monto || 0)
+    const sumActual = existingNcs.reduce((acc: number, n: any) => acc + (Number(n.monto) || 0), 0)
+    const restante = Math.max(0, totalEstimado - sumActual)
+
+    setManagingNcsList([
+      {
+        numero: "",
+        timbrado: "",
+        fecha: new Date().toISOString().slice(0, 10),
+        monto: restante,
+        factura_id: firstInv?.factura_id || "",
+        factura_numero: firstInv?.factura_numero || "",
+        motivo: "Devolución de mercadería",
+        observaciones: "",
+      }
+    ])
+  }
+
+  const handleAddManagingNcRow = () => {
+    const raw = managingNcsReturn
+    const itemInvoices = (raw?.items || []).filter((it: any) => it.factura_numero)
+    const firstInv = itemInvoices[0]
+
+    setManagingNcsList(prev => [
+      ...prev,
+      {
+        numero: "",
+        timbrado: "",
+        fecha: new Date().toISOString().slice(0, 10),
+        monto: 0,
+        factura_id: firstInv?.factura_id || "",
+        factura_numero: firstInv?.factura_numero || "",
+        motivo: "Devolución de mercadería",
+        observaciones: "",
+      }
+    ])
+  }
+
+  const handleRemoveManagingNcRow = (idx: number) => {
+    setManagingNcsList(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  const handleUpdateManagingNcRow = (idx: number, field: string, value: any) => {
+    setManagingNcsList(prev => {
+      const next = [...prev]
+      next[idx] = { ...next[idx], [field]: value }
+      return next
+    })
+  }
+
+  const handleSaveManagingNcs = async () => {
+    if (!managingNcsReturn) return
+    const validNcs = managingNcsList
+      .filter(nc => (nc.numero && nc.numero.trim()) || Number(nc.monto) > 0)
+      .map(nc => ({
+        numero: nc.numero.trim(),
+        timbrado: nc.timbrado?.trim() || undefined,
+        fecha: nc.fecha || new Date().toISOString().slice(0, 10),
+        monto: Number(nc.monto) || 0,
+        factura_id: nc.factura_id || undefined,
+        factura_numero: nc.factura_numero || undefined,
+        motivo: nc.motivo || undefined,
+        observaciones: nc.observaciones || undefined,
+      }))
+
+    if (validNcs.length === 0) {
+      toast.error("Atención", "Ingrese al menos el número y monto de la Nota de Crédito.")
+      return
+    }
+
+    setProcessingReturnAction(true)
+    try {
+      await api.purchases.returns.addCreditNotes(managingNcsReturn.id, validNcs)
+      toast.success(
+        "Notas de Crédito Registradas",
+        `Se vincularon ${validNcs.length} NC(s) a la devolución ${managingNcsReturn.codigo}.`
+      )
+      setManagingNcsReturn(null)
+      setManagingNcsList([])
+      const [updatedReturns, updatedInvoices, updatedCreditNotes] = await Promise.all([
+        api.purchases.returns.list(),
+        api.financial.invoices.list({ limit: 300 }),
+        api.financial.creditNotes().catch(() => []),
+      ])
+      setManagedReturns(updatedReturns || [])
+      if (updatedInvoices) {
+        setInvoices(updatedInvoices)
+        setAllSupplierInvoices(updatedInvoices)
+      }
+      if (updatedCreditNotes) {
+        setSupplierCreditNotes(updatedCreditNotes)
+      }
+    } catch (err: any) {
+      toast.error("Error al registrar Notas de Crédito", err.message)
     } finally {
       setProcessingReturnAction(false)
     }
@@ -4438,7 +4682,7 @@ export default function PurchasesPage() {
                       return (
                         <tr key={item.id || idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
                           <td className="p-3">
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                                 isManaged
                                   ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800"
@@ -4448,8 +4692,13 @@ export default function PurchasesPage() {
                               }`}>
                                 {isManaged ? "Devolución Compras" : item.tipo_registro === "devolucion" ? "Devolución" : "Nota de Crédito"}
                               </span>
+                              {item.raw?.notas_credito && item.raw.notas_credito.length > 1 && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                                  {item.raw.notas_credito.length} NCs
+                                </span>
+                              )}
                             </div>
-                            <div className="font-mono font-bold text-gray-900 dark:text-white mt-1">
+                            <div className="font-mono font-bold text-gray-900 dark:text-white mt-1 text-xs">
                               {item.numero_nota_credito || item.codigo || item.numero || "S/N"}
                             </div>
                           </td>
@@ -4576,12 +4825,19 @@ export default function PurchasesPage() {
                                 </>
                               )}
 
+                              {isManaged && (
+                                <button
+                                  onClick={() => handleOpenManageNcs(item.raw || item)}
+                                  className="p-1.5 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg transition"
+                                  title="Gestionar / Cargar Notas de Crédito del Proveedor"
+                                >
+                                  <Receipt className="w-4 h-4" />
+                                </button>
+                              )}
+
                               {isManaged && (estado === "autorizado" || estado === "pendiente") && (
                                 <button
-                                  onClick={() => {
-                                    setCompletingReturnId(item.id)
-                                    setNcNumberInput("")
-                                  }}
+                                  onClick={() => handleOpenCompleteReturn(item)}
                                   disabled={processingReturnAction}
                                   className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm transition"
                                   title="Registrar Salida Física e Impactar Stock/Cuentas"
@@ -9261,52 +9517,248 @@ export default function PurchasesPage() {
       )}
 
       {/* ──────────────────────────────────────────────────────────────────────────
-          MODAL: CONFIRMAR SALIDA FÍSICA E IMPACTO DE DEVOLUCIÓN
+          MODAL: CONFIRMAR SALIDA FÍSICA E IMPACTOS DE DEVOLUCIÓN (1 O MÁS NCs)
       ────────────────────────────────────────────────────────────────────────── */}
       {completingReturnId && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4 animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex items-start gap-3">
-              <div className="p-2.5 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-purple-600 shrink-0">
-                <Truck className="w-6 h-6" />
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-3xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4 animate-in fade-in zoom-in-95 duration-200 max-h-[92vh] flex flex-col">
+            
+            {/* Header */}
+            <div className="flex items-start justify-between border-b border-slate-100 dark:border-slate-800 pb-3 shrink-0">
+              <div className="flex items-start gap-3">
+                <div className="p-3 rounded-2xl bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 shrink-0 border border-purple-200 dark:border-purple-800/40">
+                  <Truck className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                      Confirmar Salida Física e Impactos de Devolución
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">
+                      {completingReturnItem?.codigo || "DEV"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Proveedor: <strong className="text-slate-700 dark:text-slate-200">{completingReturnItem?.proveedor_nombre || "Proveedor"}</strong> · Total Estimado: <strong className="text-emerald-600 dark:text-emerald-400 font-mono">{formatPYG(completingReturnItem?.valor_total_estimado || completingReturnItem?.monto || 0)}</strong>
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-base font-bold text-gray-900 dark:text-white">
-                  Confirmar Salida Física e Impactos
-                </h3>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Se completará la devolución, efectuando el egreso de inventario y el ajuste financiero con el proveedor.
-                </p>
-              </div>
-            </div>
-
-            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/40 rounded-xl p-3 text-xs text-amber-800 dark:text-amber-300 space-y-1">
-              <strong className="block font-semibold">Impactos inmediatos que se ejecutarán:</strong>
-              <p className="text-[11px] leading-relaxed">
-                1. <strong>Inventario:</strong> Descuento físico de stock en depósito y asiento de movimiento <code className="font-mono text-[10px]">devolucion_proveedor</code>.
-              </p>
-              <p className="text-[11px] leading-relaxed">
-                2. <strong>Financiero:</strong> Amortización automática del saldo pendiente en la factura del proveedor vinculada y registro en cuenta corriente.
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                Número de Nota de Crédito / Recibo Proveedor (Opcional)
-              </label>
-              <input
-                type="text"
-                value={ncNumberInput}
-                onChange={(e) => setNcNumberInput(e.target.value)}
-                placeholder="Ej: NC-001-002-0098124"
-                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-purple-500 focus:outline-none font-mono"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="button"
-                onClick={() => { setCompletingReturnId(null); setNcNumberInput("") }}
+                onClick={() => { setCompletingReturnId(null); setCompletingReturnItem(null); setCompletingReturnNcs([]) }}
+                disabled={processingReturnAction}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Scrollable Body */}
+            <div className="overflow-y-auto space-y-4 pr-1 flex-1">
+              
+              {/* Alerta de Impactos */}
+              <div className="bg-amber-50/90 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/40 rounded-2xl p-3.5 text-xs text-amber-800 dark:text-amber-300 space-y-1">
+                <strong className="block font-bold flex items-center gap-1.5 text-amber-900 dark:text-amber-200">
+                  <AlertCircle className="w-4 h-4 text-amber-600" /> Impactos Inmediatos que se Ejecutarán:
+                </strong>
+                <p className="text-[11px] leading-relaxed">
+                  1. <strong>Inventario Físico:</strong> Se descontará el stock en el depósito asignado y se asentará el movimiento formal <code className="font-mono text-[10px] bg-amber-100/70 dark:bg-amber-900/50 px-1 py-0.5 rounded">devolucion_proveedor</code>.
+                </p>
+                <p className="text-[11px] leading-relaxed">
+                  2. <strong>Notas de Crédito & Finanzas:</strong> Puede asociar <strong>1 o varias Notas de Crédito</strong> con montos detallados para amortizar facturas de compra o acreditar la cuenta corriente del proveedor. Si aún no recibió la NC física, puede confirmar la salida ahora con 0 NCs y cargarlas más adelante.
+                </p>
+              </div>
+
+              {/* Sección de Carga de NCs */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Receipt className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                    <span className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                      Notas de Crédito del Proveedor ({completingReturnNcs.length})
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddNcRow}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-purple-50 hover:bg-purple-100 text-purple-700 dark:bg-purple-950/50 dark:hover:bg-purple-900/50 dark:text-purple-300 border border-purple-200 dark:border-purple-800 transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>+ Agregar otra NC</span>
+                  </button>
+                </div>
+
+                {completingReturnNcs.length === 0 ? (
+                  <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 text-center text-xs text-slate-500 space-y-1">
+                    <p className="font-semibold">Sin Notas de Crédito asignadas en este momento.</p>
+                    <p className="text-[11px] text-slate-400">
+                      La salida física se completará y podrá registrar las NCs recibidas más adelante desde el botón <Receipt className="w-3 h-3 inline mx-0.5 text-slate-500" /> de la grilla.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {completingReturnNcs.map((nc, idx) => {
+                      const returnInvoices = Array.from(
+                        new Map(
+                          (completingReturnItem?.items || [])
+                            .filter((it: any) => it.factura_numero)
+                            .map((it: any) => [it.factura_numero, { factura_id: it.factura_id, factura_numero: it.factura_numero }])
+                        ).values()
+                      ) as { factura_id?: string; factura_numero: string }[]
+
+                      return (
+                        <div
+                          key={idx}
+                          className="p-3.5 rounded-2xl bg-slate-50/80 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/70 space-y-3 relative group"
+                        >
+                          <div className="flex items-center justify-between border-b border-slate-200/60 dark:border-slate-700/60 pb-2">
+                            <span className="text-[11px] font-black uppercase text-purple-700 dark:text-purple-300 tracking-wider">
+                              Nota de Crédito #{idx + 1}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveNcRow(idx)}
+                              className="p-1 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
+                              title="Quitar esta Nota de Crédito"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                                N° Comprobante NC *
+                              </label>
+                              <input
+                                type="text"
+                                value={nc.numero}
+                                onChange={(e) => handleUpdateNcRow(idx, "numero", e.target.value)}
+                                placeholder="Ej: 001-002-0001234"
+                                className="w-full px-2.5 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-mono focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                                Timbrado
+                              </label>
+                              <input
+                                type="text"
+                                value={nc.timbrado || ""}
+                                onChange={(e) => handleUpdateNcRow(idx, "timbrado", e.target.value)}
+                                placeholder="Ej: 12345678"
+                                className="w-full px-2.5 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-mono focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                                Fecha de Emisión
+                              </label>
+                              <input
+                                type="date"
+                                value={nc.fecha || new Date().toISOString().slice(0, 10)}
+                                onChange={(e) => handleUpdateNcRow(idx, "fecha", e.target.value)}
+                                className="w-full px-2.5 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                                Importe NC (PYG) *
+                              </label>
+                              <CurrencyInput
+                                value={nc.monto}
+                                onChangeValue={(val) => handleUpdateNcRow(idx, "monto", val)}
+                                currency="PYG"
+                                placeholder="0"
+                                className="w-full px-2.5 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white font-mono font-bold focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                                Factura Afectada
+                              </label>
+                              <select
+                                value={nc.factura_numero || ""}
+                                onChange={(e) => {
+                                  const selNum = e.target.value
+                                  const found = returnInvoices.find(i => i.factura_numero === selNum)
+                                  handleUpdateNcRow(idx, "factura_numero", selNum)
+                                  handleUpdateNcRow(idx, "factura_id", found?.factura_id || "")
+                                }}
+                                className="w-full px-2.5 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-purple-500 focus:outline-none font-mono"
+                              >
+                                <option value="">Sin factura específica / Saldo General</option>
+                                {returnInvoices.map((inv, invIdx) => (
+                                  <option key={invIdx} value={inv.factura_numero}>
+                                    Factura {inv.factura_numero}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                                Motivo / Detalle
+                              </label>
+                              <input
+                                type="text"
+                                value={nc.motivo || ""}
+                                onChange={(e) => handleUpdateNcRow(idx, "motivo", e.target.value)}
+                                placeholder="Ej: Vencimiento / Rotura"
+                                className="w-full px-2.5 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Panel de Resumen y Conciliación de Montos */}
+              {completingReturnNcs.length > 0 && (
+                <div className="bg-slate-100/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 rounded-2xl p-3.5 space-y-2 text-xs">
+                  <div className="flex items-center justify-between font-mono">
+                    <span className="text-slate-500">Valor Total Estimado de Devolución:</span>
+                    <span className="font-extrabold text-slate-900 dark:text-white">
+                      {formatPYG(completingReturnItem?.valor_total_estimado || completingReturnItem?.monto || 0)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between font-mono border-t border-slate-200 dark:border-slate-700 pt-1.5">
+                    <span className="text-purple-700 dark:text-purple-300 font-bold">Total NCs Cargadas ({completingReturnNcs.length}):</span>
+                    <span className="font-extrabold text-purple-700 dark:text-purple-300">
+                      {formatPYG(completingReturnNcs.reduce((acc, n) => acc + (Number(n.monto) || 0), 0))}
+                    </span>
+                  </div>
+                  {(() => {
+                    const est = Number(completingReturnItem?.valor_total_estimado || completingReturnItem?.monto || 0)
+                    const cargado = completingReturnNcs.reduce((acc, n) => acc + (Number(n.monto) || 0), 0)
+                    const diff = est - cargado
+                    return (
+                      <div className="flex items-center justify-between font-mono text-[11px] pt-1 border-t border-dashed border-slate-200 dark:border-slate-700">
+                        <span className="text-slate-500">Diferencia / Pendiente de Emisión:</span>
+                        <span className={`font-bold ${diff === 0 ? "text-emerald-600" : diff > 0 ? "text-amber-600" : "text-blue-600"}`}>
+                          {diff === 0 ? "✓ Coincide 100%" : `${formatPYG(diff)}`}
+                        </span>
+                      </div>
+                    )
+                  })()}
+                </div>
+              )}
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800 shrink-0">
+              <button
+                type="button"
+                onClick={() => { setCompletingReturnId(null); setCompletingReturnItem(null); setCompletingReturnNcs([]) }}
                 disabled={processingReturnAction}
                 className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-gray-700 dark:text-gray-300 disabled:opacity-50"
               >
@@ -9316,7 +9768,7 @@ export default function PurchasesPage() {
                 type="button"
                 onClick={() => handleCompleteReturn(completingReturnId)}
                 disabled={processingReturnAction}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white flex items-center gap-1.5 shadow-sm disabled:opacity-50 transition-colors"
+                className="px-5 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white flex items-center gap-1.5 shadow-md shadow-purple-600/20 disabled:opacity-50 transition-colors"
               >
                 {processingReturnAction ? (
                   <>
@@ -9324,7 +9776,284 @@ export default function PurchasesPage() {
                   </>
                 ) : (
                   <>
-                    <CheckCircle className="w-4 h-4" /> Confirmar y Ejecutar
+                    <CheckCircle className="w-4 h-4" /> Confirmar Salida y Ejecutar
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: GESTIONAR Y CARGAR NOTAS DE CRÉDITO POSTERIORES (FLEXIBILIDAD TOTAL)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {managingNcsReturn && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-3xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4 animate-in fade-in zoom-in-95 duration-200 max-h-[92vh] flex flex-col">
+            
+            {/* Header */}
+            <div className="flex items-start justify-between border-b border-slate-100 dark:border-slate-800 pb-3 shrink-0">
+              <div className="flex items-start gap-3">
+                <div className="p-3 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 shrink-0 border border-indigo-200 dark:border-indigo-800/40">
+                  <Receipt className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                      Gestión de Notas de Crédito del Proveedor
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
+                      {managingNcsReturn.codigo}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Proveedor: <strong className="text-slate-700 dark:text-slate-200">{managingNcsReturn.proveedor_nombre || managingNcsReturn.supplier_nombre}</strong> · Total Devolución: <strong className="text-emerald-600 dark:text-emerald-400 font-mono">{formatPYG(managingNcsReturn.valor_total_estimado || managingNcsReturn.monto || 0)}</strong>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setManagingNcsReturn(null); setManagingNcsList([]) }}
+                disabled={processingReturnAction}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Scrollable Body */}
+            <div className="overflow-y-auto space-y-4 pr-1 flex-1">
+              
+              {/* NCs Históricas Ya Registradas */}
+              <div>
+                <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 block mb-2">
+                  Notas de Crédito Ya Vinculadas ({managingNcsReturn.notas_credito?.length || (managingNcsReturn.nota_credito_numero ? 1 : 0)})
+                </span>
+                {managingNcsReturn.notas_credito && managingNcsReturn.notas_credito.length > 0 ? (
+                  <div className="space-y-2">
+                    {managingNcsReturn.notas_credito.map((nc: any, idx: number) => (
+                      <div
+                        key={idx}
+                        className="p-3 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 flex items-center justify-between text-xs"
+                      >
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-emerald-900 dark:text-emerald-200">
+                              {nc.numero || "S/N"}
+                            </span>
+                            {nc.timbrado && (
+                              <span className="text-[10px] text-slate-500 font-mono">
+                                (Timb: {nc.timbrado})
+                              </span>
+                            )}
+                            {nc.factura_numero && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-mono">
+                                Factura: {nc.factura_numero}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                            Fecha: {nc.fecha ? formatDate(nc.fecha) : "—"} {nc.motivo ? `· ${nc.motivo}` : ""}
+                          </div>
+                        </div>
+                        <div className="text-right font-mono">
+                          <span className="text-sm font-extrabold text-emerald-700 dark:text-emerald-300 block">
+                            {formatPYG(nc.monto || 0)}
+                          </span>
+                          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
+                            ✓ Registrada
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : managingNcsReturn.nota_credito_numero ? (
+                  <div className="p-3 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 flex items-center justify-between text-xs font-mono">
+                    <span className="font-bold text-emerald-900 dark:text-emerald-200">
+                      NC: {managingNcsReturn.nota_credito_numero}
+                    </span>
+                    <span className="font-bold text-emerald-700 dark:text-emerald-300">
+                      {formatPYG(managingNcsReturn.nota_credito_monto || managingNcsReturn.valor_total_estimado || managingNcsReturn.monto || 0)}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 text-xs text-slate-400 italic">
+                    Esta devolución aún no cuenta con Notas de Crédito registradas.
+                  </div>
+                )}
+              </div>
+
+              {/* Formulario para Cargar Nuevas NCs */}
+              <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Plus className="w-4 h-4 text-indigo-600" />
+                    <span className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                      Cargar Nuevas Notas de Crédito a esta Operación
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddManagingNcRow}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>+ Agregar otra NC</span>
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {managingNcsList.map((nc, idx) => {
+                    const managingInvoices = Array.from(
+                      new Map(
+                        (managingNcsReturn?.items || [])
+                          .filter((it: any) => it.factura_numero)
+                          .map((it: any) => [it.factura_numero, { factura_id: it.factura_id, factura_numero: it.factura_numero }])
+                      ).values()
+                    ) as { factura_id?: string; factura_numero: string }[]
+
+                    return (
+                      <div
+                        key={idx}
+                        className="p-3.5 rounded-2xl bg-slate-50/80 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/70 space-y-3 relative group"
+                      >
+                        <div className="flex items-center justify-between border-b border-slate-200/60 dark:border-slate-700/60 pb-2">
+                          <span className="text-[11px] font-black uppercase text-indigo-700 dark:text-indigo-300 tracking-wider">
+                            Nueva Nota de Crédito #{idx + 1}
+                          </span>
+                          {managingNcsList.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveManagingNcRow(idx)}
+                              className="p-1 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
+                              title="Quitar"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                              N° Comprobante NC *
+                            </label>
+                            <input
+                              type="text"
+                              value={nc.numero}
+                              onChange={(e) => handleUpdateManagingNcRow(idx, "numero", e.target.value)}
+                              placeholder="Ej: 001-002-0001234"
+                              className="w-full px-2.5 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                              Timbrado
+                            </label>
+                            <input
+                              type="text"
+                              value={nc.timbrado || ""}
+                              onChange={(e) => handleUpdateManagingNcRow(idx, "timbrado", e.target.value)}
+                              placeholder="Ej: 12345678"
+                              className="w-full px-2.5 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                              Fecha de Emisión
+                            </label>
+                            <input
+                              type="date"
+                              value={nc.fecha || new Date().toISOString().slice(0, 10)}
+                              onChange={(e) => handleUpdateManagingNcRow(idx, "fecha", e.target.value)}
+                              className="w-full px-2.5 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                              Importe NC (PYG) *
+                            </label>
+                            <CurrencyInput
+                              value={nc.monto}
+                              onChangeValue={(val) => handleUpdateManagingNcRow(idx, "monto", val)}
+                              currency="PYG"
+                              placeholder="0"
+                              className="w-full px-2.5 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white font-mono font-bold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                              Factura Afectada
+                            </label>
+                            <select
+                              value={nc.factura_numero || ""}
+                              onChange={(e) => {
+                                const selNum = e.target.value
+                                const found = managingInvoices.find(i => i.factura_numero === selNum)
+                                handleUpdateManagingNcRow(idx, "factura_numero", selNum)
+                                handleUpdateManagingNcRow(idx, "factura_id", found?.factura_id || "")
+                              }}
+                              className="w-full px-2.5 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none font-mono"
+                            >
+                              <option value="">Sin factura específica / Saldo General</option>
+                              {managingInvoices.map((inv, invIdx) => (
+                                <option key={invIdx} value={inv.factura_numero}>
+                                  Factura {inv.factura_numero}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                              Motivo / Detalle
+                            </label>
+                            <input
+                              type="text"
+                              value={nc.motivo || ""}
+                              onChange={(e) => handleUpdateManagingNcRow(idx, "motivo", e.target.value)}
+                              placeholder="Ej: Vencimiento / Diferencia"
+                              className="w-full px-2.5 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800 shrink-0">
+              <button
+                type="button"
+                onClick={() => { setManagingNcsReturn(null); setManagingNcsList([]) }}
+                disabled={processingReturnAction}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-gray-700 dark:text-gray-300 disabled:opacity-50"
+              >
+                Cerrar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveManagingNcs}
+                disabled={processingReturnAction || managingNcsList.every(n => !n.numero.trim() && Number(n.monto) <= 0)}
+                className="px-5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 shadow-md shadow-indigo-600/20 disabled:opacity-50 transition-colors"
+              >
+                {processingReturnAction ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" /> Guardando NCs...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" /> Registrar Notas de Crédito
                   </>
                 )}
               </button>
