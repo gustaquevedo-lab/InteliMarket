@@ -1,7 +1,7 @@
 """Financial schemas — AP, banking, cash flow, budgets, payment runs, dashboards"""
 
 from pydantic import BaseModel, Field, model_validator
-from typing import Optional
+from typing import Optional, Any
 from datetime import datetime, date
 from uuid import UUID
 from decimal import Decimal
@@ -561,6 +561,16 @@ class PaymentOrderAllocationCreate(BaseModel):
     invoice_id: UUID
     monto_aplicado: Decimal = Field(gt=0)
     monto_retencion: Decimal = Decimal("0")
+
+    @model_validator(mode="before")
+    @classmethod
+    def handle_monto_imputado(cls, data: Any):
+        if isinstance(data, dict):
+            if "monto_aplicado" not in data and "monto_imputado" in data:
+                data["monto_aplicado"] = data["monto_imputado"]
+            if "monto_retencion" not in data or data.get("monto_retencion") is None:
+                data["monto_retencion"] = Decimal("0")
+        return data
 
 
 class PaymentOrderDisbursementCreate(BaseModel):

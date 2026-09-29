@@ -1105,9 +1105,8 @@ export default function FinancialPage() {
         .filter(i => selectedOpInvoiceIds.has(i.id))
         .map(i => ({
           invoice_id: i.id,
-          monto_imputado: Number(i.saldo_pendiente ?? i.total ?? 0),
-          moneda: i.moneda || "PYG",
-          observaciones: "Imputación en preparación de pago (Aguardando Pago)",
+          monto_aplicado: Number(i.saldo_pendiente ?? i.total ?? 0),
+          monto_retencion: 0,
         }))
 
       const res = await api.financial.paymentOrders.create({
