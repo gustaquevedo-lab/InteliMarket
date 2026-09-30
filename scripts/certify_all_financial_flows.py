@@ -392,16 +392,27 @@ class CertificationRunner:
                 self.report_step(5, "Pagos Multifacturas BR con Múltiples Cheques", True,
                                  f"Orden #{num_orden} generada con 2 cheques: {chq1_num} (Gs. 200.000) y {chq2_num} (Gs. 300.000) persistidos correctamente en BD.")
 
+            except Exception as e:
+                import traceback
+                print("\n❌ EXCEPCIÓN DETALLADA EN FLUJO 5:")
+                traceback.print_exc()
+                await session.rollback()
+                raise
             finally:
-                await session.execute(text("DELETE FROM cheques WHERE numero IN (:c1, :c2)"), {"c1": chq1_num, "c2": chq2_num})
-                if order_id:
-                    await session.execute(text("DELETE FROM supplier_payment_order_disbursements WHERE payment_order_id = :oid"), {"oid": str(order_id)})
-                    await session.execute(text("DELETE FROM supplier_payment_order_allocations WHERE payment_order_id = :oid"), {"oid": str(order_id)})
-                    await session.execute(text("DELETE FROM supplier_payment_orders WHERE id = :oid"), {"oid": str(order_id)})
-                await session.execute(text("DELETE FROM supplier_invoice_payments WHERE invoice_id = :id"), {"id": str(inv_id)})
-                await session.execute(text("DELETE FROM supplier_invoices WHERE id = :id"), {"id": str(inv_id)})
-                await session.execute(text("DELETE FROM suppliers WHERE id = :sid"), {"sid": str(test_sup_id)})
-                await session.commit()
+                try:
+                    await session.rollback()
+                    async with async_session_factory() as cleanup_session:
+                        await cleanup_session.execute(text("DELETE FROM cheques WHERE numero IN (:c1, :c2)"), {"c1": chq1_num, "c2": chq2_num})
+                        if order_id:
+                            await cleanup_session.execute(text("DELETE FROM supplier_payment_order_disbursements WHERE payment_order_id = :oid"), {"oid": str(order_id)})
+                            await cleanup_session.execute(text("DELETE FROM supplier_payment_order_allocations WHERE payment_order_id = :oid"), {"oid": str(order_id)})
+                            await cleanup_session.execute(text("DELETE FROM supplier_payment_orders WHERE id = :oid"), {"oid": str(order_id)})
+                        await cleanup_session.execute(text("DELETE FROM supplier_invoice_payments WHERE invoice_id = :id"), {"id": str(inv_id)})
+                        await cleanup_session.execute(text("DELETE FROM supplier_invoices WHERE id = :id"), {"id": str(inv_id)})
+                        await cleanup_session.execute(text("DELETE FROM suppliers WHERE id = :sid"), {"sid": str(test_sup_id)})
+                        await cleanup_session.commit()
+                except Exception as clean_err:
+                    print(f"Advertencia en cleanup de Flujo 5: {clean_err}")
 
     async def certify_flow_6_fondo_fijo(self):
         """6. Fondo Fijo (Camila / Ariel)"""
