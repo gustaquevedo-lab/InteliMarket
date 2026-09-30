@@ -78,6 +78,7 @@ class SupplierInvoiceResponse(BaseModel):
     notas: Optional[str] = None
     created_by: Optional[UUID] = None
     approved_by: Optional[UUID] = None
+    notas_credito: list[dict] = []
     created_at: datetime
     updated_at: datetime
 
@@ -681,6 +682,18 @@ class MultiSupplierBatchItem(BaseModel):
     allocations: list[PaymentOrderAllocationCreate]
 
 
+class MultiSupplierChequeItem(BaseModel):
+    cheque_id: Optional[UUID] = None
+    numero_cheque: Optional[str] = None
+    banco_cheque: Optional[str] = None
+    titular_cheque: Optional[str] = None
+    fecha_cheque_emision: Optional[date] = None
+    fecha_cheque_vencimiento: Optional[date] = None
+    es_cheque_diferido: bool = False
+    monto: Decimal
+    bank_account_id: Optional[UUID] = None
+
+
 class MultiSupplierPaymentBatchCreate(BaseModel):
     fecha_pago: Optional[date] = None
     observaciones: Optional[str] = None
@@ -696,6 +709,7 @@ class MultiSupplierPaymentBatchCreate(BaseModel):
     fecha_cheque_emision: Optional[date] = None
     fecha_cheque_vencimiento: Optional[date] = None
     es_cheque_diferido: bool = False
+    cheques: list[MultiSupplierChequeItem] = []
     monto_total_desembolso_pyg: Decimal  # Monto total del cheque/transferencia matriz
     monto_total_desembolso_brl: Optional[Decimal] = None
     diferencia_cambio_total: Optional[Decimal] = Decimal("0")

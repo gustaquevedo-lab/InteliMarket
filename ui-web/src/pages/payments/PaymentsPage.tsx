@@ -3,14 +3,14 @@ import SupplierPaymentOrderModal from "./SupplierPaymentOrderModal"
 import SupplierPaymentOrderDetailModal from "./SupplierPaymentOrderDetailModal"
 import MultiSupplierPaymentModal from "./MultiSupplierPaymentModal"
 import LiquidacionValesModal from "./LiquidacionValesModal"
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, Fragment } from "react"
 import {
   CreditCard, Search, Plus, Filter, Download, Eye, CheckCircle2,
   XCircle, AlertTriangle, Clock, Calendar, RefreshCw, Loader2,
   Building2, User, FileText, ArrowUpRight, DollarSign, Layers,
   Check, X, FileSpreadsheet, ShieldAlert, Sparkles, Info, ArrowRight,
   TrendingDown, CheckSquare, Square, Wallet, Printer, FileCheck, Globe, Apple,
-  RotateCcw, ChevronLeft, ChevronRight
+  RotateCcw, ChevronLeft, ChevronRight, CornerDownRight
 } from "lucide-react"
 import { api, SupplierPaymentOrder } from "../../api"
 import { useAuth } from "../../context/AuthContext"
@@ -36,6 +36,7 @@ export default function PaymentsPage() {
   const [search, setSearch] = useState("")
   const [filterSupplier, setFilterSupplier] = useState("all")
   const [filterVencimiento, setFilterVencimiento] = useState("all")
+  const [filterTipoComprobante, setFilterTipoComprobante] = useState("all")
   const [selected360SupplierId, setSelected360SupplierId] = useState<string | null>(null)
   const [selected360SupplierNombre, setSelected360SupplierNombre] = useState<string | null>(null)
 
@@ -323,13 +324,18 @@ export default function PaymentsPage() {
         (filterVencimiento === "al_dia" && dias <= 0) ||
         (filterVencimiento === "urgente_7d" && dias <= 0 && Math.abs(dias) <= 7)
 
-      return matchesSearch && matchesSupplier && matchesVencimiento
+      const matchesTipoComprobante =
+        filterTipoComprobante === "all" ||
+        (filterTipoComprobante === "gasto" && (inv.tipo_comprobante === "gasto" || inv.tipo_comprobante === "insumo_gasto")) ||
+        (filterTipoComprobante === "mercaderia" && inv.tipo_comprobante !== "gasto" && inv.tipo_comprobante !== "insumo_gasto")
+
+      return matchesSearch && matchesSupplier && matchesVencimiento && matchesTipoComprobante
     }).sort((a, b) => {
       const dateA = new Date(a.fecha_emision || a.created_at || 0).getTime()
       const dateB = new Date(b.fecha_emision || b.created_at || 0).getTime()
       return dateB - dateA
     })
-  }, [invoices, search, filterSupplier, filterVencimiento, supplierMap])
+  }, [invoices, search, filterSupplier, filterVencimiento, filterTipoComprobante, supplierMap])
 
   // Filtro órdenes de pago
   const filteredOrders = useMemo(() => {
@@ -728,10 +734,20 @@ export default function PaymentsPage() {
                 onChange={(e) => setFilterVencimiento(e.target.value)}
                 className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-medium"
               >
-                <option value="all">Cualquier Estado</option>
+                <option value="all">Cualquier Vencimiento</option>
                 <option value="vencidas">Solo Vencidas</option>
                 <option value="urgente_7d">Vencen en ≤ 7 días</option>
                 <option value="al_dia">Al Día (Normal)</option>
+              </select>
+
+              <select
+                value={filterTipoComprobante}
+                onChange={(e) => setFilterTipoComprobante(e.target.value)}
+                className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-medium"
+              >
+                <option value="all">📦 Mercaderías + 🛠️ Insumos</option>
+                <option value="mercaderia">📦 Solo Mercaderías</option>
+                <option value="gasto">🛠️ Solo Insumos / Gastos</option>
               </select>
             </div>
 
@@ -783,68 +799,114 @@ export default function PaymentsPage() {
                       const esVencida = dias > 0
                       const esUrgente = dias <= 0 && Math.abs(dias) <= 7
 
+                      const hasNC = inv.notas_credito && inv.notas_credito.length > 0
                       return (
-                        <tr
-                          key={inv.id}
-                          className={`hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition ${
-                            isSelected ? "bg-rose-50/40 dark:bg-rose-950/20" : ""
-                          }`}
-                        >
-                          <td className="p-3.5 text-center">
-                            <button onClick={() => toggleSelectInvoice(inv.id)} className="p-1">
-                              {isSelected ? (
-                                <CheckSquare className="w-4 h-4 text-rose-600" />
-                              ) : (
-                                <Square className="w-4 h-4 text-slate-300 dark:text-slate-600" />
-                              )}
-                            </button>
-                          </td>
-                          <td className="p-3.5">
-                            <p className="font-extrabold text-slate-900 dark:text-white font-mono">{inv.numero_factura || "Factura S/N"}</p>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelected360SupplierId(inv.supplier_id)
-                                setSelected360SupplierNombre(inv.supplier_nombre || supplierMap[inv.supplier_id])
-                              }}
-                              className="mt-1 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 hover:bg-rose-600 hover:text-white font-bold text-[10px] transition group border border-rose-200/60 dark:border-rose-900/40"
-                              title="Abrir Visión 360° del Proveedor"
-                            >
-                              <Building2 className="w-3 h-3" />
-                              <span className="truncate max-w-[180px]">{inv.supplier_nombre || supplierMap[inv.supplier_id] || "Proveedor"}</span>
-                              <span className="text-[9px] bg-rose-200 dark:bg-rose-900 text-rose-800 dark:text-rose-200 group-hover:bg-white group-hover:text-rose-700 px-1 py-0.2 rounded font-black">
-                                360°
+                        <Fragment key={inv.id}>
+                          <tr
+                            className={`hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition ${
+                              isSelected ? "bg-rose-50/40 dark:bg-rose-950/20" : ""
+                            } ${hasNC ? "border-b-0" : ""}`}
+                          >
+                            <td className="p-3.5 text-center">
+                              <button onClick={() => toggleSelectInvoice(inv.id)} className="p-1">
+                                {isSelected ? (
+                                  <CheckSquare className="w-4 h-4 text-rose-600" />
+                                ) : (
+                                  <Square className="w-4 h-4 text-slate-300 dark:text-slate-600" />
+                                )}
+                              </button>
+                            </td>
+                            <td className="p-3.5">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <p className="font-extrabold text-slate-900 dark:text-white font-mono">{inv.numero_factura || "Factura S/N"}</p>
+                                {inv.tipo_comprobante === "gasto" || inv.tipo_comprobante === "insumo_gasto" ? (
+                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-300/80">
+                                    🛠️ Insumo/Gasto
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200">
+                                    📦 Mercadería
+                                  </span>
+                                )}
+                                {hasNC && (
+                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300/80 dark:border-amber-800">
+                                    NC Descontada ({inv.notas_credito.length})
+                                  </span>
+                                )}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelected360SupplierId(inv.supplier_id)
+                                  setSelected360SupplierNombre(inv.supplier_nombre || supplierMap[inv.supplier_id])
+                                }}
+                                className="mt-1 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 hover:bg-rose-600 hover:text-white font-bold text-[10px] transition group border border-rose-200/60 dark:border-rose-900/40"
+                                title="Abrir Visión 360° del Proveedor"
+                              >
+                                <Building2 className="w-3 h-3" />
+                                <span className="truncate max-w-[180px]">{inv.supplier_nombre || supplierMap[inv.supplier_id] || "Proveedor"}</span>
+                                <span className="text-[9px] bg-rose-200 dark:bg-rose-900 text-rose-800 dark:text-rose-200 group-hover:bg-white group-hover:text-rose-700 px-1 py-0.2 rounded font-black">
+                                  360°
+                                </span>
+                              </button>
+                            </td>
+                            <td className="p-3.5">
+                              <p className="font-mono text-slate-700 dark:text-slate-300">{inv.fecha_vencimiento ? formatDate(inv.fecha_vencimiento) : "Sin fecha"}</p>
+                              <span className={`inline-block mt-0.5 text-[9px] font-black uppercase px-2 py-0.2 rounded-full ${
+                                esVencida
+                                  ? "text-red-700 bg-red-100 dark:bg-red-950/50"
+                                  : esUrgente
+                                    ? "text-amber-700 bg-amber-100 dark:bg-amber-950/50"
+                                    : "text-emerald-700 bg-emerald-100 dark:bg-emerald-950/50"
+                              }`}>
+                                {esVencida ? `Vencida (+${dias}d)` : esUrgente ? `Vence en ${Math.abs(dias)}d` : `Al día (${Math.abs(dias)}d rest.)`}
                               </span>
-                            </button>
-                          </td>
-                          <td className="p-3.5">
-                            <p className="font-mono text-slate-700 dark:text-slate-300">{inv.fecha_vencimiento ? formatDate(inv.fecha_vencimiento) : "Sin fecha"}</p>
-                            <span className={`inline-block mt-0.5 text-[9px] font-black uppercase px-2 py-0.2 rounded-full ${
-                              esVencida
-                                ? "text-red-700 bg-red-100 dark:bg-red-950/50"
-                                : esUrgente
-                                  ? "text-amber-700 bg-amber-100 dark:bg-amber-950/50"
-                                  : "text-emerald-700 bg-emerald-100 dark:bg-emerald-950/50"
-                            }`}>
-                              {esVencida ? `Vencida (+${dias}d)` : esUrgente ? `Vence en ${Math.abs(dias)}d` : `Al día (${Math.abs(dias)}d rest.)`}
-                            </span>
-                          </td>
-                          <td className="p-3.5 text-right font-mono font-black text-slate-900 dark:text-white text-sm">
-                            {formatCurrency(inv.saldo_pendiente || inv.total, inv.moneda)}
-                          </td>
-                          <td className="p-3.5 text-center">
-                            <span className="text-[10px] text-slate-500 font-bold uppercase">{inv.condicion || "Crédito"}</span>
-                          </td>
-                          <td className="p-3.5 text-right">
-                            <button
-                              onClick={() => handleOpenIndividualOrderModal(inv)}
-                              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 text-white font-extrabold text-[11px] transition shadow-sm flex items-center gap-1 ml-auto"
-                            >
-                              <Wallet className="w-3.5 h-3.5" />
-                              <span>Pagar / OP</span>
-                            </button>
-                          </td>
-                        </tr>
+                            </td>
+                            <td className="p-3.5 text-right font-mono font-black text-slate-900 dark:text-white text-sm">
+                              {formatCurrency(inv.saldo_pendiente || inv.total, inv.moneda)}
+                            </td>
+                            <td className="p-3.5 text-center">
+                              <span className="text-[10px] text-slate-500 font-bold uppercase">{inv.condicion || "Crédito"}</span>
+                            </td>
+                            <td className="p-3.5 text-right">
+                              <button
+                                onClick={() => handleOpenIndividualOrderModal(inv)}
+                                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 text-white font-extrabold text-[11px] transition shadow-sm flex items-center gap-1 ml-auto"
+                              >
+                                <Wallet className="w-3.5 h-3.5" />
+                                <span>Pagar / OP</span>
+                              </button>
+                            </td>
+                          </tr>
+                          {hasNC && (
+                            <tr className="bg-amber-50/50 dark:bg-amber-950/20 border-b border-amber-200/50">
+                              <td colSpan={6} className="py-2.5 px-6 pl-12">
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-800 dark:text-amber-300">
+                                    <CornerDownRight className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                                    <span>Notas de Crédito Vinculadas a esta Factura:</span>
+                                  </div>
+                                  <div className="space-y-1 pl-5">
+                                    {inv.notas_credito.map((nc: any, idx: number) => (
+                                      <div key={idx} className="flex items-center justify-between text-xs py-0.5 text-slate-700 dark:text-slate-300">
+                                        <span className="font-mono font-semibold">
+                                          ↳ NC N° <strong className="text-amber-700 dark:text-amber-400">{nc.numero || "S/N"}</strong> {nc.motivo ? `(${nc.motivo})` : ""} {nc.fecha ? `· ${formatDate(nc.fecha)}` : ""}
+                                        </span>
+                                        <span className="font-mono font-bold text-rose-600 dark:text-rose-400">
+                                          - {formatCurrency(nc.monto_aplicado || nc.monto_total, inv.moneda)}
+                                        </span>
+                                      </div>
+                                    ))}
+                                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-600 dark:text-slate-400 border-t border-amber-200/60 pt-1 mt-1">
+                                      <span>Monto Original Factura: {formatCurrency(inv.total, inv.moneda)}</span>
+                                      <span>Saldo Neto Exigible: <strong className="text-emerald-700 dark:text-emerald-400 font-mono text-xs">{formatCurrency(inv.saldo_pendiente, inv.moneda)}</strong></span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
                       )
                     })}
                   </tbody>

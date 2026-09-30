@@ -125,6 +125,9 @@ class ReceivableGlobalPaymentCreate(BaseModel):
     monto_usd: Optional[Decimal] = None
     tasa_brl: Optional[Decimal] = None
     tasa_usd: Optional[Decimal] = None
+    monto_transferencia: Optional[Decimal] = Decimal("0")
+    monto_cheque: Optional[Decimal] = Decimal("0")
+    cheques: Optional[list[dict]] = None
     monto_facturas_canceladas: Optional[Decimal] = None
     diferencia_monto: Optional[Decimal] = Decimal("0")
     tipo_diferencia: Optional[str] = "exacto"

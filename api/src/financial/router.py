@@ -758,8 +758,14 @@ async def get_financial_ratios(company_id: str = Query(), db: AsyncSession = Dep
 # ── Supplier Credit Notes ────────────────────────────────────────────────────
 
 @router.get("/supplier-credit-notes")
-async def list_supplier_credit_notes(company_id: str = Query(), supplier_id: str | None = Query(None), db: AsyncSession = Depends(get_db)):
-    return await service.list_supplier_credit_notes(db, company_id, supplier_id)
+async def list_supplier_credit_notes(
+    company_id: str = Query(),
+    supplier_id: str | None = Query(None),
+    solo_pendientes: bool = Query(False),
+    limit: int = Query(500),
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.list_supplier_credit_notes(db, company_id, supplier_id, solo_pendientes=solo_pendientes, limit=limit)
 
 
 @router.post("/supplier-credit-notes/upload-attachment")

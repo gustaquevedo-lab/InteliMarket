@@ -284,7 +284,64 @@ async def get_supplier_return(
     res = await db.execute(q)
     row = res.first()
     if not row:
-        return None
+        # Fallback a SupplierReturn del módulo financiero (tabla supplier_returns)
+        q_fin = (
+            select(FinancialSupplierReturn, Supplier)
+            .outerjoin(Supplier, Supplier.id == FinancialSupplierReturn.supplier_id)
+            .where(
+                FinancialSupplierReturn.company_id == company_id,
+                FinancialSupplierReturn.id == return_id,
+            )
+        )
+        res_fin = await db.execute(q_fin)
+        row_fin = res_fin.first()
+        if not row_fin:
+            return None
+        fr, fprov = row_fin
+        prov_nom = fprov.razon_social if fprov else "Proveedor"
+        prov_ruc = fprov.ruc if fprov else "—"
+        prov_tel = fprov.telefono if fprov else "—"
+        prov_dir = fprov.direccion if fprov else "—"
+        if fprov and getattr(fprov, "ciudad", None):
+            prov_dir = f"{prov_dir} ({fprov.ciudad})"
+        monto_val = float(fr.monto or 0)
+        items_detail = [{
+            "id": str(fr.id),
+            "producto_id": str(fr.id),
+            "producto_nombre": f"Devolución según comprobante {fr.numero_factura_origen or fr.numero_nota_credito or 'S/N'}",
+            "sku": "DEV-MERC",
+            "codigo_barra": "—",
+            "factura_id": None,
+            "factura_numero": fr.numero_factura_origen,
+            "cantidad": 1.0,
+            "valor_unitario": monto_val,
+            "valor_total": monto_val,
+            "motivo": fr.observaciones or "Devolución comercial",
+            "lote": None,
+            "fecha_vencimiento": None,
+            "detalle": fr.observaciones or f"Factura Origen: {fr.numero_factura_origen or '—'} · NC: {fr.numero_nota_credito or '—'}",
+        }]
+        return {
+            "id": str(fr.id),
+            "codigo": f"DEV-{str(fr.id)[:8].upper()}",
+            "tipo": "devolucion",
+            "proveedor_id": str(fr.supplier_id),
+            "proveedor_nombre": prov_nom,
+            "proveedor_ruc": prov_ruc,
+            "proveedor_telefono": prov_tel,
+            "proveedor_direccion": prov_dir,
+            "warehouse_id": None,
+            "almacen_nombre": "Depósito Principal",
+            "fecha_creacion": (fr.created_at or fr.fecha).isoformat() if (fr.created_at or fr.fecha) else None,
+            "fecha_estimada_retiro": fr.fecha.isoformat() if fr.fecha else None,
+            "total_items": 1,
+            "valor_total_estimado": monto_val,
+            "nota_credito_numero": fr.numero_nota_credito,
+            "nota_credito_monto": monto_val if fr.numero_nota_credito else None,
+            "estado": "completado",
+            "observaciones": fr.observaciones or f"Devolución comercial ref. {fr.numero_factura_origen or 'S/N'}",
+            "items": items_detail,
+        }
     r, prov_nom, prov_ruc, prov_tel, prov_dir, prov_ciu, wh_nom = row
 
     # Nombres de usuarios (autorizado_por, completado_por, rechazado_por)

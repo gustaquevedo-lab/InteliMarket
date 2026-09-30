@@ -143,6 +143,73 @@ async def list_invoices(
             if inv.supplier_id in sup_map:
                 inv.supplier_nombre = sup_map[inv.supplier_id][0]
                 inv.supplier_ruc = sup_map[inv.supplier_id][1]
+
+    # Notas de crédito anidadas (aplicadas formalmente o vinculadas a la factura de origen)
+    inv_ids = [i.id for i in invoices if i.id]
+    nc_map: dict[uuid.UUID, list[dict]] = {i.id: [] for i in invoices}
+    if inv_ids:
+        # 1. Aplicaciones registradas
+        app_q = (
+            select(
+                SupplierCreditNoteApplication.invoice_id,
+                SupplierCreditNoteApplication.monto_aplicado,
+                SupplierCreditNoteApplication.fecha_aplicacion,
+                SupplierCreditNote.id.label("nc_id"),
+                SupplierCreditNote.numero.label("nc_numero"),
+                SupplierCreditNote.motivo.label("nc_motivo"),
+                SupplierCreditNote.monto.label("nc_monto_total"),
+            )
+            .join(SupplierCreditNote, SupplierCreditNote.id == SupplierCreditNoteApplication.credit_note_id)
+            .where(SupplierCreditNoteApplication.invoice_id.in_(inv_ids))
+        )
+        app_res = await db.execute(app_q)
+        for row in app_res.all():
+            nc_map[row.invoice_id].append({
+                "id": str(row.nc_id),
+                "numero": row.nc_numero,
+                "motivo": row.nc_motivo or "Nota de crédito",
+                "monto_aplicado": float(row.monto_aplicado or 0),
+                "monto_total": float(row.nc_monto_total or 0),
+                "fecha": row.fecha_aplicacion.isoformat() if row.fecha_aplicacion else None,
+            })
+
+        # 2. Vinculación directa por número de factura origen del mismo proveedor
+        inv_nums = {i.numero_factura.strip() for i in invoices if i.numero_factura}
+        if inv_nums:
+            nc_orig_q = (
+                select(
+                    SupplierCreditNote.id,
+                    SupplierCreditNote.numero,
+                    SupplierCreditNote.numero_factura_origen,
+                    SupplierCreditNote.motivo,
+                    SupplierCreditNote.monto,
+                    SupplierCreditNote.saldo_disponible,
+                    SupplierCreditNote.fecha,
+                    SupplierCreditNote.supplier_id,
+                )
+                .where(
+                    SupplierCreditNote.company_id == uuid.UUID(company_id),
+                    SupplierCreditNote.numero_factura_origen.in_(inv_nums),
+                    SupplierCreditNote.cancelado == False,
+                )
+            )
+            nc_orig_res = await db.execute(nc_orig_q)
+            for nc in nc_orig_res.all():
+                for inv in invoices:
+                    if inv.numero_factura and inv.numero_factura.strip() == nc.numero_factura_origen.strip() and inv.supplier_id == nc.supplier_id:
+                        if not any(x["id"] == str(nc.id) for x in nc_map[inv.id]):
+                            nc_map[inv.id].append({
+                                "id": str(nc.id),
+                                "numero": nc.numero,
+                                "motivo": nc.motivo or "Nota de crédito",
+                                "monto_aplicado": float(nc.monto or 0),
+                                "monto_total": float(nc.monto or 0),
+                                "fecha": nc.fecha.isoformat() if nc.fecha else None,
+                            })
+
+    for inv in invoices:
+        inv.notas_credito = nc_map.get(inv.id, [])
+
     return invoices
 
 
@@ -2516,6 +2583,66 @@ async def get_payable_invoices(db: AsyncSession, company_id: str, supplier_id: s
         sup_result = await db.execute(select(Supplier).where(Supplier.id.in_(supplier_ids)))
         sup_map = {s.id: s.razon_social for s in sup_result.scalars().all()}
 
+    # Vincular Notas de Crédito aplicadas o correspondientes por factura
+    inv_ids = [i.id for i in invoices]
+    nc_map: dict[uuid.UUID, list[dict]] = {i.id: [] for i in invoices}
+    if inv_ids:
+        app_q = (
+            select(
+                SupplierCreditNoteApplication.invoice_id,
+                SupplierCreditNoteApplication.monto_aplicado,
+                SupplierCreditNoteApplication.fecha.label("fecha_aplicacion"),
+                SupplierCreditNote.id.label("nc_id"),
+                SupplierCreditNote.numero.label("nc_numero"),
+                SupplierCreditNote.motivo.label("nc_motivo"),
+                SupplierCreditNote.monto.label("nc_monto_total"),
+            )
+            .join(SupplierCreditNote, SupplierCreditNote.id == SupplierCreditNoteApplication.credit_note_id)
+            .where(SupplierCreditNoteApplication.invoice_id.in_(inv_ids))
+        )
+        app_res = await db.execute(app_q)
+        for row in app_res.all():
+            nc_map[row.invoice_id].append({
+                "id": str(row.nc_id),
+                "numero": row.nc_numero,
+                "motivo": row.nc_motivo or "Nota de crédito",
+                "monto_aplicado": float(row.monto_aplicado or 0),
+                "monto_total": float(row.nc_monto_total or 0),
+                "fecha": row.fecha_aplicacion.isoformat() if row.fecha_aplicacion else None,
+            })
+
+        inv_nums = {i.numero_factura.strip() for i in invoices if i.numero_factura}
+        if inv_nums:
+            nc_orig_q = (
+                select(
+                    SupplierCreditNote.id,
+                    SupplierCreditNote.numero,
+                    SupplierCreditNote.numero_factura_origen,
+                    SupplierCreditNote.motivo,
+                    SupplierCreditNote.monto,
+                    SupplierCreditNote.fecha,
+                    SupplierCreditNote.supplier_id,
+                )
+                .where(
+                    SupplierCreditNote.company_id == uuid.UUID(company_id),
+                    SupplierCreditNote.numero_factura_origen.in_(inv_nums),
+                    SupplierCreditNote.cancelado == False,
+                )
+            )
+            nc_orig_res = await db.execute(nc_orig_q)
+            for nc in nc_orig_res.all():
+                for inv in invoices:
+                    if inv.numero_factura and inv.numero_factura.strip() == (nc.numero_factura_origen or "").strip() and inv.supplier_id == nc.supplier_id:
+                        if not any(x["id"] == str(nc.id) for x in nc_map[inv.id]):
+                            nc_map[inv.id].append({
+                                "id": str(nc.id),
+                                "numero": nc.numero,
+                                "motivo": nc.motivo or "Nota de crédito",
+                                "monto_aplicado": float(nc.monto or 0),
+                                "monto_total": float(nc.monto or 0),
+                                "fecha": nc.fecha.isoformat() if nc.fecha else None,
+                            })
+
     today = _today()
     return [
         {
@@ -2532,6 +2659,9 @@ async def get_payable_invoices(db: AsyncSession, company_id: str, supplier_id: s
             "tipo_cambio": float(i.tipo_cambio) if i.tipo_cambio is not None else 1,
             "total_brl": float(i.total_brl) if i.total_brl is not None else None,
             "saldo_pendiente_brl": float(i.saldo_pendiente_brl) if i.saldo_pendiente_brl is not None else None,
+            "tipo_comprobante": i.tipo_comprobante or "factura",
+            "concepto": i.concepto,
+            "notas_credito": nc_map.get(i.id, []),
             "dias_vencido": (today - i.fecha_vencimiento).days if i.fecha_vencimiento < today else 0,
         }
         for i in invoices
@@ -2841,11 +2971,13 @@ def save_credit_note_attachment(content: bytes, filename: str) -> str:
     return f"/uploads/credit_notes/{unique_name}"
 
 
-async def list_supplier_credit_notes(db: AsyncSession, company_id: str, supplier_id: str | None = None, limit: int = 100) -> list[dict]:
+async def list_supplier_credit_notes(db: AsyncSession, company_id: str, supplier_id: str | None = None, solo_pendientes: bool = False, limit: int = 500) -> list[dict]:
     cid = uuid.UUID(company_id)
     query = select(SupplierCreditNote, Supplier.razon_social).join(
         Supplier, Supplier.id == SupplierCreditNote.supplier_id, isouter=True
     ).where(SupplierCreditNote.company_id == cid, SupplierCreditNote.cancelado == False)
+    if solo_pendientes:
+        query = query.where(SupplierCreditNote.saldo_disponible > 0)
     if supplier_id:
         query = query.where(SupplierCreditNote.supplier_id == uuid.UUID(supplier_id))
     query = query.order_by(SupplierCreditNote.fecha.desc()).limit(limit)
@@ -4259,74 +4391,108 @@ async def create_multi_supplier_payment_batch(
 
     # 2. Desembolso centralizado (Instrumento Financiero Único)
     cheque_obj: Cheque | None = None
+    cheque_objs: list[Cheque] = []
     bank_acc_obj: BankAccount | None = None
 
     if fp == "cheque":
-        if payload.cheque_id:
-            # Cheque existente
-            ch_res = await db.execute(select(Cheque).where(Cheque.id == payload.cheque_id, Cheque.company_id == cid))
-            cheque_obj = ch_res.scalar_one_or_none()
-            if not cheque_obj:
-                raise HTTPException(status_code=404, detail="El cheque seleccionado no existe.")
-
-            consumed_res = await db.execute(
-                select(func.coalesce(func.sum(SupplierPaymentOrderDisbursement.monto_pyg), 0))
-                .where(SupplierPaymentOrderDisbursement.cheque_id == cheque_obj.id)
-            )
-            consumed_monto = consumed_res.scalar_one() or Decimal("0")
-            disponible = Decimal(str(cheque_obj.monto or 0)) - consumed_monto
-            if total_desembolso_declarado > disponible:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Saldo insuficiente en cheque N° {cheque_obj.numero}. Total: ₲ {cheque_obj.monto:,.0f} | Disponible: ₲ {disponible:,.0f} | Requerido por lote: ₲ {total_desembolso_declarado:,.0f}"
+        # Normalizar a lista de cheques
+        cheques_to_process = list(payload.cheques or [])
+        if not cheques_to_process and (payload.cheque_id or payload.numero_cheque):
+            from api.src.financial.schemas import MultiSupplierChequeItem
+            cheques_to_process = [
+                MultiSupplierChequeItem(
+                    cheque_id=payload.cheque_id,
+                    numero_cheque=payload.numero_cheque,
+                    banco_cheque=payload.banco_cheque,
+                    titular_cheque=payload.titular_cheque,
+                    fecha_cheque_emision=payload.fecha_cheque_emision,
+                    fecha_cheque_vencimiento=payload.fecha_cheque_vencimiento,
+                    es_cheque_diferido=payload.es_cheque_diferido,
+                    monto=total_desembolso_declarado,
+                    bank_account_id=payload.bank_account_id,
                 )
+            ]
 
-            db.add(ChequeHistorial(
-                cheque_id=cheque_obj.id,
-                estado_anterior=cheque_obj.estado,
-                estado_nuevo=cheque_obj.estado,
-                user_id=uuid.UUID(user_id) if user_id else None,
-                user_nombre=user_nombre or "Finanzas",
-                notas=f"Asignado a Lote Multi-Proveedor ({len(payload.items)} prov.) por ₲ {total_desembolso_declarado:,.0f} (Facturas: ₲ {total_items_pyg:,.0f}, Dif. Cambio: ₲ {diff_cambio_total:+,.0f})",
-            ))
-        else:
-            if not payload.numero_cheque:
-                raise HTTPException(status_code=400, detail="Debe indicar el número de cheque.")
+        if not cheques_to_process:
+            raise HTTPException(status_code=400, detail="Debe especificar al menos un cheque para el pago.")
 
-            fecha_em = payload.fecha_cheque_emision or _today()
-            fecha_venc = payload.fecha_cheque_vencimiento or fecha_em
-            es_dif = bool(payload.es_cheque_diferido or (fecha_venc > fecha_em))
-
-            cheque_obj = Cheque(
-                company_id=cid,
-                numero=payload.numero_cheque,
-                numero_confiable=True,
-                banco_emisor=payload.banco_cheque or "Banco",
-                bank_account_id=payload.bank_account_id,
-                beneficiario=payload.titular_cheque or f"Lote Brasil ({len(payload.items)} proveedores)",
-                tipo_cheque="emitido",
-                monto=total_desembolso_declarado,
-                moneda="PYG",
-                fecha_emision=fecha_em,
-                fecha_entrega=_today(),
-                fecha_pago=fecha_venc,
-                diferido=es_dif,
-                estado="pendiente",
-                concepto=f"Lote Multi-Proveedor / Brasil ({len(payload.items)} proveedores)",
-                notas=payload.observaciones or f"Cheque por compra de divisas / pago agrupado (Dif. Cambio: ₲ {diff_cambio_total:+,.0f})",
-                created_by=uuid.UUID(user_id) if user_id else None,
+        total_cheques_sum = sum(Decimal(str(ch.monto)) for ch in cheques_to_process)
+        if abs(total_cheques_sum - total_desembolso_declarado) > Decimal("50"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"La suma de los cheques (₲ {total_cheques_sum:,.0f}) no coincide con el total de desembolso (₲ {total_desembolso_declarado:,.0f})."
             )
-            db.add(cheque_obj)
-            await db.flush()
 
-            db.add(ChequeHistorial(
-                cheque_id=cheque_obj.id,
-                estado_anterior=None,
-                estado_nuevo="pendiente",
-                user_id=uuid.UUID(user_id) if user_id else None,
-                user_nombre=user_nombre or "Finanzas",
-                notas=f"Emitido en Lote Multi-Proveedor ({len(payload.items)} prov.) por ₲ {total_desembolso_declarado:,.0f} (Dif. Cambio: ₲ {diff_cambio_total:+,.0f})",
-            ))
+        for ch_item in cheques_to_process:
+            if ch_item.cheque_id:
+                # Cheque existente
+                ch_res = await db.execute(select(Cheque).where(Cheque.id == ch_item.cheque_id, Cheque.company_id == cid))
+                c_obj = ch_res.scalar_one_or_none()
+                if not c_obj:
+                    raise HTTPException(status_code=404, detail="El cheque seleccionado no existe.")
+
+                consumed_res = await db.execute(
+                    select(func.coalesce(func.sum(SupplierPaymentOrderDisbursement.monto_pyg), 0))
+                    .where(SupplierPaymentOrderDisbursement.cheque_id == c_obj.id)
+                )
+                consumed_monto = consumed_res.scalar_one() or Decimal("0")
+                disponible = Decimal(str(c_obj.monto or 0)) - consumed_monto
+                if Decimal(str(ch_item.monto)) > disponible:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Saldo insuficiente en cheque N° {c_obj.numero}. Total: ₲ {c_obj.monto:,.0f} | Disponible: ₲ {disponible:,.0f} | Requerido por lote: ₲ {Decimal(str(ch_item.monto)):,.0f}"
+                    )
+
+                db.add(ChequeHistorial(
+                    cheque_id=c_obj.id,
+                    estado_anterior=c_obj.estado,
+                    estado_nuevo=c_obj.estado,
+                    user_id=uuid.UUID(user_id) if user_id else None,
+                    user_nombre=user_nombre or "Finanzas",
+                    notas=f"Asignado a Lote Multi-Proveedor ({len(payload.items)} prov.) por ₲ {Decimal(str(ch_item.monto)):,.0f}",
+                ))
+                cheque_objs.append(c_obj)
+            else:
+                if not ch_item.numero_cheque:
+                    raise HTTPException(status_code=400, detail="Debe indicar el número de cheque.")
+
+                fecha_em = ch_item.fecha_cheque_emision or _today()
+                fecha_venc = ch_item.fecha_cheque_vencimiento or fecha_em
+                es_dif = bool(ch_item.es_cheque_diferido or (fecha_venc > fecha_em))
+
+                c_obj = Cheque(
+                    company_id=cid,
+                    numero=ch_item.numero_cheque,
+                    numero_confiable=True,
+                    banco_emisor=ch_item.banco_cheque or "Banco",
+                    bank_account_id=ch_item.bank_account_id or payload.bank_account_id,
+                    beneficiario=ch_item.titular_cheque or payload.titular_cheque or f"Lote Brasil ({len(payload.items)} proveedores)",
+                    tipo_cheque="emitido",
+                    monto=Decimal(str(ch_item.monto)),
+                    moneda="PYG",
+                    fecha_emision=fecha_em,
+                    fecha_entrega=_today(),
+                    fecha_pago=fecha_venc,
+                    diferido=es_dif,
+                    estado="pendiente",
+                    concepto=f"Lote Multi-Proveedor / Brasil ({len(payload.items)} proveedores)",
+                    notas=payload.observaciones or f"Cheque por pago agrupado (Dif. Cambio: ₲ {diff_cambio_total:+,.0f})",
+                    created_by=uuid.UUID(user_id) if user_id else None,
+                )
+                db.add(c_obj)
+                await db.flush()
+
+                db.add(ChequeHistorial(
+                    cheque_id=c_obj.id,
+                    estado_anterior=None,
+                    estado_nuevo="pendiente",
+                    user_id=uuid.UUID(user_id) if user_id else None,
+                    user_nombre=user_nombre or "Finanzas",
+                    notas=f"Emitido en Lote Multi-Proveedor ({len(payload.items)} prov.) por ₲ {Decimal(str(ch_item.monto)):,.0f}",
+                ))
+                cheque_objs.append(c_obj)
+
+        cheque_obj = cheque_objs[0] if cheque_objs else None
 
     elif fp == "transferencia":
         if not payload.bank_account_id:

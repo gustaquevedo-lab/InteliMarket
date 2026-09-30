@@ -177,6 +177,7 @@ export default function FinancialPage() {
   const [ncFilterSupplier, setNcFilterSupplier] = useState("todos")
   const [ncFilterMotivo, setNcFilterMotivo] = useState("todos")
   const [ncFilterImpacto, setNcFilterImpacto] = useState("todos")
+  const [ncFilterSaldo, setNcFilterSaldo] = useState<"pendientes" | "todas" | "agotadas">("pendientes")
 
   const toast = useToast()
 
@@ -461,14 +462,20 @@ export default function FinancialPage() {
       const matchSupplier = ncFilterSupplier === "todos" || cn.supplier_id === ncFilterSupplier
       const matchMotivo = ncFilterMotivo === "todos" || cn.motivo_categoria === ncFilterMotivo
       const matchImpacto = ncFilterImpacto === "todos" || cn.impacto_contable === ncFilterImpacto
+      const saldo = Number(cn.saldo_disponible !== undefined ? cn.saldo_disponible : cn.monto)
+      const matchSaldo = ncFilterSaldo === "todas"
+        ? true
+        : ncFilterSaldo === "pendientes"
+          ? (saldo > 0 && !cn.cancelado)
+          : (saldo <= 0 || Boolean(cn.cancelado))
 
-      return matchSearch && matchSupplier && matchMotivo && matchImpacto
+      return matchSearch && matchSupplier && matchMotivo && matchImpacto && matchSaldo
     }).sort((a, b) => {
       const dateA = new Date(a.fecha || a.created_at || 0).getTime()
       const dateB = new Date(b.fecha || b.created_at || 0).getTime()
       return dateB - dateA
     })
-  }, [creditNotes, ncSearch, ncFilterSupplier, ncFilterMotivo, ncFilterImpacto])
+  }, [creditNotes, ncSearch, ncFilterSupplier, ncFilterMotivo, ncFilterImpacto, ncFilterSaldo])
 
   const weeklyDueData = useMemo(() => {
     const weeks: Record<string, number> = { "Vencidas": 0, "Semana 1": 0, "Semana 2": 0, "Semana 3": 0, "Semana 4+": 0 }
@@ -2615,6 +2622,16 @@ export default function FinancialPage() {
                     className="text-xs"
                   />
                 </div>
+
+                <select
+                  value={ncFilterSaldo}
+                  onChange={e => setNcFilterSaldo(e.target.value as any)}
+                  className="input-field md:w-56 text-xs font-bold"
+                >
+                  <option value="pendientes">Solo con Saldo Pendiente</option>
+                  <option value="todas">Todas las Notas de Crédito ({creditNotes.length})</option>
+                  <option value="agotadas">Aplicadas / Sin Saldo</option>
+                </select>
 
                 <select
                   value={ncFilterMotivo}

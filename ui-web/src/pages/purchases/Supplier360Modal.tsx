@@ -6,7 +6,7 @@ import {
   FileText, ShieldAlert, CreditCard, RefreshCw, Layers, Eye,
   BarChart3, Calendar, Truck, ArrowUpRight, ArrowDownRight,
   Search, ExternalLink, HelpCircle, Check, Sparkles, Printer,
-  Wallet, Tag, FileCheck, Filter, ShieldCheck, ChevronDown
+  Wallet, Tag, FileCheck, Filter, ShieldCheck, ChevronDown, CornerDownRight
 } from "lucide-react"
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, XAxis, YAxis,
@@ -735,58 +735,75 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                               const isRetenida = f.requiere_nc || (f.monto_retenido_nc || 0) > 0 || f.bloqueada_para_pago
 
                               return (
-                                <tr key={f.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition">
-                                  <td className="p-3 font-mono font-bold">
-                                    {f.numero_factura}
-                                    {f.timbrado && <span className="block text-[10px] text-slate-400 font-normal">Timb: {f.timbrado}</span>}
-                                  </td>
-                                  <td className="p-3 font-mono text-slate-600 dark:text-slate-400">{f.fecha_emision}</td>
-                                  <td className="p-3 font-mono font-bold">
-                                    <span className={f.es_vencida ? "text-red-600" : "text-emerald-600"}>
-                                      {f.fecha_vencimiento}
-                                    </span>
-                                    <span className="block text-[9px] font-medium">
-                                      {f.es_vencida ? `+${f.dias_vencido}d vencida` : `${Math.abs(f.dias_vencido)}d restantes`}
-                                    </span>
-                                  </td>
-                                  <td className="p-3 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
-                                    {formatPYG(f.total)}
-                                  </td>
-                                  <td className="p-3 text-center">
-                                    {hasNc ? (
-                                      <div className="inline-flex flex-col items-center">
-                                        <span className="px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-black font-mono text-[10px] border border-emerald-300 dark:border-emerald-800">
-                                          -{formatPYG(mNc)}
-                                        </span>
-                                        {f.ncs_vinculadas && f.ncs_vinculadas.length > 0 && (
-                                          <span className="text-[9px] text-slate-400 mt-0.5">
-                                            {f.ncs_vinculadas.map(a => a.numero_nc).join(", ")}
+                                <React.Fragment key={f.id}>
+                                  <tr className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition">
+                                    <td className="p-3 font-mono font-bold">
+                                      {f.numero_factura}
+                                      {f.timbrado && <span className="block text-[10px] text-slate-400 font-normal">Timb: {f.timbrado}</span>}
+                                    </td>
+                                    <td className="p-3 font-mono text-slate-600 dark:text-slate-400">{f.fecha_emision}</td>
+                                    <td className="p-3 font-mono font-bold">
+                                      <span className={f.es_vencida ? "text-red-600" : "text-emerald-600"}>
+                                        {f.fecha_vencimiento}
+                                      </span>
+                                      <span className="block text-[9px] font-medium">
+                                        {f.es_vencida ? `+${f.dias_vencido}d vencida` : `${Math.abs(f.dias_vencido)}d restantes`}
+                                      </span>
+                                    </td>
+                                    <td className="p-3 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
+                                      {formatPYG(f.total)}
+                                    </td>
+                                    <td className="p-3 text-center">
+                                      {hasNc ? (
+                                        <div className="inline-flex flex-col items-center">
+                                          <span className="px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-black font-mono text-[10px] border border-emerald-300 dark:border-emerald-800">
+                                            -{formatPYG(mNc)}
                                           </span>
-                                        )}
-                                      </div>
-                                    ) : isRetenida ? (
-                                      <span className="px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 font-black text-[9px] border border-purple-300 dark:border-purple-800">
-                                        Retenida por NC
-                                      </span>
-                                    ) : (
-                                      <span className="text-slate-400 text-[10px]">Sin NC</span>
-                                    )}
-                                  </td>
-                                  <td className="p-3 text-right font-mono font-black text-rose-600 dark:text-rose-400">
-                                    {formatPYG(f.saldo_neto_real !== undefined ? f.saldo_neto_real : f.saldo_pendiente)}
-                                  </td>
-                                  <td className="p-3 text-center">
-                                    {getFaseBadge(f.fase_pago, f.fase_pago_label)}
-                                    {f.lote_pago && (
-                                      <span className="block text-[9px] text-indigo-500 font-mono mt-0.5">
-                                        {f.lote_pago.nombre}
-                                      </span>
-                                    )}
-                                  </td>
-                                  <td className="p-3 text-center text-slate-500 uppercase text-[10px] font-bold">
-                                    {f.condicion}
-                                  </td>
-                                </tr>
+                                          {f.ncs_vinculadas && f.ncs_vinculadas.length > 0 && (
+                                            <span className="text-[9px] text-slate-400 mt-0.5">
+                                              {f.ncs_vinculadas.map(a => a.numero_nc).join(", ")}
+                                            </span>
+                                          )}
+                                        </div>
+                                      ) : isRetenida ? (
+                                        <span className="px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 font-black text-[9px] border border-purple-300 dark:border-purple-800">
+                                          Retenida por NC
+                                        </span>
+                                      ) : (
+                                        <span className="text-slate-400 text-[10px]">Sin NC</span>
+                                      )}
+                                    </td>
+                                    <td className="p-3 text-right font-mono font-black text-rose-600 dark:text-rose-400">
+                                      {formatPYG(f.saldo_neto_real !== undefined ? f.saldo_neto_real : f.saldo_pendiente)}
+                                    </td>
+                                    <td className="p-3 text-center">
+                                      {getFaseBadge(f.fase_pago, f.fase_pago_label)}
+                                      {f.lote_pago && (
+                                        <span className="block text-[9px] text-indigo-500 font-mono mt-0.5">
+                                          {f.lote_pago.nombre}
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="p-3 text-center text-slate-500 uppercase text-[10px] font-bold">
+                                      {f.condicion}
+                                    </td>
+                                  </tr>
+                                  {hasNc && f.ncs_vinculadas && f.ncs_vinculadas.length > 0 && (
+                                    <tr className="bg-amber-50/60 dark:bg-amber-950/20 border-b border-amber-200/60">
+                                      <td colSpan={8} className="py-2 px-6 pl-10">
+                                        <div className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                                          <CornerDownRight className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                                          <span className="text-[11px] font-bold text-amber-800 dark:text-amber-300">Nota de Crédito Vinculada:</span>
+                                          {f.ncs_vinculadas.map((nc: any, i: number) => (
+                                            <span key={i} className="font-mono text-amber-700 dark:text-amber-300 font-bold text-xs bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded border border-amber-300/80">
+                                              NC #{nc.numero_nc || nc.numero} (-{formatPYG(nc.monto_aplicado || nc.monto)})
+                                            </span>
+                                          ))}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </React.Fragment>
                               )
                             })
                           )}

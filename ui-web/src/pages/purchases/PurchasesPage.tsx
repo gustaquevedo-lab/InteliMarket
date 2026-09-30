@@ -316,6 +316,7 @@ export default function PurchasesPage() {
     fecha_emision: new Date().toISOString().split("T")[0],
     fecha_vencimiento: new Date().toISOString().split("T")[0],
     condicion: "credito",
+    tipo_clasificacion: "mercaderia",
     moneda: "PYG" as "PYG" | "BRL",
     total_brl: "",
     tipo_cambio: "1350",
@@ -1320,6 +1321,7 @@ export default function PurchasesPage() {
         fecha_emision: manualInvoiceForm.fecha_emision,
         fecha_vencimiento: manualInvoiceForm.fecha_vencimiento,
         condicion: manualInvoiceForm.condicion,
+        tipo_comprobante: manualInvoiceForm.tipo_clasificacion === "insumo_gasto" ? "gasto" : "factura",
         moneda: isBrl ? "BRL" : "PYG",
         tipo_cambio: tc,
         total: totalPyg,
@@ -4418,6 +4420,7 @@ export default function PurchasesPage() {
                     fecha_emision: new Date().toISOString().split("T")[0],
                     fecha_vencimiento: new Date().toISOString().split("T")[0],
                     condicion: "credito",
+                    tipo_clasificacion: "mercaderia",
                     moneda: "PYG",
                     total_brl: "",
                     tipo_cambio: "1350",
@@ -4850,7 +4853,7 @@ export default function PurchasesPage() {
                               )}
 
                               {/* Botón Reporte PDF Oficial Premium A4 para Imprimir y Remitir */}
-                              {isManaged && (
+                              {(isManaged || item.tipo_registro === "devolucion") && (
                                 <button
                                   onClick={() => handleDownloadReturnPdf(item)}
                                   disabled={downloadingReturnPdfId === (item.raw?.id || item.id)}
@@ -7066,6 +7069,20 @@ export default function PurchasesPage() {
                   >
                     <option value="credito">Crédito (A Pagar)</option>
                     <option value="contado">Contado</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                    Clasificación
+                  </label>
+                  <select
+                    value={manualInvoiceForm.tipo_clasificacion}
+                    onChange={(e) => setManualInvoiceForm(prev => ({ ...prev, tipo_clasificacion: e.target.value }))}
+                    className="input-field w-full text-xs font-semibold bg-amber-50/50 dark:bg-amber-950/20 border-amber-300 dark:border-amber-800"
+                  >
+                    <option value="mercaderia">📦 Mercadería (Reventa)</option>
+                    <option value="insumo_gasto">🛠️ Insumo / Gasto Operativo</option>
                   </select>
                 </div>
               </div>

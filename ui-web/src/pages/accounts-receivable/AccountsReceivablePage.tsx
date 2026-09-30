@@ -160,6 +160,8 @@ export default function AccountsReceivablePage() {
   const [payMontoPYG, setPayMontoPYG] = useState<number>(0)
   const [payMontoBRL, setPayMontoBRL] = useState<number>(0)
   const [payMontoUSD, setPayMontoUSD] = useState<number>(0)
+  const [payMontoTransferencia, setPayMontoTransferencia] = useState<number>(0)
+  const [payMontoCheque, setPayMontoCheque] = useState<number>(0)
   const [payTasaBRL, setPayTasaBRL] = useState<number>(1450)
   const [payTasaUSD, setPayTasaUSD] = useState<number>(7800)
 
@@ -983,6 +985,13 @@ export default function AccountsReceivablePage() {
 
   // Cálculo del monto total físico entregado en Guaraníes (convertido de multimonedas)
   const montoFisicoEntregadoGs = useMemo(() => {
+    if (payFormaPago === "mixto") {
+      const efectivo = (payMontoPYG || 0) + Math.round((payMontoBRL || 0) * payTasaBRL) + Math.round((payMontoUSD || 0) * payTasaUSD)
+      const transf = payMontoTransferencia || 0
+      const chq = payMontoCheque || 0
+      const total = efectivo + transf + chq
+      return total > 0 ? total : montoTotalPago
+    }
     if (payFormaPago !== "efectivo") {
       return montoTotalPago
     }
@@ -991,7 +1000,7 @@ export default function AccountsReceivablePage() {
       return montoTotalPago
     }
     return totalCalc
-  }, [payFormaPago, payMontoPYG, payMontoBRL, payMontoUSD, payTasaBRL, payTasaUSD, montoTotalPago])
+  }, [payFormaPago, payMontoPYG, payMontoBRL, payMontoUSD, payTasaBRL, payTasaUSD, payMontoTransferencia, payMontoCheque, montoTotalPago])
 
   // Desbalanceo automático: si entregado < facturas -> descuento, si entregado > facturas -> gastos admin
   const diferenciaCompensacion = montoFisicoEntregadoGs - montoTotalPago
@@ -1007,6 +1016,8 @@ export default function AccountsReceivablePage() {
       setPayMontoPYG(0)
       setPayMontoBRL(0)
       setPayMontoUSD(0)
+      setPayMontoTransferencia(0)
+      setPayMontoCheque(0)
     }
   }, [showPaymentModal, isAgenteRetentor, superaUmbralRetencion])
 
@@ -1070,7 +1081,7 @@ export default function AccountsReceivablePage() {
     setSubmittingPayment(true)
     try {
       const selectedDocIds = Object.keys(allocations).filter(id => (parseFloat(allocations[id]) || 0) > 0)
-      const isEfectivo = payFormaPago === "efectivo"
+      const isEfectivo = payFormaPago === "efectivo" || payFormaPago === "mixto"
       const res = await api.accountsReceivable.applyGlobalPayment({
         customer_id: showPaymentModal,
         monto_total: montoFisicoEntregadoGs > 0 ? montoFisicoEntregadoGs : montoTotalPago,
@@ -1079,22 +1090,24 @@ export default function AccountsReceivablePage() {
         fecha: payFecha,
         observaciones: payObservaciones || undefined,
         accounts_receivable_ids: selectedDocIds.length > 0 ? selectedDocIds : undefined,
-        bank_account_id: (payFormaPago === "transferencia" || payFormaPago === "deposito_bancario" || payFormaPago === "pix" || payFormaPago === "qr") ? (payBankAccountId || undefined) : undefined,
+        bank_account_id: (payFormaPago === "transferencia" || payFormaPago === "deposito_bancario" || payFormaPago === "pix" || payFormaPago === "qr" || payFormaPago === "mixto") ? (payBankAccountId || undefined) : undefined,
         destino_fondos: isEfectivo ? payDestinoFondos : undefined,
-        monto_pyg: isEfectivo ? (payMontoPYG || (payMontoBRL === 0 && payMontoUSD === 0 ? montoTotalPago : 0)) : 0,
+        monto_pyg: isEfectivo ? (payMontoPYG || (payFormaPago === "efectivo" && payMontoBRL === 0 && payMontoUSD === 0 ? montoTotalPago : 0)) : 0,
         monto_brl: isEfectivo ? (payMontoBRL || 0) : 0,
         monto_usd: isEfectivo ? (payMontoUSD || 0) : 0,
+        monto_transferencia: payFormaPago === "mixto" ? payMontoTransferencia : (payFormaPago === "transferencia" ? montoTotalPago : 0),
+        monto_cheque: payFormaPago === "mixto" ? payMontoCheque : (payFormaPago === "cheque" ? montoTotalPago : 0),
         tasa_brl: payTasaBRL,
         tasa_usd: payTasaUSD,
         monto_facturas_canceladas: montoTotalPago,
         diferencia_monto: montoDiferenciaCompensacion,
         tipo_diferencia: tipoDiferenciaCompensacion,
-        cheque_numero: payFormaPago === "cheque" ? (payChequeNumero || undefined) : undefined,
-        cheque_banco: payFormaPago === "cheque" ? (payChequeBanco || undefined) : undefined,
-        cheque_librador: payFormaPago === "cheque" ? (payChequeLibrador || undefined) : undefined,
-        cheque_ruc: payFormaPago === "cheque" ? (payChequeRuc || undefined) : undefined,
-        cheque_fecha_emision: payFormaPago === "cheque" ? payChequeFechaEmision : undefined,
-        cheque_fecha_cobro: payFormaPago === "cheque" ? payChequeFechaCobro : undefined,
+        cheque_numero: (payFormaPago === "cheque" || payFormaPago === "mixto") ? (payChequeNumero || undefined) : undefined,
+        cheque_banco: (payFormaPago === "cheque" || payFormaPago === "mixto") ? (payChequeBanco || undefined) : undefined,
+        cheque_librador: (payFormaPago === "cheque" || payFormaPago === "mixto") ? (payChequeLibrador || undefined) : undefined,
+        cheque_ruc: (payFormaPago === "cheque" || payFormaPago === "mixto") ? (payChequeRuc || undefined) : undefined,
+        cheque_fecha_emision: (payFormaPago === "cheque" || payFormaPago === "mixto") ? payChequeFechaEmision : undefined,
+        cheque_fecha_cobro: (payFormaPago === "cheque" || payFormaPago === "mixto") ? payChequeFechaCobro : undefined,
         aplica_retencion: aplicaRetencion,
         monto_retencion: aplicaRetencion ? montoRetencionFinal : 0,
         retencion_numero_comprobante: (aplicaRetencion && retencionNumeroComprobante.trim()) ? retencionNumeroComprobante.trim() : undefined,
@@ -3046,6 +3059,7 @@ export default function AccountsReceivablePage() {
                   <label className="label-field">Forma de Pago</label>
                   <select className="input-field text-xs" value={payFormaPago} onChange={e => setPayFormaPago(e.target.value)}>
                     <option value="efectivo">Efectivo (Gs. / R$ / US$)</option>
+                    <option value="mixto">Pago Mixto / Combinado (Multimoneda + Cheque + Banco)</option>
                     <option value="deposito_bancario">Depósito Bancario (Boleta / Cta. Cte.)</option>
                     <option value="transferencia">Transferencia Bancaria (SIPAP)</option>
                     <option value="pix">PIX (Banco Central do Brasil)</option>
@@ -3073,7 +3087,7 @@ export default function AccountsReceivablePage() {
               </div>
 
               {/* 🏛️ PANEL DINÁMICO DE TESORERÍA / DESTINO DE FONDOS Y MULTIMONEDA */}
-              {payFormaPago === "efectivo" && (
+              {(payFormaPago === "efectivo" || payFormaPago === "mixto") && (
                 <div className="p-4 rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 space-y-3.5">
                   <div className="flex items-center justify-between text-xs font-bold text-amber-900 dark:text-amber-300">
                     <span className="flex items-center gap-2">
@@ -3203,7 +3217,7 @@ export default function AccountsReceivablePage() {
                 </div>
               )}
 
-              {(payFormaPago === "transferencia" || payFormaPago === "deposito_bancario" || payFormaPago === "pix" || payFormaPago === "qr") && (
+              {(payFormaPago === "transferencia" || payFormaPago === "deposito_bancario" || payFormaPago === "pix" || payFormaPago === "qr" || payFormaPago === "mixto") && (
                 <div className="p-3.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 space-y-2">
                   <div className="flex items-center justify-between text-xs font-bold text-blue-900 dark:text-blue-300">
                     <span className="flex items-center gap-2">
@@ -3214,25 +3228,47 @@ export default function AccountsReceivablePage() {
                       {payFormaPago === "deposito_bancario" ? "Acredita saldo en la Cta. Cte. seleccionada según la boleta" : "Acredita saldo y asienta la transacción"}
                     </span>
                   </div>
-                  <select
-                    className="input-field text-xs w-full font-medium"
-                    value={payBankAccountId}
-                    onChange={e => setPayBankAccountId(e.target.value)}
-                  >
-                    {bankAccounts.length === 0 ? (
-                      <option value="">Cargando cuentas bancarias activas...</option>
-                    ) : (
-                      bankAccounts.map(b => (
-                        <option key={b.id} value={b.id}>
-                          {b.banco_nombre} — {b.tipo_cuenta ? b.tipo_cuenta.replace('_', ' ').toUpperCase() : 'Cuenta'} {b.numero_cuenta} ({b.moneda}) · Saldo: {formatPYG(b.saldo_actual)}
-                        </option>
-                      ))
+                  <div className={`grid ${payFormaPago === "mixto" ? "grid-cols-1 sm:grid-cols-2 gap-3" : "grid-cols-1"}`}>
+                    <div>
+                      {payFormaPago === "mixto" && (
+                        <label className="text-[10px] font-bold text-blue-900 dark:text-blue-300 uppercase block mb-1">
+                          Cuenta de Acreditación
+                        </label>
+                      )}
+                      <select
+                        className="input-field text-xs w-full font-medium"
+                        value={payBankAccountId}
+                        onChange={e => setPayBankAccountId(e.target.value)}
+                      >
+                        {bankAccounts.length === 0 ? (
+                          <option value="">Cargando cuentas bancarias activas...</option>
+                        ) : (
+                          bankAccounts.map(b => (
+                            <option key={b.id} value={b.id}>
+                              {b.banco_nombre} — {b.tipo_cuenta ? b.tipo_cuenta.replace('_', ' ').toUpperCase() : 'Cuenta'} {b.numero_cuenta} ({b.moneda}) · Saldo: {formatPYG(b.saldo_actual)}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </div>
+                    {payFormaPago === "mixto" && (
+                      <div>
+                        <label className="text-[10px] font-bold text-blue-900 dark:text-blue-300 uppercase block mb-1">
+                          Monto Transferencia / Banco (₲)
+                        </label>
+                        <CurrencyInput
+                          currency="PYG"
+                          value={payMontoTransferencia}
+                          onChangeValue={val => setPayMontoTransferencia(val)}
+                          className="input-field text-xs font-mono font-bold bg-white dark:bg-slate-900 border-blue-300"
+                        />
+                      </div>
                     )}
-                  </select>
+                  </div>
                 </div>
               )}
 
-              {payFormaPago === "cheque" && (
+              {(payFormaPago === "cheque" || payFormaPago === "mixto") && (
                 <div className="p-3.5 rounded-xl bg-purple-50/70 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/40 space-y-3">
                   <div className="flex items-center justify-between text-xs font-bold text-purple-900 dark:text-purple-300">
                     <span className="flex items-center gap-2">
@@ -3243,7 +3279,7 @@ export default function AccountsReceivablePage() {
                       CARTERA DE CHEQUES
                     </span>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                  <div className={`grid grid-cols-1 ${payFormaPago === "mixto" ? "sm:grid-cols-4" : "sm:grid-cols-3"} gap-2.5 text-xs`}>
                     <div>
                       <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">N° de Cheque</label>
                       <input
@@ -3298,6 +3334,19 @@ export default function AccountsReceivablePage() {
                         onChange={e => setPayChequeFechaCobro(e.target.value)}
                       />
                     </div>
+                    {payFormaPago === "mixto" && (
+                      <div className="sm:col-span-2">
+                        <label className="text-[10px] font-black text-purple-900 dark:text-purple-300 uppercase block mb-1">
+                          Monto en Cheque (₲)
+                        </label>
+                        <CurrencyInput
+                          currency="PYG"
+                          value={payMontoCheque}
+                          onChangeValue={val => setPayMontoCheque(val)}
+                          className="input-field text-xs font-mono font-bold bg-white dark:bg-slate-900 border-purple-300"
+                        />
+                      </div>
+                    )}
                   </div>
                   {payChequeFechaCobro > getTodayAsuncion() && (
                     <div className="text-[11px] font-bold text-purple-700 dark:text-purple-300 flex items-center gap-1.5">
@@ -3305,6 +3354,28 @@ export default function AccountsReceivablePage() {
                       <span>Cheque Diferido: quedará asentado en Cartera de Cheques a Depositar hasta la fecha de cobro indicada.</span>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* 🎯 RESUMEN DE COBRO MIXTO */}
+              {payFormaPago === "mixto" && (
+                <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-50 via-teal-50 to-blue-50 dark:from-emerald-950/30 dark:via-teal-950/20 dark:to-blue-950/30 border border-emerald-200 dark:border-emerald-800/60 flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <div className="text-xs space-y-0.5">
+                    <span className="font-black text-emerald-900 dark:text-emerald-200 block uppercase tracking-wide">
+                      Resumen Cobro Mixto Percibido:
+                    </span>
+                    <div className="flex flex-wrap gap-3 text-[11px] text-slate-600 dark:text-slate-300 font-bold">
+                      <span>💵 Efectivo: {formatPYG((payMontoPYG || 0) + Math.round((payMontoBRL || 0) * payTasaBRL) + Math.round((payMontoUSD || 0) * payTasaUSD))}</span>
+                      <span>🏦 Banco: {formatPYG(payMontoTransferencia)}</span>
+                      <span>📑 Cheque: {formatPYG(payMontoCheque)}</span>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className="text-[10px] uppercase font-bold text-slate-500 block">Total Mixto Declarado</span>
+                    <span className="text-sm font-black font-mono text-emerald-600 dark:text-emerald-400">
+                      {formatPYG(montoFisicoEntregadoGs)}
+                    </span>
+                  </div>
                 </div>
               )}
 

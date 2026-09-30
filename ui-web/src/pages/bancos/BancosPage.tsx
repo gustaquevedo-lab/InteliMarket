@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react"
 import { api, type BankAccount } from "../../api"
-import { formatPYG, getTodayAsuncion } from "../../utils/format"
+import { formatPYG, formatCurrency, getTodayAsuncion } from "../../utils/format"
 import CurrencyInput from "../../components/CurrencyInput"
 import SupplierSearchInput from "../../components/SupplierSearchInput"
 import { useToast } from "../../context/ToastContext"
@@ -1269,6 +1269,38 @@ export default function BancosPage() {
                   </div>
                 </div>
               </div>
+
+              {/* Resumen de Extracto de la Cuenta Seleccionada */}
+              {(() => {
+                const currentAccount = banks.find(b => b.id === selectedBank)
+                const totalCred = filteredBankTxns.filter(t => t.tipo === "credito").reduce((acc, t) => acc + Number(t.monto || 0), 0)
+                const totalDeb = filteredBankTxns.filter(t => t.tipo === "debito").reduce((acc, t) => acc + Number(t.monto || 0), 0)
+                const ccy = currentAccount?.moneda || "PYG"
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div className="card p-3.5 bg-gradient-to-br from-blue-50/50 to-indigo-50/30 dark:from-blue-950/20 dark:to-indigo-950/10 border-blue-200/60 dark:border-blue-800/40">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">Cuenta / Titular</div>
+                      <div className="font-extrabold text-sm text-gray-900 dark:text-white truncate mt-0.5">{currentAccount?.alias || currentAccount?.banco || "Cuenta"}</div>
+                      <div className="text-[11px] text-gray-500 font-mono mt-0.5">{currentAccount?.numero_cuenta || "S/N"} · {currentAccount?.tipo?.toUpperCase()}</div>
+                    </div>
+                    <div className="card p-3.5 bg-white dark:bg-slate-900 border-gray-200 dark:border-slate-800">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Saldo en Libros (Actual)</div>
+                      <div className="font-mono font-black text-lg text-primary mt-0.5">{formatCurrency(currentAccount?.saldo_actual, ccy)}</div>
+                      <div className="text-[10px] text-gray-400 mt-0.5">Saldo calibrado del sistema</div>
+                    </div>
+                    <div className="card p-3.5 bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200/60 dark:border-emerald-800/40">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">Total Ingresos (+)</div>
+                      <div className="font-mono font-black text-base text-emerald-600 dark:text-emerald-400 mt-0.5">+{formatCurrency(totalCred, ccy)}</div>
+                      <div className="text-[10px] text-gray-500 mt-0.5">{filteredBankTxns.filter(t => t.tipo === "credito").length} movimientos</div>
+                    </div>
+                    <div className="card p-3.5 bg-red-50/40 dark:bg-red-950/20 border-red-200/60 dark:border-red-800/40">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-red-700 dark:text-red-400">Total Egresos (-)</div>
+                      <div className="font-mono font-black text-base text-red-600 dark:text-red-400 mt-0.5">-{formatCurrency(totalDeb, ccy)}</div>
+                      <div className="text-[10px] text-gray-500 mt-0.5">{filteredBankTxns.filter(t => t.tipo === "debito").length} movimientos</div>
+                    </div>
+                  </div>
+                )
+              })()}
 
               {/* Tabla de Movimientos */}
               <div className="card p-0 overflow-hidden">

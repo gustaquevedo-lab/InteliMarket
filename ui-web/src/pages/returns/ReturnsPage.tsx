@@ -20,6 +20,8 @@ interface SupplierCreditNote {
   fecha: string
   motivo: string
   monto: number
+  saldo_disponible?: number
+  cancelado?: boolean
   moneda: string
   observaciones: string
 }
@@ -86,6 +88,7 @@ export default function ReturnsPage() {
   const [creditNotes, setCreditNotes] = useState<SupplierCreditNote[]>([])
   const [ncSearch, setNcSearch] = useState("")
   const [ncFilterMotivo, setNcFilterMotivo] = useState("todos")
+  const [ncFilterSaldo, setNcFilterSaldo] = useState<"pendientes" | "todas" | "agotadas">("pendientes")
   const [loadingNc, setLoadingNc] = useState(true)
   const [viewingNc, setViewingNc] = useState<SupplierCreditNote | null>(null)
 
@@ -95,6 +98,7 @@ export default function ReturnsPage() {
   const [loadingSupRet, setLoadingSupRet] = useState(true)
   const [viewingSupRet, setViewingSupRet] = useState<SupplierReturn | null>(null)
   const [printingSupplierReturn, setPrintingSupplierReturn] = useState<any | null>(null)
+  const [downloadingReturnPdfId, setDownloadingReturnPdfId] = useState<string | null>(null)
 
   const [refreshing, setRefreshing] = useState(false)
 
@@ -249,6 +253,26 @@ export default function ReturnsPage() {
     setRefreshing(false)
   }
 
+  const handleDownloadReturnPdf = async (item: any) => {
+    const raw = item.raw || item
+    const retId = raw.id || item.id
+    if (!retId) return
+    setDownloadingReturnPdfId(retId)
+    try {
+      await api.purchases.returns.openPdf(retId)
+      toast.success("Remito PDF A4", "El remito oficial de devolución se abrió correctamente listo para imprimir.")
+    } catch (err: any) {
+      try {
+        await api.purchases.returns.downloadPdf(retId, raw.codigo || item.codigo || item.numero_nota_credito)
+        toast.success("Remito PDF A4", "El remito oficial se descargó exitosamente.")
+      } catch (err2: any) {
+        toast.error("Error al generar PDF del Remito", err.message || err2.message)
+      }
+    } finally {
+      setDownloadingReturnPdfId(null)
+    }
+  }
+
   /* ── FILTRADO Y KPIS: DEVOLUCIONES CLIENTES ──────────────────────────── */
   const filteredReturns = useMemo(() => {
     return returns.filter(r => {
@@ -282,9 +306,15 @@ export default function ReturnsPage() {
         (nc.numero_factura_origen || "").toLowerCase().includes(ncSearch.toLowerCase()) ||
         (nc.observaciones || "").toLowerCase().includes(ncSearch.toLowerCase())
       const matchMotivo = ncFilterMotivo === "todos" || (nc.motivo || "").toUpperCase() === ncFilterMotivo.toUpperCase()
-      return matchSearch && matchMotivo
+      const saldo = Number(nc.saldo_disponible !== undefined ? nc.saldo_disponible : nc.monto)
+      const matchSaldo = ncFilterSaldo === "todas"
+        ? true
+        : ncFilterSaldo === "pendientes"
+          ? (saldo > 0 && !nc.cancelado)
+          : (saldo <= 0 || Boolean(nc.cancelado))
+      return matchSearch && matchMotivo && matchSaldo
     })
-  }, [creditNotes, ncSearch, ncFilterMotivo])
+  }, [creditNotes, ncSearch, ncFilterMotivo, ncFilterSaldo])
 
   const ncKpis = useMemo(() => {
     const total = creditNotes.length
@@ -782,6 +812,16 @@ export default function ReturnsPage() {
 
             <div className="flex items-center gap-2">
               <select
+                value={ncFilterSaldo}
+                onChange={(e) => setNcFilterSaldo(e.target.value as any)}
+                className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
+              >
+                <option value="pendientes">Solo con Saldo Pendiente</option>
+                <option value="todas">Todas las Notas de Crédito ({creditNotes.length})</option>
+                <option value="agotadas">Aplicadas / Sin Saldo</option>
+              </select>
+
+              <select
                 value={ncFilterMotivo}
                 onChange={(e) => setNcFilterMotivo(e.target.value)}
                 className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
@@ -984,6 +1024,19 @@ export default function ReturnsPage() {
                               title="Imprimir Remito Oficial"
                             >
                               <Printer className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadReturnPdf(sr)}
+                              disabled={downloadingReturnPdfId === (sr.raw?.id || sr.id)}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                              title="Descargar / Imprimir Remito Oficial PDF A4"
+                            >
+                              {downloadingReturnPdfId === (sr.raw?.id || sr.id) ? (
+                                <Loader2 className="w-4 h-4 animate-spin text-rose-600" />
+                              ) : (
+                                <FileText className="w-4 h-4" />
+                              )}
                             </button>
                           </div>
                         </td>
@@ -1509,14 +1562,29 @@ export default function ReturnsPage() {
             </div>
 
             {/* Footer */}
-            <div className="pt-2 flex justify-between items-center">
-              <button
-                type="button"
-                onClick={() => setPrintingSupplierReturn(viewingSupRet.raw || viewingSupRet)}
-                className="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition"
-              >
-                <Printer className="w-4 h-4" /> Imprimir Remito Oficial
-              </button>
+            <div className="pt-2 flex flex-wrap justify-between items-center gap-2">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPrintingSupplierReturn(viewingSupRet.raw || viewingSupRet)}
+                  className="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition"
+                >
+                  <Printer className="w-4 h-4" /> Imprimir Remito Oficial
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadReturnPdf(viewingSupRet)}
+                  disabled={downloadingReturnPdfId === (viewingSupRet.raw?.id || viewingSupRet.id)}
+                  className="px-4 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-rose-600/20 transition"
+                >
+                  {downloadingReturnPdfId === (viewingSupRet.raw?.id || viewingSupRet.id) ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <FileText className="w-4 h-4" />
+                  )}
+                  <span>Remito PDF A4</span>
+                </button>
+              </div>
               <button
                 onClick={() => setViewingSupRet(null)}
                 className="px-5 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs"

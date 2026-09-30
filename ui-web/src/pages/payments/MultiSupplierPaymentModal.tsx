@@ -79,6 +79,17 @@ export default function MultiSupplierPaymentModal({
   const [fechaChequeEmision, setFechaChequeEmision] = useState(new Date().toISOString().split("T")[0])
   const [fechaChequeVencimiento, setFechaChequeVencimiento] = useState(new Date().toISOString().split("T")[0])
   const [esChequeDiferido, setEsChequeDiferido] = useState(false)
+  const [chequeMode, setChequeMode] = useState<"unico" | "multiple">("unico")
+  const [multiCheques, setMultiCheques] = useState<Array<{
+    id: string
+    numero: string
+    banco: string
+    titular: string
+    fecha_emision: string
+    fecha_vencimiento: string
+    es_diferido: boolean
+    monto: number
+  }>>([])
 
   // Desembolso nominal personalizado y diferencia de cambio
   const [customMontoDesembolso, setCustomMontoDesembolso] = useState<number | null>(null)
@@ -326,8 +337,33 @@ export default function MultiSupplierPaymentModal({
     }
 
     // Validar cheque si aplica
+    // Validar cheque si aplica
     if (formaPago === "cheque") {
-      if (useExistingCheque) {
+      if (chequeMode === "multiple") {
+        if (multiCheques.length === 0) {
+          toast.error("Cheques Múltiples", "Debe agregar al menos un cheque a la lista.")
+          return
+        }
+        for (let i = 0; i < multiCheques.length; i++) {
+          const ch = multiCheques[i]
+          if (!ch.numero.trim()) {
+            toast.error("Número de Cheque Requerido", `El cheque #${i + 1} no tiene número ingresado.`)
+            return
+          }
+          if (ch.monto <= 0) {
+            toast.error("Monto de Cheque Requerido", `El cheque N° ${ch.numero} debe tener un monto mayor a 0.`)
+            return
+          }
+        }
+        const totalCheques = multiCheques.reduce((sum, c) => sum + c.monto, 0)
+        if (Math.abs(totalCheques - montoDesembolsoFinal) > 50) {
+          toast.error(
+            "Descuadre de Cheques",
+            `La suma de los cheques (${formatPYG(totalCheques)}) no coincide con el total a desembolsar (${formatPYG(montoDesembolsoFinal)}).`
+          )
+          return
+        }
+      } else if (useExistingCheque) {
         if (!selectedChequeId) {
           toast.error("Seleccione Cheque", "Debe seleccionar el cheque emitido a vincular.")
           return
@@ -387,13 +423,25 @@ export default function MultiSupplierPaymentModal({
         bank_account_id: formaPago === "transferencia" ? transferBankAccountId : (formaPago === "cheque" ? (useExistingCheque ? undefined : bancoChequeId) : undefined),
         referencia_transferencia: formaPago === "transferencia" ? referenciaTransferencia : undefined,
         // Cheque
-        cheque_id: formaPago === "cheque" && useExistingCheque ? selectedChequeId : undefined,
-        numero_cheque: formaPago === "cheque" && !useExistingCheque ? numeroCheque : undefined,
-        banco_cheque: formaPago === "cheque" && !useExistingCheque ? (selectedAcc?.banco || "Banco") : undefined,
-        titular_cheque: formaPago === "cheque" && !useExistingCheque ? titularCheque : undefined,
-        fecha_cheque_emision: formaPago === "cheque" && !useExistingCheque ? fechaChequeEmision : undefined,
-        fecha_cheque_vencimiento: formaPago === "cheque" && !useExistingCheque ? (esChequeDiferido ? fechaChequeVencimiento : fechaChequeEmision) : undefined,
-        es_cheque_diferido: formaPago === "cheque" && !useExistingCheque ? esChequeDiferido : false,
+        cheque_id: formaPago === "cheque" && chequeMode === "unico" && useExistingCheque ? selectedChequeId : undefined,
+        numero_cheque: formaPago === "cheque" && chequeMode === "unico" && !useExistingCheque ? numeroCheque : undefined,
+        banco_cheque: formaPago === "cheque" && chequeMode === "unico" && !useExistingCheque ? (selectedAcc?.banco || "Banco") : undefined,
+        titular_cheque: formaPago === "cheque" && chequeMode === "unico" && !useExistingCheque ? titularCheque : undefined,
+        fecha_cheque_emision: formaPago === "cheque" && chequeMode === "unico" && !useExistingCheque ? fechaChequeEmision : undefined,
+        fecha_cheque_vencimiento: formaPago === "cheque" && chequeMode === "unico" && !useExistingCheque ? (esChequeDiferido ? fechaChequeVencimiento : fechaChequeEmision) : undefined,
+        es_cheque_diferido: formaPago === "cheque" && chequeMode === "unico" && !useExistingCheque ? esChequeDiferido : false,
+        cheques: formaPago === "cheque" && chequeMode === "multiple"
+          ? multiCheques.map(c => ({
+              numero_cheque: c.numero,
+              banco_cheque: c.banco,
+              titular_cheque: c.titular || titularCheque,
+              fecha_cheque_emision: c.fecha_emision,
+              fecha_cheque_vencimiento: c.es_diferido ? c.fecha_vencimiento : c.fecha_emision,
+              es_cheque_diferido: c.es_diferido,
+              monto: c.monto,
+              bank_account_id: bancoChequeId || undefined,
+            }))
+          : [],
         monto_total_desembolso_pyg: montoDesembolsoFinal,
         monto_total_desembolso_brl: formaPago === "boveda" && monedaBoveda === "BRL" ? summary.totalBrl : undefined,
         diferencia_cambio_total: diferenciaCambio,
@@ -872,7 +920,54 @@ export default function MultiSupplierPaymentModal({
             {/* CAMPOS SEGÚN FORMA DE PAGO */}
             {formaPago === "cheque" && (
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-4">
-                {/* SWITCHER VINCULAR O EMITIR */}
+                {/* SELECTOR MODO: 1 CHEQUE MATRIZ VS MÚLTIPLES CHEQUES */}
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Modo de Cheques:</span>
+                    <button
+                      type="button"
+                      onClick={() => setChequeMode("unico")}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                        chequeMode === "unico"
+                          ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xs"
+                          : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 hover:bg-slate-200"
+                      }`}
+                    >
+                      1 Cheque Matriz
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setChequeMode("multiple")
+                        if (multiCheques.length === 0) {
+                          setMultiCheques([
+                            {
+                              id: Math.random().toString(),
+                              numero: numeroCheque || "",
+                              banco: (bankAccounts.find(b => b.id === bancoChequeId)?.banco) || "Banco",
+                              titular: titularCheque,
+                              fecha_emision: fechaChequeEmision,
+                              fecha_vencimiento: fechaChequeVencimiento,
+                              es_diferido: esChequeDiferido,
+                              monto: montoDesembolsoFinal,
+                            }
+                          ])
+                        }
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                        chequeMode === "multiple"
+                          ? "bg-emerald-600 text-white shadow-xs"
+                          : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 hover:bg-slate-200"
+                      }`}
+                    >
+                      Varios Cheques ({multiCheques.length > 0 ? multiCheques.length : "Múltiples"})
+                    </button>
+                  </div>
+                </div>
+
+                {chequeMode === "unico" && (
+                  <div className="space-y-4">
+                    {/* SWITCHER VINCULAR O EMITIR */}
                 <div className="flex items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-3">
                   <label className="flex items-center gap-2 cursor-pointer text-xs font-bold">
                     <input
@@ -1080,6 +1175,147 @@ export default function MultiSupplierPaymentModal({
                 )}
               </div>
             )}
+
+            {chequeMode === "multiple" && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+                      Nómina de Cheques Individuales Asignados
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      Asigná dos o más cheques con sus datos particulares para cubrir el total del lote.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const rem = Math.max(0, montoDesembolsoFinal - multiCheques.reduce((a, b) => a + b.monto, 0))
+                      setMultiCheques(prev => [
+                        ...prev,
+                        {
+                          id: Math.random().toString(),
+                          numero: "",
+                          banco: bankAccounts[0]?.banco || "Banco",
+                          titular: titularCheque,
+                          fecha_emision: fechaPago,
+                          fecha_vencimiento: fechaPago,
+                          es_diferido: false,
+                          monto: rem,
+                        }
+                      ])
+                    }}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg flex items-center gap-1 transition shadow-xs"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Agregar Cheque
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {multiCheques.map((ch, idx) => (
+                    <div key={ch.id} className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/80 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black text-emerald-600 dark:text-emerald-400">
+                          Cheque #{idx + 1}
+                        </span>
+                        {multiCheques.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setMultiCheques(prev => prev.filter(c => c.id !== ch.id))}
+                            className="text-rose-500 hover:text-rose-700 text-xs font-bold"
+                          >
+                            Eliminar
+                          </button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">N° Cheque *</label>
+                          <input
+                            type="text"
+                            placeholder="000123"
+                            value={ch.numero}
+                            onChange={e => {
+                              const val = e.target.value
+                              setMultiCheques(prev => prev.map(c => c.id === ch.id ? { ...c, numero: val } : c))
+                            }}
+                            className="w-full p-2 text-xs font-mono font-bold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Banco Emisor</label>
+                          <select
+                            value={ch.banco}
+                            onChange={e => {
+                              const val = e.target.value
+                              setMultiCheques(prev => prev.map(c => c.id === ch.id ? { ...c, banco: val } : c))
+                            }}
+                            className="w-full p-2 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold"
+                          >
+                            {bankAccounts.map(b => (
+                              <option key={b.id} value={b.banco}>{b.banco} ({b.numero_cuenta})</option>
+                            ))}
+                            <option value="Banco Continental">Banco Continental</option>
+                            <option value="Banco Itaú">Banco Itaú</option>
+                            <option value="Banco GNB">Banco GNB</option>
+                            <option value="Sudameris">Sudameris</option>
+                            <option value="Ueno Bank">Ueno Bank</option>
+                            <option value="Banco Basa">Banco Basa</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Fecha Cobro / Venc.</label>
+                          <input
+                            type="date"
+                            value={ch.fecha_vencimiento}
+                            onChange={e => {
+                              const val = e.target.value
+                              setMultiCheques(prev => prev.map(c => c.id === ch.id ? { ...c, fecha_vencimiento: val } : c))
+                            }}
+                            className="w-full p-2 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-mono font-bold"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Monto (₲) *</label>
+                          <CurrencyInput
+                            currency="PYG"
+                            value={ch.monto}
+                            onChangeValue={val => {
+                              setMultiCheques(prev => prev.map(c => c.id === ch.id ? { ...c, monto: val } : c))
+                            }}
+                            className="w-full p-2 text-xs font-mono font-black bg-white dark:bg-slate-900 border border-emerald-300 dark:border-emerald-700 rounded-lg text-slate-900 dark:text-white"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Resumen de Cheques */}
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl border border-emerald-200 dark:border-emerald-800 flex items-center justify-between text-xs">
+                  <div>
+                    <span className="font-bold text-emerald-900 dark:text-emerald-200">
+                      Suma de Cheques: <strong>{formatPYG(multiCheques.reduce((a, b) => a + b.monto, 0))}</strong>
+                    </span>
+                    <span className="text-slate-500 text-[11px] ml-2">
+                      (Total requerido: {formatPYG(montoDesembolsoFinal)})
+                    </span>
+                  </div>
+                  {Math.abs(multiCheques.reduce((a, b) => a + b.monto, 0) - montoDesembolsoFinal) <= 50 ? (
+                    <span className="text-emerald-700 dark:text-emerald-300 font-black flex items-center gap-1">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" /> Monto Cuadrado Exacto
+                    </span>
+                  ) : (
+                    <span className="text-rose-600 dark:text-rose-400 font-black flex items-center gap-1">
+                      <AlertTriangle className="w-4 h-4" /> Diferencia: {formatPYG(multiCheques.reduce((a, b) => a + b.monto, 0) - montoDesembolsoFinal)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
             {formaPago === "transferencia" && (
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
