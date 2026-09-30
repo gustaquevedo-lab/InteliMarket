@@ -66,6 +66,8 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     cleanEndpoint.startsWith("/v1/auth/pos-supervisors") ||
     cleanEndpoint.startsWith("/v1/auth/register") ||
     cleanEndpoint.startsWith("/v1/auth/reset-password") ||
+    cleanEndpoint.startsWith("/v1/kiosk/") ||
+    cleanEndpoint.startsWith("/v1/ecommerce/catalog") ||
     cleanEndpoint.startsWith("/health") ||
     cleanEndpoint.startsWith("/uploads/")
 
