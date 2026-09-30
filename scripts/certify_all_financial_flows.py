@@ -380,7 +380,7 @@ class CertificationRunner:
 
                 # Verificar persistencia de ambos cheques en BD
                 res_chqs = await session.execute(
-                    text("SELECT numero, banco, monto FROM cheques WHERE numero IN (:c1, :c2)"),
+                    text("SELECT numero, banco_emisor, monto FROM cheques WHERE numero IN (:c1, :c2)"),
                     {"c1": chq1_num, "c2": chq2_num}
                 )
                 chqs_found = res_chqs.fetchall()
