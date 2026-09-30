@@ -420,11 +420,11 @@ class CertificationRunner:
         async with async_session_factory() as session:
             res_rend = await session.execute(
                 text("""
-                    SELECT r.id, r.codigo, r.estado, r.total_rendido, r.responsable_nombre, count(ri.id) as items_count, sum(ri.monto) as items_sum
-                    FROM expense_rendiciones r
-                    LEFT JOIN expense_rendicion_items ri ON ri.rendicion_id = r.id
+                    SELECT r.id, r.numero_rendicion, r.estado, r.total_comprobantes_presentados, r.custodio_nombre, count(e.id) as items_count, sum(e.monto) as items_sum
+                    FROM petty_cash_rendiciones r
+                    LEFT JOIN expenses e ON e.rendicion_id = r.id
                     WHERE r.id = '76e52cde-4890-4b23-baaa-43b4527dfd5f'
-                    GROUP BY r.id, r.codigo, r.estado, r.total_rendido, r.responsable_nombre
+                    GROUP BY r.id, r.numero_rendicion, r.estado, r.total_comprobantes_presentados, r.custodio_nombre
                 """)
             )
             rend = res_rend.fetchone()
@@ -432,10 +432,10 @@ class CertificationRunner:
             assert rend[1] == "REND-202609-0007", f"Código erróneo: {rend[1]}"
             assert rend[2] in ("presentada", "aprobada", "reembolsada"), f"Estado inválido: {rend[2]}"
             assert rend[5] == 28, f"Se esperaban 28 ítems, hay {rend[5]}"
-            assert rend[6] == 8422367, f"La suma de comprobantes no coincide con Gs. 8.422.367: {rend[6]}"
+            assert int(rend[6]) == 8422367, f"La suma de comprobantes no coincide con Gs. 8.422.367: {rend[6]}"
 
             self.report_step(6, "Fondo Fijo de Administración (Camila / Ariel)", True,
-                             f"Expediente #{rend[1]} para {rend[4]} íntegro: 28 comprobantes, total exacto Gs. {rend[6]:,}, estado '{rend[2]}' listo para reposición.")
+                             f"Expediente #{rend[1]} para {rend[4]} íntegro: 28 comprobantes, total exacto Gs. {int(rend[6]):,}, estado '{rend[2]}' listo para reposición.")
 
     async def certify_flow_7_bancos_extractos(self):
         """7. Extractos bancarios y Cuadre de Saldos"""
