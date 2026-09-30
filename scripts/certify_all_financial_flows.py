@@ -330,9 +330,9 @@ class CertificationRunner:
 
             finally:
                 if order_id:
-                    await session.execute(text("DELETE FROM payment_order_disbursements WHERE payment_order_id = :oid"), {"oid": str(order_id)})
-                    await session.execute(text("DELETE FROM payment_order_allocations WHERE payment_order_id = :oid"), {"oid": str(order_id)})
-                    await session.execute(text("DELETE FROM payment_orders WHERE id = :oid"), {"oid": str(order_id)})
+                    await session.execute(text("DELETE FROM supplier_payment_order_disbursements WHERE payment_order_id = :oid"), {"oid": str(order_id)})
+                    await session.execute(text("DELETE FROM supplier_payment_order_allocations WHERE payment_order_id = :oid"), {"oid": str(order_id)})
+                    await session.execute(text("DELETE FROM supplier_payment_orders WHERE id = :oid"), {"oid": str(order_id)})
                 await session.execute(text("DELETE FROM supplier_invoices WHERE id IN (:i1, :i2)"), {"i1": str(inv1_id), "i2": str(inv2_id)})
                 await session.execute(text("DELETE FROM suppliers WHERE id = :sid"), {"sid": str(test_sup_id)})
                 await session.commit()
@@ -394,9 +394,9 @@ class CertificationRunner:
             finally:
                 await session.execute(text("DELETE FROM cheques WHERE numero IN (:c1, :c2)"), {"c1": chq1_num, "c2": chq2_num})
                 if order_id:
-                    await session.execute(text("DELETE FROM payment_order_disbursements WHERE payment_order_id = :oid"), {"oid": str(order_id)})
-                    await session.execute(text("DELETE FROM payment_order_allocations WHERE payment_order_id = :oid"), {"oid": str(order_id)})
-                    await session.execute(text("DELETE FROM payment_orders WHERE id = :oid"), {"oid": str(order_id)})
+                    await session.execute(text("DELETE FROM supplier_payment_order_disbursements WHERE payment_order_id = :oid"), {"oid": str(order_id)})
+                    await session.execute(text("DELETE FROM supplier_payment_order_allocations WHERE payment_order_id = :oid"), {"oid": str(order_id)})
+                    await session.execute(text("DELETE FROM supplier_payment_orders WHERE id = :oid"), {"oid": str(order_id)})
                 await session.execute(text("DELETE FROM supplier_invoices WHERE id = :id"), {"id": str(inv_id)})
                 await session.execute(text("DELETE FROM suppliers WHERE id = :sid"), {"sid": str(test_sup_id)})
                 await session.commit()
