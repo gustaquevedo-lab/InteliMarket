@@ -122,15 +122,15 @@ class CertificationRunner:
                 # 2.1 Crear cliente y cuenta por cobrar temporal de Gs. 500.000
                 await session.execute(
                     text("""
-                        INSERT INTO customers (id, company_id, nombre, ruc, email, activo, saldo_credito_actual)
-                        VALUES (:id, :cid, 'CLIENTE TEST CERTIFICACION E2E', :ruc, 'test@cert.com', true, 500000)
+                        INSERT INTO customers (id, company_id, razon_social, ruc, email, activo)
+                        VALUES (:id, :cid, 'CLIENTE TEST CERTIFICACION E2E', :ruc, 'test@cert.com', true)
                     """),
                     {"id": str(test_customer_id), "cid": str(COMPANY_ID), "ruc": test_ruc}
                 )
                 
                 await session.execute(
                     text("""
-                        INSERT INTO accounts_receivable (id, company_id, customer_id, numero_documento, tipo_documento,
+                        INSERT INTO accounts_receivable (id, company_id, customer_id, numero_documento, tipo,
                                                         monto_original, saldo_pendiente, estado, fecha_emision, created_at)
                         VALUES (:id, :cid, :cust_id, 'FAC-TEST-001', 'factura', 500000, 500000, 'pendiente', CURRENT_DATE, CURRENT_TIMESTAMP)
                     """),
