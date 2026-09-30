@@ -69,7 +69,7 @@ class CertificationRunner:
             
             # 1.2 Probar devolución financiera tradicional
             res_fin = await session.execute(
-                text("SELECT id, numero_devolucion FROM supplier_returns WHERE company_id = :cid ORDER BY created_at DESC LIMIT 1"),
+                text("SELECT id, numero_nota_credito FROM supplier_returns WHERE company_id = :cid ORDER BY created_at DESC LIMIT 1"),
                 {"cid": str(COMPANY_ID)}
             )
             fin_row = res_fin.fetchone()
