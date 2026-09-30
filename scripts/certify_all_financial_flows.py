@@ -187,14 +187,25 @@ class CertificationRunner:
                 self.report_step(2, "Cobros CxC Mixtos Multimoneda", True,
                                  f"Cobro mixto exitoso (PYG/BRL/USD/Cheque/Transf). Recibo #{res_payment['numero_recibo']}. Saldo liquidado a 0 y cheque #{cheque_num} en cartera.")
 
+            except Exception as e:
+                import traceback
+                print("\n❌ EXCEPCIÓN DETALLADA EN FLUJO 2:")
+                traceback.print_exc()
+                await session.rollback()
+                raise
             finally:
-                # Cleanup garantizado
-                await session.execute(text("DELETE FROM cheques WHERE numero = :num"), {"num": cheque_num})
-                await session.execute(text("DELETE FROM receivable_payment_allocations WHERE accounts_receivable_id = :id"), {"id": str(test_ar_id)})
-                await session.execute(text("DELETE FROM receivable_payments WHERE customer_id = :cid"), {"cid": str(test_customer_id)})
-                await session.execute(text("DELETE FROM accounts_receivable WHERE id = :id"), {"id": str(test_ar_id)})
-                await session.execute(text("DELETE FROM customers WHERE id = :cid"), {"cid": str(test_customer_id)})
-                await session.commit()
+                # Cleanup garantizado con rollback previo si fuera necesario
+                try:
+                    await session.rollback()
+                    async with async_session_factory() as cleanup_session:
+                        await cleanup_session.execute(text("DELETE FROM cheques WHERE numero = :num"), {"num": cheque_num})
+                        await cleanup_session.execute(text("DELETE FROM receivable_payment_allocations WHERE accounts_receivable_id = :id"), {"id": str(test_ar_id)})
+                        await cleanup_session.execute(text("DELETE FROM receivable_payments WHERE customer_id = :cid"), {"cid": str(test_customer_id)})
+                        await cleanup_session.execute(text("DELETE FROM accounts_receivable WHERE id = :id"), {"id": str(test_ar_id)})
+                        await cleanup_session.execute(text("DELETE FROM customers WHERE id = :cid"), {"cid": str(test_customer_id)})
+                        await cleanup_session.commit()
+                except Exception as clean_err:
+                    print(f"Advertencia en cleanup de Flujo 2: {clean_err}")
 
     async def certify_flow_3_aquidaban_ncs(self):
         """3. Notas de crédito de Aquidabán y Filtro de Saldo"""
