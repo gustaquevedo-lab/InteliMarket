@@ -1126,63 +1126,82 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
 
                   {/* ── SUBTAB 3: DEVOLUCIONES FÍSICAS EN DEPÓSITO ── */}
                   {subTabNc === "devoluciones" && (
-                    <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
-                      <table className="w-full text-xs text-left">
-                        <thead className="bg-slate-50 dark:bg-slate-800/70 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-200 dark:border-slate-800">
-                          <tr>
-                            <th className="p-3">Código Devolución</th>
-                            <th className="p-3">Fecha Entrega</th>
-                            <th className="p-3">Tipo de Devolución</th>
-                            <th className="p-3 text-right">Valor Estimado Gs.</th>
-                            <th className="p-3">NC Proveedor</th>
-                            <th className="p-3 text-center">Etapa Actual</th>
-                            <th className="p-3 text-center">Estado Físico</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                          {devolucionesFiltradas.length === 0 ? (
+                    <div className="space-y-3">
+                      <div className="p-3 bg-sky-50 dark:bg-sky-950/40 rounded-xl border border-sky-200 dark:border-sky-800 text-[11px] text-sky-800 dark:text-sky-300 flex items-start gap-2">
+                        <Truck className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-bold">Trazabilidad Operativa de Bajas de Stock: </span>
+                          Las devoluciones registran el acto administrativo de salida física de mercadería en muelle/depósito.
+                          Cuando una devolución cuenta con NC asignada, su impacto legal y financiero en cuentas por pagar
+                          reside formalmente en la <b>Nota de Crédito</b> (reflejada en la pestaña Monedero), sin duplicar deducciones de deuda.
+                        </div>
+                      </div>
+
+                      <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
+                        <table className="w-full text-xs text-left">
+                          <thead className="bg-slate-50 dark:bg-slate-800/70 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-200 dark:border-slate-800">
                             <tr>
-                              <td colSpan={7} className="p-8 text-center text-slate-400">
-                                Sin devoluciones físicas registradas en depósito.
-                              </td>
+                              <th className="p-3">Código Devolución</th>
+                              <th className="p-3">Fecha Entrega</th>
+                              <th className="p-3">Tipo de Devolución</th>
+                              <th className="p-3 text-right">Valor Estimado Gs.</th>
+                              <th className="p-3">NC Proveedor / Formalización</th>
+                              <th className="p-3 text-center">Etapa Operativa</th>
+                              <th className="p-3 text-center">Estado Físico</th>
                             </tr>
-                          ) : (
-                            devolucionesFiltradas.map(d => (
-                              <tr key={d.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition">
-                                <td className="p-3 font-mono font-bold text-slate-900 dark:text-white">{d.codigo}</td>
-                                <td className="p-3 font-mono text-slate-500">{d.fecha}</td>
-                                <td className="p-3 capitalize font-bold text-slate-700 dark:text-slate-300">
-                                  {d.tipo.replace(/_/g, " ")}
-                                </td>
-                                <td className="p-3 text-right font-mono font-black text-rose-600">
-                                  {formatPYG(d.valor_estimado)}
-                                </td>
-                                <td className="p-3 font-mono font-bold">
-                                  {d.nota_credito_numero ? (
-                                    <span className="text-emerald-600">{d.nota_credito_numero}</span>
-                                  ) : (
-                                    <span className="text-amber-500 italic">Pendiente de NC</span>
-                                  )}
-                                </td>
-                                <td className="p-3 text-center">
-                                  <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase ${
-                                    d.tiene_nc
-                                      ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                                      : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-                                  }`}>
-                                    {d.tiene_nc ? "Etapa 2: NC Emitida" : "Etapa 1: Obligación Pendiente"}
-                                  </span>
-                                </td>
-                                <td className="p-3 text-center">
-                                  <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 uppercase text-[10px] font-bold text-slate-600 dark:text-slate-300">
-                                    {d.estado}
-                                  </span>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                            {devolucionesFiltradas.length === 0 ? (
+                              <tr>
+                                <td colSpan={7} className="p-8 text-center text-slate-400">
+                                  Sin devoluciones físicas registradas en depósito.
                                 </td>
                               </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
+                            ) : (
+                              devolucionesFiltradas.map(d => (
+                                <tr key={d.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition">
+                                  <td className="p-3 font-mono font-bold text-slate-900 dark:text-white">{d.codigo}</td>
+                                  <td className="p-3 font-mono text-slate-500">{d.fecha}</td>
+                                  <td className="p-3 capitalize font-bold text-slate-700 dark:text-slate-300">
+                                    {d.tipo.replace(/_/g, " ")}
+                                  </td>
+                                  <td className="p-3 text-right font-mono font-black text-slate-700 dark:text-slate-300">
+                                    {formatPYG(d.valor_estimado)}
+                                  </td>
+                                  <td className="p-3 font-mono font-bold">
+                                    {d.nota_credito_numero ? (
+                                      <div className="flex flex-col">
+                                        <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-bold">
+                                          <CheckCircle2 className="w-3 h-3" /> {d.nota_credito_numero}
+                                        </span>
+                                        <span className="text-[9px] text-slate-400 font-normal">
+                                          Formalizada en Monedero de NCs
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <span className="text-amber-500 italic text-[11px]">Obligación de NC pendiente</span>
+                                    )}
+                                  </td>
+                                  <td className="p-3 text-center">
+                                    <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase ${
+                                      d.tiene_nc
+                                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700"
+                                        : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-700"
+                                    }`}>
+                                      {d.tiene_nc ? "Etapa 2: NC Emitida" : "Etapa 1: Obligación Pendiente"}
+                                    </span>
+                                  </td>
+                                  <td className="p-3 text-center">
+                                    <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 uppercase text-[10px] font-bold text-slate-600 dark:text-slate-300">
+                                      {d.estado}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   )}
 

@@ -898,18 +898,11 @@ async def complete_supplier_return(
     elif sr.valor_total_estimado:
         sr.nota_credito_monto = sr.valor_total_estimado
 
-    # 3. REGISTRO FINANCIERO EN CUENTA CORRIENTE PROVEEDOR (supplier_returns)
-    fin_return = FinancialSupplierReturn(
-        company_id=company_id,
-        supplier_id=sr.proveedor_id,
-        numero_factura_origen=", ".join(filter(None, {item.factura_numero for item in sr.items})) or None,
-        numero_nota_credito=sr.nota_credito_numero or sr.codigo,
-        fecha=date.today(),
-        monto=sr.nota_credito_monto or sr.valor_total_estimado or Decimal(0),
-        moneda="PYG",
-        observaciones=f"Devolución de mercadería {sr.codigo}. Total {sr.total_items} ítems entregados al proveedor." + (f" NCs: {sr.nota_credito_numero}" if sr.nota_credito_numero else ""),
-    )
-    db.add(fin_return)
+    # 3. IMPACTO FINANCIERO Y LEGAL:
+    # La devolución física (DEV) es el acto administrativo de baja de inventario / Kardex en depósito.
+    # El impacto financiero en deuda lo formaliza legalmente la Nota de Crédito (SupplierCreditNote)
+    # creada arriba y aplicada a facturas o al saldo disponible del monedero.
+    # NO se crea FinancialSupplierReturn aquí para evitar duplicar la deducción de deuda en extractos y estados de cuenta.
 
     await db.commit()
     await db.refresh(sr)

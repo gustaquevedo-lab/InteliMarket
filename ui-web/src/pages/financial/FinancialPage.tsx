@@ -714,18 +714,21 @@ export default function FinancialPage() {
         }
         map.set(supId, item)
       }
-      // Saldo de la NC: si tiene saldo_disponible > 0, tomamos ese saldo.
-      // Si en la base de datos figura con 0 (debido a la importación histórica del legado que
-      // las importó forzando saldo=0 sin registrar aplicaciones), tomamos su monto registrado
-      // para que el usuario pueda visualizarlas, cotejarlas y compensarlas en la liquidación.
-      const saldoNC = Number(cn.saldo_disponible) > 0 ? Number(cn.saldo_disponible) : Number(cn.monto || 0)
-      if (saldoNC > 0 || Number(cn.monto || 0) > 0) {
-        item.creditNotes.push(cn)
+      // Saldo de la NC: únicamente el saldo_disponible real a favor que aún no haya sido
+      // imputado contra facturas. Si ya fue imputada al 100%, su efecto financiero ya está
+      // descontado de inv.saldo_pendiente y saldo_disponible es 0. Nunca tomar cn.monto si saldo_disponible <= 0.
+      const saldoNC = Math.max(0, Number(cn.saldo_disponible || 0))
+      item.creditNotes.push(cn)
+      if (saldoNC > 0) {
         item.ncConsolidada += saldoNC
       }
     })
 
-    // 4. Acumular Devoluciones de Mercadería pendientes de entrega de NC fiscal ("NC Pendiente de Proveedor")
+    // 4. Devoluciones de Mercadería pendientes de formalización fiscal ("Obligación Pendiente de NC")
+    // La devolución (DEV) es el acto administrativo de baja física en depósito.
+    // Solo aquellas devoluciones físicas que aún NO cuentan con NC emitida por el proveedor
+    // representan un crédito estimativo en trámite. Si ya cuentan con NC o están completadas,
+    // el impacto legal y contable reside exclusivamente en la NC (SupplierCreditNote), sin duplicar.
     const allReturns = [...supplierReturns, ...supermerReturns]
     const seenReturnIds = new Set<string>()
 
@@ -736,8 +739,17 @@ export default function FinancialPage() {
 
       const supId = ret.supplier_id || ret.proveedor_id
       if (!supId) return
-      const hasNC = !!(ret.numero_nota_credito || ret.nota_credito_numero)
-      if (hasNC) return // Ya fue entregada la NC fiscal
+
+      const hasNC = !!(
+        ret.numero_nota_credito ||
+        ret.nota_credito_numero ||
+        (Array.isArray(ret.notas_credito) && ret.notas_credito.length > 0)
+      )
+      const isCompletado = (ret.estado || "").toLowerCase() === "completado"
+      if (hasNC || isCompletado) return // Formalizada vía NC fiscal o completada en compras
+
+      // Si las observaciones refieren a una devolución completada o con NCs, excluir
+      if (ret.observaciones && /DEV-\d|NCs:/i.test(ret.observaciones)) return
 
       let item = map.get(supId)
       if (!item) {
@@ -763,7 +775,7 @@ export default function FinancialPage() {
         map.set(supId, item)
       }
 
-      const montoDev = Number(ret.monto || ret.total || ret.total_costo || 0)
+      const montoDev = Number(ret.monto || ret.total || ret.total_costo || ret.valor_total_estimado || 0)
       if (montoDev > 0) {
         item.devolucionesPendientes.push(ret)
         item.ncNoRegistrada += montoDev

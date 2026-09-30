@@ -286,8 +286,8 @@ def generate_supplier_360_pdf(company: dict, data: dict, generated_by: str = "",
         # Tabla 3: Devoluciones físicas en depósito
         devs_fis = monedero.get("devoluciones_fisicas", [])
         if devs_fis:
-            elements.append(Paragraph("3. Devoluciones Físicas de Mercadería en Depósito / Muelle", TITLE_SEC))
-            dev_table_data = [["N° Devolución", "Fecha", "Tipo", "Valor Estimado Gs.", "NC Asociada", "Etapa Operativa", "Estado"]]
+            elements.append(Paragraph("3. Devoluciones Físicas de Mercadería en Depósito / Muelle (Baja de Stock)", TITLE_SEC))
+            dev_table_data = [["N° Devolución", "Fecha", "Tipo", "Valor Estimado Gs.", "NC Formal Asociada", "Etapa Operativa", "Estado"]]
             for d in devs_fis[:15]:
                 tiene_nc = d.get("tiene_nc", False)
                 dev_table_data.append([
@@ -296,12 +296,13 @@ def generate_supplier_360_pdf(company: dict, data: dict, generated_by: str = "",
                     _c(d.get("tipo", "devolucion").capitalize()),
                     _n(_fmt_gs(d.get("valor_estimado")), bold=True),
                     _c(d.get("nota_credito_numero") or "Pendiente de NC", color=GREEN if tiene_nc else HexColor("#D97706")),
-                    _c("Etapa 2: NC Emitida" if tiene_nc else "Etapa 1: Obligación Pendiente", bold=True, color=GREEN if tiene_nc else HexColor("#D97706")),
+                    _c("Etapa 2: Formalizada vía NC" if tiene_nc else "Etapa 1: Obligación Pendiente", bold=True, color=GREEN if tiene_nc else HexColor("#D97706")),
                     _c(d.get("estado", "completado").upper()),
                 ])
             t_dev = Table(dev_table_data, colWidths=[28 * mm, 18 * mm, 22 * mm, 28 * mm, 30 * mm, 36 * mm, 22 * mm])
             t_dev.setStyle(_th_style(cols_right=[3]))
             elements.append(t_dev)
+            elements.append(Paragraph("<font size=7 color='#64748B'>* Nota de Trazabilidad: La devolución física es el registro administrativo de baja de stock en muelle. Su impacto financiero formal en deuda se perfecciona exclusivamente vía Nota de Crédito (Tabla 1) y sus compensaciones a facturas (Tabla 4), sin duplicar deducciones contables.</font>", BODY_REG))
             elements.append(Spacer(1, 10))
 
         # Tabla 4: Historial de aplicaciones / compensaciones

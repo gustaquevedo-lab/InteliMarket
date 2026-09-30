@@ -2114,11 +2114,11 @@ export default function PurchasesPage() {
 
   // Filtrado y Paginación de Devoluciones y Notas de Crédito (Gestionadas + Legacy)
   const filteredReturnsAndNC = useMemo(() => {
-    // 1. Devoluciones gestionadas (con circuito de aprobación e impacto stock/finanzas)
+    // 1. Devoluciones gestionadas (Circuito Oficial con baja de stock y trazabilidad de NC)
     const managed = managedReturns.map(r => ({
       id: r.id,
       codigo: r.codigo,
-      numero_nota_credito: r.nota_credito_numero || r.codigo,
+      numero_nota_credito: r.nota_credito_numero || "",
       tipo_registro: "devolucion_gestionada",
       supplier_id: r.proveedor_id,
       supplier_nombre: r.proveedor_nombre,
@@ -2135,27 +2135,56 @@ export default function PurchasesPage() {
       raw: r,
     }))
 
-    // 2. Devoluciones Legacy (evitar duplicar si ya figura por código o id)
-    const managedCodes = new Set(managed.map(m => m.codigo))
+    // Conjunto de NCs y Códigos vinculados a devoluciones gestionadas para no duplicar filas
+    const linkedNcNumbers = new Set<string>()
+    const managedCodes = new Set(managed.map(m => (m.codigo || "").toLowerCase().trim()))
+
+    managed.forEach(m => {
+      if (m.raw?.notas_credito && Array.isArray(m.raw.notas_credito)) {
+        m.raw.notas_credito.forEach((nc: any) => {
+          if (nc?.numero) linkedNcNumbers.add(nc.numero.toLowerCase().trim())
+        })
+      }
+      if (m.numero_nota_credito) {
+        m.numero_nota_credito.split(",").forEach((s: string) => {
+          const t = s.trim().toLowerCase()
+          if (t) linkedNcNumbers.add(t)
+        })
+      }
+    })
+
+    // 2. Devoluciones Legacy (evitar duplicar si ya figura por código, id o NC vinculada)
     const legacy = supplierReturns
-      .filter(sr => !managedCodes.has(sr.numero_nota_credito))
+      .filter(sr => {
+        const ncNum = (sr.numero_nota_credito || "").toLowerCase().trim()
+        if (ncNum && (linkedNcNumbers.has(ncNum) || managedCodes.has(ncNum))) return false
+        if (sr.observaciones && managed.some(m => m.codigo && sr.observaciones.toLowerCase().includes(m.codigo.toLowerCase()))) return false
+        return true
+      })
       .map(r => ({
         ...r,
         tipo_registro: "devolucion",
         estado: "completado",
       }))
 
-    // 3. Notas de Crédito
-    const ncs = supplierCreditNotes.map(nc => ({
-      ...nc,
-      tipo_registro: "nota_credito",
-      numero_nota_credito: nc.numero,
-      estado: "completado",
-    }))
+    // 3. Notas de Crédito independientes (excluir las formalizadas dentro de una devolución para no triplicar)
+    const ncs = supplierCreditNotes
+      .filter(nc => {
+        const num = (nc.numero || "").toLowerCase().trim()
+        if (num && linkedNcNumbers.has(num)) return false
+        return true
+      })
+      .map(nc => ({
+        ...nc,
+        tipo_registro: "nota_credito",
+        numero_nota_credito: nc.numero,
+        estado: "completado",
+      }))
 
     const combined = [...managed, ...legacy, ...ncs]
     return combined.filter(item => {
       const matchSearch = !searchReturns ||
+        (item.codigo?.toLowerCase().includes(searchReturns.toLowerCase())) ||
         (item.numero_nota_credito?.toLowerCase().includes(searchReturns.toLowerCase())) ||
         (item.numero_factura_origen?.toLowerCase().includes(searchReturns.toLowerCase())) ||
         (item.supplier_nombre?.toLowerCase().includes(searchReturns.toLowerCase())) ||
@@ -4719,8 +4748,13 @@ export default function PurchasesPage() {
                                 </span>
                               )}
                             </div>
-                            <div className="font-mono font-bold text-gray-900 dark:text-white mt-1 text-xs">
-                              {item.numero_nota_credito || item.codigo || item.numero || "S/N"}
+                            <div className="font-mono font-bold text-gray-900 dark:text-white mt-1 text-xs flex items-center gap-1.5 flex-wrap">
+                              <span>{isManaged ? (item.codigo || "DEV-S/N") : (item.numero_nota_credito || item.codigo || item.numero || "S/N")}</span>
+                              {isManaged && item.numero_nota_credito && (
+                                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
+                                  NC: {item.numero_nota_credito}
+                                </span>
+                              )}
                             </div>
                           </td>
 
