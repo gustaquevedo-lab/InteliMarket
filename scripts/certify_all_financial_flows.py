@@ -213,7 +213,7 @@ class CertificationRunner:
         async with async_session_factory() as session:
             # 3.1 Validar que el placeholder provisional esté cancelado y sin saldo disponible
             res_prov = await session.execute(
-                text("SELECT id, numero, monto_total, saldo_disponible, cancelado FROM supplier_credit_notes WHERE id = '80021be9-2acf-4825-a230-0c41eb2566e7'")
+                text("SELECT id, numero, monto, saldo_disponible, cancelado FROM supplier_credit_notes WHERE id = '80021be9-2acf-4825-a230-0c41eb2566e7'")
             )
             prov = res_prov.fetchone()
             assert prov is not None, "No se encontró el registro provisional"
@@ -223,7 +223,7 @@ class CertificationRunner:
             # 3.2 Validar que las dos NCs físicas reales existen, están activas y vinculadas a Aquidabán
             res_reales = await session.execute(
                 text("""
-                    SELECT scn.numero, scn.monto_total, scn.saldo_disponible, scn.cancelado, s.razon_social
+                    SELECT scn.numero, scn.monto, scn.saldo_disponible, scn.cancelado, s.razon_social
                     FROM supplier_credit_notes scn
                     JOIN suppliers s ON s.id = scn.supplier_id
                     WHERE scn.numero IN ('001-001-0007502', '001-001-0007503')
@@ -277,8 +277,8 @@ class CertificationRunner:
                 await session.execute(
                     text("""
                         INSERT INTO supplier_invoices (id, company_id, supplier_id, numero_factura, tipo_comprobante,
-                                                     monto_total, saldo_pendiente, estado, fecha_emision, fecha_vencimiento)
-                        VALUES (:id, :cid, :sid, 'FAC-MERC-001', 'mercaderia', 300000, 300000, 'pendiente', CURRENT_DATE, CURRENT_DATE + 30)
+                                                     total, saldo_pendiente, estado, fecha_emision, fecha_vencimiento, moneda)
+                        VALUES (:id, :cid, :sid, 'FAC-MERC-001', 'mercaderia', 300000, 300000, 'pendiente', CURRENT_DATE, CURRENT_DATE + 30, 'PYG')
                     """),
                     {"id": str(inv1_id), "cid": str(COMPANY_ID), "sid": str(test_sup_id)}
                 )
@@ -287,8 +287,8 @@ class CertificationRunner:
                 await session.execute(
                     text("""
                         INSERT INTO supplier_invoices (id, company_id, supplier_id, numero_factura, tipo_comprobante,
-                                                     monto_total, saldo_pendiente, estado, fecha_emision, fecha_vencimiento)
-                        VALUES (:id, :cid, :sid, 'FAC-INS-002', 'gasto', 150000, 150000, 'pendiente', CURRENT_DATE, CURRENT_DATE + 15)
+                                                     total, saldo_pendiente, estado, fecha_emision, fecha_vencimiento, moneda)
+                        VALUES (:id, :cid, :sid, 'FAC-INS-002', 'gasto', 150000, 150000, 'pendiente', CURRENT_DATE, CURRENT_DATE + 15, 'PYG')
                     """),
                     {"id": str(inv2_id), "cid": str(COMPANY_ID), "sid": str(test_sup_id)}
                 )
@@ -356,8 +356,8 @@ class CertificationRunner:
                 await session.execute(
                     text("""
                         INSERT INTO supplier_invoices (id, company_id, supplier_id, numero_factura, tipo_comprobante,
-                                                     monto_total, saldo_pendiente, estado, fecha_emision, fecha_vencimiento)
-                        VALUES (:id, :cid, :sid, 'FAC-BR-CHQ', 'mercaderia', 500000, 500000, 'pendiente', CURRENT_DATE, CURRENT_DATE + 30)
+                                                     total, saldo_pendiente, estado, fecha_emision, fecha_vencimiento, moneda)
+                        VALUES (:id, :cid, :sid, 'FAC-BR-CHQ', 'mercaderia', 500000, 500000, 'pendiente', CURRENT_DATE, CURRENT_DATE + 30, 'PYG')
                     """),
                     {"id": str(inv_id), "cid": str(COMPANY_ID), "sid": str(test_sup_id)}
                 )
