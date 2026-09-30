@@ -270,11 +270,7 @@ export default function GondolaPage() {
     if (!cola.length) return
     setImprimiendo(true)
     try {
-      const nombre = printerConfig?.qz_printer_name
-      if (!nombre) {
-        mostrar("error", "Falta configurar el nombre de la impresora en Integraciones > Hardware")
-        return
-      }
+      const nombre = printerConfig?.qz_printer_name || "Etiqueta"
       // Se dibuja cada etiqueta al tamaño exacto de la impresora y se manda
       // como gráfico ZPL: así sale idéntica al diseño aprobado.
       const dx = Number(printerConfig?.dpmm_x) || 8

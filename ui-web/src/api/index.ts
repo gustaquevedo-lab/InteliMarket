@@ -58,7 +58,10 @@ function notifySessionExpired() {
 }
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  let token = localStorage.getItem("access_token")
+  let token = localStorage.getItem("access_token") || localStorage.getItem("station_token")
+  if (!localStorage.getItem("access_token") && token) {
+    try { localStorage.setItem("access_token", token) } catch {}
+  }
   const cleanEndpoint = endpoint.startsWith("/api") ? endpoint.substring(4) : endpoint
   const isPublicEndpoint =
     cleanEndpoint.startsWith("/v1/auth/login") ||
@@ -68,6 +71,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     cleanEndpoint.startsWith("/v1/auth/reset-password") ||
     cleanEndpoint.startsWith("/v1/kiosk/") ||
     cleanEndpoint.startsWith("/v1/ecommerce/catalog") ||
+    cleanEndpoint.startsWith("/v1/label-printing/qz-certificate") ||
     cleanEndpoint.startsWith("/health") ||
     cleanEndpoint.startsWith("/uploads/")
 

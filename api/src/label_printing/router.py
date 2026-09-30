@@ -203,7 +203,7 @@ async def generar_token_estacion(db: AsyncSession = Depends(get_db), user=Depend
             "id": str(etiquetador.id),
             "email": etiquetador.email,
             "rol": etiquetador.rol,
-            "company_id": str(user.get("company_id")),
+            "company_id": str(user.get("company_id") or "00000000-0000-0000-0000-000000000010"),
             "estacion": "etiquetas_gondola",
         },
         expires_delta=timedelta(days=1825),  # 5 anios

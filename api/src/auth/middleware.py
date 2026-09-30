@@ -32,7 +32,8 @@ async def get_current_user(
         user = get_current_user_from_token(token_str)
         if "sub" in user and "id" not in user:
             user["id"] = user["sub"]
-        if "company_id" not in user:
+        cid = user.get("company_id")
+        if not cid or cid == "00000000-0000-0000-0000-000000000001":
             user["company_id"] = "00000000-0000-0000-0000-000000000010"
         if "tenant_id" not in user or not user["tenant_id"]:
             user["tenant_id"] = "00000000-0000-0000-0000-000000000001"
