@@ -238,7 +238,7 @@ class CertificationRunner:
             # 3.3 Validar que la devolución física tiene las NCs vinculadas
             res_dev = await session.execute(
                 text("""
-                    SELECT id, codigo, nota_credito_numero, nota_credito_monto, notas_credito_vinculadas
+                    SELECT id, codigo, nota_credito_numero, nota_credito_monto, notas_credito
                     FROM supermer_supplier_returns
                     WHERE id = 'e4a11930-8838-4e08-ac22-4965a60561a4'
                 """)
