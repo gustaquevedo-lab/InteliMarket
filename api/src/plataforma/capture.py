@@ -93,7 +93,12 @@ def py_top_frame(exc: BaseException) -> str | None:
 
 
 def compute_fingerprint(ev: dict) -> str:
-    if ev["source"] == "integration":
+    msg_raw = str(ev.get("message") or "")
+    if ev.get("kind") == "NetworkError" or "Sin conexión con el servidor" in msg_raw:
+        basis = f"{ev['source']}|NetworkError|offline"
+    elif "dynamically imported module" in msg_raw or "Importing a module script failed" in msg_raw:
+        basis = f"{ev['source']}|ViteStaleChunk|preload"
+    elif ev["source"] == "integration":
         basis = "|".join(["integration", ev.get("provider") or "", ev.get("op") or "", normalize_message(ev.get("code") or ev.get("message"))])
     elif ev.get("http_status") and not ev.get("stack"):
         basis = "|".join([ev["source"], "http", str(ev["http_status"]), ev.get("route") or "", ev.get("http_method") or ""])
@@ -103,6 +108,11 @@ def compute_fingerprint(ev: dict) -> str:
 
 
 def make_title(ev: dict) -> str:
+    msg_raw = str(ev.get("message") or "")
+    if ev.get("kind") == "NetworkError" or "Sin conexión con el servidor" in msg_raw:
+        return "NetworkError: Sin conexión con el servidor central (red cliente offline)"
+    if "dynamically imported module" in msg_raw or "Importing a module script failed" in msg_raw:
+        return "ViteChunkError: Módulo desactualizado tras nuevo deploy (resuelto con recarga)"
     if ev["source"] == "integration":
         head = f"{(ev.get('provider') or '?').upper()} · {ev.get('op') or 'operación'}"
         tail = ev.get("code") or normalize_message(ev.get("message"))

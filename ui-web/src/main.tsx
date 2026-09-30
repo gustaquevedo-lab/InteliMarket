@@ -37,6 +37,17 @@ import "./index.css"
   }
 })()
 
+// Manejo proactivo de chunks dinamicos desactualizados tras un nuevo deploy:
+// si el navegador intenta cargar un hash anterior, recarga la pagina limpiamente.
+window.addEventListener("vite:preloadError", (event) => {
+  const key = "im_vite_preload_reload"
+  const last = Number(sessionStorage.getItem(key) || 0)
+  if (Date.now() - last > 15000) {
+    sessionStorage.setItem(key, String(Date.now()))
+    window.location.reload()
+  }
+})
+
 try { initMonitor() } catch { /* el monitor nunca frena el arranque */ }
 
 createRoot(document.getElementById("root")!).render(

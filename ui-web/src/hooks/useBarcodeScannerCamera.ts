@@ -161,7 +161,7 @@ export function useBarcodeScannerCamera(
   // el codigo leido; no hay preview embebido que mantener en React, asi que
   // cameraActive solo indica "escaneo nativo en curso" para la UI (spinner,
   // boton deshabilitado, etc).
-  const startNativeScan = useCallback(async () => {
+  const startNativeScan = useCallback(async (): Promise<boolean> => {
     setCameraError(null)
     setCameraLoading(true)
     try {
@@ -173,7 +173,7 @@ export function useBarcodeScannerCamera(
             "Permiso de cámara denegado. Habilitalo en los ajustes de la app (Configuración del teléfono → Apps → Extra → Permisos)."
           )
           setCameraLoading(false)
-          return
+          return true
         }
       }
 
@@ -193,9 +193,16 @@ export function useBarcodeScannerCamera(
       if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
         handleCodeScanned(barcodes[0].rawValue)
       }
+      return true
     } catch (err: any) {
-      console.error("Error en escaneo nativo:", err)
-      setCameraError(err?.message || "No se pudo abrir el escáner de la cámara.")
+      const msg = String(err?.message || err || "")
+      if (/not implemented|unimplemented|unavailable/i.test(msg)) {
+        console.warn("Plugin BarcodeScanner nativo no implementado, alternando a cámara web:", err)
+        return false
+      }
+      console.warn("Error en escaneo nativo:", err)
+      setCameraError(msg || "No se pudo abrir el escáner de la cámara.")
+      return true
     } finally {
       setCameraActive(false)
       setCameraLoading(false)
@@ -205,8 +212,8 @@ export function useBarcodeScannerCamera(
   const startCamera = useCallback(
     async (targetDeviceId?: string) => {
       if (Capacitor.isNativePlatform()) {
-        await startNativeScan()
-        return
+        const ok = await startNativeScan()
+        if (ok) return
       }
 
       setCameraError(null)

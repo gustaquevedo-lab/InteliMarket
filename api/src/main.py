@@ -159,7 +159,7 @@ async def lifespan(app: FastAPI):
     # corre en la instancia principal -- si corriera en las 2, cada job
     # (backups, recordatorios WhatsApp, depreciacion mensual...) se dispara
     # duplicado. Ver RUN_SCHEDULER en config.py.
-    if settings.run_scheduler:
+    if settings.run_scheduler and "sandbox" not in (settings.db_search_path or ""):
         start_scheduler()
     from api.src.plataforma import capture as _capture
     _capture.install_log_handler()

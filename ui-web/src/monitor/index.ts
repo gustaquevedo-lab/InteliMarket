@@ -248,28 +248,6 @@ export function initMonitor() {
     } catch (e: any) {
       if (isApi && !mine && e?.name !== "AbortError") {
         addBreadcrumb("api", `${method} ${pathTemplate(url)} -> SIN CONEXION`)
-
-        // No inundar la consola de incidencias con falsos positivos cuando:
-        // 1. El cliente no tiene red (laptop sin wifi, suspendida o modo avión)
-        // 2. La ventana está minimizada / en suspensión (document.visibilityState === "hidden")
-        // 3. Es un sondeo periódico de fondo o healthcheck
-        // 4. Es una petición de cierre de turno ejecutada durante la recarga de la página
-        const isOffline = typeof navigator !== "undefined" && !navigator.onLine
-        const isHidden = typeof document !== "undefined" && document.visibilityState === "hidden"
-        const isBackgroundPoll = /health|notifications|supervisor-requests|deposit-approvals|cash-sessions-summary|cash-handoffs|cash-drop-requests|credit-approval-requests|low-stock|cajeros\/performance|pos-shift\/end/i.test(url)
-
-        if (!isOffline && !isHidden && !isBackgroundPoll) {
-          enqueue({
-            source: isElectron() ? "electron" : "frontend",
-            level: "error",
-            kind: "NetworkError",
-            provider: undefined,
-            message: `Sin conexión con el servidor: ${method} ${pathTemplate(url)}`,
-            http_method: method,
-            route: pathTemplate(url),
-            duration_ms: Math.round(performance.now() - t0),
-          })
-        }
       }
       throw e
     }

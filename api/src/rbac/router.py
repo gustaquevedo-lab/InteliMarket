@@ -177,14 +177,22 @@ async def set_role_permissions(
     return {"message": "Permisos actualizados"}
 
 
+def _parse_uuid_safe(val: str, field_name: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(str(val))
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(status_code=400, detail=f"'{field_name}' no es un UUID válido")
+
+
 @router.get("/users/{user_id}/roles", response_model=List[UserRoleResponse])
 async def get_user_roles(
     user_id: str,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    tenant_id = uuid.UUID(user["tenant_id"])
-    roles = await service.get_user_roles(db, uuid.UUID(user_id), tenant_id)
+    uid = _parse_uuid_safe(user_id, "user_id")
+    tenant_id = _parse_uuid_safe(user.get("tenant_id"), "tenant_id")
+    roles = await service.get_user_roles(db, uid, tenant_id)
     return [UserRoleResponse(**r) for r in roles]
 
 
@@ -197,8 +205,9 @@ async def assign_user_role(
 ):
     if not _is_tenant_admin(user):
         raise HTTPException(status_code=403, detail="Solo administradores pueden asignar roles")
-    tenant_id = uuid.UUID(user["tenant_id"])
-    success = await service.assign_user_role(db, uuid.UUID(user_id), tenant_id, data.role_id)
+    uid = _parse_uuid_safe(user_id, "user_id")
+    tenant_id = _parse_uuid_safe(user.get("tenant_id"), "tenant_id")
+    success = await service.assign_user_role(db, uid, tenant_id, data.role_id)
     if not success:
         raise HTTPException(status_code=400, detail="El usuario ya tiene este rol asignado")
     return {"message": "Rol asignado"}
@@ -213,8 +222,10 @@ async def remove_user_role(
 ):
     if not _is_tenant_admin(user):
         raise HTTPException(status_code=403, detail="Solo administradores pueden remover roles")
-    tenant_id = uuid.UUID(user["tenant_id"])
-    success = await service.remove_user_role(db, uuid.UUID(user_id), tenant_id, uuid.UUID(role_id))
+    uid = _parse_uuid_safe(user_id, "user_id")
+    rid = _parse_uuid_safe(role_id, "role_id")
+    tenant_id = _parse_uuid_safe(user.get("tenant_id"), "tenant_id")
+    success = await service.remove_user_role(db, uid, tenant_id, rid)
     if not success:
         raise HTTPException(status_code=404, detail="Asignación de rol no encontrada")
     return {"message": "Rol removido"}

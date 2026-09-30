@@ -47,7 +47,6 @@ export class ErrorBoundary extends Component<Props, State> {
       const ultimo = Number(sessionStorage.getItem(key) || 0)
       if (Date.now() - ultimo > 15000) {
         sessionStorage.setItem(key, String(Date.now()))
-        try { captureException(error, { componentStack: (errorInfo.componentStack || "").slice(0, 1500), modulo: this.props.moduleName || "raiz", auto_recargado: true }, "warning") } catch { /* nada */ }
         window.location.reload()
         return
       }

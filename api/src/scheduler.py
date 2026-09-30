@@ -163,15 +163,21 @@ async def run_promotions_daily_sync():
 
     async with async_session_factory() as db:
         try:
-            # 1. Tocar las promociones activas para que el trigger PostgreSQL 'trg_sync_promo_precio_fijo'
-            # reevalúe la vigencia del día actual (valido_desde, valido_hasta, dias_semana)
+            # 1. Obtener las promociones activas
             res = await db.execute(
-                update(Promotion)
-                .where(Promotion.activo == True, Promotion.estado == "activa")
-                .values(updated_at=func.now())
-                .returning(Promotion)
+                select(Promotion).where(Promotion.activo == True, Promotion.estado == "activa")
             )
             promos = list(res.scalars().all())
+
+            # 2. Tocar las promociones activas para que el trigger PostgreSQL 'trg_sync_promo_precio_fijo'
+            # reevalúe la vigencia del día actual (valido_desde, valido_hasta, dias_semana)
+            if promos:
+                promo_ids = [pr.id for pr in promos]
+                await db.execute(
+                    update(Promotion)
+                    .where(Promotion.id.in_(promo_ids))
+                    .values(updated_at=func.now())
+                )
 
             # 2. Tocar los productos vinculados y sincronizar balanzas
             for pr in promos:
