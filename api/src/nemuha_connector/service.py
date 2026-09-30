@@ -630,7 +630,9 @@ async def sync_accounts_receivable(db: AsyncSession, company_id: str, since: dat
                     UPDATE accounts_receivable
                     SET saldo_pendiente = :saldo, estado = :estado, updated_at = now(),
                         sale_id = COALESCE(sale_id, :sale_id)
-                    WHERE id = :id AND (notas_cobranza IS NULL OR notas_cobranza NOT LIKE '%MANAGED_INTELIMARKET%')
+                    WHERE id = :id 
+                      AND (notas_cobranza IS NULL OR notas_cobranza NOT LIKE '%MANAGED_INTELIMARKET%')
+                      AND id NOT IN (SELECT accounts_receivable_id FROM receivable_payment_allocations)
                 """),
                 {"saldo": saldo, "estado": estado, "id": str(existing_id), "sale_id": str(sale_id) if sale_id else None},
             )

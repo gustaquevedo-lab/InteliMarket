@@ -844,7 +844,7 @@ async def list_payments_for_document(db: AsyncSession, accounts_receivable_id: s
 async def list_payments_for_customer(db: AsyncSession, company_id: str, customer_id: str) -> list[dict]:
     result = await db.execute(
         text("""
-            SELECT rp.id, rp.fecha, rp.monto_total, rp.forma_pago, rp.referencia, rp.observaciones, rp.created_at,
+            SELECT rp.id, rp.numero_recibo, rp.fecha, rp.monto_total, rp.forma_pago, rp.referencia, rp.observaciones, rp.created_at,
                    COALESCE(json_agg(json_build_object('accounts_receivable_id', rpa.accounts_receivable_id, 'numero_documento', ar.numero_documento, 'monto', rpa.monto)) FILTER (WHERE rpa.id IS NOT NULL), '[]') as allocations
             FROM receivable_payments rp
             LEFT JOIN receivable_payment_allocations rpa ON rpa.receivable_payment_id = rp.id
