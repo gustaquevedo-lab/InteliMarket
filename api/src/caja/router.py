@@ -603,6 +603,23 @@ async def vault_entries(estado: str | None = Query(None), db: AsyncSession = Dep
     return await service.list_vault_entries(db, user["company_id"], estado)
 
 
+@router.get("/vault/kardex")
+async def get_vault_kardex(
+    moneda: str = Query("PYG"),
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.get_vault_kardex(
+        db=db,
+        company_id=user["company_id"],
+        moneda=moneda,
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+    )
+
+
 @router.get("/caja/export/arqueo.pdf")
 async def export_arqueo_pdf(
     fecha_desde: date = Query(...), fecha_hasta: date = Query(...),

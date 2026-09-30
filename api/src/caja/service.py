@@ -35,6 +35,7 @@ from api.src.auth.models import User
 from api.src.returns.models import Return
 from api.src.common.dates import end_of_day
 from api.src.fiscal.models import NotaCreditoDebito
+from api.src.cheques.models import Cheque
 
 # Canales de pago oficiales desglosados aceptados en Extra Supermercado
 PAYMENT_CHANNEL_DEFINITIONS = [
@@ -5977,6 +5978,185 @@ async def resolve_cash_shortage_request(
         "sueldok_status": req.sueldok_sync_status,
         "sueldok_response": sueldok_result,
     }
+
+
+# ── Kardex de Bóveda por Moneda Individual ───────────────────────────
+
+async def get_vault_kardex(
+    db: AsyncSession,
+    company_id: str,
+    moneda: str = "PYG",
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
+) -> dict:
+    """Retorna el extracto/kardex detallado de movimientos de ingreso, egreso
+    y saldo acumulado progresivo para una bóveda específica (PYG, BRL, USD o CHEQUES)."""
+    cid = uuid.UUID(company_id)
+    moneda_upper = (moneda or "PYG").upper()
+
+    if moneda_upper in ("CHEQUE", "CHEQUES"):
+        q = (
+            select(Cheque)
+            .where(Cheque.company_id == cid, Cheque.tipo_cheque == "recibido")
+            .order_by(Cheque.created_at.asc())
+        )
+        res = await db.execute(q)
+        cheques = res.scalars().all()
+
+        raw_events = []
+        for chq in cheques:
+            monto_val = float(chq.monto or 0)
+            f_in = chq.created_at or datetime.now(timezone.utc)
+            # Evento 1: Ingreso a cartera
+            raw_events.append({
+                "id": f"ING-{str(chq.id)}",
+                "fecha": f_in,
+                "tipo": "ingreso",
+                "concepto": f"Recepción Cheque #{chq.numero} ({chq.banco_emisor}) - Librador: {chq.librador_nombre or '—'}",
+                "origen": "recepcion_cheque",
+                "referencia": chq.numero,
+                "monto_ingreso": monto_val,
+                "monto_egreso": 0.0,
+                "estado": chq.estado,
+                "usuario": "Caja / Tesorería",
+                "observaciones": chq.notas or chq.concepto or "",
+                "detalles": {
+                    "numero": chq.numero,
+                    "banco": chq.banco_emisor,
+                    "librador": chq.librador_nombre,
+                    "fecha_cobro": chq.fecha_pago.isoformat() if chq.fecha_pago else None,
+                    "diferido": chq.diferido,
+                },
+            })
+
+            # Evento 2: Egreso si ya salió de la cartera (depositado, cobrado, etc.)
+            if chq.estado in ("depositado", "cobrado", "rechazado", "anulado"):
+                f_egr = chq.updated_at or chq.fecha_pago or f_in
+                raw_events.append({
+                    "id": f"EGR-{str(chq.id)}",
+                    "fecha": f_egr,
+                    "tipo": "egreso",
+                    "concepto": f"Salida Cheque #{chq.numero} ({chq.banco_emisor}) — {chq.estado.upper()}",
+                    "origen": f"cheque_{chq.estado}",
+                    "referencia": chq.numero,
+                    "monto_ingreso": 0.0,
+                    "monto_egreso": monto_val,
+                    "estado": chq.estado,
+                    "usuario": "Tesorería",
+                    "observaciones": f"Cambio de estado en cartera: {chq.estado}",
+                    "detalles": {
+                        "numero": chq.numero,
+                        "banco": chq.banco_emisor,
+                        "librador": chq.librador_nombre,
+                        "fecha_cobro": chq.fecha_pago.isoformat() if chq.fecha_pago else None,
+                        "diferido": chq.diferido,
+                    },
+                })
+    else:
+        # Bóveda física en moneda extranjera o moneda local
+        q = (
+            select(VaultEntry)
+            .where(VaultEntry.company_id == cid)
+            .order_by(VaultEntry.created_at.asc())
+        )
+        res = await db.execute(q)
+        entries = res.scalars().all()
+
+        u_ids = {e.registrado_por for e in entries if e.registrado_por}
+        users_map = {}
+        if u_ids:
+            u_res = await db.execute(select(User).where(User.id.in_(u_ids)))
+            for u in u_res.scalars().all():
+                users_map[u.id] = u.nombre or u.email or "Usuario"
+
+        raw_events = []
+        for e in entries:
+            if moneda_upper == "BRL":
+                monto_val = float(e.monto_brl or 0)
+            elif moneda_upper == "USD":
+                monto_val = float(e.monto_usd or 0)
+            else:  # PYG
+                monto_val = float(e.monto_pyg or 0)
+
+            if monto_val <= 0:
+                continue
+
+            user_name = users_map.get(e.registrado_por, "Tesorería")
+            origen_label = {
+                "entrega_cajero": "Recaudación Cierre de Caja",
+                "cobranza_ar": "Cobranza CxC Clientes",
+                "ajuste": "Ajuste de Bóveda",
+                "cheque_caja": "Cheques de Caja",
+            }.get(e.origen, e.origen.replace("_", " ").title())
+
+            # 1. Ingreso a Bóveda
+            raw_events.append({
+                "id": f"ING-{str(e.id)}",
+                "fecha": e.created_at,
+                "tipo": "ingreso",
+                "concepto": f"{origen_label}" + (f" ({e.observaciones})" if e.observaciones else ""),
+                "origen": e.origen,
+                "referencia": str(e.id)[:8].upper(),
+                "monto_ingreso": monto_val,
+                "monto_egreso": 0.0,
+                "estado": e.estado,
+                "usuario": user_name,
+                "observaciones": e.observaciones or "",
+            })
+
+            # 2. Egreso si fue depositado al banco
+            if e.estado == "depositado" and e.fecha_deposito:
+                ref_txt = str(e.bank_transaction_id)[:8].upper() if e.bank_transaction_id else "BANCO"
+                raw_events.append({
+                    "id": f"EGR-{str(e.id)}",
+                    "fecha": e.fecha_deposito,
+                    "tipo": "egreso",
+                    "concepto": f"Depósito Bancario (Trx #{ref_txt})",
+                    "origen": "deposito_bancario",
+                    "referencia": ref_txt,
+                    "monto_ingreso": 0.0,
+                    "monto_egreso": monto_val,
+                    "estado": "depositado",
+                    "usuario": user_name,
+                    "observaciones": e.observaciones or "Fondos remesados al banco",
+                })
+
+    # Ordenar cronológicamente para calcular el saldo acumulado progresivo
+    raw_events.sort(key=lambda x: x["fecha"] if isinstance(x["fecha"], datetime) else datetime.min)
+
+    saldo = 0.0
+    kardex = []
+    tot_ing = 0.0
+    tot_egr = 0.0
+
+    for ev in raw_events:
+        saldo += (ev["monto_ingreso"] - ev["monto_egreso"])
+        ev["saldo_acumulado"] = round(saldo, 2) if moneda_upper in ("BRL", "USD") else int(saldo)
+        tot_ing += ev["monto_ingreso"]
+        tot_egr += ev["monto_egreso"]
+
+        f_dt = ev["fecha"]
+        f_date = f_dt.date() if isinstance(f_dt, datetime) else f_dt
+        if fecha_desde and f_date < fecha_desde:
+            continue
+        if fecha_hasta and f_date > fecha_hasta:
+            continue
+
+        ev["fecha_str"] = ev["fecha"].isoformat() if isinstance(ev["fecha"], datetime) else str(ev["fecha"])
+        kardex.append(ev)
+
+    # Devolver lo más reciente primero para el listado en tabla
+    kardex.reverse()
+
+    return {
+        "moneda": moneda_upper,
+        "saldo_actual": round(saldo, 2) if moneda_upper in ("BRL", "USD") else int(saldo),
+        "total_ingresos": round(tot_ing, 2) if moneda_upper in ("BRL", "USD") else int(tot_ing),
+        "total_egresos": round(tot_egr, 2) if moneda_upper in ("BRL", "USD") else int(tot_egr),
+        "cantidad_movimientos": len(kardex),
+        "movimientos": kardex,
+    }
+
 
 
 

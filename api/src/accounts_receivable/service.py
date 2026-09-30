@@ -7,7 +7,14 @@ import uuid
 from sqlalchemy import select, text, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.src.integrated_finance.auto_posting import PostingEngine, ACC_CAJA, ACC_CXC, ACC_IVA_CREDITO
+from api.src.integrated_finance.auto_posting import (
+    PostingEngine,
+    ACC_CAJA,
+    ACC_CXC,
+    ACC_IVA_CREDITO,
+    ACC_DESCUENTOS_OTORGADOS,
+    ACC_INGRESOS_ADMINISTRATIVOS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -355,31 +362,50 @@ async def _post_ar_payment_accounting(
     aplica_retencion: bool,
     monto_retencion: Decimal,
     retencion_numero_comprobante: str | None,
+    tipo_diferencia: str = "exacto",
+    diferencia_monto: Decimal = Decimal("0"),
+    monto_facturas_canceladas: Decimal | None = None,
 ) -> None:
     """Genera el asiento contable de partida doble para el cobro de CxC:
     - DEBE: Caja y Bancos (1.1.01) por el dinero neto recibido (monto_total - retención)
     - DEBE: IVA Crédito Fiscal (1.1.05) por la retención soportada (comprobante Tesakã)
-    - HABER: Cuentas por Cobrar Clientes (1.1.02) por el total cancelado de la deuda.
-    Garantiza balance exacto y registro auditable."""
+    - DEBE: Descuentos Otorgados (5.1.02) si tipo_diferencia == 'descuento' (redondeo a favor del cliente)
+    - HABER: Cuentas por Cobrar Clientes (1.1.02) por el total cancelado de la deuda (monto_facturas_canceladas)
+    - HABER: Ingresos Administrativos / Cobranza (4.2.01) si tipo_diferencia == 'gastos_administrativos' (redondeo a favor del comercio)
+    Garantiza balance exacto (Total DEBE == Total HABER) y registro auditable."""
     try:
         engine = PostingEngine(db, company_id)
         await engine.ensure_accounts()
 
-        monto_tot_q = Decimal(str(monto_total)).quantize(Decimal("1"))
+        monto_entregado_q = Decimal(str(monto_total)).quantize(Decimal("1"))
         monto_ret_q = Decimal(str(monto_retencion)).quantize(Decimal("1")) if aplica_retencion else Decimal("0")
-        monto_neto_q = max(Decimal("0"), monto_tot_q - monto_ret_q)
+        monto_neto_caja = max(Decimal("0"), monto_entregado_q - monto_ret_q)
+
+        monto_facturas_q = Decimal(
+            str(monto_facturas_canceladas if monto_facturas_canceladas is not None else monto_total)
+        ).quantize(Decimal("1"))
+        monto_dif_q = Decimal(str(diferencia_monto or 0)).quantize(Decimal("1"))
 
         lines: list[tuple[str, str, Decimal]] = []
-        if monto_neto_q > 0:
-            lines.append((ACC_CAJA, "debe", monto_neto_q))
+        if monto_neto_caja > 0:
+            lines.append((ACC_CAJA, "debe", monto_neto_caja))
         if monto_ret_q > 0:
             lines.append((ACC_IVA_CREDITO, "debe", monto_ret_q))
-        if monto_tot_q > 0:
-            lines.append((ACC_CXC, "haber", monto_tot_q))
+        if monto_dif_q > 0 and tipo_diferencia == "descuento":
+            lines.append((ACC_DESCUENTOS_OTORGADOS, "debe", monto_dif_q))
+
+        if monto_facturas_q > 0:
+            lines.append((ACC_CXC, "haber", monto_facturas_q))
+        if monto_dif_q > 0 and tipo_diferencia == "gastos_administrativos":
+            lines.append((ACC_INGRESOS_ADMINISTRATIVOS, "haber", monto_dif_q))
 
         concepto = f"Cobro Recibo #{numero_recibo} - {customer_name}"
         if aplica_retencion and retencion_numero_comprobante:
             concepto += f" (Ret. IVA Tesakã #{retencion_numero_comprobante})"
+        if tipo_diferencia == "descuento" and monto_dif_q > 0:
+            concepto += f" [Descuento: Gs. {int(monto_dif_q):,}]"
+        elif tipo_diferencia == "gastos_administrativos" and monto_dif_q > 0:
+            concepto += f" [Gastos Admin: Gs. {int(monto_dif_q):,}]"
 
         await engine.post(fecha, concepto, "receivable_payment", payment_id, lines)
     except Exception as e:
@@ -399,7 +425,7 @@ async def _record_treasury_ingress(
     numero_recibo: str,
 ) -> dict:
     """Registra el impacto del cobro en el subsistema correspondiente de tesorería:
-    - Efectivo: genera entrada en VaultEntry (Bóveda Central) o vincula caja_session_id.
+    - Efectivo: genera entrada en VaultEntry (Bóveda Central con desglose en PYG, BRL y USD) o vincula caja_session_id.
     - Transferencia / PIX / QR: genera BankTransaction (tipo='credito') y actualiza bank_account.saldo_actual.
     - Cheque: registra el cheque recibido en cartera (tabla cheques) con sus fechas y emisor."""
     forma_pago = (getattr(data, "forma_pago", None) or "efectivo").lower()
@@ -416,19 +442,42 @@ async def _record_treasury_ingress(
         if destino_fondos == "caja" and caja_session_id:
             pass
         else:
+            monto_pyg = Decimal(str(getattr(data, "monto_pyg", 0) or 0))
+            monto_brl = Decimal(str(getattr(data, "monto_brl", 0) or 0))
+            monto_usd = Decimal(str(getattr(data, "monto_usd", 0) or 0))
+            if monto_pyg == 0 and monto_brl == 0 and monto_usd == 0:
+                mon_str = (getattr(data, "moneda", "PYG") or "PYG").upper()
+                if mon_str == "BRL":
+                    monto_brl = monto
+                elif mon_str == "USD":
+                    monto_usd = monto
+                else:
+                    monto_pyg = monto
+
+            det_monedas = []
+            if monto_pyg > 0:
+                det_monedas.append(f"Gs. {int(monto_pyg):,}")
+            if monto_brl > 0:
+                det_monedas.append(f"R$ {monto_brl:,.2f}")
+            if monto_usd > 0:
+                det_monedas.append(f"US$ {monto_usd:,.2f}")
+            det_str = f" ({' + '.join(det_monedas)})" if det_monedas else ""
+
             vault_entry_id = uuid.uuid4()
             await db.execute(
                 text("""
                     INSERT INTO vault_entries
-                        (id, company_id, origen, monto_pyg, estado, observaciones, registrado_por, created_at)
+                        (id, company_id, origen, monto_pyg, monto_brl, monto_usd, estado, observaciones, registrado_por, created_at)
                     VALUES
-                        (:id, :company_id, 'cobranza_ar', :monto, 'en_boveda', :obs, :user_id, NOW())
+                        (:id, :company_id, 'cobranza_ar', :monto_pyg, :monto_brl, :monto_usd, 'en_boveda', :obs, :user_id, NOW())
                 """),
                 {
                     "id": vault_entry_id,
                     "company_id": company_id,
-                    "monto": float(monto),
-                    "obs": f"Cobro AR Recibo #{numero_recibo} - Cliente: {customer_name}",
+                    "monto_pyg": float(monto_pyg),
+                    "monto_brl": float(monto_brl),
+                    "monto_usd": float(monto_usd),
+                    "obs": f"Cobro AR Recibo #{numero_recibo}{det_str} - Cliente: {customer_name}",
                     "user_id": registrado_por,
                 },
             )
@@ -477,7 +526,7 @@ async def _record_treasury_ingress(
                      receivable_payment_id, concepto, notas, created_by, created_at, updated_at)
                 VALUES
                     (:id, :company_id, :numero, :banco, 'Extra Supermercado Mayorista', :librador, :ruc,
-                     :monto, 'PYG', :f_emision, :f_pago, :diferido, 'en_cartera', 'recibido', :cust_id,
+                     :monto, :moneda, :f_emision, :f_pago, :diferido, 'en_cartera', 'recibido', :cust_id,
                      :payment_id, :concepto, :notas, :user_id, NOW(), NOW())
             """),
             {
@@ -488,6 +537,7 @@ async def _record_treasury_ingress(
                 "librador": getattr(data, "cheque_librador", None) or customer_name,
                 "ruc": getattr(data, "cheque_ruc", None) or customer_ruc,
                 "monto": float(monto),
+                "moneda": getattr(data, "moneda", "PYG") or "PYG",
                 "f_emision": chq_f_emision,
                 "f_pago": chq_f_cobro,
                 "diferido": diferido,
@@ -528,13 +578,37 @@ async def _record_treasury_ingress(
 
 async def create_receivable_payment(db: AsyncSession, company_id: str, data, registrado_por: str | None) -> dict:
     """Registra un pago de un cliente y lo reparte entre los documentos que
-    indique — a diferencia de apply_payment_to_receivable (atado 1 a 1 a una
-    venta), esto permite que un solo pago cubra varias facturas, que es como
-    se cobra en la practica. Valida que el reparto sume exactamente el monto
-    total del pago y que cada documento tenga saldo suficiente."""
+    indique. Valida que el reparto cubra las facturas a cancelar, admite pagos
+    multimoneda y compensa desbalanceos por redondeo o tipo de cambio contra
+    descuentos o gastos administrativos."""
     total_allocado = sum(a.monto for a in data.allocations)
-    if total_allocado != data.monto_total:
-        return {"error": f"El reparto ({total_allocado}) no coincide con el monto total del pago ({data.monto_total})"}
+
+    monto_pyg = Decimal(str(getattr(data, "monto_pyg", 0) or 0))
+    monto_brl = Decimal(str(getattr(data, "monto_brl", 0) or 0))
+    monto_usd = Decimal(str(getattr(data, "monto_usd", 0) or 0))
+    tasa_brl = Decimal(str(getattr(data, "tasa_brl", 1) or 1))
+    tasa_usd = Decimal(str(getattr(data, "tasa_usd", 1) or 1))
+
+    if monto_pyg > 0 or monto_brl > 0 or monto_usd > 0:
+        monto_entregado_gs = (monto_pyg + (monto_brl * tasa_brl) + (monto_usd * tasa_usd)).quantize(Decimal("1"))
+    else:
+        monto_entregado_gs = Decimal(str(data.monto_total)).quantize(Decimal("1"))
+
+    monto_facturas = Decimal(str(getattr(data, "monto_facturas_canceladas", None) or total_allocado)).quantize(Decimal("1"))
+
+    if total_allocado != monto_facturas:
+        return {"error": f"El reparto a documentos ({total_allocado}) no coincide con el total de facturas a cancelar ({monto_facturas})"}
+
+    dif = monto_entregado_gs - monto_facturas
+    if dif < Decimal("0"):
+        tipo_diferencia = "descuento"
+        diferencia_monto = abs(dif)
+    elif dif > Decimal("0"):
+        tipo_diferencia = "gastos_administrativos"
+        diferencia_monto = dif
+    else:
+        tipo_diferencia = "exacto"
+        diferencia_monto = Decimal("0")
 
     ids = [str(a.accounts_receivable_id) for a in data.allocations]
     result = await db.execute(
@@ -579,19 +653,21 @@ async def create_receivable_payment(db: AsyncSession, company_id: str, data, reg
     retencion_numero_comprobante = getattr(data, "retencion_numero_comprobante", None) if aplica_retencion else None
     retencion_fecha = getattr(data, "retencion_fecha", None) if aplica_retencion else None
     retencion_porcentaje = Decimal(str(getattr(data, "retencion_porcentaje", 30.00) or 30.00)) if aplica_retencion else Decimal("30.00")
-    monto_efectivo_recibido = max(Decimal("0"), Decimal(str(data.monto_total)) - monto_retencion)
+    monto_efectivo_recibido = max(Decimal("0"), monto_entregado_gs - monto_retencion)
 
     await db.execute(
         text("""
             INSERT INTO receivable_payments
                 (id, company_id, customer_id, monto_total, moneda, forma_pago, referencia, fecha, observaciones, registrado_por, numero_recibo,
-                 aplica_retencion, monto_retencion, retencion_numero_comprobante, retencion_fecha, retencion_porcentaje, monto_efectivo_recibido)
+                 aplica_retencion, monto_retencion, retencion_numero_comprobante, retencion_fecha, retencion_porcentaje, monto_efectivo_recibido,
+                 monto_pyg, monto_brl, monto_usd, tasa_brl, tasa_usd, monto_facturas_canceladas, diferencia_monto, tipo_diferencia)
             VALUES (:id, :company_id, :customer_id, :monto_total, :moneda, :forma_pago, :referencia, :fecha, :observaciones, :registrado_por, :numero_recibo,
-                 :aplica_retencion, :monto_retencion, :retencion_numero_comprobante, :retencion_fecha, :retencion_porcentaje, :monto_efectivo_recibido)
+                 :aplica_retencion, :monto_retencion, :retencion_numero_comprobante, :retencion_fecha, :retencion_porcentaje, :monto_efectivo_recibido,
+                 :monto_pyg, :monto_brl, :monto_usd, :tasa_brl, :tasa_usd, :monto_facturas_canceladas, :diferencia_monto, :tipo_diferencia)
         """),
         {
             "id": payment_id, "company_id": company_id, "customer_id": str(data.customer_id),
-            "monto_total": float(data.monto_total), "moneda": data.moneda, "forma_pago": data.forma_pago,
+            "monto_total": float(monto_entregado_gs), "moneda": data.moneda or "PYG", "forma_pago": data.forma_pago,
             "referencia": data.referencia, "fecha": p_date,
             "observaciones": data.observaciones, "registrado_por": registrado_por,
             "numero_recibo": numero_recibo,
@@ -601,6 +677,14 @@ async def create_receivable_payment(db: AsyncSession, company_id: str, data, reg
             "retencion_fecha": retencion_fecha,
             "retencion_porcentaje": float(retencion_porcentaje),
             "monto_efectivo_recibido": float(monto_efectivo_recibido),
+            "monto_pyg": float(monto_pyg),
+            "monto_brl": float(monto_brl),
+            "monto_usd": float(monto_usd),
+            "tasa_brl": float(tasa_brl),
+            "tasa_usd": float(tasa_usd),
+            "monto_facturas_canceladas": float(monto_facturas),
+            "diferencia_monto": float(diferencia_monto),
+            "tipo_diferencia": tipo_diferencia,
         },
     )
 
@@ -633,7 +717,7 @@ async def create_receivable_payment(db: AsyncSession, company_id: str, data, reg
                 saldo_disponible = LEAST(limite_credito, saldo_disponible + :monto)
             WHERE company_id = :company_id AND customer_id = :customer_id
         """),
-        {"monto": float(data.monto_total), "company_id": company_id, "customer_id": str(data.customer_id)},
+        {"monto": float(monto_facturas), "company_id": company_id, "customer_id": str(data.customer_id)},
     )
     nuevo_saldo_utilizado = await db.execute(
         text("SELECT saldo_utilizado FROM credit_accounts WHERE company_id = :company_id AND customer_id = :customer_id"),
@@ -666,10 +750,13 @@ async def create_receivable_payment(db: AsyncSession, company_id: str, data, reg
         fecha=p_date,
         numero_recibo=numero_recibo,
         customer_name=customer_name,
-        monto_total=Decimal(str(data.monto_total)),
+        monto_total=monto_entregado_gs,
         aplica_retencion=aplica_retencion,
         monto_retencion=monto_retencion,
         retencion_numero_comprobante=retencion_numero_comprobante,
+        tipo_diferencia=tipo_diferencia,
+        diferencia_monto=diferencia_monto,
+        monto_facturas_canceladas=monto_facturas,
     )
 
     await db.flush()
@@ -677,7 +764,10 @@ async def create_receivable_payment(db: AsyncSession, company_id: str, data, reg
         "id": str(payment_id),
         "payment_id": str(payment_id),
         "numero_recibo": numero_recibo,
-        "monto_total": float(data.monto_total),
+        "monto_total": float(monto_entregado_gs),
+        "monto_facturas_canceladas": float(monto_facturas),
+        "diferencia_monto": float(diferencia_monto),
+        "tipo_diferencia": tipo_diferencia,
         "aplica_retencion": aplica_retencion,
         "monto_retencion": float(monto_retencion),
         "monto_efectivo_recibido": float(monto_efectivo_recibido),
@@ -886,12 +976,35 @@ async def apply_global_payment(
         return {"error": "El cliente no posee facturas pendientes de cobro para imputar el pago."}
 
     total_deuda = sum(Decimal(str(d.saldo_pendiente)) for d in docs)
-    monto_pago = Decimal(str(data.monto_total))
 
-    if monto_pago > total_deuda:
+    monto_pyg = Decimal(str(getattr(data, "monto_pyg", 0) or 0))
+    monto_brl = Decimal(str(getattr(data, "monto_brl", 0) or 0))
+    monto_usd = Decimal(str(getattr(data, "monto_usd", 0) or 0))
+    tasa_brl = Decimal(str(getattr(data, "tasa_brl", 1) or 1))
+    tasa_usd = Decimal(str(getattr(data, "tasa_usd", 1) or 1))
+
+    if monto_pyg > 0 or monto_brl > 0 or monto_usd > 0:
+        monto_entregado_gs = (monto_pyg + (monto_brl * tasa_brl) + (monto_usd * tasa_usd)).quantize(Decimal("1"))
+    else:
+        monto_entregado_gs = Decimal(str(data.monto_total)).quantize(Decimal("1"))
+
+    monto_facturas = Decimal(str(getattr(data, "monto_facturas_canceladas", None) or data.monto_total)).quantize(Decimal("1"))
+
+    if monto_facturas > total_deuda:
         return {
-            "error": f"El monto del pago (Gs. {int(monto_pago):,}) excede el total de saldo pendiente disponible (Gs. {int(total_deuda):,})."
+            "error": f"El monto a cancelar de facturas (Gs. {int(monto_facturas):,}) excede el total de saldo pendiente disponible (Gs. {int(total_deuda):,})."
         }
+
+    dif = monto_entregado_gs - monto_facturas
+    if dif < Decimal("0"):
+        tipo_diferencia = "descuento"
+        diferencia_monto = abs(dif)
+    elif dif > Decimal("0"):
+        tipo_diferencia = "gastos_administrativos"
+        diferencia_monto = dif
+    else:
+        tipo_diferencia = "exacto"
+        diferencia_monto = Decimal("0")
 
     # Obtener datos del cliente para el rastro y el comprobante
     cust_res = await db.execute(
@@ -917,21 +1030,23 @@ async def apply_global_payment(
     retencion_numero_comprobante = getattr(data, "retencion_numero_comprobante", None) if aplica_retencion else None
     retencion_fecha = getattr(data, "retencion_fecha", None) if aplica_retencion else None
     retencion_porcentaje = Decimal(str(getattr(data, "retencion_porcentaje", 30.00) or 30.00)) if aplica_retencion else Decimal("30.00")
-    monto_efectivo_recibido = max(Decimal("0"), monto_pago - monto_retencion)
+    monto_efectivo_recibido = max(Decimal("0"), monto_entregado_gs - monto_retencion)
 
     await db.execute(
         text("""
             INSERT INTO receivable_payments
                 (id, company_id, customer_id, monto_total, moneda, forma_pago, referencia, fecha, observaciones, registrado_por, numero_recibo,
-                 aplica_retencion, monto_retencion, retencion_numero_comprobante, retencion_fecha, retencion_porcentaje, monto_efectivo_recibido)
+                 aplica_retencion, monto_retencion, retencion_numero_comprobante, retencion_fecha, retencion_porcentaje, monto_efectivo_recibido,
+                 monto_pyg, monto_brl, monto_usd, tasa_brl, tasa_usd, monto_facturas_canceladas, diferencia_monto, tipo_diferencia)
             VALUES (:id, :company_id, :customer_id, :monto_total, :moneda, :forma_pago, :referencia, :fecha, :observaciones, :registrado_por, :numero_recibo,
-                 :aplica_retencion, :monto_retencion, :retencion_numero_comprobante, :retencion_fecha, :retencion_porcentaje, :monto_efectivo_recibido)
+                 :aplica_retencion, :monto_retencion, :retencion_numero_comprobante, :retencion_fecha, :retencion_porcentaje, :monto_efectivo_recibido,
+                 :monto_pyg, :monto_brl, :monto_usd, :tasa_brl, :tasa_usd, :monto_facturas_canceladas, :diferencia_monto, :tipo_diferencia)
         """),
         {
             "id": payment_id,
             "company_id": company_id,
             "customer_id": str(data.customer_id),
-            "monto_total": float(monto_pago),
+            "monto_total": float(monto_entregado_gs),
             "moneda": data.moneda or "PYG",
             "forma_pago": data.forma_pago or "efectivo",
             "referencia": data.referencia,
@@ -945,10 +1060,18 @@ async def apply_global_payment(
             "retencion_fecha": retencion_fecha,
             "retencion_porcentaje": float(retencion_porcentaje),
             "monto_efectivo_recibido": float(monto_efectivo_recibido),
+            "monto_pyg": float(monto_pyg),
+            "monto_brl": float(monto_brl),
+            "monto_usd": float(monto_usd),
+            "tasa_brl": float(tasa_brl),
+            "tasa_usd": float(tasa_usd),
+            "monto_facturas_canceladas": float(monto_facturas),
+            "diferencia_monto": float(diferencia_monto),
+            "tipo_diferencia": tipo_diferencia,
         },
     )
 
-    restante = monto_pago
+    restante = monto_facturas
     aplicados = []
 
     for doc in docs:
@@ -1008,7 +1131,7 @@ async def apply_global_payment(
                 saldo_disponible = LEAST(limite_credito, saldo_disponible + :monto)
             WHERE company_id = :company_id AND customer_id = :customer_id
         """),
-        {"monto": float(monto_pago), "company_id": company_id, "customer_id": str(data.customer_id)},
+        {"monto": float(monto_facturas), "company_id": company_id, "customer_id": str(data.customer_id)},
     )
     nuevo_saldo_utilizado = await db.execute(
         text("SELECT saldo_utilizado FROM credit_accounts WHERE company_id = :company_id AND customer_id = :customer_id"),
@@ -1041,10 +1164,13 @@ async def apply_global_payment(
         fecha=fecha_pago,
         numero_recibo=numero_recibo,
         customer_name=customer_name,
-        monto_total=Decimal(str(monto_pago)),
+        monto_total=monto_entregado_gs,
         aplica_retencion=aplica_retencion,
         monto_retencion=monto_retencion,
         retencion_numero_comprobante=retencion_numero_comprobante,
+        tipo_diferencia=tipo_diferencia,
+        diferencia_monto=diferencia_monto,
+        monto_facturas_canceladas=monto_facturas,
     )
 
     await db.flush()
@@ -1052,7 +1178,10 @@ async def apply_global_payment(
         "payment_id": str(payment_id),
         "id": str(payment_id),
         "numero_recibo": numero_recibo,
-        "monto_total": float(monto_pago),
+        "monto_total": float(monto_entregado_gs),
+        "monto_facturas_canceladas": float(monto_facturas),
+        "diferencia_monto": float(diferencia_monto),
+        "tipo_diferencia": tipo_diferencia,
         "aplica_retencion": aplica_retencion,
         "monto_retencion": float(monto_retencion),
         "monto_efectivo_recibido": float(monto_efectivo_recibido),

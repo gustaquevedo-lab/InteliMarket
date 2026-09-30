@@ -62,6 +62,8 @@ class PeriodClosedError(Exception):
 
 REQUIRED_ACCOUNTS = {
     "1.1.05": ("IVA Credito Fiscal", "activo"),
+    "4.2.01": ("Otros Ingresos / Gastos Administrativos Cobrados", "ingreso"),
+    "5.1.02": ("Descuentos Concedidos sobre Ventas", "gasto"),
 }
 
 ACC_CAJA = "1.1.01"
@@ -71,7 +73,9 @@ ACC_IVA_CREDITO = "1.1.05"
 ACC_CXP = "2.1.01"
 ACC_IVA_DEBITO = "2.1.03"
 ACC_VENTAS = "4.1.01"
+ACC_INGRESOS_ADMINISTRATIVOS = "4.2.01"
 ACC_COSTO_VENTA = "5.1.01"
+ACC_DESCUENTOS_OTORGADOS = "5.1.02"
 ACC_SUELDOS = "6.1.01"
 ACC_ALQUILERES = "6.1.02"
 ACC_SERVICIOS = "6.1.03"

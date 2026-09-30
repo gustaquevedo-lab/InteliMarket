@@ -2239,6 +2239,30 @@ export const api = {
   vault: {
     dashboard: () => client.get<VaultDashboard>("/v1/vault/dashboard"),
     entries: (params?: { estado?: string }) => client.get<VaultEntry[]>("/v1/vault/entries", params as any),
+    kardex: (params?: { moneda?: string; fecha_desde?: string; fecha_hasta?: string }) =>
+      client.get<{
+        moneda: string
+        saldo_actual: number
+        total_ingresos: number
+        total_egresos: number
+        cantidad_movimientos: number
+        movimientos: {
+          id: string
+          fecha: string
+          fecha_str: string
+          tipo: "ingreso" | "egreso"
+          concepto: string
+          origen: string
+          referencia: string
+          monto_ingreso: number
+          monto_egreso: number
+          saldo_acumulado: number
+          estado: string
+          usuario?: string
+          observaciones?: string
+          detalles?: any
+        }[]
+      }>("/v1/vault/kardex", params as any),
     deposit: (data: { entry_ids: string[]; bank_transaction_id?: string }) => client.post<{ deposited?: boolean; depositadas?: number; pending_approval?: boolean; request_id?: string; monto_total_pyg?: number }>("/v1/vault/deposit", data),
     depositToBank: (data: { entry_ids: string[]; bank_account_id: string; numero_boleta: string; transportadora?: string; fecha_deposito?: string; observaciones?: string }) => client.post<any>("/v1/vault/deposit-to-bank", data),
     depositAmountToBank: (data: { monto_pyg: number; bank_account_id: string; numero_boleta: string; transportadora?: string; fecha_deposito?: string; observaciones?: string }) => client.post<any>("/v1/vault/deposit-amount-to-bank", data),
@@ -3148,9 +3172,9 @@ export const api = {
     downloadCobranzasPdf: (params?: { fecha_desde?: string; fecha_hasta?: string }) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/export/cobranzas.pdf`, params, "cobranzas.pdf"),
     downloadReceiptA6Pdf: (paymentId: string) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/payments/${paymentId}/receipt.pdf`, undefined, `recibo_${paymentId.slice(0, 8)}.pdf`),
     pendingForCustomer: (customerId: string) => client.get<{ id: string; numero_documento: string; fecha_emision: string; fecha_vencimiento: string | null; moneda: string; monto_original: number; saldo_pendiente: number; dias_mora: number }[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/customers/${customerId}/pending`),
-    registerPayment: (data: { customer_id: string; monto_total: number; moneda?: string; forma_pago?: string; referencia?: string; fecha?: string; observaciones?: string; aplica_retencion?: boolean; monto_retencion?: number; retencion_numero_comprobante?: string; retencion_fecha?: string; retencion_porcentaje?: number; monto_efectivo_recibido?: number; allocations: { accounts_receivable_id: string; monto: number }[] }) =>
+    registerPayment: (data: { customer_id: string; monto_total: number; moneda?: string; forma_pago?: string; referencia?: string; fecha?: string; observaciones?: string; aplica_retencion?: boolean; monto_retencion?: number; retencion_numero_comprobante?: string; retencion_fecha?: string; retencion_porcentaje?: number; monto_efectivo_recibido?: number; monto_pyg?: number; monto_brl?: number; monto_usd?: number; tasa_brl?: number; tasa_usd?: number; monto_facturas_canceladas?: number; diferencia_monto?: number; tipo_diferencia?: string; allocations: { accounts_receivable_id: string; monto: number }[] }) =>
       client.post<{ id: string; monto_total: number; allocations: { accounts_receivable_id: string; monto: number; nuevo_saldo: number; nuevo_estado: string }[] }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/payments`, data),
-    applyGlobalPayment: (data: { customer_id: string; monto_total: number; moneda?: string; forma_pago?: string; referencia?: string; fecha?: string; observaciones?: string; accounts_receivable_ids?: string[]; bank_account_id?: string; destino_fondos?: string; caja_session_id?: string; cheque_numero?: string; cheque_banco?: string; cheque_librador?: string; cheque_ruc?: string; cheque_fecha_emision?: string; cheque_fecha_cobro?: string; aplica_retencion?: boolean; monto_retencion?: number; retencion_numero_comprobante?: string; retencion_fecha?: string; retencion_porcentaje?: number; monto_efectivo_recibido?: number }) =>
+    applyGlobalPayment: (data: { customer_id: string; monto_total: number; moneda?: string; forma_pago?: string; referencia?: string; fecha?: string; observaciones?: string; accounts_receivable_ids?: string[]; bank_account_id?: string; destino_fondos?: string; caja_session_id?: string; cheque_numero?: string; cheque_banco?: string; cheque_librador?: string; cheque_ruc?: string; cheque_fecha_emision?: string; cheque_fecha_cobro?: string; aplica_retencion?: boolean; monto_retencion?: number; retencion_numero_comprobante?: string; retencion_fecha?: string; retencion_porcentaje?: number; monto_efectivo_recibido?: number; monto_pyg?: number; monto_brl?: number; monto_usd?: number; tasa_brl?: number; tasa_usd?: number; monto_facturas_canceladas?: number; diferencia_monto?: number; tipo_diferencia?: string }) =>
       client.post<{ id: string; payment_id: string; numero_recibo: string; monto_total: number; documentos_afectados: number; allocations: any[]; treasury?: any }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/payments/apply-global`, data),
     verifyReceipt: (paymentId: string) => client.get<any>(`/v1/accounts-receivable/receipts/${paymentId}/verify`),
     documentPayments: (id: string) => client.get<{ id: string; fecha: string; forma_pago: string | null; referencia: string | null; observaciones: string | null; monto: number; created_at: string }[]>(`/v1/accounts-receivable/${id}/payments`),

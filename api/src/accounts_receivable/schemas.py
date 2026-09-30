@@ -86,6 +86,14 @@ class ReceivablePaymentCreate(BaseModel):
     retencion_fecha: Optional[date] = None
     retencion_porcentaje: Optional[Decimal] = Decimal("30.00")
     monto_efectivo_recibido: Optional[Decimal] = None
+    monto_pyg: Optional[Decimal] = None
+    monto_brl: Optional[Decimal] = None
+    monto_usd: Optional[Decimal] = None
+    tasa_brl: Optional[Decimal] = None
+    tasa_usd: Optional[Decimal] = None
+    monto_facturas_canceladas: Optional[Decimal] = None
+    diferencia_monto: Optional[Decimal] = Decimal("0")
+    tipo_diferencia: Optional[str] = "exacto"
     allocations: list[ReceivableAllocationInput] = Field(min_length=1)
 
 
@@ -112,6 +120,14 @@ class ReceivableGlobalPaymentCreate(BaseModel):
     retencion_fecha: Optional[date] = None
     retencion_porcentaje: Optional[Decimal] = Decimal("30.00")
     monto_efectivo_recibido: Optional[Decimal] = None
+    monto_pyg: Optional[Decimal] = None
+    monto_brl: Optional[Decimal] = None
+    monto_usd: Optional[Decimal] = None
+    tasa_brl: Optional[Decimal] = None
+    tasa_usd: Optional[Decimal] = None
+    monto_facturas_canceladas: Optional[Decimal] = None
+    diferencia_monto: Optional[Decimal] = Decimal("0")
+    tipo_diferencia: Optional[str] = "exacto"
     # Si viene None o vacío, se aplica en cascada FIFO a todas las facturas pendientes
     # Si viene con IDs, se aplica en cascada FIFO sólo a las facturas seleccionadas
     accounts_receivable_ids: Optional[list[UUID]] = None

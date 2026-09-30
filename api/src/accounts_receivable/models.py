@@ -101,6 +101,15 @@ class ReceivablePayment(Base):
     retencion_fecha = Column(Date)
     retencion_porcentaje = Column(Numeric(5, 2), default=30.00)
     monto_efectivo_recibido = Column(Numeric(15, 0), default=0)
+    # Cobro multimoneda y tratamiento de desbalanceo
+    monto_pyg = Column(Numeric(15, 0))
+    monto_brl = Column(Numeric(12, 2))
+    monto_usd = Column(Numeric(12, 2))
+    tasa_brl = Column(Numeric(10, 2))
+    tasa_usd = Column(Numeric(10, 2))
+    monto_facturas_canceladas = Column(Numeric(15, 0))
+    diferencia_monto = Column(Numeric(15, 0), default=0)
+    tipo_diferencia = Column(String(30), default="exacto")  # exacto | descuento | gastos_administrativos
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (

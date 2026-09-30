@@ -8,7 +8,7 @@ import {
 } from "lucide-react"
 import { api, downloadAuthenticated, type BankAccount, type BankTransaction, type VaultDashboard, type VaultEntry } from "../../api"
 import { useToast } from "../../context/ToastContext"
-import { formatPYG, formatDate, formatDateTime, getTodayAsuncion } from "../../utils/format"
+import { formatPYG, formatDate, formatDateTime, getTodayAsuncion, formatBRL, formatUSD, formatCurrency } from "../../utils/format"
 import CurrencyInput from "../../components/CurrencyInput"
 
 const downloadPdf = (endpoint: string, filename: string) => downloadAuthenticated(endpoint, undefined, filename)
@@ -68,6 +68,65 @@ export default function BovedaPage() {
   const [approvalActionId, setApprovalActionId] = useState<string | null>(null)
   const [exportingPdf, setExportingPdf] = useState(false)
   const [searchMovements, setSearchMovements] = useState("")
+
+  type VaultCurrency = "PYG" | "BRL" | "USD" | "CHEQUE"
+  const [kardexMoneda, setKardexMoneda] = useState<VaultCurrency>("PYG")
+  const [kardexDesde, setKardexDesde] = useState(() => getInitialBovedaDates().desde)
+  const [kardexHasta, setKardexHasta] = useState(() => getInitialBovedaDates().hasta)
+  const [kardexSearch, setKardexSearch] = useState("")
+  const [kardexLoading, setKardexLoading] = useState(false)
+  const [kardexData, setKardexData] = useState<{
+    moneda: string
+    saldo_actual: number
+    total_ingresos: number
+    total_egresos: number
+    cantidad_movimientos: number
+    movimientos: {
+      id: string
+      fecha: string
+      fecha_str: string
+      tipo: "ingreso" | "egreso"
+      concepto: string
+      origen: string
+      referencia: string
+      monto_ingreso: number
+      monto_egreso: number
+      saldo_acumulado: number
+      estado: string
+      usuario?: string
+      observaciones?: string
+      detalles?: any
+    }[]
+  } | null>(null)
+
+  const loadKardex = async (moneda: VaultCurrency = kardexMoneda, desde = kardexDesde, hasta = kardexHasta) => {
+    setKardexLoading(true)
+    try {
+      const res = await api.vault.kardex({
+        moneda,
+        fecha_desde: desde || undefined,
+        fecha_hasta: hasta || undefined,
+      })
+      setKardexData(res)
+    } catch (err) {
+      console.error("Error loading vault kardex", err)
+      toast.error("Error", "No se pudo cargar el kardex de la bóveda seleccionada")
+    } finally {
+      setKardexLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab === "movimientos") {
+      loadKardex(kardexMoneda, kardexDesde, kardexHasta)
+    }
+  }, [activeTab, kardexMoneda])
+
+  const formatVaultMoney = (val: number, cur: string) => {
+    if (cur === "BRL") return formatBRL(val)
+    if (cur === "USD") return formatUSD(val)
+    return formatPYG(val)
+  }
 
   const toast = useToast()
 
@@ -385,6 +444,18 @@ export default function BovedaPage() {
     (m.observaciones || "").toLowerCase().includes(searchMovements.toLowerCase()) ||
     (m.fecha || "").includes(searchMovements)
   ).sort((a, b) => new Date(b.fecha || 0).getTime() - new Date(a.fecha || 0).getTime())
+
+  const filteredKardexMovements = (kardexData?.movimientos || []).filter((m) => {
+    if (!kardexSearch.trim()) return true
+    const q = kardexSearch.toLowerCase()
+    return (
+      (m.concepto || "").toLowerCase().includes(q) ||
+      (m.origen || "").toLowerCase().includes(q) ||
+      (m.referencia || "").toLowerCase().includes(q) ||
+      (m.usuario || "").toLowerCase().includes(q) ||
+      (m.observaciones || "").toLowerCase().includes(q)
+    )
+  })
 
   if (loading) {
     return (
@@ -1041,63 +1112,231 @@ export default function BovedaPage() {
         </div>
       )}
 
-      {/* TAB 4: LIBRO DIARIO DE BÓVEDA */}
+      {/* TAB 4: LIBRO DIARIO DE BÓVEDA & KARDEX INDIVIDUAL POR BÓVEDA */}
       {activeTab === "movimientos" && (
-        <div className="card p-5 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 dark:border-gray-700 pb-3">
+        <div className="card p-5 space-y-5 border border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 shadow-sm animate-fade-in">
+          {/* Header & Sub-tabs */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-100 dark:border-gray-800 pb-4">
             <div>
               <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
-                <History className="w-5 h-5 text-indigo-600" />
-                Libro Diario de Movimientos de Bóveda
+                <History className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                Kardex Individual & Movimientos por Bóveda
               </h3>
-              <p className="text-xs text-gray-400">
-                Registro de entradas (cierres de POS, sangrías) y salidas (remesas, pagos)
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Selecciona una denominación para auditar ingresos, egresos y el saldo progresivo de cada valor físico
               </p>
             </div>
 
-            <div className="flex items-center gap-4 text-xs">
-              <span className="text-emerald-600 font-bold font-mono">+{formatPYG(totalEntradas)} Entradas</span>
-              <span className="text-red-500 font-bold font-mono">-{formatPYG(totalRetiros)} Salidas</span>
+            {/* Sub-pestañas individuales de bóveda */}
+            <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700/60 overflow-x-auto">
+              {[
+                { key: "PYG" as VaultCurrency, label: "🪙 Bóveda PYG (Gs.)" },
+                { key: "BRL" as VaultCurrency, label: "💵 Bóveda BRL (R$)" },
+                { key: "USD" as VaultCurrency, label: "💵 Bóveda USD (US$)" },
+                { key: "CHEQUE" as VaultCurrency, label: "📋 Cartera Cheques" },
+              ].map((sub) => {
+                const isSelected = kardexMoneda === sub.key
+                return (
+                  <button
+                    key={sub.key}
+                    type="button"
+                    onClick={() => {
+                      setKardexMoneda(sub.key)
+                      loadKardex(sub.key, kardexDesde, kardexHasta)
+                    }}
+                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                      isSelected
+                        ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/50"
+                    }`}
+                  >
+                    <span>{sub.label}</span>
+                  </button>
+                )
+              })}
             </div>
           </div>
 
-          <div className="overflow-x-auto max-h-[500px]">
+          {/* Filtros de Fecha & Búsqueda */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 dark:bg-slate-800/40 p-3 rounded-xl border border-slate-200/60 dark:border-slate-700/50 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                <span className="font-semibold text-slate-600 dark:text-slate-400">Desde:</span>
+                <input
+                  type="date"
+                  value={kardexDesde}
+                  onChange={(e) => setKardexDesde(e.target.value)}
+                  className="px-2 py-1 border border-slate-300 dark:border-slate-600 rounded-lg text-xs bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="font-semibold text-slate-600 dark:text-slate-400">Hasta:</span>
+                <input
+                  type="date"
+                  value={kardexHasta}
+                  onChange={(e) => setKardexHasta(e.target.value)}
+                  className="px-2 py-1 border border-slate-300 dark:border-slate-600 rounded-lg text-xs bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => loadKardex(kardexMoneda, kardexDesde, kardexHasta)}
+                disabled={kardexLoading}
+                className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition flex items-center gap-1 shadow-sm"
+              >
+                {kardexLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                Filtrar
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2 flex-1 sm:max-w-xs">
+              <div className="relative w-full">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Buscar concepto, referencia, usuario..."
+                  value={kardexSearch}
+                  onChange={(e) => setKardexSearch(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1 border border-slate-300 dark:border-slate-600 rounded-lg text-xs bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* KPI Summary Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-4 rounded-2xl bg-indigo-50/60 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/40 shadow-sm">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-400">
+                Saldo Actual {kardexMoneda} en Bóveda
+              </span>
+              <div className="text-xl font-extrabold text-indigo-950 dark:text-indigo-200 mt-1 font-mono">
+                {formatVaultMoney(kardexData?.saldo_actual || 0, kardexMoneda)}
+              </div>
+              <span className="text-[10px] text-indigo-600/80 dark:text-indigo-400/80 mt-1 block">
+                {kardexMoneda === "PYG" ? "Guaraníes físicos en custodia" : kardexMoneda === "BRL" ? "Reales físicos en custodia" : kardexMoneda === "USD" ? "Dólares físicos en custodia" : "Cheques en cartera"}
+              </span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40 shadow-sm">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+                Total Ingresos (Período)
+              </span>
+              <div className="text-xl font-extrabold text-emerald-700 dark:text-emerald-300 mt-1 font-mono">
+                +{formatVaultMoney(kardexData?.total_ingresos || 0, kardexMoneda)}
+              </div>
+              <span className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80 mt-1 block">
+                Cierres POS, cobros CxC y remesas
+              </span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-red-50/60 dark:bg-red-950/20 border border-red-100 dark:border-red-900/40 shadow-sm">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-red-700 dark:text-red-400">
+                Total Salidas (Período)
+              </span>
+              <div className="text-xl font-extrabold text-red-600 dark:text-red-400 mt-1 font-mono">
+                -{formatVaultMoney(kardexData?.total_egresos || 0, kardexMoneda)}
+              </div>
+              <span className="text-[10px] text-red-600/80 dark:text-red-400/80 mt-1 block">
+                Depósitos bancarios y remesas
+              </span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 shadow-sm">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                Movimientos Auditados
+              </span>
+              <div className="text-xl font-extrabold text-slate-800 dark:text-slate-200 mt-1 font-mono">
+                {kardexData?.cantidad_movimientos || 0}
+              </div>
+              <span className="text-[10px] text-slate-500 mt-1 block">
+                Registros con doble partida y trazabilidad
+              </span>
+            </div>
+          </div>
+
+          {/* Tabla de Kardex Progresivo */}
+          <div className="overflow-x-auto max-h-[600px] border border-slate-200 dark:border-slate-800 rounded-xl">
             <table className="w-full text-xs text-left">
-              <thead className="bg-gray-50 dark:bg-slate-800/80 text-gray-500 font-bold uppercase sticky top-0">
+              <thead className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold uppercase sticky top-0 z-10">
                 <tr>
+                  <th className="p-3">Fecha / Hora</th>
                   <th className="p-3">Tipo</th>
-                  <th className="p-3">Fecha</th>
+                  <th className="p-3">Concepto / Operación</th>
+                  <th className="p-3">Referencia / Origen</th>
                   <th className="p-3">Responsable</th>
-                  <th className="p-3">Concepto / Observaciones</th>
-                  <th className="p-3 text-right">Monto</th>
+                  <th className="p-3 text-right">Ingreso (+)</th>
+                  <th className="p-3 text-right">Egreso (-)</th>
+                  <th className="p-3 text-right">Saldo Progresivo</th>
+                  <th className="p-3 text-center">Estado</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                {filteredMovements.length === 0 ? (
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800 bg-white dark:bg-slate-900">
+                {kardexLoading ? (
                   <tr>
-                    <td colSpan={5} className="p-8 text-center text-gray-400">No hay movimientos registrados.</td>
+                    <td colSpan={9} className="p-12 text-center text-slate-400">
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
+                        <span>Cargando movimientos del Kardex de {kardexMoneda}...</span>
+                      </div>
+                    </td>
+                  </tr>
+                ) : filteredKardexMovements.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="p-12 text-center text-gray-400">
+                      No hay movimientos registrados para la Bóveda {kardexMoneda} en el período seleccionado.
+                    </td>
                   </tr>
                 ) : (
-                  filteredMovements.map(m => (
-                    <tr key={m.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition">
-                      <td className="p-3">
+                  filteredKardexMovements.map((km) => (
+                    <tr key={km.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition">
+                      <td className="p-3 font-mono text-gray-500 whitespace-nowrap">
+                        {km.fecha ? formatDateTime(km.fecha) : "-"}
+                      </td>
+                      <td className="p-3 whitespace-nowrap">
                         <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
-                          m.tipo === "entrada"
+                          km.tipo === "ingreso"
                             ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
                             : "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300"
                         }`}>
-                          {m.tipo === "entrada" ? "↓ Entrada" : "↑ Salida / Retiro"}
+                          {km.tipo === "ingreso" ? "↓ Ingreso" : "↑ Salida"}
                         </span>
                       </td>
-                      <td className="p-3 font-mono text-gray-500">{formatDate(m.fecha)}</td>
-                      <td className="p-3 font-bold text-gray-800 dark:text-gray-200">{m.usuario || "Supervisor"}</td>
-                      <td className="p-3 text-gray-600 dark:text-gray-300 max-w-xs truncate" title={m.observaciones}>
-                        {m.observaciones || "Recaudación de caja"}
+                      <td className="p-3 font-semibold text-gray-800 dark:text-gray-200">
+                        {km.concepto}
+                        {km.observaciones && km.observaciones !== km.concepto && (
+                          <span className="block text-[10px] text-gray-400 font-normal truncate max-w-xs" title={km.observaciones}>
+                            {km.observaciones}
+                          </span>
+                        )}
                       </td>
-                      <td className={`p-3 text-right font-mono font-bold text-sm ${
-                        m.tipo === "entrada" ? "text-emerald-600" : "text-red-500"
-                      }`}>
-                        {m.tipo === "entrada" ? "+" : "-"}{formatPYG(m.monto)} {m.moneda !== "PYG" ? m.moneda : ""}
+                      <td className="p-3 text-gray-500 font-mono text-[11px]">
+                        <span className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded text-slate-700 dark:text-slate-300">
+                          {km.referencia || km.origen || "-"}
+                        </span>
+                      </td>
+                      <td className="p-3 text-gray-700 dark:text-gray-300 font-medium whitespace-nowrap">
+                        {km.usuario || "Supervisor / Sistema"}
+                      </td>
+                      <td className="p-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
+                        {km.monto_ingreso > 0 ? `+${formatVaultMoney(km.monto_ingreso, kardexMoneda)}` : "-"}
+                      </td>
+                      <td className="p-3 text-right font-mono font-bold text-red-600 dark:text-red-400 whitespace-nowrap">
+                        {km.monto_egreso > 0 ? `-${formatVaultMoney(km.monto_egreso, kardexMoneda)}` : "-"}
+                      </td>
+                      <td className="p-3 text-right font-mono font-extrabold text-indigo-700 dark:text-indigo-300 whitespace-nowrap bg-indigo-50/30 dark:bg-indigo-950/20">
+                        {formatVaultMoney(km.saldo_acumulado, kardexMoneda)}
+                      </td>
+                      <td className="p-3 text-center whitespace-nowrap">
+                        <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          km.estado === "depositado"
+                            ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                            : km.estado === "en_boveda"
+                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                            : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                        }`}>
+                          {km.estado === "en_boveda" ? "En Bóveda" : km.estado === "depositado" ? "Depositado" : km.estado}
+                        </span>
                       </td>
                     </tr>
                   ))

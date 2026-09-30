@@ -5,11 +5,13 @@ import {
   TrendingUp, FileSpreadsheet, FileDown, CheckCircle2, ChevronDown, ChevronRight,
   User, Check, Phone, ArrowUpRight, ShieldCheck, RefreshCw, BarChart2,
   Printer, QrCode, ExternalLink, CheckSquare, Square, Building2, Building,
-  Users, Send, Landmark, ArrowRight, DownloadCloud, FileCheck, Layers, Filter
+  Users, Send, Landmark, ArrowRight, DownloadCloud, FileCheck, Layers, Filter,
+  Banknote
 } from "lucide-react"
 import { api, type AccountsReceivable, type Sale, type SaleItem, type CreditAccount } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate, formatPercentage, getTodayAsuncion, getAsuncionDateStr } from "../../utils/format"
+import CurrencyInput from "../../components/CurrencyInput"
 
 const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
@@ -153,6 +155,13 @@ export default function AccountsReceivablePage() {
   const [payFecha, setPayFecha] = useState(() => getTodayAsuncion())
   const [payObservaciones, setPayObservaciones] = useState("")
   const [submittingPayment, setSubmittingPayment] = useState(false)
+
+  // 💵 Desglose Multimoneda & Bóveda Físico
+  const [payMontoPYG, setPayMontoPYG] = useState<number>(0)
+  const [payMontoBRL, setPayMontoBRL] = useState<number>(0)
+  const [payMontoUSD, setPayMontoUSD] = useState<number>(0)
+  const [payTasaBRL, setPayTasaBRL] = useState<number>(1450)
+  const [payTasaUSD, setPayTasaUSD] = useState<number>(7800)
 
   // 🏛️ Tesorería, Bóveda y Bancos
   const [bankAccounts, setBankAccounts] = useState<any[]>([])
@@ -960,10 +969,44 @@ export default function AccountsReceivablePage() {
 
   const montoEfectivoRecibido = Math.max(0, montoTotalPago - montoRetencionFinal)
 
+  // Cargar cotizaciones oficiales del sistema al abrir
+  useEffect(() => {
+    api.settings.exchangeRates.list().then(rates => {
+      if (rates && Array.isArray(rates)) {
+        const brl = rates.find(r => r.moneda_origen === "BRL" || r.moneda_destino === "BRL")
+        if (brl && brl.tasa && Number(brl.tasa) > 0) setPayTasaBRL(Number(brl.tasa))
+        const usd = rates.find(r => r.moneda_origen === "USD" || r.moneda_destino === "USD")
+        if (usd && usd.tasa && Number(usd.tasa) > 0) setPayTasaUSD(Number(usd.tasa))
+      }
+    }).catch(() => {})
+  }, [])
+
+  // Cálculo del monto total físico entregado en Guaraníes (convertido de multimonedas)
+  const montoFisicoEntregadoGs = useMemo(() => {
+    if (payFormaPago !== "efectivo") {
+      return montoTotalPago
+    }
+    const totalCalc = (payMontoPYG || 0) + Math.round((payMontoBRL || 0) * payTasaBRL) + Math.round((payMontoUSD || 0) * payTasaUSD)
+    if (totalCalc === 0 && montoTotalPago > 0) {
+      return montoTotalPago
+    }
+    return totalCalc
+  }, [payFormaPago, payMontoPYG, payMontoBRL, payMontoUSD, payTasaBRL, payTasaUSD, montoTotalPago])
+
+  // Desbalanceo automático: si entregado < facturas -> descuento, si entregado > facturas -> gastos admin
+  const diferenciaCompensacion = montoFisicoEntregadoGs - montoTotalPago
+  const tipoDiferenciaCompensacion = diferenciaCompensacion < 0 ? "descuento" : (diferenciaCompensacion > 0 ? "gastos_administrativos" : "exacto")
+  const montoDiferenciaCompensacion = Math.abs(diferenciaCompensacion)
+
   // Asumir automáticamente retención si el cliente es Agente Retentor y supera el umbral legal
   useEffect(() => {
     if (showPaymentModal && isAgenteRetentor && superaUmbralRetencion) {
       setAplicaRetencion(true)
+    }
+    if (showPaymentModal) {
+      setPayMontoPYG(0)
+      setPayMontoBRL(0)
+      setPayMontoUSD(0)
     }
   }, [showPaymentModal, isAgenteRetentor, superaUmbralRetencion])
 
@@ -989,6 +1032,9 @@ export default function AccountsReceivablePage() {
     }
     setAllocations(nuevas)
     setPayMontoGlobal(String(total))
+    if (payFormaPago === "efectivo" && payMontoBRL === 0 && payMontoUSD === 0) {
+      setPayMontoPYG(total)
+    }
   }
 
   const handleToggleDocBatch = (id: string) => {
@@ -1024,16 +1070,25 @@ export default function AccountsReceivablePage() {
     setSubmittingPayment(true)
     try {
       const selectedDocIds = Object.keys(allocations).filter(id => (parseFloat(allocations[id]) || 0) > 0)
+      const isEfectivo = payFormaPago === "efectivo"
       const res = await api.accountsReceivable.applyGlobalPayment({
         customer_id: showPaymentModal,
-        monto_total: montoTotalPago,
+        monto_total: montoFisicoEntregadoGs > 0 ? montoFisicoEntregadoGs : montoTotalPago,
         forma_pago: payFormaPago,
         referencia: payReferencia || undefined,
         fecha: payFecha,
         observaciones: payObservaciones || undefined,
         accounts_receivable_ids: selectedDocIds.length > 0 ? selectedDocIds : undefined,
         bank_account_id: (payFormaPago === "transferencia" || payFormaPago === "deposito_bancario" || payFormaPago === "pix" || payFormaPago === "qr") ? (payBankAccountId || undefined) : undefined,
-        destino_fondos: payFormaPago === "efectivo" ? payDestinoFondos : undefined,
+        destino_fondos: isEfectivo ? payDestinoFondos : undefined,
+        monto_pyg: isEfectivo ? (payMontoPYG || (payMontoBRL === 0 && payMontoUSD === 0 ? montoTotalPago : 0)) : 0,
+        monto_brl: isEfectivo ? (payMontoBRL || 0) : 0,
+        monto_usd: isEfectivo ? (payMontoUSD || 0) : 0,
+        tasa_brl: payTasaBRL,
+        tasa_usd: payTasaUSD,
+        monto_facturas_canceladas: montoTotalPago,
+        diferencia_monto: montoDiferenciaCompensacion,
+        tipo_diferencia: tipoDiferenciaCompensacion,
         cheque_numero: payFormaPago === "cheque" ? (payChequeNumero || undefined) : undefined,
         cheque_banco: payFormaPago === "cheque" ? (payChequeBanco || undefined) : undefined,
         cheque_librador: payFormaPago === "cheque" ? (payChequeLibrador || undefined) : undefined,
@@ -1045,7 +1100,7 @@ export default function AccountsReceivablePage() {
         retencion_numero_comprobante: (aplicaRetencion && retencionNumeroComprobante.trim()) ? retencionNumeroComprobante.trim() : undefined,
         retencion_fecha: aplicaRetencion ? retencionFecha : undefined,
         retencion_porcentaje: aplicaRetencion ? retencionPorcentaje : undefined,
-        monto_efectivo_recibido: aplicaRetencion ? montoEfectivoRecibido : montoTotalPago,
+        monto_efectivo_recibido: aplicaRetencion ? Math.max(0, (montoFisicoEntregadoGs > 0 ? montoFisicoEntregadoGs : montoTotalPago) - montoRetencionFinal) : (montoFisicoEntregadoGs > 0 ? montoFisicoEntregadoGs : montoTotalPago),
       })
 
       const msgExito = aplicaRetencion && montoRetencionFinal > 0
@@ -3017,12 +3072,17 @@ export default function AccountsReceivablePage() {
                 </div>
               </div>
 
-              {/* 🏛️ PANEL DINÁMICO DE TESORERÍA / DESTINO DE FONDOS */}
+              {/* 🏛️ PANEL DINÁMICO DE TESORERÍA / DESTINO DE FONDOS Y MULTIMONEDA */}
               {payFormaPago === "efectivo" && (
-                <div className="p-3.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 space-y-2">
-                  <div className="flex items-center gap-2 text-xs font-bold text-amber-900 dark:text-amber-300">
-                    <Landmark className="w-4 h-4 text-amber-600" />
-                    <span>Destino del Efectivo Cobrado</span>
+                <div className="p-4 rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 space-y-3.5">
+                  <div className="flex items-center justify-between text-xs font-bold text-amber-900 dark:text-amber-300">
+                    <span className="flex items-center gap-2">
+                      <Landmark className="w-4 h-4 text-amber-600" />
+                      <span>Destino del Efectivo Cobrado</span>
+                    </span>
+                    <span className="text-[11px] font-normal text-amber-800 dark:text-amber-400">
+                      Ingreso individual a bóveda por cada moneda física
+                    </span>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                     <label className={`p-2.5 rounded-lg border flex items-center gap-2 cursor-pointer transition ${
@@ -3053,6 +3113,92 @@ export default function AccountsReceivablePage() {
                       />
                       <span>🛒 Caja de Salón (Imputar a sesión de cajera)</span>
                     </label>
+                  </div>
+
+                  {/* 💵 Desglose Multimoneda Físico (PYG, BRL, USD) */}
+                  <div className="pt-2 border-t border-amber-200/80 dark:border-amber-900/50 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black text-amber-950 dark:text-amber-200 flex items-center gap-1.5 uppercase tracking-wide">
+                        <Banknote className="w-4 h-4 text-emerald-600" />
+                        Desglose Multimoneda Físico Recibido
+                      </span>
+                      <span className="text-xs font-mono font-black text-emerald-600 dark:text-emerald-400">
+                        Total Entregado: {formatPYG(montoFisicoEntregadoGs)}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      {/* PYG */}
+                      <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-200/80 dark:border-slate-800 shadow-sm">
+                        <label className="text-[10px] font-black text-slate-500 uppercase block mb-1">
+                          🪙 Guaraníes (PYG)
+                        </label>
+                        <CurrencyInput
+                          currency="PYG"
+                          value={payMontoPYG}
+                          onChangeValue={(num) => setPayMontoPYG(num)}
+                          placeholder="0"
+                          className="input-field text-right font-mono font-bold text-xs"
+                        />
+                      </div>
+
+                      {/* BRL */}
+                      <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-200/80 dark:border-slate-800 shadow-sm">
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[10px] font-black text-slate-500 uppercase">
+                            💵 Reales (BRL)
+                          </label>
+                          <span className="text-[9px] text-slate-400 font-mono">x {formatPYG(payTasaBRL)}</span>
+                        </div>
+                        <CurrencyInput
+                          currency="BRL"
+                          value={payMontoBRL}
+                          onChangeValue={(num) => setPayMontoBRL(num)}
+                          placeholder="0,00"
+                          className="input-field text-right font-mono font-bold text-xs"
+                        />
+                        {payMontoBRL > 0 && (
+                          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono font-bold block mt-1 text-right">
+                            ≈ {formatPYG(Math.round(payMontoBRL * payTasaBRL))}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* USD */}
+                      <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-200/80 dark:border-slate-800 shadow-sm">
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[10px] font-black text-slate-500 uppercase">
+                            💵 Dólares (USD)
+                          </label>
+                          <span className="text-[9px] text-gray-400 font-mono">x {formatPYG(payTasaUSD)}</span>
+                        </div>
+                        <CurrencyInput
+                          currency="USD"
+                          value={payMontoUSD}
+                          onChangeValue={(num) => setPayMontoUSD(num)}
+                          placeholder="0.00"
+                          className="input-field text-right font-mono font-bold text-xs"
+                        />
+                        {payMontoUSD > 0 && (
+                          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono font-bold block mt-1 text-right">
+                            ≈ {formatPYG(Math.round(payMontoUSD * payTasaUSD))}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[10px] text-slate-500">
+                      <span>Cotización de Conversión: 1 R$ = {formatPYG(payTasaBRL)} · 1 US$ = {formatPYG(payTasaUSD)}</span>
+                      {payMontoPYG === 0 && payMontoBRL === 0 && payMontoUSD === 0 && montoTotalPago > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setPayMontoPYG(montoTotalPago)}
+                          className="text-indigo-600 dark:text-indigo-400 font-bold hover:underline cursor-pointer"
+                        >
+                          Auto: Asignar {formatPYG(montoTotalPago)} en Gs.
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
@@ -3174,16 +3320,15 @@ export default function AccountsReceivablePage() {
 
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                   <div className="relative flex-1">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-mono text-xs font-bold">₲</span>
-                    <input
-                      type="number"
+                    <CurrencyInput
+                      currency="PYG"
                       placeholder="Monto global que abonó el cliente..."
-                      className={`input-field text-xs pl-7 font-mono font-bold transition ${
+                      className={`input-field text-xs font-mono font-bold transition ${
                         payMontoGlobalError ? "border-rose-500 ring-2 ring-rose-200 dark:ring-rose-900/50" : ""
                       }`}
-                      value={payMontoGlobal}
-                      onChange={e => {
-                        setPayMontoGlobal(e.target.value)
+                      value={parseFloat(payMontoGlobal) || 0}
+                      onChangeValue={(val) => {
+                        setPayMontoGlobal(String(val))
                         if (payMontoGlobalError) setPayMontoGlobalError(null)
                       }}
                       onKeyDown={e => { if (e.key === "Enter") handleDistribuirFifo() }}
@@ -3287,13 +3432,12 @@ export default function AccountsReceivablePage() {
                         </div>
 
                         <div className="flex items-center gap-2 self-end sm:self-auto">
-                          <span className="text-gray-400 text-[11px]">₲</span>
-                          <input
-                            type="number"
+                          <CurrencyInput
+                            currency="PYG"
                             placeholder="0"
                             className="input-field text-right w-36 font-mono font-bold text-xs"
-                            value={allocations[doc.id] || ""}
-                            onChange={e => setAllocations({ ...allocations, [doc.id]: e.target.value })}
+                            value={parseFloat(allocations[doc.id]) || 0}
+                            onChangeValue={(val) => setAllocations({ ...allocations, [doc.id]: String(val) })}
                             disabled={!isSelected}
                           />
                         </div>
@@ -3303,24 +3447,69 @@ export default function AccountsReceivablePage() {
                 </div>
               )}
 
-              {/* Resumen Total y Desglose Final */}
-              <div className="p-4 rounded-xl bg-slate-900 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md border border-slate-800">
-                <div>
-                  <span className="text-xs font-bold text-slate-300 block">Total Deuda Cancelada</span>
-                  <span className="text-[11px] text-slate-400">
-                    {Object.values(allocations).filter(v => (parseFloat(v) || 0) > 0).length} factura(s) amortizada(s)
-                  </span>
-                </div>
-                <div className="text-right">
-                  <span className="text-xl sm:text-2xl font-black text-white font-mono block">
-                    {formatPYG(montoTotalPago)}
-                  </span>
-                  {aplicaRetencion && montoRetencionFinal > 0 && (
-                    <span className="text-xs font-bold text-emerald-400 font-mono block">
-                      Neto a percibir: {formatPYG(montoEfectivoRecibido)} (-{formatPYG(montoRetencionFinal)} Ret. IVA)
+              {/* Resumen Total y Desglose Final con Diferencias */}
+              <div className="p-4 rounded-xl bg-slate-900 text-white space-y-3 shadow-md border border-slate-800">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div>
+                    <span className="text-xs font-bold text-slate-300 block">Facturas a Cancelar</span>
+                    <span className="text-[11px] text-slate-400">
+                      {Object.values(allocations).filter(v => (parseFloat(v) || 0) > 0).length} factura(s) amortizada(s) al 100%
                     </span>
-                  )}
+                  </div>
+                  <div className="text-right">
+                    <span className="text-xl sm:text-2xl font-black text-white font-mono block">
+                      {formatPYG(montoTotalPago)}
+                    </span>
+                    {payFormaPago === "efectivo" && (
+                      <span className="text-xs font-bold text-amber-300 font-mono block">
+                        Físico Entregado: {formatPYG(montoFisicoEntregadoGs)}
+                      </span>
+                    )}
+                    {aplicaRetencion && montoRetencionFinal > 0 && (
+                      <span className="text-xs font-bold text-emerald-400 font-mono block">
+                        Neto a percibir: {formatPYG(Math.max(0, montoFisicoEntregadoGs - montoRetencionFinal))} (-{formatPYG(montoRetencionFinal)} Ret. IVA)
+                      </span>
+                    )}
+                  </div>
                 </div>
+
+                {/* Badge de Compensación Inteligente */}
+                {montoTotalPago > 0 && payFormaPago === "efectivo" && (
+                  <div className="pt-2 border-t border-slate-800">
+                    {tipoDiferenciaCompensacion === "descuento" && (
+                      <div className="p-2.5 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-between text-xs text-amber-200">
+                        <div className="flex items-center gap-2">
+                          <span>🏷️</span>
+                          <span>
+                            Diferencia imputada a <b>Descuento Concedido</b>: <b className="font-mono text-amber-300">-{formatPYG(montoDiferenciaCompensacion)}</b> (se cancela el 100% de la deuda).
+                          </span>
+                        </div>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-amber-500 text-slate-950">
+                          Cuenta 5.1.02
+                        </span>
+                      </div>
+                    )}
+                    {tipoDiferenciaCompensacion === "gastos_administrativos" && (
+                      <div className="p-2.5 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-between text-xs text-blue-200">
+                        <div className="flex items-center gap-2">
+                          <span>💼</span>
+                          <span>
+                            Diferencia imputada a <b>Gastos Administrativos / Cobranza</b>: <b className="font-mono text-blue-300">+{formatPYG(montoDiferenciaCompensacion)}</b> (excedente ingresado a bóveda).
+                          </span>
+                        </div>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-blue-500 text-white">
+                          Cuenta 4.2.01
+                        </span>
+                      </div>
+                    )}
+                    {tipoDiferenciaCompensacion === "exacto" && (
+                      <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        <span>Pago 100% exacto y balanceado (₲ 0 diferencia).</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
