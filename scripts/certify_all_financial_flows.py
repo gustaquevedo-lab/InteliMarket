@@ -295,7 +295,7 @@ class CertificationRunner:
                 await session.commit()
 
                 # 4.4 Consultar facturas por pagar para el proveedor
-                payable = await fin_service.get_payable_invoices(session, COMPANY_ID, supplier_id=test_sup_id)
+                payable = await fin_service.get_payable_invoices(session, str(COMPANY_ID), supplier_id=str(test_sup_id))
                 assert len(payable) == 2, f"Se esperaban 2 facturas en cuentas por pagar, se obtuvieron {len(payable)}"
                 tipos = {p["numero_factura"]: p.get("tipo_comprobante") for p in payable}
                 assert tipos["FAC-MERC-001"] == "mercaderia", f"Tipo incorrecto para mercadería: {tipos['FAC-MERC-001']}"
@@ -468,7 +468,7 @@ class CertificationRunner:
             )
             aq_sup = res_sup.fetchone()
             if aq_sup:
-                payable = await fin_service.get_payable_invoices(session, COMPANY_ID, supplier_id=aq_sup[0])
+                payable = await fin_service.get_payable_invoices(session, str(COMPANY_ID), supplier_id=str(aq_sup[0]))
                 for p in payable:
                     assert "notas_credito" in p, f"La factura {p['numero_factura']} no incluye la clave notas_credito"
                     assert isinstance(p["notas_credito"], list), "notas_credito debe ser una lista"

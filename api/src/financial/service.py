@@ -2561,7 +2561,7 @@ async def get_payable_invoices(db: AsyncSession, company_id: str, supplier_id: s
     tenia create_payment_run (agarraba TODAS las vencidas de una, sin que
     nadie eligiera nada)."""
     query = select(SupplierInvoice).where(
-        SupplierInvoice.company_id == uuid.UUID(company_id),
+        SupplierInvoice.company_id == uuid.UUID(str(company_id)),
         SupplierInvoice.estado.in_(["pendiente", "aprobada", "parcial"]),
         or_(
             SupplierInvoice.bloqueada_para_pago == False,
@@ -2570,7 +2570,7 @@ async def get_payable_invoices(db: AsyncSession, company_id: str, supplier_id: s
         SupplierInvoice.saldo_pendiente > 0,
     )
     if supplier_id:
-        query = query.where(SupplierInvoice.supplier_id == uuid.UUID(supplier_id))
+        query = query.where(SupplierInvoice.supplier_id == uuid.UUID(str(supplier_id)))
     if hasta:
         query = query.where(SupplierInvoice.fecha_vencimiento <= hasta)
     query = query.order_by(SupplierInvoice.fecha_vencimiento.asc())
