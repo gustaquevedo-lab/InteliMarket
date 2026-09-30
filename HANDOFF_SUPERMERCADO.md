@@ -162,8 +162,10 @@ Pedido explícito del cliente, textual: *"nunca mas van a apuntar a sandbox y no
 
 ### Terminales físicas activas (las 2 que funcionan; la tercera tiene lector roto y sigue sin configurar)
 
-- **`.247`** ("Terminal 1", Windows 10, user `user` / `Extra2026`)
-- **`.120`** ("CONSULTOR3", ex-`.234` — **cambió de IP esta sesión**, user `pc` / `Extra2026`). Si no responde en `.120`, puede haber cambiado de IP de nuevo — pedirle al cliente la IP actual antes de asumir que está caída.
+- **`.193`** ("Terminal 1" / `CONSULTOR1`, ex-`.247`, Windows 10, user `user` / `Extra2026`)
+- **`.126`** ("CONSULTOR3", ex-`.120`, ex-`.234`, Windows 11, user `pc` / `Extra2026`)
+
+> **Incidente 2026-09-30 (RESUELTO)**: Un blindaje previo de auth (`665f13b0`) interceptaba cualquier request sin token con `No hay sesión activa` si la ruta no estaba en `isPublicEndpoint`. Como `/v1/kiosk/` no estaba en esa lista y los kioskos no tienen sesión de usuario, las terminales quedaron bloqueadas (fallaba el logo, las cotizaciones y el escaneo de código arrojaba 'Error de Conexión'). Se agregó `/v1/kiosk/` y `/v1/ecommerce/catalog` a `isPublicEndpoint`, se desplegó a producción con `bash deploy-ui.sh` y se reinició Edge en ambas terminales mediante `KioskWatchdog`. Ambos consultores volvieron a operar al 100% de inmediato.
 
 Ambas apuntan a **producción** (`http://192.168.0.242:5173/verificador`), nunca a sandbox (`:5174`). Método de gestión: WinRM + NTLM desde la VM (`/tmp/winrm_env`, helper `/tmp/run_winrm.py <ip> <user> <pass> <script.ps1>`). **Relanzar Edge SIEMPRE vía `Start-ScheduledTask -TaskName KioskWatchdog`, nunca `Start-Process` directo por WinRM** — Start-Process directo aterriza en la Session 0 invisible (o, peor, el proceso puede desaparecer solo poco después, confirmado de nuevo esta sesión al testear el self-heal). Técnica para ver la pantalla real (no solo curl/API): registrar una scheduled task one-off con `-LogonType Interactive`, tomar el screenshot a disco, leerlo en base64 vía WinRM normal.
 
