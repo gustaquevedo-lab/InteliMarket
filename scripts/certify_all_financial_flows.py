@@ -78,12 +78,12 @@ class CertificationRunner:
             if sm_row:
                 ret_sm = await returns_service.get_supplier_return(session, COMPANY_ID, sm_row[0])
                 assert ret_sm is not None, f"Fallo al recuperar supermer_supplier_returns {sm_row[0]}"
-                assert ret_sm["id"] == sm_row[0]
+                assert str(ret_sm["id"]) == str(sm_row[0])
             
             if fin_row:
                 ret_fin = await returns_service.get_supplier_return(session, COMPANY_ID, fin_row[0])
                 assert ret_fin is not None, f"Fallo en fallback a supplier_returns {fin_row[0]}"
-                assert ret_fin["id"] == fin_row[0]
+                assert str(ret_fin["id"]) == str(fin_row[0])
             
             # Validar generación del PDF A4
             target_ret = ret_sm if sm_row else ret_fin
@@ -161,9 +161,9 @@ class CertificationRunner:
 
                 res_payment = await ar_service.apply_global_payment(
                     session,
-                    COMPANY_ID,
+                    str(COMPANY_ID),
                     payment_payload,
-                    user_id=uuid.UUID("00000000-0000-0000-0000-000000000001")
+                    registrado_por="00000000-0000-0000-0000-000000000001"
                 )
 
                 # 2.3 Validar que el saldo de la deuda haya bajado a 0
