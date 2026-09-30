@@ -2096,12 +2096,13 @@ def generate_acta_verificacion_tesoreria_pdf(
     total_monto_esperado_vouchers = 0
 
     for g in grupos:
-        cant = g.get("cantidad_esperada") or g.get("cantidad") or len(g.get("vouchers", []))
-        tot_g = float(g.get("total_esperado_gs") or g.get("monto_gs") or sum(float(v.get("monto_gs") or 0) for v in g.get("vouchers", [])))
-        tot_fis = float(g.get("monto_fisico_gs") if g.get("monto_fisico_gs") is not None else tot_g)
-        dif_g = float(g.get("diferencia_gs") if g.get("diferencia_gs") is not None else (tot_fis - tot_g))
-        cant_falt = g.get("cant_faltantes", 0)
-        cant_disc = g.get("cant_discrepantes", 0)
+        v_list = g.get("vouchers") or []
+        cant = len(v_list) if v_list else int(g.get("cantidad_esperada") or g.get("cantidad") or 0)
+        tot_g = float(sum(float(v.get("monto_gs") or 0) for v in v_list)) if v_list else float(g.get("total_esperado_gs") or g.get("monto_gs") or 0)
+        tot_fis = float(sum(float(v.get("monto_fisico") if v.get("monto_fisico") is not None else (v.get("monto_gs") or 0)) for v in v_list)) if v_list else float(g.get("monto_fisico_gs") if g.get("monto_fisico_gs") is not None else tot_g)
+        dif_g = float(tot_fis - tot_g)
+        cant_falt = sum(1 for v in v_list if v.get("audit_estado") == "faltante") if v_list else g.get("cant_faltantes", 0)
+        cant_disc = sum(1 for v in v_list if v.get("audit_estado") == "discrepante") if v_list else g.get("cant_discrepantes", 0)
 
         total_cant_vouchers += cant
         total_monto_vouchers += tot_fis
@@ -2126,27 +2127,14 @@ def generate_acta_verificacion_tesoreria_pdf(
             dictamen_cell,
         ])
 
-    # Reclasificaciones si las hubiere
-    adjustments = punteo_data.get("adjustments") or []
-    if adjustments:
-        tot_adj = sum(float(a.get("monto_gs") or 0) for a in adjustments)
-        total_monto_vouchers += tot_adj
-        t_vouch_rows.append([
-            Paragraph("<b>Reclasificación de Efectivo en Tesorería</b>", style_td_lbl),
-            Paragraph("Documento de Valor", style_td_lbl),
-            Paragraph(f"{len(adjustments)} docs", ParagraphStyle("TC_A", parent=style_td_lbl, alignment=TA_CENTER)),
-            Paragraph(f"Gs. {_fmt_val(tot_adj)}", style_td_val),
-            Paragraph("<font color='#0284C7'><b>✓ RECLASIFICADO</b></font>", ParagraphStyle("TCD_A", parent=style_td_lbl, alignment=TA_CENTER)),
-        ])
-
-    if not grupos and not adjustments:
+    if not grupos:
         t_vouch_rows.append([
             Paragraph("No se registraron ventas no efectivo en esta sesión.", style_td_lbl),
             "", "", "", ""
         ])
 
-    # Fila total
-    dif_tot_vouch = float(punteo_data.get("diferencia_vouchers_gs") or (total_monto_vouchers - total_monto_esperado_vouchers))
+    # Fila total consistente
+    dif_tot_vouch = total_monto_vouchers - total_monto_esperado_vouchers
     dictamen_tot = "<font color='#059669'><b>✓ AUDITADO (CONFORME)</b></font>" if dif_tot_vouch == 0 else f"<font color='#DC2626'><b>OBSERVADO ({'+' if dif_tot_vouch > 0 else ''}{_fmt_val(dif_tot_vouch)})</b></font>"
 
     t_vouch_rows.append([

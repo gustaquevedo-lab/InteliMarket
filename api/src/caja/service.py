@@ -4239,14 +4239,24 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
                         matched_o = k
                         break
             if matched_o and matched_o in vouchers_by_channel:
-                vouchers_by_channel[matched_o]["total_esperado_gs"] = max(0.0, vouchers_by_channel[matched_o]["total_esperado_gs"] - m_gs_adj)
-                vouchers_by_channel[matched_o]["cantidad_esperada"] = max(0, vouchers_by_channel[matched_o]["cantidad_esperada"] - 1)
+                removed = False
                 for orig_v in list(vouchers_by_channel[matched_o]["vouchers"]):
-                    if not orig_v.get("es_reclasificado") and abs(float(orig_v.get("monto_gs", 0)) - m_gs_adj) < 1.0:
+                    matches = False
+                    if a.sale_id and orig_v.get("sale_id") == str(a.sale_id):
+                        matches = True
+                    elif a.ticket_numero and orig_v.get("numero_ticket") == str(a.ticket_numero):
+                        matches = True
+                    elif not orig_v.get("es_reclasificado") and abs(float(orig_v.get("monto_gs", 0)) - m_gs_adj) < 1.0:
+                        matches = True
+                    if matches:
                         vouchers_by_channel[matched_o]["vouchers"].remove(orig_v)
                         if orig_v in vouchers:
                             vouchers.remove(orig_v)
+                        removed = True
                         break
+                if removed:
+                    vouchers_by_channel[matched_o]["total_esperado_gs"] = max(0.0, vouchers_by_channel[matched_o]["total_esperado_gs"] - m_gs_adj)
+                    vouchers_by_channel[matched_o]["cantidad_esperada"] = max(0, vouchers_by_channel[matched_o]["cantidad_esperada"] - 1)
 
     # 5b. Inyectar comprobantes de Devoluciones y Notas de Crédito que afectan medios no efectivo
     returns_punteo_res = await db.execute(
@@ -4459,6 +4469,8 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
         ch_dif = ch_fis - ch_sis
         ch_faltantes = sum(1 for v in ch_vouchers if v.get("audit_estado") == "faltante")
         ch_discrepantes = sum(1 for v in ch_vouchers if v.get("audit_estado") == "discrepante")
+        c["total_esperado_gs"] = ch_sis
+        c["cantidad_esperada"] = len(ch_vouchers)
         c["monto_fisico_gs"] = ch_fis
         c["diferencia_gs"] = ch_dif
         c["cant_faltantes"] = ch_faltantes
@@ -4468,6 +4480,9 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
     for k, v in summary_final.items():
         matching = vouchers_by_channel.get(k)
         if matching:
+            v["total_esperado_gs"] = matching["total_esperado_gs"]
+            v["cantidad"] = matching["cantidad_esperada"]
+            v["monto_gs"] = matching["total_esperado_gs"]
             v["monto_fisico_gs"] = matching["monto_fisico_gs"]
             v["diferencia_gs"] = matching["diferencia_gs"]
             v["dictamen"] = matching["dictamen"]
