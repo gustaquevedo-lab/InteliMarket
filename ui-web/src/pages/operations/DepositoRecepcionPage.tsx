@@ -5,7 +5,7 @@ import {
   Building2, User, LogIn, LogOut, Check, ChevronRight, Lock, Eye, EyeOff,
   Flame, Sparkles, Printer, Layers, Clock, ShieldAlert, Wifi,
   Lightbulb, Sun, Moon, CheckCheck, FileText, Download,
-  Hash, RotateCcw, Barcode, FlipHorizontal, ArrowDownCircle, ExternalLink
+  Hash, RotateCcw, Barcode, FlipHorizontal, ArrowDownCircle, ExternalLink, Trash2
 } from "lucide-react"
 import { useBarcodeScannerCamera } from "../../hooks"
 import { api, type PurchaseOrder, type Product } from "../../api"
@@ -85,6 +85,12 @@ const clearDraftFromStorage = (poId: string) => {
 
 const isDraftOutOfSync = (draft: any, serverPO: any): boolean => {
   if (!draft || !serverPO) return true
+
+  // Si la orden ya no es recepcionable en Compras (ej. completada, recibida o cancelada)
+  const estado = String(serverPO.estado || "").toLowerCase()
+  if (["completado", "cancelado", "recibido", "cerrado"].includes(estado)) {
+    return true
+  }
 
   // 1. Verificar timestamp de actualización
   const draftBasePoTime = new Date(draft.poUpdatedAt || draft.po?.updated_at || draft.po?.fecha || draft.po?.created_at || 0).getTime()
@@ -170,6 +176,9 @@ export default function DepositoRecepcionPage() {
   const [extraAutorizadoPor, setExtraAutorizadoPor] = useState("")
   const [extraMotivo, setExtraMotivo] = useState("Mercadería entregada por el proveedor sin OC previa pero de alta rotación")
 
+  // Modal para pausar o descartar la recepción activa y volver a órdenes
+  const [showExitModal, setShowExitModal] = useState(false)
+
 
   // Acordeón y caché de ítems de órdenes en lista principal
   const [expandedPOId, setExpandedPOId] = useState<string | null>(null)
@@ -216,23 +225,29 @@ export default function DepositoRecepcionPage() {
     }
   }, [user, toast, logout])
 
-  // Auto-restaurar borrador al abrir o recargar la página
+  // Auto-restaurar borrador al abrir o recargar la página (SOLO UNA VEZ EN EL MONTAJE)
+  const autoRestoredRef = useRef(false)
+
   useEffect(() => {
     if (!user) return
+    if (autoRestoredRef.current) return
+    autoRestoredRef.current = true
+
     const activePoId = localStorage.getItem(STORAGE_ACTIVE_PO_KEY)
     if (activePoId && viewState === "orders" && !selectedPO) {
       const draft = loadDraftFromStorage(activePoId)
       if (draft && draft.po && Array.isArray(draft.itemsDraft) && draft.itemsDraft.length > 0) {
         api.purchases.getOrder(activePoId).then((freshPO) => {
-          if (!freshPO) {
+          if (!freshPO || ["completado", "cancelado", "recibido", "cerrado"].includes((freshPO.estado || "").toLowerCase())) {
             clearDraftFromStorage(activePoId)
+            fetchOrders()
             return
           }
           if (isDraftOutOfSync(draft, freshPO)) {
             clearDraftFromStorage(activePoId)
             toast.warning(
-              "Orden Modificada en Compras",
-              `La orden ${freshPO.numero} fue modificada en Compras. Se descartó el borrador anterior para recepcionar la versión actualizada.`
+              "Orden Modificada o Cerrada en Compras",
+              `La orden ${freshPO.numero} fue modificada o cerrada en Compras. Se descartó el borrador anterior para recepcionar la versión actualizada.`
             )
             fetchOrders()
           } else {
@@ -265,9 +280,37 @@ export default function DepositoRecepcionPage() {
           setDraftLastSaved(draft.savedAt || new Date().toISOString())
           setViewState("receiving")
         })
+      } else {
+        clearDraftFromStorage(activePoId)
       }
     }
-  }, [user, viewState, selectedPO, toast, fetchOrders])
+  }, [user, fetchOrders, toast])
+
+  const handleExitReception = (discard = false) => {
+    stopCamera()
+    if (selectedPO?.id) {
+      if (discard) {
+        clearDraftFromStorage(selectedPO.id)
+        toast.info("Borrador Descartado", "Se descartó el avance local de la recepción.")
+      } else {
+        localStorage.removeItem(STORAGE_ACTIVE_PO_KEY)
+        toast.info("Borrador en Pausa", "El avance quedó guardado. Puedes continuar cuando gustes desde la lista.")
+      }
+    } else {
+      const activePoId = localStorage.getItem(STORAGE_ACTIVE_PO_KEY)
+      if (activePoId) {
+        if (discard) clearDraftFromStorage(activePoId)
+        else localStorage.removeItem(STORAGE_ACTIVE_PO_KEY)
+      }
+    }
+    setSelectedPO(null)
+    setItemsDraft([])
+    setProveedorRef("")
+    setObservaciones("")
+    setRestoredFromDraft(false)
+    setViewState("orders")
+    fetchOrders()
+  }
 
   // Auto-guardado en localStorage cada vez que cambian los datos de recepción
   useEffect(() => {
@@ -1078,15 +1121,9 @@ export default function DepositoRecepcionPage() {
           <div className="flex items-center gap-3">
             {viewState === "receiving" && (
               <button
-                onClick={() => {
-                  if (window.confirm("¿Volver a la lista de órdenes? Si deseas descartar este borrador, puedes hacerlo luego con 'Recargar desde OC Oficial'.")) {
-                    stopCamera()
-                    setSelectedPO(null)
-                    setViewState("orders")
-                  }
-                }}
-                className="p-2.5 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 active:scale-95 transition-all border border-slate-200 dark:border-slate-700"
-                title="Volver a Órdenes"
+                onClick={() => setShowExitModal(true)}
+                className="p-2.5 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 active:scale-95 transition-all border border-slate-200 dark:border-slate-700 cursor-pointer"
+                title="Salir o Pausar Recepción"
               >
                 <ArrowLeft className="w-5 h-5" />
               </button>
@@ -1659,6 +1696,16 @@ export default function DepositoRecepcionPage() {
                 >
                   <RefreshCw className="w-3.5 h-3.5 text-sky-500" />
                   <span>Recargar desde OC Oficial</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowExitModal(true)}
+                  className="px-3 py-2 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-700 dark:text-rose-300 hover:bg-rose-500/20 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer"
+                  title="Pausar o descartar la recepción actual y volver a la lista de órdenes"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Salir / Pausar</span>
                 </button>
               </div>
             </div>
@@ -2474,6 +2521,66 @@ export default function DepositoRecepcionPage() {
             >
               Agregar a la Descarga de Muelle
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: SALIR DE LA RECEPCIÓN ────────────────────────────────────── */}
+      {showExitModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-500 flex items-center justify-center font-black shrink-0">
+                <Truck className="w-6 h-6" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-base font-black text-slate-900 dark:text-white truncate">¿Salir de la Recepción?</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                  Orden <strong className="text-amber-600 dark:text-amber-400 font-mono">{selectedPO?.numero || "activa"}</strong>
+                  {selectedPO?.supplier?.razon_social ? ` · ${selectedPO.supplier.razon_social}` : ""}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              Elige cómo deseas salir. Si pausas, los lotes, vencimientos y cantidades contadas quedarán guardados en este dispositivo para continuar más tarde.
+            </p>
+
+            <div className="space-y-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowExitModal(false)
+                  handleExitReception(false)
+                }}
+                className="w-full py-3.5 px-4 rounded-2xl bg-amber-500 hover:bg-amber-400 active:scale-[0.98] text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition cursor-pointer"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>Pausar y Volver a Órdenes</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm("¿Seguro que deseas descartar todo el avance de esta orden y borrar el borrador local?")) {
+                    setShowExitModal(false)
+                    handleExitReception(true)
+                  }
+                }}
+                className="w-full py-3.5 px-4 rounded-2xl bg-rose-500/10 hover:bg-rose-500/20 active:scale-[0.98] text-rose-600 dark:text-rose-400 border border-rose-500/20 font-bold text-sm flex items-center justify-center gap-2 transition cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Descartar Avance y Salir</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowExitModal(false)}
+                className="w-full py-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-semibold text-xs flex items-center justify-center transition cursor-pointer"
+              >
+                Continuar Descargando
+              </button>
+            </div>
           </div>
         </div>
       )}
