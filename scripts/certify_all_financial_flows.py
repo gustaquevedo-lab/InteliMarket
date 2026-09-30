@@ -30,7 +30,11 @@ from sqlalchemy import text
 from api.src.db import async_session_factory
 from api.src.purchases import returns_service, supplier_return_pdf
 from api.src.financial import service as fin_service
-from api.src.financial.schemas import PaymentOrderCreate, PaymentOrderChequeItem
+from api.src.financial.schemas import (
+    SupplierPaymentOrderCreate,
+    PaymentOrderAllocationCreate,
+    PaymentOrderDisbursementCreate,
+)
 from api.src.accounts_receivable import service as ar_service
 from api.src.accounts_receivable.schemas import ReceivableGlobalPaymentCreate
 
@@ -287,17 +291,19 @@ class CertificationRunner:
                 assert tipos["FAC-INS-002"] in ("gasto", "insumo_gasto"), f"Tipo incorrecto para insumo: {tipos['FAC-INS-002']}"
 
                 # 4.5 Pagar ambas facturas en una sola Orden de Pago (Gs. 450.000)
-                po_payload = PaymentOrderCreate(
+                po_payload = SupplierPaymentOrderCreate(
                     supplier_id=test_sup_id,
-                    monto_total=450000,
-                    forma_pago="efectivo",
-                    facturas=[
-                        {"invoice_id": inv1_id, "monto_aplicado": 300000},
-                        {"invoice_id": inv2_id, "monto_aplicado": 150000}
+                    allocations=[
+                        PaymentOrderAllocationCreate(invoice_id=inv1_id, monto_aplicado=decimal.Decimal("300000")),
+                        PaymentOrderAllocationCreate(invoice_id=inv2_id, monto_aplicado=decimal.Decimal("150000"))
+                    ],
+                    disbursements=[
+                        PaymentOrderDisbursementCreate(forma_pago="boveda", monto=decimal.Decimal("450000"))
                     ]
                 )
-                po_res = await fin_service.create_payment_order(session, COMPANY_ID, po_payload, user_id=uuid.UUID("00000000-0000-0000-0000-000000000001"))
-                order_id = po_res.id
+                po_res = await fin_service.create_supplier_payment_order(session, str(COMPANY_ID), po_payload, user_id="00000000-0000-0000-0000-000000000001")
+                order_id = po_res["id"]
+                num_orden = po_res.get("numero_orden", "S/N")
 
                 # 4.6 Verificar saldos a 0
                 res_check = await session.execute(
@@ -309,11 +315,12 @@ class CertificationRunner:
                     assert row[2] in ("pagada", "pagado"), f"Estado inesperado en {row[0]}: {row[2]}"
 
                 self.report_step(4, "Cuentas por Pagar (Mercaderías + Insumos Unificados)", True,
-                                 f"Facturas de mercadería (Gs. 300.000) e insumo (Gs. 150.000) pagadas juntas en Orden #{po_res.numero_orden}. Ambos saldos liquidados a 0.")
+                                 f"Facturas de mercadería (Gs. 300.000) e insumo (Gs. 150.000) pagadas juntas en Orden #{num_orden}. Ambos saldos liquidados a 0.")
 
             finally:
                 if order_id:
-                    await session.execute(text("DELETE FROM payment_order_invoices WHERE payment_order_id = :oid"), {"oid": str(order_id)})
+                    await session.execute(text("DELETE FROM payment_order_disbursements WHERE payment_order_id = :oid"), {"oid": str(order_id)})
+                    await session.execute(text("DELETE FROM payment_order_allocations WHERE payment_order_id = :oid"), {"oid": str(order_id)})
                     await session.execute(text("DELETE FROM payment_orders WHERE id = :oid"), {"oid": str(order_id)})
                 await session.execute(text("DELETE FROM supplier_invoices WHERE id IN (:i1, :i2)"), {"i1": str(inv1_id), "i2": str(inv2_id)})
                 await session.execute(text("DELETE FROM suppliers WHERE id = :sid"), {"sid": str(test_sup_id)})
@@ -324,6 +331,7 @@ class CertificationRunner:
         print("\n--- Ejecutando Certificación Flujo 5: Múltiples Cheques en Pago ---")
         async with async_session_factory() as session:
             test_sup_id = uuid.uuid4()
+            inv_id = uuid.uuid4()
             test_ruc = f"PRV-CHQ-{int(datetime.datetime.now().timestamp())}"
             chq1_num = f"BR-9901-{int(datetime.datetime.now().timestamp()) % 10000}"
             chq2_num = f"BR-9902-{int(datetime.datetime.now().timestamp()) % 10000}"
@@ -334,19 +342,29 @@ class CertificationRunner:
                     text("INSERT INTO suppliers (id, company_id, razon_social, ruc, activo) VALUES (:id, :cid, 'PROVEEDOR BR TEST', :ruc, true)"),
                     {"id": str(test_sup_id), "cid": str(COMPANY_ID), "ruc": test_ruc}
                 )
+                await session.execute(
+                    text("""
+                        INSERT INTO supplier_invoices (id, company_id, supplier_id, numero_factura, tipo_comprobante,
+                                                     monto_total, saldo_pendiente, estado, fecha_emision, fecha_vencimiento)
+                        VALUES (:id, :cid, :sid, 'FAC-BR-CHQ', 'mercaderia', 500000, 500000, 'pendiente', CURRENT_DATE, CURRENT_DATE + 30)
+                    """),
+                    {"id": str(inv_id), "cid": str(COMPANY_ID), "sid": str(test_sup_id)}
+                )
                 await session.commit()
 
-                po_payload = PaymentOrderCreate(
+                po_payload = SupplierPaymentOrderCreate(
                     supplier_id=test_sup_id,
-                    monto_total=500000,
-                    forma_pago="cheque",
-                    cheques=[
-                        PaymentOrderChequeItem(numero=chq1_num, banco="Banco do Brasil", monto=200000, fecha_cobro="2026-10-15"),
-                        PaymentOrderChequeItem(numero=chq2_num, banco="Bradesco", monto=300000, fecha_cobro="2026-10-30")
+                    allocations=[
+                        PaymentOrderAllocationCreate(invoice_id=inv_id, monto_aplicado=decimal.Decimal("500000"))
+                    ],
+                    disbursements=[
+                        PaymentOrderDisbursementCreate(forma_pago="cheque", monto=decimal.Decimal("200000"), numero_cheque=chq1_num, banco_cheque="Banco do Brasil"),
+                        PaymentOrderDisbursementCreate(forma_pago="cheque", monto=decimal.Decimal("300000"), numero_cheque=chq2_num, banco_cheque="Bradesco")
                     ]
                 )
-                po_res = await fin_service.create_payment_order(session, COMPANY_ID, po_payload, user_id=uuid.UUID("00000000-0000-0000-0000-000000000001"))
-                order_id = po_res.id
+                po_res = await fin_service.create_supplier_payment_order(session, str(COMPANY_ID), po_payload, user_id="00000000-0000-0000-0000-000000000001")
+                order_id = po_res["id"]
+                num_orden = po_res.get("numero_orden", "S/N")
 
                 # Verificar persistencia de ambos cheques en BD
                 res_chqs = await session.execute(
@@ -360,12 +378,15 @@ class CertificationRunner:
                 assert chq_dict[chq2_num] == ("Bradesco", 300000)
 
                 self.report_step(5, "Pagos Multifacturas BR con Múltiples Cheques", True,
-                                 f"Orden #{po_res.numero_orden} generada con 2 cheques: {chq1_num} (Gs. 200.000) y {chq2_num} (Gs. 300.000) persistidos correctamente en BD.")
+                                 f"Orden #{num_orden} generada con 2 cheques: {chq1_num} (Gs. 200.000) y {chq2_num} (Gs. 300.000) persistidos correctamente en BD.")
 
             finally:
                 await session.execute(text("DELETE FROM cheques WHERE numero IN (:c1, :c2)"), {"c1": chq1_num, "c2": chq2_num})
                 if order_id:
+                    await session.execute(text("DELETE FROM payment_order_disbursements WHERE payment_order_id = :oid"), {"oid": str(order_id)})
+                    await session.execute(text("DELETE FROM payment_order_allocations WHERE payment_order_id = :oid"), {"oid": str(order_id)})
                     await session.execute(text("DELETE FROM payment_orders WHERE id = :oid"), {"oid": str(order_id)})
+                await session.execute(text("DELETE FROM supplier_invoices WHERE id = :id"), {"id": str(inv_id)})
                 await session.execute(text("DELETE FROM suppliers WHERE id = :sid"), {"sid": str(test_sup_id)})
                 await session.commit()
 
