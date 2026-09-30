@@ -491,8 +491,8 @@ class CertificationRunner:
                     text("""
                         SELECT si.numero_factura, scn.numero, scna.monto_aplicado
                         FROM supplier_credit_note_applications scna
-                        JOIN supplier_invoices si ON si.id = scna.supplier_invoice_id
-                        JOIN supplier_credit_notes scn ON scn.id = scna.supplier_credit_note_id
+                        JOIN supplier_invoices si ON si.id = scna.invoice_id
+                        JOIN supplier_credit_notes scn ON scn.id = scna.credit_note_id
                         LIMIT 1
                     """)
                 )
