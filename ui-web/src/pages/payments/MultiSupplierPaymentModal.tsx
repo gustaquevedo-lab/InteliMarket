@@ -337,6 +337,8 @@ export default function MultiSupplierPaymentModal({
     }
 
     // Validar cheque si aplica
+    let effectiveMontoDesembolso = montoDesembolsoFinal
+
     // Validar cheque si aplica
     if (formaPago === "cheque") {
       if (chequeMode === "multiple") {
@@ -356,10 +358,18 @@ export default function MultiSupplierPaymentModal({
           }
         }
         const totalCheques = multiCheques.reduce((sum, c) => sum + c.monto, 0)
-        if (Math.abs(totalCheques - montoDesembolsoFinal) > 50) {
+        const diffCheques = Math.abs(totalCheques - effectiveMontoDesembolso)
+
+        // Si la diferencia es menor o igual a 5.000 Gs (típico redondeo de centavos o retenciones de facturas),
+        // o si no se había fijado un desembolso manual, calzamos automáticamente el desembolso a la suma de los cheques
+        // para que contable y bancariamente sea 100% exacto al papel físico.
+        if (diffCheques > 0 && diffCheques <= 5000) {
+          effectiveMontoDesembolso = totalCheques
+          setCustomMontoDesembolso(totalCheques)
+        } else if (diffCheques > 50) {
           toast.error(
             "Descuadre de Cheques",
-            `La suma de los cheques (${formatPYG(totalCheques)}) no coincide con el total a desembolsar (${formatPYG(montoDesembolsoFinal)}).`
+            `La suma de los cheques (${formatPYG(totalCheques)}) no coincide con el total a desembolsar (${formatPYG(effectiveMontoDesembolso)}). Diferencia: ${formatPYG(totalCheques - effectiveMontoDesembolso)}. Utilice el botón "Ajustar desembolso a cheques" para confirmar la diferencia de cambio/redondeo.`
           )
           return
         }
@@ -414,6 +424,7 @@ export default function MultiSupplierPaymentModal({
     setSubmitting(true)
     try {
       const selectedAcc = bankAccounts.find(b => b.id === (formaPago === "transferencia" ? transferBankAccountId : bancoChequeId))
+      const effectiveDiferenciaCambio = effectiveMontoDesembolso - summary.totalPyg
 
       const batchPayload = {
         fecha_pago: fechaPago,
@@ -442,9 +453,9 @@ export default function MultiSupplierPaymentModal({
               bank_account_id: bancoChequeId || undefined,
             }))
           : [],
-        monto_total_desembolso_pyg: montoDesembolsoFinal,
+        monto_total_desembolso_pyg: effectiveMontoDesembolso,
         monto_total_desembolso_brl: formaPago === "boveda" && monedaBoveda === "BRL" ? summary.totalBrl : undefined,
-        diferencia_cambio_total: diferenciaCambio,
+        diferencia_cambio_total: effectiveDiferenciaCambio,
         items: groups.map((g, idx) => {
           const groupMontoPyg = g.invoices.reduce((s, i) => s + i.monto_pyg, 0)
           const groupMontoMoneda = g.invoices.reduce((s, i) => s + i.monto_moneda, 0)
@@ -452,11 +463,11 @@ export default function MultiSupplierPaymentModal({
           // Prorrateo exacto de la diferencia de cambio por proveedor
           const diffItem = summary.totalPyg > 0
             ? (idx === groups.length - 1
-                ? diferenciaCambio - groups.slice(0, idx).reduce((acc, prevG) => {
+                ? effectiveDiferenciaCambio - groups.slice(0, idx).reduce((acc, prevG) => {
                     const pPyg = prevG.invoices.reduce((s, i) => s + i.monto_pyg, 0)
-                    return acc + Math.round((diferenciaCambio * pPyg) / summary.totalPyg)
+                    return acc + Math.round((effectiveDiferenciaCambio * pPyg) / summary.totalPyg)
                   }, 0)
-                : Math.round((diferenciaCambio * groupMontoPyg) / summary.totalPyg))
+                : Math.round((effectiveDiferenciaCambio * groupMontoPyg) / summary.totalPyg))
             : 0
 
           return {
@@ -1293,25 +1304,58 @@ export default function MultiSupplierPaymentModal({
                 </div>
 
                 {/* Resumen de Cheques */}
-                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl border border-emerald-200 dark:border-emerald-800 flex items-center justify-between text-xs">
-                  <div>
-                    <span className="font-bold text-emerald-900 dark:text-emerald-200">
-                      Suma de Cheques: <strong>{formatPYG(multiCheques.reduce((a, b) => a + b.monto, 0))}</strong>
-                    </span>
-                    <span className="text-slate-500 text-[11px] ml-2">
-                      (Total requerido: {formatPYG(montoDesembolsoFinal)})
-                    </span>
-                  </div>
-                  {Math.abs(multiCheques.reduce((a, b) => a + b.monto, 0) - montoDesembolsoFinal) <= 50 ? (
-                    <span className="text-emerald-700 dark:text-emerald-300 font-black flex items-center gap-1">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600" /> Monto Cuadrado Exacto
-                    </span>
-                  ) : (
-                    <span className="text-rose-600 dark:text-rose-400 font-black flex items-center gap-1">
-                      <AlertTriangle className="w-4 h-4" /> Diferencia: {formatPYG(multiCheques.reduce((a, b) => a + b.monto, 0) - montoDesembolsoFinal)}
-                    </span>
-                  )}
-                </div>
+                {(() => {
+                  const totalCheques = multiCheques.reduce((a, b) => a + b.monto, 0)
+                  const diffCheques = totalCheques - montoDesembolsoFinal
+                  const isCuadrado = Math.abs(diffCheques) <= 50
+
+                  return (
+                    <div className="p-3 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-slate-700 dark:text-slate-300">
+                            Suma de Cheques: <strong className="text-emerald-700 dark:text-emerald-400 font-mono text-sm">{formatPYG(totalCheques)}</strong>
+                          </span>
+                          <span className="text-slate-500 text-[11px]">
+                            (Total facturas: {formatPYG(summary.totalPyg)})
+                          </span>
+                        </div>
+                        {customMontoDesembolso !== null && customMontoDesembolso !== summary.totalPyg && (
+                          <div className="text-[11px] text-amber-700 dark:text-amber-400 font-medium flex items-center gap-1.5 flex-wrap">
+                            <span>Ajuste aplicado al desembolso: {formatPYG(customMontoDesembolso - summary.totalPyg)}</span>
+                            <button
+                              type="button"
+                              onClick={() => setCustomMontoDesembolso(null)}
+                              className="text-emerald-600 hover:underline font-bold text-[10px]"
+                            >
+                              (Restablecer al total de facturas)
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {isCuadrado ? (
+                        <span className="text-emerald-700 dark:text-emerald-300 font-black flex items-center gap-1 shrink-0">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" /> Monto Cuadrado Exacto
+                        </span>
+                      ) : (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-rose-600 dark:text-rose-400 font-black flex items-center gap-1 shrink-0">
+                            <AlertTriangle className="w-4 h-4 shrink-0" /> Diferencia: {formatPYG(diffCheques)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setCustomMontoDesembolso(totalCheques)}
+                            className="px-2.5 py-1 text-[11px] font-bold bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition shadow-xs flex items-center gap-1 shrink-0"
+                            title="Ajustar el desembolso total a la suma de los cheques ingresados"
+                          >
+                            Ajustar desembolso a cheques ({formatPYG(totalCheques)})
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
               </div>
             )}
           </div>

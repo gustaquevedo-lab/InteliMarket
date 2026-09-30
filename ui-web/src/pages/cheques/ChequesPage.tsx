@@ -3,7 +3,7 @@ import {
   CreditCard, Search, Plus, Filter, Download, Eye, CheckCircle2,
   XCircle, AlertTriangle, Clock, Calendar, RefreshCw, Loader2,
   Building2, Landmark, User, FileText, ArrowUpRight, ArrowDownLeft, ShieldCheck,
-  Check, X, FileSpreadsheet, History, Info, Sparkles, DollarSign, Receipt
+  Check, X, FileSpreadsheet, History, Info, Sparkles, DollarSign, Receipt, Ban
 } from "lucide-react"
 import { api } from "../../api"
 import { useAuth } from "../../context/AuthContext"
@@ -72,6 +72,11 @@ export default function ChequesPage() {
   const [selectedCheque, setSelectedCheque] = useState<any>(null)
   const [historial, setHistorial] = useState<any[]>([])
   const [loadingHistorial, setLoadingHistorial] = useState(false)
+
+  // Modal Anulación
+  const [chequeAAnular, setChequeAAnular] = useState<any>(null)
+  const [motivoAnulacion, setMotivoAnulacion] = useState("")
+  const [anulando, setAnulando] = useState(false)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -156,14 +161,33 @@ export default function ChequesPage() {
     })
   }, [cheques, search, filterBanco, filterEstado, filterTipo, tab, supplierMap])
 
-  const handleUpdateEstado = async (id: string, nuevoEstado: string) => {
-    const notas = prompt(`Confirmar cambio de estado a "${nuevoEstado.toUpperCase()}". Ingresá observaciones (opcional):`) || undefined
+  const handleUpdateEstado = async (id: string, nuevoEstado: string, notas?: string) => {
     try {
       await api.cheques.updateEstado(id, { estado: nuevoEstado, notas })
       toast.success("Estado de Cheque Actualizado", `El cheque pasó a estado ${nuevoEstado}.`)
       loadData()
     } catch (e: any) {
       toast.error("Error al actualizar estado", e.message)
+    }
+  }
+
+  const handleAnular = async () => {
+    if (!chequeAAnular) return
+    if (!motivoAnulacion.trim()) {
+      toast.error("Motivo requerido", "Ingresá el motivo de anulación antes de confirmar.")
+      return
+    }
+    setAnulando(true)
+    try {
+      await api.cheques.updateEstado(chequeAAnular.id, { estado: "anulado", notas: motivoAnulacion.trim() })
+      toast.success("Cheque Anulado", `El cheque N° ${chequeAAnular.numero} fue anulado correctamente.`)
+      setChequeAAnular(null)
+      setMotivoAnulacion("")
+      loadData()
+    } catch (e: any) {
+      toast.error("Error al anular cheque", e.message)
+    } finally {
+      setAnulando(false)
     }
   }
 
@@ -529,6 +553,16 @@ export default function ChequesPage() {
                           {(c.estado === "depositado" || c.estado === "en_cartera") && (
                             <button onClick={() => handleUpdateEstado(c.id, "rechazado")} className="btn-secondary text-[10px] px-2 py-1 text-red-600 border-red-200 hover:bg-red-50">
                               Rechazar
+                            </button>
+                          )}
+                          {/* Anular: disponible para cheques emitidos en estado pendiente o entregado */}
+                          {esEmitido && (c.estado === "pendiente" || c.estado === "entregado") && (
+                            <button
+                              onClick={() => { setChequeAAnular(c); setMotivoAnulacion("") }}
+                              className="btn-secondary text-[10px] px-2 py-1 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-700/60 hover:bg-amber-50 dark:hover:bg-amber-950/40"
+                              title="Anular cheque emitido"
+                            >
+                              <Ban className="w-3 h-3 inline mr-0.5" />Anular
                             </button>
                           )}
                         </div>
@@ -1024,6 +1058,99 @@ export default function ChequesPage() {
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL ANULACIÓN DE CHEQUE EMITIDO */}
+      {chequeAAnular && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => { if (!anulando) { setChequeAAnular(null); setMotivoAnulacion("") } }}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md border border-amber-300/60 dark:border-amber-700/40 overflow-hidden" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-amber-100 dark:border-amber-900/40 bg-gradient-to-r from-amber-50 dark:from-amber-950/30 to-transparent flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-amber-100 dark:bg-amber-900/50 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-700/60">
+                <Ban className="w-5 h-5" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-base font-bold text-gray-900 dark:text-white">Anular Cheque Emitido</h3>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                  N° <strong className="font-mono">{chequeAAnular.numero}</strong> · {chequeAAnular.banco_emisor || "Banco"} · {chequeAAnular.beneficiario}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={anulando}
+                onClick={() => { setChequeAAnular(null); setMotivoAnulacion("") }}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-40"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {/* Alerta informativa */}
+              <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <div className="text-[11px] text-amber-800 dark:text-amber-200">
+                  <strong>Acción irreversible.</strong> El cheque pasará a estado <em>"Anulado"</em> y no podrá retomarse. Se registrará en el historial con el motivo indicado.
+                </div>
+              </div>
+
+              {/* Resumen del cheque */}
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="bg-gray-50 dark:bg-slate-800/60 rounded-xl p-3 border border-gray-100 dark:border-slate-700">
+                  <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Monto</p>
+                  <p className="font-black font-mono text-gray-900 dark:text-white mt-0.5">{chequeAAnular.moneda === "USD" ? `US$ ${Number(chequeAAnular.monto).toLocaleString("en-US", { minimumFractionDigits: 2 })}` : `Gs. ${Number(chequeAAnular.monto).toLocaleString("es-PY")}`}</p>
+                </div>
+                <div className="bg-gray-50 dark:bg-slate-800/60 rounded-xl p-3 border border-gray-100 dark:border-slate-700">
+                  <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Estado Actual</p>
+                  <p className="font-bold text-gray-800 dark:text-gray-200 mt-0.5 capitalize">{chequeAAnular.estado}</p>
+                </div>
+              </div>
+
+              {/* Campo motivo */}
+              <div>
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1.5">
+                  Motivo de Anulación <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  rows={3}
+                  autoFocus
+                  disabled={anulando}
+                  value={motivoAnulacion}
+                  onChange={e => setMotivoAnulacion(e.target.value)}
+                  placeholder="Ej: Error en monto, cheque extraviado, acuerdo cancelado con proveedor..."
+                  className="w-full rounded-xl border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs px-3 py-2.5 text-gray-800 dark:text-gray-200 placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:ring-amber-400/40 focus:border-amber-400 disabled:opacity-60"
+                />
+                {!motivoAnulacion.trim() && (
+                  <p className="text-[10px] text-red-500 mt-1">El motivo es obligatorio para anular un cheque.</p>
+                )}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between bg-gray-50/70 dark:bg-slate-900/50">
+              <button
+                type="button"
+                disabled={anulando}
+                onClick={() => { setChequeAAnular(null); setMotivoAnulacion("") }}
+                className="btn-outline text-xs px-4 py-2 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={anulando || !motivoAnulacion.trim()}
+                onClick={handleAnular}
+                className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-black transition disabled:opacity-50 flex items-center gap-2 shadow-sm"
+              >
+                {anulando ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /><span>Anulando...</span></>
+                ) : (
+                  <><Ban className="w-4 h-4" /><span>Confirmar Anulación</span></>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

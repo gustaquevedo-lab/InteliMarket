@@ -153,7 +153,7 @@ async def list_invoices(
             select(
                 SupplierCreditNoteApplication.invoice_id,
                 SupplierCreditNoteApplication.monto_aplicado,
-                SupplierCreditNoteApplication.fecha_aplicacion,
+                SupplierCreditNoteApplication.fecha.label("fecha_aplicacion"),
                 SupplierCreditNote.id.label("nc_id"),
                 SupplierCreditNote.numero.label("nc_numero"),
                 SupplierCreditNote.motivo.label("nc_motivo"),
@@ -196,7 +196,7 @@ async def list_invoices(
             nc_orig_res = await db.execute(nc_orig_q)
             for nc in nc_orig_res.all():
                 for inv in invoices:
-                    if inv.numero_factura and inv.numero_factura.strip() == nc.numero_factura_origen.strip() and inv.supplier_id == nc.supplier_id:
+                    if inv.numero_factura and inv.numero_factura.strip() == (nc.numero_factura_origen or "").strip() and inv.supplier_id == nc.supplier_id:
                         if not any(x["id"] == str(nc.id) for x in nc_map[inv.id]):
                             nc_map[inv.id].append({
                                 "id": str(nc.id),
