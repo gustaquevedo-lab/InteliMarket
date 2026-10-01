@@ -695,11 +695,27 @@ def generate_cierre_escpos(recon: dict) -> dict:
     lines.append("=" * W)
 
     # 5. Conciliación y Dictamen
-    dif = recon['diferencia_consolidada_gs']
-    signo = "+" if dif > 0 else ""
-    lines.append(_format_two_col("DIFERENCIA CONSOLIDADA GS:", f"{signo}{dif:,.0f} Gs.", W))
-    estado_cuadre = "CUADRADO" if abs(dif) < 5000 else ("SOBRANTE" if dif > 0 else "FALTANTE")
-    lines.append(f"DICTAMEN AUDITORIA: {estado_cuadre}".center(W))
+    dif_ef = float(recon.get('diferencia_consolidada_gs', 0.0))
+    va = recon.get('vouchers_audit') or {}
+    tiene_auditoria_vouchers = bool(va.get('auditado'))
+    dif_vouch = float(va.get('diferencia_vouchers_gs', 0.0)) if tiene_auditoria_vouchers else float(recon.get('diferencia_vouchers_gs', 0.0))
+    dif_global = float(recon.get('diferencia_global_turno_gs', dif_ef + dif_vouch))
+
+    signo_ef = "+" if dif_ef > 0 else ""
+    signo_v = "+" if dif_vouch > 0 else ""
+    signo_g = "+" if dif_global > 0 else ""
+
+    if tiene_auditoria_vouchers and abs(dif_vouch) > 0:
+        lines.append(_format_two_col("  Dif. Efectivo Gaveta:", f"{signo_ef}{dif_ef:,.0f} Gs.", W))
+        lines.append(_format_two_col("  Dif. Comprobantes:", f"{signo_v}{dif_vouch:,.0f} Gs.", W))
+        lines.append("-" * W)
+        lines.append(_format_two_col("DIFERENCIA NETA TURNO:", f"{signo_g}{dif_global:,.0f} Gs.", W))
+        estado_cuadre = "CUADRADO" if abs(dif_global) < 30000 else ("SOBRANTE" if dif_global > 0 else "FALTANTE")
+        lines.append(f"DICTAMEN AUDITORIA: {estado_cuadre}".center(W))
+    else:
+        lines.append(_format_two_col("DIFERENCIA CONSOLIDADA GS:", f"{signo_ef}{dif_ef:,.0f} Gs.", W))
+        estado_cuadre = "CUADRADO" if abs(dif_ef) < 30000 else ("SOBRANTE" if dif_ef > 0 else "FALTANTE")
+        lines.append(f"DICTAMEN AUDITORIA: {estado_cuadre}".center(W))
     lines.append("=" * W)
 
     # Detalle de composición de efectivo rendido
@@ -1058,7 +1074,28 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
             o_key = (a.origen_forma_pago or "EFECTIVO").upper()
 
             # 1. Sumar al canal destino
-            if d_key in desglose_by_key:
+            if d_key in ["EFECTIVO", "EFECTIVO_PYG"]:
+                if "EFECTIVO_PYG" in desglose_by_key:
+                    desglose_by_key["EFECTIVO_PYG"]["cantidad"] += 1
+                    desglose_by_key["EFECTIVO_PYG"]["monto_gs"] += float(m_gs_adj)
+                    desglose_by_key["EFECTIVO_PYG"]["monto_orig"] += float(m_gs_adj)
+                    desglose_by_key["EFECTIVO_PYG"]["monto_formateado"] = f"{desglose_by_key['EFECTIVO_PYG']['monto_gs']:,.0f}".replace(",", ".") + " Gs."
+                else:
+                    item_adj = {
+                        "clave": "EFECTIVO_PYG",
+                        "label": "Efectivo Gs.",
+                        "tipo": "efectivo",
+                        "icon": "banknote",
+                        "cantidad": 1,
+                        "monto_orig": float(m_gs_adj),
+                        "monto_gs": float(m_gs_adj),
+                        "monto_formateado": f"{float(m_gs_adj):,.0f}".replace(",", ".") + " Gs.",
+                        "moneda": "PYG",
+                    }
+                    desglose_detallado.append(item_adj)
+                    desglose_by_key["EFECTIVO_PYG"] = item_adj
+                efectivo_pyg += m_gs_adj
+            elif d_key in desglose_by_key:
                 desglose_by_key[d_key]["cantidad"] += 1
                 desglose_by_key[d_key]["monto_gs"] += float(m_gs_adj)
                 desglose_by_key[d_key]["monto_orig"] += float(m_gs_adj)
@@ -1095,6 +1132,9 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
                     for k in desglose_by_key:
                         if ("DINELCO" in o_key and "DINELCO" in k) or \
                            ("BANCARD" in o_key and "BANCARD" in k) or \
+                           ("DEBITO" in o_key and "DEBITO" in k) or \
+                           ("CREDITO" in o_key and "CREDITO" in k) or \
+                           ("TARJETA" in o_key and ("DEBITO" in k or "CREDITO" in k)) or \
                            ("QR" in o_key and "QR" in k) or \
                            ("PIX" in o_key and "PIX" in k) or \
                            ("EXTRA_CLUB" in o_key and "EXTRA_CLUB" in k):
@@ -4548,10 +4588,14 @@ async def create_payment_adjustment(
         raise ValueError("Sesión de caja no encontrada")
 
     d_key = data["destino_canal_key"]
-    d_label = data.get("destino_canal_label")
-    if not d_label:
-        matched = PAYMENT_CHANNEL_MAP.get(d_key)
-        d_label = matched[1] if matched else d_key.replace("_", " ").title()
+    if d_key in ["EFECTIVO", "EFECTIVO_PYG"]:
+        d_key = "EFECTIVO_PYG"
+        d_label = "Efectivo en Gaveta"
+    else:
+        d_label = data.get("destino_canal_label")
+        if not d_label:
+            matched = PAYMENT_CHANNEL_MAP.get(d_key)
+            d_label = matched[1] if matched else d_key.replace("_", " ").title()
 
     m_gs = Decimal(str(data.get("monto_gs") or 0))
     if m_gs <= 0:

@@ -569,6 +569,7 @@ export const offlineDB = {
   creditAccounts: {
     getAll: () => getStore<CachedCreditAccount>(STORE_CREDIT_ACCOUNTS),
     getByCustomer: async (customerId: string) => (await getByIndex<CachedCreditAccount>(STORE_CREDIT_ACCOUNTS, "customer_id", customerId))[0] || null,
+    put: (account: CachedCreditAccount) => putItem(STORE_CREDIT_ACCOUNTS, account),
     setAll: (accounts: CachedCreditAccount[]) => clearStore(STORE_CREDIT_ACCOUNTS).then(() => putMany(STORE_CREDIT_ACCOUNTS, accounts)),
     clear: () => clearStore(STORE_CREDIT_ACCOUNTS),
   },

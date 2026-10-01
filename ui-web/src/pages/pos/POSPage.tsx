@@ -7516,7 +7516,17 @@ export default function POSPage() {
             ventaYaCreadaSinRecibo = true
             createdSaleId = created.id
           } catch (apiErr: any) {
-            console.error("No se pudo registrar la venta para obtener el número interno, se reintenta en modo offline:", apiErr)
+            console.error("No se pudo registrar la venta previa:", apiErr)
+            const msg = apiErr?.message || "Error al registrar venta"
+            const status = apiErr?.status || (apiErr?.response?.status)
+            const isBusinessRejection = status === 400 || status === 422 || status === 409 ||
+              /crédito insuficiente|en mora|cuenta inactiva|sin disponible|regla ineludible/i.test(msg)
+
+            if (isBusinessRejection && isClubMember) {
+              toast.error("Venta a Crédito Rechazada", msg)
+              setSubmitting(false)
+              return
+            }
           }
         }
       }
@@ -7798,38 +7808,25 @@ export default function POSPage() {
       // sumaba al delay entre cobrar y que salga el ticket.
       if (!ventaYaCreadaSinRecibo) {
         if (!serverOnline || !navigator.onLine) {
-          // Modo Offline Inmediato (0ms de espera): encolado directo en IndexedDB
-          try {
-            const offlineId = `off-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-            createdOfflineSaleId = offlineId
-            await offlineDB.pendingSales.add({
-              id: offlineId,
-              data: { ...saleBasePayload, recibo_html: receiptHtml },
-              created_at: new Date().toISOString(),
-              status: "pending",
-              retry_count: 0,
-              last_retry: new Date().toISOString(),
-              next_retry: new Date().toISOString(),
-            })
-            // Avisa a la malla LAN cuanto se le vendio a este cliente a
-            // credito, para que las demas cajas descuenten lo mismo de su
-            // saldo offline aunque el servidor siga caido (ver
-            // OfflineContext.getExtraClubOfflineBalance).
-            {
-              const extraClubMontoOffline = salePaymentsForCreate.find((p) => p.forma_pago === "EXTRA_CLUB")?.monto || 0
-              if (extraClubMontoOffline > 0) {
-                recordExtraClubOfflineConsumption(customer.id, extraClubMontoOffline, offlineId).catch(() => {})
-              }
+          if (isClubMember) {
+            // Modo Offline: Inspección Pre-flight estricta en IndexedDB
+            const offlineAcc = await offlineDB.creditAccounts.getByCustomer(customer.id).catch(() => null)
+            const montoClub = isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+            if (!offlineAcc || !offlineAcc.activo) {
+              toast.error("Venta Offline Rechazada", "El cliente no posee una cuenta de crédito activa en la memoria de la caja.")
+              setSubmitting(false)
+              return
             }
-            toast.warning("Venta guardada en modo offline", "El ticket se imprimió y la venta se sincronizará automáticamente cuando vuelva la conexión.")
-          } catch (dbErr) {
-            console.error("Error guardando en pendingSales:", dbErr)
-            toast.error("Venta no guardada en el sistema", "Error de almacenamiento local. Avisá a soporte.")
-          }
-        } else {
-          // Modo Online: registro en segundo plano sin retrasar la salida del ticket
-          saleCreatePromise = withTimeout(api.sales.create({ ...saleBasePayload, recibo_html: receiptHtml } as any), 8000).catch(async (apiErr: any) => {
-            console.warn("[POS] API central no disponible o demorada, encolando venta offline en IndexedDB...", apiErr)
+            const dispLocal = Number(offlineAcc.saldo_disponible || 0)
+            if (dispLocal < montoClub) {
+              toast.error(
+                "Venta Offline Rechazada: Saldo Insuficiente",
+                `El socio dispone de ${formatPYG(dispLocal)} en la caja para una compra de ${formatPYG(montoClub)}. Sin conexión con el servidor no se autorizan compras sin disponible respaldado en caja. Cobre en efectivo o tarjeta.`
+              )
+              setSubmitting(false)
+              return
+            }
+
             try {
               const offlineId = `off-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
               createdOfflineSaleId = offlineId
@@ -7842,19 +7839,120 @@ export default function POSPage() {
                 last_retry: new Date().toISOString(),
                 next_retry: new Date().toISOString(),
               })
-              {
-                const extraClubMontoOffline = salePaymentsForCreate.find((p) => p.forma_pago === "EXTRA_CLUB")?.monto || 0
-                if (extraClubMontoOffline > 0) {
-                  recordExtraClubOfflineConsumption(customer.id, extraClubMontoOffline, offlineId).catch(() => {})
-                }
-              }
+              // Actualizar saldo disponible local en IndexedDB
+              await offlineDB.creditAccounts.put({
+                ...offlineAcc,
+                saldo_disponible: offlineAcc.saldo_disponible - montoClub,
+                saldo_utilizado: offlineAcc.saldo_utilizado + montoClub,
+              })
+              recordExtraClubOfflineConsumption(customer.id, montoClub, offlineId).catch(() => {})
+              toast.warning("Venta Extra Club autorizada en modo offline", "Verificada y respaldada con el saldo disponible de la memoria de la caja.")
+            } catch (dbErr) {
+              console.error("Error guardando en pendingSales:", dbErr)
+              toast.error("Venta no guardada en la caja", "Error de almacenamiento local. Avisá a soporte.")
+              setSubmitting(false)
+              return
+            }
+          } else {
+            // Venta al contado offline estándar
+            try {
+              const offlineId = `off-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+              createdOfflineSaleId = offlineId
+              await offlineDB.pendingSales.add({
+                id: offlineId,
+                data: { ...saleBasePayload, recibo_html: receiptHtml },
+                created_at: new Date().toISOString(),
+                status: "pending",
+                retry_count: 0,
+                last_retry: new Date().toISOString(),
+                next_retry: new Date().toISOString(),
+              })
               toast.warning("Venta guardada en modo offline", "El ticket se imprimió y la venta se sincronizará automáticamente cuando vuelva la conexión.")
             } catch (dbErr) {
               console.error("Error guardando en pendingSales:", dbErr)
-              toast.error("Venta no guardada en el sistema", apiErr?.message || "Avisá a soporte.")
+              toast.error("Venta no guardada en el sistema", "Error de almacenamiento local. Avisá a soporte.")
             }
-            return null
-          })
+          }
+        } else {
+          // Modo Online
+          if (isClubMember) {
+            // Extra Club Online: confirmación en servidor ANTES de imprimir ticket
+            try {
+              const created = await withTimeout(api.sales.create({ ...saleBasePayload, recibo_html: receiptHtml } as any), 8000)
+              createdSaleId = created.id
+              if (created.numero) numeroComprobante = created.numero
+              if ((created as any).numero_interno) numeroInterno = (created as any).numero_interno
+              ventaYaCreadaSinRecibo = true
+            } catch (apiErr: any) {
+              console.warn("[POS] Error registrando venta Extra Club en backend:", apiErr)
+              const msg = apiErr?.message || "Rechazo de crédito en servidor"
+              const status = apiErr?.status || (apiErr?.response?.status)
+              const isBusinessRejection = status === 400 || status === 422 || status === 409 ||
+                /crédito insuficiente|en mora|cuenta inactiva|sin disponible|regla ineludible/i.test(msg)
+
+              if (isBusinessRejection) {
+                toast.error("Venta a Crédito Rechazada", msg)
+                setSubmitting(false)
+                return
+              }
+
+              // Si fue corte real de conexión (timeout / network error): verificar respaldo local
+              const offlineAcc = await offlineDB.creditAccounts.getByCustomer(customer.id).catch(() => null)
+              const montoClub = isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+              if (!offlineAcc || !offlineAcc.activo || Number(offlineAcc.saldo_disponible || 0) < montoClub) {
+                const disp = offlineAcc ? Number(offlineAcc.saldo_disponible || 0) : 0
+                toast.error(
+                  "Servidor Inalcanzable y Sin Saldo Local",
+                  `El servidor no respondió a tiempo y la caja registra disponible de ${formatPYG(disp)}. Cobre en efectivo o tarjeta.`
+                )
+                setSubmitting(false)
+                return
+              }
+
+              // Respaldado localmente
+              const offlineId = `off-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+              createdOfflineSaleId = offlineId
+              await offlineDB.pendingSales.add({
+                id: offlineId,
+                data: { ...saleBasePayload, recibo_html: receiptHtml },
+                created_at: new Date().toISOString(),
+                status: "pending",
+                retry_count: 0,
+                last_retry: new Date().toISOString(),
+                next_retry: new Date().toISOString(),
+              })
+              await offlineDB.creditAccounts.put({
+                ...offlineAcc,
+                saldo_disponible: offlineAcc.saldo_disponible - montoClub,
+                saldo_utilizado: offlineAcc.saldo_utilizado + montoClub,
+              })
+              recordExtraClubOfflineConsumption(customer.id, montoClub, offlineId).catch(() => {})
+              toast.warning("Venta guardada en modo offline", "El servidor no respondió pero se verificó el saldo en la base local de la caja.")
+            }
+          } else {
+            // Contado / Medios normales: no bloquea el ticket
+            saleCreatePromise = withTimeout(api.sales.create({ ...saleBasePayload, recibo_html: receiptHtml } as any), 8000).catch(async (apiErr: any) => {
+              console.warn("[POS] API central no disponible o demorada, encolando venta offline en IndexedDB...", apiErr)
+              try {
+                const offlineId = `off-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+                createdOfflineSaleId = offlineId
+                await offlineDB.pendingSales.add({
+                  id: offlineId,
+                  data: { ...saleBasePayload, recibo_html: receiptHtml },
+                  created_at: new Date().toISOString(),
+                  status: "pending",
+                  retry_count: 0,
+                  last_retry: new Date().toISOString(),
+                  next_retry: new Date().toISOString(),
+                })
+                toast.warning("Venta guardada en modo offline", "El ticket se imprimió y la venta se sincronizará automáticamente cuando vuelva la conexión.")
+              } catch (dbErr) {
+                console.error("Error guardando en pendingSales:", dbErr)
+                toast.error("Venta no guardada en el sistema", apiErr?.message || "Avisá a soporte.")
+              }
+              return null
+            })
+          }
         }
       }
 
