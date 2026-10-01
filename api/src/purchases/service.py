@@ -891,12 +891,9 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         invoice_num = (data.proveedor_ref or receipt.numero).strip()
         iva_10 = (receipt.total / Decimal("11")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
-        is_br_sup = bool(sup and (sup.tipo_proveedor in ("brasilero", "br") or (getattr(sup, "moneda_default", "") == "BRL"))) or (data.total_brl is not None)
-        inv_moneda = "BRL" if is_br_sup else "PYG"
+        inv_moneda = "BRL" if (data.total_brl is not None and data.total_brl > 0 and getattr(data, "moneda", "") == "BRL") else "PYG"
         inv_tc = data.tipo_cambio or Decimal("1")
-        inv_total_brl = data.total_brl
-        if is_br_sup and inv_total_brl is None and inv_tc > 1:
-            inv_total_brl = (receipt.total / inv_tc).quantize(Decimal("0.01"))
+        inv_total_brl = data.total_brl if inv_moneda == "BRL" else None
 
         inv = SupplierInvoice(
             company_id=company_id,

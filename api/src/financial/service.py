@@ -1082,12 +1082,9 @@ async def auto_create_invoice_from_receipt(db: AsyncSession, receipt_id: str) ->
     sup = sup_result.scalar_one_or_none()
     plazo_dias = sup.plazo_pago_dias if (sup and sup.plazo_pago_dias) else 30
 
-    is_br_sup = bool(sup and (sup.tipo_proveedor in ("brasilero", "br") or getattr(sup, "moneda_default", "") == "BRL")) or (po.moneda == "BRL")
-    inv_moneda = "BRL" if is_br_sup else (po.moneda or "PYG")
+    inv_moneda = po.moneda or "PYG"
     inv_tc = po.tipo_cambio or Decimal("1")
-    inv_total_brl = None
-    if is_br_sup and inv_tc > 1:
-        inv_total_brl = (total / inv_tc).quantize(Decimal("0.01"))
+    inv_total_brl = total if inv_moneda == "BRL" else None
 
     obs_info = f" - Obs: {receipt.motivo_revision}" if receipt.motivo_revision else ""
     invoice = SupplierInvoice(
