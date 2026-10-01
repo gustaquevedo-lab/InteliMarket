@@ -92,6 +92,38 @@ async def export_customer_return_pdf_endpoint(
     )
 
 
+@router.get("/returns/{return_id}/nota-credito/pdf")
+async def export_customer_return_nota_credito_pdf_endpoint(
+    return_id: str,
+    copy: str = Query("ORIGINAL: CLIENTE"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_auth),
+):
+    """
+    Genera la Nota de Crédito Oficial A4 aprobada por la SET / DNIT en PDF.
+    Diseño legal con desglose tributario, identificación de factura que modifica,
+    subtotales por tasa, liquidación del IVA, total en letras y casillas de firma.
+    """
+    cid = user.get("company_id")
+    ret_data = await service.get_return_pdf_data(db, return_id, cid)
+    if not ret_data:
+        raise HTTPException(status_code=404, detail="Devolución no encontrada")
+
+    company = await _get_company_info(db, str(ret_data.get("company_id") or cid))
+    pdf_bytes = pdf_reports.generate_nota_credito_pdf(company, ret_data, copy_type=copy)
+    nc_num = ret_data.get("nota_credito_numero") or ret_data.get("numero") or f"NC_{return_id[:8]}"
+    clean_num = str(nc_num).replace("/", "_").replace(" ", "_").replace(":", "_")
+    filename = f"Nota_Credito_{clean_num}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )
+
+
 @router.post("/returns/{return_id}/approve", response_model=ReturnResponse)
 async def approve_return(return_id: str, body: ReturnApprove, db: AsyncSession = Depends(get_db)):
     result = await service.approve_return(db, return_id, body)

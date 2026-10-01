@@ -12,6 +12,7 @@ import { useConfirm } from "../../components/ConfirmDialog"
 import { formatPYG, formatDate } from "../../utils/format"
 import { useAuth } from "../../context/AuthContext"
 import FacturaA4Modal from "./FacturaA4Modal"
+import NotaCreditoA4Modal from "./NotaCreditoA4Modal"
 import Rg90ExportModal from "./Rg90ExportModal"
 import EmitirFacturaAdminModal from "./EmitirFacturaAdminModal"
 
@@ -668,7 +669,7 @@ export default function SalesPage() {
                           <button
                             onClick={() => setViewingSale(s)}
                             className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-xl transition"
-                            title="Ver e Imprimir Factura Legal A4 (SET)"
+                            title={isNC ? "Ver e Imprimir Nota de Crédito Legal A4 (SET)" : "Ver e Imprimir Factura Legal A4 (SET)"}
                           >
                             <Eye className="w-4 h-4" />
                           </button>
@@ -695,18 +696,31 @@ export default function SalesPage() {
         </div>
       </div>
 
-      {/* ── MODAL OFICIAL DE FACTURA A4 (SET / DNIT) ───────────────────────── */}
+      {/* ── MODAL OFICIAL: FACTURA A4 (SET) O NOTA DE CRÉDITO A4 (SET) ───────── */}
       {viewingSale && !anularModal && (
-        <FacturaA4Modal
-          sale={viewingSale}
-          customer={viewingCustomer || (viewingSale.customer_id ? customersMap.get(viewingSale.customer_id) : null)}
-          onClose={() => {
-            setViewingSale(null)
-            setViewingCustomer(null)
-          }}
-          timbrado={timbradoFacturas}
-          timbradoVencimiento={timbradoVencimiento}
-        />
+        viewingSale.tipo_comprobante === "nota_credito" || activeTab === "notas_credito" ? (
+          <NotaCreditoA4Modal
+            sale={viewingSale}
+            customer={viewingCustomer || (viewingSale.customer_id ? customersMap.get(viewingSale.customer_id) : null)}
+            onClose={() => {
+              setViewingSale(null)
+              setViewingCustomer(null)
+            }}
+            timbrado={timbradoNC}
+            timbradoVencimiento={timbradoVencimiento}
+          />
+        ) : (
+          <FacturaA4Modal
+            sale={viewingSale}
+            customer={viewingCustomer || (viewingSale.customer_id ? customersMap.get(viewingSale.customer_id) : null)}
+            onClose={() => {
+              setViewingSale(null)
+              setViewingCustomer(null)
+            }}
+            timbrado={timbradoFacturas}
+            timbradoVencimiento={timbradoVencimiento}
+          />
+        )
       )}
 
       {/* ── MODAL DE CIERRE DE CAJA X / Z ──────────────────────────────────── */}

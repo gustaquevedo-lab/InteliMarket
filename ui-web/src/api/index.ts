@@ -3143,6 +3143,19 @@ export const api = {
         throw err
       }
     },
+    downloadNotaCreditoPdf: (returnId: string, numero?: string, copy: string = "ORIGINAL: CLIENTE") => {
+      const clean = (numero || "NC").replace(/\s+/g, "_")
+      return downloadAuthenticated(`/v1/returns/${returnId}/nota-credito/pdf?copy=${encodeURIComponent(copy)}`, {}, `Nota_Credito_${clean}.pdf`)
+    },
+    getNotaCreditoPdfBlobUrl: async (returnId: string, copy: string = "ORIGINAL: CLIENTE"): Promise<string> => {
+      const token = localStorage.getItem("access_token")
+      const url = `${API_BASE}/v1/returns/${returnId}/nota-credito/pdf?copy=${encodeURIComponent(copy)}`
+      const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      if (!res.ok) throw new Error(`Error ${res.status} al generar el PDF Oficial de la Nota de Crédito`)
+      const blob = await res.blob()
+      const fileBlob = new Blob([blob], { type: "application/pdf" })
+      return URL.createObjectURL(fileBlob)
+    },
   },
   salesOrders: {
     list: (params?: { estado?: string }) => client.get<SalesOrder[]>(`/v1/companies/${COMPANY_ID}/sales-orders`, params as any),

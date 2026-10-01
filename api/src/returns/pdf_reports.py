@@ -736,3 +736,492 @@ def generate_customer_return_pdf(company: dict, data: dict, generated_by: str = 
     pdf_bytes = buffer.getvalue()
     buffer.close()
     return pdf_bytes
+
+
+# ── CONVERSOR DE NÚMEROS A LETRAS PARA NOTAS DE CRÉDITO SET ──────────────
+
+def _numero_a_letras_pyg(monto: int | float | Decimal) -> str:
+    """Convierte un importe entero en Guaraníes a texto en mayúsculas reglamentario SET."""
+    n = int(abs(monto))
+    if n == 0:
+        return "CERO"
+
+    unidades = ["", "UN", "DOS", "TRES", "CUATRO", "CINCO", "SEIS", "SIETE", "OCHO", "NUEVE"]
+    dieces = ["DIEZ", "ONCE", "DOCE", "TRECE", "CATORCE", "QUINCE", "DIECISÉIS", "DIECISIETE", "DIECIOCHO", "DIECINUEVE"]
+    decenas = ["", "DIEZ", "VEINTE", "TREINTA", "CUARENTA", "CINCUENTA", "SESENTA", "SETENTA", "OCHENTA", "NOVENTA"]
+    centenas = ["", "CIENTO", "DOSCIENTOS", "TRESCIENTOS", "CUATROCIENTOS", "QUINIENTOS", "SEISCIENTOS", "SETECIENTOS", "OCHOCIENTOS", "NOVECIENTOS"]
+
+    def _seccion(num: int) -> str:
+        if num == 100:
+            return "CIEN"
+        c = num // 100
+        d = (num % 100) // 10
+        u = num % 10
+        res = []
+        if c > 0:
+            res.append(centenas[c])
+        if d == 1:
+            res.append(dieces[u])
+        elif d == 2 and u > 0:
+            res.append(f"VEINTI{unidades[u]}")
+        elif d > 0:
+            res.append(decenas[d])
+            if u > 0:
+                res.append(f"Y {unidades[u]}")
+        elif u > 0:
+            res.append(unidades[u])
+        return " ".join(res)
+
+    partes = []
+    millones = n // 1000000
+    resto = n % 1000000
+    if millones == 1:
+        partes.append("UN MILLÓN")
+    elif millones > 1:
+        partes.append(f"{_seccion(millones)} MILLONES")
+
+    miles = resto // 1000
+    resto = resto % 1000
+    if miles == 1:
+        partes.append("MIL")
+    elif miles > 1:
+        partes.append(f"{_seccion(miles)} MIL")
+
+    if resto > 0:
+        partes.append(_seccion(resto))
+
+    return " ".join(partes).strip()
+
+
+# ── GENERADOR OFICIAL DE NOTA DE CRÉDITO A4 (SET / DNIT) ──────────────────
+
+def generate_nota_credito_pdf(
+    company: dict,
+    data: dict,
+    copy_type: str = "ORIGINAL: CLIENTE",
+) -> bytes:
+    """
+    Genera la Nota de Crédito Oficial A4 (SET / DNIT) para clientes de Extra Supermercado Mayorista.
+    Cumple con el formato legal de Autoimpresor/Facturación Electrónica:
+      - Encabezado con datos del emisor y timbrado oficial.
+      - Recuadro obligatorio SET: COMPROBANTE QUE MODIFICA (Factura, Timbrado, Fecha y Motivo).
+      - Recuadro de datos del cliente receptor y condición de venta.
+      - Detalle de ítems con columnas canónicas: Cant., Código, Descripción, P. Unitario, Exentas, 5%, 10%.
+      - Subtotales por tasa, Total General en números y en letras.
+      - Liquidación del IVA (5%, 10%, Total IVA).
+      - Destino del documento (ORIGINAL: CLIENTE / DUPLICADO: ARCHIVO TRIBUTARIO).
+      - Casillas oficiales de firma del emisor y del cliente en conformidad.
+    """
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=8 * mm,
+        rightMargin=8 * mm,
+        topMargin=8 * mm,
+        bottomMargin=8 * mm,
+    )
+
+    styles = getSampleStyleSheet()
+    elements = []
+
+    # Emisor
+    razon_social = company.get("razon_social") or "GRUPO SANTA TERESA E.A.S."
+    nombre_fantasia = company.get("nombre_fantasia") or company.get("nombre") or "Extra Supermercado Mayorista"
+    ruc_empresa = company.get("ruc") or "80150377-9"
+    dir_empresa = company.get("direccion") or "Alejo Garcia esquina Carlos Antonio López"
+    ciudad_empresa = company.get("ciudad") or "Pedro Juan Caballero, Amambay - Paraguay"
+    tel_empresa = company.get("telefono") or "+595992052200"
+    actividad = company.get("actividad_principal") or "Venta al por mayor y menor de mercaderías generales en supermercado"
+
+    # Datos NC
+    nc_numero = data.get("nota_credito_numero") or data.get("numero") or "001-001-0000001"
+    timbrado_numero = data.get("nota_credito_timbrado") or company.get("timbrado_numero") or "18545636"
+    timbrado_vencimiento = data.get("timbrado_vencimiento") or "31/12/2026"
+
+    # Factura que modifica
+    factura_numero = data.get("sale_numero") or "001-001-0000001"
+    factura_timbrado = data.get("sale_timbrado") or timbrado_numero
+    factura_fecha_raw = data.get("sale_fecha") or data.get("fecha")
+    if isinstance(factura_fecha_raw, datetime):
+        factura_fecha = factura_fecha_raw.astimezone(PY_TZ).strftime("%d/%m/%Y")
+    elif factura_fecha_raw:
+        try:
+            factura_fecha = datetime.fromisoformat(str(factura_fecha_raw)).astimezone(PY_TZ).strftime("%d/%m/%Y")
+        except Exception:
+            factura_fecha = str(factura_fecha_raw)[:10]
+    else:
+        factura_fecha = datetime.now(PY_TZ).strftime("%d/%m/%Y")
+
+    motivo = data.get("motivo_detalle") or data.get("motivo") or "Devolución de mercaderías y regularización de cuenta"
+
+    # Cliente
+    cust_name = data.get("customer_name") or "CONSUMIDOR FINAL"
+    cust_ruc = data.get("customer_ruc") or "44444401-7"
+    cust_dir = data.get("customer_direccion") or "Pedro Juan Caballero, Amambay"
+    cust_tel = data.get("customer_telefono") or "—"
+
+    # Fecha Emisión NC
+    fecha_emision_raw = data.get("fecha_aprobacion") or data.get("fecha") or datetime.now(PY_TZ)
+    if isinstance(fecha_emision_raw, datetime):
+        fecha_emision_nc = fecha_emision_raw.astimezone(PY_TZ).strftime("%d/%m/%Y %H:%M")
+    elif fecha_emision_raw:
+        try:
+            fecha_emision_nc = datetime.fromisoformat(str(fecha_emision_raw)).astimezone(PY_TZ).strftime("%d/%m/%Y %H:%M")
+        except Exception:
+            fecha_emision_nc = str(fecha_emision_raw)
+    else:
+        fecha_emision_nc = datetime.now(PY_TZ).strftime("%d/%m/%Y %H:%M")
+
+    # 1. ENCABEZADO: EMISOR & RECUADRO TIMBRADO SET
+    logo_flow = _logo_flowable(max_width=38 * mm, max_height=18 * mm)
+
+    emisor_lines = [
+        Paragraph(f"<b>{razon_social}</b>", ParagraphStyle("NC_Rz", fontName=FONT_BOLD, fontSize=11, leading=13, textColor=COLOR_SLATE_950)),
+        Paragraph(f"<b>{nombre_fantasia}</b>", ParagraphStyle("NC_NF", fontName=FONT_BOLD, fontSize=9.5, leading=11, textColor=COLOR_SLATE_800)),
+        Paragraph(actividad, ParagraphStyle("NC_Act", fontName=FONT_REGULAR, fontSize=7.5, leading=9, textColor=COLOR_SLATE_600)),
+        Paragraph(f"{dir_empresa} · {ciudad_empresa}", ParagraphStyle("NC_Dir", fontName=FONT_REGULAR, fontSize=7.5, leading=9, textColor=COLOR_SLATE_600)),
+        Paragraph(f"Teléfono: {tel_empresa}", ParagraphStyle("NC_Tel", fontName=FONT_REGULAR, fontSize=7.5, leading=9, textColor=COLOR_SLATE_600)),
+    ]
+
+    timbrado_box = [
+        Paragraph(f"<b>TIMBRADO Nº {timbrado_numero}</b>", ParagraphStyle("NC_Timb", fontName=FONT_BOLD, fontSize=8.5, leading=10, alignment=TA_CENTER)),
+        Paragraph(f"Válido hasta: {timbrado_vencimiento}", ParagraphStyle("NC_Venc", fontName=FONT_REGULAR, fontSize=7.5, leading=9, alignment=TA_CENTER, textColor=COLOR_SLATE_600)),
+        Paragraph(f"<b>RUC: {ruc_empresa}</b>", ParagraphStyle("NC_Ruc", fontName=FONT_BOLD, fontSize=9, leading=11, alignment=TA_CENTER)),
+        Spacer(1, 1 * mm),
+        Paragraph("<b>NOTA DE CRÉDITO</b>", ParagraphStyle("NC_Title", fontName=FONT_BOLD, fontSize=11, leading=13, alignment=TA_CENTER, textColor=WHITE)),
+        Spacer(1, 1 * mm),
+        Paragraph(f"<b>Nº {nc_numero}</b>", ParagraphStyle("NC_Num", fontName=FONT_BOLD, fontSize=11, leading=13, alignment=TA_CENTER, textColor=COLOR_SLATE_950)),
+    ]
+
+    timbrado_cell = Table(
+        [[timbrado_box[0]], [timbrado_box[1]], [timbrado_box[2]], [timbrado_box[4]], [timbrado_box[6]]],
+        colWidths=[65 * mm],
+    )
+    timbrado_cell.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 1.2, COLOR_SLATE_950),
+        ("BACKGROUND", (0, 3), (0, 3), COLOR_SLATE_950),
+        ("BACKGROUND", (0, 0), (0, 2), COLOR_SLATE_50),
+        ("BACKGROUND", (0, 4), (0, 4), WHITE),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+    ]))
+
+    header_table = Table(
+        [[logo_flow, emisor_lines, timbrado_cell]],
+        colWidths=[36 * mm, 93 * mm, 65 * mm],
+    )
+    header_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    elements.append(header_table)
+    elements.append(Spacer(1, 2 * mm))
+
+    # 2. RECUADRO MANDATORIO SET: COMPROBANTE QUE MODIFICA
+    modifica_title = Paragraph("<b>COMPROBANTE QUE MODIFICA (MANDATO LEGAL SET / DNIT)</b>", ParagraphStyle("NC_ModTitle", fontName=FONT_BOLD, fontSize=7.5, leading=9, textColor=COLOR_SLATE_900))
+    modifica_row1 = [
+        Paragraph(f"<b>Tipo Comprobante:</b> FACTURA", ParagraphStyle("NC_M1", fontName=FONT_REGULAR, fontSize=7.5, leading=9)),
+        Paragraph(f"<b>Nº Factura:</b> <font face='Courier-Bold'>{factura_numero}</font>", ParagraphStyle("NC_M2", fontName=FONT_REGULAR, fontSize=7.5, leading=9)),
+        Paragraph(f"<b>Timbrado Factura:</b> {factura_timbrado}", ParagraphStyle("NC_M3", fontName=FONT_REGULAR, fontSize=7.5, leading=9)),
+        Paragraph(f"<b>Fecha Factura:</b> {factura_fecha}", ParagraphStyle("NC_M4", fontName=FONT_REGULAR, fontSize=7.5, leading=9)),
+    ]
+    modifica_row2 = [
+        Paragraph(f"<b>Motivo de Emisión:</b> {html.escape(motivo).upper()}", ParagraphStyle("NC_M5", fontName=FONT_REGULAR, fontSize=7.5, leading=9)),
+    ]
+
+    modifica_table = Table(
+        [
+            [modifica_title, "", "", ""],
+            modifica_row1,
+            [modifica_row2[0], "", "", ""],
+        ],
+        colWidths=[48 * mm, 48 * mm, 48 * mm, 50 * mm],
+    )
+    modifica_table.setStyle(TableStyle([
+        ("SPAN", (0, 0), (3, 0)),
+        ("SPAN", (0, 2), (3, 2)),
+        ("BOX", (0, 0), (-1, -1), 1, COLOR_SLATE_950),
+        ("BACKGROUND", (0, 0), (-1, 0), COLOR_SLATE_100),
+        ("BACKGROUND", (0, 1), (-1, -1), WHITE),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.8),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    elements.append(modifica_table)
+    elements.append(Spacer(1, 1.5 * mm))
+
+    # 3. DATOS DEL CLIENTE / RECEPTOR
+    cliente_rows = [
+        [
+            Paragraph(f"<b>Fecha de Emisión:</b> {fecha_emision_nc}", ParagraphStyle("NC_C1", fontName=FONT_REGULAR, fontSize=8, leading=10)),
+            Paragraph(f"<b>Condición de Venta:</b> [X] CONTADO &nbsp;&nbsp; [ ] CRÉDITO", ParagraphStyle("NC_C2", fontName=FONT_REGULAR, fontSize=8, leading=10, alignment=TA_RIGHT)),
+        ],
+        [
+            Paragraph(f"<b>Nombre o Razón Social:</b> <b>{html.escape(cust_name).upper()}</b>", ParagraphStyle("NC_C3", fontName=FONT_REGULAR, fontSize=8, leading=10)),
+            Paragraph(f"<b>R.U.C. / C.I. Nº:</b> <font face='Courier-Bold'>{cust_ruc}</font>", ParagraphStyle("NC_C4", fontName=FONT_REGULAR, fontSize=8, leading=10, alignment=TA_RIGHT)),
+        ],
+        [
+            Paragraph(f"<b>Dirección:</b> {html.escape(cust_dir)}", ParagraphStyle("NC_C5", fontName=FONT_REGULAR, fontSize=7.5, leading=9)),
+            Paragraph(f"<b>Teléfono:</b> {cust_tel}", ParagraphStyle("NC_C6", fontName=FONT_REGULAR, fontSize=7.5, leading=9, alignment=TA_RIGHT)),
+        ],
+    ]
+    cliente_table = Table(cliente_rows, colWidths=[120 * mm, 74 * mm])
+    cliente_table.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.8, COLOR_SLATE_950),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    elements.append(cliente_table)
+    elements.append(Spacer(1, 2 * mm))
+
+    # 4. TABLA OFICIAL DE ÍTEMS Y MERCADERÍAS (SET)
+    items_list = data.get("items") or []
+    table_headers = [
+        Paragraph("<b>CANT.</b>", ParagraphStyle("TH_C", fontName=FONT_BOLD, fontSize=7.5, alignment=TA_CENTER)),
+        Paragraph("<b>CÓDIGO</b>", ParagraphStyle("TH_Cod", fontName=FONT_BOLD, fontSize=7.5, alignment=TA_CENTER)),
+        Paragraph("<b>DESCRIPCIÓN DE MERCADERÍAS Y/O SERVICIOS</b>", ParagraphStyle("TH_D", fontName=FONT_BOLD, fontSize=7.5)),
+        Paragraph("<b>PRECIO UNIT.</b>", ParagraphStyle("TH_P", fontName=FONT_BOLD, fontSize=7.5, alignment=TA_RIGHT)),
+        Paragraph("<b>EXENTAS</b>", ParagraphStyle("TH_Ex", fontName=FONT_BOLD, fontSize=7.5, alignment=TA_RIGHT)),
+        Paragraph("<b>5%</b>", ParagraphStyle("TH_5", fontName=FONT_BOLD, fontSize=7.5, alignment=TA_RIGHT)),
+        Paragraph("<b>10%</b>", ParagraphStyle("TH_10", fontName=FONT_BOLD, fontSize=7.5, alignment=TA_RIGHT)),
+    ]
+
+    items_table_data = [table_headers]
+
+    tot_exenta = Decimal("0")
+    tot_5 = Decimal("0")
+    tot_10 = Decimal("0")
+    tot_nc = Decimal("0")
+
+    for it in items_list:
+        cant = float(it.get("cantidad") or 1)
+        p_unit = float(it.get("precio_unitario") or it.get("precio") or 0)
+        tasa = float(it.get("iva_tasa") or 10)
+        line_tot = float(it.get("total") or (cant * p_unit))
+        tot_dec = Decimal(str(round(line_tot)))
+        tot_nc += tot_dec
+
+        ex_str, v5_str, v10_str = "0", "0", "0"
+        if tasa == 0:
+            tot_exenta += tot_dec
+            ex_str = _fmt_gs(line_tot)
+        elif tasa == 5:
+            tot_5 += tot_dec
+            v5_str = _fmt_gs(line_tot)
+        else:
+            tot_10 += tot_dec
+            v10_str = _fmt_gs(line_tot)
+
+        sku = it.get("product_sku") or it.get("codigo_barra") or it.get("sku") or "—"
+        p_name = it.get("product_name") or it.get("descripcion") or "Producto General"
+
+        items_table_data.append([
+            Paragraph(f"<font face='Courier-Bold'>{cant:,.2f}</font>".replace(",00", ""), ParagraphStyle("TD_C", fontName=FONT_REGULAR, fontSize=7.5, alignment=TA_CENTER)),
+            Paragraph(f"<font face='Courier'>{sku[:14]}</font>", ParagraphStyle("TD_Cod", fontName=FONT_REGULAR, fontSize=7, alignment=TA_CENTER)),
+            Paragraph(f"<b>{html.escape(p_name[:45])}</b>", ParagraphStyle("TD_D", fontName=FONT_REGULAR, fontSize=7.5)),
+            Paragraph(f"<font face='Courier'>{_fmt_gs(p_unit)}</font>", ParagraphStyle("TD_P", fontName=FONT_REGULAR, fontSize=7.5, alignment=TA_RIGHT)),
+            Paragraph(f"<font face='Courier'>{ex_str}</font>", ParagraphStyle("TD_Ex", fontName=FONT_REGULAR, fontSize=7.5, alignment=TA_RIGHT)),
+            Paragraph(f"<font face='Courier'>{v5_str}</font>", ParagraphStyle("TD_5", fontName=FONT_REGULAR, fontSize=7.5, alignment=TA_RIGHT)),
+            Paragraph(f"<font face='Courier-Bold'>{v10_str}</font>", ParagraphStyle("TD_10", fontName=FONT_REGULAR, fontSize=7.5, alignment=TA_RIGHT)),
+        ])
+
+    # Si no había ítems en el array pero hay total general
+    if not items_list and (data.get("total") or data.get("monto")):
+        tot_nc = Decimal(str(round(float(data.get("total") or data.get("monto") or 0))))
+        tot_10 = tot_nc
+        items_table_data.append([
+            Paragraph("1", ParagraphStyle("TD_C", fontName=FONT_REGULAR, fontSize=7.5, alignment=TA_CENTER)),
+            Paragraph("—", ParagraphStyle("TD_Cod", fontName=FONT_REGULAR, fontSize=7, alignment=TA_CENTER)),
+            Paragraph(f"<b>{html.escape(motivo)}</b>", ParagraphStyle("TD_D", fontName=FONT_REGULAR, fontSize=7.5)),
+            Paragraph(f"<font face='Courier'>{_fmt_gs(float(tot_nc))}</font>", ParagraphStyle("TD_P", fontName=FONT_REGULAR, fontSize=7.5, alignment=TA_RIGHT)),
+            Paragraph("0", ParagraphStyle("TD_Ex", fontName=FONT_REGULAR, fontSize=7.5, alignment=TA_RIGHT)),
+            Paragraph("0", ParagraphStyle("TD_5", fontName=FONT_REGULAR, fontSize=7.5, alignment=TA_RIGHT)),
+            Paragraph(f"<font face='Courier-Bold'>{_fmt_gs(float(tot_nc))}</font>", ParagraphStyle("TD_10", fontName=FONT_REGULAR, fontSize=7.5, alignment=TA_RIGHT)),
+        ])
+
+    # Rellenar con filas vacías para aspecto oficial de talonario
+    min_filas = 16
+    filas_actuales = len(items_table_data) - 1
+    for _ in range(max(0, min_filas - filas_actuales)):
+        items_table_data.append([
+            Paragraph("&nbsp;", ParagraphStyle("TD_Empty", fontSize=7.5)),
+            Paragraph("&nbsp;", ParagraphStyle("TD_Empty", fontSize=7.5)),
+            Paragraph("&nbsp;", ParagraphStyle("TD_Empty", fontSize=7.5)),
+            Paragraph("&nbsp;", ParagraphStyle("TD_Empty", fontSize=7.5)),
+            Paragraph("&nbsp;", ParagraphStyle("TD_Empty", fontSize=7.5)),
+            Paragraph("&nbsp;", ParagraphStyle("TD_Empty", fontSize=7.5)),
+            Paragraph("&nbsp;", ParagraphStyle("TD_Empty", fontSize=7.5)),
+        ])
+
+    col_widths = [14 * mm, 26 * mm, 74 * mm, 24 * mm, 18 * mm, 18 * mm, 20 * mm]
+    grid_table = Table(items_table_data, colWidths=col_widths)
+    grid_table.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.8, COLOR_SLATE_950),
+        ("INNERGRID", (0, 0), (-1, -1), 0.4, COLOR_SLATE_200),
+        ("BACKGROUND", (0, 0), (-1, 0), COLOR_SLATE_100),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.8),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    elements.append(grid_table)
+
+    # 5. SUBTOTALES POR TASA
+    subtot_table = Table(
+        [[
+            Paragraph("<b>SUBTOTALES:</b>", ParagraphStyle("ST_L", fontName=FONT_BOLD, fontSize=8, alignment=TA_RIGHT)),
+            Paragraph(f"<font face='Courier-Bold'>{_fmt_gs(float(tot_exenta))}</font>", ParagraphStyle("ST_Ex", fontName=FONT_BOLD, fontSize=8, alignment=TA_RIGHT)),
+            Paragraph(f"<font face='Courier-Bold'>{_fmt_gs(float(tot_5))}</font>", ParagraphStyle("ST_5", fontName=FONT_BOLD, fontSize=8, alignment=TA_RIGHT)),
+            Paragraph(f"<font face='Courier-Bold'>{_fmt_gs(float(tot_10))}</font>", ParagraphStyle("ST_10", fontName=FONT_BOLD, fontSize=8, alignment=TA_RIGHT)),
+        ]],
+        colWidths=[138 * mm, 18 * mm, 18 * mm, 20 * mm],
+    )
+    subtot_table.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.8, COLOR_SLATE_950),
+        ("INNERGRID", (0, 0), (-1, -1), 0.4, COLOR_SLATE_200),
+        ("BACKGROUND", (0, 0), (-1, -1), COLOR_SLATE_50),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    elements.append(subtot_table)
+    elements.append(Spacer(1, 1.5 * mm))
+
+    # 6. TOTAL GENERAL Y TOTAL EN LETRAS
+    tot_letras = _numero_a_letras_pyg(tot_nc)
+    total_box = Table(
+        [
+            [
+                Paragraph("<b>TOTAL NOTA DE CRÉDITO EN GUARANÍES:</b>", ParagraphStyle("T_TotL", fontName=FONT_BOLD, fontSize=9)),
+                Paragraph(f"<font face='Courier-Bold' size='12'><b>Gs. {_fmt_gs(float(tot_nc))}</b></font>", ParagraphStyle("T_TotV", fontName=FONT_BOLD, fontSize=11, alignment=TA_RIGHT)),
+            ],
+            [
+                Paragraph(f"<b>SON:</b> {tot_letras} GUARANÍES", ParagraphStyle("T_Letras", fontName=FONT_REGULAR, fontSize=8, leading=10)),
+                "",
+            ]
+        ],
+        colWidths=[140 * mm, 54 * mm],
+    )
+    total_box.setStyle(TableStyle([
+        ("SPAN", (0, 1), (1, 1)),
+        ("BOX", (0, 0), (-1, -1), 1.2, COLOR_SLATE_950),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.5, COLOR_SLATE_200),
+        ("BACKGROUND", (0, 0), (-1, -1), WHITE),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    elements.append(total_box)
+    elements.append(Spacer(1, 1.5 * mm))
+
+    # 7. LIQUIDACIÓN DEL IVA (Art. 86 Ley 125/91 y Ley 6380/19)
+    iva_5 = round(tot_5 / Decimal("21"))
+    iva_10 = round(tot_10 / Decimal("11"))
+    iva_total = iva_5 + iva_10
+
+    iva_box = Table(
+        [[
+            Paragraph("<b>LIQUIDACIÓN DEL I.V.A.:</b>", ParagraphStyle("IVA_T", fontName=FONT_BOLD, fontSize=8)),
+            Paragraph(f"<b>(5%):</b> <font face='Courier-Bold'>Gs. {_fmt_gs(float(iva_5))}</font>", ParagraphStyle("IVA_5", fontName=FONT_REGULAR, fontSize=8)),
+            Paragraph(f"<b>(10%):</b> <font face='Courier-Bold'>Gs. {_fmt_gs(float(iva_10))}</font>", ParagraphStyle("IVA_10", fontName=FONT_REGULAR, fontSize=8)),
+            Paragraph(f"<b>TOTAL I.V.A.:</b> <font face='Courier-Bold'>Gs. {_fmt_gs(float(iva_total))}</font>", ParagraphStyle("IVA_Tot", fontName=FONT_BOLD, fontSize=8, alignment=TA_RIGHT)),
+        ]],
+        colWidths=[45 * mm, 45 * mm, 45 * mm, 59 * mm],
+    )
+    iva_box.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.8, COLOR_SLATE_950),
+        ("BACKGROUND", (0, 0), (-1, -1), COLOR_SLATE_50),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    elements.append(iva_box)
+    elements.append(Spacer(1, 4 * mm))
+
+    # 8. CASILLAS DE FIRMA
+    firma_emisor = Table(
+        [
+            [Paragraph("&nbsp;", ParagraphStyle("F_Space", fontSize=14))],
+            [Paragraph("____________________________________________", ParagraphStyle("F_Line", alignment=TA_CENTER, fontSize=8))],
+            [Paragraph("<b>FIRMA DEL RESPONSABLE / EMISOR</b>", ParagraphStyle("F_Tit", fontName=FONT_BOLD, alignment=TA_CENTER, fontSize=7.5))],
+            [Paragraph("Caja & Facturación — Extra Supermercado", ParagraphStyle("F_Sub", fontName=FONT_REGULAR, alignment=TA_CENTER, fontSize=7, textColor=COLOR_SLATE_500))],
+        ],
+        colWidths=[90 * mm],
+    )
+    firma_emisor.setStyle(TableStyle([
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+    ]))
+
+    firma_cliente = Table(
+        [
+            [Paragraph("&nbsp;", ParagraphStyle("F_Space", fontSize=14))],
+            [Paragraph("____________________________________________", ParagraphStyle("F_Line", alignment=TA_CENTER, fontSize=8))],
+            [Paragraph("<b>FIRMA Y CONFORMIDAD DEL CLIENTE</b>", ParagraphStyle("F_Tit2", fontName=FONT_BOLD, alignment=TA_CENTER, fontSize=7.5))],
+            [Paragraph("Aclaración: ....................................... C.I. Nº: ......................", ParagraphStyle("F_Sub2", fontName=FONT_REGULAR, alignment=TA_CENTER, fontSize=7, textColor=COLOR_SLATE_500))],
+        ],
+        colWidths=[90 * mm],
+    )
+    firma_cliente.setStyle(TableStyle([
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+    ]))
+
+    firmas_block = Table(
+        [[firma_emisor, "", firma_cliente]],
+        colWidths=[93 * mm, 8 * mm, 93 * mm],
+    )
+    firmas_block.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    elements.append(firmas_block)
+    elements.append(Spacer(1, 2 * mm))
+
+    # 9. PIE DE PÁGINA LEGAL & DESTINO DEL COMPROBANTE
+    pie_line = Table(
+        [[
+            Paragraph(f"<b>{copy_type.upper()}</b>", ParagraphStyle("Pie_Copy", fontName=FONT_BOLD, fontSize=8, textColor=COLOR_SLATE_950)),
+            Paragraph(f"Autorizado como Autoimpresor por Resolución SET / DNIT Nº {timbrado_numero} — Extra Supermercado Mayorista", ParagraphStyle("Pie_Res", fontName=FONT_REGULAR, fontSize=7, alignment=TA_RIGHT, textColor=COLOR_SLATE_500)),
+        ]],
+        colWidths=[80 * mm, 114 * mm],
+    )
+    pie_line.setStyle(TableStyle([
+        ("LINEABOVE", (0, 0), (-1, 0), 0.5, COLOR_SLATE_300),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    elements.append(pie_line)
+
+    doc.build(elements)
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+    return pdf_bytes
+

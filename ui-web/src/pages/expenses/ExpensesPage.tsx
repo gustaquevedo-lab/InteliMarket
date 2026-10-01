@@ -21,6 +21,7 @@ import { useAuth } from "../../context/AuthContext"
 import { RendicionCreateModal } from "./RendicionCreateModal"
 import { RendicionAuditModal } from "./RendicionAuditModal"
 import { ExpensePaymentModal } from "./ExpensePaymentModal"
+import { FundDetailModal } from "./FundDetailModal"
 
 type Tab = "dashboard" | "fondos" | "rendiciones" | "list" | "arqueos" | "sectores" | "categories" | "reportes"
 type ReportSubTab = "sector" | "fondos" | "fiscal" | "rendicion"
@@ -110,6 +111,8 @@ export default function ExpensesPage() {
   const [loadingRendiciones, setLoadingRendiciones] = useState(false)
   const [showCreateRendicionModal, setShowCreateRendicionModal] = useState(false)
   const [rendicionCreateInitialFundId, setRendicionCreateInitialFundId] = useState("")
+  const [rendicionCreateInitialExpenseIds, setRendicionCreateInitialExpenseIds] = useState<string[]>([])
+  const [selectedFundForDetail, setSelectedFundForDetail] = useState<PettyCashFund | null>(null)
   const [selectedRendicionForAuditId, setSelectedRendicionForAuditId] = useState<string | null>(null)
   const [filterRendicionFund, setFilterRendicionFund] = useState("")
   const [filterRendicionEstado, setFilterRendicionEstado] = useState("")
@@ -1572,17 +1575,15 @@ export default function ExpensesPage() {
     }
   }
 
+  const handleRendirFromDetail = (fundId: string, selectedExpenseIds: string[]) => {
+    setSelectedFundForDetail(null)
+    setRendicionCreateInitialFundId(fundId)
+    setRendicionCreateInitialExpenseIds(selectedExpenseIds)
+    setShowCreateRendicionModal(true)
+  }
+
   const handleViewFundMovements = async (fund: PettyCashFund) => {
-    setLoadingMovements(true)
-    setSelectedFundMovements({ fund, movements: [] })
-    try {
-      const movs = await api.expenses.funds.movements(fund.id, 50)
-      setSelectedFundMovements({ fund, movements: movs })
-    } catch (e: any) {
-      toast.error("Error al cargar movimientos", e.message)
-    } finally {
-      setLoadingMovements(false)
-    }
+    setSelectedFundForDetail(fund)
   }
 
   const handleSaveApprovalThreshold = async (e: React.FormEvent) => {
@@ -2196,6 +2197,7 @@ export default function ExpensesPage() {
                         <button
                           onClick={() => {
                             setRendicionCreateInitialFundId(f.id)
+                            setRendicionCreateInitialExpenseIds([])
                             setShowCreateRendicionModal(true)
                           }}
                           className="btn-primary py-1.5 px-2 text-xs flex items-center justify-center gap-1 col-span-2 sm:col-span-1"
@@ -2218,9 +2220,9 @@ export default function ExpensesPage() {
                           <ClipboardCheck className="w-3.5 h-3.5" /> Arqueo
                         </button>
                         <button
-                          onClick={() => handleViewFundMovements(f)}
+                          onClick={() => setSelectedFundForDetail(f)}
                           className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 flex items-center justify-center gap-1 transition-colors"
-                          title="Ver historial de comprobantes"
+                          title="Ver comprobantes y movimientos del fondo"
                         >
                           <FileText className="w-3.5 h-3.5" /> Detalle
                         </button>
@@ -5461,52 +5463,13 @@ export default function ExpensesPage() {
         </div>
       )}
 
-      {/* MODAL: MOVIMIENTOS HISTÓRICOS DE FONDO */}
-      {selectedFundMovements && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 space-y-4 my-8">
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
-              <div>
-                <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                  <PiggyBank className="w-5 h-5 text-indigo-600" /> Movimientos: {selectedFundMovements.fund.nombre}
-                </h3>
-                <p className="text-xs text-gray-400">Últimos comprobantes y reposiciones imputadas a este fondo</p>
-              </div>
-              <button onClick={() => setSelectedFundMovements(null)} className="text-gray-400 hover:text-gray-600">
-                <XCircle className="w-5 h-5" />
-              </button>
-            </div>
-
-            {loadingMovements ? (
-              <div className="flex justify-center py-12">
-                <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
-              </div>
-            ) : (
-              <div className="max-h-96 overflow-y-auto space-y-2">
-                {selectedFundMovements.movements.map((m: any) => (
-                  <div key={m.id} className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
-                    <div>
-                      <p className="font-bold text-gray-900 dark:text-white">{m.descripcion || m.tipo}</p>
-                      <p className="text-[11px] text-gray-400">
-                        {m.created_at ? new Date(m.created_at).toLocaleString("es-PY") : "—"} · {m.tipo}
-                      </p>
-                    </div>
-                    <div className="text-right font-mono">
-                      <span className={`font-bold text-sm ${m.monto < 0 ? "text-red-500" : "text-emerald-600"}`}>
-                        {formatPYG(m.monto)}
-                      </span>
-                      <p className="text-[10px] text-gray-400">Saldo: {formatPYG(m.saldo_posterior)}</p>
-                    </div>
-                  </div>
-                ))}
-                {selectedFundMovements.movements.length === 0 && (
-                  <p className="text-center py-8 text-xs text-gray-400">Sin movimientos registrados en este fondo.</p>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {/* MODAL: DETALLE COMPLETO DEL FONDO FIJO (COMPROBANTES Y MOVIMIENTOS) */}
+      <FundDetailModal
+        fund={selectedFundForDetail}
+        isOpen={!!selectedFundForDetail}
+        onClose={() => setSelectedFundForDetail(null)}
+        onRendir={handleRendirFromDetail}
+      />
 
       {/* MODAL: POLÍTICAS DE APROBACIÓN */}
       {showThresholdForm && (
@@ -5710,14 +5673,19 @@ export default function ExpensesPage() {
       {/* MODAL: PRESENTACIÓN DE RENDICIÓN DE CUENTAS (CUSTODIO) */}
       <RendicionCreateModal
         isOpen={showCreateRendicionModal}
-        onClose={() => setShowCreateRendicionModal(false)}
+        onClose={() => {
+          setShowCreateRendicionModal(false)
+          setRendicionCreateInitialExpenseIds([])
+        }}
         onSuccess={() => {
           setShowCreateRendicionModal(false)
+          setRendicionCreateInitialExpenseIds([])
           fetchRendiciones()
           fetchAll()
         }}
         funds={funds}
         initialFundId={rendicionCreateInitialFundId}
+        initialSelectedExpenseIds={rendicionCreateInitialExpenseIds}
       />
 
       {/* MODAL: AUDITORÍA ITEM POR ITEM Y REPOSICIÓN (TESORERÍA) */}

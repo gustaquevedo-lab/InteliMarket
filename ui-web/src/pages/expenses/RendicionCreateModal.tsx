@@ -14,6 +14,7 @@ interface Props {
   onSuccess: () => void
   funds: PettyCashFund[]
   initialFundId?: string
+  initialSelectedExpenseIds?: string[]
 }
 
 export const RendicionCreateModal: React.FC<Props> = ({
@@ -22,6 +23,7 @@ export const RendicionCreateModal: React.FC<Props> = ({
   onSuccess,
   funds,
   initialFundId,
+  initialSelectedExpenseIds,
 }) => {
   const toast = useToast()
   const [fundId, setFundId] = useState(initialFundId || (funds[0]?.id || ""))
@@ -32,6 +34,19 @@ export const RendicionCreateModal: React.FC<Props> = ({
   const [observaciones, setObservaciones] = useState("")
   const [submitting, setSubmitting] = useState(false)
 
+  // Sincronizar fundId y campos al abrir el modal o cambiar el fondo inicial
+  useEffect(() => {
+    if (isOpen) {
+      if (initialFundId) {
+        setFundId(initialFundId)
+      } else if (!fundId && funds[0]?.id) {
+        setFundId(funds[0].id)
+      }
+      setEfectivoContado("")
+      setObservaciones("")
+    }
+  }, [isOpen, initialFundId])
+
   // Cargar comprobantes pendientes cuando cambia el fondo
   useEffect(() => {
     if (!fundId || !isOpen) return
@@ -41,12 +56,17 @@ export const RendicionCreateModal: React.FC<Props> = ({
         const res = await api.expenses.list({
           fund_id: fundId,
           sin_rendicion: true,
-          limit: 200,
+          limit: 300,
         })
         const valid = res.filter(e => !e.anulado && e.estado !== "rechazado")
         setAvailableExpenses(valid)
-        // Por defecto preseleccionar todos
-        setSelectedIds(valid.map(e => e.id))
+        if (initialSelectedExpenseIds && initialSelectedExpenseIds.length > 0) {
+          const matchIds = valid.filter(e => initialSelectedExpenseIds.includes(e.id)).map(e => e.id)
+          setSelectedIds(matchIds.length > 0 ? matchIds : valid.map(e => e.id))
+        } else {
+          // Por defecto preseleccionar todos
+          setSelectedIds(valid.map(e => e.id))
+        }
       } catch (err: any) {
         toast.error("Error al cargar comprobantes", err.message)
       } finally {
@@ -54,7 +74,7 @@ export const RendicionCreateModal: React.FC<Props> = ({
       }
     }
     fetchPending()
-  }, [fundId, isOpen])
+  }, [fundId, isOpen, initialSelectedExpenseIds])
 
   if (!isOpen) return null
 
