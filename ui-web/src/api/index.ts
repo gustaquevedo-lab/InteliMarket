@@ -3108,6 +3108,41 @@ export const api = {
     getItems: (id: string) => client.get<ReturnItem[]>(`/v1/returns/${id}/items`),
     approve: (id: string, aprobado_por?: string) => client.post<Return>(`/v1/returns/${id}/approve`, { aprobado_por }),
     reject: (id: string, motivo?: string) => client.post<Return>(`/v1/returns/${id}/reject`, { motivo }),
+    downloadPdf: (returnId: string, numero?: string) => {
+      const clean = (numero || "DEV").replace(/\s+/g, "_")
+      return downloadAuthenticated(`/v1/returns/${returnId}/pdf`, {}, `Reporte_Devolucion_${clean}.pdf`)
+    },
+    getPdfBlobUrl: async (returnId: string): Promise<string> => {
+      const token = localStorage.getItem("access_token")
+      const url = `${API_BASE}/v1/returns/${returnId}/pdf`
+      const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      if (!res.ok) throw new Error(`Error ${res.status} al generar el Reporte PDF de Devolución`)
+      const blob = await res.blob()
+      const fileBlob = new Blob([blob], { type: "application/pdf" })
+      return URL.createObjectURL(fileBlob)
+    },
+    openPdf: async (returnId: string) => {
+      const newWin = typeof window !== "undefined" ? window.open("about:blank", "_blank") : null
+      try {
+        const token = localStorage.getItem("access_token")
+        const url = `${API_BASE}/v1/returns/${returnId}/pdf`
+        const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+        if (!res.ok) throw new Error(`Error ${res.status} al generar el Reporte PDF de Devolución`)
+        const blob = await res.blob()
+        const fileBlob = new Blob([blob], { type: "application/pdf" })
+        const blobUrl = URL.createObjectURL(fileBlob)
+        if (newWin && !newWin.closed) {
+          newWin.location.href = blobUrl
+        } else {
+          window.open(blobUrl, "_blank")
+        }
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 120000)
+        return blobUrl
+      } catch (err) {
+        if (newWin && !newWin.closed) newWin.close()
+        throw err
+      }
+    },
   },
   salesOrders: {
     list: (params?: { estado?: string }) => client.get<SalesOrder[]>(`/v1/companies/${COMPANY_ID}/sales-orders`, params as any),

@@ -284,6 +284,33 @@ export default function ReturnsPage() {
     }
   }
 
+  const handleViewCustomerReturnPdf = async (r: any) => {
+    const raw = r.raw || r
+    const retId = raw.id || r.id
+    if (!retId) return
+    setDownloadingReturnPdfId(retId)
+    const num = raw.numero || r.numero || "DEV"
+    try {
+      const blobUrl = await api.returns.getPdfBlobUrl(retId)
+      setViewerPdfUrl(blobUrl)
+      setViewerPdfTitle(`Acta Oficial de Devolución RMA · ${num}`)
+      setViewerPdfFilename(`Reporte_Devolucion_${String(num).replace(/\s+/g, "_")}.pdf`)
+    } catch (err: any) {
+      try {
+        await api.returns.openPdf(retId)
+      } catch (err2: any) {
+        try {
+          await api.returns.downloadPdf(retId, num)
+          toast.success("Reporte A4 Descargado", "El reporte oficial se descargó exitosamente.")
+        } catch (err3: any) {
+          toast.error("Error al generar PDF de la Devolución", err.message || err2.message || err3.message)
+        }
+      }
+    } finally {
+      setDownloadingReturnPdfId(null)
+    }
+  }
+
   /* ── FILTRADO Y KPIS: DEVOLUCIONES CLIENTES ──────────────────────────── */
   const filteredReturns = useMemo(() => {
     return returns.filter(r => {
@@ -769,6 +796,19 @@ export default function ReturnsPage() {
                                 title="Ver Detalle RMA"
                               >
                                 <Eye className="w-4 h-4" />
+                              </button>
+
+                              <button
+                                onClick={() => handleViewCustomerReturnPdf(r)}
+                                disabled={downloadingReturnPdfId === r.id}
+                                className="p-2 text-rose-600 dark:text-rose-400 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition flex items-center justify-center"
+                                title="Imprimir / Ver Reporte Oficial A4 (PDF)"
+                              >
+                                {downloadingReturnPdfId === r.id ? (
+                                  <Loader2 className="w-4 h-4 animate-spin text-rose-500" />
+                                ) : (
+                                  <Printer className="w-4 h-4" />
+                                )}
                               </button>
 
                               {r.estado === "pendiente" && (
@@ -1306,7 +1346,20 @@ export default function ReturnsPage() {
               </div>
             </div>
 
-            <div className="pt-2 flex justify-end">
+            <div className="pt-2 flex justify-between items-center gap-3">
+              <button
+                onClick={() => handleViewCustomerReturnPdf(viewingReturn)}
+                disabled={downloadingReturnPdfId === viewingReturn.id}
+                className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 text-white font-bold text-xs shadow-md shadow-rose-600/20 flex items-center gap-2 transition"
+              >
+                {downloadingReturnPdfId === viewingReturn.id ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Printer className="w-4 h-4" />
+                )}
+                <span>Imprimir / Ver Reporte A4</span>
+              </button>
+
               <button onClick={() => setViewingReturn(null)} className="px-5 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs">
                 Cerrar
               </button>
