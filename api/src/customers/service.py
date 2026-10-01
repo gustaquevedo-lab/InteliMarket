@@ -25,6 +25,110 @@ async def get_customer_by_ruc(db: AsyncSession, company_id: str, ruc: str) -> Cu
     return result.scalar_one_or_none()
 
 
+async def get_customer_by_doc(db: AsyncSession, company_id: str, doc: str) -> Customer | None:
+    clean = "".join([c for c in doc.split("-")[0] if c.isdigit()])
+    if not clean:
+        return None
+    result = await db.execute(
+        select(Customer).where(
+            Customer.company_id == company_id,
+            or_(
+                Customer.ci == clean,
+                Customer.ruc == clean,
+                Customer.ruc.like(f"{clean}-%"),
+            )
+        ).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+def compute_dv_set(clean: str) -> int:
+    suma = 0
+    factor = 2
+    for i in reversed(clean):
+        suma += int(i) * factor
+        factor = 2 if factor == 11 else factor + 1
+    resto = suma % 11
+    return 11 - resto if resto > 1 else 0
+
+
+def enrich_customer_data(data_dict: dict):
+    """Enriquece y normaliza los datos del cliente consultando DNIT y TSJE."""
+    import sqlite3
+    import os
+
+    raw_doc = data_dict.get("ci") or data_dict.get("ruc") or ""
+    clean = "".join([c for c in str(raw_doc).split("-")[0] if c.isdigit()])
+    if not clean or len(clean) < 5:
+        return
+
+    raw_name = str(data_dict.get("razon_social") or "").strip().upper()
+    es_empresa = clean.startswith("80") or any(w in raw_name for w in [" S.A", " S.R.L", " E.A.S", " SOCIEDAD", " LTDA", " CIA", " S.C."])
+
+    dnit_paths = [
+        "/home/intellihouse/intelimarket/ruc_dnit.db",
+        os.path.expanduser("~/Library/CloudStorage/OneDrive-Personal/Dev/Intelimarket/ruc_dnit.db"),
+        "ruc_dnit.db"
+    ]
+    r_dnit = None
+    for p in dnit_paths:
+        if os.path.exists(p):
+            try:
+                with sqlite3.connect(p, timeout=1.0) as con:
+                    cur = con.cursor()
+                    r_dnit = cur.execute("SELECT ruc, dv, razon_social, estado FROM contribuyentes WHERE ruc = ?", (clean,)).fetchone()
+                    if not r_dnit and len(clean) >= 6:
+                        sub = clean[:-1]
+                        r_sub = cur.execute("SELECT ruc, dv, razon_social, estado FROM contribuyentes WHERE ruc = ?", (sub,)).fetchone()
+                        if r_sub and str(r_sub[1]) == clean[-1]:
+                            r_dnit = r_sub
+                            clean = sub
+            except Exception:
+                pass
+            break
+
+    if es_empresa:
+        data_dict["tipo_persona"] = "juridica"
+        data_dict["tipo"] = "contribuyente"
+        data_dict["ci"] = None
+        if r_dnit:
+            data_dict["ruc"] = f"{r_dnit[0]}-{r_dnit[1]}"
+            data_dict["razon_social"] = r_dnit[2]
+        else:
+            dv = compute_dv_set(clean)
+            data_dict["ruc"] = f"{clean}-{dv}"
+            if not data_dict.get("razon_social"):
+                data_dict["razon_social"] = raw_name
+    else:
+        data_dict["tipo_persona"] = "fisica"
+        data_dict["ci"] = clean
+        if r_dnit:
+            data_dict["tipo"] = "contribuyente"
+            data_dict["ruc"] = f"{r_dnit[0]}-{r_dnit[1]}"
+            if not data_dict.get("razon_social") or data_dict["razon_social"].strip().upper() in ("CLIENTE", "CONSUMIDOR FINAL", ""):
+                data_dict["razon_social"] = r_dnit[2]
+        else:
+            data_dict["tipo"] = "consumidor_final"
+            dv = compute_dv_set(clean)
+            data_dict["ruc"] = f"{clean}-{dv}"
+            if not data_dict.get("razon_social") or data_dict["razon_social"].strip().upper() in ("CLIENTE", "CONSUMIDOR FINAL", ""):
+                padron_paths = [
+                    "/home/intellihouse/intelimarket/padron.db",
+                    os.path.expanduser("~/Library/CloudStorage/OneDrive-Personal/Dev/Bingo30k/padron.db"),
+                    "padron.db"
+                ]
+                for pp in padron_paths:
+                    if os.path.exists(pp):
+                        try:
+                            with sqlite3.connect(pp, timeout=1.0) as con_p:
+                                r_p = con_p.cursor().execute("SELECT nombre, apellido FROM electors WHERE ci = ?", (clean,)).fetchone()
+                                if r_p:
+                                    data_dict["razon_social"] = f"{r_p[0]} {r_p[1]}".strip().upper()
+                        except Exception:
+                            pass
+                        break
+
+
 async def list_customers(
     db: AsyncSession,
     company_id: str,
@@ -91,6 +195,7 @@ async def list_customers(
 
 async def create_customer(db: AsyncSession, data: CustomerCreate) -> Customer:
     data_dict = data.model_dump()
+    enrich_customer_data(data_dict)
     from decimal import Decimal
     # Asegurar sincronización de ambos campos de límite
     limite = None
