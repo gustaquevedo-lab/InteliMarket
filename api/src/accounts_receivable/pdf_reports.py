@@ -549,28 +549,59 @@ def generate_recibo_a6_pdf(
     elements.append(header_table)
     elements.append(Spacer(1, 2))
 
-    # 2. DATOS DEL CLIENTE Y COBRO
+    # 2. DATOS DEL CLIENTE Y DETALLE DE COBRO
     c_name = receipt_data.get("customer_name") or receipt_data.get("nombre_fantasia") or "Cliente"
     c_ruc = receipt_data.get("customer_ruc") or "—"
     c_tel = receipt_data.get("customer_telefono") or "—"
     c_emp = receipt_data.get("empresa_vinculada_nombre")
-    forma = (receipt_data.get("forma_pago") or "Efectivo").replace("_", " ").upper()
-    ref = receipt_data.get("referencia") or "—"
+    emp_line = f"<br/><font size=5.5 color='#64748B'>EMPRESA VINC.:</font> <font size=6 color='#1E40AF'><b>{c_emp}</b></font>" if c_emp else ""
 
     cli_col1 = (
-        f"<font size=6 color='#64748B'>CLIENTE:</font> <font size=6.8 color='#0F172A'><b>{c_name}</b></font><br/>"
-        f"<font size=6 color='#64748B'>RUC / C.I.:</font> <font size=6.5 color='#0F172A'><b>{c_ruc}</b></font> &nbsp; "
-        f"<font size=6 color='#64748B'>TEL:</font> <font size=6.5 color='#0F172A'>{c_tel}</font>"
+        f"<font size=5.5 color='#64748B'>CLIENTE:</font> <font size=6.8 color='#0F172A'><b>{c_name}</b></font><br/>"
+        f"<font size=5.5 color='#64748B'>RUC / C.I.:</font> <font size=6.2 color='#0F172A'><b>{c_ruc}</b></font> &nbsp; "
+        f"<font size=5.5 color='#64748B'>TEL:</font> <font size=6.2 color='#0F172A'>{c_tel}</font>"
+        f"{emp_line}"
     )
+
+    # Detalle de formas de pago percibidas
+    formas_items = receipt_data.get("formas_pago_detalle", [])
+    if formas_items:
+        lineas_fp = []
+        for fp in formas_items:
+            t = fp.get("tipo")
+            if t == "efectivo_pyg":
+                lineas_fp.append(f"Efec. Gs: <b>{_fmt_gs(fp['monto_gs'])}</b>")
+            elif t == "efectivo_brl":
+                lineas_fp.append(f"Efec. R$: <b>{fp.get('monto', 0):,.2f}</b> <font size=4.8 color='#64748B'>(Cot. {fp.get('tasa', 1):,.0f} = {_fmt_gs(fp['monto_gs'])})</font>")
+            elif t == "efectivo_usd":
+                lineas_fp.append(f"Efec. US$: <b>{fp.get('monto', 0):,.2f}</b> <font size=4.8 color='#64748B'>(Cot. {fp.get('tasa', 1):,.0f} = {_fmt_gs(fp['monto_gs'])})</font>")
+            elif t == "transferencia":
+                det_banco = fp.get("banco") or "Banco"
+                cta = f" Cta {fp['cuenta']}" if fp.get("cuenta") else ""
+                f_op = f" Op: {fp['fecha'][:10]}" if fp.get("fecha") else ""
+                lineas_fp.append(f"Transf: <b>{_fmt_gs(fp['monto_gs'])}</b> <font size=4.8 color='#475569'>[{det_banco}{cta}{f_op}]</font>")
+            elif t == "cheque":
+                lineas_fp.append(f"Cheque: <b>{_fmt_gs(fp['monto_gs'])}</b>")
+            elif t == "retencion_iva":
+                lineas_fp.append(f"Ret. IVA: <b>{_fmt_gs(fp['monto_gs'])}</b>")
+            else:
+                lineas_fp.append(f"{fp.get('descripcion')}: <b>{_fmt_gs(fp['monto_gs'])}</b>")
+        fp_text = "<br/>".join(lineas_fp[:3])
+        if len(lineas_fp) > 3:
+            fp_text += f"<br/><font size=4.8 color='#64748B'><i>(+ {len(lineas_fp) - 3} formas adicionales)</i></font>"
+    else:
+        forma = (receipt_data.get("forma_pago") or "Efectivo").replace("_", " ").upper()
+        ref = receipt_data.get("referencia") or "—"
+        fp_text = f"<b>{forma}</b> &nbsp; Ref: {ref}"
+
     cli_col2 = (
-        f"<font size=6 color='#64748B'>EMPRESA VINC.:</font> <font size=6.5 color='#1E40AF'><b>{c_emp or '—'}</b></font><br/>"
-        f"<font size=6 color='#64748B'>MEDIO DE PAGO:</font> <font size=6.5 color='#0F172A'><b>{forma}</b></font> &nbsp; "
-        f"<font size=6 color='#64748B'>REF:</font> <font size=6.5 color='#0F172A'>{ref}</font>"
+        f"<font size=5.5 color='#64748B'><b>FORMAS DE PAGO PERCIBIDAS:</b></font><br/>"
+        f"<font size=5.6 color='#0F172A'>{fp_text}</font>"
     )
 
     cli_table = Table(
         [[Paragraph(cli_col1, styles["Normal"]), Paragraph(cli_col2, styles["Normal"])]],
-        colWidths=[74 * mm, 64 * mm],
+        colWidths=[68 * mm, 70 * mm],
     )
     cli_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F8FAFC")),
@@ -582,18 +613,19 @@ def generate_recibo_a6_pdf(
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ]))
     elements.append(cli_table)
-    elements.append(Spacer(1, 2))
+    elements.append(Spacer(1, 1.5))
 
-    # 3. TABLA DE FACTURAS IMPUTADAS
+    # 3. TABLA DE FACTURAS IMPUTADAS Y NOTAS DE CRÉDITO APLICADAS
     allocations = receipt_data.get("allocations", [])
     monto_total = Decimal(str(receipt_data.get("monto_total") or 0))
 
     t_alloc_head = [
-        Paragraph("<font size=6 color='#FFFFFF'><b>Doc. / Factura</b></font>", styles["Normal"]),
-        Paragraph("<font size=6 color='#FFFFFF'><b>Vencimiento</b></font>", styles["Normal"]),
-        Paragraph("<font size=6 color='#FFFFFF'><b>Monto Orig.</b></font>", ParagraphStyle("TH1", parent=styles["Normal"], alignment=TA_RIGHT)),
-        Paragraph("<font size=6 color='#FFFFFF'><b>Monto Cobrado</b></font>", ParagraphStyle("TH2", parent=styles["Normal"], alignment=TA_RIGHT)),
-        Paragraph("<font size=6 color='#FFFFFF'><b>Saldo Restante</b></font>", ParagraphStyle("TH3", parent=styles["Normal"], alignment=TA_RIGHT)),
+        Paragraph("<font size=5.5 color='#FFFFFF'><b>Doc. / Factura</b></font>", styles["Normal"]),
+        Paragraph("<font size=5.5 color='#FFFFFF'><b>Vencimiento</b></font>", styles["Normal"]),
+        Paragraph("<font size=5.5 color='#FFFFFF'><b>Monto Orig.</b></font>", ParagraphStyle("TH1", parent=styles["Normal"], alignment=TA_RIGHT)),
+        Paragraph("<font size=5.5 color='#FFFFFF'><b>NC Aplicada</b></font>", ParagraphStyle("THNC", parent=styles["Normal"], alignment=TA_RIGHT)),
+        Paragraph("<font size=5.5 color='#FFFFFF'><b>Cobrado</b></font>", ParagraphStyle("TH2", parent=styles["Normal"], alignment=TA_RIGHT)),
+        Paragraph("<font size=5.5 color='#FFFFFF'><b>Saldo</b></font>", ParagraphStyle("TH3", parent=styles["Normal"], alignment=TA_RIGHT)),
     ]
     t_alloc_data = [t_alloc_head]
 
@@ -607,39 +639,60 @@ def generate_recibo_a6_pdf(
         m_imp = a.get("monto") if a.get("monto") is not None else a.get("monto_aplicado", 0)
         s_rest = a.get("saldo_pendiente") if a.get("saldo_pendiente") is not None else a.get("nuevo_saldo", 0)
 
+        # NC asociada a este documento
+        ncs_doc = a.get("notas_credito", [])
+        if ncs_doc:
+            nc_total_doc = sum(nc.get("total", 0) for nc in ncs_doc)
+            nc_nums_str = ", ".join(nc.get("numero", "") for nc in ncs_doc)
+            nc_cell = Paragraph(
+                f"<font size=5.5 color='#DC2626'><b>-{_fmt_gs(nc_total_doc)}</b></font><br/>"
+                f"<font size=4.6 color='#64748B'>NC {nc_nums_str}</font>",
+                ParagraphStyle("TDNC", parent=styles["Normal"], alignment=TA_RIGHT)
+            )
+        else:
+            notas_cob = str(a.get("notas_cobranza") or "")
+            if "NC" in notas_cob and "Devolución" in notas_cob:
+                nc_cell = Paragraph("<font size=4.8 color='#DC2626'>NC en nota</font>", ParagraphStyle("TDNC", parent=styles["Normal"], alignment=TA_RIGHT))
+            else:
+                nc_cell = Paragraph("<font size=5 color='#94A3B8'>—</font>", ParagraphStyle("TDNC", parent=styles["Normal"], alignment=TA_RIGHT))
+
         t_alloc_data.append([
-            Paragraph(f"<font size=6 color='#0F172A'><b>{doc_num}</b></font>", styles["Normal"]),
-            Paragraph(f"<font size=5.8 color='#475569'>{vto_str}</font>", styles["Normal"]),
-            Paragraph(f"<font size=6 color='#475569'>{_fmt_gs(m_orig)}</font>", ParagraphStyle("TD1", parent=styles["Normal"], alignment=TA_RIGHT)),
-            Paragraph(f"<font size=6 color='#059669'><b>{_fmt_gs(m_imp)}</b></font>", ParagraphStyle("TD2", parent=styles["Normal"], alignment=TA_RIGHT)),
-            Paragraph(f"<font size=6 color='#0F172A'>{_fmt_gs(s_rest)}</font>", ParagraphStyle("TD3", parent=styles["Normal"], alignment=TA_RIGHT)),
+            Paragraph(f"<font size=5.8 color='#0F172A'><b>{doc_num}</b></font>", styles["Normal"]),
+            Paragraph(f"<font size=5.2 color='#475569'>{vto_str}</font>", styles["Normal"]),
+            Paragraph(f"<font size=5.5 color='#475569'>{_fmt_gs(m_orig)}</font>", ParagraphStyle("TD1", parent=styles["Normal"], alignment=TA_RIGHT)),
+            nc_cell,
+            Paragraph(f"<font size=5.5 color='#059669'><b>{_fmt_gs(m_imp)}</b></font>", ParagraphStyle("TD2", parent=styles["Normal"], alignment=TA_RIGHT)),
+            Paragraph(f"<font size=5.5 color='#0F172A'>{_fmt_gs(s_rest)}</font>", ParagraphStyle("TD3", parent=styles["Normal"], alignment=TA_RIGHT)),
         ])
 
     if len(allocations) > max_filas:
         restantes = len(allocations) - max_filas
         monto_otros = sum(Decimal(str(a.get("monto") or a.get("monto_aplicado", 0))) for a in allocations[max_filas:])
+        nc_otros = sum(Decimal(str(a.get("total_nc") or 0)) for a in allocations[max_filas:])
+        nc_otros_cell = Paragraph(f"<font size=5.2 color='#DC2626'><b>-{_fmt_gs(nc_otros)}</b></font>", ParagraphStyle("TDNCO", parent=styles["Normal"], alignment=TA_RIGHT)) if nc_otros > 0 else Paragraph("—", ParagraphStyle("TDNCO", parent=styles["Normal"], alignment=TA_RIGHT))
         t_alloc_data.append([
-            Paragraph(f"<font size=5.5 color='#64748B'><i>(+ {restantes} facturas adicionales imputadas)</i></font>", styles["Normal"]),
+            Paragraph(f"<font size=5.2 color='#64748B'><i>(+ {restantes} facturas adicionales imputadas)</i></font>", styles["Normal"]),
             Paragraph("", styles["Normal"]), Paragraph("", styles["Normal"]),
-            Paragraph(f"<font size=6 color='#059669'><b>{_fmt_gs(monto_otros)}</b></font>", ParagraphStyle("TDO", parent=styles["Normal"], alignment=TA_RIGHT)),
+            nc_otros_cell,
+            Paragraph(f"<font size=5.5 color='#059669'><b>{_fmt_gs(monto_otros)}</b></font>", ParagraphStyle("TDO", parent=styles["Normal"], alignment=TA_RIGHT)),
             Paragraph("—", ParagraphStyle("TDS", parent=styles["Normal"], alignment=TA_RIGHT)),
         ])
 
-    t_alloc = Table(t_alloc_data, colWidths=[36 * mm, 24 * mm, 26 * mm, 26 * mm, 26 * mm])
+    t_alloc = Table(t_alloc_data, colWidths=[30 * mm, 18 * mm, 24 * mm, 26 * mm, 22 * mm, 18 * mm])
     t_alloc.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 1.5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
-        ("LEFTPADDING", (0, 0), (-1, -1), 3),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.2),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2.5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2.5),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, HexColor("#F8FAFC")]),
         ("LINEBELOW", (0, 0), (-1, -1), 0.5, HexColor("#E2E8F0")),
     ]))
     elements.append(t_alloc)
-    elements.append(Spacer(1, 2))
+    elements.append(Spacer(1, 1.5))
 
-    # 4. TOTAL COBRADO Y MONTO EN LETRAS
+    # 4. TOTAL COBRADO, LIQUIDACIÓN Y MONTO EN LETRAS
     monto_letras = _numero_a_letras(int(monto_total))
     aplica_ret = bool(receipt_data.get("aplica_retencion"))
     monto_ret = Decimal(str(receipt_data.get("monto_retencion") or 0))
@@ -648,26 +701,31 @@ def generate_recibo_a6_pdf(
     ret_fec = receipt_data.get("retencion_fecha")
     ret_fec_str = ret_fec.strftime("%d/%m/%Y") if hasattr(ret_fec, "strftime") else str(ret_fec or "")
 
+    total_ncs = Decimal(str(receipt_data.get("total_notas_credito") or 0))
+    total_facturas = Decimal(str(receipt_data.get("total_facturas_original") or (monto_total + total_ncs)))
+
+    tot_col1 = (
+        f"<font size=5 color='#64748B'><b>SON GUARANÍES:</b></font><br/>"
+        f"<font size=6 color='#0F172A'><b>{monto_letras} GUARANÍES</b></font>"
+    )
+    if total_ncs > 0:
+        ncs_resumen = ", ".join(f"{nc.get('numero')} (-{_fmt_gs(nc.get('total', 0))})" for nc in receipt_data.get("notas_credito", [])[:2])
+        tot_col1 += f"<br/><font size=5 color='#1E40AF'><b>NOTAS DE CRÉDITO APLICADAS:</b> -{_fmt_gs(total_ncs)} &nbsp;[{ncs_resumen}]</font>"
     if aplica_ret and monto_ret > 0:
-        tot_col1 = (
-            f"<font size=5.5 color='#64748B'><b>SON GUARANÍES (TOTAL DEUDA CANCELADA):</b></font><br/>"
-            f"<font size=6.2 color='#0F172A'><b>{monto_letras} GUARANÍES</b></font><br/>"
-            f"<font size=5.5 color='#B45309'><b>RETENCIÓN IVA (Agente Retentor):</b> {_fmt_gs(monto_ret)} (Tesakã: {ret_comp} {ret_fec_str})</font>"
-        )
-        tot_col2 = (
-            f"<font size=5.5 color='#64748B'>Total Deuda: <b>{_fmt_gs(monto_total)}</b></font> &nbsp; "
-            f"<font size=5.5 color='#DC2626'>Retención: <b>-{_fmt_gs(monto_ret)}</b></font><br/>"
-            f"<font size=5.5 color='#64748B'><b>NETO RECIBIDO:</b></font> "
-            f"<font size=9.5 color='#059669'><b>{_fmt_gs(monto_neto)}</b></font>"
-        )
+        tot_col1 += f"<br/><font size=5 color='#B45309'><b>RETENCIÓN IVA (Tesakã {ret_comp} {ret_fec_str}):</b> -{_fmt_gs(monto_ret)}</font>"
+
+    if total_ncs > 0 or (aplica_ret and monto_ret > 0):
+        tot_col2 = f"<font size=4.8 color='#64748B'>Total Facturas:</font> <b>{_fmt_gs(total_facturas)}</b><br/>"
+        if total_ncs > 0:
+            tot_col2 += f"<font size=4.8 color='#DC2626'>(-) Notas Crédito:</font> <b>-{_fmt_gs(total_ncs)}</b><br/>"
+        if aplica_ret and monto_ret > 0:
+            tot_col2 += f"<font size=4.8 color='#B45309'>(-) Ret. IVA:</font> <b>-{_fmt_gs(monto_ret)}</b><br/>"
+        monto_destacado = monto_neto if (aplica_ret and monto_ret > 0) else monto_total
+        tot_col2 += f"<font size=5.5 color='#64748B'><b>TOTAL PERCIBIDO:</b></font> <font size=8.5 color='#059669'><b>{_fmt_gs(monto_destacado)}</b></font>"
     else:
-        tot_col1 = (
-            f"<font size=5.5 color='#64748B'><b>SON GUARANÍES:</b></font><br/>"
-            f"<font size=6.5 color='#0F172A'><b>{monto_letras} GUARANÍES</b></font>"
-        )
         tot_col2 = (
-            f"<font size=6 color='#64748B'><b>TOTAL COBRADO:</b></font><br/>"
-            f"<font size=10 color='#059669'><b>{_fmt_gs(monto_total)}</b></font>"
+            f"<font size=5.5 color='#64748B'><b>TOTAL COBRADO:</b></font><br/>"
+            f"<font size=9.5 color='#059669'><b>{_fmt_gs(monto_total)}</b></font>"
         )
 
     tot_data = [
@@ -676,7 +734,7 @@ def generate_recibo_a6_pdf(
             Paragraph(tot_col2, ParagraphStyle("TotCob", parent=styles["Normal"], alignment=TA_RIGHT)),
         ]
     ]
-    t_total = Table(tot_data, colWidths=[92 * mm, 46 * mm])
+    t_total = Table(tot_data, colWidths=[88 * mm, 50 * mm])
     t_total.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F1F5F9")),
         ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
@@ -687,28 +745,28 @@ def generate_recibo_a6_pdf(
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ]))
     elements.append(t_total)
-    elements.append(Spacer(1, 2))
+    elements.append(Spacer(1, 1.5))
 
     # 5. FOOTER CON QR Y FIRMAS
     qr_url = f"{verification_base_url.rstrip('/')}/verificar-recibo/{receipt_data.get('id')}"
     q = qr.QrCodeWidget(qr_url)
     b = q.getBounds()
     qw, qh = b[2] - b[0], b[3] - b[1]
-    qr_size = 18 * mm
+    qr_size = 15 * mm
     d_qr = Drawing(qr_size, qr_size, transform=[qr_size / qw, 0, 0, qr_size / qh, 0, 0])
     d_qr.add(q)
 
     qr_expl = (
-        "<font size=5 color='#64748B'>Escaneá con tu celular para verificar la validez oficial en línea de este recibo.</font>"
+        "<font size=4.8 color='#64748B'>Escaneá con tu celular para verificar la validez oficial en línea de este recibo.</font>"
     )
 
     firma_caja = (
         "<br/><br/>___________________________<br/>"
-        "<font size=5.5 color='#64748B'><b>Caja / Recaudador</b><br/>Firma y Aclaración</font>"
+        "<font size=5 color='#64748B'><b>Caja / Recaudador</b><br/>Firma y Aclaración</font>"
     )
     firma_cliente = (
         "<br/><br/>___________________________<br/>"
-        "<font size=5.5 color='#64748B'><b>Cliente / Deudor</b><br/>Conformidad de Pago</font>"
+        "<font size=5 color='#64748B'><b>Cliente / Deudor</b><br/>Conformidad de Pago</font>"
     )
 
     footer_table = Table(
@@ -718,7 +776,7 @@ def generate_recibo_a6_pdf(
             Paragraph(firma_caja, ParagraphStyle("FCaja", parent=styles["Normal"], alignment=TA_CENTER)),
             Paragraph(firma_cliente, ParagraphStyle("FCli", parent=styles["Normal"], alignment=TA_CENTER)),
         ]],
-        colWidths=[20 * mm, 34 * mm, 42 * mm, 42 * mm],
+        colWidths=[18 * mm, 34 * mm, 43 * mm, 43 * mm],
     )
     footer_table.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),

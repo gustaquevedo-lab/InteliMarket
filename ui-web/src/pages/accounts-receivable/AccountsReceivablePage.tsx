@@ -5004,6 +5004,12 @@ export default function AccountsReceivablePage() {
                 <div><span className="text-gray-400 block text-[11px]">Fecha Vencimiento</span><span className="font-mono text-gray-700 dark:text-gray-300">{selectedDoc.fecha_vencimiento || "—"}</span></div>
               </div>
 
+              {selectedDoc.notas_cobranza && (
+                <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs">
+                  <span className="font-bold">Ajustes / Devoluciones (Notas de Crédito):</span> {selectedDoc.notas_cobranza}
+                </div>
+              )}
+
               {invoiceItems.length > 0 && (
                 <div>
                   <h5 className="font-bold text-gray-500 uppercase tracking-wider mb-2 text-[11px]">Ítems Facturados</h5>

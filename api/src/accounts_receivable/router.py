@@ -360,9 +360,15 @@ async def verify_payment_receipt(
                 "monto_aplicado": float(a.get("monto") or 0),
                 "saldo_pendiente": float(a.get("saldo_pendiente") or 0),
                 "estado": a.get("estado"),
+                "notas_credito": a.get("notas_credito", []),
+                "total_nc": float(a.get("total_nc") or 0),
             }
             for a in data.get("allocations", [])
         ],
+        "notas_credito": data.get("notas_credito", []),
+        "total_notas_credito": float(data.get("total_notas_credito") or 0),
+        "total_facturas_original": float(data.get("total_facturas_original") or 0),
+        "formas_pago_detalle": data.get("formas_pago_detalle", []),
     }
 
 

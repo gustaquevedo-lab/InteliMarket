@@ -1398,8 +1398,9 @@ async def get_deuda_detallada_data(
 
 
 async def get_payment_receipt_data(db: AsyncSession, payment_id: str) -> dict | None:
-    """Trae toda la información de un pago registrado, el cliente, la empresa
-    y las facturas amortizadas con sus montos imputados y saldos restantes."""
+    """Trae toda la información de un pago registrado, el cliente, la empresa,
+    las facturas amortizadas con sus montos imputados y saldos restantes,
+    las Notas de Crédito (NC) aplicadas a esas facturas y el desglose de formas de pago."""
     q_pay = text("""
         SELECT
             rp.id, rp.company_id, rp.customer_id, rp.monto_total, rp.moneda,
@@ -1409,6 +1410,8 @@ async def get_payment_receipt_data(db: AsyncSession, payment_id: str) -> dict | 
             rp.retencion_fecha, rp.retencion_porcentaje, rp.monto_efectivo_recibido,
             rp.bank_account_id, rp.fecha_transferencia, rp.monto_transferencia, rp.monto_cheque, rp.referencia_transferencia,
             rp.monto_pyg, rp.monto_brl, rp.monto_usd, rp.tasa_brl, rp.tasa_usd,
+            rp.cheque_id,
+            ba.banco as banco_nombre, ba.numero_cuenta as banco_cuenta, ba.tipo as banco_tipo,
             c.razon_social as customer_name, c.nombre_fantasia, c.ruc as customer_ruc,
             c.telefono as customer_telefono, c.empresa_vinculada_nombre,
             comp.razon_social as comp_razon_social, comp.ruc as comp_ruc,
@@ -1416,6 +1419,7 @@ async def get_payment_receipt_data(db: AsyncSession, payment_id: str) -> dict | 
         FROM receivable_payments rp
         LEFT JOIN customers c ON c.id = rp.customer_id
         LEFT JOIN companies comp ON comp.id = rp.company_id
+        LEFT JOIN bank_accounts ba ON ba.id = rp.bank_account_id
         WHERE rp.id = :id
     """)
     r_pay = await db.execute(q_pay, {"id": payment_id})
@@ -1425,9 +1429,10 @@ async def get_payment_receipt_data(db: AsyncSession, payment_id: str) -> dict | 
 
     q_alloc = text("""
         SELECT
-            rpa.id, rpa.monto,
+            rpa.id, rpa.monto, rpa.monto as monto_aplicado,
+            ar.id as accounts_receivable_id, ar.sale_id,
             ar.numero_documento, ar.fecha_emision, ar.fecha_vencimiento,
-            ar.monto_original, ar.saldo_pendiente, ar.estado
+            ar.monto_original, ar.saldo_pendiente, ar.estado, ar.notas_cobranza
         FROM receivable_payment_allocations rpa
         LEFT JOIN accounts_receivable ar ON ar.id = rpa.accounts_receivable_id
         WHERE rpa.receivable_payment_id = :payment_id
@@ -1436,8 +1441,179 @@ async def get_payment_receipt_data(db: AsyncSession, payment_id: str) -> dict | 
     alloc_res = await db.execute(q_alloc, {"payment_id": payment_id})
     allocations = [dict(a._mapping) for a in alloc_res.fetchall()]
 
+    # Buscar Notas de Crédito asociadas a las ventas de estas facturas
+    sale_ids = [str(a["sale_id"]) for a in allocations if a.get("sale_id")]
+    doc_nums = [str(a["numero_documento"]) for a in allocations if a.get("numero_documento")]
+
+    ncs_by_sale: dict[str, list[dict]] = {}
+    ncs_by_doc: dict[str, list[dict]] = {}
+    all_ncs: list[dict] = []
+
+    if sale_ids or doc_nums:
+        q_nc = text("""
+            SELECT
+                nc.id, nc.numero, nc.total, nc.created_at, nc.motivo, nc.sale_id,
+                nc.timbrado_numero, s.numero as factura_numero
+            FROM notas_credito_debito nc
+            JOIN sales s ON s.id = nc.sale_id
+            WHERE (nc.sale_id = ANY(:sale_ids) OR s.numero = ANY(:doc_nums))
+              AND nc.estado != 'anulado'
+            ORDER BY nc.created_at ASC
+        """)
+        nc_res = await db.execute(q_nc, {"sale_ids": sale_ids, "doc_nums": doc_nums})
+        for nc_row in nc_res.fetchall():
+            nc_dict = dict(nc_row._mapping)
+            nc_dict["total"] = float(nc_dict.get("total") or 0)
+            all_ncs.append(nc_dict)
+            s_id = str(nc_dict.get("sale_id") or "")
+            f_num = str(nc_dict.get("factura_numero") or "")
+            if s_id:
+                ncs_by_sale.setdefault(s_id, []).append(nc_dict)
+            if f_num:
+                ncs_by_doc.setdefault(f_num, []).append(nc_dict)
+
+    # Asociar NCs a cada allocation
+    for a in allocations:
+        s_id = str(a.get("sale_id") or "")
+        f_num = str(a.get("numero_documento") or "")
+        matched_ncs = ncs_by_sale.get(s_id) or ncs_by_doc.get(f_num) or []
+        a["notas_credito"] = matched_ncs
+        a["total_nc"] = sum(nc["total"] for nc in matched_ncs)
+
+    # Buscar cheques vinculados
+    chq_list: list[dict] = []
+    cheque_id_val = getattr(row, "cheque_id", None)
+    q_chq = text("""
+        SELECT id, numero, banco_emisor, librador_nombre, librador_documento, monto, fecha_emision, fecha_pago, diferido
+        FROM cheques
+        WHERE receivable_payment_id = :payment_id OR (:chq_id IS NOT NULL AND id = :chq_id)
+    """)
+    chq_res = await db.execute(q_chq, {"payment_id": payment_id, "chq_id": cheque_id_val})
+    for ch_r in chq_res.fetchall():
+        c_dict = dict(ch_r._mapping)
+        c_dict["monto"] = float(c_dict.get("monto") or 0)
+        chq_list.append(c_dict)
+
     pay_dict = dict(row._mapping)
     pay_dict["allocations"] = allocations
+    pay_dict["notas_credito"] = all_ncs
+    pay_dict["total_notas_credito"] = sum(nc["total"] for nc in all_ncs)
+    pay_dict["total_facturas_original"] = sum(float(a.get("monto_original") or 0) for a in allocations)
+    pay_dict["cheques"] = chq_list
+
+    # Desglose de formas de pago percibidas
+    formas_pago_detalle = []
+    monto_pyg = float(pay_dict.get("monto_pyg") or 0)
+    monto_brl = float(pay_dict.get("monto_brl") or 0)
+    monto_usd = float(pay_dict.get("monto_usd") or 0)
+    tasa_brl = float(pay_dict.get("tasa_brl") or 1)
+    tasa_usd = float(pay_dict.get("tasa_usd") or 1)
+    monto_transf = float(pay_dict.get("monto_transferencia") or 0)
+    monto_chq = float(pay_dict.get("monto_cheque") or 0)
+
+    if monto_pyg > 0:
+        formas_pago_detalle.append({
+            "tipo": "efectivo_pyg",
+            "descripcion": "Efectivo Guaraníes",
+            "moneda": "PYG",
+            "monto": monto_pyg,
+            "monto_gs": monto_pyg,
+        })
+    if monto_brl > 0:
+        monto_gs_brl = round(monto_brl * tasa_brl)
+        formas_pago_detalle.append({
+            "tipo": "efectivo_brl",
+            "descripcion": f"Efectivo Reales (R$ {monto_brl:,.2f} a cotiz. {tasa_brl:,.0f})",
+            "moneda": "BRL",
+            "monto": monto_brl,
+            "tasa": tasa_brl,
+            "monto_gs": monto_gs_brl,
+        })
+    if monto_usd > 0:
+        monto_gs_usd = round(monto_usd * tasa_usd)
+        formas_pago_detalle.append({
+            "tipo": "efectivo_usd",
+            "descripcion": f"Efectivo Dólares (US$ {monto_usd:,.2f} a cotiz. {tasa_usd:,.0f})",
+            "moneda": "USD",
+            "monto": monto_usd,
+            "tasa": tasa_usd,
+            "monto_gs": monto_gs_usd,
+        })
+    if monto_transf > 0:
+        info_parts = []
+        if pay_dict.get("banco_nombre"):
+            info_parts.append(str(pay_dict["banco_nombre"]))
+        if pay_dict.get("banco_cuenta"):
+            info_parts.append(f"Cta: {pay_dict['banco_cuenta']}")
+        f_tr = pay_dict.get("fecha_transferencia")
+        if f_tr:
+            f_str = f_tr.strftime("%d/%m/%Y") if hasattr(f_tr, "strftime") else str(f_tr)
+            info_parts.append(f"Fecha op: {f_str}")
+        ref_val = pay_dict.get("referencia_transferencia") or pay_dict.get("referencia")
+        if ref_val:
+            info_parts.append(f"Ref: {ref_val}")
+        desc_tr = "Transferencia Bancaria"
+        if info_parts:
+            desc_tr += f" ({' · '.join(info_parts)})"
+        formas_pago_detalle.append({
+            "tipo": "transferencia",
+            "descripcion": desc_tr,
+            "moneda": "PYG",
+            "monto": monto_transf,
+            "monto_gs": monto_transf,
+            "banco": pay_dict.get("banco_nombre"),
+            "cuenta": pay_dict.get("banco_cuenta"),
+            "fecha": str(pay_dict.get("fecha_transferencia") or ""),
+            "referencia": ref_val,
+        })
+    if monto_chq > 0 or len(chq_list) > 0:
+        info_ch = []
+        for ch in chq_list:
+            info_ch.append(f"N° {ch['numero']} ({ch.get('banco_emisor') or 'Banco'})")
+        desc_ch = "Cheque"
+        if info_ch:
+            desc_ch += f" ({', '.join(info_ch)})"
+        formas_pago_detalle.append({
+            "tipo": "cheque",
+            "descripcion": desc_ch,
+            "moneda": "PYG",
+            "monto": monto_chq or sum(c["monto"] for c in chq_list),
+            "monto_gs": monto_chq or sum(c["monto"] for c in chq_list),
+            "cheques": chq_list,
+        })
+
+    # Si fue efectivo tradicional o no se desglosó por monedas
+    if not formas_pago_detalle:
+        forma_label = (pay_dict.get("forma_pago") or "Efectivo").replace("_", " ").upper()
+        if pay_dict.get("referencia"):
+            forma_label += f" (Ref: {pay_dict['referencia']})"
+        formas_pago_detalle.append({
+            "tipo": pay_dict.get("forma_pago") or "efectivo",
+            "descripcion": forma_label,
+            "moneda": pay_dict.get("moneda") or "PYG",
+            "monto": float(pay_dict.get("monto_total") or 0),
+            "monto_gs": float(pay_dict.get("monto_total") or 0),
+        })
+
+    # Retención IVA si aplica
+    if pay_dict.get("aplica_retencion") and float(pay_dict.get("monto_retencion") or 0) > 0:
+        ret_parts = ["Retención Tesakã"]
+        if pay_dict.get("retencion_numero_comprobante"):
+            ret_parts.append(f"N° {pay_dict['retencion_numero_comprobante']}")
+        ret_fec = pay_dict.get("retencion_fecha")
+        if ret_fec:
+            ret_fec_str = ret_fec.strftime("%d/%m/%Y") if hasattr(ret_fec, "strftime") else str(ret_fec)
+            ret_parts.append(ret_fec_str)
+        formas_pago_detalle.append({
+            "tipo": "retencion_iva",
+            "descripcion": " · ".join(ret_parts),
+            "moneda": "PYG",
+            "monto": float(pay_dict["monto_retencion"]),
+            "monto_gs": float(pay_dict["monto_retencion"]),
+        })
+
+    pay_dict["formas_pago_detalle"] = formas_pago_detalle
+
     rec_fallback = f"REC-{row.fecha.strftime('%Y%m%d') if row.fecha else '20260910'}-{str(abs(hash(str(payment_id))))[:4]}"
     pay_dict["numero_recibo"] = getattr(row, "numero_recibo", None) or rec_fallback
     return pay_dict

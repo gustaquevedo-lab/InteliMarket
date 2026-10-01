@@ -147,14 +147,37 @@ export default function VerificarReciboPage() {
           <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 space-y-3">
             <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800 pb-2">
               <CreditCard className="w-4 h-4 text-indigo-400" />
-              <span>Detalles del Cobro</span>
+              <span>Medios de Pago Percibidos</span>
             </div>
             <div className="text-xs text-slate-400 space-y-2">
-              <div>
-                <span className="text-slate-400 block text-[11px]">Forma de Pago:</span>
-                <span className="text-sm font-bold text-white capitalize">{data.forma_pago.replace("_", " ")}</span>
-              </div>
-              {data.referencia && (
+              {data.formas_pago_detalle && data.formas_pago_detalle.length > 0 ? (
+                <div className="space-y-1.5">
+                  {data.formas_pago_detalle.map((fp: any, fIdx: number) => (
+                    <div key={fIdx} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-slate-800/70 border border-slate-700/50">
+                      <div>
+                        <div className="font-semibold text-slate-200 text-xs">{fp.descripcion}</div>
+                        {fp.banco && (
+                          <div className="text-[10px] text-slate-400">
+                            {fp.banco} {fp.cuenta ? `· Cta: ${fp.cuenta}` : ""} {fp.fecha ? `· Op: ${fp.fecha.slice(0, 10)}` : ""}
+                          </div>
+                        )}
+                        {fp.referencia && !fp.banco && (
+                          <div className="text-[10px] text-slate-400">Ref: {fp.referencia}</div>
+                        )}
+                      </div>
+                      <span className="font-mono font-bold text-emerald-400 text-xs whitespace-nowrap">
+                        {formatPYG(fp.monto_gs || fp.monto)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div>
+                  <span className="text-slate-400 block text-[11px]">Forma de Pago:</span>
+                  <span className="text-sm font-bold text-white capitalize">{data.forma_pago.replace("_", " ")}</span>
+                </div>
+              )}
+              {data.referencia && (!data.formas_pago_detalle || data.formas_pago_detalle.length === 0) && (
                 <div>
                   <span className="text-slate-400 block text-[11px]">Comprobante / N° Referencia:</span>
                   <span className="text-xs font-mono text-slate-200 font-semibold">{data.referencia}</span>
@@ -169,6 +192,25 @@ export default function VerificarReciboPage() {
             </div>
           </div>
         </div>
+
+        {/* Resumen de Liquidación si hubo Notas de Crédito */}
+        {data.total_notas_credito > 0 && (
+          <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div>
+              <div className="font-bold text-amber-400 flex items-center gap-1.5">
+                <FileText className="w-4 h-4" />
+                <span>Notas de Crédito Aplicadas a la Operación</span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Se amortizó parte de las facturas mediante notas de crédito emitidas previamente por devolución o ajuste.
+              </p>
+            </div>
+            <div className="text-right">
+              <span className="text-[10px] text-slate-400 block">Total en Notas de Crédito</span>
+              <span className="font-mono font-bold text-red-400 text-sm">-{formatPYG(data.total_notas_credito)}</span>
+            </div>
+          </div>
+        )}
 
         {/* Facturas Imputadas */}
         <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 space-y-4">
@@ -188,8 +230,23 @@ export default function VerificarReciboPage() {
                   <div className="text-slate-400 text-[11px] mt-0.5">
                     {alloc.fecha_vencimiento ? `Vencimiento: ${alloc.fecha_vencimiento}` : "Sin vencimiento fijo"} · Monto Original: {formatPYG(alloc.monto_original)}
                   </div>
+                  {alloc.notas_credito && alloc.notas_credito.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {alloc.notas_credito.map((nc: any, ncIdx: number) => (
+                        <span key={ncIdx} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/10 text-red-400 border border-red-500/30">
+                          NC {nc.numero}: -{formatPYG(nc.total)}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center justify-between sm:justify-end gap-4 border-t sm:border-t-0 border-slate-700 pt-2 sm:pt-0">
+                  {alloc.total_nc > 0 && (
+                    <div className="text-left sm:text-right">
+                      <span className="text-[10px] text-slate-400 block">NC Aplicada</span>
+                      <span className="font-mono font-bold text-red-400 text-sm">-{formatPYG(alloc.total_nc)}</span>
+                    </div>
+                  )}
                   <div className="text-left sm:text-right">
                     <span className="text-[10px] text-slate-400 block">Cobrado</span>
                     <span className="font-mono font-bold text-emerald-400 text-sm">{formatPYG(alloc.monto_aplicado)}</span>
