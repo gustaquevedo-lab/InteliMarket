@@ -487,23 +487,25 @@ async def _record_treasury_ingress(
         if m_banco > 0:
             bank_tx_id = uuid.uuid4()
             desc_tipo = "Depósito Bancario" if "deposito" in forma_pago else ("PIX" if forma_pago == "pix" else ("QR" if forma_pago == "qr" else "Transferencia"))
-            ref_str = f" - Boleta/Ref: {getattr(data, 'referencia', '')}" if getattr(data, "referencia", None) else ""
+            ref_val = getattr(data, "referencia_transferencia", None) or getattr(data, "referencia", None)
+            ref_str = f" - Boleta/Ref: {ref_val}" if ref_val else ""
+            fecha_op = getattr(data, "fecha_transferencia", None) or getattr(data, "fecha", None) or date.today()
             await db.execute(
                 text("""
                     INSERT INTO bank_transactions
                         (id, company_id, bank_account_id, fecha, tipo, monto, moneda, descripcion, referencia, contraparte, conciliado, fecha_conciliacion, categoria, created_at)
                     VALUES
-                        (:id, :company_id, :bank_account_id, :fecha, 'credito', :monto, :moneda, :descripcion, :referencia, :contraparte, true, NOW(), 'cobranzas', NOW())
+                        (:id, :company_id, :bank_account_id, :fecha, 'credito', :monto, :moneda, :descripcion, :referencia, :contraparte, false, NULL, 'cobranzas', NOW())
                 """),
                 {
                     "id": bank_tx_id,
                     "company_id": company_id,
                     "bank_account_id": str(bank_account_id),
-                    "fecha": getattr(data, "fecha", None) or date.today(),
+                    "fecha": fecha_op,
                     "monto": float(m_banco),
                     "moneda": getattr(data, "moneda", "PYG") or "PYG",
                     "descripcion": f"Cobro AR {desc_tipo} Recibo #{numero_recibo}{ref_str} - Cliente: {customer_name}",
-                    "referencia": getattr(data, "referencia", None),
+                    "referencia": ref_val,
                     "contraparte": customer_name,
                 },
             )
@@ -704,15 +706,23 @@ async def create_receivable_payment(db: AsyncSession, company_id: str, data, reg
     retencion_porcentaje = Decimal(str(getattr(data, "retencion_porcentaje", 30.00) or 30.00)) if aplica_retencion else Decimal("30.00")
     monto_efectivo_recibido = max(Decimal("0"), monto_entregado_gs - monto_retencion)
 
+    bank_account_id = getattr(data, "bank_account_id", None)
+    fecha_transferencia = getattr(data, "fecha_transferencia", None)
+    referencia_transferencia = getattr(data, "referencia_transferencia", None)
+    monto_transferencia = Decimal(str(getattr(data, "monto_transferencia", 0) or 0))
+    monto_cheque = Decimal(str(getattr(data, "monto_cheque", 0) or 0))
+
     await db.execute(
         text("""
             INSERT INTO receivable_payments
                 (id, company_id, customer_id, monto_total, moneda, forma_pago, referencia, fecha, observaciones, registrado_por, numero_recibo,
                  aplica_retencion, monto_retencion, retencion_numero_comprobante, retencion_fecha, retencion_porcentaje, monto_efectivo_recibido,
-                 monto_pyg, monto_brl, monto_usd, tasa_brl, tasa_usd, monto_facturas_canceladas, diferencia_monto, tipo_diferencia)
+                 monto_pyg, monto_brl, monto_usd, tasa_brl, tasa_usd, monto_facturas_canceladas, diferencia_monto, tipo_diferencia,
+                 bank_account_id, fecha_transferencia, monto_transferencia, monto_cheque, referencia_transferencia)
             VALUES (:id, :company_id, :customer_id, :monto_total, :moneda, :forma_pago, :referencia, :fecha, :observaciones, :registrado_por, :numero_recibo,
                  :aplica_retencion, :monto_retencion, :retencion_numero_comprobante, :retencion_fecha, :retencion_porcentaje, :monto_efectivo_recibido,
-                 :monto_pyg, :monto_brl, :monto_usd, :tasa_brl, :tasa_usd, :monto_facturas_canceladas, :diferencia_monto, :tipo_diferencia)
+                 :monto_pyg, :monto_brl, :monto_usd, :tasa_brl, :tasa_usd, :monto_facturas_canceladas, :diferencia_monto, :tipo_diferencia,
+                 :bank_account_id, :fecha_transferencia, :monto_transferencia, :monto_cheque, :referencia_transferencia)
         """),
         {
             "id": payment_id, "company_id": company_id, "customer_id": str(data.customer_id),
@@ -734,6 +744,11 @@ async def create_receivable_payment(db: AsyncSession, company_id: str, data, reg
             "monto_facturas_canceladas": float(monto_facturas),
             "diferencia_monto": float(diferencia_monto),
             "tipo_diferencia": tipo_diferencia,
+            "bank_account_id": str(bank_account_id) if bank_account_id else None,
+            "fecha_transferencia": fecha_transferencia,
+            "monto_transferencia": float(monto_transferencia) if monto_transferencia > 0 else None,
+            "monto_cheque": float(monto_cheque) if monto_cheque > 0 else None,
+            "referencia_transferencia": referencia_transferencia,
         },
     )
 
@@ -845,6 +860,7 @@ async def list_payments_for_customer(db: AsyncSession, company_id: str, customer
     result = await db.execute(
         text("""
             SELECT rp.id, rp.numero_recibo, rp.fecha, rp.monto_total, rp.forma_pago, rp.referencia, rp.observaciones, rp.created_at,
+                   rp.bank_account_id, rp.fecha_transferencia, rp.monto_transferencia, rp.monto_cheque, rp.referencia_transferencia,
                    COALESCE(json_agg(json_build_object('accounts_receivable_id', rpa.accounts_receivable_id, 'numero_documento', ar.numero_documento, 'monto', rpa.monto)) FILTER (WHERE rpa.id IS NOT NULL), '[]') as allocations
             FROM receivable_payments rp
             LEFT JOIN receivable_payment_allocations rpa ON rpa.receivable_payment_id = rp.id
@@ -1083,15 +1099,21 @@ async def apply_global_payment(
     retencion_porcentaje = Decimal(str(getattr(data, "retencion_porcentaje", 30.00) or 30.00)) if aplica_retencion else Decimal("30.00")
     monto_efectivo_recibido = max(Decimal("0"), monto_entregado_gs - monto_retencion)
 
+    bank_account_id = getattr(data, "bank_account_id", None)
+    fecha_transferencia = getattr(data, "fecha_transferencia", None)
+    referencia_transferencia = getattr(data, "referencia_transferencia", None)
+
     await db.execute(
         text("""
             INSERT INTO receivable_payments
                 (id, company_id, customer_id, monto_total, moneda, forma_pago, referencia, fecha, observaciones, registrado_por, numero_recibo,
                  aplica_retencion, monto_retencion, retencion_numero_comprobante, retencion_fecha, retencion_porcentaje, monto_efectivo_recibido,
-                 monto_pyg, monto_brl, monto_usd, tasa_brl, tasa_usd, monto_facturas_canceladas, diferencia_monto, tipo_diferencia)
+                 monto_pyg, monto_brl, monto_usd, tasa_brl, tasa_usd, monto_facturas_canceladas, diferencia_monto, tipo_diferencia,
+                 bank_account_id, fecha_transferencia, monto_transferencia, monto_cheque, referencia_transferencia)
             VALUES (:id, :company_id, :customer_id, :monto_total, :moneda, :forma_pago, :referencia, :fecha, :observaciones, :registrado_por, :numero_recibo,
                  :aplica_retencion, :monto_retencion, :retencion_numero_comprobante, :retencion_fecha, :retencion_porcentaje, :monto_efectivo_recibido,
-                 :monto_pyg, :monto_brl, :monto_usd, :tasa_brl, :tasa_usd, :monto_facturas_canceladas, :diferencia_monto, :tipo_diferencia)
+                 :monto_pyg, :monto_brl, :monto_usd, :tasa_brl, :tasa_usd, :monto_facturas_canceladas, :diferencia_monto, :tipo_diferencia,
+                 :bank_account_id, :fecha_transferencia, :monto_transferencia, :monto_cheque, :referencia_transferencia)
         """),
         {
             "id": payment_id,
@@ -1119,6 +1141,11 @@ async def apply_global_payment(
             "monto_facturas_canceladas": float(monto_facturas),
             "diferencia_monto": float(diferencia_monto),
             "tipo_diferencia": tipo_diferencia,
+            "bank_account_id": str(bank_account_id) if bank_account_id else None,
+            "fecha_transferencia": fecha_transferencia,
+            "monto_transferencia": float(monto_transf) if monto_transf > 0 else None,
+            "monto_cheque": float(monto_cheque) if monto_cheque > 0 else None,
+            "referencia_transferencia": referencia_transferencia,
         },
     )
 
@@ -1380,6 +1407,8 @@ async def get_payment_receipt_data(db: AsyncSession, payment_id: str) -> dict | 
             rp.numero_recibo,
             rp.aplica_retencion, rp.monto_retencion, rp.retencion_numero_comprobante,
             rp.retencion_fecha, rp.retencion_porcentaje, rp.monto_efectivo_recibido,
+            rp.bank_account_id, rp.fecha_transferencia, rp.monto_transferencia, rp.monto_cheque, rp.referencia_transferencia,
+            rp.monto_pyg, rp.monto_brl, rp.monto_usd, rp.tasa_brl, rp.tasa_usd,
             c.razon_social as customer_name, c.nombre_fantasia, c.ruc as customer_ruc,
             c.telefono as customer_telefono, c.empresa_vinculada_nombre,
             comp.razon_social as comp_razon_social, comp.ruc as comp_ruc,

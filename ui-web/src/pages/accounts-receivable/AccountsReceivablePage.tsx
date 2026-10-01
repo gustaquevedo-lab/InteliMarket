@@ -169,6 +169,8 @@ export default function AccountsReceivablePage() {
   const [bankAccounts, setBankAccounts] = useState<any[]>([])
   const [payDestinoFondos, setPayDestinoFondos] = useState<"boveda" | "caja">("boveda")
   const [payBankAccountId, setPayBankAccountId] = useState("")
+  const [payFechaTransferencia, setPayFechaTransferencia] = useState(() => getTodayAsuncion())
+  const [payReferenciaTransferencia, setPayReferenciaTransferencia] = useState("")
   const [payChequeNumero, setPayChequeNumero] = useState("")
   const [payChequeBanco, setPayChequeBanco] = useState("")
   const [payChequeLibrador, setPayChequeLibrador] = useState("")
@@ -923,6 +925,8 @@ export default function AccountsReceivablePage() {
       setSelectedBatchDocs({})
     }
     setPayReferencia("")
+    setPayReferenciaTransferencia("")
+    setPayFechaTransferencia(getTodayAsuncion())
     setPayObservaciones("")
     setPayDestinoFondos("boveda")
     if (bankAccounts.length > 0 && !payBankAccountId) {
@@ -1167,6 +1171,8 @@ export default function AccountsReceivablePage() {
         monto_brl: isEfectivo ? (payMontoBRL || 0) : 0,
         monto_usd: isEfectivo ? (payMontoUSD || 0) : 0,
         monto_transferencia: payFormaPago === "mixto" ? payMontoTransferencia : (payFormaPago === "transferencia" ? montoTotalPago : 0),
+        fecha_transferencia: (payFormaPago === "transferencia" || payFormaPago === "deposito_bancario" || payFormaPago === "pix" || payFormaPago === "qr" || payFormaPago === "mixto") ? (payFechaTransferencia || payFecha) : undefined,
+        referencia_transferencia: payReferenciaTransferencia || undefined,
         monto_cheque: payFormaPago === "mixto" ? payMontoCheque : (payFormaPago === "cheque" ? montoTotalPago : 0),
         tasa_brl: payTasaBRL,
         tasa_usd: payTasaUSD,
@@ -3350,7 +3356,7 @@ export default function AccountsReceivablePage() {
                       {payFormaPago === "deposito_bancario" ? "Acredita saldo en la Cta. Cte. seleccionada según la boleta" : "Acredita saldo y asienta la transacción"}
                     </span>
                   </div>
-                  <div className={`grid ${payFormaPago === "mixto" ? "grid-cols-1 sm:grid-cols-2 gap-3" : "grid-cols-1"}`}>
+                  <div className={`grid ${payFormaPago === "mixto" ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5" : "grid-cols-1"}`}>
                     <div>
                       {payFormaPago === "mixto" && (
                         <label className="text-[10px] font-bold text-blue-900 dark:text-blue-300 uppercase block mb-1">
@@ -3386,7 +3392,43 @@ export default function AccountsReceivablePage() {
                         />
                       </div>
                     )}
+                    {payFormaPago === "mixto" && (
+                      <div>
+                        <label className="text-[10px] font-bold text-blue-900 dark:text-blue-300 uppercase block mb-1 flex items-center justify-between">
+                          <span>Fecha Operación Banco</span>
+                          <span className="text-[9px] text-blue-600 dark:text-blue-400 font-extrabold px-1 rounded bg-blue-100 dark:bg-blue-900/60">Conciliación</span>
+                        </label>
+                        <input
+                          type="date"
+                          className="input-field text-xs bg-white dark:bg-slate-900 border-blue-300 font-medium"
+                          value={payFechaTransferencia}
+                          onChange={e => setPayFechaTransferencia(e.target.value)}
+                        />
+                      </div>
+                    )}
+                    {payFormaPago === "mixto" && (
+                      <div>
+                        <label className="text-[10px] font-bold text-blue-900 dark:text-blue-300 uppercase block mb-1">
+                          N° Ref. / SIPAP Bancario
+                        </label>
+                        <input
+                          type="text"
+                          className="input-field text-xs bg-white dark:bg-slate-900 border-blue-300 font-mono"
+                          placeholder="Ej: SIPAP 984124"
+                          value={payReferenciaTransferencia}
+                          onChange={e => setPayReferenciaTransferencia(e.target.value)}
+                        />
+                      </div>
+                    )}
                   </div>
+                  {payFormaPago === "mixto" && (
+                    <div className="flex items-center gap-1.5 text-[10px] text-blue-700 dark:text-blue-300 font-medium pt-1 border-t border-blue-200/60 dark:border-blue-900/40">
+                      <Clock className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                      <span>
+                        La fecha de la operación se asienta en la transacción bancaria para su conciliación automática con el extracto del banco.
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -3488,7 +3530,7 @@ export default function AccountsReceivablePage() {
                     </span>
                     <div className="flex flex-wrap gap-3 text-[11px] text-slate-600 dark:text-slate-300 font-bold">
                       <span>💵 Efectivo: {formatPYG((payMontoPYG || 0) + Math.round((payMontoBRL || 0) * payTasaBRL) + Math.round((payMontoUSD || 0) * payTasaUSD))}</span>
-                      <span>🏦 Banco: {formatPYG(payMontoTransferencia)}</span>
+                      <span>🏦 Banco: {formatPYG(payMontoTransferencia)}{payMontoTransferencia > 0 && payFechaTransferencia ? ` (Op: ${new Date(payFechaTransferencia + 'T00:00:00').toLocaleDateString('es-PY')})` : ''}</span>
                       <span>📑 Cheque: {formatPYG(payMontoCheque)}</span>
                     </div>
                   </div>

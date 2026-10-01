@@ -94,6 +94,10 @@ class ReceivablePaymentCreate(BaseModel):
     monto_facturas_canceladas: Optional[Decimal] = None
     diferencia_monto: Optional[Decimal] = Decimal("0")
     tipo_diferencia: Optional[str] = "exacto"
+    fecha_transferencia: Optional[date] = None
+    referencia_transferencia: Optional[str] = None
+    monto_transferencia: Optional[Decimal] = Decimal("0")
+    monto_cheque: Optional[Decimal] = Decimal("0")
     allocations: list[ReceivableAllocationInput] = Field(min_length=1)
 
 
@@ -126,6 +130,8 @@ class ReceivableGlobalPaymentCreate(BaseModel):
     tasa_brl: Optional[Decimal] = None
     tasa_usd: Optional[Decimal] = None
     monto_transferencia: Optional[Decimal] = Decimal("0")
+    fecha_transferencia: Optional[date] = None
+    referencia_transferencia: Optional[str] = None
     monto_cheque: Optional[Decimal] = Decimal("0")
     cheques: Optional[list[dict]] = None
     monto_facturas_canceladas: Optional[Decimal] = None
@@ -187,6 +193,11 @@ class ReceivablePaymentResponse(BaseModel):
     retencion_fecha: Optional[date] = None
     retencion_porcentaje: Optional[Decimal] = Decimal("30.00")
     monto_efectivo_recibido: Optional[Decimal] = None
+    bank_account_id: Optional[UUID] = None
+    fecha_transferencia: Optional[date] = None
+    referencia_transferencia: Optional[str] = None
+    monto_transferencia: Optional[Decimal] = None
+    monto_cheque: Optional[Decimal] = None
     allocations: list[dict] = []
 
     class Config:

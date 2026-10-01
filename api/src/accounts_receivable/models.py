@@ -110,6 +110,11 @@ class ReceivablePayment(Base):
     monto_facturas_canceladas = Column(Numeric(15, 0))
     diferencia_monto = Column(Numeric(15, 0), default=0)
     tipo_diferencia = Column(String(30), default="exacto")  # exacto | descuento | gastos_administrativos
+    # Conciliación bancaria y trazabilidad de cobro mixto / bancario
+    fecha_transferencia = Column(Date)
+    monto_transferencia = Column(Numeric(15, 0))
+    monto_cheque = Column(Numeric(15, 0))
+    referencia_transferencia = Column(String(150))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
