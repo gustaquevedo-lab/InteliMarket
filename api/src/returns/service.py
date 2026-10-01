@@ -537,7 +537,7 @@ async def get_return_pdf_data(db: AsyncSession, return_id: str, company_id: str 
     # Enriquecer con datos de Nota de Crédito
     nc_id = data.get("nota_credito_id")
     if nc_id:
-        res_nc = await db.execute(select(NotaCreditoDebito.numero, NotaCreditoDebito.timbrado).where(NotaCreditoDebito.id == nc_id))
+        res_nc = await db.execute(select(NotaCreditoDebito.numero, NotaCreditoDebito.timbrado_numero).where(NotaCreditoDebito.id == nc_id))
         nc_row = res_nc.first()
         if nc_row:
             data["nota_credito_numero"] = nc_row[0]
