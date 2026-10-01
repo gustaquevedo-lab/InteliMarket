@@ -1483,12 +1483,20 @@ async def get_payment_receipt_data(db: AsyncSession, payment_id: str) -> dict | 
     # Buscar cheques vinculados
     chq_list: list[dict] = []
     cheque_id_val = getattr(row, "cheque_id", None)
-    q_chq = text("""
-        SELECT id, numero, banco_emisor, librador_nombre, librador_documento, monto, fecha_emision, fecha_pago, diferido
-        FROM cheques
-        WHERE receivable_payment_id = :payment_id OR (:chq_id IS NOT NULL AND id = :chq_id)
-    """)
-    chq_res = await db.execute(q_chq, {"payment_id": payment_id, "chq_id": cheque_id_val})
+    if cheque_id_val:
+        q_chq = text("""
+            SELECT id, numero, banco_emisor, librador_nombre, librador_documento, monto, fecha_emision, fecha_pago, diferido
+            FROM cheques
+            WHERE receivable_payment_id = :payment_id OR id = :chq_id
+        """)
+        chq_res = await db.execute(q_chq, {"payment_id": payment_id, "chq_id": str(cheque_id_val)})
+    else:
+        q_chq = text("""
+            SELECT id, numero, banco_emisor, librador_nombre, librador_documento, monto, fecha_emision, fecha_pago, diferido
+            FROM cheques
+            WHERE receivable_payment_id = :payment_id
+        """)
+        chq_res = await db.execute(q_chq, {"payment_id": payment_id})
     for ch_r in chq_res.fetchall():
         c_dict = dict(ch_r._mapping)
         c_dict["monto"] = float(c_dict.get("monto") or 0)
