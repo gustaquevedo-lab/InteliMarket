@@ -1454,10 +1454,11 @@ async def get_corporate_agreement_pending_docs(
     empresa_nombre: str,
     fecha_corte: date | None = None,
     doc_ids: list[str] | None = None,
+    tipo_destino: str | None = "personal",
 ) -> dict:
     """Trae los funcionarios de una empresa vinculada y sus facturas pendientes
     que aún no fueron incluidas en ninguna remisión de corte mensual,
-    opcionalmente filtrando por fecha_corte (inclusive) o lista específica de comprobantes."""
+    opcionalmente filtrando por fecha_corte (inclusive), tipo_destino ('personal', 'empresa', 'todos') o lista específica de comprobantes."""
     try:
         cid = uuid.UUID(str(company_id))
     except (ValueError, TypeError, AttributeError):
@@ -1471,6 +1472,13 @@ async def get_corporate_agreement_pending_docs(
     if doc_ids:
         extra_clauses.append("ar.id = ANY(:doc_ids)")
         params["doc_ids"] = [str(x) for x in doc_ids]
+
+    if tipo_destino == "personal":
+        extra_clauses.append("(c.tipo_persona != 'juridica' AND c.razon_social NOT ILIKE :empresa_exacta)")
+        params["empresa_exacta"] = empresa_nombre.strip()
+    elif tipo_destino == "empresa":
+        extra_clauses.append("(c.tipo_persona = 'juridica' OR c.razon_social ILIKE :empresa_exacta)")
+        params["empresa_exacta"] = empresa_nombre.strip()
 
     extra_sql = ("\n          AND " + "\n          AND ".join(extra_clauses)) if extra_clauses else ""
 
@@ -1559,6 +1567,7 @@ async def create_corporate_remission(db: AsyncSession, company_id: str, data, us
     periodo_mes = data.periodo_mes.strip()
     fecha_corte = data.fecha_corte or date.today()
     fecha_remision = date.today()
+    tipo_destino = getattr(data, "tipo_destino", "personal") or "personal"
 
     if data.accounts_receivable_ids:
         doc_ids = [str(i) for i in data.accounts_receivable_ids]
@@ -1570,15 +1579,27 @@ async def create_corporate_remission(db: AsyncSession, company_id: str, data, us
         """)
         r_docs = await db.execute(q_docs, {"ids": doc_ids, "company_id": company_id})
     else:
-        q_docs = text("""
+        extra_filter = ""
+        if tipo_destino == "personal":
+            extra_filter = "AND (c.tipo_persona != 'juridica' AND c.razon_social NOT ILIKE :empresa_exacta)"
+        elif tipo_destino == "empresa":
+            extra_filter = "AND (c.tipo_persona = 'juridica' OR c.razon_social ILIKE :empresa_exacta)"
+
+        q_docs = text(f"""
             SELECT ar.id, ar.customer_id, ar.saldo_pendiente, c.empresa_vinculada_ruc
             FROM accounts_receivable ar
             JOIN customers c ON c.id = ar.customer_id
             WHERE ar.company_id = :company_id AND TRIM(c.empresa_vinculada_nombre) ILIKE :empresa
               AND ar.estado = 'pendiente' AND ar.corporate_remission_id IS NULL
               AND DATE(ar.fecha_emision AT TIME ZONE 'America/Asuncion') <= :fecha_corte
+              {extra_filter}
         """)
-        r_docs = await db.execute(q_docs, {"company_id": company_id, "empresa": f"%{empresa_nombre}%", "fecha_corte": fecha_corte})
+        r_docs = await db.execute(q_docs, {
+            "company_id": company_id,
+            "empresa": f"%{empresa_nombre}%",
+            "empresa_exacta": empresa_nombre,
+            "fecha_corte": fecha_corte,
+        })
 
     docs = r_docs.fetchall()
     if not docs:
@@ -1718,7 +1739,7 @@ async def get_corporate_remission_detail(db: AsyncSession, remission_id: str) ->
         text("""
             SELECT
                 ar.id, ar.customer_id, ar.numero_documento, ar.fecha_emision, ar.fecha_vencimiento,
-                ar.monto_original, ar.saldo_pendiente, ar.tipo, ar.estado,
+                ar.monto_original, ar.saldo_pendiente, ar.tipo, ar.estado, ar.notas_cobranza,
                 COALESCE(c.razon_social, c.nombre_fantasia, 'Funcionario') as customer_name,
                 c.ruc as customer_ruc, c.ci as ci_numero
             FROM accounts_receivable ar
@@ -1731,6 +1752,7 @@ async def get_corporate_remission_detail(db: AsyncSession, remission_id: str) ->
     docs = docs_res.fetchall()
 
     funcionarios_dict = {}
+    import re
     for d in docs:
         cid = str(d.customer_id)
         if cid not in funcionarios_dict:
@@ -1744,7 +1766,22 @@ async def get_corporate_remission_detail(db: AsyncSession, remission_id: str) ->
                 "documentos": [],
             }
         fn = funcionarios_dict[cid]
-        s = float(d.saldo_pendiente or d.monto_original or 0)
+        if rem_dict.get("estado") == "PAGADO":
+            # Si ya se canceló, el saldo_pendiente en BD quedó en 0.
+            # Calculamos el importe neto efectivamente liquidado restando Notas de Crédito / devoluciones
+            neto = float(d.monto_original or 0)
+            if getattr(d, "notas_cobranza", None):
+                matches = re.findall(r"-₲\s*([0-9\.,]+)", d.notas_cobranza)
+                for m in matches:
+                    clean_m = m.replace(".", "").replace(",", ".")
+                    try:
+                        neto -= float(clean_m)
+                    except Exception:
+                        pass
+            s = max(0.0, neto)
+        else:
+            s = float(d.saldo_pendiente or d.monto_original or 0)
+
         fn["saldo_total"] += s
         fn["cantidad_documentos"] += 1
         fn["documentos"].append({
@@ -1906,5 +1943,239 @@ async def pay_corporate_remission(db: AsyncSession, company_id: str, remission_i
         "saldo_pendiente": float(nuevo_saldo),
         "estado": nuevo_estado,
     }
+
+
+async def revert_corporate_remission_payment(
+    db: AsyncSession, company_id: str, remission_id: str, motivo: str | None, user_id: str | None
+) -> dict:
+    """Revierte de forma atómica y consistente el pago registrado para una remisión corporativa:
+    1. Descuenta los fondos indebidamente acreditados en la cuenta bancaria de Banco/Bóveda.
+    2. Elimina la transacción bancaria / anula cheque recibido.
+    3. Restablece los comprobantes asociados a estado 'REMITIDO_EMPRESA' y con su saldo adeudado real.
+    4. Restablece el saldo pendiente de la remisión a su monto original y su estado a 'REMITIDO'."""
+    r_res = await db.execute(
+        text("SELECT * FROM ar_corporate_remissions WHERE id = :id AND company_id = :cid"),
+        {"id": remission_id, "cid": company_id},
+    )
+    rem = r_res.fetchone()
+    if not rem:
+        return {"error": "Remisión corporativa no encontrada"}
+
+    if rem.estado not in ("PAGADO", "PAGADO_PARCIAL"):
+        return {"error": f"La remisión se encuentra en estado '{rem.estado}'. Solo se pueden revertir pagos de remisiones en estado PAGADO o PAGADO_PARCIAL."}
+
+    # 1. Revertir transacciones bancarias asociadas
+    bt_res = await db.execute(
+        text("""
+            SELECT id, bank_account_id, monto
+            FROM bank_transactions
+            WHERE company_id = :cid
+              AND categoria = 'cobranzas_corporativas'
+              AND (descripcion ILIKE :desc_rem OR referencia ILIKE :ref_rem)
+        """),
+        {"cid": company_id, "desc_rem": f"%{rem.numero_remision}%", "ref_rem": f"%{rem.numero_remision}%"}
+    )
+    bts = bt_res.fetchall()
+    for bt in bts:
+        if bt.bank_account_id and bt.monto:
+            await db.execute(
+                text("UPDATE bank_accounts SET saldo_actual = saldo_actual - :monto, updated_at = NOW() WHERE id = :id"),
+                {"monto": float(bt.monto), "id": str(bt.bank_account_id)}
+            )
+        await db.execute(
+            text("DELETE FROM bank_transactions WHERE id = :id"),
+            {"id": bt.id}
+        )
+
+    # 2. Revertir entradas en bóveda
+    ve_res = await db.execute(
+        text("""
+            SELECT id
+            FROM vault_entries
+            WHERE company_id = :cid
+              AND origen = 'cobranza_ar'
+              AND observaciones ILIKE :obs_rem
+        """),
+        {"cid": company_id, "obs_rem": f"%{rem.numero_remision}%"}
+    )
+    ves = ve_res.fetchall()
+    for ve in ves:
+        await db.execute(
+            text("DELETE FROM vault_entries WHERE id = :id"),
+            {"id": ve.id}
+        )
+
+    # 3. Anular cheques recibidos
+    chq_res = await db.execute(
+        text("""
+            SELECT id
+            FROM cheques
+            WHERE company_id = :cid
+              AND concepto ILIKE :con_rem
+        """),
+        {"cid": company_id, "con_rem": f"%{rem.numero_remision}%"}
+    )
+    chqs = chq_res.fetchall()
+    for chq in chqs:
+        await db.execute(
+            text("UPDATE cheques SET estado = 'anulado', updated_at = NOW() WHERE id = :id"),
+            {"id": chq.id}
+        )
+
+    # 4. Restaurar comprobantes de la remisión a REMITIDO_EMPRESA con su saldo pendiente neto real
+    docs_res = await db.execute(
+        text("SELECT id, monto_original, notas_cobranza FROM accounts_receivable WHERE corporate_remission_id = :rem_id"),
+        {"rem_id": remission_id}
+    )
+    docs = docs_res.fetchall()
+    import re
+    for d in docs:
+        saldo = Decimal(str(d.monto_original or 0))
+        if getattr(d, "notas_cobranza", None):
+            matches = re.findall(r"-₲\s*([0-9\.,]+)", d.notas_cobranza)
+            for m in matches:
+                clean_m = m.replace(".", "").replace(",", ".")
+                try:
+                    saldo -= Decimal(clean_m)
+                except Exception:
+                    pass
+        saldo = max(Decimal("0"), saldo)
+        await db.execute(
+            text("""
+                UPDATE accounts_receivable
+                SET estado = 'REMITIDO_EMPRESA',
+                    saldo_pendiente = :saldo,
+                    ultimo_pago = NULL,
+                    updated_at = NOW()
+                WHERE id = :id
+            """),
+            {"saldo": float(saldo), "id": d.id}
+        )
+
+    # 5. Restaurar la remisión a estado REMITIDO
+    motivo_clean = (motivo or "").strip() or "Reversión efectuada por operador"
+    nota_adjunta = f"\n[PAGO REVERTIDO el {date.today().isoformat()}: {motivo_clean}]"
+    await db.execute(
+        text("""
+            UPDATE ar_corporate_remissions
+            SET saldo_pendiente = monto_total,
+                estado = 'REMITIDO',
+                fecha_recepcion = NULL,
+                notas = COALESCE(notas, '') || :nota,
+                updated_at = NOW()
+            WHERE id = :id
+        """),
+        {"nota": nota_adjunta, "id": remission_id}
+    )
+
+    await db.flush()
+    return {
+        "remission_id": str(remission_id),
+        "numero_remision": rem.numero_remision,
+        "estado": "REMITIDO",
+        "saldo_pendiente": float(rem.monto_total),
+        "message": f"Pago de remisión {rem.numero_remision} revertido exitosamente. Los comprobantes vuelven a estar pendientes de cobro a la empresa."
+    }
+
+
+async def cancel_corporate_remission(
+    db: AsyncSession, company_id: str, remission_id: str, motivo: str | None, user_id: str | None
+) -> dict:
+    """Anula por completo una remisión corporativa que aún no tiene cobros activos (o cuyos cobros fueron revertidos):
+    1. Desvincula todos los comprobantes (corporate_remission_id = NULL) y los devuelve a estado 'pendiente'.
+    2. Restablece la deuda en la cuenta corriente personal de cada funcionario (saldo_utilizado).
+    3. Marca la remisión como 'ANULADO' para mantener trazabilidad histórica."""
+    r_res = await db.execute(
+        text("SELECT * FROM ar_corporate_remissions WHERE id = :id AND company_id = :cid"),
+        {"id": remission_id, "cid": company_id},
+    )
+    rem = r_res.fetchone()
+    if not rem:
+        return {"error": "Remisión corporativa no encontrada"}
+
+    if rem.estado in ("PAGADO", "PAGADO_PARCIAL"):
+        return {"error": "No se puede anular una remisión con pagos registrados. Revierta el pago primero."}
+
+    docs_res = await db.execute(
+        text("""
+            SELECT ar.id, ar.customer_id, ar.monto_original, ar.notas_cobranza
+            FROM accounts_receivable ar
+            WHERE ar.corporate_remission_id = :rem_id
+        """),
+        {"rem_id": remission_id}
+    )
+    docs = docs_res.fetchall()
+
+    funcionarios_montos = {}
+    import re
+    for d in docs:
+        cid = str(d.customer_id)
+        saldo = Decimal(str(d.monto_original or 0))
+        if getattr(d, "notas_cobranza", None):
+            matches = re.findall(r"-₲\s*([0-9\.,]+)", d.notas_cobranza)
+            for m in matches:
+                clean_m = m.replace(".", "").replace(",", ".")
+                try:
+                    saldo -= Decimal(clean_m)
+                except Exception:
+                    pass
+        saldo = max(Decimal("0"), saldo)
+        funcionarios_montos[cid] = funcionarios_montos.get(cid, Decimal("0")) + saldo
+
+        await db.execute(
+            text("""
+                UPDATE accounts_receivable
+                SET corporate_remission_id = NULL,
+                    remitido_empresa_at = NULL,
+                    estado = 'pendiente',
+                    saldo_pendiente = :saldo,
+                    updated_at = NOW()
+                WHERE id = :id
+            """),
+            {"saldo": float(saldo), "id": d.id}
+        )
+
+    for cid, monto in funcionarios_montos.items():
+        await db.execute(
+            text("""
+                UPDATE credit_accounts
+                SET saldo_utilizado = saldo_utilizado + :monto,
+                    saldo_disponible = GREATEST(0, saldo_disponible - :monto),
+                    updated_at = NOW()
+                WHERE company_id = :company_id AND customer_id = :customer_id
+            """),
+            {"monto": float(monto), "company_id": company_id, "customer_id": cid}
+        )
+        await db.execute(
+            text("""
+                UPDATE customers
+                SET credito_usado = credito_usado + :monto
+                WHERE id = :customer_id
+            """),
+            {"monto": float(monto), "customer_id": cid}
+        )
+
+    motivo_clean = (motivo or "").strip() or "Anulada por operador"
+    nota_adjunta = f"\n[REMISIÓN ANULADA el {date.today().isoformat()}: {motivo_clean}]"
+    await db.execute(
+        text("""
+            UPDATE ar_corporate_remissions
+            SET estado = 'ANULADO',
+                saldo_pendiente = 0,
+                notas = COALESCE(notas, '') || :nota,
+                updated_at = NOW()
+            WHERE id = :id
+        """),
+        {"nota": nota_adjunta, "id": remission_id}
+    )
+
+    await db.flush()
+    return {
+        "remission_id": str(remission_id),
+        "numero_remision": rem.numero_remision,
+        "estado": "ANULADO",
+        "message": f"Remisión {rem.numero_remision} anulada exitosamente. Los comprobantes quedaron nuevamente disponibles para corte."
+    }
+
 
 

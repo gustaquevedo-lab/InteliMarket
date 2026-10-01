@@ -17,6 +17,7 @@ from api.src.accounts_receivable.schemas import (
     ReceivableGlobalPaymentCreate,
     CorporateRemissionCreate,
     CorporateRemissionPayInput,
+    CorporateRemissionRevertInput,
 )
 from api.src.integrated_finance import pdf_reports
 from api.src.auth.middleware import require_auth
@@ -378,10 +379,13 @@ async def corporate_agreement_pending_docs(
     company_id: str,
     empresa_nombre: str,
     fecha_corte: date | None = Query(None, description="Fecha tope de emisión de comprobantes"),
+    tipo_destino: str | None = Query("personal", description="personal, empresa o todos"),
     db: AsyncSession = Depends(get_db),
 ):
     """Documentos y funcionarios pendientes de corte mensual para una empresa vinculada."""
-    return await service.get_corporate_agreement_pending_docs(db, company_id, empresa_nombre, fecha_corte=fecha_corte)
+    return await service.get_corporate_agreement_pending_docs(
+        db, company_id, empresa_nombre, fecha_corte=fecha_corte, tipo_destino=tipo_destino
+    )
 
 
 @router.get("/companies/{company_id}/accounts-receivable/corporate-agreements/{empresa_nombre}/extractos.pdf")
@@ -547,6 +551,44 @@ async def pay_corporate_remission_endpoint(
     """Registra el pago efectuado por la empresa vinculada (parcial o total).
     Impacta en la tesorería (Banco/Bóveda/Cheque) y salda las facturas sin tocar el crédito de los empleados."""
     result = await service.pay_corporate_remission(db, company_id, remission_id, body, user.get("id"))
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@router.post("/companies/{company_id}/accounts-receivable/corporate-remissions/{remission_id}/revert-payment")
+async def revert_corporate_remission_payment_endpoint(
+    company_id: str,
+    remission_id: str,
+    body: CorporateRemissionRevertInput,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Revierte de forma segura y atómica el pago registrado para una remisión corporativa.
+    Descuenta de la cuenta bancaria / bóveda el importe ingresado, anula cheques y restablece
+    el saldo exigible y estado de los comprobantes."""
+    result = await service.revert_corporate_remission_payment(
+        db, company_id, remission_id, body.motivo, user.get("id")
+    )
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@router.post("/companies/{company_id}/accounts-receivable/corporate-remissions/{remission_id}/cancel")
+async def cancel_corporate_remission_endpoint(
+    company_id: str,
+    remission_id: str,
+    body: CorporateRemissionRevertInput,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Anula una remisión corporativa pendiente de cobro (o cuyo pago haya sido previamente revertido).
+    Desvincula las facturas devolviéndolas a estado 'pendiente' y restablece el crédito utilizado
+    de los funcionarios."""
+    result = await service.cancel_corporate_remission(
+        db, company_id, remission_id, body.motivo, user.get("id")
+    )
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result

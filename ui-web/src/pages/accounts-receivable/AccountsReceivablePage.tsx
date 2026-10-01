@@ -6,7 +6,7 @@ import {
   User, Check, Phone, ArrowUpRight, ShieldCheck, RefreshCw, BarChart2,
   Printer, QrCode, ExternalLink, CheckSquare, Square, Building2, Building,
   Users, Send, Landmark, ArrowRight, DownloadCloud, FileCheck, Layers, Filter,
-  Banknote
+  Banknote, RotateCcw, Ban, Trash2
 } from "lucide-react"
 import { api, type AccountsReceivable, type Sale, type SaleItem, type CreditAccount } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -281,6 +281,7 @@ export default function AccountsReceivablePage() {
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   })
   const [remitFechaCorte, setRemitFechaCorte] = useState(() => getTodayAsuncion())
+  const [remitTipoDestino, setRemitTipoDestino] = useState<"personal" | "empresa" | "todos">("personal")
   const [remitModo, setRemitModo] = useState<"completo" | "selectivo">("completo")
   const [selectedRemitDocIds, setSelectedRemitDocIds] = useState<Set<string>>(new Set())
   const [remitSearchFilter, setRemitSearchFilter] = useState("")
@@ -288,8 +289,14 @@ export default function AccountsReceivablePage() {
   const [remitNotas, setRemitNotas] = useState("")
   const [remitting, setRemitting] = useState(false)
   const [showPayRemissionModal, setShowPayRemissionModal] = useState<any | null>(null)
+  const [revertRemissionModal, setRevertRemissionModal] = useState<any | null>(null)
+  const [revertMotivo, setRevertMotivo] = useState("")
+  const [revertingRemission, setRevertingRemission] = useState(false)
+  const [cancelRemissionModal, setCancelRemissionModal] = useState<any | null>(null)
+  const [cancelMotivo, setCancelMotivo] = useState("")
+  const [cancelingRemission, setCancelingRemission] = useState(false)
   const [payRemForm, setPayRemForm] = useState({
-    monto: "",
+    monto: "" as string | number,
     forma_pago: "transferencia",
     bank_account_id: "",
     referencia: "",
@@ -446,8 +453,8 @@ export default function AccountsReceivablePage() {
     }
   }
 
-  const handleSelectEmpresa = async (empresaNombre: string, fechaCorteOverride?: string) => {
-    if (selectedEmpresa === empresaNombre && !fechaCorteOverride) {
+  const handleSelectEmpresa = async (empresaNombre: string, fechaCorteOverride?: string, tipoDestinoOverride?: string) => {
+    if (selectedEmpresa === empresaNombre && !fechaCorteOverride && !tipoDestinoOverride) {
       setSelectedEmpresa("")
       setEmpresaPending(null)
       return
@@ -455,8 +462,9 @@ export default function AccountsReceivablePage() {
     setSelectedEmpresa(empresaNombre)
     setEmpresaPendingLoading(true)
     const fecha = fechaCorteOverride !== undefined ? fechaCorteOverride : remitFechaCorte
+    const tipo = tipoDestinoOverride !== undefined ? tipoDestinoOverride : remitTipoDestino
     try {
-      const data = await api.accountsReceivable.corporateAgreementPendingDocs(empresaNombre, fecha || undefined)
+      const data = await api.accountsReceivable.corporateAgreementPendingDocs(empresaNombre, fecha || undefined, tipo || undefined)
       if (data && Array.isArray(data.documentos)) {
         data.documentos.sort((a: any, b: any) => new Date(b.fecha_emision || b.created_at || 0).getTime() - new Date(a.fecha_emision || a.created_at || 0).getTime())
       }
@@ -476,7 +484,7 @@ export default function AccountsReceivablePage() {
     setSelectedEmpresa(empresaNombre)
     setEmpresaPendingLoading(true)
     try {
-      const data = await api.accountsReceivable.corporateAgreementPendingDocs(empresaNombre, remitFechaCorte || undefined)
+      const data = await api.accountsReceivable.corporateAgreementPendingDocs(empresaNombre, remitFechaCorte || undefined, remitTipoDestino)
       setEmpresaPending(data)
       const allDocIds = new Set<string>()
       data?.funcionarios?.forEach((f: any) => {
@@ -499,7 +507,7 @@ export default function AccountsReceivablePage() {
     if (!selectedEmpresa) return
     setEmpresaPendingLoading(true)
     try {
-      const data = await api.accountsReceivable.corporateAgreementPendingDocs(selectedEmpresa, newFecha || undefined)
+      const data = await api.accountsReceivable.corporateAgreementPendingDocs(selectedEmpresa, newFecha || undefined, remitTipoDestino)
       setEmpresaPending(data)
       const allDocIds = new Set<string>()
       data?.funcionarios?.forEach((f: any) => {
@@ -510,6 +518,27 @@ export default function AccountsReceivablePage() {
       setSelectedRemitDocIds(allDocIds)
     } catch (e: any) {
       toast.error("Error al actualizar fecha de corte", e.message)
+    } finally {
+      setEmpresaPendingLoading(false)
+    }
+  }
+
+  const handleRemitTipoDestinoChange = async (newTipo: "personal" | "empresa" | "todos") => {
+    setRemitTipoDestino(newTipo)
+    if (!selectedEmpresa) return
+    setEmpresaPendingLoading(true)
+    try {
+      const data = await api.accountsReceivable.corporateAgreementPendingDocs(selectedEmpresa, remitFechaCorte || undefined, newTipo)
+      setEmpresaPending(data)
+      const allDocIds = new Set<string>()
+      data?.funcionarios?.forEach((f: any) => {
+        f.documentos?.forEach((d: any) => {
+          allDocIds.add(d.id)
+        })
+      })
+      setSelectedRemitDocIds(allDocIds)
+    } catch (e: any) {
+      toast.error("Error al actualizar alcance del lote", e.message)
     } finally {
       setEmpresaPendingLoading(false)
     }
@@ -610,19 +639,20 @@ export default function AccountsReceivablePage() {
         empresa_vinculada_nombre: selectedEmpresa,
         periodo_mes: remitPeriodo,
         fecha_corte: remitFechaCorte || undefined,
+        tipo_destino: remitTipoDestino,
         accounts_receivable_ids: remitModo === "selectivo" ? Array.from(selectedRemitDocIds) : undefined,
         notas: remitNotas || undefined,
       })
       toast.success(
         "Corte y Remisión ejecutada con éxito",
-        `Lote ${res.numero_remision} emitido. Se liberó la línea de crédito de ${res.cantidad_funcionarios} funcionarios socios Extra Club.`
+        `Lote ${res.numero_remision} emitido. Se procesaron ${res.cantidad_documentos} comprobantes de ${res.cantidad_funcionarios} funcionarios.`
       )
       setShowRemitModal(false)
       setRemitNotas("")
       setSelectedRemitDocIds(new Set())
       fetchAgreements()
       fetchRemissions()
-      handleSelectEmpresa(selectedEmpresa, remitFechaCorte)
+      handleSelectEmpresa(selectedEmpresa, remitFechaCorte, remitTipoDestino)
       fetchData()
     } catch (e: any) {
       toast.error("Error al ejecutar corte", e.message || "Ocurrió un error al procesar la remisión")
@@ -633,7 +663,8 @@ export default function AccountsReceivablePage() {
 
   const handlePayRemission = async () => {
     if (!showPayRemissionModal) return
-    const monto = parseFloat(payRemForm.monto)
+    const rawMonto = payRemForm.monto
+    const monto = typeof rawMonto === 'number' ? rawMonto : parseFloat(String(rawMonto).replace(/\./g, '').replace(',', '.'))
     if (!monto || monto <= 0) {
       toast.warning("Monto requerido", "Ingresá un monto válido pagado por la empresa")
       return
@@ -685,6 +716,46 @@ export default function AccountsReceivablePage() {
       toast.error("Error al registrar pago", e.message || "No se pudo registrar el pago de la remisión")
     } finally {
       setPayingRemission(false)
+    }
+  }
+
+  const handleRevertRemissionPayment = async () => {
+    if (!revertRemissionModal) return
+    setRevertingRemission(true)
+    try {
+      const res = await api.accountsReceivable.revertCorporateRemissionPayment(revertRemissionModal.id, {
+        motivo: revertMotivo.trim() || undefined,
+      })
+      toast.success("Pago Revertido", res.message || "El pago fue revertido y los comprobantes volvieron a estar pendientes.")
+      setRevertRemissionModal(null)
+      setRevertMotivo("")
+      fetchRemissions()
+      fetchAgreements()
+      fetchData()
+    } catch (e: any) {
+      toast.error("Error al revertir pago", e.message || "No se pudo revertir el pago de la remisión")
+    } finally {
+      setRevertingRemission(false)
+    }
+  }
+
+  const handleCancelRemission = async () => {
+    if (!cancelRemissionModal) return
+    setCancelingRemission(true)
+    try {
+      const res = await api.accountsReceivable.cancelCorporateRemission(cancelRemissionModal.id, {
+        motivo: cancelMotivo.trim() || undefined,
+      })
+      toast.success("Remisión Anulada", res.message || "La remisión fue anulada y los comprobantes quedaron libres para corte.")
+      setCancelRemissionModal(null)
+      setCancelMotivo("")
+      fetchRemissions()
+      fetchAgreements()
+      fetchData()
+    } catch (e: any) {
+      toast.error("Error al anular remisión", e.message || "No se pudo anular la remisión")
+    } finally {
+      setCancelingRemission(false)
     }
   }
 
@@ -2218,14 +2289,18 @@ export default function AccountsReceivablePage() {
                               </td>
                               <td className="p-3.5">
                                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                                  isPagado
+                                  r.estado === "PAGADO"
                                     ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-200"
+                                    : r.estado === "PAGADO_PARCIAL"
+                                    ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200"
+                                    : r.estado === "ANULADO"
+                                    ? "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300 border border-rose-200 line-through"
                                     : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200"
                                 }`}>
-                                  {isPagado ? "Cancelado" : "Pendiente Pago"}
+                                  {r.estado === "PAGADO" ? "Cancelado" : r.estado === "PAGADO_PARCIAL" ? "Pago Parcial" : r.estado === "ANULADO" ? "Anulado" : "Pendiente Pago"}
                                 </span>
                               </td>
-                              <td className="p-3.5 text-right space-x-2">
+                              <td className="p-3.5 text-right space-x-1.5 whitespace-nowrap">
                                 <button
                                   onClick={() => api.accountsReceivable.downloadRemisionPdf(r.id, r.numero_remision)}
                                   className="btn-outline py-1 px-2.5 text-xs inline-flex items-center gap-1"
@@ -2234,12 +2309,13 @@ export default function AccountsReceivablePage() {
                                   <Printer className="w-3.5 h-3.5 text-indigo-500" />
                                   <span>Acta (PDF)</span>
                                 </button>
-                                {!isPagado && (
+
+                                {r.estado !== "PAGADO" && r.estado !== "ANULADO" && (
                                   <button
                                     onClick={() => {
                                       setShowPayRemissionModal(r)
                                       setPayRemForm({
-                                        monto: String(r.saldo_pendiente),
+                                        monto: Number(r.saldo_pendiente || 0),
                                         forma_pago: "transferencia",
                                         bank_account_id: bankAccounts.length > 0 ? bankAccounts[0].id : "",
                                         referencia: "",
@@ -2257,7 +2333,35 @@ export default function AccountsReceivablePage() {
                                     title="Registrar pago de la empresa en tesorería"
                                   >
                                     <DollarSign className="w-3.5 h-3.5" />
-                                    <span>Cobrar Lote</span>
+                                    <span>{r.estado === "PAGADO_PARCIAL" ? "Cobrar Saldo" : "Cobrar Lote"}</span>
+                                  </button>
+                                )}
+
+                                {(r.estado === "PAGADO" || r.estado === "PAGADO_PARCIAL") && (
+                                  <button
+                                    onClick={() => {
+                                      setRevertRemissionModal(r)
+                                      setRevertMotivo("")
+                                    }}
+                                    className="btn-outline py-1 px-2.5 text-xs text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/40 inline-flex items-center gap-1"
+                                    title="Revertir cobro: descuenta de tesorería y reabre los comprobantes"
+                                  >
+                                    <RotateCcw className="w-3.5 h-3.5" />
+                                    <span>Revertir Pago</span>
+                                  </button>
+                                )}
+
+                                {r.estado === "REMITIDO" && (
+                                  <button
+                                    onClick={() => {
+                                      setCancelRemissionModal(r)
+                                      setCancelMotivo("")
+                                    }}
+                                    className="btn-outline py-1 px-2.5 text-xs text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-950/40 inline-flex items-center gap-1"
+                                    title="Anular remisión y devolver comprobantes a pendientes"
+                                  >
+                                    <Ban className="w-3.5 h-3.5" />
+                                    <span>Anular</span>
                                   </button>
                                 )}
                               </td>
@@ -3884,6 +3988,57 @@ export default function AccountsReceivablePage() {
                 </div>
               </div>
 
+              {/* Selector de Alcance del Lote */}
+              <div className="space-y-1.5">
+                <label className="label-field text-gray-700 dark:text-gray-300 font-bold flex items-center justify-between">
+                  <span>Alcance / Destino del Lote</span>
+                  <span className="text-[10px] text-gray-500 font-normal">Segregación de cartera</span>
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleRemitTipoDestinoChange("personal")}
+                    className={`p-2.5 rounded-xl border text-center transition flex flex-col items-center gap-1 ${
+                      remitTipoDestino === "personal"
+                        ? "border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200 ring-2 ring-emerald-500/20 shadow-sm"
+                        : "border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40 text-gray-700 dark:text-gray-300"
+                    }`}
+                  >
+                    <Users className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <span className="font-extrabold text-[11px]">Nómina Personal</span>
+                    <span className="text-[9px] text-gray-500 dark:text-gray-400 leading-tight">Solo funcionarios</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleRemitTipoDestinoChange("empresa")}
+                    className={`p-2.5 rounded-xl border text-center transition flex flex-col items-center gap-1 ${
+                      remitTipoDestino === "empresa"
+                        ? "border-blue-500 bg-blue-50/70 dark:bg-blue-950/40 text-blue-900 dark:text-blue-200 ring-2 ring-blue-500/20 shadow-sm"
+                        : "border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40 text-gray-700 dark:text-gray-300"
+                    }`}
+                  >
+                    <Building className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                    <span className="font-extrabold text-[11px]">Empresa Directa</span>
+                    <span className="text-[9px] text-gray-500 dark:text-gray-400 leading-tight">Solo institucional</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleRemitTipoDestinoChange("todos")}
+                    className={`p-2.5 rounded-xl border text-center transition flex flex-col items-center gap-1 ${
+                      remitTipoDestino === "todos"
+                        ? "border-indigo-500 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 ring-2 ring-indigo-500/20 shadow-sm"
+                        : "border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40 text-gray-700 dark:text-gray-300"
+                    }`}
+                  >
+                    <Layers className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                    <span className="font-extrabold text-[11px]">Consolidar Todo</span>
+                    <span className="text-[9px] text-gray-500 dark:text-gray-400 leading-tight">Personal + Empresa</span>
+                  </button>
+                </div>
+              </div>
+
               {/* Selector de Modalidad */}
               <div className="space-y-1.5">
                 <label className="label-field text-gray-700 dark:text-gray-300 font-bold">
@@ -4175,13 +4330,39 @@ export default function AccountsReceivablePage() {
               </div>
 
               <div>
-                <label className="label-field">Monto a Cancelar (₲)</label>
-                <input
-                  type="number"
-                  className="input-field text-xs font-mono font-bold"
+                <label className="label-field flex items-center justify-between">
+                  <span>Monto a Cancelar (₲)</span>
+                  <span className="text-[10px] text-gray-500 font-normal">
+                    Saldo del lote: <strong>{formatPYG(showPayRemissionModal.saldo_pendiente)}</strong>
+                  </span>
+                </label>
+                <CurrencyInput
                   value={payRemForm.monto}
-                  onChange={e => setPayRemForm({ ...payRemForm, monto: e.target.value })}
+                  onChangeValue={(numVal) => setPayRemForm({ ...payRemForm, monto: numVal })}
+                  currency="PYG"
+                  className="input-field text-xs font-mono font-bold"
+                  placeholder="0"
                 />
+                {(() => {
+                  const m = typeof payRemForm.monto === 'number' ? payRemForm.monto : parseFloat(String(payRemForm.monto).replace(/\./g, '').replace(',', '.')) || 0
+                  const saldo = Number(showPayRemissionModal.saldo_pendiente || 0)
+                  const remanente = Math.max(0, saldo - m)
+                  if (m > 0 && remanente > 0) {
+                    return (
+                      <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium mt-1 flex items-center gap-1">
+                        ⚠️ <strong>Pago Parcial:</strong> Quedará un saldo pendiente de <strong>{formatPYG(remanente)}</strong> en este lote.
+                      </p>
+                    )
+                  }
+                  if (m >= saldo && saldo > 0) {
+                    return (
+                      <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium mt-1 flex items-center gap-1">
+                        ✓ <strong>Cancelación Total:</strong> Se saldará el 100% de la remisión.
+                      </p>
+                    )
+                  }
+                  return null
+                })()}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -4399,6 +4580,140 @@ export default function AccountsReceivablePage() {
                   <span>Confirmar Cobro de Empresa</span>
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Revertir Pago de Remisión */}
+      {revertRemissionModal && (
+        <div className="modal-overlay" onClick={() => setRevertRemissionModal(null)}>
+          <div
+            className="modal-content max-w-md w-full p-5 space-y-4 shadow-2xl rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500 flex items-center justify-center shrink-0">
+                <RotateCcw className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                  Revertir Pago de Remisión
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Lote {revertRemissionModal.numero_remision} · {revertRemissionModal.empresa_vinculada_nombre}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 text-xs text-amber-900 dark:text-amber-200 space-y-1">
+              <p className="font-bold flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 text-amber-600" />
+                Impacto de la reversión:
+              </p>
+              <ul className="list-disc pl-5 space-y-0.5 text-[11px] text-amber-800 dark:text-amber-300">
+                <li>Se descontará de tesorería (cuenta bancaria o bóveda) el importe cobrado.</li>
+                <li>Se anulará el comprobante de cobro / transacción registrada.</li>
+                <li>Los comprobantes del lote volverán a estado <strong>REMITIDO_EMPRESA</strong> con saldo adeudado exigible.</li>
+                <li>El lote volverá a estado <strong>REMITIDO</strong> con saldo pendiente de <strong>{formatPYG(revertRemissionModal.monto_total)}</strong>.</li>
+              </ul>
+            </div>
+
+            <div>
+              <label className="label-field">Motivo de la Reversión <span className="text-red-500">*</span></label>
+              <textarea
+                className="input-field text-xs h-20"
+                placeholder="Ej: Monto ingresado incorrecto, boleta bancaria errónea, o imputación a corregir..."
+                value={revertMotivo}
+                onChange={e => setRevertMotivo(e.target.value)}
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setRevertRemissionModal(null)}
+                className="btn-ghost text-xs px-3 py-2"
+                disabled={revertingRemission}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleRevertRemissionPayment}
+                disabled={revertingRemission}
+                className="btn-primary bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-2 shadow-md transition"
+              >
+                {revertingRemission ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+                <span>Confirmar Reversión de Pago</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Anular Remisión (Desvincular comprobantes) */}
+      {cancelRemissionModal && (
+        <div className="modal-overlay" onClick={() => setCancelRemissionModal(null)}>
+          <div
+            className="modal-content max-w-md w-full p-5 space-y-4 shadow-2xl rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 flex items-center justify-center shrink-0">
+                <Ban className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                  Anular Lote de Remisión
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Lote {cancelRemissionModal.numero_remision} · {cancelRemissionModal.empresa_vinculada_nombre}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800/60 text-xs text-red-900 dark:text-red-200 space-y-1">
+              <p className="font-bold flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 text-red-600" />
+                Desvinculación de comprobantes:
+              </p>
+              <ul className="list-disc pl-5 space-y-0.5 text-[11px] text-red-800 dark:text-red-300">
+                <li>Se desvincularán todos los comprobantes ({cancelRemissionModal.cantidad_documentos}) del lote.</li>
+                <li>Los comprobantes volverán a estado <strong>pendiente</strong> individual.</li>
+                <li>Se restablecerá la deuda y el saldo utilizado en la cuenta corriente de los funcionarios.</li>
+                <li>El lote quedará registrado como <strong>ANULADO</strong> para auditoría.</li>
+              </ul>
+            </div>
+
+            <div>
+              <label className="label-field">Motivo de Anulación <span className="text-red-500">*</span></label>
+              <textarea
+                className="input-field text-xs h-20"
+                placeholder="Ej: Lote generado con funcionarios o fechas incorrectas, regeneración necesaria..."
+                value={cancelMotivo}
+                onChange={e => setCancelMotivo(e.target.value)}
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setCancelRemissionModal(null)}
+                className="btn-ghost text-xs px-3 py-2"
+                disabled={cancelingRemission}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleCancelRemission}
+                disabled={cancelingRemission}
+                className="btn-primary bg-red-600 hover:bg-red-500 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-2 shadow-md transition"
+              >
+                {cancelingRemission ? <Loader2 className="w-4 h-4 animate-spin" /> : <Ban className="w-4 h-4" />}
+                <span>Confirmar Anulación del Lote</span>
+              </button>
             </div>
           </div>
         </div>

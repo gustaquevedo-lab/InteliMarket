@@ -140,6 +140,7 @@ class CorporateRemissionCreate(BaseModel):
     empresa_vinculada_nombre: str
     periodo_mes: str
     fecha_corte: Optional[date] = None
+    tipo_destino: Optional[str] = "personal"  # "personal", "empresa", "todos"
     accounts_receivable_ids: Optional[list[UUID]] = None
     notas: Optional[str] = None
 
@@ -159,6 +160,10 @@ class CorporateRemissionPayInput(BaseModel):
     fecha_cheque_emision: Optional[date] = None
     fecha_cheque_cobro: Optional[date] = None
     titular_cheque: Optional[str] = None
+
+
+class CorporateRemissionRevertInput(BaseModel):
+    motivo: Optional[str] = "Reversión efectuada por operador"
 
 
 

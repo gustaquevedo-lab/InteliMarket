@@ -3241,8 +3241,11 @@ export const api = {
     documentPayments: (id: string) => client.get<{ id: string; fecha: string; forma_pago: string | null; referencia: string | null; observaciones: string | null; monto: number; created_at: string }[]>(`/v1/accounts-receivable/${id}/payments`),
     customerPayments: (customerId: string) => client.get<{ id: string; fecha: string; monto_total: number; forma_pago: string | null; referencia: string | null; observaciones: string | null; created_at: string; allocations: { accounts_receivable_id: string; numero_documento: string; monto: number }[] }[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/customers/${customerId}/payments`),
     corporateAgreementsSummary: () => client.get<any[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/summary`),
-    corporateAgreementPendingDocs: (empresa: string, fecha_corte?: string) =>
-      client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/${encodeURIComponent(empresa)}/pending-docs`, fecha_corte ? { fecha_corte } : undefined),
+    corporateAgreementPendingDocs: (empresa: string, fecha_corte?: string, tipo_destino?: string) =>
+      client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/${encodeURIComponent(empresa)}/pending-docs`, {
+        ...(fecha_corte ? { fecha_corte } : {}),
+        ...(tipo_destino ? { tipo_destino } : {}),
+      }),
     downloadExtractosEmpresaPdf: (empresa: string, periodo: string, fecha_corte?: string, doc_ids?: string[]) =>
       downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/${encodeURIComponent(empresa)}/extractos.pdf`, {
         periodo,
@@ -3255,7 +3258,7 @@ export const api = {
         ...(fecha_corte ? { fecha_corte } : {}),
         ...(doc_ids && doc_ids.length > 0 ? { doc_ids: doc_ids.join(",") } : {}),
       }, `consolidado_${empresa.replace(/\s+/g, '_')}_${periodo}.pdf`),
-    createCorporateRemission: (data: { empresa_vinculada_nombre: string; periodo_mes: string; fecha_corte?: string; accounts_receivable_ids?: string[]; notas?: string }) => client.post<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/remit`, data),
+    createCorporateRemission: (data: { empresa_vinculada_nombre: string; periodo_mes: string; fecha_corte?: string; tipo_destino?: string; accounts_receivable_ids?: string[]; notas?: string }) => client.post<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/remit`, data),
     listCorporateRemissions: (empresa?: string) => client.get<any[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions`, empresa ? { empresa_nombre: empresa } : undefined),
     getCorporateRemissionDetail: (id: string) => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}`),
     downloadRemisionPdf: (id: string, numero?: string) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}/pdf`, undefined, `remision_${numero || id.slice(0, 8)}.pdf`),
@@ -3274,6 +3277,10 @@ export const api = {
       fecha_cheque_cobro?: string;
       titular_cheque?: string;
     }) => client.post<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}/pay`, data),
+    revertCorporateRemissionPayment: (id: string, data?: { motivo?: string }) =>
+      client.post<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}/revert-payment`, data || {}),
+    cancelCorporateRemission: (id: string, data?: { motivo?: string }) =>
+      client.post<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}/cancel`, data || {}),
     listBanks: () => client.get<any[]>("/v1/financial/banks", { company_id: COMPANY_ID } as any),
   },
 
