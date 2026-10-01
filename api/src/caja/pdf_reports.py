@@ -2040,7 +2040,7 @@ def generate_acta_verificacion_tesoreria_pdf(
         ("TOPPADDING", (0, 0), (-1, -1), 1.8),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 1.8),
         ("BACKGROUND", (0, 4), (-1, 4), HexColor("#DCFCE7")),
-        ("BACKGROUND", (0, 5), (-1, 5), HexColor("#FEF2F2" if dif_consolidada < 0 else "#F0FDF4")),
+        ("BACKGROUND", (0, 5), (-1, 5), HexColor("#FEF2F2" if dif_efectivo < 0 else "#F0FDF4")),
     ]))
 
     t_bloque_ef = Table([[t_esp, t_rec]], colWidths=[92 * mm, 92 * mm])
