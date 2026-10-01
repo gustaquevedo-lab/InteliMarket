@@ -9,7 +9,6 @@ a receivable_payments para permitir conciliación bancaria exacta con fecha de o
 """
 from typing import Sequence, Union
 from alembic import op
-import sqlalchemy as sa
 
 
 revision: str = '20261001180000'
@@ -24,8 +23,10 @@ def upgrade() -> None:
         ADD COLUMN IF NOT EXISTS fecha_transferencia DATE,
         ADD COLUMN IF NOT EXISTS monto_transferencia NUMERIC(15, 0),
         ADD COLUMN IF NOT EXISTS monto_cheque NUMERIC(15, 0),
-        ADD COLUMN IF NOT EXISTS referencia_transferencia VARCHAR(150);
+        ADD COLUMN IF NOT EXISTS referencia_transferencia VARCHAR(150)
+    """)
 
+    op.execute("""
         DO $$
         BEGIN
             IF EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'sandbox') THEN
@@ -35,7 +36,7 @@ def upgrade() -> None:
                 ADD COLUMN IF NOT EXISTS monto_cheque NUMERIC(15, 0),
                 ADD COLUMN IF NOT EXISTS referencia_transferencia VARCHAR(150);
             END IF;
-        END $$;
+        END $$
     """)
 
 
@@ -45,8 +46,10 @@ def downgrade() -> None:
         DROP COLUMN IF EXISTS fecha_transferencia,
         DROP COLUMN IF EXISTS monto_transferencia,
         DROP COLUMN IF EXISTS monto_cheque,
-        DROP COLUMN IF EXISTS referencia_transferencia;
+        DROP COLUMN IF EXISTS referencia_transferencia
+    """)
 
+    op.execute("""
         DO $$
         BEGIN
             IF EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'sandbox') THEN
@@ -56,5 +59,5 @@ def downgrade() -> None:
                 DROP COLUMN IF EXISTS monto_cheque,
                 DROP COLUMN IF EXISTS referencia_transferencia;
             END IF;
-        END $$;
+        END $$
     """)
