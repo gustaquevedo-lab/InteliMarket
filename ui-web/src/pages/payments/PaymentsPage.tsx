@@ -311,10 +311,14 @@ export default function PaymentsPage() {
   // Filtro facturas
   const filteredInvoices = useMemo(() => {
     return invoices.filter(inv => {
-      const matchesSearch = !search ||
-        (inv.numero_factura || "").toLowerCase().includes(search.toLowerCase()) ||
-        (inv.supplier_nombre || "").toLowerCase().includes(search.toLowerCase()) ||
-        (supplierMap[inv.supplier_id] || "").toLowerCase().includes(search.toLowerCase())
+      const q = search.toLowerCase().trim()
+      const matchesSearch = !q ||
+        (inv.numero_factura || "").toLowerCase().includes(q) ||
+        (inv.supplier_nombre || "").toLowerCase().includes(q) ||
+        (supplierMap[inv.supplier_id] || "").toLowerCase().includes(q) ||
+        (inv.purchase_order_numero || "").toLowerCase().includes(q) ||
+        (inv.receipt_numero || "").toLowerCase().includes(q) ||
+        (inv.concepto || "").toLowerCase().includes(q)
 
       const matchesSupplier = filterSupplier === "all" || inv.supplier_id === filterSupplier
       const dias = Number(inv.dias_vencido || 0)
@@ -819,6 +823,11 @@ export default function PaymentsPage() {
                             <td className="p-3.5">
                               <div className="flex items-center gap-1.5 flex-wrap">
                                 <p className="font-extrabold text-slate-900 dark:text-white font-mono">{inv.numero_factura || "Factura S/N"}</p>
+                                {inv.purchase_order_numero && (
+                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200">
+                                    OC: {inv.purchase_order_numero.replace("OC-", "")}
+                                  </span>
+                                )}
                                 {inv.tipo_comprobante === "gasto" || inv.tipo_comprobante === "insumo_gasto" ? (
                                   <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-300/80">
                                     🛠️ Insumo/Gasto
@@ -1094,6 +1103,11 @@ export default function PaymentsPage() {
                             <div className="font-mono font-black text-slate-900 dark:text-white text-xs">
                               {inv.numero_factura}
                             </div>
+                            {inv.purchase_order_numero && (
+                              <p className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold font-mono">
+                                OC: {inv.purchase_order_numero.replace("OC-", "")}
+                              </p>
+                            )}
                             {inv.timbrado && (
                               <p className="text-[10px] text-slate-400 font-mono">Timb: {inv.timbrado}</p>
                             )}

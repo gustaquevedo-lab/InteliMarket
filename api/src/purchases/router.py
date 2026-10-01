@@ -333,7 +333,7 @@ async def convert_requisition_to_po(
 @router.post("/purchase-receipts", response_model=ReceiptResponse, status_code=status.HTTP_201_CREATED)
 async def create_receipt(body: ReceiptCreate, db: AsyncSession = Depends(get_db), _=Depends(require_permission("purchases:receive"))):
     receipt = await service.create_receipt(db, body)
-    if receipt.purchase_order_id and not receipt.requiere_revision:
+    if receipt.purchase_order_id:
         try:
             async with db.begin_nested():
                 from api.src.financial.service import auto_create_invoice_from_receipt

@@ -920,8 +920,11 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
             condicion="credito" if plazo_dias > 0 else "contado",
             tipo_comprobante="factura",
             estado="pendiente",
-            concepto=f"Recepción de mercadería {receipt.numero}" + (f" - Ref: {data.proveedor_ref}" if data.proveedor_ref else ""),
-            notas=data.observaciones,
+            concepto=(
+                f"Recepción de mercadería {receipt.numero}"
+                + (f" - Ref: {data.proveedor_ref}" if data.proveedor_ref else "")
+                + (f" - Obs: {data.observaciones}" if data.observaciones else "")
+            ),
             created_by=data.user_id,
         )
         db.add(inv)

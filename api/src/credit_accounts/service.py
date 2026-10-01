@@ -158,6 +158,11 @@ async def get_credit_check(db: AsyncSession, company_id: str, customer_id: str, 
     if not account.activo:
         return {"ok": False, "inactive": True}
 
+    cust_res = await db.execute(
+        select(Customer.empresa_vinculada_nombre).where(Customer.id == uuid.UUID(str(customer_id)))
+    )
+    empresa_vinculada = cust_res.scalar_one_or_none()
+
     mora_result = await db.execute(
         text("""
             SELECT COALESCE(MAX(GREATEST(0, CURRENT_DATE - fecha_vencimiento)), 0) FROM accounts_receivable
@@ -167,15 +172,21 @@ async def get_credit_check(db: AsyncSession, company_id: str, customer_id: str, 
     )
     max_dias_mora = int(mora_result.scalar() or 0)
 
+    # Clientes con empresa vinculada (convenio empresarial / deducción por planilla)
+    # no se bloquean por mora minorista de 60 días; su liquidación es corporativa.
+    en_mora = (max_dias_mora > MORA_BLOQUEO_DIAS) if not empresa_vinculada else False
     disponible = Decimal(str(account.saldo_disponible))
-    en_mora = max_dias_mora > MORA_BLOQUEO_DIAS
+    disponible_suficiente = disponible >= monto
     return {
-        "ok": disponible >= monto and not en_mora,
+        "ok": disponible_suficiente and not en_mora,
         "credit_account_id": account.id,
         "limite_credito": account.limite_credito,
         "saldo_disponible": account.saldo_disponible,
+        "saldo_utilizado": account.saldo_utilizado,
         "en_mora": en_mora,
         "dias_mora": max_dias_mora,
+        "empresa_vinculada": bool(empresa_vinculada),
+        "disponible_suficiente": disponible_suficiente,
     }
 
 

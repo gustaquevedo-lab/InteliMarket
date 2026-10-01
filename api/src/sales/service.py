@@ -714,15 +714,21 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
 
         # ── REGLA GENERAL INMUTABLE E INELUDIBLE: SIN DISPONIBLE NO SE PUEDE FACTURAR A CRÉDITO ──
         # Si el cliente no tiene saldo disponible suficiente para cubrir la compra,
-        # la venta se rechaza terminantemente. No se permite bajo ningún concepto ni autorización.
-        if not check.get("ok"):
-            disp = check.get("saldo_disponible", Decimal("0"))
-            lim = check.get("limite_credito", Decimal("0"))
-            motivo_mora = f" (en mora por {check.get('dias_mora', 0)} días)" if check.get("en_mora") else ""
+        # la venta se rechaza terminantemente. Ningún override puede violar el saldo disponible.
+        disp = check.get("saldo_disponible", Decimal("0"))
+        lim = check.get("limite_credito", Decimal("0"))
+        if not check.get("disponible_suficiente", disp >= monto_credito):
             raise ValueError(
-                f"Línea de crédito insuficiente{motivo_mora}: el cliente dispone de {disp:,.0f} Gs. de {lim:,.0f} Gs. "
+                f"Línea de crédito insuficiente: el cliente dispone de {disp:,.0f} Gs. de {lim:,.0f} Gs. "
                 f"Monto a crédito solicitado: {monto_credito:,.0f} Gs. "
                 f"Regla ineludible: no se puede facturar a crédito sin saldo disponible. Cobre con otro medio de pago."
+            )
+
+        # Si el cliente minorista tiene facturas vencidas hace más de 60 días sin convenio de empresa vinculada:
+        if check.get("en_mora") and not getattr(data, "admin_override_credito", False):
+            raise ValueError(
+                f"Cliente en mora por {check.get('dias_mora', 0)} días: "
+                f"Requiere autorización expresa de supervisor para facturar."
             )
 
         credit_result = await process_purchase(

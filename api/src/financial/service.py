@@ -34,7 +34,7 @@ from api.src.financial.schemas import (
     MultiSupplierPaymentBatchCreate,
     SettleValesAndPayRequest,
 )
-from api.src.purchases.models import Supplier, PurchaseReceipt
+from api.src.purchases.models import Supplier, PurchaseReceipt, PurchaseOrder
 from api.src.caja.models import VaultEntry, CashRegisterMovement
 from api.src.petty_cash.models import PettyCashFund, PettyCashFundMovement
 from api.src.cheques.models import Cheque, ChequeHistorial
@@ -1078,23 +1078,37 @@ async def auto_create_invoice_from_receipt(db: AsyncSession, receipt_id: str) ->
         iva_10 = (po.iva_10 or Decimal("0")) * proporcion
         iva_5 = (po.iva_5 or Decimal("0")) * proporcion
 
+    sup_result = await db.execute(select(Supplier).where(Supplier.id == po.supplier_id))
+    sup = sup_result.scalar_one_or_none()
+    plazo_dias = sup.plazo_pago_dias if (sup and sup.plazo_pago_dias) else 30
+
+    is_br_sup = bool(sup and (sup.tipo_proveedor in ("brasilero", "br") or getattr(sup, "moneda_default", "") == "BRL")) or (po.moneda == "BRL")
+    inv_moneda = "BRL" if is_br_sup else (po.moneda or "PYG")
+    inv_tc = po.tipo_cambio or Decimal("1")
+    inv_total_brl = None
+    if is_br_sup and inv_tc > 1:
+        inv_total_brl = (total / inv_tc).quantize(Decimal("0.01"))
+
+    obs_info = f" - Obs: {receipt.motivo_revision}" if receipt.motivo_revision else ""
     invoice = SupplierInvoice(
         company_id=po.company_id,
         supplier_id=po.supplier_id,
         numero_factura=f"AUTO-{receipt.numero}",
         fecha_emision=_today(),
-        fecha_vencimiento=_today() + timedelta(days=30),
+        fecha_vencimiento=_today() + timedelta(days=plazo_dias),
         total=total,
         iva_10=iva_10,
         iva_5=iva_5,
         saldo_pendiente=total,
-        moneda=po.moneda,
-        tipo_cambio=po.tipo_cambio,
+        moneda=inv_moneda,
+        tipo_cambio=inv_tc,
+        total_brl=inv_total_brl,
+        saldo_pendiente_brl=inv_total_brl,
         purchase_order_id=po.id,
         receipt_id=receipt.id,
-        condicion="credito",
+        condicion="credito" if plazo_dias > 0 else "contado",
         estado="pendiente",
-        concepto="Auto-generada desde recepción",
+        concepto=f"Recepción {receipt.numero} - OC {po.numero}{obs_info}",
     )
     db.add(invoice)
     await db.flush()
@@ -2617,6 +2631,18 @@ async def get_payable_invoices(db: AsyncSession, company_id: str, supplier_id: s
         sup_result = await db.execute(select(Supplier).where(Supplier.id.in_(supplier_ids)))
         sup_map = {s.id: s.razon_social for s in sup_result.scalars().all()}
 
+    po_ids = {i.purchase_order_id for i in invoices if i.purchase_order_id}
+    po_map = {}
+    if po_ids:
+        po_result = await db.execute(select(PurchaseOrder.id, PurchaseOrder.numero).where(PurchaseOrder.id.in_(po_ids)))
+        po_map = {row.id: row.numero for row in po_result.all()}
+
+    rc_ids = {i.receipt_id for i in invoices if i.receipt_id}
+    rc_map = {}
+    if rc_ids:
+        rc_result = await db.execute(select(PurchaseReceipt.id, PurchaseReceipt.numero).where(PurchaseReceipt.id.in_(rc_ids)))
+        rc_map = {row.id: row.numero for row in rc_result.all()}
+
     # Vincular Notas de Crédito aplicadas o correspondientes por factura
     inv_ids = [i.id for i in invoices]
     nc_map: dict[uuid.UUID, list[dict]] = {i.id: [] for i in invoices}
@@ -2689,6 +2715,10 @@ async def get_payable_invoices(db: AsyncSession, company_id: str, supplier_id: s
             "timbrado": i.timbrado,
             "supplier_id": str(i.supplier_id),
             "supplier_nombre": sup_map.get(i.supplier_id, "Desconocido"),
+            "purchase_order_id": str(i.purchase_order_id) if i.purchase_order_id else None,
+            "purchase_order_numero": po_map.get(i.purchase_order_id),
+            "receipt_id": str(i.receipt_id) if i.receipt_id else None,
+            "receipt_numero": rc_map.get(i.receipt_id),
             "fecha_emision": i.fecha_emision.isoformat() if i.fecha_emision else None,
             "fecha_vencimiento": i.fecha_vencimiento.isoformat(),
             "total": float(i.total) if i.total is not None else 0,
