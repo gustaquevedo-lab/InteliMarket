@@ -8655,7 +8655,7 @@ export default function POSPage() {
                 onClick={async () => {
                   toast.info("Sincronizando...", "Enviando ventas pendientes al servidor...")
                   try {
-                    const res = await syncPendingSales()
+                    const res = await syncPendingSales(true)
                     if (res.synced > 0) {
                       toast.success("Sincronización Exitosa", `${res.synced} venta(s) enviadas al servidor.`)
                     } else if (res.failed > 0) {

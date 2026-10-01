@@ -488,3 +488,60 @@ async def reject_return(db: AsyncSession, return_id: str, motivo: str) -> Return
     await db.flush()
     await db.refresh(return_obj)
     return return_obj
+
+
+async def get_return_pdf_data(db: AsyncSession, return_id: str, company_id: str | None = None) -> dict | None:
+    data = await get_return_with_items(db, return_id)
+    if not data:
+        return None
+    if company_id and str(data.get("company_id")) != str(company_id):
+        return None
+
+    # Enriquecer con Depósito
+    wh_id = data.get("warehouse_id")
+    if wh_id:
+        from api.src.inventory.models import Warehouse
+        res_w = await db.execute(select(Warehouse.nombre).where(Warehouse.id == wh_id))
+        wh_nom = res_w.scalar_one_or_none()
+        if wh_nom:
+            data["warehouse_name"] = wh_nom
+
+    # Enriquecer con Emisor (User)
+    u_id = data.get("user_id")
+    if u_id:
+        from api.src.auth.models import User
+        res_u = await db.execute(select(User.nombre).where(User.id == u_id))
+        u_nom = res_u.scalar_one_or_none()
+        if u_nom:
+            data["usuario_nombre"] = u_nom
+
+    # Enriquecer con Aprobador (User)
+    ap_id = data.get("aprobado_por")
+    if ap_id:
+        from api.src.auth.models import User
+        res_ap = await db.execute(select(User.nombre).where(User.id == ap_id))
+        ap_nom = res_ap.scalar_one_or_none()
+        if ap_nom:
+            data["aprobador_nombre"] = ap_nom
+
+    # Enriquecer con datos de Venta Origen
+    s_id = data.get("sale_id")
+    if s_id:
+        res_s = await db.execute(select(Sale.fecha, Sale.total, Sale.tipo_comprobante).where(Sale.id == s_id))
+        s_row = res_s.first()
+        if s_row:
+            data["sale_fecha"] = s_row[0]
+            data["sale_total"] = s_row[1]
+            data["sale_tipo_comprobante"] = s_row[2]
+
+    # Enriquecer con datos de Nota de Crédito
+    nc_id = data.get("nota_credito_id")
+    if nc_id:
+        res_nc = await db.execute(select(NotaCreditoDebito.numero, NotaCreditoDebito.timbrado).where(NotaCreditoDebito.id == nc_id))
+        nc_row = res_nc.first()
+        if nc_row:
+            data["nota_credito_numero"] = nc_row[0]
+            data["nota_credito_timbrado"] = nc_row[1]
+
+    return data
+
