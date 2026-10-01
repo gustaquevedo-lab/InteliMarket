@@ -14,7 +14,7 @@ interface OfflineContextType {
   cachedCustomers: CachedCustomer[]
   saveCartOffline: (items: OfflineCartItem[]) => void
   addPendingSale: (data: unknown) => Promise<string>
-  syncPendingSales: () => Promise<number>
+  syncPendingSales: (forceRetryErrors?: boolean) => Promise<number>
   syncCatalog: () => Promise<boolean>
   generateReceipt: (saleNumber: string, items: Array<{ nombre: string; cantidad: number; precio: number; total: number }>, total: number, iva10: number, iva5: number, paymentMethod: string, customerName: string | null, branchName: string) => { html: string; print: () => void }
   saveReceipt: (saleId: string, saleNumber: string, html: string) => Promise<void>
@@ -250,9 +250,9 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     return id
   }
 
-  const doSyncPendingSales = async (): Promise<number> => {
+  const doSyncPendingSales = async (forceRetryErrors: boolean = false): Promise<number> => {
     const [salesResult] = await Promise.allSettled([
-      syncPendingSales(),
+      syncPendingSales(forceRetryErrors),
       syncPendingCupones()
     ])
     const sales = await offlineDB.pendingSales.getAll()

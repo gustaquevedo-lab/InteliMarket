@@ -145,6 +145,24 @@ async def resolve_sale_number(db: AsyncSession, data: SaleCreate) -> str:
     if not config:
         return await generate_sale_number(db, str(data.company_id), str(data.branch_id) if data.branch_id else None)
 
+    # 0. Si el cliente (terminal POS offline o venta con correlativo fijo) mandó un número fiscal válido:
+    if data.numero and re.match(r"^[0-9]{3}-[0-9]{3}-[0-9]{7}$", str(data.numero).strip()):
+        num_clean = str(data.numero).strip()
+        num_exist = await db.execute(select(Sale.id).where(Sale.numero == num_clean))
+        if not num_exist.scalar_one_or_none():
+            parts = num_clean.split("-")
+            p_pe = parts[1]
+            p_seq = int(parts[2])
+            await db.execute(
+                text("""
+                    UPDATE punto_emision_secuencias
+                    SET numero_actual = GREATEST(numero_actual, :next_seq), updated_at = NOW()
+                    WHERE company_id = :cid AND punto_emision = :pe AND tipo_documento = 'factura'
+                """),
+                {"cid": data.company_id, "pe": p_pe, "next_seq": p_seq + 1}
+            )
+            return num_clean
+
     punto: str | None = None
 
     # 1. Si el frontend mandó punto_emision explícito (ej: "001-013" o "013"), extraer los 3 dígitos
@@ -314,7 +332,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             return cand
 
     numero = await resolve_sale_number(db, data)
-    numero_interno = await generate_internal_sale_number(db, str(data.company_id))
+    numero_interno = data.numero_interno or await generate_internal_sale_number(db, str(data.company_id))
 
     subtotal = Decimal("0")
     descuento_total = Decimal("0")
