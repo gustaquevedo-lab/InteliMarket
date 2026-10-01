@@ -44,6 +44,8 @@ from fastapi import HTTPException
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+import re
+
 TZ_ASUNCION = ZoneInfo("America/Asuncion")
 
 
@@ -53,6 +55,32 @@ def _now():
 
 def _today():
     return date.today()
+
+
+def _clean_doc_number(num: str | None) -> str:
+    """Extrae el formato canónico 001-001-0001234 o los dígitos limpios sin timbrado prefijado."""
+    if not num:
+        return ""
+    s = str(num).strip()
+    parts = [p.strip() for p in s.split(" - ") if p.strip()]
+    if len(parts) > 1:
+        for p in parts:
+            if "-" in p:
+                return p
+        return parts[-1]
+    return s
+
+
+def _doc_numbers_match(num1: str | None, num2: str | None) -> bool:
+    if not num1 or not num2:
+        return False
+    c1 = _clean_doc_number(num1)
+    c2 = _clean_doc_number(num2)
+    if c1 == c2 or c1.endswith(c2) or c2.endswith(c1):
+        return True
+    d1 = re.sub(r"\D", "", c1)
+    d2 = re.sub(r"\D", "", c2)
+    return bool(d1 and d2 and (d1 == d2 or d1.endswith(d2) or d2.endswith(d1)))
 
 
 # ── AP: Supplier Invoices ──────────────────────────────────────────────────────
@@ -105,7 +133,8 @@ async def list_invoices(
     desde: date | None = None, hasta: date | None = None,
     limit: int = 50, offset: int = 0,
 ) -> list[SupplierInvoice]:
-    query = select(SupplierInvoice).where(SupplierInvoice.company_id == uuid.UUID(company_id))
+    cid = company_id if isinstance(company_id, uuid.UUID) else uuid.UUID(str(company_id))
+    query = select(SupplierInvoice).where(SupplierInvoice.company_id == cid)
     if estado:
         if "," in estado:
             estados = [e.strip() for e in estado.split(",") if e.strip()]
@@ -113,7 +142,8 @@ async def list_invoices(
         else:
             query = query.where(SupplierInvoice.estado == estado)
     if supplier_id:
-        query = query.where(SupplierInvoice.supplier_id == uuid.UUID(supplier_id))
+        sid = supplier_id if isinstance(supplier_id, uuid.UUID) else uuid.UUID(str(supplier_id))
+        query = query.where(SupplierInvoice.supplier_id == sid)
     if vencidas:
         query = query.where(
             SupplierInvoice.fecha_vencimiento < _today(),
@@ -175,7 +205,8 @@ async def list_invoices(
 
         # 2. Vinculación directa por número de factura origen del mismo proveedor
         inv_nums = {i.numero_factura.strip() for i in invoices if i.numero_factura}
-        if inv_nums:
+        sup_ids = {i.supplier_id for i in invoices if i.supplier_id}
+        if sup_ids:
             nc_orig_q = (
                 select(
                     SupplierCreditNote.id,
@@ -188,21 +219,23 @@ async def list_invoices(
                     SupplierCreditNote.supplier_id,
                 )
                 .where(
-                    SupplierCreditNote.company_id == uuid.UUID(company_id),
-                    SupplierCreditNote.numero_factura_origen.in_(inv_nums),
+                    SupplierCreditNote.company_id == cid,
+                    SupplierCreditNote.supplier_id.in_(sup_ids),
                     SupplierCreditNote.cancelado == False,
+                    SupplierCreditNote.saldo_disponible > 0,
                 )
             )
             nc_orig_res = await db.execute(nc_orig_q)
             for nc in nc_orig_res.all():
                 for inv in invoices:
-                    if inv.numero_factura and inv.numero_factura.strip() == (nc.numero_factura_origen or "").strip() and inv.supplier_id == nc.supplier_id:
+                    if inv.supplier_id == nc.supplier_id and _doc_numbers_match(inv.numero_factura, nc.numero_factura_origen):
                         if not any(x["id"] == str(nc.id) for x in nc_map[inv.id]):
+                            m_disp = float(nc.saldo_disponible if nc.saldo_disponible is not None else nc.monto)
                             nc_map[inv.id].append({
                                 "id": str(nc.id),
                                 "numero": nc.numero,
                                 "motivo": nc.motivo or "Nota de crédito",
-                                "monto_aplicado": float(nc.monto or 0),
+                                "monto_aplicado": m_disp,
                                 "monto_total": float(nc.monto or 0),
                                 "fecha": nc.fecha.isoformat() if nc.fecha else None,
                             })
@@ -2560,8 +2593,9 @@ async def get_payable_invoices(db: AsyncSession, company_id: str, supplier_id: s
     2) -- no crea nada, solo lista. Reemplaza la auto-seleccion ciega que
     tenia create_payment_run (agarraba TODAS las vencidas de una, sin que
     nadie eligiera nada)."""
+    cid = company_id if isinstance(company_id, uuid.UUID) else uuid.UUID(str(company_id))
     query = select(SupplierInvoice).where(
-        SupplierInvoice.company_id == uuid.UUID(str(company_id)),
+        SupplierInvoice.company_id == cid,
         SupplierInvoice.estado.in_(["pendiente", "aprobada", "parcial"]),
         or_(
             SupplierInvoice.bloqueada_para_pago == False,
@@ -2612,7 +2646,8 @@ async def get_payable_invoices(db: AsyncSession, company_id: str, supplier_id: s
             })
 
         inv_nums = {i.numero_factura.strip() for i in invoices if i.numero_factura}
-        if inv_nums:
+        sup_ids = {i.supplier_id for i in invoices if i.supplier_id}
+        if sup_ids:
             nc_orig_q = (
                 select(
                     SupplierCreditNote.id,
@@ -2620,25 +2655,28 @@ async def get_payable_invoices(db: AsyncSession, company_id: str, supplier_id: s
                     SupplierCreditNote.numero_factura_origen,
                     SupplierCreditNote.motivo,
                     SupplierCreditNote.monto,
+                    SupplierCreditNote.saldo_disponible,
                     SupplierCreditNote.fecha,
                     SupplierCreditNote.supplier_id,
                 )
                 .where(
-                    SupplierCreditNote.company_id == uuid.UUID(company_id),
-                    SupplierCreditNote.numero_factura_origen.in_(inv_nums),
+                    SupplierCreditNote.company_id == cid,
+                    SupplierCreditNote.supplier_id.in_(sup_ids),
                     SupplierCreditNote.cancelado == False,
+                    SupplierCreditNote.saldo_disponible > 0,
                 )
             )
             nc_orig_res = await db.execute(nc_orig_q)
             for nc in nc_orig_res.all():
                 for inv in invoices:
-                    if inv.numero_factura and inv.numero_factura.strip() == (nc.numero_factura_origen or "").strip() and inv.supplier_id == nc.supplier_id:
+                    if inv.supplier_id == nc.supplier_id and _doc_numbers_match(inv.numero_factura, nc.numero_factura_origen):
                         if not any(x["id"] == str(nc.id) for x in nc_map[inv.id]):
+                            m_disp = float(nc.saldo_disponible if nc.saldo_disponible is not None else nc.monto)
                             nc_map[inv.id].append({
                                 "id": str(nc.id),
                                 "numero": nc.numero,
                                 "motivo": nc.motivo or "Nota de crédito",
-                                "monto_aplicado": float(nc.monto or 0),
+                                "monto_aplicado": m_disp,
                                 "monto_total": float(nc.monto or 0),
                                 "fecha": nc.fecha.isoformat() if nc.fecha else None,
                             })
@@ -2972,14 +3010,15 @@ def save_credit_note_attachment(content: bytes, filename: str) -> str:
 
 
 async def list_supplier_credit_notes(db: AsyncSession, company_id: str, supplier_id: str | None = None, solo_pendientes: bool = False, limit: int = 500) -> list[dict]:
-    cid = uuid.UUID(company_id)
+    cid = company_id if isinstance(company_id, uuid.UUID) else uuid.UUID(str(company_id))
     query = select(SupplierCreditNote, Supplier.razon_social).join(
         Supplier, Supplier.id == SupplierCreditNote.supplier_id, isouter=True
     ).where(SupplierCreditNote.company_id == cid, SupplierCreditNote.cancelado == False)
     if solo_pendientes:
         query = query.where(SupplierCreditNote.saldo_disponible > 0)
     if supplier_id:
-        query = query.where(SupplierCreditNote.supplier_id == uuid.UUID(supplier_id))
+        sid = supplier_id if isinstance(supplier_id, uuid.UUID) else uuid.UUID(str(supplier_id))
+        query = query.where(SupplierCreditNote.supplier_id == sid)
     query = query.order_by(SupplierCreditNote.fecha.desc()).limit(limit)
     result = await db.execute(query)
     return [

@@ -10,6 +10,7 @@ import { useToast } from "../../context/ToastContext"
 import { useConfirm } from "../../components/ConfirmDialog"
 import { formatPYG, formatDate } from "../../utils/format"
 import { DevolucionProveedorPrintModal } from "../purchases/DevolucionProveedorPrintModal"
+import { PdfViewerModal } from "../../components/PdfViewerModal"
 
 interface SupplierCreditNote {
   id: string
@@ -99,6 +100,9 @@ export default function ReturnsPage() {
   const [viewingSupRet, setViewingSupRet] = useState<SupplierReturn | null>(null)
   const [printingSupplierReturn, setPrintingSupplierReturn] = useState<any | null>(null)
   const [downloadingReturnPdfId, setDownloadingReturnPdfId] = useState<string | null>(null)
+  const [viewerPdfUrl, setViewerPdfUrl] = useState<string | null>(null)
+  const [viewerPdfTitle, setViewerPdfTitle] = useState<string>("")
+  const [viewerPdfFilename, setViewerPdfFilename] = useState<string>("")
 
   const [refreshing, setRefreshing] = useState(false)
 
@@ -258,15 +262,22 @@ export default function ReturnsPage() {
     const retId = raw.id || item.id
     if (!retId) return
     setDownloadingReturnPdfId(retId)
+    const codigo = raw.codigo || item.codigo || item.numero_nota_credito || "DEV"
     try {
-      await api.purchases.returns.openPdf(retId)
-      toast.success("Remito PDF A4", "El remito oficial de devolución se abrió correctamente listo para imprimir.")
+      const blobUrl = await api.purchases.returns.getPdfBlobUrl(retId)
+      setViewerPdfUrl(blobUrl)
+      setViewerPdfTitle(`Remito Oficial de Devolución A4 · ${codigo}`)
+      setViewerPdfFilename(`Remito_${String(codigo).replace(/\s+/g, "_")}.pdf`)
     } catch (err: any) {
       try {
-        await api.purchases.returns.downloadPdf(retId, raw.codigo || item.codigo || item.numero_nota_credito)
-        toast.success("Remito PDF A4", "El remito oficial se descargó exitosamente.")
+        await api.purchases.returns.openPdf(retId)
       } catch (err2: any) {
-        toast.error("Error al generar PDF del Remito", err.message || err2.message)
+        try {
+          await api.purchases.returns.downloadPdf(retId, codigo)
+          toast.success("Remito PDF A4", "El remito oficial se descargó exitosamente.")
+        } catch (err3: any) {
+          toast.error("Error al generar PDF del Remito", err.message || err2.message || err3.message)
+        }
       }
     } finally {
       setDownloadingReturnPdfId(null)
@@ -1603,6 +1614,16 @@ export default function ReturnsPage() {
           onClose={() => setPrintingSupplierReturn(null)}
         />
       )}
+
+      {/* ── MODAL: VISOR PDF A4 OFICIAL ── */}
+      <PdfViewerModal
+        open={!!viewerPdfUrl}
+        onClose={() => setViewerPdfUrl(null)}
+        pdfUrl={viewerPdfUrl}
+        title={viewerPdfTitle}
+        subtitle="Remito de devolución con membrete oficial, casillas de firma y control físico"
+        filename={viewerPdfFilename}
+      />
     </div>
   )
 }

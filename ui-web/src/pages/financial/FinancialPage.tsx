@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react"
+import { Fragment, useState, useEffect, useMemo } from "react"
 import Supplier360Modal from "../purchases/Supplier360Modal"
 import { api, type SupplierInvoice, type Budget, type PaymentRun, type CashFlowProjection, type FinancialDashboard, type BankAccount } from "../../api"
 import { formatPYG, formatDate, getTodayAsuncion } from "../../utils/format"
@@ -14,7 +14,7 @@ import {
   Layers, ShieldCheck, Check, Phone, ArrowRight, HelpCircle, Download,
   Upload, Paperclip, ExternalLink, Wallet, ArrowLeft, CheckSquare, Square,
   PackageMinus, Truck, Printer, Users, CheckCheck, FileCheck, CalendarClock,
-  LayoutGrid, ListFilter
+  LayoutGrid, ListFilter, CornerDownRight
 } from "lucide-react"
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -1651,9 +1651,9 @@ export default function FinancialPage() {
                               }
 
                               return (
-                                <tr
-                                  key={`${doc.docType}-${doc.id}`}
-                                  className={`transition-colors cursor-pointer ${
+                                <Fragment key={`${doc.docType}-${doc.id}`}>
+                                  <tr
+                                    className={`transition-colors cursor-pointer ${
                                     doc.isSelected
                                       ? isFactura
                                         ? "bg-indigo-50/60 dark:bg-indigo-950/30 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
@@ -1685,9 +1685,13 @@ export default function FinancialPage() {
                                   {/* 2. Tipo de Documento */}
                                   <td className="p-3.5 whitespace-nowrap">
                                     {isFactura && (
-                                      <span className="inline-flex items-center gap-1.5 text-[11px] font-extrabold px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200 dark:border-blue-900/40">
+                                      <span className={`inline-flex items-center gap-1.5 text-[11px] font-extrabold px-2.5 py-1 rounded-md border ${
+                                        doc.raw?.tipo_comprobante === "gasto" || doc.raw?.tipo_comprobante === "insumo_gasto"
+                                          ? "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 border-amber-200 dark:border-amber-900/40"
+                                          : "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200 dark:border-blue-900/40"
+                                      }`}>
                                         <Receipt className="w-3.5 h-3.5" />
-                                        FACTURA
+                                        {doc.raw?.tipo_comprobante === "gasto" || doc.raw?.tipo_comprobante === "insumo_gasto" ? "INSUMO / GASTO" : "MERCADERÍA"}
                                       </span>
                                     )}
                                     {isNC && (
@@ -1806,6 +1810,35 @@ export default function FinancialPage() {
                                     )}
                                   </td>
                                 </tr>
+                                {isFactura && doc.raw?.notas_credito && doc.raw.notas_credito.length > 0 && (
+                                  <tr className="bg-amber-50/60 dark:bg-amber-950/20 border-b border-amber-200/50">
+                                    <td colSpan={10} className="py-2.5 px-6 pl-12">
+                                      <div className="space-y-1">
+                                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-800 dark:text-amber-300">
+                                          <CornerDownRight className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                                          <span>Nota de Crédito Vinculada a esta Factura:</span>
+                                        </div>
+                                        <div className="space-y-1 pl-5">
+                                          {doc.raw.notas_credito.map((nc: any, idx: number) => (
+                                            <div key={idx} className="flex items-center justify-between text-xs py-0.5 text-slate-700 dark:text-slate-300">
+                                              <span className="font-mono font-semibold">
+                                                ↳ NC N° <strong className="text-amber-700 dark:text-amber-400">{nc.numero || "S/N"}</strong> {nc.motivo ? `(${nc.motivo})` : ""} {nc.fecha ? `· ${formatDate(nc.fecha)}` : ""}
+                                              </span>
+                                              <span className="font-mono font-bold text-rose-600 dark:text-rose-400">
+                                                - {formatPYG(nc.monto_aplicado || nc.monto_total)}
+                                              </span>
+                                            </div>
+                                          ))}
+                                          <div className="flex items-center justify-between text-[11px] font-bold text-slate-600 dark:text-slate-400 border-t border-amber-200/60 pt-1 mt-1">
+                                            <span>Monto Original Factura: {formatPYG(doc.montoOriginal)}</span>
+                                            <span>Saldo Neto Exigible: <strong className="text-emerald-700 dark:text-emerald-400 font-mono text-xs">{formatPYG(doc.saldoEfectivo)}</strong></span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </Fragment>
                               )
                             })
                           )}

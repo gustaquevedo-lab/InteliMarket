@@ -37,6 +37,7 @@ import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate, formatCurrency } from "../../utils/format"
 import { DevolucionProveedorPrintModal } from "./DevolucionProveedorPrintModal"
+import { PdfViewerModal } from "../../components/PdfViewerModal"
 import CurrencyInput from "../../components/CurrencyInput"
 
 type MainTab = "asistente_ia" | "demandas_clientes" | "ordenes" | "recepciones" | "facturas_p2p" | "devoluciones" | "matching" | "proveedores" | "requisiciones" | "cotizaciones" | "presupuestos" | "reportes"
@@ -208,6 +209,9 @@ export default function PurchasesPage() {
   const [processingReturnAction, setProcessingReturnAction] = useState(false)
   const [printingReturnDoc, setPrintingReturnDoc] = useState<any | null>(null)
   const [downloadingReturnPdfId, setDownloadingReturnPdfId] = useState<string | null>(null)
+  const [viewerPdfUrl, setViewerPdfUrl] = useState<string | null>(null)
+  const [viewerPdfTitle, setViewerPdfTitle] = useState<string>("")
+  const [viewerPdfFilename, setViewerPdfFilename] = useState<string>("")
 
   // Facturas de Proveedores (Procure-to-Pay)
   const [allSupplierInvoices, setAllSupplierInvoices] = useState<SupplierInvoice[]>([])
@@ -2618,15 +2622,22 @@ export default function PurchasesPage() {
     const retId = raw.id || item.id
     if (!retId) return
     setDownloadingReturnPdfId(retId)
+    const codigo = raw.codigo || item.codigo || item.numero_nota_credito || "DEV"
     try {
-      await api.purchases.returns.openPdf(retId)
-      toast.success("Remito PDF Oficial Generado", "El documento A4 se abrió en una pestaña nueva listo para imprimir y remitir.")
+      const blobUrl = await api.purchases.returns.getPdfBlobUrl(retId)
+      setViewerPdfUrl(blobUrl)
+      setViewerPdfTitle(`Remito Oficial de Devolución A4 · ${codigo}`)
+      setViewerPdfFilename(`Remito_${String(codigo).replace(/\s+/g, "_")}.pdf`)
     } catch (err: any) {
       try {
-        await api.purchases.returns.downloadPdf(retId, raw.codigo)
-        toast.success("Remito PDF Oficial Descargado", "El archivo PDF en formato A4 se descargó exitosamente.")
+        await api.purchases.returns.openPdf(retId)
       } catch (err2: any) {
-        toast.error("Error al generar PDF del Remito", err.message || err2.message)
+        try {
+          await api.purchases.returns.downloadPdf(retId, codigo)
+          toast.success("Remito PDF Oficial Descargado", "El archivo PDF en formato A4 se descargó exitosamente.")
+        } catch (err3: any) {
+          toast.error("Error al generar PDF del Remito", err.message || err2.message || err3.message)
+        }
       }
     } finally {
       setDownloadingReturnPdfId(null)
@@ -10960,6 +10971,16 @@ export default function PurchasesPage() {
           onClose={() => setPrintingReturnDoc(null)}
         />
       )}
+
+      {/* ── MODAL: VISOR PDF A4 OFICIAL ── */}
+      <PdfViewerModal
+        open={!!viewerPdfUrl}
+        onClose={() => setViewerPdfUrl(null)}
+        pdfUrl={viewerPdfUrl}
+        title={viewerPdfTitle}
+        subtitle="Remito de devolución a proveedor en formato estándar A4 con casillas y firmas de control"
+        filename={viewerPdfFilename}
+      />
 
       {/* ──────────────────────────────────────────────────────────────────────────
           MODAL: COMPARATIVA DE PRECIOS ENTRE PROVEEDORES (QUIÉN VENDE MÁS BARATO)

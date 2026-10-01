@@ -583,7 +583,16 @@ export default function SupplierPaymentOrderModal({
                       return (
                         <tr key={inv.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
                           <td className="p-3 font-mono font-bold text-slate-900 dark:text-white">
-                            {inv.numero_factura}
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span>{inv.numero_factura}</span>
+                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
+                                inv.tipo_comprobante === "gasto" || inv.tipo_comprobante === "insumo_gasto"
+                                  ? "bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800"
+                                  : "bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 border-blue-300 dark:border-blue-800"
+                              }`}>
+                                {inv.tipo_comprobante === "gasto" || inv.tipo_comprobante === "insumo_gasto" ? "INSUMO/GASTO" : "MERCADERÍA"}
+                              </span>
+                            </div>
                           </td>
                           <td className="p-3 text-slate-500">
                             <p>{inv.timbrado || "S/T"}</p>
@@ -645,30 +654,50 @@ export default function SupplierPaymentOrderModal({
 
               {/* AGREGAR FACTURAS ADICIONALES DEL PROVEEDOR */}
               {availableInvoices.length > 0 && (
-                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-850/50 border border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-between text-xs">
-                  <span className="text-slate-500">¿Deseás incluir más facturas pendientes de este proveedor?</span>
-                  <div className="flex gap-2">
+                <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-850/50 border border-dashed border-slate-300 dark:border-slate-700 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+                  <div>
+                    <span className="font-bold text-slate-700 dark:text-slate-300 block">Facturas Pendientes Disponibles del Proveedor:</span>
+                    <span className="text-[11px] text-slate-500">Podés incluir tanto facturas de mercaderías como de insumos/gastos en esta misma orden.</span>
+                  </div>
+                  <div className="flex gap-2 flex-wrap">
                     {availableInvoices
                       .filter(i => !selectedInvoicesMap[i.id] && i.supplier_id === supplier.id)
-                      .slice(0, 3)
-                      .map(inv => (
-                        <button
-                          key={inv.id}
-                          onClick={() => {
-                            setSelectedInvoicesMap(prev => ({
-                              ...prev,
-                              [inv.id]: {
-                                inv,
-                                monto_aplicado: inv.saldo_pendiente,
-                                monto_retencion: 0,
-                              }
-                            }))
-                          }}
-                          className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-rose-500 text-[11px] font-mono flex items-center gap-1 transition"
-                        >
-                          <Plus className="w-3 h-3 text-rose-500" /> {inv.numero_factura} ({formatPYG(inv.saldo_pendiente)})
-                        </button>
-                      ))}
+                      .map(inv => {
+                        const isGasto = inv.tipo_comprobante === "gasto" || inv.tipo_comprobante === "insumo_gasto"
+                        return (
+                          <button
+                            key={inv.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedInvoicesMap(prev => ({
+                                ...prev,
+                                [inv.id]: {
+                                  inv,
+                                  monto_aplicado: inv.saldo_pendiente,
+                                  monto_retencion: 0,
+                                }
+                              }))
+                            }}
+                            className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-mono flex items-center gap-1.5 transition ${
+                              isGasto
+                                ? "bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 hover:border-amber-500 shadow-sm"
+                                : "bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 hover:border-rose-500 shadow-sm"
+                            }`}
+                            title={`Agregar comprobante de ${isGasto ? "Insumo/Gasto" : "Mercadería"} a esta Orden`}
+                          >
+                            <Plus className="w-3.5 h-3.5 text-rose-500" />
+                            <span className="font-bold">{inv.numero_factura}</span>
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold">({formatPYG(inv.saldo_pendiente)})</span>
+                            <span className={`text-[8px] font-extrabold px-1 py-0.2 rounded ${
+                              isGasto
+                                ? "bg-amber-200 dark:bg-amber-900 text-amber-800 dark:text-amber-200"
+                                : "bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200"
+                            }`}>
+                              {isGasto ? "GASTO" : "MERC"}
+                            </span>
+                          </button>
+                        )
+                      })}
                   </div>
                 </div>
               )}

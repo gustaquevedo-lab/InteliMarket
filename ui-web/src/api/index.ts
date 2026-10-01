@@ -2693,16 +2693,36 @@ export const api = {
         const clean = (codigo || "DEV").replace(/\s+/g, "_")
         return downloadAuthenticated(`/v1/purchases/returns/${returnId}/pdf?company_id=${COMPANY_ID}`, {}, `Remito_${clean}.pdf`)
       },
-      openPdf: async (returnId: string) => {
+      getPdfBlobUrl: async (returnId: string): Promise<string> => {
         const token = localStorage.getItem("access_token")
         const url = `${API_BASE}/v1/purchases/returns/${returnId}/pdf?company_id=${COMPANY_ID}`
         const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
         if (!res.ok) throw new Error(`Error ${res.status} al generar el PDF del Remito`)
         const blob = await res.blob()
         const fileBlob = new Blob([blob], { type: "application/pdf" })
-        const blobUrl = URL.createObjectURL(fileBlob)
-        window.open(blobUrl, "_blank")
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 60000)
+        return URL.createObjectURL(fileBlob)
+      },
+      openPdf: async (returnId: string) => {
+        const newWin = typeof window !== "undefined" ? window.open("about:blank", "_blank") : null
+        try {
+          const token = localStorage.getItem("access_token")
+          const url = `${API_BASE}/v1/purchases/returns/${returnId}/pdf?company_id=${COMPANY_ID}`
+          const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+          if (!res.ok) throw new Error(`Error ${res.status} al generar el PDF del Remito`)
+          const blob = await res.blob()
+          const fileBlob = new Blob([blob], { type: "application/pdf" })
+          const blobUrl = URL.createObjectURL(fileBlob)
+          if (newWin && !newWin.closed) {
+            newWin.location.href = blobUrl
+          } else {
+            window.open(blobUrl, "_blank")
+          }
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 120000)
+          return blobUrl
+        } catch (err) {
+          if (newWin && !newWin.closed) newWin.close()
+          throw err
+        }
       },
     },
   },

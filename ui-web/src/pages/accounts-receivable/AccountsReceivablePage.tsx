@@ -3157,12 +3157,21 @@ export default function AccountsReceivablePage() {
                       </div>
 
                       {/* BRL */}
-                      <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-200/80 dark:border-slate-800 shadow-sm">
-                        <div className="flex items-center justify-between mb-1">
+                      <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-200/80 dark:border-slate-800 shadow-sm space-y-2">
+                        <div className="flex items-center justify-between">
                           <label className="text-[10px] font-black text-slate-500 uppercase">
                             💵 Reales (BRL)
                           </label>
-                          <span className="text-[9px] text-slate-400 font-mono">x {formatPYG(payTasaBRL)}</span>
+                          <div className="flex items-center gap-1">
+                            <span className="text-[9px] font-bold text-slate-400">Cotiz. ₲:</span>
+                            <CurrencyInput
+                              currency="PYG"
+                              value={payTasaBRL}
+                              onChangeValue={(val) => setPayTasaBRL(val > 0 ? val : 1)}
+                              placeholder="1.450"
+                              className="input-field text-right font-mono font-bold text-[10px] py-0.5 px-1.5 w-20 h-6 bg-slate-100 dark:bg-slate-800"
+                            />
+                          </div>
                         </div>
                         <CurrencyInput
                           currency="BRL"
@@ -3172,19 +3181,28 @@ export default function AccountsReceivablePage() {
                           className="input-field text-right font-mono font-bold text-xs"
                         />
                         {payMontoBRL > 0 && (
-                          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono font-bold block mt-1 text-right">
+                          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono font-bold block text-right">
                             ≈ {formatPYG(Math.round(payMontoBRL * payTasaBRL))}
                           </span>
                         )}
                       </div>
 
                       {/* USD */}
-                      <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-200/80 dark:border-slate-800 shadow-sm">
-                        <div className="flex items-center justify-between mb-1">
+                      <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-200/80 dark:border-slate-800 shadow-sm space-y-2">
+                        <div className="flex items-center justify-between">
                           <label className="text-[10px] font-black text-slate-500 uppercase">
                             💵 Dólares (USD)
                           </label>
-                          <span className="text-[9px] text-gray-400 font-mono">x {formatPYG(payTasaUSD)}</span>
+                          <div className="flex items-center gap-1">
+                            <span className="text-[9px] font-bold text-slate-400">Cotiz. ₲:</span>
+                            <CurrencyInput
+                              currency="PYG"
+                              value={payTasaUSD}
+                              onChangeValue={(val) => setPayTasaUSD(val > 0 ? val : 1)}
+                              placeholder="7.800"
+                              className="input-field text-right font-mono font-bold text-[10px] py-0.5 px-1.5 w-20 h-6 bg-slate-100 dark:bg-slate-800"
+                            />
+                          </div>
                         </div>
                         <CurrencyInput
                           currency="USD"
@@ -3194,7 +3212,7 @@ export default function AccountsReceivablePage() {
                           className="input-field text-right font-mono font-bold text-xs"
                         />
                         {payMontoUSD > 0 && (
-                          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono font-bold block mt-1 text-right">
+                          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono font-bold block text-right">
                             ≈ {formatPYG(Math.round(payMontoUSD * payTasaUSD))}
                           </span>
                         )}
@@ -3202,7 +3220,7 @@ export default function AccountsReceivablePage() {
                     </div>
 
                     <div className="flex items-center justify-between text-[10px] text-slate-500">
-                      <span>Cotización de Conversión: 1 R$ = {formatPYG(payTasaBRL)} · 1 US$ = {formatPYG(payTasaUSD)}</span>
+                      <span>Cotización aplicada: 1 R$ = {formatPYG(payTasaBRL)} · 1 US$ = {formatPYG(payTasaUSD)} (Editable en cada casilla)</span>
                       {payMontoPYG === 0 && payMontoBRL === 0 && payMontoUSD === 0 && montoTotalPago > 0 && (
                         <button
                           type="button"

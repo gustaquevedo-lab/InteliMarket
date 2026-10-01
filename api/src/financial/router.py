@@ -761,7 +761,7 @@ async def get_financial_ratios(company_id: str = Query(), db: AsyncSession = Dep
 async def list_supplier_credit_notes(
     company_id: str = Query(),
     supplier_id: str | None = Query(None),
-    solo_pendientes: bool = Query(False),
+    solo_pendientes: bool = Query(True),
     limit: int = Query(500),
     db: AsyncSession = Depends(get_db)
 ):
