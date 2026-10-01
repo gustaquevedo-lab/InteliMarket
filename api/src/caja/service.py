@@ -4225,46 +4225,48 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
         m_gs_adj = float(a.monto_gs or 0)
         c_key = a.destino_canal_key
         o_key = (a.origen_forma_pago or "EFECTIVO").upper()
-        voucher_adj = {
-            "id": f"adj_{str(a.id)}",
-            "adjustment_id": str(a.id),
-            "sale_id": str(a.sale_id) if a.sale_id else None,
-            "fecha": a.created_at.isoformat() if a.created_at else None,
-            "numero_ticket": a.ticket_numero or ("Reclasif. Efectivo" if o_key in ["EFECTIVO", "EFECTIVO_PYG"] else f"Reclasif. {a.origen_forma_pago}"),
-            "tipo_comprobante": "Reclasificación Tesorería",
-            "medio_pago": a.destino_canal_label,
-            "canal_key": c_key,
-            "moneda": a.moneda or "PYG",
-            "monto_original": m_gs_adj,
-            "monto_gs": m_gs_adj,
-            "nro_boleta": a.nro_comprobante or "—",
-            "codigo_autorizacion": a.codigo_autorizacion or "—",
-            "nsu": "—",
-            "tarjeta_marca": a.banco_entidad or "Tesorería / Manual",
-            "tarjeta_pan": "—",
-            "titular": a.titular or "—",
-            "es_reclasificado": True,
-            "origen_forma_pago": a.origen_forma_pago,
-            "banco_entidad": a.banco_entidad,
-            "motivo": a.motivo,
-        }
-        vouchers.append(voucher_adj)
-        if c_key in vouchers_by_channel:
-            vouchers_by_channel[c_key]["total_esperado_gs"] += m_gs_adj
-            vouchers_by_channel[c_key]["cantidad_esperada"] += 1
-            vouchers_by_channel[c_key]["vouchers"].append(voucher_adj)
-        else:
-            inst_info = CHANNEL_TO_INSTRUMENT_TYPE.get(c_key, ("DOCUMENTOS_VALOR", "Documentos de Pago", "file-check", 5))
-            vouchers_by_channel[c_key] = {
+        # Si el destino NO es efectivo, agregarlo como voucher a los comprobantes no efectivo
+        if c_key not in ["EFECTIVO", "EFECTIVO_PYG"]:
+            voucher_adj = {
+                "id": f"adj_{str(a.id)}",
+                "adjustment_id": str(a.id),
+                "sale_id": str(a.sale_id) if a.sale_id else None,
+                "fecha": a.created_at.isoformat() if a.created_at else None,
+                "numero_ticket": a.ticket_numero or ("Reclasif. Efectivo" if o_key in ["EFECTIVO", "EFECTIVO_PYG"] else f"Reclasif. {a.origen_forma_pago}"),
+                "tipo_comprobante": "Reclasificación Tesorería",
+                "medio_pago": a.destino_canal_label,
                 "canal_key": c_key,
-                "canal_label": a.destino_canal_label,
-                "icon": inst_info[2],
-                "total_esperado_gs": m_gs_adj,
-                "cantidad_esperada": 1,
-                "vouchers": [voucher_adj],
+                "moneda": a.moneda or "PYG",
+                "monto_original": m_gs_adj,
+                "monto_gs": m_gs_adj,
+                "nro_boleta": a.nro_comprobante or "—",
+                "codigo_autorizacion": a.codigo_autorizacion or "—",
+                "nsu": "—",
+                "tarjeta_marca": a.banco_entidad or "Tesorería / Manual",
+                "tarjeta_pan": "—",
+                "titular": a.titular or "—",
+                "es_reclasificado": True,
+                "origen_forma_pago": a.origen_forma_pago,
+                "banco_entidad": a.banco_entidad,
+                "motivo": a.motivo,
             }
+            vouchers.append(voucher_adj)
+            if c_key in vouchers_by_channel:
+                vouchers_by_channel[c_key]["total_esperado_gs"] += m_gs_adj
+                vouchers_by_channel[c_key]["cantidad_esperada"] += 1
+                vouchers_by_channel[c_key]["vouchers"].append(voucher_adj)
+            else:
+                inst_info = CHANNEL_TO_INSTRUMENT_TYPE.get(c_key, ("DOCUMENTOS_VALOR", "Documentos de Pago", "file-check", 5))
+                vouchers_by_channel[c_key] = {
+                    "canal_key": c_key,
+                    "canal_label": a.destino_canal_label,
+                    "icon": inst_info[2],
+                    "total_esperado_gs": m_gs_adj,
+                    "cantidad_esperada": 1,
+                    "vouchers": [voucher_adj],
+                }
 
-        # Si el origen es un medio no efectivo (ej: Dinelco), remover/descontar del canal origen
+        # Si el origen es un medio no efectivo (ej: Dinelco, Tarjeta Débito), remover/descontar del canal origen
         if o_key not in ["EFECTIVO", "EFECTIVO_PYG"]:
             matched_o = None
             if o_key in vouchers_by_channel:
@@ -4273,6 +4275,9 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
                 for k in vouchers_by_channel:
                     if ("DINELCO" in o_key and "DINELCO" in k) or \
                        ("BANCARD" in o_key and "BANCARD" in k) or \
+                       ("DEBITO" in o_key and "DEBITO" in k) or \
+                       ("CREDITO" in o_key and "CREDITO" in k) or \
+                       ("TARJETA" in o_key and ("DEBITO" in k or "CREDITO" in k)) or \
                        ("QR" in o_key and "QR" in k) or \
                        ("PIX" in o_key and "PIX" in k) or \
                        ("EXTRA_CLUB" in o_key and "EXTRA_CLUB" in k):
@@ -4284,7 +4289,7 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
                     matches = False
                     if a.sale_id and orig_v.get("sale_id") == str(a.sale_id):
                         matches = True
-                    elif a.ticket_numero and orig_v.get("numero_ticket") == str(a.ticket_numero):
+                    elif a.ticket_numero and (orig_v.get("numero_ticket") == str(a.ticket_numero) or str(a.ticket_numero) in str(orig_v.get("numero_ticket"))):
                         matches = True
                     elif not orig_v.get("es_reclasificado") and abs(float(orig_v.get("monto_gs", 0)) - m_gs_adj) < 1.0:
                         matches = True

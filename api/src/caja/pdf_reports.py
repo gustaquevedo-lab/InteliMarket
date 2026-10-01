@@ -1986,10 +1986,10 @@ def generate_acta_verificacion_tesoreria_pdf(
     c_decl_total = round(c_decl_pyg + (c_decl_brl * tasa_brl) + (c_decl_usd * tasa_usd))
     dif_entrega_gs = c_total - c_decl_total
 
-    dif_consolidada = c_total - esp_total
-    estado_cuadre = "CONFORME (SIN DIFERENCIA)" if abs(dif_consolidada) < 1000 else ("SOBRANTE" if dif_consolidada > 0 else "FALTANTE")
-    signo_cons = "+" if dif_consolidada >= 0 else ""
-    dif_color_hex = "#059669" if dif_consolidada >= 0 else "#DC2626"
+    dif_efectivo = c_total - esp_total
+    estado_cuadre_ef = "CUADRADO" if abs(dif_efectivo) < 5000 else ("SOBRANTE" if dif_efectivo > 0 else "FALTANTE")
+    signo_ef = "+" if dif_efectivo >= 0 else ""
+    dif_color_ef = "#059669" if abs(dif_efectivo) < 5000 else ("#D97706" if dif_efectivo > 0 else "#DC2626")
 
     style_th = ParagraphStyle("TH_V", parent=styles["Normal"], fontName=FONT_BOLD, fontSize=7.2, leading=8.5, textColor=HexColor("#0F172A"))
     style_td_lbl = ParagraphStyle("TDL_V", parent=styles["Normal"], fontSize=6.8, leading=8.0, textColor=HexColor("#334155"))
@@ -2021,8 +2021,8 @@ def generate_acta_verificacion_tesoreria_pdf(
         [Paragraph(f"Efectivo Dólares (US$ {_fmt_val(c_usd, is_divisa=True)} x {_fmt_val(tasa_usd)}):", style_td_lbl), Paragraph(f"Gs. {_fmt_val(c_usd_gs)}", style_td_val)],
         [Paragraph("<b>TOTAL RECIBIDO EN BÓVEDA:</b>", ParagraphStyle("B3_V", parent=style_td_lbl, fontName=FONT_BOLD, textColor=HexColor("#047857"))),
          Paragraph(f"<font color='#047857'><b>Gs. {_fmt_val(c_total)}</b></font>", style_td_val)],
-        [Paragraph("<b>DIFERENCIA (Recibido - Esperado):</b>", ParagraphStyle("B4_V", parent=style_td_lbl, fontName=FONT_BOLD, textColor=HexColor(dif_color_hex))),
-         Paragraph(f"<font color='{dif_color_hex}'><b>{signo_cons}Gs. {_fmt_val(dif_consolidada)} ({estado_cuadre})</b></font>", style_td_val)],
+        [Paragraph("<b>DIFERENCIA EFECTIVO EN GAVETA:</b>", ParagraphStyle("B4_V", parent=style_td_lbl, fontName=FONT_BOLD, textColor=HexColor(dif_color_ef))),
+         Paragraph(f"<font color='{dif_color_ef}'><b>{signo_ef}Gs. {_fmt_val(dif_efectivo)} ({estado_cuadre_ef})</b></font>", style_td_val)],
     ]
     if dif_entrega_gs != 0:
         signo_ent = "+" if dif_entrega_gs > 0 else ""
@@ -2160,14 +2160,21 @@ def generate_acta_verificacion_tesoreria_pdf(
 
     # 5. DICTAMEN AUDITORÍA Y NOTAS DE TESORERÍA
     obs_dictamen = handoff.get("observaciones") or ""
+    dif_neto_turno = dif_efectivo + dif_tot_vouch
+    signo_neto = "+" if dif_neto_turno >= 0 else ""
+    estado_neto = "CONFORME (TURNO CUADRADO)" if abs(dif_neto_turno) < 30000 else ("SOBRANTE EN TURNO" if dif_neto_turno > 0 else "FALTANTE EN TURNO")
+    color_neto = "#059669" if abs(dif_neto_turno) < 30000 else ("#D97706" if dif_neto_turno > 0 else "#DC2626")
+
     txt_dictamen = (
-        f"<b>DICTAMEN DE CONFORMIDAD DE TESORERÍA:</b> "
+        f"<b>DICTAMEN DE CONFORMIDAD Y AUDITORÍA DE TESORERÍA:</b> "
         f"Valores recepcionados conforme a planilla de recuento físico. "
-        f"Efectivo asumido en Bóveda: <b>Gs. {_fmt_val(c_total)}</b>. Comprobantes archivados: <b>{total_cant_vouchers} vouchers (Gs. {_fmt_val(total_monto_vouchers)})</b>. "
-        f"Dictamen general: <b>{estado_cuadre}</b> ({signo_cons}Gs. {_fmt_val(dif_consolidada)}). "
+        f"Efectivo asumido en Bóveda: <b>Gs. {_fmt_val(c_total)}</b> (Dif. Gaveta: {signo_ef}Gs. {_fmt_val(dif_efectivo)}). "
+        f"Comprobantes archivados: <b>{total_cant_vouchers} vouchers (Gs. {_fmt_val(total_monto_vouchers)})</b> (Dif. Vouchers: {'+' if dif_tot_vouch > 0 else ''}Gs. {_fmt_val(dif_tot_vouch)}). "
+        f"<br/><b>CONCILIACIÓN NETA DEL TURNO (Efectivo + Comprobantes):</b> "
+        f"<font color='{color_neto}'><b>{signo_neto}Gs. {_fmt_val(dif_neto_turno)} — {estado_neto}</b></font>. "
     )
     if obs_dictamen:
-        txt_dictamen += f"<i>Observaciones de Tesorería: {obs_dictamen.strip()}</i>"
+        txt_dictamen += f"<br/><i>Observaciones de Tesorería: {obs_dictamen.strip()}</i>"
 
     t_dictamen = Table([[Paragraph(txt_dictamen, ParagraphStyle("DictV", parent=styles["Normal"], fontSize=6.5, leading=8.2, textColor=HexColor("#1E293B")))]], colWidths=[186 * mm])
     t_dictamen.setStyle(TableStyle([

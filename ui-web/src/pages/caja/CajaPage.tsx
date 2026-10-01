@@ -6820,6 +6820,9 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                     className="w-full text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white px-3 py-2 focus:ring-2 focus:ring-amber-500 font-medium"
                     required
                   >
+                    <optgroup label="💵 Efectivo en Gaveta">
+                      <option value="EFECTIVO">💵 Efectivo en Gaveta (Cobro de tarjeta/QR recibido en billetes)</option>
+                    </optgroup>
                     <optgroup label="🌐 Transferencias Bancarias & PIX">
                       <option value="PLUGPAY_PIX">Plug Pay PIX Brasil</option>
                       <option value="TRANSFERENCIA">Transferencia Bancaria SIPAP</option>
