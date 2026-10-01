@@ -187,7 +187,11 @@ export function getRetryDelay(retryCount: number): number {
 const ventasRescatadas = new Set<string>()
 const rechazosReportados = new Set<string>()
 
-async function rescatarVentasAtascadas(): Promise<void> {
+export function resetVentasRescatadas(): void {
+  ventasRescatadas.clear()
+}
+
+async function rescatarVentasAtascadas(forceAll: boolean = false): Promise<void> {
   try {
     const todas = await offlineDB.pendingSales.getAll()
     const ahora = Date.now()
@@ -196,7 +200,8 @@ async function rescatarVentasAtascadas(): Promise<void> {
       const syncingViejo = v.status === "syncing" && ahora - new Date(v.last_retry).getTime() > 60000
       const agotada = v.retry_count >= MAX_RETRIES
       const enError = v.status === "error"
-      if ((syncingViejo || agotada || enError) && !ventasRescatadas.has(v.id)) {
+      const errorRecuperable = /sesión activa|inicie sesión|token|401|unauthorized|conflict|409|duplicat/i.test(v.error || "")
+      if (syncingViejo || agotada || (enError && (forceAll || errorRecuperable || !ventasRescatadas.has(v.id)))) {
         ventasRescatadas.add(v.id)
         await offlineDB.pendingSales.update({
           ...v,
@@ -209,8 +214,14 @@ async function rescatarVentasAtascadas(): Promise<void> {
   } catch {}
 }
 
-export async function syncPendingSales(onProgress?: (synced: number, total: number) => void): Promise<{ synced: number; failed: number; lastError?: string }> {
-  await rescatarVentasAtascadas()
+export async function syncPendingSales(
+  forceRetryErrors: boolean = false,
+  onProgress?: (synced: number, total: number) => void
+): Promise<{ synced: number; failed: number; lastError?: string }> {
+  if (forceRetryErrors) {
+    ventasRescatadas.clear()
+  }
+  await rescatarVentasAtascadas(forceRetryErrors)
   const pending = await offlineDB.pendingSales.getPending()
   if (pending.length === 0) return { synced: 0, failed: 0 }
 
@@ -247,12 +258,12 @@ export async function syncPendingSales(onProgress?: (synced: number, total: numb
       failed++
       const msg = err instanceof Error ? err.message : "Sync failed"
       lastError = msg
-      // Corte de red / servidor caido = transitorio, se reintenta con backoff.
+      // Corte de red / servidor caido / sesión pendiente = transitorio, se reintenta con backoff.
       // Cualquier otra respuesta (ej. 400 "Linea de credito insuficiente") es un
       // rechazo de negocio: reintentar identico jamas va a funcionar, asi que se
       // aparta como "error" (NO se borra: queda guardada para revision) en vez de
       // martillar al servidor cada 10s para siempre.
-      const transitorio = /failed to fetch|network|load failed|abort|timeout|reiniciando|HTTP 5\d\d|HTTP 408|HTTP 429/i.test(msg)
+      const transitorio = /failed to fetch|network|load failed|abort|timeout|reiniciando|HTTP 5\d\d|HTTP 408|HTTP 429|sesión activa|inicie sesión|token|401|unauthorized/i.test(msg)
       if (!transitorio && !rechazosReportados.has(sale.id)) {
         // Avisa al servidor (auditoria) QUE venta y POR QUE fue rechazada, para
         // que administracion la vea sin depender de que la cajera mire la caja.

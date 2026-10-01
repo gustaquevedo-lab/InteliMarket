@@ -171,6 +171,24 @@ async def reserve_fiscal_invoice_number(
     if timbrado.fecha_fin < date.today():
         raise TimbradoVencidoError(f"El timbrado {timbrado.numero} vencio el {timbrado.fecha_fin} — renovarlo antes de seguir facturando")
 
+    # ── AUTO-SANACIÓN Y BLINDAJE CONTRA COLISIONES FISCALES ──
+    # Si por ventas offline, regularizaciones o importaciones existen en la tabla sales
+    # números mayores o iguales a secuencia.numero_actual para este establecimiento y punto,
+    # auto-avanzamos la secuencia al número disponible inmediatamente superior.
+    from sqlalchemy import text
+    prefix = f"{secuencia.establecimiento}-{secuencia.punto_emision}-"
+    max_num_res = await db.execute(
+        text("""
+            SELECT COALESCE(MAX(CAST(SUBSTRING(numero FROM 9) AS INTEGER)), 0)
+            FROM sales
+            WHERE company_id = :cid AND numero LIKE :pfx AND numero ~ '^[0-9]{3}-[0-9]{3}-[0-9]{7}$'
+        """),
+        {"cid": cid, "pfx": f"{prefix}%"},
+    )
+    max_existing = int(max_num_res.scalar() or 0)
+    if max_existing >= secuencia.numero_actual:
+        secuencia.numero_actual = max_existing + 1
+
     if secuencia.numero_actual > secuencia.numero_final:
         raise TimbradoAgotadoError(
             f"El punto de emision '{punto_emision}' agoto su numeracion (hasta {secuencia.numero_final}) — "

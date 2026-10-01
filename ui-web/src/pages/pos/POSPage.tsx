@@ -626,6 +626,15 @@ export default function POSPage() {
             : `001-${rawPe.replace(/[^0-9]/g, "").padStart(3, "0")}`
           setTerminalAssignment(assignment)
           setPuntoEmision(pe)
+          if ((assignment as any).factura_actual) {
+            const rawDigits = String(assignment.punto_emision || "").replace(/[^0-9]/g, "")
+            const peDigits = rawDigits.slice(-3).padStart(3, "0")
+            const key = `pos_fiscal_seq_${peDigits}`
+            const current = parseInt(localStorage.getItem(key) || "0", 10)
+            if ((assignment as any).factura_actual - 1 > current) {
+              localStorage.setItem(key, String((assignment as any).factura_actual - 1))
+            }
+          }
           try {
             const saved = localStorage.getItem(userCajaKey)
             const currentData = saved ? JSON.parse(saved) : {}
@@ -639,6 +648,23 @@ export default function POSPage() {
       }
     })()
   }, [])
+
+  // Secuencia fiscal monótona persistida por terminal (Offline-First estricto)
+  // Cada terminal física es dueña exclusiva de su punto de emisión (ej: Caja 5 = 015).
+  // Nunca inventa ni emite números aleatorios (Math.random) en comprobantes timbrados.
+  const getNextTerminalFiscalNumber = (pe: string): { numero: string; seq: number } => {
+    const rawDigits = (pe || "012").replace(/[^0-9]/g, "")
+    const peDigits = rawDigits.slice(-3).padStart(3, "0")
+    const key = `pos_fiscal_seq_${peDigits}`
+    let currentSeq = parseInt(localStorage.getItem(key) || "0", 10)
+    if (currentSeq <= 0 && (terminalAssignment as any)?.factura_actual) {
+      currentSeq = (terminalAssignment as any).factura_actual - 1
+    }
+    const nextSeq = Math.max(1, currentSeq + 1)
+    localStorage.setItem(key, String(nextSeq))
+    const formatted = `001-${peDigits}-${String(nextSeq).padStart(7, "0")}`
+    return { numero: formatted, seq: nextSeq }
+  }
 
   // ── 2. ESTADOS GENERALES Y CATÁLOGO ───────────────────────────────────────
   const [products, setProducts] = useState<Product[]>([])
@@ -7146,7 +7172,8 @@ export default function POSPage() {
 
     setSubmitting(true)
     try {
-      const saleNumber = `${puntoEmision}-${String(Math.floor(Math.random() * 900000) + 100000).padStart(7, "0")}`
+      const localFiscal = getNextTerminalFiscalNumber(puntoEmision)
+      const saleNumber = localFiscal.numero
 
       // Cargar datos reales de la empresa y plantilla personalizada directamente desde DB / localStorage
       let companyData: any = {}
@@ -7482,6 +7509,8 @@ export default function POSPage() {
         customer_id: customer.id,
         user_id: user?.id,
         session_id: cashSessionId || undefined,
+        punto_emision: puntoEmision,
+        numero: saleNumber,
         // Punto de emisión fijo de esta máquina (si ya fue asignado por un
         // administrador) -- sin esto, el backend cae al único punto de
         // emisión por defecto de toda la empresa, sin importar en qué caja
@@ -7511,7 +7540,17 @@ export default function POSPage() {
           try {
             // withTimeout: 8s para permitir cálculo fiscal completo sin falsos fallos en red local
             const created = await withTimeout(api.sales.create(saleBasePayload as any), 8000)
-            numeroComprobante = created.numero || saleNumber
+            if (created.numero) {
+              numeroComprobante = created.numero
+              const rawDigits = (puntoEmision || "012").replace(/[^0-9]/g, "")
+              const peDigits = rawDigits.slice(-3).padStart(3, "0")
+              const sSeq = parseInt(created.numero.split("-")[2] || "0", 10)
+              if (sSeq > 0) {
+                localStorage.setItem(`pos_fiscal_seq_${peDigits}`, String(sSeq))
+              }
+            } else {
+              numeroComprobante = saleNumber
+            }
             numeroInterno = (created as any).numero_interno || null
             ventaYaCreadaSinRecibo = true
             createdSaleId = created.id
@@ -7880,7 +7919,15 @@ export default function POSPage() {
             try {
               const created = await withTimeout(api.sales.create({ ...saleBasePayload, recibo_html: receiptHtml } as any), 8000)
               createdSaleId = created.id
-              if (created.numero) numeroComprobante = created.numero
+              if (created.numero) {
+                numeroComprobante = created.numero
+                const rawDigits = (puntoEmision || "012").replace(/[^0-9]/g, "")
+                const peDigits = rawDigits.slice(-3).padStart(3, "0")
+                const sSeq = parseInt(created.numero.split("-")[2] || "0", 10)
+                if (sSeq > 0) {
+                  localStorage.setItem(`pos_fiscal_seq_${peDigits}`, String(sSeq))
+                }
+              }
               if ((created as any).numero_interno) numeroInterno = (created as any).numero_interno
               ventaYaCreadaSinRecibo = true
             } catch (apiErr: any) {
@@ -8608,7 +8655,7 @@ export default function POSPage() {
                 onClick={async () => {
                   toast.info("Sincronizando...", "Enviando ventas pendientes al servidor...")
                   try {
-                    const res = await syncPendingSales()
+                    const res = await syncPendingSales(true)
                     if (res.synced > 0) {
                       toast.success("Sincronización Exitosa", `${res.synced} venta(s) enviadas al servidor.`)
                     } else if (res.failed > 0) {
