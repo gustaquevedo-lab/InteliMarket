@@ -305,10 +305,27 @@ class ApproveLossPromoInput(BaseModel):
 
 
 class RecordVendorCreditNoteInput(BaseModel):
-    nc_numero_proveedor: str
-    nc_timbrado_proveedor: str
-    nc_monto_total: Decimal
+    nc_numero_proveedor: Optional[str] = ""
+    nc_timbrado_proveedor: Optional[str] = ""
+    nc_monto_total: Optional[Decimal] = Decimal(0)
     observaciones: Optional[str] = None
+
+    # Compatibilidad con frontend legado y nombres alternativos
+    nc_numero: Optional[str] = None
+    nc_timbrado: Optional[str] = None
+    monto_nc: Optional[Decimal] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reconcile_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if not data.get("nc_numero_proveedor") and data.get("nc_numero"):
+                data["nc_numero_proveedor"] = str(data["nc_numero"])
+            if not data.get("nc_timbrado_proveedor") and data.get("nc_timbrado"):
+                data["nc_timbrado_proveedor"] = str(data["nc_timbrado"])
+            if (data.get("nc_monto_total") is None) and data.get("monto_nc") is not None:
+                data["nc_monto_total"] = data["monto_nc"]
+        return data
 
 
 class VendorClaimResponse(BaseModel):

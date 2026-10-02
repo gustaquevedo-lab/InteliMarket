@@ -14,6 +14,7 @@ import { api, type Promotion, type Product, type Supplier, type Category } from 
 import { useToast } from "../../context/ToastContext"
 import { useConfirm } from "../../components/ConfirmDialog"
 import { formatPYG, formatDate } from "../../utils/format"
+import CurrencyInput from "../../components/CurrencyInput"
 import { Promotion360Modal } from "./Promotion360Modal"
 
 type PromoTab = "activas" | "vencimientos" | "sell_out" | "pendientes" | "pausadas" | "todas"
@@ -823,6 +824,9 @@ export default function PromocionesPage() {
 
     try {
       await api.promotions.recordVendorCreditNote(selectedPromo.id, {
+        nc_numero_proveedor: ncNumero,
+        nc_timbrado_proveedor: ncTimbrado,
+        nc_monto_total: Number(ncMonto),
         nc_numero: ncNumero,
         nc_timbrado: ncTimbrado,
         monto_nc: Number(ncMonto)
@@ -830,8 +834,9 @@ export default function PromocionesPage() {
       toast.success("Nota de Crédito Registrada", `Se asentó la NC Nº ${ncNumero} por ${formatPYG(Number(ncMonto))}`)
       setShowSellOutModal(false)
       loadData()
-    } catch {
-      toast.error("Error", "No se pudo registrar la Nota de Crédito")
+    } catch (err: any) {
+      const errMsg = err?.response?.data?.detail || err?.message || "No se pudo registrar la Nota de Crédito"
+      toast.error("Error", typeof errMsg === "string" ? errMsg : JSON.stringify(errMsg))
     } finally {
       setSavingNC(false)
     }
@@ -3504,11 +3509,12 @@ export default function PromocionesPage() {
 
                   <div>
                     <label className="text-[10px] font-bold text-slate-300 block mb-1">Monto Asentado en Cuenta (Gs.):</label>
-                    <input
-                      type="number"
+                    <CurrencyInput
                       required
                       value={ncMonto}
-                      onChange={e => setNcMonto(e.target.value === "" ? "" : Number(e.target.value))}
+                      onChangeValue={(val) => setNcMonto(val)}
+                      currency="PYG"
+                      placeholder="0"
                       className="w-full text-xs font-mono font-black p-2 rounded-xl border border-slate-700 bg-slate-800 text-emerald-400 text-base"
                     />
                   </div>
