@@ -2816,6 +2816,51 @@ async def calculate_smart_replenishment_preview(
         where_clauses.append("(p.nombre ILIKE :search OR p.sku ILIKE :search OR p.codigo_barra ILIKE :search)")
 
     sql = f"""
+        WITH all_purchases AS (
+            SELECT 
+                pri.product_id,
+                pr.supplier_id,
+                pr.fecha as fecha
+            FROM purchase_receipt_items pri
+            JOIN purchase_receipts pr ON pr.id = pri.receipt_id
+            WHERE pr.company_id = :cid
+              AND pr.estado != 'cancelado' 
+              AND pr.supplier_id IS NOT NULL
+
+            UNION ALL
+
+            SELECT 
+                poi.product_id,
+                po.supplier_id,
+                po.fecha as fecha
+            FROM purchase_order_items poi
+            JOIN purchase_orders po ON po.id = poi.purchase_order_id
+            WHERE po.company_id = :cid
+              AND po.estado != 'cancelado' 
+              AND po.supplier_id IS NOT NULL
+
+            UNION ALL
+
+            SELECT 
+                sii.product_id,
+                si.supplier_id,
+                COALESCE(si.fecha_emision::timestamptz, si.created_at) as fecha
+            FROM supplier_invoice_items sii
+            JOIN supplier_invoices si ON si.id = sii.invoice_id
+            WHERE si.company_id = :cid
+              AND si.supplier_id IS NOT NULL 
+              AND sii.product_id IS NOT NULL
+        ),
+        last_sup_cte AS (
+            SELECT DISTINCT ON (ap.product_id)
+                ap.product_id,
+                ap.supplier_id as last_sup_id,
+                sup.razon_social as last_sup_name,
+                ap.fecha as last_purchase_date
+            FROM all_purchases ap
+            JOIN suppliers sup ON sup.id = ap.supplier_id
+            ORDER BY ap.product_id, ap.fecha DESC NULLS LAST
+        )
         SELECT 
             p.id,
             p.nombre,
@@ -2841,6 +2886,7 @@ async def calculate_smart_replenishment_preview(
             COALESCE(last_sup.last_sup_name, p_sup.razon_social, 'Sin Proveedor') as last_sup_name
         FROM products p
         LEFT JOIN suppliers p_sup ON p_sup.id = p.supplier_id
+        LEFT JOIN last_sup_cte last_sup ON last_sup.product_id = p.id
         LEFT JOIN (
             SELECT product_id, SUM(cantidad) as total_stock
             FROM stock
@@ -2879,18 +2925,6 @@ async def calculate_smart_replenishment_preview(
               AND pr.producto_ids IS NOT NULL
               AND (pr.valido_hasta IS NULL OR pr.valido_hasta >= CURRENT_DATE - INTERVAL '120 days')
         ) promo_flag ON promo_flag.product_id = p.id
-        LEFT JOIN (
-            SELECT DISTINCT ON (poi_last.product_id)
-                poi_last.product_id,
-                po_last.supplier_id as last_sup_id,
-                sup_last.razon_social as last_sup_name
-            FROM purchase_order_items poi_last
-            JOIN purchase_orders po_last ON po_last.id = poi_last.purchase_order_id
-            JOIN suppliers sup_last ON sup_last.id = po_last.supplier_id
-            WHERE po_last.company_id = :cid
-              AND po_last.estado != 'cancelado'
-            ORDER BY poi_last.product_id, po_last.fecha DESC, po_last.created_at DESC
-        ) last_sup ON last_sup.product_id = p.id
         LEFT JOIN (
             SELECT poi.product_id, SUM(poi.cantidad - COALESCE(poi.cantidad_recibida, 0)) as total_en_transito
             FROM purchase_order_items poi

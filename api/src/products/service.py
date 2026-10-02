@@ -296,22 +296,45 @@ async def list_products(
     if supplier_id:
         try:
             supp_uuid = UUID(supplier_id)
-            po_subquery = (
-                select(PurchaseOrderItem.product_id)
-                .join(PurchaseOrder, PurchaseOrder.id == PurchaseOrderItem.purchase_order_id)
-                .where(PurchaseOrder.supplier_id == supp_uuid)
-            )
-            sph_subquery = (
-                select(SupplierPriceHistory.product_id)
-                .where(SupplierPriceHistory.supplier_id == supp_uuid)
-            )
-            query = query.where(
-                or_(
-                    Product.supplier_id == supp_uuid,
-                    Product.id.in_(po_subquery),
-                    Product.id.in_(sph_subquery),
+            last_sup_subquery = (
+                select(text("p_sub.id"))
+                .select_from(
+                    text("""
+                        products p_sub
+                        LEFT JOIN (
+                            SELECT DISTINCT ON (ap.product_id)
+                                ap.product_id,
+                                ap.supplier_id as last_sup_id
+                            FROM (
+                                SELECT pri.product_id, pr.supplier_id, pr.fecha
+                                FROM purchase_receipt_items pri
+                                JOIN purchase_receipts pr ON pr.id = pri.receipt_id
+                                WHERE pr.company_id = :c_uuid AND pr.estado != 'cancelado' AND pr.supplier_id IS NOT NULL
+
+                                UNION ALL
+
+                                SELECT poi.product_id, po.supplier_id, po.fecha
+                                FROM purchase_order_items poi
+                                JOIN purchase_orders po ON po.id = poi.purchase_order_id
+                                WHERE po.company_id = :c_uuid AND po.estado != 'cancelado' AND po.supplier_id IS NOT NULL
+
+                                UNION ALL
+
+                                SELECT sii.product_id, si.supplier_id, COALESCE(si.fecha_emision::timestamptz, si.created_at) as fecha
+                                FROM supplier_invoice_items sii
+                                JOIN supplier_invoices si ON si.id = sii.invoice_id
+                                WHERE si.company_id = :c_uuid AND si.supplier_id IS NOT NULL AND sii.product_id IS NOT NULL
+                            ) ap
+                            ORDER BY ap.product_id, ap.fecha DESC NULLS LAST
+                        ) ls ON ls.product_id = p_sub.id
+                    """)
                 )
+                .where(
+                    text("p_sub.company_id = :c_uuid AND COALESCE(ls.last_sup_id, p_sub.supplier_id) = :supp_uuid")
+                )
+                .params(c_uuid=c_uuid, supp_uuid=supp_uuid)
             )
+            query = query.where(Product.id.in_(last_sup_subquery))
         except ValueError:
             pass
 
@@ -406,8 +429,44 @@ async def list_products(
             p.__dict__["stock_actual"] = st
             p.__dict__["stock_disponible"] = sd
 
-        # 2. Asociar Proveedor (directo del producto o por órdenes de compra)
-        direct_supp_ids = [p.supplier_id for p in products if getattr(p, "supplier_id", None)]
+        # 2. Asociar Proveedor (Último proveedor de compra registrado con fallback a products.supplier_id)
+        last_sup_rows = await db.execute(
+            text("""
+                SELECT DISTINCT ON (ap.product_id)
+                    ap.product_id,
+                    ap.supplier_id,
+                    s.razon_social as supplier_nombre
+                FROM (
+                    SELECT pri.product_id, pr.supplier_id, pr.fecha
+                    FROM purchase_receipt_items pri
+                    JOIN purchase_receipts pr ON pr.id = pri.receipt_id
+                    WHERE pr.company_id = :c_uuid AND pr.estado != 'cancelado' AND pr.supplier_id IS NOT NULL
+                      AND pri.product_id = ANY(:p_ids)
+
+                    UNION ALL
+
+                    SELECT poi.product_id, po.supplier_id, po.fecha
+                    FROM purchase_order_items poi
+                    JOIN purchase_orders po ON po.id = poi.purchase_order_id
+                    WHERE po.company_id = :c_uuid AND po.estado != 'cancelado' AND po.supplier_id IS NOT NULL
+                      AND poi.product_id = ANY(:p_ids)
+
+                    UNION ALL
+
+                    SELECT sii.product_id, si.supplier_id, COALESCE(si.fecha_emision::timestamptz, si.created_at) as fecha
+                    FROM supplier_invoice_items sii
+                    JOIN supplier_invoices si ON si.id = sii.invoice_id
+                    WHERE si.company_id = :c_uuid AND si.supplier_id IS NOT NULL AND sii.product_id IS NOT NULL
+                      AND sii.product_id = ANY(:p_ids)
+                ) ap
+                JOIN suppliers s ON s.id = ap.supplier_id
+                ORDER BY ap.product_id, ap.fecha DESC NULLS LAST
+            """),
+            {"c_uuid": c_uuid, "p_ids": p_ids}
+        )
+        last_sup_by_pid = {r.product_id: (r.supplier_id, r.supplier_nombre) for r in last_sup_rows}
+
+        direct_supp_ids = [p.supplier_id for p in products if getattr(p, "supplier_id", None) and p.id not in last_sup_by_pid]
         suppliers_by_id = {}
         if direct_supp_ids:
             supp_rows = await db.execute(
@@ -416,29 +475,12 @@ async def list_products(
             )
             suppliers_by_id = {r.id: r.razon_social for r in supp_rows}
 
-        # Fallback para productos sin supplier_id asignado: buscar en purchase_orders
-        missing_supp_pids = [p.id for p in products if not getattr(p, "supplier_id", None)]
-        po_supp_map = {}
-        if missing_supp_pids:
-            po_supp_res = await db.execute(
-                text("""
-                    SELECT DISTINCT ON (poi.product_id) poi.product_id, po.supplier_id, s.razon_social as supplier_nombre
-                    FROM purchase_order_items poi
-                    JOIN purchase_orders po ON po.id = poi.purchase_order_id
-                    JOIN suppliers s ON s.id = po.supplier_id
-                    WHERE poi.product_id = ANY(:p_ids)
-                    ORDER BY poi.product_id, poi.created_at DESC
-                """),
-                {"p_ids": missing_supp_pids}
-            )
-            po_supp_map = {r.product_id: (r.supplier_id, r.supplier_nombre) for r in po_supp_res}
-
         for p in products:
-            if getattr(p, "supplier_id", None) and p.supplier_id in suppliers_by_id:
+            if p.id in last_sup_by_pid:
+                p.__dict__["supplier_id"] = last_sup_by_pid[p.id][0]
+                p.__dict__["supplier_nombre"] = last_sup_by_pid[p.id][1]
+            elif getattr(p, "supplier_id", None) and p.supplier_id in suppliers_by_id:
                 p.__dict__["supplier_nombre"] = suppliers_by_id[p.supplier_id]
-            elif p.id in po_supp_map:
-                p.__dict__["supplier_id"] = po_supp_map[p.id][0]
-                p.__dict__["supplier_nombre"] = po_supp_map[p.id][1]
 
         # 3. Asociar Escala Mayorista preferencial (sp_tiered_prices)
         tier_res = await db.execute(

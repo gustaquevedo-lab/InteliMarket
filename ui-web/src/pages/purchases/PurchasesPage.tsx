@@ -1006,7 +1006,7 @@ export default function PurchasesPage() {
   const handleOpenGenerateModal = () => {
     const itemsToOrder = (replenishmentData?.items || []).filter(
       (it: any) => {
-        if (selectedSupplierIA && it.ultimo_proveedor_id !== selectedSupplierIA) return false
+        if (selectedSupplierIA && String(it.ultimo_proveedor_id || "").toLowerCase() !== String(selectedSupplierIA).toLowerCase()) return false
         return selectedItemsIA[it.product_id] && (editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida) > 0
       }
     )
@@ -1889,7 +1889,7 @@ export default function PurchasesPage() {
     if (!replenishmentData) return 0
     return replenishmentData.items
       .filter((it: any) => {
-        if (selectedSupplierIA && it.ultimo_proveedor_id !== selectedSupplierIA) return false
+        if (selectedSupplierIA && String(it.ultimo_proveedor_id || "").toLowerCase() !== String(selectedSupplierIA).toLowerCase()) return false
         return selectedItemsIA[it.product_id]
       })
       .reduce((acc: number, it: any) => {
@@ -1904,7 +1904,7 @@ export default function PurchasesPage() {
     if (!replenishmentData) return 0
     return replenishmentData.items
       .filter((it: any) => {
-        if (selectedSupplierIA && it.ultimo_proveedor_id !== selectedSupplierIA) return false
+        if (selectedSupplierIA && String(it.ultimo_proveedor_id || "").toLowerCase() !== String(selectedSupplierIA).toLowerCase()) return false
         return selectedItemsIA[it.product_id]
       })
       .reduce((acc: number, it: any) => {
@@ -1929,7 +1929,7 @@ export default function PurchasesPage() {
     if (!replenishmentData?.items) return []
     const filtered = replenishmentData.items.filter((it: any) => {
       // Blindaje estricto: si se seleccionó un proveedor, descartar todo ítem que no pertenezca a ese proveedor
-      if (selectedSupplierIA && it.ultimo_proveedor_id !== selectedSupplierIA) {
+      if (selectedSupplierIA && String(it.ultimo_proveedor_id || "").toLowerCase() !== String(selectedSupplierIA).toLowerCase()) {
         return false
       }
 
@@ -3176,7 +3176,11 @@ export default function PurchasesPage() {
                     value={filterSupplierSearchIA}
                     onFocus={() => setSupplierComboboxOpen(true)}
                     onChange={(e) => {
-                      setFilterSupplierSearchIA(e.target.value)
+                      const val = e.target.value
+                      setFilterSupplierSearchIA(val)
+                      if (!val.trim()) {
+                        setSelectedSupplierIA("")
+                      }
                       setSupplierComboboxOpen(true)
                     }}
                     className={`input-field pl-9 pr-10 w-full text-xs font-semibold py-2 bg-white dark:bg-slate-900 border-2 transition-all ${
