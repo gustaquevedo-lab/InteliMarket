@@ -493,7 +493,7 @@ def generate_recibo_a6_pdf(
     buffer = io.BytesIO()
     PAGE_WIDTH = 148 * mm
     PAGE_HEIGHT = 105 * mm
-    MARGIN_A6 = 3.5 * mm
+    MARGIN_A6 = 3.0 * mm
 
     doc = SimpleDocTemplate(
         buffer, pagesize=(PAGE_WIDTH, PAGE_HEIGHT),
@@ -752,7 +752,7 @@ def generate_recibo_a6_pdf(
     q = qr.QrCodeWidget(qr_url)
     b = q.getBounds()
     qw, qh = b[2] - b[0], b[3] - b[1]
-    qr_size = 12 * mm
+    qr_size = 11 * mm
     d_qr = Drawing(qr_size, qr_size, transform=[qr_size / qw, 0, 0, qr_size / qh, 0, 0])
     d_qr.add(q)
 
@@ -761,11 +761,11 @@ def generate_recibo_a6_pdf(
     )
 
     firma_caja = (
-        "<br/>___________________________<br/>"
+        "___________________________<br/>"
         "<font size=4.8 color='#64748B'><b>Caja / Recaudador</b><br/>Firma y Aclaración</font>"
     )
     firma_cliente = (
-        "<br/>___________________________<br/>"
+        "___________________________<br/>"
         "<font size=4.8 color='#64748B'><b>Cliente / Deudor</b><br/>Conformidad de Pago</font>"
     )
 
@@ -776,7 +776,7 @@ def generate_recibo_a6_pdf(
             Paragraph(firma_caja, ParagraphStyle("FCaja", parent=styles["Normal"], alignment=TA_CENTER)),
             Paragraph(firma_cliente, ParagraphStyle("FCli", parent=styles["Normal"], alignment=TA_CENTER)),
         ]],
-        colWidths=[15 * mm, 34 * mm, 46 * mm, 46 * mm],
+        colWidths=[14 * mm, 36 * mm, 46 * mm, 46 * mm],
     )
     footer_table.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
