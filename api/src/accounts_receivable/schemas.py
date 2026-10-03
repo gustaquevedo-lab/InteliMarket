@@ -219,3 +219,8 @@ class ReceiptVerificationResponse(BaseModel):
     empresa: dict
     allocations: list[dict]
 
+
+class CreditBlockingPolicy(BaseModel):
+    bloqueo_mora_activo: bool = False
+    dias_mora_limite: int = Field(default=60, ge=1, le=365)
+

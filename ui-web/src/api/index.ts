@@ -3295,6 +3295,8 @@ export const api = {
     cancelCorporateRemission: (id: string, data?: { motivo?: string }) =>
       client.post<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}/cancel`, data || {}),
     listBanks: () => client.get<any[]>("/v1/financial/banks", { company_id: COMPANY_ID } as any),
+    getCreditBlockingPolicy: () => client.get<{ bloqueo_mora_activo: boolean; dias_mora_limite: number }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/credit-policy`),
+    updateCreditBlockingPolicy: (data: { bloqueo_mora_activo: boolean; dias_mora_limite: number }) => client.put<{ bloqueo_mora_activo: boolean; dias_mora_limite: number }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/credit-policy`, data),
   },
 
   backups: {

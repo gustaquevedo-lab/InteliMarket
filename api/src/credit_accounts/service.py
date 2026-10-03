@@ -11,6 +11,7 @@ import uuid
 from api.src.credit_accounts.models import CreditAccount, CreditMovement, CreditApprovalRequest, ReceivableWriteoffRequest, CustomerAdvance
 from api.src.credit_accounts.schemas import CreditAccountCreate, CreditAccountUpdate, CreditPayment, MoraConfig, DunningConfig, CustomerAdvanceCreate
 from api.src.customers.models import Customer
+from api.src.accounts_receivable.service import get_credit_blocking_policy
 
 
 async def _sync_credito_usado(db: AsyncSession, company_id, customer_id, saldo_utilizado: Decimal) -> None:
@@ -66,9 +67,12 @@ async def list_credit_accounts(db: AsyncSession, company_id: str, activo: Option
             {"cid": company_id},
         )
         mora_map = {str(r.customer_id): r.max_mora for r in mora_result.fetchall()}
+        policy = await get_credit_blocking_policy(db, company_id)
+        bloqueo_activo = policy.get("bloqueo_mora_activo", False)
+        dias_limite = policy.get("dias_mora_limite", 60)
         for account in accounts:
             account.dias_mora_max = mora_map.get(str(account.customer_id), 0)
-            account.en_mora = account.dias_mora_max > MORA_BLOQUEO_DIAS
+            account.en_mora = (account.dias_mora_max > dias_limite) if bloqueo_activo else False
 
     return accounts
 
@@ -172,9 +176,15 @@ async def get_credit_check(db: AsyncSession, company_id: str, customer_id: str, 
     )
     max_dias_mora = int(mora_result.scalar() or 0)
 
+    policy = await get_credit_blocking_policy(db, company_id)
+    bloqueo_activo = policy.get("bloqueo_mora_activo", False)
+    dias_limite = policy.get("dias_mora_limite", MORA_BLOQUEO_DIAS)
+
     # Clientes con empresa vinculada (convenio empresarial / deducción por planilla)
-    # no se bloquean por mora minorista de 60 días; su liquidación es corporativa.
-    en_mora = (max_dias_mora > MORA_BLOQUEO_DIAS) if not empresa_vinculada else False
+    # no se bloquean por mora minorista; su liquidación es corporativa.
+    # Si la empresa tiene desactivado el bloqueo por mora (bloqueo_mora_activo=False),
+    # no se bloquea a ningún cliente por días de atraso.
+    en_mora = (max_dias_mora > dias_limite) if (bloqueo_activo and not empresa_vinculada) else False
     disponible = Decimal(str(account.saldo_disponible))
     disponible_suficiente = disponible >= monto
     return {
@@ -185,6 +195,8 @@ async def get_credit_check(db: AsyncSession, company_id: str, customer_id: str, 
         "saldo_utilizado": account.saldo_utilizado,
         "en_mora": en_mora,
         "dias_mora": max_dias_mora,
+        "dias_mora_limite": dias_limite,
+        "bloqueo_mora_activo": bloqueo_activo,
         "empresa_vinculada": bool(empresa_vinculada),
         "disponible_suficiente": disponible_suficiente,
     }

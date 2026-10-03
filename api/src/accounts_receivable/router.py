@@ -18,6 +18,7 @@ from api.src.accounts_receivable.schemas import (
     CorporateRemissionCreate,
     CorporateRemissionPayInput,
     CorporateRemissionRevertInput,
+    CreditBlockingPolicy,
 )
 from api.src.integrated_finance import pdf_reports
 from api.src.auth.middleware import require_auth
@@ -598,5 +599,26 @@ async def cancel_corporate_remission_endpoint(
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
+
+
+@router.get("/companies/{company_id}/accounts-receivable/credit-policy")
+async def get_credit_policy_endpoint(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Obtiene la configuración de restricción de mora para compras a crédito / Extra Club."""
+    return await service.get_credit_blocking_policy(db, company_id)
+
+
+@router.put("/companies/{company_id}/accounts-receivable/credit-policy")
+async def update_credit_policy_endpoint(
+    company_id: str,
+    data: CreditBlockingPolicy,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Actualiza la política de restricción y días de mora permitidos para compras a crédito / Extra Club."""
+    return await service.update_credit_blocking_policy(db, company_id, data)
 
 

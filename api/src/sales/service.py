@@ -742,10 +742,12 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
                 f"Regla ineludible: no se puede facturar a crédito sin saldo disponible. Cobre con otro medio de pago."
             )
 
-        # Si el cliente minorista tiene facturas vencidas hace más de 60 días sin convenio de empresa vinculada:
+        # Si la empresa tiene activo el bloqueo por mora y el cliente excede los días límite:
         if check.get("en_mora") and not getattr(data, "admin_override_credito", False):
+            dias_mora = check.get("dias_mora", 0)
+            dias_limite = check.get("dias_mora_limite", 60)
             raise ValueError(
-                f"Cliente en mora por {check.get('dias_mora', 0)} días: "
+                f"Cliente en mora por {dias_mora} días (política activa de bloqueo a partir de {dias_limite} días): "
                 f"Requiere autorización expresa de supervisor para facturar."
             )
 

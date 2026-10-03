@@ -3,6 +3,7 @@ import logging
 from decimal import Decimal
 from datetime import datetime, timezone, date, timedelta
 import uuid
+import json
 
 from sqlalchemy import select, text, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -2389,6 +2390,54 @@ async def cancel_corporate_remission(
         "estado": "ANULADO",
         "message": f"Remisión {rem.numero_remision} anulada exitosamente. Los comprobantes quedaron nuevamente disponibles para corte."
     }
+
+
+# ── Política de Bloqueo por Mora en Crédito / Extra Club ───────────────────────
+_CREDIT_BLOCKING_POLICY_KEY = "ar_credit_blocking_policy"
+
+
+async def get_credit_blocking_policy(db: AsyncSession, company_id: str) -> dict:
+    """Retorna la política configurada para la empresa sobre bloqueo por mora en ventas a crédito/Extra Club.
+    Por defecto, bloqueo_mora_activo = False (no restringe por antigüedad de facturas),
+    y dias_mora_limite = 60 días."""
+    try:
+        result = await db.execute(
+            text("SELECT value FROM settings_company WHERE company_id = :cid AND key = :k"),
+            {"cid": company_id, "k": _CREDIT_BLOCKING_POLICY_KEY},
+        )
+        row = result.fetchone()
+        if row and row.value:
+            data = json.loads(row.value)
+            return {
+                "bloqueo_mora_activo": bool(data.get("bloqueo_mora_activo", False)),
+                "dias_mora_limite": max(1, int(data.get("dias_mora_limite", 60))),
+            }
+    except Exception as e:
+        logger.warning("No se pudo leer settings_company para ar_credit_blocking_policy: %s", e)
+    return {"bloqueo_mora_activo": False, "dias_mora_limite": 60}
+
+
+async def update_credit_blocking_policy(db: AsyncSession, company_id: str, data: any) -> dict:
+    """Actualiza la política de bloqueo por mora para la empresa en settings_company."""
+    if isinstance(data, dict):
+        bloqueo_activo = bool(data.get("bloqueo_mora_activo", False))
+        dias_limite = max(1, int(data.get("dias_mora_limite", 60)))
+    else:
+        bloqueo_activo = bool(getattr(data, "bloqueo_mora_activo", False))
+        dias_limite = max(1, int(getattr(data, "dias_mora_limite", 60)))
+
+    payload = {"bloqueo_mora_activo": bloqueo_activo, "dias_mora_limite": dias_limite}
+    val = json.dumps(payload)
+    await db.execute(
+        text("""
+            INSERT INTO settings_company (id, company_id, key, value, created_at, updated_at)
+            VALUES (gen_random_uuid(), :cid, :k, :v, now(), now())
+            ON CONFLICT (company_id, key) DO UPDATE SET value = :v, updated_at = now()
+        """),
+        {"cid": company_id, "k": _CREDIT_BLOCKING_POLICY_KEY, "v": val},
+    )
+    await db.commit()
+    return payload
 
 
 

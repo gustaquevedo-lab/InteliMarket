@@ -3,7 +3,7 @@ import {
   Search, ReceiptText, Clock, AlertTriangle, DollarSign, FileText, Loader2,
   Calendar, Eye, X, Package, Wallet, Sparkles, PhoneCall, CreditCard, Plus,
   TrendingUp, FileSpreadsheet, FileDown, CheckCircle2, ChevronDown, ChevronRight,
-  User, Check, Phone, ArrowUpRight, ShieldCheck, RefreshCw, BarChart2,
+  User, Check, Phone, ArrowUpRight, ShieldCheck, ShieldAlert, RefreshCw, BarChart2,
   Printer, QrCode, ExternalLink, CheckSquare, Square, Building2, Building,
   Users, Send, Landmark, ArrowRight, DownloadCloud, FileCheck, Layers, Filter,
   Banknote, RotateCcw, Ban, Trash2
@@ -140,6 +140,16 @@ export default function AccountsReceivablePage() {
   const [empresaSearchResults, setEmpresaSearchResults] = useState<string[]>([])
   const [empresaSearchOpen, setEmpresaSearchOpen] = useState(false)
   const [empresaSearchLoading, setEmpresaSearchLoading] = useState(false)
+
+  // 🛡️ Política de Bloqueo por Mora en Crédito / Extra Club
+  const [creditPolicy, setCreditPolicy] = useState<{ bloqueo_mora_activo: boolean; dias_mora_limite: number }>({
+    bloqueo_mora_activo: false,
+    dias_mora_limite: 60,
+  })
+  const [showPolicyModal, setShowPolicyModal] = useState(false)
+  const [savingPolicy, setSavingPolicy] = useState(false)
+  const [formPolicyActivo, setFormPolicyActivo] = useState(false)
+  const [formPolicyDias, setFormPolicyDias] = useState<number>(60)
 
   // Registrar pago & Cobro Global FIFO
   const [showPaymentModal, setShowPaymentModal] = useState<string | null>(null)
@@ -806,6 +816,46 @@ export default function AccountsReceivablePage() {
     if (tab === "scoring" && scores.length === 0) fetchScoring()
   }, [tab])
 
+  const fetchCreditPolicy = async () => {
+    try {
+      const policy = await api.accountsReceivable.getCreditBlockingPolicy()
+      if (policy) {
+        setCreditPolicy(policy)
+        setFormPolicyActivo(!!policy.bloqueo_mora_activo)
+        setFormPolicyDias(Number(policy.dias_mora_limite) || 60)
+      }
+    } catch (err) {
+      console.error("Error al cargar política de crédito:", err)
+    }
+  }
+
+  useEffect(() => {
+    fetchCreditPolicy()
+  }, [])
+
+  const handleSavePolicy = async () => {
+    setSavingPolicy(true)
+    try {
+      const updated = await api.accountsReceivable.updateCreditBlockingPolicy({
+        bloqueo_mora_activo: formPolicyActivo,
+        dias_mora_limite: formPolicyDias > 0 ? formPolicyDias : 60,
+      })
+      setCreditPolicy(updated)
+      toast.success(
+        "Política Actualizada",
+        formPolicyActivo
+          ? `Bloqueo activo para atrasos superiores a ${updated.dias_mora_limite} días.`
+          : "Bloqueo por mora desactivado. Se permite facturar con cupo disponible."
+      )
+      setShowPolicyModal(false)
+      fetchData()
+    } catch (err: any) {
+      toast.error("Error", err?.message || "No se pudo actualizar la política de mora")
+    } finally {
+      setSavingPolicy(false)
+    }
+  }
+
   const openInvoice = async (doc: AccountsReceivable) => {
     setSelectedDoc(doc)
     setInvoiceSale(null)
@@ -1346,6 +1396,22 @@ export default function AccountsReceivablePage() {
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-indigo-300">
                 ⏱️ DSO: {summary?.dso != null ? `${summary.dso.toFixed(0)} días` : "—"}
               </span>
+              <span
+                onClick={() => {
+                  setFormPolicyActivo(creditPolicy.bloqueo_mora_activo)
+                  setFormPolicyDias(creditPolicy.dias_mora_limite)
+                  setShowPolicyModal(true)
+                }}
+                className={`cursor-pointer px-2.5 py-1 rounded-lg border font-mono transition flex items-center gap-1.5 active:scale-95 ${
+                  creditPolicy.bloqueo_mora_activo
+                    ? "bg-amber-950/40 text-amber-300 border-amber-700/60 hover:bg-amber-900/50"
+                    : "bg-emerald-950/40 text-emerald-300 border-emerald-700/60 hover:bg-emerald-900/50"
+                }`}
+                title="Configuración de restricción por mora (Clic para editar)"
+              >
+                <ShieldAlert className="w-3 h-3" />
+                <span>Bloqueo Mora: {creditPolicy.bloqueo_mora_activo ? `Activo (> ${creditPolicy.dias_mora_limite}d)` : "Desactivado"}</span>
+              </span>
             </div>
           </div>
 
@@ -1371,6 +1437,23 @@ export default function AccountsReceivablePage() {
               title="Actualizar datos en vivo"
             >
               <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin text-indigo-400" : ""}`} />
+            </button>
+            <button
+              onClick={() => {
+                setFormPolicyActivo(creditPolicy.bloqueo_mora_activo)
+                setFormPolicyDias(creditPolicy.dias_mora_limite)
+                setShowPolicyModal(true)
+              }}
+              className="px-3.5 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/80 backdrop-blur-md text-xs font-bold transition flex items-center gap-2 shadow-sm"
+              title="Configurar política de restricción y bloqueo de facturación por mora en Extra Club"
+            >
+              <ShieldAlert className={`w-4 h-4 ${creditPolicy.bloqueo_mora_activo ? "text-amber-400" : "text-emerald-400"}`} />
+              <span>Restricción de Mora</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-extrabold ${
+                creditPolicy.bloqueo_mora_activo ? "bg-amber-500/20 text-amber-300 border border-amber-500/30" : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+              }`}>
+                {creditPolicy.bloqueo_mora_activo ? `${creditPolicy.dias_mora_limite}d` : "Inactiva"}
+              </span>
             </button>
             <button
               onClick={() => setTab("reportes")}
@@ -1863,6 +1946,54 @@ export default function AccountsReceivablePage() {
                   className="btn-primary text-xs flex items-center gap-2 shrink-0"
                 >
                   <Sparkles className="w-4 h-4 text-amber-300" /> Recalcular Scores
+                </button>
+              </div>
+
+              {/* 🛡️ Tarjeta Informativa de Política de Bloqueo por Mora */}
+              <div className={`p-4 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                creditPolicy.bloqueo_mora_activo
+                  ? "bg-amber-950/20 border-amber-800/40 text-amber-200"
+                  : "bg-emerald-950/20 border-emerald-800/40 text-emerald-200"
+              }`}>
+                <div className="flex items-start gap-3.5">
+                  <div className={`p-2.5 rounded-xl border shrink-0 ${
+                    creditPolicy.bloqueo_mora_activo
+                      ? "bg-amber-500/20 border-amber-500/40 text-amber-300"
+                      : "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
+                  }`}>
+                    <ShieldAlert className="w-5 h-5" />
+                  </div>
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black uppercase tracking-wider">
+                        {creditPolicy.bloqueo_mora_activo ? "Bloqueo por Mora Activo" : "Bloqueo por Mora Desactivado"}
+                      </span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold font-mono ${
+                        creditPolicy.bloqueo_mora_activo
+                          ? "bg-amber-500/30 text-amber-200 border border-amber-500/40"
+                          : "bg-emerald-500/30 text-emerald-200 border border-emerald-500/40"
+                      }`}>
+                        {creditPolicy.bloqueo_mora_activo ? `Límite: > ${creditPolicy.dias_mora_limite} días` : "Facturación Libre con Cupo"}
+                      </span>
+                    </div>
+                    <p className="text-xs opacity-80 leading-relaxed">
+                      {creditPolicy.bloqueo_mora_activo
+                        ? `Clientes con comprobantes vencidos hace más de ${creditPolicy.dias_mora_limite} días tienen retenida la venta a crédito en Extra Club hasta contar con autorización.`
+                        : "Los clientes pueden comprar a crédito siempre que dispongan de saldo en su línea de crédito, sin restricción por facturas vencidas antiguas."}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormPolicyActivo(creditPolicy.bloqueo_mora_activo)
+                    setFormPolicyDias(creditPolicy.dias_mora_limite)
+                    setShowPolicyModal(true)
+                  }}
+                  className="px-4 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-white font-bold text-xs border border-slate-700 transition shrink-0 flex items-center gap-1.5 shadow-sm active:scale-95"
+                >
+                  <ShieldAlert className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Modificar Política</span>
                 </button>
               </div>
 
@@ -5089,6 +5220,148 @@ export default function AccountsReceivablePage() {
             <div className="p-6 border-t flex justify-end gap-3">
               <button onClick={() => setShowCollectionForm(false)} className="btn-ghost text-xs">Cancelar</button>
               <button onClick={handleCreateCollectionAction} className="btn-primary text-xs">Guardar Gestión</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Configuración de Política de Bloqueo por Mora */}
+      {showPolicyModal && (
+        <div className="modal-overlay z-50 flex items-center justify-center p-3 bg-slate-950/80 backdrop-blur-sm" onClick={() => setShowPolicyModal(false)}>
+          <div
+            className="modal-box max-w-lg w-full bg-slate-900 border border-slate-700/80 shadow-2xl rounded-2xl overflow-hidden p-0 animate-in fade-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="p-5 border-b border-slate-800 bg-slate-950/60 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`p-2.5 rounded-xl border ${formPolicyActivo ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'}`}>
+                  <ShieldAlert className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white tracking-tight">Política de Restricción por Mora</h3>
+                  <p className="text-xs text-slate-400">Control de ventas a crédito / Extra Club con facturas vencidas</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPolicyModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 space-y-6">
+              {/* Toggle Bloqueo Activo */}
+              <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/80 flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-white">Bloqueo de facturación por atraso</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+                      formPolicyActivo
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    }`}>
+                      {formPolicyActivo ? 'ACTIVADO' : 'DESACTIVADO'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    {formPolicyActivo
+                      ? 'Si un cliente tiene facturas vencidas por más de los días fijados, el sistema no permitirá facturar a crédito en Extra Club sin autorización de supervisor.'
+                      : 'La restricción está desactivada. Los clientes con saldo de crédito disponible podrán facturar con normalidad aunque tengan comprobantes vencidos antiguos.'}
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1">
+                  <input
+                    type="checkbox"
+                    checked={formPolicyActivo}
+                    onChange={(e) => setFormPolicyActivo(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+                </label>
+              </div>
+
+              {/* Días de mora límite */}
+              <div className={`space-y-3 transition-opacity ${formPolicyActivo ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                    Días de atraso permitidos antes del bloqueo
+                  </label>
+                  <span className="text-xs font-mono font-bold text-amber-400">
+                    {formPolicyDias} días de mora
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="relative flex-1">
+                    <input
+                      type="number"
+                      min={1}
+                      max={365}
+                      value={formPolicyDias}
+                      onChange={(e) => setFormPolicyDias(Math.max(1, parseInt(e.target.value) || 1))}
+                      disabled={!formPolicyActivo}
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <span className="absolute right-3 top-2.5 text-xs text-slate-500">días</span>
+                  </div>
+                </div>
+
+                {/* Presets rápidos */}
+                <div className="flex items-center gap-2 pt-1 flex-wrap">
+                  <span className="text-[11px] text-slate-400">Ajustes rápidos:</span>
+                  {[30, 45, 60, 90, 120].map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => setFormPolicyDias(d)}
+                      disabled={!formPolicyActivo}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold font-mono transition ${
+                        formPolicyDias === d
+                          ? 'bg-amber-500/30 text-amber-300 border border-amber-500/50'
+                          : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-750 border border-slate-700'
+                      }`}
+                    >
+                      {d} días
+                    </button>
+                  ))}
+                </div>
+
+                <p className="text-[11px] text-slate-400 leading-normal">
+                  💡 <strong>Ejemplo:</strong> Establecer en {formPolicyDias} días significa que un cliente con un comprobante impago vencido hace {formPolicyDias + 1} días será retenido automáticamente en caja.
+                </p>
+              </div>
+
+              {/* Convenios corporativos nota */}
+              <div className="p-3 bg-blue-950/30 border border-blue-800/40 rounded-xl flex items-start gap-2.5">
+                <span className="text-base">🏢</span>
+                <p className="text-[11px] text-blue-200/90 leading-relaxed">
+                  <strong>Convenios Empresariales:</strong> Los funcionarios con empresa vinculada (ej. Grupo Santa Teresa E.A.S.) liquidan vía remisión corporativa / descuento de nómina, por lo que están exentos del bloqueo individual de mora minorista.
+                </p>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-800 bg-slate-950/60 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowPolicyModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSavePolicy}
+                disabled={savingPolicy}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-extrabold text-xs transition flex items-center gap-2 shadow-lg shadow-indigo-950/40 disabled:opacity-50"
+              >
+                {savingPolicy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                <span>Guardar Política</span>
+              </button>
             </div>
           </div>
         </div>
