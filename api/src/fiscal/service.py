@@ -172,21 +172,24 @@ async def reserve_fiscal_invoice_number(
         raise TimbradoVencidoError(f"El timbrado {timbrado.numero} vencio el {timbrado.fecha_fin} — renovarlo antes de seguir facturando")
 
     # ── AUTO-SANACIÓN Y BLINDAJE CONTRA COLISIONES FISCALES ──
-    # Si por ventas offline, regularizaciones o importaciones existen en la tabla sales
-    # números mayores o iguales a secuencia.numero_actual para este establecimiento y punto,
-    # auto-avanzamos la secuencia al número disponible inmediatamente superior.
+    # Dependiendo del tipo de documento, validamos la secuencia contra la tabla correspondiente:
+    # 'notas_credito_debito' para notas de crédito/débito y 'sales' para facturas.
     from sqlalchemy import text
     prefix = f"{secuencia.establecimiento}-{secuencia.punto_emision}-"
+    target_table = "notas_credito_debito" if tipo_documento in ("nota_credito", "nota_debito") else "sales"
     max_num_res = await db.execute(
-        text("""
+        text(f"""
             SELECT COALESCE(MAX(CAST(SUBSTRING(numero FROM 9) AS INTEGER)), 0)
-            FROM sales
-            WHERE company_id = :cid AND numero LIKE :pfx AND numero ~ '^[0-9]{3}-[0-9]{3}-[0-9]{7}$'
+            FROM {target_table}
+            WHERE company_id = :cid AND numero LIKE :pfx AND numero ~ '^[0-9]{{3}}-[0-9]{{3}}-[0-9]{{7}}$'
         """),
         {"cid": cid, "pfx": f"{prefix}%"},
     )
     max_existing = int(max_num_res.scalar() or 0)
     if max_existing >= secuencia.numero_actual:
+        secuencia.numero_actual = max_existing + 1
+    elif secuencia.numero_actual > secuencia.numero_final and max_existing < secuencia.numero_final:
+        # Auto-corrección si la secuencia fue corrompida previamente por colisión entre tablas
         secuencia.numero_actual = max_existing + 1
 
     if secuencia.numero_actual > secuencia.numero_final:
