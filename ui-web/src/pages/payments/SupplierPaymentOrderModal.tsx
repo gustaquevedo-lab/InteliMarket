@@ -284,10 +284,45 @@ export default function SupplierPaymentOrderModal({
     return { total, diferencia, cuadra }
   }, [disbursements, summaryFacturas.neto, defaultExchangeRateBRL])
 
+  const validateInvoiceAllocations = (): boolean => {
+    for (const item of Object.values(selectedInvoicesMap)) {
+      const aplicado = Number(item.monto_aplicado || 0)
+      const retencion = Number(item.monto_retencion || 0)
+      const saldo = Number(item.inv.saldo_pendiente || 0)
+
+      if (aplicado <= 0) {
+        toast.error("Monto inválido", `El monto a amortizar de la factura ${item.inv.numero_factura} debe ser mayor a 0.`)
+        return false
+      }
+      if (aplicado > saldo) {
+        toast.error(
+          "Monto excede saldo",
+          `El monto a amortizar (₲ ${formatPYG(aplicado)}) supera el saldo pendiente (₲ ${formatPYG(saldo)}) de la factura ${item.inv.numero_factura}.`
+        )
+        return false
+      }
+      if (retencion < 0) {
+        toast.error("Retención inválida", `La retención no puede ser negativa en la factura ${item.inv.numero_factura}.`)
+        return false
+      }
+      if (retencion > aplicado) {
+        toast.error(
+          "Retención inválida",
+          `La retención (₲ ${formatPYG(retencion)}) no puede superar el monto amortizado (₲ ${formatPYG(aplicado)}) en la factura ${item.inv.numero_factura}.`
+        )
+        return false
+      }
+    }
+    return true
+  }
+
   // Inicializar un renglón de desembolso por defecto si pasa a step 2
   const handleGoToStep2 = () => {
     if (Object.keys(selectedInvoicesMap).length === 0) {
       toast.error("Seleccione al menos una factura", "Debe amortizar al menos una factura.")
+      return
+    }
+    if (!validateInvoiceAllocations()) {
       return
     }
     if (summaryFacturas.neto <= 0) {
@@ -359,6 +394,10 @@ export default function SupplierPaymentOrderModal({
   const handleSaveOnlyRegister = async () => {
     if (Object.keys(selectedInvoicesMap).length === 0) {
       toast.error("Seleccione al menos una factura", "")
+      return
+    }
+
+    if (!validateInvoiceAllocations()) {
       return
     }
 
@@ -445,6 +484,10 @@ export default function SupplierPaymentOrderModal({
         onSuccess(res)
       } else {
         // Crear y liquidar de inmediato
+        if (!validateInvoiceAllocations()) {
+          return
+        }
+
         const allocations = Object.values(selectedInvoicesMap).map(item => ({
           invoice_id: item.inv.id,
           monto_aplicado: item.monto_aplicado,
@@ -579,7 +622,13 @@ export default function SupplierPaymentOrderModal({
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {Object.values(selectedInvoicesMap).map(({ inv, monto_aplicado, monto_retencion }) => {
-                      const restante = Math.max(0, inv.saldo_pendiente - (Number(monto_aplicado) + Number(monto_retencion)))
+                      const numAplicado = Number(monto_aplicado || 0)
+                      const numRetencion = Number(monto_retencion || 0)
+                      const saldo = Number(inv.saldo_pendiente || 0)
+                      const restante = Math.max(0, saldo - numAplicado)
+                      const isExceeded = numAplicado > saldo
+                      const isRetencionExceeded = numRetencion > numAplicado
+
                       return (
                         <tr key={inv.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
                           <td className="p-3 font-mono font-bold text-slate-900 dark:text-white">
@@ -611,8 +660,17 @@ export default function SupplierPaymentOrderModal({
                                   [inv.id]: { ...prev[inv.id], monto_aplicado: val }
                                 }))
                               }}
-                              className="w-full text-right p-1.5 font-mono font-bold text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:ring-1 focus:ring-rose-500"
+                              className={`w-full text-right p-1.5 font-mono font-bold text-xs bg-white dark:bg-slate-900 border rounded-lg focus:ring-1 ${
+                                isExceeded
+                                  ? "border-rose-500 text-rose-600 focus:ring-rose-500"
+                                  : "border-slate-300 dark:border-slate-700 focus:ring-rose-500"
+                              }`}
                             />
+                            {isExceeded && (
+                              <span className="text-[9px] font-bold text-rose-500 block text-right mt-0.5">
+                                Supera saldo
+                              </span>
+                            )}
                           </td>
                           <td className="p-2 text-right">
                             <CurrencyInput
@@ -624,10 +682,21 @@ export default function SupplierPaymentOrderModal({
                                   [inv.id]: { ...prev[inv.id], monto_retencion: val }
                                 }))
                               }}
-                              className="w-full text-right p-1.5 font-mono text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg"
+                              className={`w-full text-right p-1.5 font-mono text-xs bg-white dark:bg-slate-900 border rounded-lg ${
+                                isRetencionExceeded
+                                  ? "border-rose-500 text-rose-600"
+                                  : "border-slate-300 dark:border-slate-700"
+                              }`}
                             />
+                            {isRetencionExceeded && (
+                              <span className="text-[9px] font-bold text-rose-500 block text-right mt-0.5">
+                                Supera amort.
+                              </span>
+                            )}
                           </td>
-                          <td className="p-3 text-right font-mono font-bold text-slate-500">
+                          <td className={`p-3 text-right font-mono font-bold ${
+                            isExceeded ? "text-rose-500" : "text-slate-500"
+                          }`}>
                             {formatPYG(restante)}
                           </td>
                           <td className="p-3 text-center">

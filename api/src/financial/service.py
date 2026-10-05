@@ -3400,7 +3400,26 @@ async def create_supplier_payment_order(
 
         aplicado = alloc_in.monto_aplicado
         retencion = alloc_in.monto_retencion or Decimal("0")
-        total_amortizar = aplicado + retencion
+
+        if aplicado <= Decimal("0"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"El monto a amortizar de la factura {inv.numero_factura} debe ser mayor a 0."
+            )
+
+        if retencion < Decimal("0"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"La retención de la factura {inv.numero_factura} no puede ser negativa."
+            )
+
+        if retencion > aplicado:
+            raise HTTPException(
+                status_code=400,
+                detail=f"La retención (₲ {retencion:,.0f}) no puede superar el monto amortizado (₲ {aplicado:,.0f}) de la factura {inv.numero_factura}."
+            )
+
+        total_amortizar = aplicado
 
         if total_amortizar > inv.saldo_pendiente:
             raise HTTPException(
@@ -4051,7 +4070,7 @@ async def _execute_disbursements_internal(
         )
         inv = inv_res.scalar_one_or_none()
         if inv:
-            total_amort = alloc.monto_aplicado + alloc.monto_retencion
+            total_amort = alloc.monto_aplicado
             inv.saldo_pendiente = max(Decimal("0"), inv.saldo_pendiente - total_amort)
 
             # Tolerancia de diferencia de cambio / redondeo: si el saldo restante es un micro-remanente (<= 5.000 Gs)
@@ -4819,7 +4838,7 @@ async def create_multi_supplier_payment_batch(
             m_aplicado = Decimal(str(alloc.monto_aplicado))
             m_ret = Decimal(str(alloc.monto_retencion or 0))
             saldo_ant = Decimal(str(inv.saldo_pendiente or inv.total))
-            total_amort = m_aplicado + m_ret
+            total_amort = m_aplicado
             saldo_rest = max(Decimal("0"), saldo_ant - total_amort)
 
             # Tolerancia de diferencia de cambio / centavos: si el saldo restante es un micro-remanente (<= 5.000 Gs)
