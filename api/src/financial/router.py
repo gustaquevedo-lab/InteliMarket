@@ -74,9 +74,10 @@ async def list_invoices(
     hasta: date | None = Query(None),
     limit: int = Query(50, ge=1, le=5000),
     offset: int = Query(0, ge=0),
+    order_by: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_invoices(db, company_id, estado, supplier_id, vencidas, desde, hasta, limit, offset)
+    return await service.list_invoices(db, company_id, estado, supplier_id, vencidas, desde, hasta, limit, offset, order_by)
 
 
 @router.get("/invoices/paid", response_model=PaidInvoicesListResponse)

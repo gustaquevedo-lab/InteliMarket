@@ -3829,7 +3829,7 @@ export const api = {
   },
   financial: {
     invoices: {
-      list: (params?: { estado?: string; supplier_id?: string; vencidas?: boolean; desde?: string; hasta?: string; limit?: number; offset?: number }) => client.get<SupplierInvoice[]>("/v1/financial/invoices", { company_id: COMPANY_ID, ...params } as any),
+      list: (params?: { estado?: string; supplier_id?: string; vencidas?: boolean; desde?: string; hasta?: string; limit?: number; offset?: number; order_by?: string }) => client.get<SupplierInvoice[]>("/v1/financial/invoices", { company_id: COMPANY_ID, ...params } as any),
       get: (id: string) => client.get<SupplierInvoice>(`/v1/financial/invoices/${id}`),
       create: (data: any) => client.post<SupplierInvoice>("/v1/financial/invoices", { company_id: COMPANY_ID, ...data }),
       approve: (id: string) => client.post<{ detail: string }>(`/v1/financial/invoices/${id}/approve`),

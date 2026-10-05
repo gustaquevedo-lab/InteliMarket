@@ -682,7 +682,7 @@ export default function PurchasesPage() {
         api.purchases.listReceipts(),
         api.purchases.listSuppliers(),
         api.purchases.reports.kpis(),
-        api.financial.invoices.list({ limit: 300 }),
+        api.financial.invoices.list({ limit: 500, order_by: "newest" }),
         api.purchases.requisitions.list(),
         api.purchases.rfqs.list(),
         api.purchases.budgets.list(),
@@ -2128,13 +2128,21 @@ export default function PurchasesPage() {
 
   // Filtrado y Paginación de Facturas Proveedores (Procure-to-Pay)
   const filteredInvoicesP2P = useMemo(() => {
-    return allSupplierInvoices.filter(inv => {
+    const list = allSupplierInvoices.filter(inv => {
       const matchSearch = !searchInvoices || 
         (inv.numero_factura?.toLowerCase().includes(searchInvoices.toLowerCase())) ||
         (inv.supplier_nombre?.toLowerCase().includes(searchInvoices.toLowerCase())) ||
         (inv.concepto?.toLowerCase().includes(searchInvoices.toLowerCase()))
       const matchStatus = filterInvoiceStatus === "todos" || inv.estado === filterInvoiceStatus
       return matchSearch && matchStatus
+    })
+    return [...list].sort((a: any, b: any) => {
+      const dateA = a.fecha_emision ? new Date(a.fecha_emision).getTime() : (a.created_at ? new Date(a.created_at).getTime() : 0)
+      const dateB = b.fecha_emision ? new Date(b.fecha_emision).getTime() : (b.created_at ? new Date(b.created_at).getTime() : 0)
+      if (dateB !== dateA) return dateB - dateA
+      const createA = a.created_at ? new Date(a.created_at).getTime() : 0
+      const createB = b.created_at ? new Date(b.created_at).getTime() : 0
+      return createB - createA
     })
   }, [allSupplierInvoices, searchInvoices, filterInvoiceStatus])
 
@@ -2808,7 +2816,7 @@ export default function PurchasesPage() {
       setNcNumberInput("")
       const [updatedReturns, updatedInvoices, updatedCreditNotes] = await Promise.all([
         api.purchases.returns.list(),
-        api.financial.invoices.list({ limit: 300 }),
+        api.financial.invoices.list({ limit: 500, order_by: "newest" }),
         api.financial.creditNotes().catch(() => []),
       ])
       setManagedReturns(updatedReturns || [])
@@ -2927,7 +2935,7 @@ export default function PurchasesPage() {
       setManagingNcsList([])
       const [updatedReturns, updatedInvoices, updatedCreditNotes] = await Promise.all([
         api.purchases.returns.list(),
-        api.financial.invoices.list({ limit: 300 }),
+        api.financial.invoices.list({ limit: 500, order_by: "newest" }),
         api.financial.creditNotes().catch(() => []),
       ])
       setManagedReturns(updatedReturns || [])
@@ -5159,7 +5167,7 @@ export default function PurchasesPage() {
           <div className="card overflow-hidden bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm">
             <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-700/60 flex justify-between items-center">
               <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300">
-                Auditoría Cruzada de Facturas ({allSupplierInvoices.length} Comprobantes Registrados)
+                Auditoría Cruzada de Facturas ({filteredInvoicesP2P.length} Comprobantes — Más Recientes Primero)
               </h4>
             </div>
 
@@ -5177,7 +5185,7 @@ export default function PurchasesPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                  {allSupplierInvoices.slice(0, 20).map(inv => {
+                  {filteredInvoicesP2P.slice(0, 50).map(inv => {
                     const isBlocked = (inv as any).bloqueada_para_pago || inv.estado === "retenida_discrepancia"
                     return (
                       <tr key={inv.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/30 transition-colors">

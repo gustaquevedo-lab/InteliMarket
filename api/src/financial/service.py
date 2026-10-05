@@ -132,6 +132,7 @@ async def list_invoices(
     vencidas: bool | None = None,
     desde: date | None = None, hasta: date | None = None,
     limit: int = 50, offset: int = 0,
+    order_by: str | None = None,
 ) -> list[SupplierInvoice]:
     cid = company_id if isinstance(company_id, uuid.UUID) else uuid.UUID(str(company_id))
     query = select(SupplierInvoice).where(SupplierInvoice.company_id == cid)
@@ -153,11 +154,18 @@ async def list_invoices(
         query = query.where(SupplierInvoice.fecha_emision >= desde)
     if hasta:
         query = query.where(SupplierInvoice.fecha_emision <= hasta)
-    query = query.order_by(
-        case((SupplierInvoice.saldo_pendiente > 0, 0), else_=1),
-        SupplierInvoice.fecha_vencimiento.asc(),
-        SupplierInvoice.fecha_emision.desc(),
-    ).offset(offset).limit(limit)
+    if order_by in ("newest", "fecha_desc", "recientes", "created_desc"):
+        query = query.order_by(
+            SupplierInvoice.fecha_emision.desc().nullslast(),
+            SupplierInvoice.created_at.desc(),
+        )
+    else:
+        query = query.order_by(
+            case((SupplierInvoice.saldo_pendiente > 0, 0), else_=1),
+            SupplierInvoice.fecha_vencimiento.asc(),
+            SupplierInvoice.fecha_emision.desc(),
+        )
+    query = query.offset(offset).limit(limit)
     result = await db.execute(query)
     invoices = list(result.scalars().all())
 
