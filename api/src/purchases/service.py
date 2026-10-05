@@ -713,6 +713,13 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
     numero = await generate_receipt_number(db)
     total = sum((item.cantidad_recibida * item.costo_unitario for item in data.items), Decimal("0"))
 
+    if data.total_factura_impreso is not None and data.total_factura_impreso > 0:
+        diff_redondeo = (data.total_factura_impreso - total).quantize(Decimal("1"))
+        if abs(diff_redondeo) > Decimal("5000"):
+            raise ValueError(
+                f"La diferencia de redondeo ({diff_redondeo:+,} ₲) excede la tolerancia permitida de ₲ 5.000 entre la factura impresa y el total recibido"
+            )
+
     po_price_map: dict[str, Decimal] = {}
     if data.purchase_order_id:
         po_items_result = await db.execute(
@@ -889,7 +896,13 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         fecha_vencimiento = fecha_emision + timedelta(days=plazo_dias)
 
         invoice_num = (data.proveedor_ref or receipt.numero).strip()
-        iva_10 = (receipt.total / Decimal("11")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        diff_redondeo = Decimal("0")
+        factura_total = receipt.total
+        if data.total_factura_impreso is not None and data.total_factura_impreso > 0:
+            diff_redondeo = (data.total_factura_impreso - receipt.total).quantize(Decimal("1"))
+            factura_total = data.total_factura_impreso.quantize(Decimal("1"))
+
+        iva_10 = (factura_total / Decimal("11")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
         inv_moneda = "BRL" if (data.total_brl is not None and data.total_brl > 0 and getattr(data, "moneda", "") == "BRL") else "PYG"
         inv_tc = data.tipo_cambio or Decimal("1")
@@ -902,12 +915,12 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
             fecha_emision=fecha_emision,
             fecha_recepcion=fecha_emision,
             fecha_vencimiento=fecha_vencimiento,
-            subtotal=receipt.total - iva_10,
+            subtotal=factura_total - iva_10,
             descuento=Decimal("0"),
             iva_10=iva_10,
             iva_5=Decimal("0"),
-            total=receipt.total,
-            saldo_pendiente=receipt.total,
+            total=factura_total,
+            saldo_pendiente=factura_total,
             moneda=inv_moneda,
             tipo_cambio=inv_tc,
             total_brl=inv_total_brl,
@@ -920,6 +933,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
             concepto=(
                 f"Recepción de mercadería {receipt.numero}"
                 + (f" - Ref: {data.proveedor_ref}" if data.proveedor_ref else "")
+                + (f" [Ajuste Redondeo Factura: {diff_redondeo:+,} ₲]" if diff_redondeo != 0 else "")
                 + (f" - Obs: {data.observaciones}" if data.observaciones else "")
             ),
             created_by=data.user_id,

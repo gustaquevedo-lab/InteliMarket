@@ -102,6 +102,14 @@ export default function SupplierPaymentOrderModal({
   // Facturas comerciales legales de respaldo (para justificar tickets provisorios/sin factura)
   const [legalInvoices, setLegalInvoices] = useState<LegalInvoiceFormItem[]>([])
 
+  // Ajuste por redondeo de centavos/decimales (tolerancia máx. ± ₲ 5.000)
+  const [ajusteSigno, setAjusteSigno] = useState<"+" | "-">("+")
+  const [ajusteMonto, setAjusteMonto] = useState<number>(0)
+
+  const ajusteRedondeo = useMemo(() => {
+    return (ajusteSigno === "+" ? 1 : -1) * (Number(ajusteMonto) || 0)
+  }, [ajusteSigno, ajusteMonto])
+
   // Inicializar facturas
   useEffect(() => {
     if (existingOrder && existingOrder.allocations) {
@@ -122,6 +130,11 @@ export default function SupplierPaymentOrderModal({
           monto_retencion: a.monto_retencion || 0,
         }
       })
+      if (existingOrder.diferencia_cambio) {
+        const diff = Number(existingOrder.diferencia_cambio) || 0
+        setAjusteSigno(diff < 0 ? "-" : "+")
+        setAjusteMonto(Math.abs(diff))
+      }
       setSelectedInvoicesMap(map)
       setStep("step2_desembolso")
     } else {
@@ -185,9 +198,9 @@ export default function SupplierPaymentOrderModal({
       subtotal += Number(item.monto_aplicado || 0)
       retenciones += Number(item.monto_retencion || 0)
     })
-    const neto = Math.max(0, subtotal - retenciones)
-    return { subtotal, retenciones, neto }
-  }, [selectedInvoicesMap])
+    const neto = Math.max(0, subtotal - retenciones + ajusteRedondeo)
+    return { subtotal, retenciones, neto, ajusteRedondeo }
+  }, [selectedInvoicesMap, ajusteRedondeo])
 
   // Detección de tickets o remitos provisorios sin factura fiscal (ej. AUTO-REC o remitos)
   const hasUnbilledTickets = useMemo(() => {
@@ -421,6 +434,7 @@ export default function SupplierPaymentOrderModal({
         observaciones: observaciones || undefined,
         allocations,
         legal_invoices: validLegalInvoices.length > 0 ? validLegalInvoices : undefined,
+        diferencia_redondeo: ajusteRedondeo || 0,
       })
 
       toast.success("Orden de Pago Registrada", `Se creó la orden ${res.numero_orden} en estado 'registrado'. Lista para su posterior asignación de medios de pago.`)
@@ -479,6 +493,7 @@ export default function SupplierPaymentOrderModal({
           observaciones: observaciones || undefined,
           disbursements: sanitizedDisbursements,
           legal_invoices: validLegalInvoices.length > 0 ? validLegalInvoices : undefined,
+          diferencia_redondeo: ajusteRedondeo || 0,
         })
         toast.success("Orden de Pago Liquidada", `Se desembolsó exitosamente la orden ${res.numero_orden}. Fondos y saldos actualizados.`)
         onSuccess(res)
@@ -502,6 +517,7 @@ export default function SupplierPaymentOrderModal({
           allocations,
           disbursements: sanitizedDisbursements,
           legal_invoices: validLegalInvoices.length > 0 ? validLegalInvoices : undefined,
+          diferencia_redondeo: ajusteRedondeo || 0,
         })
         toast.success("Pago Liquidado con Éxito", `Se emitió y liquidó la orden ${res.numero_orden} por ${formatPYG(summaryFacturas.neto)}.`)
         onSuccess(res)
@@ -719,6 +735,62 @@ export default function SupplierPaymentOrderModal({
                     })}
                   </tbody>
                 </table>
+              </div>
+
+              {/* PANEL DE TOTALES Y AJUSTE POR REDONDEO */}
+              <div className="bg-slate-50 dark:bg-slate-850 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex-1 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      Ajuste por Redondeo / Decimales (Centavos)
+                    </span>
+                    <span className="text-[10px] bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded-full font-mono font-semibold">
+                      Tolerancia: ± ₲ 5.000
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Ajuste contable para compensar pequeñas diferencias de decimales de la factura física impresa sin distorsionar la retención impositiva.
+                  </p>
+                  <div className="flex items-center gap-2 pt-1 max-w-sm">
+                    <select
+                      value={ajusteSigno}
+                      onChange={e => setAjusteSigno(e.target.value as "+" | "-")}
+                      className="text-xs font-bold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-slate-700 dark:text-slate-300"
+                    >
+                      <option value="+">+ Ajuste a Pagar (+)</option>
+                      <option value="-">- Descuento a Favor (-)</option>
+                    </select>
+                    <div className="flex-1">
+                      <CurrencyInput
+                        value={ajusteMonto}
+                        onChangeValue={val => setAjusteMonto(Math.min(5000, Math.max(0, val)))}
+                        placeholder="0"
+                        className="w-full text-xs p-1.5 font-mono text-right bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3 text-right bg-white dark:bg-slate-900/80 p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800 shrink-0">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Amortizaciones</span>
+                    <span className="text-xs font-mono font-bold text-slate-700 dark:text-slate-300">
+                      {formatPYG(summaryFacturas.subtotal)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-amber-500 block">Retenciones</span>
+                    <span className="text-xs font-mono font-bold text-amber-600 dark:text-amber-400">
+                      {summaryFacturas.retenciones > 0 ? `-${formatPYG(summaryFacturas.retenciones)}` : "₲ 0"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-rose-500 block">Neto a Desembolsar</span>
+                    <span className="text-sm font-mono font-black text-rose-600 dark:text-rose-400">
+                      {formatPYG(summaryFacturas.neto)}
+                    </span>
+                  </div>
+                </div>
               </div>
 
               {/* AGREGAR FACTURAS ADICIONALES DEL PROVEEDOR */}
@@ -1002,6 +1074,41 @@ export default function SupplierPaymentOrderModal({
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase font-bold block">Notas Crédito Disp.</span>
                   <span className="font-mono font-bold text-purple-400">{creditNotes.length} comprobantes</span>
+                </div>
+              </div>
+
+              {/* AJUSTE POR REDONDEO EN PASO 2 */}
+              <div className="bg-slate-50 dark:bg-slate-850/60 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                    Ajuste por Redondeo / Decimales:
+                  </span>
+                  <span className="text-[10px] bg-slate-200 dark:bg-slate-750 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded-full font-mono font-semibold">
+                    Máx ± ₲ 5.000
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={ajusteSigno}
+                    onChange={e => setAjusteSigno(e.target.value as "+" | "-")}
+                    className="text-xs font-bold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-2.5 py-1 text-slate-700 dark:text-slate-300"
+                  >
+                    <option value="+">+ Recargo / Sobrecosto (+)</option>
+                    <option value="-">- Descuento por Redondeo (-)</option>
+                  </select>
+                  <div className="w-32">
+                    <CurrencyInput
+                      value={ajusteMonto}
+                      onChangeValue={val => setAjusteMonto(Math.min(5000, Math.max(0, val)))}
+                      placeholder="0"
+                      className="w-full text-xs p-1 font-mono text-right bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold"
+                    />
+                  </div>
+                  {ajusteRedondeo !== 0 && (
+                    <span className="text-xs font-mono font-bold text-rose-500">
+                      ({ajusteRedondeo > 0 ? `+${formatPYG(ajusteRedondeo)}` : formatPYG(ajusteRedondeo)})
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -1441,7 +1548,13 @@ export default function SupplierPaymentOrderModal({
                           : `Monto asignado excede el neto por: ${formatPYG(Math.abs(summaryDesembolsos.diferencia))}`}
                     </p>
                     <p className="text-[11px] text-slate-500">
-                      Total Neto Requerido: <b>{formatPYG(summaryFacturas.neto)}</b> · Total Desembolsos: <b>{formatPYG(summaryDesembolsos.total)}</b>
+                      Total Neto Requerido: <b>{formatPYG(summaryFacturas.neto)}</b>
+                      {ajusteRedondeo !== 0 && (
+                        <span className="text-slate-400 font-medium ml-1">
+                          (incluye {ajusteRedondeo > 0 ? `+${formatPYG(ajusteRedondeo)}` : formatPYG(ajusteRedondeo)} de redondeo)
+                        </span>
+                      )}
+                      {" · "}Total Desembolsos: <b>{formatPYG(summaryDesembolsos.total)}</b>
                     </p>
                   </div>
                 </div>

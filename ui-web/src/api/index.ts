@@ -432,7 +432,7 @@ export interface PurchaseRfq { id: string; company_id: string; requisition_id?: 
 export interface PurchaseRfqWithDetail extends PurchaseRfq { items: PurchaseRfqItem[]; responses: PurchaseRfqResponse[] }
 export interface PurchaseBudget { id: string; company_id: string; nombre: string; anio: number; mes?: number | null; tipo?: string | null; moneda?: string | null; monto_presupuestado: number; monto_ejecutado?: number | null; monto_disponible?: number | null; categoria_id?: string | null; departamento?: string | null; activo: boolean; observaciones?: string | null; user_id?: string | null; created_at?: string; updated_at?: string }
 export interface PurchaseBudgetConsumption { budget_id: string; nombre: string; anio: number; mes?: number | null; monto_presupuestado: number; monto_ejecutado: number; monto_disponible: number; porcentaje_ejecutado: number }
-export interface PurchaseReceipt { id: string; company_id?: string; purchase_order_id?: string | null; orden?: PurchaseOrder; supplier_id?: string; supplier?: Supplier; warehouse_id?: string; numero?: string; fecha?: string; estado?: string; proveedor_ref?: string | null; total?: number; total_brl?: number; tipo_cambio?: number; user_id?: string | null; observaciones?: string | null; requiere_revision?: boolean; motivo_revision?: string | null; items?: PurchaseReceiptItem[]; created_at?: string; updated_at?: string }
+export interface PurchaseReceipt { id: string; company_id?: string; purchase_order_id?: string | null; orden?: PurchaseOrder; supplier_id?: string; supplier?: Supplier; warehouse_id?: string; numero?: string; fecha?: string; estado?: string; proveedor_ref?: string | null; total?: number; total_brl?: number; tipo_cambio?: number; total_factura_impreso?: number; user_id?: string | null; observaciones?: string | null; requiere_revision?: boolean; motivo_revision?: string | null; items?: PurchaseReceiptItem[]; created_at?: string; updated_at?: string }
 export interface PurchaseReceiptItem { id?: string; receipt_id?: string; product_id?: string; producto?: Product; variant_id?: string | null; cantidad_ordenada?: number | null; cantidad_recibida?: number; precio_unitario?: number; costo_unitario?: number; total?: number; batch_id?: string | null; cantidad_rechazada?: number | null; motivo_rechazo?: string | null; created_at?: string }
 
 
@@ -3857,9 +3857,9 @@ export const api = {
         client.get<{ items: SupplierPaymentOrder[]; total: number }>("/v1/financial/payment-orders", { company_id: COMPANY_ID, ...params } as any),
       get: (orderId: string) =>
         client.get<SupplierPaymentOrder>(`/v1/financial/payment-orders/${orderId}`, { company_id: COMPANY_ID } as any),
-      create: (data: { supplier_id: string; fecha_emision?: string; observaciones?: string; recibo_proveedor?: string; estado?: string; allocations: any[]; disbursements?: any[]; legal_invoices?: any[] }) =>
+      create: (data: { supplier_id: string; fecha_emision?: string; observaciones?: string; recibo_proveedor?: string; estado?: string; allocations: any[]; disbursements?: any[]; legal_invoices?: any[]; diferencia_redondeo?: number }) =>
         client.post<SupplierPaymentOrder>(`/v1/financial/payment-orders?company_id=${COMPANY_ID}`, data),
-      disburse: (orderId: string, data: { fecha_pago?: string; recibo_proveedor?: string; observaciones?: string; disbursements: any[]; legal_invoices?: any[] }) =>
+      disburse: (orderId: string, data: { fecha_pago?: string; recibo_proveedor?: string; observaciones?: string; disbursements: any[]; legal_invoices?: any[]; diferencia_redondeo?: number }) =>
         client.post<SupplierPaymentOrder>(`/v1/financial/payment-orders/${orderId}/disburse?company_id=${COMPANY_ID}`, data),
       downloadPdf: (orderId: string, numOrden: string) =>
         downloadAuthenticated(`/v1/financial/payment-orders/${orderId}/pdf`, { company_id: COMPANY_ID }, `recibo_orden_pago_${numOrden}.pdf`),

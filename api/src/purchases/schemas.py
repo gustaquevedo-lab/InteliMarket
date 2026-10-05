@@ -331,6 +331,7 @@ class ReceiptCreate(BaseModel):
     proveedor_ref: Optional[str] = None
     total_brl: Optional[Decimal] = None
     tipo_cambio: Optional[Decimal] = None
+    total_factura_impreso: Optional[Decimal] = None
     items: list[ReceiptItemInput]
     observaciones: Optional[str] = None
     user_id: Optional[UUID] = None

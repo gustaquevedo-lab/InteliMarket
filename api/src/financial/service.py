@@ -3445,6 +3445,17 @@ async def create_supplier_payment_order(
     if monto_neto < Decimal("0"):
         raise HTTPException(status_code=400, detail="El monto retenido no puede superar el monto total.")
 
+    diff_redondeo = Decimal(str(getattr(data, "diferencia_redondeo", 0) or 0))
+    if abs(diff_redondeo) > Decimal("5000"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"El ajuste por redondeo (₲ {diff_redondeo:+,.0f}) supera la tolerancia máxima permitida de ±₲ 5.000."
+        )
+
+    monto_neto_efectivo = monto_neto + diff_redondeo
+    if monto_neto_efectivo < Decimal("0"):
+        raise HTTPException(status_code=400, detail="El monto neto a desembolsar no puede ser negativo.")
+
     # 3. Crear Orden de Pago
     num_orden = await _generate_order_number(db, cid)
     order = SupplierPaymentOrder(
@@ -3456,7 +3467,8 @@ async def create_supplier_payment_order(
         moneda="PYG",
         monto_total=monto_total,
         monto_retenido=monto_retenido,
-        monto_neto=monto_neto,
+        monto_neto=monto_neto_efectivo,
+        diferencia_cambio=diff_redondeo,
         observaciones=data.observaciones,
         recibo_proveedor=data.recibo_proveedor,
         created_by=uuid.UUID(user_id) if user_id else None,
@@ -3495,6 +3507,7 @@ async def create_supplier_payment_order(
             observaciones=data.observaciones,
             disbursements=data.disbursements,
             legal_invoices=data.legal_invoices,
+            diferencia_redondeo=data.diferencia_redondeo,
         )
         await _execute_disbursements_internal(
             db=db,
@@ -3652,6 +3665,20 @@ async def _execute_disbursements_internal(
         tc = d.tipo_cambio or Decimal("1")
         m_pyg = Decimal(str(d.monto)) * tc
         total_desembolso_pyg += m_pyg
+
+    # 1. Ajustar por diferencia_redondeo si vino en payload
+    diff_redondeo_payload = Decimal(str(getattr(payload, "diferencia_redondeo", 0) or 0))
+    if diff_redondeo_payload != Decimal("0"):
+        if abs(diff_redondeo_payload) > Decimal("5000"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"El ajuste por redondeo (₲ {diff_redondeo_payload:+,.0f}) supera la tolerancia máxima permitida de ±₲ 5.000."
+            )
+        current_diff = order.diferencia_cambio or Decimal("0")
+        if current_diff != diff_redondeo_payload:
+            ajuste_delta = diff_redondeo_payload - current_diff
+            order.diferencia_cambio = diff_redondeo_payload
+            order.monto_neto = order.monto_neto + ajuste_delta
 
     diff = abs(total_desembolso_pyg - order.monto_neto)
     if diff > Decimal("50"):  # Margen de 50 Gs por posibles redondeos

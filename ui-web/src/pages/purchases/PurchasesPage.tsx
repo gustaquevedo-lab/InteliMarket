@@ -433,6 +433,7 @@ export default function PurchasesPage() {
     es_br?: boolean
     total_brl?: string
     tipo_cambio?: string
+    total_factura_impreso?: string
     items: {
       product_id: string
       nombre: string
@@ -457,8 +458,23 @@ export default function PurchasesPage() {
     es_br: false,
     total_brl: "",
     tipo_cambio: "1350",
+    total_factura_impreso: "",
     items: [],
   })
+
+  const totalCalculadoItemsRecepcion = useMemo(() => {
+    return (receiptForm.items || []).reduce((acc, it) => {
+      const cant = Number(it.cantidad_recibir) || 0
+      const cost = Number(it.precio_unitario) || 0
+      return acc + (cant * cost)
+    }, 0)
+  }, [receiptForm.items])
+
+  const diffRedondeoRecepcion = useMemo(() => {
+    if (!receiptForm.total_factura_impreso) return 0
+    return Math.round(Number(receiptForm.total_factura_impreso) - totalCalculadoItemsRecepcion)
+  }, [receiptForm.total_factura_impreso, totalCalculadoItemsRecepcion])
+
   const [savingReceipt, setSavingReceipt] = useState(false)
   const [packBarcodesByProduct, setPackBarcodesByProduct] = useState<Map<string, PackBarcode[]>>(new Map())
   const [lastReceiptForLabels, setLastReceiptForLabels] = useState<{ id: string; numero: string } | null>(null)
@@ -1190,6 +1206,7 @@ export default function PurchasesPage() {
         es_br: isBr,
         total_brl: "",
         tipo_cambio: "1350",
+        total_factura_impreso: "",
         items: (items || []).map(it => {
           const cantidadRecibir = Math.max(0, Number(it.cantidad || 0) - Number(it.recibido || (it as any).cantidad_recibida || 0))
           return {
@@ -1263,6 +1280,14 @@ export default function PurchasesPage() {
       return
     }
 
+    if (receiptForm.total_factura_impreso && Math.abs(diffRedondeoRecepcion) > 5000) {
+      toast.error(
+        "Tolerancia de redondeo excedida",
+        `La diferencia entre la factura impresa y los ítems (${diffRedondeoRecepcion > 0 ? "+" : ""}${formatPYG(diffRedondeoRecepcion)}) excede el límite permitido de ₲ 5.000.`
+      )
+      return
+    }
+
     setSavingReceipt(true)
     try {
       const created = await api.purchases.createReceipt({
@@ -1271,6 +1296,7 @@ export default function PurchasesPage() {
         observaciones: receiptForm.observaciones || undefined,
         total_brl: (receiptForm.es_br && receiptForm.total_brl) ? Number(receiptForm.total_brl) : undefined,
         tipo_cambio: (receiptForm.es_br && receiptForm.tipo_cambio) ? Number(receiptForm.tipo_cambio) : undefined,
+        total_factura_impreso: receiptForm.total_factura_impreso ? Number(receiptForm.total_factura_impreso) : undefined,
         items: validItems.map(it => ({
           product_id: it.product_id,
           cantidad_recibida: Number(it.cantidad_recibir),
@@ -6756,6 +6782,52 @@ export default function PurchasesPage() {
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* Sección Total Impreso en Factura y Ajuste por Redondeo */}
+              <div className="p-3 bg-slate-50 dark:bg-slate-850/60 border border-slate-200 dark:border-slate-800 rounded-xl space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                      Total Impreso en Factura Física (Opcional - Ajuste de Centavos)
+                    </span>
+                    <span className="text-[10px] text-slate-500">
+                      Si la factura en papel difiere por centavos respecto al total calculado de ítems (tolerancia máx. ± ₲ 5.000).
+                    </span>
+                  </div>
+                  {diffRedondeoRecepcion !== 0 && (
+                    <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded-lg ${
+                      Math.abs(diffRedondeoRecepcion) <= 5000
+                        ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                        : "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"
+                    }`}>
+                      Diferencia: {diffRedondeoRecepcion > 0 ? `+${formatPYG(diffRedondeoRecepcion)}` : formatPYG(diffRedondeoRecepcion)}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                      Monto Total Impreso en Factura (₲)
+                    </label>
+                    <CurrencyInput
+                      currency="PYG"
+                      placeholder="Dejar vacío si coincide con el total de ítems"
+                      value={receiptForm.total_factura_impreso || ""}
+                      onChangeValue={(val) => setReceiptForm(prev => ({ ...prev, total_factura_impreso: val ? String(val) : "" }))}
+                      className="input-field w-full text-xs font-mono font-bold text-right"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                      Total Calculado por Ítems Recibidos (₲)
+                    </label>
+                    <div className="input-field w-full text-xs font-mono font-black text-right bg-white dark:bg-slate-800 flex items-center justify-end px-3">
+                      {formatPYG(totalCalculadoItemsRecepcion)}
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Barra de Adición Extraordinaria en Muelle */}
