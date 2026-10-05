@@ -4270,7 +4270,11 @@ async def list_supplier_payment_orders(
             disb_map.setdefault(d.payment_order_id, []).append(fp_label)
 
     for r in results:
-        o = r.SupplierPaymentOrder
+        o = getattr(r, "SupplierPaymentOrder", None) or (r if hasattr(r, "numero_orden") else r[0])
+        sup_nombre = getattr(r, "supplier_nombre", None) or "Proveedor General"
+        sup_ruc = getattr(r, "supplier_ruc", None) or "-"
+        tot_fac = getattr(r, "total_facturas", 0) or 0
+
         fps = list(dict.fromkeys(disb_map.get(o.id, [])))
         if forma_pago and forma_pago not in [f.lower().replace(" ", "_") for f in fps]:
             continue
@@ -4284,8 +4288,8 @@ async def list_supplier_payment_orders(
             "id": str(o.id),
             "company_id": str(o.company_id),
             "supplier_id": str(o.supplier_id),
-            "supplier_nombre": r.supplier_nombre or "Proveedor General",
-            "supplier_ruc": r.supplier_ruc or "-",
+            "supplier_nombre": sup_nombre,
+            "supplier_ruc": sup_ruc,
             "numero_orden": o.numero_orden,
             "fecha_emision": o.fecha_emision.isoformat() if o.fecha_emision else None,
             "fecha_pago": o.fecha_pago.isoformat() if o.fecha_pago else None,
@@ -4299,7 +4303,7 @@ async def list_supplier_payment_orders(
             "recibo_proveedor": o.recibo_proveedor,
             "created_at": o.created_at.isoformat() if o.created_at else None,
             "updated_at": o.updated_at.isoformat() if o.updated_at else None,
-            "total_facturas": r.total_facturas or 0,
+            "total_facturas": tot_fac,
             "formas_pago_resumen": ", ".join(fps) if fps else ("Pendiente de pago" if o.estado == "registrado" else "-"),
             "moneda_desembolso": moneda_desembolso,
             "monto_desembolso_moneda": monto_desembolso_moneda,
@@ -4331,7 +4335,18 @@ async def get_supplier_payment_order_detail(
     if not row:
         return None
 
-    o = row.SupplierPaymentOrder
+    if hasattr(row, "SupplierPaymentOrder"):
+        o = row.SupplierPaymentOrder
+        sup_nombre = getattr(row, "supplier_nombre", None)
+        sup_ruc = getattr(row, "supplier_ruc", None)
+    elif hasattr(row, "numero_orden"):
+        o = row
+        sup_nombre = getattr(row, "supplier_nombre", None)
+        sup_ruc = getattr(row, "supplier_ruc", None)
+    else:
+        o = row[0]
+        sup_nombre = getattr(row, "supplier_nombre", None)
+        sup_ruc = getattr(row, "supplier_ruc", None)
 
     # Cargar Allocations enriquecidas
     alloc_q = (
@@ -4346,21 +4361,25 @@ async def get_supplier_payment_order_detail(
         .where(SupplierPaymentOrderAllocation.payment_order_id == o.id)
     )
     alloc_rows = (await db.execute(alloc_q)).all()
-    allocations_data = [
-        {
-            "id": str(a.SupplierPaymentOrderAllocation.id),
-            "invoice_id": str(a.SupplierPaymentOrderAllocation.invoice_id),
-            "numero_factura": a.numero_factura,
-            "timbrado": a.timbrado,
-            "fecha_emision": a.fecha_emision.isoformat() if a.fecha_emision else None,
-            "fecha_vencimiento": a.fecha_vencimiento.isoformat() if a.fecha_vencimiento else None,
-            "monto_aplicado": float(a.SupplierPaymentOrderAllocation.monto_aplicado),
-            "monto_retencion": float(a.SupplierPaymentOrderAllocation.monto_retencion),
-            "saldo_anterior": float(a.SupplierPaymentOrderAllocation.saldo_anterior),
-            "saldo_restante": float(a.SupplierPaymentOrderAllocation.saldo_restante),
-        }
-        for a in alloc_rows
-    ]
+    allocations_data = []
+    for a in alloc_rows:
+        alloc_obj = getattr(a, "SupplierPaymentOrderAllocation", None) or (a if hasattr(a, "monto_aplicado") else a[0])
+        num_fac = getattr(a, "numero_factura", None)
+        timbrado = getattr(a, "timbrado", None)
+        fech_em = getattr(a, "fecha_emision", None)
+        fech_vc = getattr(a, "fecha_vencimiento", None)
+        allocations_data.append({
+            "id": str(alloc_obj.id),
+            "invoice_id": str(alloc_obj.invoice_id),
+            "numero_factura": num_fac,
+            "timbrado": timbrado,
+            "fecha_emision": fech_em.isoformat() if fech_em else None,
+            "fecha_vencimiento": fech_vc.isoformat() if fech_vc else None,
+            "monto_aplicado": float(alloc_obj.monto_aplicado),
+            "monto_retencion": float(alloc_obj.monto_retencion),
+            "saldo_anterior": float(alloc_obj.saldo_anterior),
+            "saldo_restante": float(alloc_obj.saldo_restante),
+        })
 
     # Cargar Disbursements enriquecidos
     disb_q = (
@@ -4376,34 +4395,41 @@ async def get_supplier_payment_order_detail(
         .where(SupplierPaymentOrderDisbursement.payment_order_id == o.id)
     )
     disb_rows = (await db.execute(disb_q)).all()
-    disbursements_data = [
-        {
-            "id": str(d.SupplierPaymentOrderDisbursement.id),
-            "forma_pago": d.SupplierPaymentOrderDisbursement.forma_pago,
-            "monto": float(d.SupplierPaymentOrderDisbursement.monto),
-            "moneda": d.SupplierPaymentOrderDisbursement.moneda,
-            "tipo_cambio": float(d.SupplierPaymentOrderDisbursement.tipo_cambio),
-            "monto_pyg": float(d.SupplierPaymentOrderDisbursement.monto_pyg),
-            "bank_account_id": str(d.SupplierPaymentOrderDisbursement.bank_account_id) if d.SupplierPaymentOrderDisbursement.bank_account_id else None,
-            "banco_nombre": d.banco_nombre or d.SupplierPaymentOrderDisbursement.banco_cheque,
-            "referencia_transferencia": d.SupplierPaymentOrderDisbursement.referencia_transferencia,
-            "cheque_id": str(d.SupplierPaymentOrderDisbursement.cheque_id) if d.SupplierPaymentOrderDisbursement.cheque_id else None,
-            "numero_cheque": d.SupplierPaymentOrderDisbursement.numero_cheque,
-            "banco_cheque": d.SupplierPaymentOrderDisbursement.banco_cheque,
-            "fecha_cheque_emision": d.SupplierPaymentOrderDisbursement.fecha_cheque_emision.isoformat() if d.SupplierPaymentOrderDisbursement.fecha_cheque_emision else None,
-            "fecha_cheque_vencimiento": d.SupplierPaymentOrderDisbursement.fecha_cheque_vencimiento.isoformat() if d.SupplierPaymentOrderDisbursement.fecha_cheque_vencimiento else None,
-            "es_cheque_diferido": d.SupplierPaymentOrderDisbursement.es_cheque_diferido,
-            "titular_cheque": d.SupplierPaymentOrderDisbursement.titular_cheque,
-            "petty_cash_fund_id": str(d.SupplierPaymentOrderDisbursement.petty_cash_fund_id) if d.SupplierPaymentOrderDisbursement.petty_cash_fund_id else None,
-            "fondo_nombre": d.fondo_nombre,
-            "credit_note_id": str(d.SupplierPaymentOrderDisbursement.credit_note_id) if d.SupplierPaymentOrderDisbursement.credit_note_id else None,
-            "numero_nc": d.numero_nc,
-            "comprobante_url": d.SupplierPaymentOrderDisbursement.comprobante_url,
-            "observaciones": d.SupplierPaymentOrderDisbursement.observaciones,
-            "created_at": d.SupplierPaymentOrderDisbursement.created_at.isoformat() if d.SupplierPaymentOrderDisbursement.created_at else None,
-        }
-        for d in disb_rows
-    ]
+    disbursements_data = []
+    for d in disb_rows:
+        disb_obj = getattr(d, "SupplierPaymentOrderDisbursement", None) or (d if hasattr(d, "forma_pago") else d[0])
+        banco_nom = getattr(d, "banco_nombre", None) or getattr(disb_obj, "banco_cheque", None)
+        fondo_nom = getattr(d, "fondo_nombre", None)
+        num_nc = getattr(d, "numero_nc", None)
+        fech_ch_em = getattr(disb_obj, "fecha_cheque_emision", None)
+        fech_ch_vc = getattr(disb_obj, "fecha_cheque_vencimiento", None)
+        c_at = getattr(disb_obj, "created_at", None)
+
+        disbursements_data.append({
+            "id": str(disb_obj.id),
+            "forma_pago": disb_obj.forma_pago,
+            "monto": float(disb_obj.monto),
+            "moneda": disb_obj.moneda,
+            "tipo_cambio": float(disb_obj.tipo_cambio),
+            "monto_pyg": float(disb_obj.monto_pyg),
+            "bank_account_id": str(disb_obj.bank_account_id) if disb_obj.bank_account_id else None,
+            "banco_nombre": banco_nom,
+            "referencia_transferencia": disb_obj.referencia_transferencia,
+            "cheque_id": str(disb_obj.cheque_id) if disb_obj.cheque_id else None,
+            "numero_cheque": disb_obj.numero_cheque,
+            "banco_cheque": disb_obj.banco_cheque,
+            "fecha_cheque_emision": fech_ch_em.isoformat() if fech_ch_em else None,
+            "fecha_cheque_vencimiento": fech_ch_vc.isoformat() if fech_ch_vc else None,
+            "es_cheque_diferido": disb_obj.es_cheque_diferido,
+            "titular_cheque": disb_obj.titular_cheque,
+            "petty_cash_fund_id": str(disb_obj.petty_cash_fund_id) if disb_obj.petty_cash_fund_id else None,
+            "fondo_nombre": fondo_nom,
+            "credit_note_id": str(disb_obj.credit_note_id) if disb_obj.credit_note_id else None,
+            "numero_nc": num_nc,
+            "comprobante_url": disb_obj.comprobante_url,
+            "observaciones": disb_obj.observaciones,
+            "created_at": c_at.isoformat() if c_at else None,
+        })
 
     fps = list(dict.fromkeys([d["forma_pago"].replace("_", " ").title() for d in disbursements_data]))
 
