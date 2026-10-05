@@ -25,6 +25,7 @@ from api.src.purchases.models import (
     PurchaseReceiptItem,
     SupplierNcRequest,
 )
+from api.src.products.models import Product
 
 TOLERANCIA_PRECIO_GS = Decimal("10")  # Tolerancia máxima para diferencias de redondeo
 
@@ -94,129 +95,265 @@ async def perform_3way_match(
     total_facturado = Decimal("0")
     total_recibido_val = Decimal("0")
     inv_product_keys = set()
-    
-    # Evaluar ítems de la factura
-    for inv_item in invoice.items:
-        prod_key = str(inv_item.product_id) if inv_item.product_id else None
-        if prod_key:
-            inv_product_keys.add(prod_key)
-        
-        cant_facturada = Decimal(str(inv_item.cantidad))
-        precio_facturado = Decimal(str(inv_item.precio_unitario))
-        subtotal_item_facturado = Decimal(str(inv_item.total))
-        total_facturado += subtotal_item_facturado
 
-        # Datos de recepción muelle
-        rec_item = receipt_items_map.get(prod_key) if prod_key else None
-        cant_recibida = Decimal(str(rec_item.cantidad_recibida)) if rec_item else Decimal("0")
-        cant_rechazada = Decimal(str(rec_item.cantidad_rechazada or 0)) if rec_item else Decimal("0")
-        motivo_rechazo = rec_item.motivo_rechazo if rec_item else None
-
-        # Datos de orden de compra
-        po_item = po_items_map.get(prod_key) if prod_key else None
-        cant_ordenada = Decimal(str(po_item.cantidad)) if po_item else None
-        precio_orden = Decimal(str(po_item.precio_unitario)) if po_item else None
-
-        linea_estado = "conforme"
-        motivos_linea = []
-        diferencia_linea_monto = Decimal("0")
-
-        # Regla 1: Ítem no ordenado en el Pedido (No autorizado)
-        if po and po_item is None:
-            linea_estado = "item_no_pedido"
-            diferencia_linea_monto = subtotal_item_facturado
-            motivos_linea.append(f"Ítem no pactado en Pedido N° {po.numero} (No autorizado)")
-            precio_orden = Decimal("0")
-            cant_ordenada = Decimal("0")
-            diff_cant = cant_facturada
-            diff_precio = precio_facturado
-        else:
-            p_ord = precio_orden if precio_orden is not None else precio_facturado
-            total_recibido_val += cant_recibida * p_ord
-            diff_precio = precio_facturado - p_ord
-            diff_cant = cant_facturada - (cant_recibida if receipt else (cant_ordenada or Decimal("0")))
-
-            if receipt:
-                # Discrepancia física muelle
-                diff_cant_rec = cant_facturada - cant_recibida
-                if diff_cant_rec > Decimal("0.001"):
-                    linea_estado = "discrepancia_cantidad"
-                    monto_dif_cant = diff_cant_rec * precio_facturado
-                    diferencia_linea_monto += monto_dif_cant
-                    if cant_rechazada > 0:
-                        motivos_linea.append(f"Rechazo en muelle: {cant_rechazada} u. ({motivo_rechazo or 'daño/vencimiento'})")
-                    else:
-                        motivos_linea.append(f"Faltante físico: facturadas {cant_facturada} u. vs recibidas {cant_recibida} u.")
-
-                # Sobreprecio contra pedido
-                if diff_precio > TOLERANCIA_PRECIO_GS:
-                    linea_estado = "discrepancia_precio" if linea_estado == "conforme" else "discrepancia_mixta"
-                    base_cant = cant_recibida if cant_recibida > 0 else cant_facturada
-                    monto_dif_precio = diff_precio * base_cant
-                    diferencia_linea_monto += monto_dif_precio
-                    motivos_linea.append(f"Sobreprecio: Facturado {precio_facturado:,.0f} Gs vs {p_ord:,.0f} Gs pactado en Pedido (+{diff_precio:,.0f} Gs/u)")
-            elif po:
-                # Sin muelle aún: 2-Way Match estricto Factura vs Pedido
-                # Chequeo sobreprecio
-                if diff_precio > TOLERANCIA_PRECIO_GS:
-                    linea_estado = "discrepancia_precio"
-                    monto_dif_precio = diff_precio * cant_facturada
-                    diferencia_linea_monto += monto_dif_precio
-                    motivos_linea.append(f"Sobreprecio: Facturado {precio_facturado:,.0f} Gs vs {p_ord:,.0f} Gs pactado en Pedido (+{diff_precio:,.0f} Gs/u)")
-
-                # Chequeo exceso de cantidad ordenada
-                if cant_ordenada is not None and cant_facturada > cant_ordenada + Decimal("0.001"):
-                    linea_estado = "discrepancia_cantidad" if linea_estado == "conforme" else "discrepancia_mixta"
-                    exceso_cant = cant_facturada - cant_ordenada
-                    monto_exceso = exceso_cant * p_ord
-                    diferencia_linea_monto += monto_exceso
-                    motivos_linea.append(f"Exceso sobre Pedido: Facturado {cant_facturada} u. vs {cant_ordenada} u. en Pedido (+{exceso_cant} u.)")
-            else:
-                # Sin orden ni muelle
-                linea_estado = "sin_orden"
-                motivos_linea.append("Sin Pedido ni Recepción asociada")
-                diferencia_linea_monto = subtotal_item_facturado
-
-        total_discrepancia_monto += diferencia_linea_monto
-
-        discrepancias_lines.append({
-            "product_id": prod_key,
-            "descripcion": inv_item.descripcion,
-            "codigo_proveedor": inv_item.codigo_proveedor,
-            "cantidad_ordenada": float(cant_ordenada) if cant_ordenada is not None else None,
-            "cantidad_recibida": float(cant_recibida),
-            "cantidad_rechazada": float(cant_rechazada),
-            "cantidad_facturada": float(cant_facturada),
-            "precio_orden": float(precio_orden) if precio_orden is not None else None,
-            "precio_facturado": float(precio_facturado),
-            "diferencia_cantidad": float(diff_cant),
-            "diferencia_precio": float(diff_precio),
-            "diferencia_monto": float(diferencia_linea_monto),
-            "estado": linea_estado,
-            "motivos": "; ".join(motivos_linea) if motivos_linea else "Conforme 100%"
-        })
-
-    # Verificar ítems del Pedido no facturados (faltantes en factura)
-    items_faltantes_po: list[dict[str, Any]] = []
+    # Recolectar todos los product_id para resolver sus nombres de forma masiva
+    prod_ids_to_resolve = set()
+    for it in invoice.items:
+        if it.product_id:
+            prod_ids_to_resolve.add(it.product_id)
+    if receipt:
+        for ri in receipt.items:
+            if ri.product_id:
+                prod_ids_to_resolve.add(ri.product_id)
     if po:
         for poi in po.items:
-            pkey = str(poi.product_id)
-            if pkey not in inv_product_keys:
-                items_faltantes_po.append({
-                    "product_id": pkey,
-                    "descripcion": poi.descripcion,
-                    "cantidad_ordenada": float(poi.cantidad),
-                    "precio_orden": float(poi.precio_unitario),
-                    "total_orden": float(poi.total)
-                })
+            if poi.product_id:
+                prod_ids_to_resolve.add(poi.product_id)
 
-        # Chequeo de diferencia global entre Total Facturado y Total Pedido
-        po_total = Decimal(str(po.total or 0))
-        diff_po_total = abs(total_facturado - po_total)
-        if diff_po_total > TOLERANCIA_PRECIO_GS and total_discrepancia_monto < diff_po_total:
-            # Diferencia neta no cubierta por ítems individuales (ej. recargos no previstos o fletes)
-            diferencia_no_explicada = diff_po_total - total_discrepancia_monto
-            total_discrepancia_monto += diferencia_no_explicada
+    product_names: dict[str, str] = {}
+    if prod_ids_to_resolve:
+        prod_res = await db.execute(select(Product.id, Product.nombre).where(Product.id.in_(prod_ids_to_resolve)))
+        product_names = {str(p.id): p.nombre for p in prod_res.all()}
+
+    # CASO A: La factura tiene renglones detallados (ej. importados por XML SIFEN o cargados expresamente)
+    if len(invoice.items) > 0:
+        for inv_item in invoice.items:
+            prod_key = str(inv_item.product_id) if inv_item.product_id else None
+            if prod_key:
+                inv_product_keys.add(prod_key)
+            
+            cant_facturada = Decimal(str(inv_item.cantidad))
+            precio_facturado = Decimal(str(inv_item.precio_unitario))
+            subtotal_item_facturado = Decimal(str(inv_item.total))
+            total_facturado += subtotal_item_facturado
+
+            rec_item = receipt_items_map.get(prod_key) if prod_key else None
+            cant_recibida = Decimal(str(rec_item.cantidad_recibida)) if rec_item else Decimal("0")
+            cant_rechazada = Decimal(str(rec_item.cantidad_rechazada or 0)) if rec_item else Decimal("0")
+            motivo_rechazo = rec_item.motivo_rechazo if rec_item else None
+
+            po_item = po_items_map.get(prod_key) if prod_key else None
+            cant_ordenada = Decimal(str(po_item.cantidad)) if po_item else None
+            precio_orden = Decimal(str(po_item.precio_unitario)) if po_item else None
+
+            linea_estado = "conforme"
+            motivos_linea = []
+            diferencia_linea_monto = Decimal("0")
+
+            if po and po_item is None:
+                linea_estado = "item_no_pedido"
+                diferencia_linea_monto = subtotal_item_facturado
+                motivos_linea.append(f"Ítem no pactado en Pedido N° {po.numero} (No autorizado)")
+                precio_orden = Decimal("0")
+                cant_ordenada = Decimal("0")
+                diff_cant = cant_facturada
+                diff_precio = precio_facturado
+            else:
+                p_ord = precio_orden if precio_orden is not None else precio_facturado
+                total_recibido_val += cant_recibida * p_ord
+                diff_precio = precio_facturado - p_ord
+                diff_cant = cant_facturada - (cant_recibida if receipt else (cant_ordenada or Decimal("0")))
+
+                if receipt:
+                    diff_cant_rec = cant_facturada - cant_recibida
+                    if diff_cant_rec > Decimal("0.001"):
+                        linea_estado = "discrepancia_cantidad"
+                        monto_dif_cant = diff_cant_rec * precio_facturado
+                        diferencia_linea_monto += monto_dif_cant
+                        if cant_rechazada > 0:
+                            motivos_linea.append(f"Rechazo en muelle: {cant_rechazada:g} u. ({motivo_rechazo or 'daño/vencimiento'})")
+                        else:
+                            motivos_linea.append(f"Faltante físico: facturadas {cant_facturada:g} u. vs recibidas {cant_recibida:g} u.")
+
+                    if diff_precio > TOLERANCIA_PRECIO_GS:
+                        linea_estado = "discrepancia_precio" if linea_estado == "conforme" else "discrepancia_mixta"
+                        base_cant = cant_recibida if cant_recibida > 0 else cant_facturada
+                        monto_dif_precio = diff_precio * base_cant
+                        diferencia_linea_monto += monto_dif_precio
+                        motivos_linea.append(f"Sobreprecio: Facturado {precio_facturado:,.0f} Gs vs {p_ord:,.0f} Gs en Pedido (+{diff_precio:,.0f} Gs/u)")
+                elif po:
+                    if diff_precio > TOLERANCIA_PRECIO_GS:
+                        linea_estado = "discrepancia_precio"
+                        monto_dif_precio = diff_precio * cant_facturada
+                        diferencia_linea_monto += monto_dif_precio
+                        motivos_linea.append(f"Sobreprecio: Facturado {precio_facturado:,.0f} Gs vs {p_ord:,.0f} Gs pactado en Pedido (+{diff_precio:,.0f} Gs/u)")
+
+                    if cant_ordenada is not None and cant_facturada > cant_ordenada + Decimal("0.001"):
+                        linea_estado = "discrepancia_cantidad" if linea_estado == "conforme" else "discrepancia_mixta"
+                        exceso_cant = cant_facturada - cant_ordenada
+                        monto_exceso = exceso_cant * p_ord
+                        diferencia_linea_monto += monto_exceso
+                        motivos_linea.append(f"Exceso sobre Pedido: Facturado {cant_facturada:g} u. vs {cant_ordenada:g} u. en Pedido (+{exceso_cant:g} u.)")
+                else:
+                    linea_estado = "sin_orden"
+                    motivos_linea.append("Sin Pedido ni Recepción asociada")
+                    diferencia_linea_monto = subtotal_item_facturado
+
+            total_discrepancia_monto += diferencia_linea_monto
+            desc = inv_item.descripcion or product_names.get(prod_key) or (po_item.descripcion if po_item else f"Producto {prod_key[:8]}")
+
+            discrepancias_lines.append({
+                "product_id": prod_key,
+                "descripcion": desc,
+                "codigo_proveedor": inv_item.codigo_proveedor,
+                "cantidad_ordenada": float(cant_ordenada) if cant_ordenada is not None else None,
+                "cantidad_recibida": float(cant_recibida),
+                "cantidad_rechazada": float(cant_rechazada),
+                "cantidad_facturada": float(cant_facturada),
+                "precio_orden": float(precio_orden) if precio_orden is not None else None,
+                "precio_facturado": float(precio_facturado),
+                "diferencia_cantidad": float(diff_cant),
+                "diferencia_precio": float(diff_precio),
+                "diferencia_monto": float(diferencia_linea_monto),
+                "tipo": linea_estado,
+                "estado": linea_estado,
+                "motivo": "; ".join(motivos_linea) if motivos_linea else "Conforme 100%",
+                "motivos": "; ".join(motivos_linea) if motivos_linea else "Conforme 100%",
+            })
+
+        # Verificar ítems del Pedido no facturados
+        items_faltantes_po: list[dict[str, Any]] = []
+        if po:
+            for poi in po.items:
+                pkey = str(poi.product_id)
+                if pkey not in inv_product_keys:
+                    items_faltantes_po.append({
+                        "product_id": pkey,
+                        "descripcion": product_names.get(pkey) or poi.descripcion,
+                        "cantidad_ordenada": float(poi.cantidad),
+                        "precio_orden": float(poi.precio_unitario),
+                        "total_orden": float(poi.total)
+                    })
+
+    # CASO B: Factura creada desde Muelle / Recepción física (cotéjase con los ítems del remito/recepción)
+    elif receipt:
+        for ri in receipt.items:
+            prod_key = str(ri.product_id)
+            inv_product_keys.add(prod_key)
+
+            cant_recibida = Decimal(str(ri.cantidad_recibida or 0))
+            cant_rechazada = Decimal(str(ri.cantidad_rechazada or 0))
+            motivo_rechazo = ri.motivo_rechazo
+
+            po_item = po_items_map.get(prod_key)
+            cant_ordenada = Decimal(str(po_item.cantidad)) if po_item else (Decimal(str(ri.cantidad_ordenada)) if ri.cantidad_ordenada is not None else None)
+            precio_orden = Decimal(str(po_item.precio_unitario)) if po_item else None
+            precio_facturado = Decimal(str(ri.precio_unitario or ri.costo_unitario or (po_item.precio_unitario if po_item else 0)))
+
+            cant_facturada = (cant_recibida + cant_rechazada) if (cant_recibida + cant_rechazada) > 0 else (cant_ordenada or Decimal("0"))
+            subtotal_linea = cant_facturada * precio_facturado
+            total_facturado += subtotal_linea
+
+            linea_estado = "conforme"
+            motivos_linea = []
+            diferencia_linea_monto = Decimal("0")
+
+            if cant_rechazada > Decimal("0.001"):
+                linea_estado = "faltante_fisico"
+                monto_dif = cant_rechazada * precio_facturado
+                diferencia_linea_monto += monto_dif
+                motivos_linea.append(f"Faltante en muelle: {cant_rechazada:g} u. ({motivo_rechazo or 'incompleto / dañado'})")
+
+            if precio_orden is not None and (precio_facturado - precio_orden) > TOLERANCIA_PRECIO_GS:
+                diff_p = precio_facturado - precio_orden
+                diff_monto_p = diff_p * (cant_recibida if cant_recibida > 0 else cant_facturada)
+                diferencia_linea_monto += diff_monto_p
+                linea_estado = "discrepancia_precio" if linea_estado == "conforme" else "discrepancia_mixta"
+                motivos_linea.append(f"Sobreprecio: Facturado {precio_facturado:,.0f} Gs vs {precio_orden:,.0f} Gs en Pedido (+{diff_p:,.0f} Gs/u)")
+
+            p_base = precio_orden if precio_orden is not None else precio_facturado
+            total_recibido_val += cant_recibida * p_base
+            total_discrepancia_monto += diferencia_linea_monto
+
+            desc = product_names.get(prod_key) or (po_item.descripcion if po_item else f"Producto {prod_key[:8]}")
+
+            discrepancias_lines.append({
+                "product_id": prod_key,
+                "descripcion": desc,
+                "codigo_proveedor": None,
+                "cantidad_ordenada": float(cant_ordenada) if cant_ordenada is not None else None,
+                "cantidad_recibida": float(cant_recibida),
+                "cantidad_rechazada": float(cant_rechazada),
+                "cantidad_facturada": float(cant_facturada),
+                "precio_orden": float(precio_orden) if precio_orden is not None else None,
+                "precio_facturado": float(precio_facturado),
+                "diferencia_cantidad": float(cant_rechazada),
+                "diferencia_precio": float(precio_facturado - (precio_orden or precio_facturado)),
+                "diferencia_monto": float(diferencia_linea_monto),
+                "tipo": linea_estado,
+                "estado": linea_estado,
+                "motivo": "; ".join(motivos_linea) if motivos_linea else "Conforme 100%",
+                "motivos": "; ".join(motivos_linea) if motivos_linea else "Conforme 100%",
+            })
+
+        # Ítems pactados en OC que no vinieron en la entrega
+        items_faltantes_po: list[dict[str, Any]] = []
+        if po:
+            for poi in po.items:
+                pkey = str(poi.product_id)
+                if pkey not in inv_product_keys:
+                    cant_ord = Decimal(str(poi.cantidad))
+                    p_ord = Decimal(str(poi.precio_unitario))
+                    tot_linea = Decimal(str(poi.total or (cant_ord * p_ord)))
+                    total_discrepancia_monto += tot_linea
+                    desc = product_names.get(pkey) or poi.descripcion or f"Producto {pkey[:8]}"
+                    discrepancias_lines.append({
+                        "product_id": pkey,
+                        "descripcion": desc,
+                        "codigo_proveedor": None,
+                        "cantidad_ordenada": float(cant_ord),
+                        "cantidad_recibida": 0.0,
+                        "cantidad_rechazada": float(cant_ord),
+                        "cantidad_facturada": float(cant_ord),
+                        "precio_orden": float(p_ord),
+                        "precio_facturado": float(p_ord),
+                        "diferencia_cantidad": float(cant_ord),
+                        "diferencia_precio": 0.0,
+                        "diferencia_monto": float(tot_linea),
+                        "tipo": "item_no_entregado",
+                        "estado": "item_no_entregado",
+                        "motivo": f"Ítem pactado en Pedido N° {po.numero} no entregado en muelle",
+                        "motivos": f"Ítem pactado en Pedido N° {po.numero} no entregado en muelle",
+                    })
+
+        if total_facturado == Decimal("0"):
+            total_facturado = Decimal(str(invoice.total or 0))
+
+    # CASO C: Factura con Orden de Compra pero pendiente de muelle
+    elif po:
+        items_faltantes_po = []
+        for poi in po.items:
+            pkey = str(poi.product_id)
+            cant_ord = Decimal(str(poi.cantidad))
+            p_ord = Decimal(str(poi.precio_unitario))
+            tot_linea = Decimal(str(poi.total or (cant_ord * p_ord)))
+            total_facturado += tot_linea
+            desc = product_names.get(pkey) or poi.descripcion or f"Producto {pkey[:8]}"
+            discrepancias_lines.append({
+                "product_id": pkey,
+                "descripcion": desc,
+                "codigo_proveedor": None,
+                "cantidad_ordenada": float(cant_ord),
+                "cantidad_recibida": 0.0,
+                "cantidad_rechazada": 0.0,
+                "cantidad_facturada": float(cant_ord),
+                "precio_orden": float(p_ord),
+                "precio_facturado": float(p_ord),
+                "diferencia_cantidad": float(cant_ord),
+                "diferencia_precio": 0.0,
+                "diferencia_monto": float(tot_linea),
+                "tipo": "pendiente_recepcion",
+                "estado": "pendiente_recepcion",
+                "motivo": "Pendiente de ingreso físico en muelle",
+                "motivos": "Pendiente de ingreso físico en muelle",
+            })
+        if total_facturado == Decimal("0"):
+            total_facturado = Decimal(str(invoice.total or 0))
+
+    # CASO D: Factura sin orden ni recepción
+    else:
+        items_faltantes_po = []
+        total_facturado = Decimal(str(invoice.total or 0))
 
     # 5. Determinar estado general del Matching
     nc_request_obj: Optional[SupplierNcRequest] = None
@@ -228,7 +365,7 @@ async def perform_3way_match(
         invoice.monto_retenido_nc = total_discrepancia_monto
         invoice.requiere_nc = True
         invoice.motivo_bloqueo = (
-            f"BLOQUEADA PARA PAGO: Discrepancia detectada de {total_discrepancia_monto:,.0f} Gs. con el Pedido. "
+            f"BLOQUEADA PARA PAGO: Discrepancia detectada de {total_discrepancia_monto:,.0f} Gs. con el Pedido/Muelle. "
             f"Sin entrega de la Nota de Crédito correspondiente, no se liberará el pago."
         )
 
@@ -246,7 +383,7 @@ async def perform_3way_match(
             seq = (c_res.scalar() or 0) + 1
             num_snc = f"SNC-{seq:05d}"
 
-            motivos_resumen = [line["motivos"] for line in discrepancias_lines if line["diferencia_monto"] > 0]
+            motivos_resumen = [line["motivo"] for line in discrepancias_lines if line["diferencia_monto"] > 0]
             detalle_motivos = " | ".join(motivos_resumen)[:1000]
 
             nc_request_obj = SupplierNcRequest(
@@ -266,13 +403,13 @@ async def perform_3way_match(
         else:
             nc_request_obj.monto_reclamado = total_discrepancia_monto
     elif po and not receipt:
-        # Match 100% exacto con el Pedido, pero pendiente de ingreso físico en muelle
+        # Match con el Pedido, pero pendiente de ingreso físico en muelle
         estado_match = "conforme_pendiente_recepcion"
         invoice.bloqueada_para_pago = True
         invoice.estado = "en_revision"
         invoice.monto_retenido_nc = Decimal("0")
         invoice.requiere_nc = False
-        invoice.motivo_bloqueo = "Valores y precios exactos con el Pedido. Pendiente de recepción física en muelle para autorizar pago."
+        invoice.motivo_bloqueo = "Valores y precios conformes con el Pedido. Pendiente de recepción física en muelle para autorizar pago."
     elif receipt:
         # Match 100% triple conciliado
         estado_match = "conciliado_100"
@@ -286,7 +423,9 @@ async def perform_3way_match(
         estado_match = "sin_orden_ni_recepcion"
         invoice.bloqueada_para_pago = True
         invoice.estado = "en_revision"
-        invoice.motivo_bloqueo = "Factura sin Orden de Compra ni Recepción física asociada."
+        invoice.monto_retenido_nc = Decimal("0")
+        invoice.requiere_nc = False
+        invoice.motivo_bloqueo = "Factura sin Orden de Compra ni Recepción física asociada en el sistema."
 
     await db.commit()
 

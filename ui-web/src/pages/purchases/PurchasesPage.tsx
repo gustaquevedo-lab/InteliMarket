@@ -8105,47 +8105,90 @@ export default function PurchasesPage() {
                 )}
 
                 {/* Tabla de discrepancias ítem por ítem */}
-                {matchResult.discrepancias && matchResult.discrepancias.length > 0 && (
+                {matchResult.discrepancias && matchResult.discrepancias.length > 0 ? (
                   <div className="space-y-2">
-                    <h5 className="text-xs font-bold uppercase tracking-wider text-gray-500">
-                      Detalle de Discrepancias por Producto
+                    <h5 className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 flex items-center justify-between">
+                      <span>Cotejo de Mercadería Línea a Línea ({matchResult.discrepancias.length} Ítems)</span>
+                      <span className="text-[11px] font-normal text-gray-500">Muelle vs Pedido vs Facturado</span>
                     </h5>
                     <div className="overflow-x-auto border border-slate-200 dark:border-slate-700 rounded-xl">
-                      <table className="w-full text-left text-xs">
+                      <table className="w-full text-left text-xs min-w-[700px]">
                         <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px]">
                           <tr>
                             <th className="p-2.5">Producto</th>
-                            <th className="p-2.5 text-center">Tipo Discrepancia</th>
+                            <th className="p-2.5 text-center">Estado Cotejo</th>
                             <th className="p-2.5 text-right">Cant. Recibida</th>
                             <th className="p-2.5 text-right">Cant. Facturada</th>
-                            <th className="p-2.5 text-right">Diferencia (Gs.)</th>
+                            <th className="p-2.5 text-right">Diferencia</th>
+                            <th className="p-2.5">Detalle / Motivo</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                          {matchResult.discrepancias.map((d: any, idx: number) => (
-                            <tr key={idx}>
-                              <td className="p-2.5 font-bold text-gray-900 dark:text-white">
-                                {d.descripcion}
-                              </td>
-                              <td className="p-2.5 text-center">
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300">
-                                  {d.tipo?.replace("_", " ").toUpperCase()}
-                                </span>
-                              </td>
-                              <td className="p-2.5 text-right font-mono">
-                                {d.cantidad_recibida}
-                              </td>
-                              <td className="p-2.5 text-right font-mono font-bold text-red-600">
-                                {d.cantidad_facturada}
-                              </td>
-                              <td className="p-2.5 text-right font-mono font-black text-red-600">
-                                {formatPYG(d.diferencia_monto || 0)}
-                              </td>
-                            </tr>
-                          ))}
+                          {matchResult.discrepancias.map((d: any, idx: number) => {
+                            const isConforme = (d.tipo === "conforme" || d.estado === "conforme") && (!d.diferencia_monto || Number(d.diferencia_monto) === 0)
+                            const isShortage = d.tipo === "faltante_fisico" || d.estado === "discrepancia_cantidad" || Number(d.cantidad_rechazada || 0) > 0
+                            const isPending = d.tipo === "pendiente_recepcion" || d.estado === "pendiente_recepcion"
+                            const isOverprice = d.tipo === "discrepancia_precio" || d.estado === "discrepancia_precio"
+                            
+                            return (
+                              <tr key={idx} className={!isConforme ? "bg-rose-50/40 dark:bg-rose-950/20" : ""}>
+                                <td className="p-2.5">
+                                  <div className="font-bold text-gray-900 dark:text-white">{d.descripcion}</div>
+                                  {d.codigo_proveedor && <div className="text-[10px] font-mono text-gray-400">Ref: {d.codigo_proveedor}</div>}
+                                </td>
+                                <td className="p-2.5 text-center">
+                                  {isConforme ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                                      CONFORME
+                                    </span>
+                                  ) : isShortage ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300">
+                                      FALTANTE EN MUELLE
+                                    </span>
+                                  ) : isOverprice ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                                      SOBREPRECIO
+                                    </span>
+                                  ) : isPending ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300">
+                                      PENDIENTE MUELLE
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300">
+                                      {(d.tipo || d.estado || "DISCREPANCIA").replace("_", " ").toUpperCase()}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="p-2.5 text-right font-mono font-medium text-gray-800 dark:text-gray-200">
+                                  {d.cantidad_recibida}
+                                </td>
+                                <td className="p-2.5 text-right font-mono font-bold text-gray-900 dark:text-white">
+                                  {d.cantidad_facturada}
+                                </td>
+                                <td className={`p-2.5 text-right font-mono font-black ${
+                                  Number(d.diferencia_monto || 0) > 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600"
+                                }`}>
+                                  {Number(d.diferencia_monto || 0) > 0 ? formatPYG(d.diferencia_monto) : "₲ 0"}
+                                </td>
+                                <td className="p-2.5 text-gray-600 dark:text-gray-300 text-[11px]">
+                                  {d.motivo || d.motivos || (isConforme ? "Conforme 100%" : "—")}
+                                </td>
+                              </tr>
+                            )
+                          })}
                         </tbody>
                       </table>
                     </div>
+                  </div>
+                ) : (
+                  <div className="p-6 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-center space-y-2">
+                    <AlertCircle className="w-6 h-6 mx-auto text-indigo-500 opacity-70" />
+                    <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+                      {matchResult.mensaje || "Comprobante sin ítems de pedido ni recepción para cotejar."}
+                    </p>
+                    <p className="text-[11px] text-gray-500">
+                      Para realizar la conciliación matemática ítem por ítem, la factura debe estar vinculada a una Orden de Compra (OC) o a un Remito de Recepción en muelle.
+                    </p>
                   </div>
                 )}
               </div>

@@ -35,7 +35,7 @@ from api.src.purchases.schemas import (
     RfqCreate, RfqResponseSubmit,
 )
 from api.src.inventory.models import Stock, StockLot, InventoryMovement
-from api.src.financial.models import SupplierInvoice
+from api.src.financial.models import SupplierInvoice, SupplierInvoiceItem
 from api.src.products.models import Product
 
 
@@ -939,6 +939,22 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
             created_by=data.user_id,
         )
         db.add(inv)
+        await db.flush()
+
+        for itm in data.items:
+            cant_rec = Decimal(str(itm.cantidad_recibida or 0))
+            cant_rech = Decimal(str(itm.cantidad_rechazada or 0))
+            cant_fac = (cant_rec + cant_rech) if (cant_rec + cant_rech) > 0 else (Decimal(str(itm.cantidad_ordenada or 1)))
+            cost = itm.costo_unitario or Decimal("0")
+            db.add(SupplierInvoiceItem(
+                invoice_id=inv.id,
+                product_id=itm.product_id,
+                variant_id=itm.variant_id,
+                cantidad=cant_fac,
+                precio_unitario=cost,
+                total=(cost * cant_fac).quantize(Decimal("1")),
+                descripcion=None,
+            ))
     except Exception as e:
         logger.warning("No se pudo crear automáticamente la factura en Cuentas por Pagar: %s", e)
 
