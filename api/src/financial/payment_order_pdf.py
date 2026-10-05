@@ -91,6 +91,20 @@ def _format_gs(val) -> str:
         return "0"
 
 
+def _format_divisa(val, moneda: str = "PYG") -> str:
+    try:
+        n = float(val or 0)
+        curr = (moneda or "PYG").upper()
+        if curr == "BRL":
+            return f"{n:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        elif curr == "USD":
+            return f"{n:,.2f}"
+        else:
+            return _format_gs(n)
+    except Exception:
+        return "0"
+
+
 def _format_date(val) -> str:
     if not val:
         return "-"
@@ -187,12 +201,24 @@ def generate_payment_order_receipt_pdf(
     recibo_prov = order.get("recibo_proveedor") or "Sin registrar"
     observaciones = order.get("observaciones") or "-"
 
+    divisa_disbs = [
+        d for d in disbursements
+        if (d.get("moneda") and str(d.get("moneda")).upper() != "PYG" and float(d.get("monto") or 0) > 0)
+    ]
+    moneda_label = str(order.get("moneda") or "PYG").upper()
+    if divisa_disbs:
+        c_set = sorted(list(set(str(d.get("moneda")).upper() for d in divisa_disbs)))
+        c_desc = [f"R$ (BRL)" if c == "BRL" else f"US$ (USD)" if c == "USD" else c for c in c_set]
+        moneda_label = f"PYG + {', '.join(c_desc)}"
+    elif moneda_label != "PYG":
+        moneda_label = f"R$ (BRL)" if moneda_label == "BRL" else f"US$ (USD)" if moneda_label == "USD" else moneda_label
+
     info_data = [
         [
             Paragraph(f"<b>BENEFICIARIO / PROVEEDOR:</b><br/>{prov_nombre}", styles["CellText"]),
             Paragraph(f"<b>RUC / DOCUMENTO:</b><br/>{prov_ruc}", styles["CellText"]),
             Paragraph(f"<b>RECIBO OFICIAL PROV.:</b><br/>{recibo_prov}", styles["CellText"]),
-            Paragraph(f"<b>MONEDA:</b><br/>{order.get('moneda', 'PYG')}", styles["CellText"]),
+            Paragraph(f"<b>MONEDA DE PAGO:</b><br/>{moneda_label}", styles["CellText"]),
         ]
     ]
     t_info = Table(info_data, colWidths=[65 * mm, 40 * mm, 45 * mm, 30 * mm])
@@ -297,6 +323,12 @@ def generate_payment_order_receipt_pdf(
             m_pyg = Decimal(str(d.get("monto_pyg") or d.get("monto") or 0))
             total_desembolsado += m_pyg
 
+            m_orig = Decimal(str(d.get("monto") or 0))
+            d_moneda = (str(d.get("moneda") or "PYG")).upper()
+            tc = Decimal(str(d.get("tipo_cambio") or 1))
+            is_foreign = d_moneda != "PYG" and m_orig > Decimal("0")
+            curr_sym = "R$" if d_moneda == "BRL" else "US$" if d_moneda == "USD" else d_moneda
+
             fp_label = fp.replace("_", " ").title()
             if fp == "boveda":
                 fp_label = "Efectivo Bóveda Central"
@@ -336,12 +368,24 @@ def generate_payment_order_receipt_pdf(
                 origen = "-"
                 plazo = "-"
 
+            if is_foreign:
+                fp_label += f" ({curr_sym})"
+                detalle += f"<br/><b>Divisa:</b> <font color='#166534'><b>{curr_sym} {_format_divisa(m_orig, d_moneda)}</b></font> (Cotiz: ₲ {_format_gs(tc)})"
+
+            importe_cell = Paragraph(f"₲ {_format_gs(m_pyg)}", styles["CellRightBold"])
+            if is_foreign:
+                importe_cell = Paragraph(
+                    f"₲ {_format_gs(m_pyg)}<br/>"
+                    f"<font size=6.5 color='#15803D'><b>({curr_sym} {_format_divisa(m_orig, d_moneda)})</b></font>",
+                    styles["CellRightBold"]
+                )
+
             des_rows.append([
                 Paragraph(fp_label, styles["CellBold"]),
                 Paragraph(detalle, styles["CellText"]),
                 Paragraph(origen, styles["CellText"]),
                 Paragraph(plazo, styles["CellCenter"]),
-                Paragraph(f"₲ {_format_gs(m_pyg)}", styles["CellRightBold"]),
+                importe_cell,
             ])
 
         des_rows.append([
@@ -375,13 +419,26 @@ def generate_payment_order_receipt_pdf(
         diff_tipo = "SOBRECOSTO" if diff_cambio > 0 else "GANANCIA"
         diff_line = f"<br/><b>DIF. CAMBIO ({diff_tipo}):</b> ₲ {diff_prefix}{_format_gs(diff_cambio)}"
 
+    divisa_summary_lines = ""
+    if divisa_disbs:
+        for d in divisa_disbs:
+            d_curr = str(d.get("moneda") or "").upper()
+            d_sym = "R$" if d_curr == "BRL" else "US$" if d_curr == "USD" else d_curr
+            d_amt = Decimal(str(d.get("monto") or 0))
+            d_tc = Decimal(str(d.get("tipo_cambio") or 1))
+            divisa_summary_lines += (
+                f"<br/><font size=8 color='#15803D'><b>DESEMBOLSO EN DIVISA:</b> "
+                f"<b>{d_sym} {_format_divisa(d_amt, d_curr)}</b> (TC: ₲ {_format_gs(d_tc)})</font>"
+            )
+
     resumen_data = [
         [
             Paragraph(f"<b>OBSERVACIONES:</b><br/>{observaciones}", styles["CellText"]),
             Paragraph(
                 f"<b>TOTAL FACTURAS:</b> ₲ {_format_gs(order.get('monto_total', total_aplicado))}<br/>"
                 f"<b>RETENCIONES:</b> ₲ {_format_gs(order.get('monto_retenido', total_retenciones))}"
-                f"{diff_line}<br/>"
+                f"{diff_line}"
+                f"{divisa_summary_lines}<br/>"
                 f"<b><font size=9 color='#0F172A'>TOTAL NETO A PAGAR: ₲ {_format_gs(order.get('monto_neto', total_aplicado - total_retenciones))}</font></b>",
                 styles["CellRight"]
             )
@@ -491,14 +548,20 @@ def generate_supplier_payments_report_pdf(
         total_general += m_neto
 
         fp_resumen = o.get("formas_pago_resumen") or "-"
+        divisa_sub = ""
+        if o.get("moneda_desembolso") and str(o.get("moneda_desembolso")).upper() != "PYG" and o.get("monto_desembolso_moneda"):
+            curr = str(o.get("moneda_desembolso")).upper()
+            sym = "R$" if curr == "BRL" else "US$" if curr == "USD" else curr
+            divisa_sub = f"<br/><font size=6 color='#15803D'><b>({sym} {_format_divisa(o.get('monto_desembolso_moneda'), curr)})</b></font>"
+
         table_rows.append([
             Paragraph(str(o.get("numero_orden")), styles["CellBold"]),
             Paragraph(_format_date(o.get("fecha_pago") or o.get("fecha_emision")), styles["CellCenter"]),
             Paragraph(str(o.get("supplier_nombre") or "-")[:28], styles["CellText"]),
             Paragraph(str(o.get("total_facturas", 1)), styles["CellCenter"]),
-            Paragraph(fp_resumen[:35], styles["CellText"]),
+            Paragraph(fp_resumen[:45], styles["CellText"]),
             Paragraph(str(o.get("estado", "")).upper(), styles["CellCenter"]),
-            Paragraph(f"₲ {_format_gs(m_neto)}", styles["CellRightBold"]),
+            Paragraph(f"₲ {_format_gs(m_neto)}{divisa_sub}", styles["CellRightBold"]),
         ])
 
     table_rows.append([

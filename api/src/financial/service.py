@@ -4232,12 +4232,16 @@ async def list_supplier_payment_orders(
     orders_list = []
     order_ids = [r.SupplierPaymentOrder.id for r in results]
 
-    # Pre-cargar resumen de formas de pago
+    # Pre-cargar resumen de formas de pago y divisas
     disb_map = {}
+    disb_currency_map = {}
     if order_ids:
         disb_q = select(
             SupplierPaymentOrderDisbursement.payment_order_id,
             SupplierPaymentOrderDisbursement.forma_pago,
+            SupplierPaymentOrderDisbursement.moneda,
+            SupplierPaymentOrderDisbursement.monto,
+            SupplierPaymentOrderDisbursement.tipo_cambio,
             SupplierPaymentOrderDisbursement.monto_pyg,
             SupplierPaymentOrderDisbursement.es_cheque_diferido
         ).where(SupplierPaymentOrderDisbursement.payment_order_id.in_(order_ids))
@@ -4246,13 +4250,35 @@ async def list_supplier_payment_orders(
             fp_label = d.forma_pago.replace("_", " ").title()
             if d.forma_pago == "cheque" and d.es_cheque_diferido:
                 fp_label = "Cheque Dif."
+
+            # Si el desembolso fue en divisa extranjera, enriquecer la etiqueta con el importe en moneda
+            if d.moneda and d.moneda != "PYG" and float(d.monto or 0) > 0:
+                simbolo = "R$" if d.moneda == "BRL" else "US$" if d.moneda == "USD" else d.moneda
+                m_val = float(d.monto)
+                m_str = f"{m_val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if d.moneda == "BRL" else f"{m_val:,.2f}"
+                fp_label = f"{fp_label} ({simbolo} {m_str})"
+
+                curr_info = disb_currency_map.setdefault(d.payment_order_id, {
+                    "moneda": d.moneda,
+                    "monto": Decimal("0"),
+                    "tipo_cambio": d.tipo_cambio or Decimal("1")
+                })
+                curr_info["monto"] += Decimal(str(d.monto or 0))
+                if d.tipo_cambio:
+                    curr_info["tipo_cambio"] = d.tipo_cambio
+
             disb_map.setdefault(d.payment_order_id, []).append(fp_label)
 
     for r in results:
         o = r.SupplierPaymentOrder
-        fps = list(set(disb_map.get(o.id, [])))
+        fps = list(dict.fromkeys(disb_map.get(o.id, [])))
         if forma_pago and forma_pago not in [f.lower().replace(" ", "_") for f in fps]:
             continue
+
+        curr_info = disb_currency_map.get(o.id)
+        moneda_desembolso = curr_info["moneda"] if curr_info else (o.moneda if o.moneda != "PYG" else None)
+        monto_desembolso_moneda = float(curr_info["monto"]) if curr_info else None
+        tipo_cambio_desembolso = float(curr_info["tipo_cambio"]) if curr_info else None
 
         orders_list.append({
             "id": str(o.id),
@@ -4275,6 +4301,9 @@ async def list_supplier_payment_orders(
             "updated_at": o.updated_at.isoformat() if o.updated_at else None,
             "total_facturas": r.total_facturas or 0,
             "formas_pago_resumen": ", ".join(fps) if fps else ("Pendiente de pago" if o.estado == "registrado" else "-"),
+            "moneda_desembolso": moneda_desembolso,
+            "monto_desembolso_moneda": monto_desembolso_moneda,
+            "tipo_cambio_desembolso": tipo_cambio_desembolso,
         })
 
     return {"items": orders_list, "total": len(orders_list)}
@@ -4376,7 +4405,12 @@ async def get_supplier_payment_order_detail(
         for d in disb_rows
     ]
 
-    fps = list(set([d["forma_pago"].replace("_", " ").title() for d in disbursements_data]))
+    fps = list(dict.fromkeys([d["forma_pago"].replace("_", " ").title() for d in disbursements_data]))
+
+    foreign_disbs = [d for d in disbursements_data if d.get("moneda") and d.get("moneda") != "PYG" and float(d.get("monto") or 0) > 0]
+    moneda_desembolso = foreign_disbs[0]["moneda"] if foreign_disbs else (o.moneda if o.moneda != "PYG" else None)
+    monto_desembolso_moneda = sum(float(d.get("monto") or 0) for d in foreign_disbs) if foreign_disbs else None
+    tipo_cambio_desembolso = foreign_disbs[0]["tipo_cambio"] if foreign_disbs else None
 
     return {
         "id": str(o.id),
@@ -4399,6 +4433,9 @@ async def get_supplier_payment_order_detail(
         "updated_at": o.updated_at.isoformat() if o.updated_at else None,
         "total_facturas": len(allocations_data),
         "formas_pago_resumen": ", ".join(fps) if fps else ("Pendiente de pago" if o.estado == "registrado" else "-"),
+        "moneda_desembolso": moneda_desembolso,
+        "monto_desembolso_moneda": monto_desembolso_moneda,
+        "tipo_cambio_desembolso": tipo_cambio_desembolso,
         "allocations": allocations_data,
         "disbursements": disbursements_data,
     }

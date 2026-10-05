@@ -1179,6 +1179,9 @@ export interface SupplierPaymentOrder {
   updated_at?: string;
   total_facturas?: number;
   formas_pago_resumen?: string;
+  moneda_desembolso?: string | null;
+  monto_desembolso_moneda?: number | null;
+  tipo_cambio_desembolso?: number | null;
   allocations?: PaymentOrderAllocation[];
   disbursements?: PaymentOrderDisbursement[];
 }

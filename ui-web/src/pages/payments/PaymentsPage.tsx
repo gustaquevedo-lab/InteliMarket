@@ -15,7 +15,7 @@ import {
 import { api, SupplierPaymentOrder } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
-import { formatPYG, formatDate, formatCurrency } from "../../utils/format"
+import { formatPYG, formatDate, formatCurrency, formatBRL, formatUSD } from "../../utils/format"
 
 type ApTab = "facturas" | "facturas_pagadas" | "ordenes_pago" | "aging" | "lotes"
 
@@ -1324,8 +1324,24 @@ export default function PaymentsPage() {
                               {order.formas_pago_resumen || "-"}
                             </span>
                           </td>
-                          <td className="p-3.5 text-right font-mono font-black text-rose-600 dark:text-rose-400 text-sm">
-                            {formatPYG(order.monto_neto)}
+                          <td className="p-3.5 text-right font-mono">
+                            <div className="font-black text-rose-600 dark:text-rose-400 text-sm">
+                              {formatPYG(order.monto_neto)}
+                            </div>
+                            {order.moneda_desembolso && order.moneda_desembolso !== "PYG" && Number(order.monto_desembolso_moneda || 0) > 0 && (
+                              <div className="flex items-center justify-end gap-1 mt-0.5">
+                                <span
+                                  className="text-[10px] font-extrabold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-1.5 py-0.5 rounded border border-emerald-500/20"
+                                  title={`Cotización aplicada: ₲ ${formatPYG(order.tipo_cambio_desembolso || 1).replace('₲ ', '')}`}
+                                >
+                                  {order.moneda_desembolso === "BRL"
+                                    ? formatBRL(order.monto_desembolso_moneda)
+                                    : order.moneda_desembolso === "USD"
+                                    ? formatUSD(order.monto_desembolso_moneda)
+                                    : `${order.moneda_desembolso} ${order.monto_desembolso_moneda}`}
+                                </span>
+                              </div>
+                            )}
                           </td>
                           <td className="p-3.5 text-center">
                             <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase border ${
