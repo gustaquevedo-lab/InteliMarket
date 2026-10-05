@@ -36,7 +36,7 @@ async def perform_3way_match(
     user_id: Optional[str] = None
 ) -> dict[str, Any]:
     """Ejecuta la conciliación triple matemática (3-Way Match) para una factura dada."""
-    inv_uuid = uuid.UUID(invoice_id)
+    inv_uuid = uuid.UUID(str(invoice_id))
     
     # 1. Cargar factura e ítems
     inv_q = select(SupplierInvoice).options(
