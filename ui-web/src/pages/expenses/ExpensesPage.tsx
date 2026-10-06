@@ -6,7 +6,7 @@ import {
   Paperclip, ClipboardCheck, Scale, Filter, Eye, RefreshCw, ShieldAlert, ArrowRight,
   SlidersHorizontal, Check, AlertCircle, FileText, Download, Calendar, Tag,
   FileSpreadsheet, Printer, PieChart, BookOpen, FileCheck, ScrollText, CheckCheck,
-  Pencil, Package, RotateCcw, X, ChevronDown, UserCheck
+  Pencil, Package, RotateCcw, X, ChevronDown, UserCheck, Trash2, Settings, Edit3
 } from "lucide-react"
 import {
   api, API_ORIGIN, type Expense, type ExpenseCategory, type CostCenter,
@@ -105,6 +105,21 @@ export default function ExpensesPage() {
     caja_boveda_id: "",
     bank_account_id: "",
   })
+
+  // Edición y Eliminación de Fondos Fijos
+  const [systemUsers, setSystemUsers] = useState<any[]>([])
+  const [editingFund, setEditingFund] = useState<PettyCashFund | null>(null)
+  const [editFundForm, setEditFundForm] = useState({
+    nombre: "",
+    monto_autorizado: "",
+    custodio_id: "",
+    cost_center_id: "",
+    monto_maximo_por_gasto: "",
+    activo: true,
+  })
+  const [savingEditFund, setSavingEditFund] = useState(false)
+  const [fundToDelete, setFundToDelete] = useState<PettyCashFund | null>(null)
+  const [deletingFund, setDeletingFund] = useState(false)
 
   // Rendiciones de Cuentas & Reposición
   const [rendiciones, setRendiciones] = useState<PettyCashRendicion[]>([])
@@ -626,7 +641,7 @@ export default function ExpensesPage() {
   const fetchAll = async () => {
     setLoading(true)
     try {
-      const [c, cc, f, ac, pc, bAccs, cRegs, rends, invs, sups, staff, sAdv] = await Promise.all([
+      const [c, cc, f, ac, pc, bAccs, cRegs, rends, invs, sups, staff, sAdv, uList] = await Promise.all([
         api.expenses.categories.list().catch(() => []),
         api.expenses.costCenters.list().catch(() => []),
         api.expenses.funds.list().catch(() => []),
@@ -639,10 +654,14 @@ export default function ExpensesPage() {
         api.purchases.listSuppliers().catch(() => []),
         api.expenses.staffCandidates().catch(() => []),
         api.expenses.sueldokAdvances().catch(() => []),
+        api.auth.users.list().catch(() => []),
       ])
       setCategories(c)
       setCostCenters(cc)
       setFunds(f)
+      if (Array.isArray(uList)) {
+        setSystemUsers(uList.filter((u: any) => u.activo !== false))
+      }
       setPendingCounts(Array.isArray(pc) ? [...pc].sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()) : [])
       setBankAccounts(bAccs.filter((b: any) => b.activo))
       setCashRegisters(cRegs)
@@ -1351,6 +1370,68 @@ export default function ExpensesPage() {
       fetchAll()
     } catch (e: any) {
       toast.error("Error al crear fondo", e.message)
+    }
+  }
+
+  const handleOpenEditFund = (f: PettyCashFund) => {
+    setEditingFund(f)
+    setEditFundForm({
+      nombre: f.nombre || "",
+      monto_autorizado: String(f.monto_autorizado || 0),
+      custodio_id: f.custodio_id || "",
+      cost_center_id: f.cost_center_id || "",
+      monto_maximo_por_gasto: f.monto_maximo_por_gasto ? String(f.monto_maximo_por_gasto) : "",
+      activo: f.activo !== false,
+    })
+  }
+
+  const handleSaveEditFund = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingFund) return
+    if (!editFundForm.nombre.trim()) {
+      toast.warning("Validación", "El nombre del fondo es obligatorio")
+      return
+    }
+    const aut = Number(editFundForm.monto_autorizado)
+    if (isNaN(aut) || aut <= 0) {
+      toast.warning("Validación", "El monto autorizado debe ser mayor a 0")
+      return
+    }
+    setSavingEditFund(true)
+    try {
+      await api.expenses.funds.update(editingFund.id, {
+        nombre: editFundForm.nombre.trim(),
+        monto_autorizado: aut,
+        custodio_id: editFundForm.custodio_id || undefined,
+        cost_center_id: editFundForm.cost_center_id || undefined,
+        monto_maximo_por_gasto: editFundForm.monto_maximo_por_gasto ? Number(editFundForm.monto_maximo_por_gasto) : undefined,
+        activo: editFundForm.activo,
+      })
+      toast.success("Fondo actualizado", "Los parámetros del fondo fijo fueron guardados correctamente.")
+      setEditingFund(null)
+      const updatedFunds = await api.expenses.funds.list().catch(() => [])
+      setFunds(updatedFunds)
+    } catch (err: any) {
+      toast.error("Error al actualizar fondo", err.message || "No se pudo actualizar el fondo")
+    } finally {
+      setSavingEditFund(false)
+    }
+  }
+
+  const handleDeleteFund = async () => {
+    if (!fundToDelete) return
+    setDeletingFund(true)
+    try {
+      await api.expenses.funds.delete(fundToDelete.id)
+      toast.success("Fondo eliminado", `El fondo '${fundToDelete.nombre}' ha sido eliminado exitosamente.`)
+      setFundToDelete(null)
+      setEditingFund(null)
+      const updatedFunds = await api.expenses.funds.list().catch(() => [])
+      setFunds(updatedFunds)
+    } catch (err: any) {
+      toast.error("No se pudo eliminar el fondo", err.message || "Si el fondo tiene comprobantes o rendiciones históricas, desactívelo en lugar de eliminarlo.")
+    } finally {
+      setDeletingFund(false)
     }
   }
 
@@ -2145,11 +2226,21 @@ export default function ExpensesPage() {
                               </p>
                             </div>
                           </div>
-                          {!f.activo && (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500">
-                              Inactivo
-                            </span>
-                          )}
+                          <div className="flex items-center gap-1">
+                            {!f.activo && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500">
+                                Inactivo
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditFund(f)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-300 transition"
+                              title="Editar parámetros del fondo (monto autorizado, custodio, etc.)"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
 
                         {/* Etiquetas de Sector y Límite */}
@@ -5191,13 +5282,18 @@ export default function ExpensesPage() {
 
                 <div>
                   <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Custodio Responsable (Encargado)</label>
-                  <input
-                    type="text"
-                    placeholder={user?.nombre || "Encargado de sector"}
+                  <select
                     className="input-field w-full text-xs"
                     value={fundForm.custodio_id}
                     onChange={e => setFundForm({ ...fundForm, custodio_id: e.target.value })}
-                  />
+                  >
+                    <option value="">Seleccionar custodio responsable...</option>
+                    {systemUsers.map((u: any) => (
+                      <option key={u.id} value={u.id}>
+                        {u.nombre} ({u.email || u.rol})
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
@@ -5285,6 +5381,216 @@ export default function ExpensesPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: EDITAR FONDO FIJO */}
+      {editingFund && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 space-y-4 my-8">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <PiggyBank className="w-5 h-5 text-indigo-600" /> Editar Fondo Fijo
+                </h3>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Modificar límite autorizado, custodio responsable o estado del fondo
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingFund(null)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditFund} className="space-y-4 text-xs">
+              <div>
+                <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Nombre de la Caja / Fondo *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="ej: Fondo Fijo - Administración"
+                  className="input-field w-full text-xs"
+                  value={editFundForm.nombre}
+                  onChange={e => setEditFundForm({ ...editFundForm, nombre: e.target.value })}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Monto Autorizado / Límite (PYG) *</label>
+                  <CurrencyInput
+                    required
+                    currency="PYG"
+                    placeholder="ej: 5.000.000"
+                    className="input-field w-full text-xs font-mono font-bold text-right"
+                    value={editFundForm.monto_autorizado}
+                    onChangeValue={(num, formatted) => setEditFundForm({ ...editFundForm, monto_autorizado: String(num) })}
+                  />
+                  <span className="text-[10px] text-gray-400 mt-0.5 block">
+                    Saldo real en gaveta: {formatPYG(editingFund.saldo_actual)}
+                  </span>
+                </div>
+
+                <div>
+                  <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Límite Máximo por Gasto (PYG)</label>
+                  <CurrencyInput
+                    currency="PYG"
+                    placeholder="ej: 500.000"
+                    className="input-field w-full text-xs font-mono text-right"
+                    value={editFundForm.monto_maximo_por_gasto}
+                    onChangeValue={(num, formatted) => setEditFundForm({ ...editFundForm, monto_maximo_por_gasto: String(num) })}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Centro de Costo / Sector Asignado</label>
+                  <select
+                    className="input-field w-full text-xs"
+                    value={editFundForm.cost_center_id}
+                    onChange={e => setEditFundForm({ ...editFundForm, cost_center_id: e.target.value })}
+                  >
+                    <option value="">Sin sector específico (Global)</option>
+                    {costCenters.map(cc => (
+                      <option key={cc.id} value={cc.id}>{cc.nombre}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Custodio Responsable (Encargado)</label>
+                  <select
+                    className="input-field w-full text-xs"
+                    value={editFundForm.custodio_id}
+                    onChange={e => setEditFundForm({ ...editFundForm, custodio_id: e.target.value })}
+                  >
+                    <option value="">Sin custodio asignado</option>
+                    {systemUsers.map((u: any) => (
+                      <option key={u.id} value={u.id}>
+                        {u.nombre} ({u.email || u.rol})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                <div>
+                  <span className="font-bold text-slate-800 dark:text-slate-200 text-xs block">
+                    Estado del Fondo
+                  </span>
+                  <span className="text-[10px] text-slate-500">
+                    Los fondos inactivos no aparecen en los selectores de pagos ni nuevas rendiciones.
+                  </span>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="sr-only peer"
+                    checked={editFundForm.activo}
+                    onChange={e => setEditFundForm({ ...editFundForm, activo: e.target.checked })}
+                  />
+                  <div className="w-9 h-5 bg-slate-300 peer-focus:outline-hidden rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                </label>
+              </div>
+
+              <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFundToDelete(editingFund)
+                  }}
+                  className="px-3 py-2 rounded-xl text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-1.5 transition"
+                  title="Eliminar este fondo si no tiene historial activo"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Eliminar Fondo
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingFund(null)}
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingEditFund}
+                    className="btn-primary text-xs px-4 py-2 flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                  >
+                    {savingEditFund ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Guardando...
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-3.5 h-3.5" /> Guardar Cambios
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CONFIRMAR ELIMINAR FONDO */}
+      {fundToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
+              <h3 className="text-base font-bold text-rose-600 flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5" /> Eliminar Fondo Fijo
+              </h3>
+              <button
+                type="button"
+                onClick={() => setFundToDelete(null)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 text-xs text-rose-800 dark:text-rose-200 space-y-2">
+              <p className="font-bold">¿Seguro que deseás eliminar este fondo?</p>
+              <p>Fondo: <span className="font-extrabold">{fundToDelete.nombre}</span></p>
+              <p>Límite Autorizado: <span className="font-mono font-bold">{formatPYG(fundToDelete.monto_autorizado)}</span></p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 pt-1">
+                ⚠️ Si el fondo posee rendiciones o gastos históricos, el sistema impedirá el borrado para preservar la trazabilidad fiscal y sugerirá desactivarlo.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-700">
+              <button
+                type="button"
+                onClick={() => setFundToDelete(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={deletingFund}
+                onClick={handleDeleteFund}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+              >
+                {deletingFund ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Eliminando...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" /> Confirmar Eliminación
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

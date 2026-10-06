@@ -4197,6 +4197,19 @@ async def _execute_disbursements_internal(
                 estado="conciliado",
             ))
 
+            # Si la factura correspondía a un comprobante de gasto (insumo/servicio), actualizar Expense
+            if inv.estado == "pagada":
+                from api.src.petty_cash.models import Expense
+                exp_res = await db.execute(
+                    select(Expense).where(Expense.supplier_invoice_id == inv.id, Expense.anulado == False)
+                )
+                for exp_item in exp_res.scalars().all():
+                    exp_item.fecha_pago = payload.fecha_pago or _today()
+                    exp_item.pagado_por = uuid.UUID(user_id) if user_id else None
+                    exp_item.pagado_at = datetime.now(timezone.utc)
+                    exp_item.estado = "liquidado"
+                    exp_item.forma_pago_resumen = f"OP #{order.numero_orden}"
+
     # 4.1 Procesar Facturas Legales si vienen en la liquidación
     if payload.legal_invoices and len(payload.legal_invoices) > 0:
         await _process_payment_order_legal_invoices(

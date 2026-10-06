@@ -220,10 +220,46 @@ async def update_fund(db: AsyncSession, fund_id: str, data: PettyCashFundUpdate)
         return None
     for field, value in data.model_dump(exclude_unset=True).items():
         if value is not None:
+            if field in ("custodio_id", "cost_center_id"):
+                if value and str(value).strip():
+                    try:
+                        value = uuid.UUID(str(value).strip())
+                    except ValueError:
+                        value = None
+                else:
+                    value = None
+            elif field in ("monto_autorizado", "monto_maximo_por_gasto"):
+                value = Decimal(str(value))
             setattr(fund, field, value)
     await db.commit()
     await db.refresh(fund)
     return fund
+
+
+async def delete_fund(db: AsyncSession, fund_id: str) -> bool:
+    fund = await get_fund(db, fund_id)
+    if not fund:
+        return False
+    # Verificar si tiene rendiciones historicas
+    rend_count = await db.scalar(
+        select(sa_func.count(PettyCashRendicion.id)).where(PettyCashRendicion.fund_id == fund.id)
+    )
+    if rend_count and rend_count > 0:
+        raise ValueError("No se puede eliminar un fondo con rendiciones históricas registradas. Desactívelo en su lugar.")
+
+    # Verificar si tiene gastos
+    exp_count = await db.scalar(
+        select(sa_func.count(Expense.id)).where(Expense.fund_id == fund.id)
+    )
+    if exp_count and exp_count > 0:
+        raise ValueError("No se puede eliminar un fondo con comprobantes o gastos asociados. Reasigne los gastos o desactive el fondo.")
+
+    from sqlalchemy import delete as sa_delete
+    await db.execute(sa_delete(PettyCashFundMovement).where(PettyCashFundMovement.fund_id == fund.id))
+    await db.delete(fund)
+    await db.commit()
+    return True
+
 
 
 async def get_fund_movements(db: AsyncSession, fund_id: str, limit: int = 50) -> list[PettyCashFundMovement]:
@@ -646,6 +682,49 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
                     exp.timbrado = target_inv.timbrado
 
         exp.es_pago_proveedor = True
+    elif exp.supplier_id and not exp.es_anticipo_sueldo and not exp.supplier_invoice_id:
+        from api.src.financial.models import SupplierInvoice
+        num_clean = (exp.numero_factura or f"CP-{str(exp.id)[:8].upper()}").strip()
+        timb_clean = (exp.timbrado or "").strip() or None
+
+        check_q = select(SupplierInvoice).where(
+            SupplierInvoice.company_id == cid,
+            SupplierInvoice.supplier_id == exp.supplier_id,
+            SupplierInvoice.numero_factura == num_clean
+        )
+        if timb_clean:
+            check_q = check_q.where(SupplierInvoice.timbrado == timb_clean)
+        existing_inv = (await db.execute(check_q)).scalar_one_or_none()
+
+        if existing_inv:
+            exp.supplier_invoice_id = existing_inv.id
+        else:
+            subtotal = (exp.gravado_10 or Decimal("0")) + (exp.gravado_5 or Decimal("0")) + (exp.exentas or Decimal("0"))
+            new_inv = SupplierInvoice(
+                company_id=cid,
+                supplier_id=exp.supplier_id,
+                numero_factura=num_clean,
+                timbrado=timb_clean,
+                fecha_emision=exp.fecha_gasto or date.today(),
+                fecha_recepcion=exp.fecha_gasto or date.today(),
+                fecha_vencimiento=exp.fecha_gasto or date.today(),
+                subtotal=subtotal if subtotal > 0 else exp.monto,
+                descuento=Decimal("0"),
+                iva_10=exp.iva_10 or Decimal("0"),
+                iva_5=exp.iva_5 or Decimal("0"),
+                total=exp.monto,
+                saldo_pendiente=exp.monto,
+                moneda="PYG",
+                tipo_cambio=Decimal("1"),
+                condicion="credito",
+                tipo_comprobante="gasto",
+                estado="aprobada",
+                concepto=f"Insumo/Gasto: {exp.descripcion}"[:300],
+                created_by=_safe_uuid(user_id),
+            )
+            db.add(new_inv)
+            await db.flush()
+            exp.supplier_invoice_id = new_inv.id
 
     await db.commit()
     await db.refresh(exp)
@@ -1072,6 +1151,24 @@ async def disburse_expense(
     exp.forma_pago_resumen = ", ".join(resumen_medios) if resumen_medios else "PAGADO"
     if data.notas:
         exp.notas = (exp.notas or "") + ("\n" if exp.notas else "") + data.notas
+
+    # Si tenía cuenta por pagar vinculada, liquidarla en el acto
+    if exp.supplier_invoice_id:
+        from api.src.financial.models import SupplierInvoice, SupplierInvoicePayment
+        inv_res = await db.execute(select(SupplierInvoice).where(SupplierInvoice.id == exp.supplier_invoice_id))
+        inv = inv_res.scalar_one_or_none()
+        if inv and inv.saldo_pendiente > Decimal("0"):
+            inv.saldo_pendiente = Decimal("0")
+            inv.estado = "pagada"
+            db.add(SupplierInvoicePayment(
+                invoice_id=inv.id,
+                payment_method="gasto_caja_chica",
+                monto=inv.total,
+                moneda=inv.moneda or "PYG",
+                fecha_pago=fecha_efectiva_pago,
+                referencia=f"Gasto {exp.numero_factura or exp.id}",
+                estado="conciliado",
+            ))
 
     await db.commit()
     await db.refresh(exp)
