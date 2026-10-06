@@ -241,6 +241,31 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             exp_descuento += t["descuento_monto"]
         expected_sale_total = exp_subtotal - exp_descuento
 
+        # ── PROTECCIÓN IDEMPOTENCIA: VENTAS OFFLINE RECUPERADAS PREVIAMENTE (CONTINGENCIA CAJA 5) ──
+        # Si la venta offline que el POS intenta sincronizar ya fue recuperada y registrada previamente
+        # en el servidor central (ej. contingencias de red), evitamos duplicar la factura, descontar stock doble
+        # y rechazar por línea de crédito, retornando la venta ya confirmada.
+        if data.customer_id and expected_sale_total:
+            rec_stmt = (
+                select(Sale)
+                .where(
+                    Sale.company_id == data.company_id,
+                    Sale.customer_id == data.customer_id,
+                    Sale.total == expected_sale_total,
+                    Sale.condicion == data.condicion,
+                    Sale.estado.in_(["confirmado", "completada", "completado"]),
+                    Sale.observaciones.ilike("%recuperada de Caja 5%"),
+                )
+            )
+            rec_sale = (await db.execute(rec_stmt)).scalars().first()
+            if rec_sale:
+                logger.info(
+                    "Venta offline ya registrada previamente como ticket %s (id=%s, total=%s). Retornando venta existente.",
+                    rec_sale.numero, rec_sale.id, rec_sale.total
+                )
+                rec_sale._is_existing = True
+                return rec_sale
+
         has_electronic_payment = any(
             (p.forma_pago or "").upper().replace("_", " ") in (
                 "TARJETA DEBITO", "TARJETA CREDITO",
