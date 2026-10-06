@@ -1,6 +1,6 @@
 """Financial service — AP, banking, cash flow, budgets, payment runs, dashboards"""
 
-from sqlalchemy import select, func, and_, or_, text, case
+from sqlalchemy import select, func, and_, or_, text, case, delete
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone, date, timedelta
@@ -29,7 +29,7 @@ from api.src.financial.schemas import (
     PaymentRunCreate,
     CashFlowAlertConfig,
     SupplierCreditNoteCreate, SupplierCreditNoteApply,
-    SupplierPaymentOrderCreate, SupplierPaymentOrderDisburse,
+    SupplierPaymentOrderCreate, SupplierPaymentOrderDisburse, SupplierPaymentOrderUpdate,
     PaymentOrderDisbursementCreate,
     MultiSupplierPaymentBatchCreate,
     SettleValesAndPayRequest,
@@ -3398,6 +3398,8 @@ async def create_supplier_payment_order(
     monto_retenido = Decimal("0")
     allocations_to_create = []
 
+    auto_redondeo_exceso = Decimal("0")
+
     for alloc_in in data.allocations:
         inv = invoices_by_id[alloc_in.invoice_id]
         if inv.estado in ("pagada", "cancelada"):
@@ -3430,10 +3432,16 @@ async def create_supplier_payment_order(
         total_amortizar = aplicado
 
         if total_amortizar > inv.saldo_pendiente:
-            raise HTTPException(
-                status_code=400,
-                detail=f"El monto a amortizar (₲ {total_amortizar:,.0f}) supera el saldo pendiente (₲ {inv.saldo_pendiente:,.0f}) de la factura {inv.numero_factura}."
-            )
+            diff_exceso = total_amortizar - inv.saldo_pendiente
+            if diff_exceso <= Decimal("5000") and Decimal(str(getattr(data, "diferencia_redondeo", 0) or 0)) == Decimal("0"):
+                auto_redondeo_exceso += diff_exceso
+                total_amortizar = inv.saldo_pendiente
+                aplicado = inv.saldo_pendiente
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"El monto a amortizar (₲ {total_amortizar:,.0f}) supera el saldo pendiente (₲ {inv.saldo_pendiente:,.0f}) de la factura {inv.numero_factura}."
+                )
 
         saldo_anterior = inv.saldo_pendiente
         saldo_restante = saldo_anterior - total_amortizar
@@ -3453,7 +3461,7 @@ async def create_supplier_payment_order(
     if monto_neto < Decimal("0"):
         raise HTTPException(status_code=400, detail="El monto retenido no puede superar el monto total.")
 
-    diff_redondeo = Decimal(str(getattr(data, "diferencia_redondeo", 0) or 0))
+    diff_redondeo = Decimal(str(getattr(data, "diferencia_redondeo", 0) or 0)) + auto_redondeo_exceso
     if abs(diff_redondeo) > Decimal("5000"):
         raise HTTPException(
             status_code=400,
@@ -4395,7 +4403,12 @@ async def get_supplier_payment_order_detail(
             SupplierPaymentOrderDisbursement,
             BankAccount.banco.label("banco_nombre"),
             PettyCashFund.nombre.label("fondo_nombre"),
-            SupplierCreditNote.numero.label("numero_nc")
+            SupplierCreditNote.numero.label("numero_nc"),
+            SupplierCreditNote.timbrado.label("timbrado_nc"),
+            SupplierCreditNote.fecha.label("fecha_nc"),
+            SupplierCreditNote.motivo.label("motivo_nc"),
+            SupplierCreditNote.monto.label("monto_total_nc"),
+            SupplierCreditNote.numero_factura_origen.label("factura_origen_nc")
         )
         .join(BankAccount, BankAccount.id == SupplierPaymentOrderDisbursement.bank_account_id, isouter=True)
         .join(PettyCashFund, PettyCashFund.id == SupplierPaymentOrderDisbursement.petty_cash_fund_id, isouter=True)
@@ -4409,6 +4422,11 @@ async def get_supplier_payment_order_detail(
         banco_nom = getattr(d, "banco_nombre", None) or getattr(disb_obj, "banco_cheque", None)
         fondo_nom = getattr(d, "fondo_nombre", None)
         num_nc = getattr(d, "numero_nc", None)
+        timbrado_nc = getattr(d, "timbrado_nc", None)
+        fecha_nc = getattr(d, "fecha_nc", None)
+        motivo_nc = getattr(d, "motivo_nc", None)
+        monto_total_nc = getattr(d, "monto_total_nc", None)
+        factura_origen_nc = getattr(d, "factura_origen_nc", None)
         fech_ch_em = getattr(disb_obj, "fecha_cheque_emision", None)
         fech_ch_vc = getattr(disb_obj, "fecha_cheque_vencimiento", None)
         c_at = getattr(disb_obj, "created_at", None)
@@ -4434,6 +4452,11 @@ async def get_supplier_payment_order_detail(
             "fondo_nombre": fondo_nom,
             "credit_note_id": str(disb_obj.credit_note_id) if disb_obj.credit_note_id else None,
             "numero_nc": num_nc,
+            "timbrado_nc": timbrado_nc,
+            "fecha_nc": fecha_nc.isoformat() if fecha_nc else None,
+            "motivo_nc": motivo_nc,
+            "monto_total_nc": float(monto_total_nc) if monto_total_nc is not None else None,
+            "factura_origen_nc": factura_origen_nc,
             "comprobante_url": disb_obj.comprobante_url,
             "observaciones": disb_obj.observaciones,
             "created_at": c_at.isoformat() if c_at else None,
@@ -4445,6 +4468,20 @@ async def get_supplier_payment_order_detail(
     moneda_desembolso = foreign_disbs[0]["moneda"] if foreign_disbs else (o.moneda if o.moneda != "PYG" else None)
     monto_desembolso_moneda = sum(float(d.get("monto") or 0) for d in foreign_disbs) if foreign_disbs else None
     tipo_cambio_desembolso = foreign_disbs[0]["tipo_cambio"] if foreign_disbs else None
+
+    credit_notes_applied = [
+        {
+            "id": d["credit_note_id"],
+            "numero": d["numero_nc"] or "S/N",
+            "timbrado": d.get("timbrado_nc") or "-",
+            "fecha": d.get("fecha_nc"),
+            "motivo": d.get("motivo_nc") or "Descuento / Devolución",
+            "factura_origen": d.get("factura_origen_nc") or "-",
+            "monto_total": d.get("monto_total_nc") or d["monto_pyg"],
+            "monto_aplicado": d["monto_pyg"],
+        }
+        for d in disbursements_data if d["forma_pago"] == "nota_credito"
+    ]
 
     return {
         "id": str(o.id),
@@ -4472,7 +4509,144 @@ async def get_supplier_payment_order_detail(
         "tipo_cambio_desembolso": tipo_cambio_desembolso,
         "allocations": allocations_data,
         "disbursements": disbursements_data,
+        "credit_notes_applied": credit_notes_applied,
     }
+
+
+async def update_supplier_payment_order(
+    db: AsyncSession,
+    company_id: str,
+    order_id: str,
+    data: SupplierPaymentOrderUpdate
+) -> dict:
+    """Actualiza datos administrativos de una Orden de Pago (Recibo Oficial, Observaciones, Fechas)."""
+    cid = uuid.UUID(company_id)
+    ord_id = uuid.UUID(order_id)
+    q = select(SupplierPaymentOrder).where(SupplierPaymentOrder.id == ord_id, SupplierPaymentOrder.company_id == cid)
+    order = (await db.execute(q)).scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Orden de Pago no encontrada.")
+
+    if data.recibo_proveedor is not None:
+        order.recibo_proveedor = data.recibo_proveedor.strip() or None
+    if data.observaciones is not None:
+        order.observaciones = data.observaciones.strip() or None
+    if data.fecha_emision is not None:
+        order.fecha_emision = data.fecha_emision
+    if data.fecha_pago is not None:
+        order.fecha_pago = data.fecha_pago
+
+    await db.commit()
+    return await get_supplier_payment_order_detail(db, company_id, order_id)
+
+
+async def delete_supplier_payment_order(
+    db: AsyncSession,
+    company_id: str,
+    order_id: str,
+    user_id: str | None = None
+) -> dict:
+    """Elimina o anula una Orden de Pago revirtiendo facturas amortizadas y salidas de fondos si estaba pagada."""
+    cid = uuid.UUID(company_id)
+    ord_id = uuid.UUID(order_id)
+    q = select(SupplierPaymentOrder).where(SupplierPaymentOrder.id == ord_id, SupplierPaymentOrder.company_id == cid)
+    order = (await db.execute(q)).scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Orden de Pago no encontrada.")
+
+    num_orden = order.numero_orden
+
+    # Si estaba pagada, revertir todas las amortizaciones y desembolsos
+    if order.estado == "pagado":
+        # 1. Revertir Facturas (SupplierInvoice)
+        alloc_res = await db.execute(
+            select(SupplierPaymentOrderAllocation).where(SupplierPaymentOrderAllocation.payment_order_id == order.id)
+        )
+        for alloc in alloc_res.scalars().all():
+            inv = await db.get(SupplierInvoice, alloc.invoice_id)
+            if inv:
+                inv.saldo_pendiente = (inv.saldo_pendiente or Decimal("0")) + alloc.monto_aplicado
+                if inv.estado == "pagada":
+                    inv.estado = "pendiente"
+
+        # 2. Revertir Desembolsos
+        disb_res = await db.execute(
+            select(SupplierPaymentOrderDisbursement).where(SupplierPaymentOrderDisbursement.payment_order_id == order.id)
+        )
+        for d in disb_res.scalars().all():
+            fp = d.forma_pago
+            m_pyg = d.monto_pyg or d.monto
+            if fp == "fondo_fijo" and d.petty_cash_fund_id:
+                fund = await db.get(PettyCashFund, d.petty_cash_fund_id)
+                if fund:
+                    s_ant = fund.saldo_actual
+                    fund.saldo_actual += m_pyg
+                    db.add(PettyCashFundMovement(
+                        fund_id=fund.id,
+                        tipo="ingreso",
+                        monto=m_pyg,
+                        saldo_anterior=s_ant,
+                        saldo_nuevo=fund.saldo_actual,
+                        referencia_type="payment_order_reversal",
+                        referencia_id=order.id,
+                        observaciones=f"Reversión por anulación de OP {num_orden}",
+                        created_by=uuid.UUID(user_id) if user_id else None,
+                    ))
+            elif fp == "transferencia" and d.bank_account_id:
+                bank_acc = await db.get(BankAccount, d.bank_account_id)
+                if bank_acc:
+                    bank_acc.saldo_actual += m_pyg
+                    await db.execute(
+                        delete(BankTransaction).where(
+                            BankTransaction.bank_account_id == bank_acc.id,
+                            BankTransaction.descripcion.ilike(f"%{num_orden}%")
+                        )
+                    )
+            elif fp == "nota_credito" and d.credit_note_id:
+                nc = await db.get(SupplierCreditNote, d.credit_note_id)
+                if nc:
+                    nc.saldo_disponible = (nc.saldo_disponible or Decimal("0")) + m_pyg
+                    await db.execute(
+                        delete(SupplierCreditNoteApplication).where(
+                            SupplierCreditNoteApplication.credit_note_id == nc.id,
+                            SupplierCreditNoteApplication.observaciones.ilike(f"%{num_orden}%")
+                        )
+                    )
+            elif fp == "cheque" and d.cheque_id:
+                ch = await db.get(Cheque, d.cheque_id)
+                if ch:
+                    if f"OP {num_orden}" in (ch.concepto or "") or f"{num_orden}" in (ch.notas or ""):
+                        ch.estado = "anulado"
+                        db.add(ChequeHistorial(
+                            cheque_id=ch.id,
+                            estado_anterior="pendiente",
+                            estado_nuevo="anulado",
+                            user_id=uuid.UUID(user_id) if user_id else None,
+                            notas=f"Cheque anulado por eliminación de OP {num_orden}",
+                        ))
+            elif fp == "boveda":
+                vault_entries_res = await db.execute(
+                    select(VaultEntry).where(
+                        VaultEntry.company_id == cid,
+                        VaultEntry.observaciones.ilike(f"%{num_orden}%"),
+                        VaultEntry.estado == "pagado_proveedor"
+                    )
+                )
+                for ve in vault_entries_res.scalars().all():
+                    ve.estado = "disponible"
+                    ve.observaciones = f"Restaurado por eliminación de OP {num_orden}"
+
+    # Eliminar Allocations, Disbursements y la Orden
+    await db.execute(
+        delete(SupplierPaymentOrderAllocation).where(SupplierPaymentOrderAllocation.payment_order_id == order.id)
+    )
+    await db.execute(
+        delete(SupplierPaymentOrderDisbursement).where(SupplierPaymentOrderDisbursement.payment_order_id == order.id)
+    )
+    await db.delete(order)
+    await db.commit()
+    return {"success": True, "message": f"Orden de Pago {num_orden} eliminada correctamente y saldos actualizados."}
+
 
 
 async def get_cheques_available_for_disbursement(

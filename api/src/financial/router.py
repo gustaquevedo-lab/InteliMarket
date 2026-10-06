@@ -28,7 +28,7 @@ from api.src.financial.schemas import (
     APPaymentRejectRequest,
     CashFlowAlertConfig,
     SupplierCreditNoteCreate, SupplierCreditNoteApply,
-    SupplierPaymentOrderCreate, SupplierPaymentOrderDisburse,
+    SupplierPaymentOrderCreate, SupplierPaymentOrderDisburse, SupplierPaymentOrderUpdate,
     PaymentProposalPdfRequest,
     MultiSupplierPaymentBatchCreate,
     SettleValesAndPayRequest,
@@ -1020,6 +1020,30 @@ async def disburse_payment_order(
 ):
     return await service.disburse_supplier_payment_order(
         db, company_id, order_id, body, user_id=user_id
+    )
+
+
+@router.patch("/payment-orders/{order_id}")
+async def update_payment_order(
+    order_id: str,
+    body: SupplierPaymentOrderUpdate,
+    company_id: str = Query(),
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.update_supplier_payment_order(
+        db, company_id, order_id, body
+    )
+
+
+@router.delete("/payment-orders/{order_id}")
+async def delete_payment_order(
+    order_id: str,
+    company_id: str = Query(),
+    user_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.delete_supplier_payment_order(
+        db, company_id, order_id, user_id=user_id
     )
 
 

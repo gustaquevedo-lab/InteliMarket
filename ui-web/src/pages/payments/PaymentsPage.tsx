@@ -10,7 +10,7 @@ import {
   Building2, User, FileText, ArrowUpRight, DollarSign, Layers,
   Check, X, FileSpreadsheet, ShieldAlert, Sparkles, Info, ArrowRight,
   TrendingDown, CheckSquare, Square, Wallet, Printer, FileCheck, Globe, Apple,
-  RotateCcw, ChevronLeft, ChevronRight, CornerDownRight
+  RotateCcw, ChevronLeft, ChevronRight, CornerDownRight, Pencil, Trash2
 } from "lucide-react"
 import { api, SupplierPaymentOrder } from "../../api"
 import { useAuth } from "../../context/AuthContext"
@@ -46,6 +46,24 @@ export default function PaymentsPage() {
   const [filterOrderFormaPago, setFilterOrderFormaPago] = useState("all")
   const [filterOrderSupplier, setFilterOrderSupplier] = useState("all")
   const [exportingReportPdf, setExportingReportPdf] = useState(false)
+
+  // Acciones en Órdenes de Pago: Editar, Eliminar y Crear desde pestaña
+  const [orderToEdit, setOrderToEdit] = useState<{
+    id: string
+    numero_orden: string
+    supplier_nombre?: string
+    recibo_proveedor: string
+    fecha_emision: string
+    fecha_pago: string
+    observaciones: string
+    estado: string
+    monto_neto: number
+  } | null>(null)
+  const [savingEditOrder, setSavingEditOrder] = useState(false)
+  const [orderToDelete, setOrderToDelete] = useState<SupplierPaymentOrder | null>(null)
+  const [deletingOrder, setDeletingOrder] = useState(false)
+  const [showSelectSupplierModal, setShowSelectSupplierModal] = useState(false)
+  const [searchSupplierModal, setSearchSupplierModal] = useState("")
 
   // Selección múltiple para Órdenes de Pago y Lotes
   const [selectedInvoices, setSelectedInvoices] = useState<string[]>([])

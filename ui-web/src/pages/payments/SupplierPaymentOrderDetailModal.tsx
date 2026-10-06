@@ -1,6 +1,6 @@
 import {
   X, Download, CheckCircle2, Clock, Building2,
-  Wallet, FileText, Calendar, CreditCard, ShieldCheck, Layers, Coins
+  Wallet, FileText, Calendar, CreditCard, ShieldCheck, Layers, Coins, ReceiptText
 } from "lucide-react"
 import { api, SupplierPaymentOrder } from "../../api"
 import { formatPYG, formatDate, formatBRL, formatUSD, formatCurrency } from "../../utils/format"
@@ -25,6 +25,19 @@ export default function SupplierPaymentOrderDetailModal({
     (d: any) => d.moneda && String(d.moneda).toUpperCase() !== "PYG" && Number(d.monto || 0) > 0
   ) || []
   const hasForeign = foreignDisbs.length > 0 || (order.moneda && String(order.moneda).toUpperCase() !== "PYG")
+
+  const creditNotes = ((order as any).credit_notes_applied && (order as any).credit_notes_applied.length > 0)
+    ? (order as any).credit_notes_applied
+    : (order.disbursements || []).filter((d: any) => d.forma_pago === "nota_credito").map((d: any) => ({
+        id: d.credit_note_id,
+        numero: d.numero_nc || "S/N",
+        timbrado: d.timbrado_nc || "-",
+        fecha: d.fecha_nc,
+        motivo: d.motivo_nc || "Descuento / Devolución",
+        factura_origen: d.factura_origen_nc || "-",
+        monto_total: d.monto_total_nc || d.monto_pyg,
+        monto_aplicado: d.monto_pyg,
+      }))
 
   const handleDownloadPdf = () => {
     api.financial.paymentOrders.downloadPdf(order.id, order.numero_orden)
@@ -294,6 +307,47 @@ export default function SupplierPaymentOrderDetailModal({
               </div>
             )}
           </div>
+
+          {/* 3. NOTAS DE CRÉDITO AFECTADAS AL PAGO */}
+          {creditNotes.length > 0 && (
+            <div className="space-y-2">
+              <h3 className="text-xs font-extrabold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
+                <ReceiptText className="w-4 h-4 text-indigo-500" /> Notas de Crédito Afectadas (Compensación AP)
+              </h3>
+              <div className="rounded-2xl border border-indigo-200/60 dark:border-indigo-900/40 bg-indigo-50/20 dark:bg-indigo-950/10 overflow-hidden">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-indigo-50/60 dark:bg-indigo-900/30 text-indigo-800 dark:text-indigo-300 uppercase text-[10px] font-extrabold border-b border-indigo-200/50 dark:border-indigo-800/40">
+                    <tr>
+                      <th className="p-2.5">N° Nota de Crédito</th>
+                      <th className="p-2.5">Timbrado</th>
+                      <th className="p-2.5">Fecha</th>
+                      <th className="p-2.5">Factura Origen</th>
+                      <th className="p-2.5">Motivo / Concepto</th>
+                      <th className="p-2.5 text-right">Monto Total NC</th>
+                      <th className="p-2.5 text-right">Monto Aplicado</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-indigo-100/40 dark:divide-indigo-900/30 font-mono">
+                    {creditNotes.map((nc: any, idx: number) => (
+                      <tr key={nc.id || idx} className="hover:bg-indigo-50/40 dark:hover:bg-indigo-900/20">
+                        <td className="p-2.5 font-bold text-indigo-950 dark:text-indigo-200">
+                          {nc.numero || "S/N"}
+                        </td>
+                        <td className="p-2.5 text-slate-500">{nc.timbrado || "-"}</td>
+                        <td className="p-2.5 text-slate-500">{nc.fecha ? formatDate(nc.fecha) : "-"}</td>
+                        <td className="p-2.5 text-slate-600 dark:text-slate-400">{nc.factura_origen || "-"}</td>
+                        <td className="p-2.5 font-sans text-slate-600 dark:text-slate-400 text-[11px] max-w-[180px] truncate" title={nc.motivo}>
+                          {nc.motivo || "Descuento / Devolución"}
+                        </td>
+                        <td className="p-2.5 text-right text-slate-600 dark:text-slate-400">{formatPYG(nc.monto_total)}</td>
+                        <td className="p-2.5 text-right font-black text-indigo-600 dark:text-indigo-400">{formatPYG(nc.monto_aplicado)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {order.observaciones && (
             <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 text-xs">

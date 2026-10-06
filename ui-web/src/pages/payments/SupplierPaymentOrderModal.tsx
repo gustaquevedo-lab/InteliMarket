@@ -308,11 +308,14 @@ export default function SupplierPaymentOrderModal({
         return false
       }
       if (aplicado > saldo) {
-        toast.error(
-          "Monto excede saldo",
-          `El monto a amortizar (₲ ${formatPYG(aplicado)}) supera el saldo pendiente (₲ ${formatPYG(saldo)}) de la factura ${item.inv.numero_factura}.`
-        )
-        return false
+        const diff = Math.round(aplicado - saldo)
+        if (diff > 5000) {
+          toast.error(
+            "Monto excede saldo",
+            `El monto a amortizar (${formatPYG(aplicado)}) supera el saldo pendiente (${formatPYG(saldo)}) de la factura ${item.inv.numero_factura}.`
+          )
+          return false
+        }
       }
       if (retencion < 0) {
         toast.error("Retención inválida", `La retención no puede ser negativa en la factura ${item.inv.numero_factura}.`)
@@ -321,7 +324,7 @@ export default function SupplierPaymentOrderModal({
       if (retencion > aplicado) {
         toast.error(
           "Retención inválida",
-          `La retención (₲ ${formatPYG(retencion)}) no puede superar el monto amortizado (₲ ${formatPYG(aplicado)}) en la factura ${item.inv.numero_factura}.`
+          `La retención (${formatPYG(retencion)}) no puede superar el monto amortizado (${formatPYG(aplicado)}) en la factura ${item.inv.numero_factura}.`
         )
         return false
       }
@@ -335,10 +338,69 @@ export default function SupplierPaymentOrderModal({
       toast.error("Seleccione al menos una factura", "Debe amortizar al menos una factura.")
       return
     }
-    if (!validateInvoiceAllocations()) {
-      return
+
+    let hasAutoAdjusted = false
+    let autoAdjustDiff = 0
+    const newMap = { ...selectedInvoicesMap }
+
+    for (const [id, item] of Object.entries(selectedInvoicesMap)) {
+      const aplicado = Number(item.monto_aplicado || 0)
+      const retencion = Number(item.monto_retencion || 0)
+      const saldo = Number(item.inv.saldo_pendiente || 0)
+
+      if (aplicado <= 0) {
+        toast.error("Monto inválido", `El monto a amortizar de la factura ${item.inv.numero_factura} debe ser mayor a 0.`)
+        return
+      }
+      if (aplicado > saldo) {
+        const diff = Math.round(aplicado - saldo)
+        if (diff <= 5000) {
+          // Exceso dentro de la tolerancia de redondeo (centavos / decimales)
+          newMap[id] = { ...item, monto_aplicado: saldo }
+          hasAutoAdjusted = true
+          autoAdjustDiff += diff
+        } else {
+          toast.error(
+            "Monto excede saldo",
+            `El monto a amortizar (${formatPYG(aplicado)}) supera el saldo pendiente (${formatPYG(saldo)}) de la factura ${item.inv.numero_factura}.`
+          )
+          return
+        }
+      }
+      if (retencion < 0) {
+        toast.error("Retención inválida", `La retención no puede ser negativa en la factura ${item.inv.numero_factura}.`)
+        return
+      }
+      if (retencion > aplicado) {
+        toast.error(
+          "Retención inválida",
+          `La retención (${formatPYG(retencion)}) no puede superar el monto amortizado (${formatPYG(aplicado)}) en la factura ${item.inv.numero_factura}.`
+        )
+        return
+      }
     }
-    if (summaryFacturas.neto <= 0) {
+
+    let finalNeto = summaryFacturas.neto
+    if (hasAutoAdjusted) {
+      setSelectedInvoicesMap(newMap)
+      const newAjuste = (ajusteSigno === "+" ? ajusteMonto : 0) + autoAdjustDiff
+      setAjusteSigno("+")
+      setAjusteMonto(newAjuste)
+      toast.info(
+        "Ajuste por Redondeo Automático",
+        `Se amortizó el saldo total de la factura (${formatPYG(selectedInvoicesMap[Object.keys(selectedInvoicesMap)[0]]?.inv.saldo_pendiente || 0)}) y los ${formatPYG(autoAdjustDiff)} excedentes se asignaron a Ajuste por Redondeo (+) para completar los medios de pago.`
+      )
+      // Recalcular neto con los valores ajustados
+      let sub = 0
+      let ret = 0
+      Object.values(newMap).forEach(it => {
+        sub += Number(it.monto_aplicado || 0)
+        ret += Number(it.monto_retencion || 0)
+      })
+      finalNeto = Math.max(0, sub - ret + newAjuste)
+    }
+
+    if (finalNeto <= 0) {
       toast.error("Monto inválido", "El monto neto a pagar debe ser mayor a 0.")
       return
     }
@@ -683,9 +745,32 @@ export default function SupplierPaymentOrderModal({
                               }`}
                             />
                             {isExceeded && (
-                              <span className="text-[9px] font-bold text-rose-500 block text-right mt-0.5">
-                                Supera saldo
-                              </span>
+                              <div className="flex flex-col items-end gap-0.5 mt-0.5">
+                                <span className="text-[9px] font-bold text-rose-500 block text-right">
+                                  Supera saldo por {formatPYG(numAplicado - saldo)}
+                                </span>
+                                {numAplicado - saldo <= 5000 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const diff = Math.round(numAplicado - saldo)
+                                      setSelectedInvoicesMap(prev => ({
+                                        ...prev,
+                                        [inv.id]: { ...prev[inv.id], monto_aplicado: saldo }
+                                      }))
+                                      setAjusteSigno("+")
+                                      setAjusteMonto(prev => (ajusteSigno === "+" ? prev : 0) + diff)
+                                      toast.info(
+                                        "Ajuste aplicado",
+                                        `Se fijó la amortización en ${formatPYG(saldo)} y se asignaron ${formatPYG(diff)} como Ajuste por Redondeo (+).`
+                                      )
+                                    }}
+                                    className="text-[9px] text-blue-600 dark:text-blue-400 font-bold underline hover:text-blue-800 cursor-pointer"
+                                  >
+                                    Pasar exceso ({formatPYG(numAplicado - saldo)}) a Redondeo
+                                  </button>
+                                )}
+                              </div>
                             )}
                           </td>
                           <td className="p-2 text-right">

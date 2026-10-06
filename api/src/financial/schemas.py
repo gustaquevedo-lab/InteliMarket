@@ -672,6 +672,13 @@ class SupplierPaymentOrderDisburse(BaseModel):
     diferencia_redondeo: Optional[Decimal] = Decimal("0")
 
 
+class SupplierPaymentOrderUpdate(BaseModel):
+    recibo_proveedor: Optional[str] = None
+    observaciones: Optional[str] = None
+    fecha_emision: Optional[date] = None
+    fecha_pago: Optional[date] = None
+
+
 class MultiSupplierBatchItem(BaseModel):
     supplier_id: UUID
     recibo_proveedor: Optional[str] = None
@@ -792,6 +799,11 @@ class PaymentOrderDisbursementResponse(BaseModel):
     fondo_nombre: Optional[str] = None
     credit_note_id: Optional[UUID] = None
     numero_nc: Optional[str] = None
+    timbrado_nc: Optional[str] = None
+    fecha_nc: Optional[date] = None
+    motivo_nc: Optional[str] = None
+    monto_total_nc: Optional[Decimal] = None
+    factura_origen_nc: Optional[str] = None
     comprobante_url: Optional[str] = None
     observaciones: Optional[str] = None
     created_at: datetime
@@ -829,5 +841,6 @@ class SupplierPaymentOrderResponse(BaseModel):
 class SupplierPaymentOrderDetailResponse(SupplierPaymentOrderResponse):
     allocations: list[PaymentOrderAllocationResponse] = []
     disbursements: list[PaymentOrderDisbursementResponse] = []
+    credit_notes_applied: Optional[list[dict]] = None
 
 

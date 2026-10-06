@@ -1157,6 +1157,11 @@ export interface PaymentOrderDisbursement {
   fondo_nombre?: string | null;
   credit_note_id?: string | null;
   numero_nc?: string | null;
+  timbrado_nc?: string | null;
+  fecha_nc?: string | null;
+  motivo_nc?: string | null;
+  monto_total_nc?: number | null;
+  factura_origen_nc?: string | null;
   comprobante_url?: string | null;
   observaciones?: string | null;
   created_at?: string;
@@ -1188,6 +1193,7 @@ export interface SupplierPaymentOrder {
   tipo_cambio_desembolso?: number | null;
   allocations?: PaymentOrderAllocation[];
   disbursements?: PaymentOrderDisbursement[];
+  credit_notes_applied?: any[];
 }
 
 export interface SueldokPayroll { id: string; company_id?: string; periodo?: string; fecha_inicio?: string; fecha_fin?: string; total_neto?: number; total_bruto?: number; total_descuentos?: number; total_aportes?: number; cantidad_empleados?: number; estado?: string; created_at?: string; updated_at?: string }
@@ -3868,6 +3874,10 @@ export const api = {
         client.post<SupplierPaymentOrder>(`/v1/financial/payment-orders?company_id=${COMPANY_ID}`, data),
       disburse: (orderId: string, data: { fecha_pago?: string; recibo_proveedor?: string; observaciones?: string; disbursements: any[]; legal_invoices?: any[]; diferencia_redondeo?: number }) =>
         client.post<SupplierPaymentOrder>(`/v1/financial/payment-orders/${orderId}/disburse?company_id=${COMPANY_ID}`, data),
+      update: (orderId: string, data: { recibo_proveedor?: string; observaciones?: string; fecha_emision?: string; fecha_pago?: string }) =>
+        client.patch<SupplierPaymentOrder>(`/v1/financial/payment-orders/${orderId}?company_id=${COMPANY_ID}`, data),
+      delete: (orderId: string) =>
+        client.delete<{ success: boolean; message: string }>(`/v1/financial/payment-orders/${orderId}?company_id=${COMPANY_ID}`),
       downloadPdf: (orderId: string, numOrden: string) =>
         downloadAuthenticated(`/v1/financial/payment-orders/${orderId}/pdf`, { company_id: COMPANY_ID }, `recibo_orden_pago_${numOrden}.pdf`),
       exportReportPdf: (params?: { supplier_id?: string; estado?: string; forma_pago?: string; fecha_desde?: string; fecha_hasta?: string }) =>
