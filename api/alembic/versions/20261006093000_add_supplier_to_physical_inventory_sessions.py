@@ -32,13 +32,12 @@ def upgrade() -> None:
     op.execute("""
         DO $$
         BEGIN
-            IF EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'sandbox') THEN
-                ALTER TABLE sandbox.physical_inventory_sessions
-                ADD COLUMN IF NOT EXISTS supplier_id UUID,
-                ADD COLUMN IF NOT EXISTS supplier_nombre VARCHAR(150),
-                ADD COLUMN IF NOT EXISTS categoria_nombre VARCHAR(150);
-
-                CREATE INDEX IF NOT EXISTS idx_sandbox_phys_session_supplier ON sandbox.physical_inventory_sessions(supplier_id);
+            IF EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'sandbox' AND table_name = 'physical_inventory_sessions'
+            ) THEN
+                EXECUTE 'ALTER TABLE sandbox.physical_inventory_sessions ADD COLUMN IF NOT EXISTS supplier_id UUID, ADD COLUMN IF NOT EXISTS supplier_nombre VARCHAR(150), ADD COLUMN IF NOT EXISTS categoria_nombre VARCHAR(150)';
+                EXECUTE 'CREATE INDEX IF NOT EXISTS idx_sandbox_phys_session_supplier ON sandbox.physical_inventory_sessions(supplier_id)';
             END IF;
         END $$
     """)
@@ -59,12 +58,12 @@ def downgrade() -> None:
     op.execute("""
         DO $$
         BEGIN
-            IF EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'sandbox') THEN
-                DROP INDEX IF EXISTS sandbox.idx_sandbox_phys_session_supplier;
-                ALTER TABLE sandbox.physical_inventory_sessions
-                DROP COLUMN IF EXISTS supplier_id,
-                DROP COLUMN IF EXISTS supplier_nombre,
-                DROP COLUMN IF EXISTS categoria_nombre;
+            IF EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'sandbox' AND table_name = 'physical_inventory_sessions'
+            ) THEN
+                EXECUTE 'DROP INDEX IF EXISTS sandbox.idx_sandbox_phys_session_supplier';
+                EXECUTE 'ALTER TABLE sandbox.physical_inventory_sessions DROP COLUMN IF EXISTS supplier_id, DROP COLUMN IF EXISTS supplier_nombre, DROP COLUMN IF EXISTS categoria_nombre';
             END IF;
         END $$
     """)
