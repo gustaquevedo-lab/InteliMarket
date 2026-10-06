@@ -495,6 +495,77 @@ export default function PaymentsPage() {
     }
   }
 
+  // Abrir Modal de Edición de Orden de Pago
+  const handleOpenEditOrder = (order: SupplierPaymentOrder) => {
+    setOrderToEdit({
+      id: order.id,
+      numero_orden: order.numero_orden,
+      supplier_nombre: order.supplier_nombre,
+      recibo_proveedor: order.recibo_proveedor || "",
+      fecha_emision: order.fecha_emision ? order.fecha_emision.slice(0, 10) : "",
+      fecha_pago: order.fecha_pago ? order.fecha_pago.slice(0, 10) : "",
+      observaciones: order.observaciones || "",
+      estado: order.estado,
+      monto_neto: order.monto_neto,
+    })
+  }
+
+  // Guardar Edición de Orden de Pago
+  const handleSaveEditOrder = async () => {
+    if (!orderToEdit) return
+    setSavingEditOrder(true)
+    try {
+      await api.financial.paymentOrders.update(orderToEdit.id, {
+        recibo_proveedor: orderToEdit.recibo_proveedor.trim() || undefined,
+        fecha_emision: orderToEdit.fecha_emision || undefined,
+        fecha_pago: orderToEdit.fecha_pago || undefined,
+        observaciones: orderToEdit.observaciones.trim() || undefined,
+      })
+      toast.success("Orden Actualizada", `Se actualizaron los datos de la orden N° ${orderToEdit.numero_orden}`)
+      setOrderToEdit(null)
+      loadData()
+    } catch (err: any) {
+      toast.error("Error al actualizar orden", err.message || String(err))
+    } finally {
+      setSavingEditOrder(false)
+    }
+  }
+
+  // Confirmar Eliminación de Orden de Pago
+  const handleConfirmDeleteOrder = async () => {
+    if (!orderToDelete) return
+    setDeletingOrder(true)
+    try {
+      const res = await api.financial.paymentOrders.delete(orderToDelete.id)
+      toast.success(
+        "Orden de Pago Eliminada",
+        res.message || `La orden N° ${orderToDelete.numero_orden} fue eliminada exitosamente.`
+      )
+      setOrderToDelete(null)
+      loadData()
+    } catch (err: any) {
+      toast.error("Error al eliminar orden", err.message || String(err))
+    } finally {
+      setDeletingOrder(false)
+    }
+  }
+
+  // Seleccionar proveedor para crear una nueva orden de pago desde allí
+  const handleSelectSupplierForNewPayment = (sup: any) => {
+    setShowSelectSupplierModal(false)
+    setSearchSupplierModal("")
+    setOrderModalData({
+      supplier: {
+        id: sup.id,
+        razon_social: sup.razon_social || sup.nombre || "Proveedor",
+        ruc: sup.ruc,
+      },
+      initialInvoices: [],
+      availableInvoices: invoices.filter((i) => i.supplier_id === sup.id),
+      existingOrder: null,
+    })
+  }
+
   return (
     <div className="space-y-6 pb-20 animate-fade-in min-w-0">
       {/* 🌟 HERO INSTITUCIONAL EXTRA SUPERMERCADO */}
@@ -1275,6 +1346,13 @@ export default function PaymentsPage() {
 
             <div className="flex items-center gap-2">
               <button
+                onClick={() => setShowSelectSupplierModal(true)}
+                className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold flex items-center gap-1.5 transition shadow-sm"
+              >
+                <Plus className="w-4 h-4" />
+                <span>+ Nueva Orden de Pago</span>
+              </button>
+              <button
                 onClick={handleExportReportPdf}
                 disabled={exportingReportPdf}
                 className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-sm"
@@ -1291,7 +1369,7 @@ export default function PaymentsPage() {
               <div className="text-center py-20 text-slate-400 text-xs">
                 <Wallet className="w-12 h-12 mx-auto mb-3 opacity-30" />
                 <p className="font-bold text-sm text-slate-600 dark:text-slate-300">No hay órdenes de pago registradas</p>
-                <p className="mt-1">Seleccioná facturas en la primera pestaña para generar una orden de pago.</p>
+                <p className="mt-1">Seleccioná facturas en la primera pestaña o hacé clic en "+ Nueva Orden de Pago".</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -1388,6 +1466,13 @@ export default function PaymentsPage() {
                               >
                                 <Eye className="w-3.5 h-3.5" />
                               </button>
+                              <button
+                                onClick={() => handleOpenEditOrder(order)}
+                                className="p-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-600 dark:text-blue-400 transition"
+                                title="Editar Orden / Recibo"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
                               {isLote && (
                                 <button
                                   onClick={() => api.financial.paymentOrders.downloadBatchReportPdf({ order_ids: [order.id] })}
@@ -1403,6 +1488,13 @@ export default function PaymentsPage() {
                                 title="Descargar Recibo / OP Oficial PDF"
                               >
                                 <Printer className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => setOrderToDelete(order)}
+                                className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 transition"
+                                title="Eliminar Orden de Pago"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </div>
                           </td>
@@ -1770,6 +1862,297 @@ export default function PaymentsPage() {
                     Revertir {selectedPaidInvoiceIds.length} Facturas
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EDITAR ORDEN DE PAGO */}
+      {orderToEdit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 max-w-lg w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5 text-blue-600 dark:text-blue-400">
+                <Pencil className="w-5 h-5" />
+                <h3 className="font-extrabold text-base uppercase">
+                  Editar Orden: <span className="font-mono text-slate-900 dark:text-white">{orderToEdit.numero_orden}</span>
+                </h3>
+              </div>
+              <button
+                onClick={() => setOrderToEdit(null)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 bg-slate-50 dark:bg-slate-800/40 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs">
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase font-black">Proveedor</span>
+                <p className="font-bold text-slate-800 dark:text-slate-200 truncate">{orderToEdit.supplier_nombre || "Proveedor"}</p>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase font-black">Monto Neto</span>
+                <p className="font-mono font-black text-rose-600 dark:text-rose-400">{formatPYG(orderToEdit.monto_neto)}</p>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase font-black">Estado</span>
+                <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-black uppercase mt-0.5 ${
+                  orderToEdit.estado === "pagado"
+                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                    : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                }`}>
+                  {orderToEdit.estado}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  N° Recibo Oficial del Proveedor:
+                </label>
+                <input
+                  type="text"
+                  value={orderToEdit.recibo_proveedor}
+                  onChange={(e) => setOrderToEdit({ ...orderToEdit, recibo_proveedor: e.target.value })}
+                  placeholder="Ej: 001-001-0012345"
+                  className="w-full text-xs font-mono px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Fecha de Emisión:
+                  </label>
+                  <input
+                    type="date"
+                    value={orderToEdit.fecha_emision}
+                    onChange={(e) => setOrderToEdit({ ...orderToEdit, fecha_emision: e.target.value })}
+                    className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Fecha de Pago / Liquidación:
+                  </label>
+                  <input
+                    type="date"
+                    value={orderToEdit.fecha_pago}
+                    onChange={(e) => setOrderToEdit({ ...orderToEdit, fecha_pago: e.target.value })}
+                    className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Observaciones / Notas Internas:
+                </label>
+                <textarea
+                  rows={3}
+                  value={orderToEdit.observaciones}
+                  onChange={(e) => setOrderToEdit({ ...orderToEdit, observaciones: e.target.value })}
+                  placeholder="Notas adicionales sobre la orden..."
+                  className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setOrderToEdit(null)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 rounded-xl transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={savingEditOrder}
+                onClick={handleSaveEditOrder}
+                className="px-4 py-2 text-xs font-extrabold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+              >
+                {savingEditOrder ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Guardando...
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-3.5 h-3.5" /> Guardar Cambios
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL ELIMINAR ORDEN DE PAGO */}
+      {orderToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2 text-rose-600">
+                <Trash2 className="w-5 h-5" />
+                <h3 className="font-extrabold text-base uppercase">Eliminar Orden de Pago</h3>
+              </div>
+              <button
+                onClick={() => setOrderToDelete(null)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 rounded-2xl p-4 text-xs text-rose-900 dark:text-rose-200 space-y-2">
+              <p className="font-extrabold text-sm flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+                Orden N° {orderToDelete.numero_orden}
+              </p>
+              <div className="space-y-1 text-[11px] text-slate-700 dark:text-slate-300">
+                <p><span className="font-bold">Proveedor:</span> {orderToDelete.supplier_nombre}</p>
+                <p><span className="font-bold">Monto Neto:</span> {formatPYG(orderToDelete.monto_neto)}</p>
+                <p><span className="font-bold">Estado actual:</span> <span className="font-extrabold uppercase">{orderToDelete.estado}</span></p>
+              </div>
+              {orderToDelete.estado === "pagado" ? (
+                <p className="text-[11px] font-bold text-rose-700 dark:text-rose-300 border-t border-rose-200 dark:border-rose-800/60 pt-2">
+                  ⚠️ Esta orden ya fue liquidada. Al eliminarla, se revertirán automáticamente las amortizaciones de las facturas (volviendo a estado pendiente), se devolverán saldos a las Notas de Crédito aplicadas y se cancelarán/reversarán los egresos de fondos registrados.
+                </p>
+              ) : (
+                <p className="text-[11px] font-medium text-slate-600 dark:text-slate-400 border-t border-rose-200 dark:border-rose-800/60 pt-2">
+                  Esta orden aún está pendiente de desembolso. Las facturas asociadas quedarán liberadas inmediatamente para futuras órdenes.
+                </p>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setOrderToDelete(null)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 rounded-xl transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={deletingOrder}
+                onClick={handleConfirmDeleteOrder}
+                className="px-4 py-2 text-xs font-extrabold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+              >
+                {deletingOrder ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Eliminando...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" /> Confirmar Eliminación
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL SELECCIONAR PROVEEDOR PARA NUEVA ORDEN DE PAGO */}
+      {showSelectSupplierModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 max-w-xl w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5 text-rose-600 dark:text-rose-400">
+                <Wallet className="w-5 h-5" />
+                <h3 className="font-extrabold text-base uppercase">Nueva Orden de Pago</h3>
+              </div>
+              <button
+                onClick={() => setShowSelectSupplierModal(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Seleccioná el proveedor para el cual deseás emitir una Orden de Pago o liquidación.
+            </p>
+
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Buscar proveedor por nombre, razón social o RUC..."
+                value={searchSupplierModal}
+                onChange={(e) => setSearchSupplierModal(e.target.value)}
+                autoFocus
+                className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs focus:ring-2 focus:ring-rose-500/20"
+              />
+            </div>
+
+            <div className="max-h-80 overflow-y-auto space-y-1.5 pr-1 divide-y divide-slate-100 dark:divide-slate-800/60">
+              {suppliers
+                .filter((s) => {
+                  if (!searchSupplierModal.trim()) return true
+                  const q = searchSupplierModal.toLowerCase()
+                  return (
+                    s.razon_social?.toLowerCase().includes(q) ||
+                    s.nombre?.toLowerCase().includes(q) ||
+                    s.ruc?.toLowerCase().includes(q)
+                  )
+                })
+                .sort((a, b) => {
+                  const pendingA = invoices.filter((i) => i.supplier_id === a.id).length
+                  const pendingB = invoices.filter((i) => i.supplier_id === b.id).length
+                  if (pendingB !== pendingA) return pendingB - pendingA
+                  return (a.razon_social || "").localeCompare(b.razon_social || "")
+                })
+                .map((sup) => {
+                  const pendingInvs = invoices.filter((i) => i.supplier_id === sup.id)
+                  const pendingTotal = pendingInvs.reduce(
+                    (acc, curr) => acc + Number(curr.saldo_pendiente || curr.total || 0),
+                    0
+                  )
+                  return (
+                    <div
+                      key={sup.id}
+                      onClick={() => handleSelectSupplierForNewPayment(sup)}
+                      className="p-3 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition flex items-center justify-between group"
+                    >
+                      <div className="min-w-0 pr-2">
+                        <p className="font-extrabold text-xs text-slate-900 dark:text-white group-hover:text-rose-600 transition truncate">
+                          {sup.razon_social || sup.nombre}
+                        </p>
+                        <p className="text-[10px] text-slate-400 font-mono">RUC: {sup.ruc || "Sin RUC"}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        {pendingInvs.length > 0 ? (
+                          <>
+                            <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-full border border-amber-500/20">
+                              {pendingInvs.length} facturas ptes.
+                            </span>
+                            <p className="text-[11px] font-mono font-black text-slate-700 dark:text-slate-300 mt-1">
+                              {formatPYG(pendingTotal)}
+                            </p>
+                          </>
+                        ) : (
+                          <span className="text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
+                            Sin deuda pendiente
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowSelectSupplierModal(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 rounded-xl transition"
+              >
+                Cerrar
               </button>
             </div>
           </div>
