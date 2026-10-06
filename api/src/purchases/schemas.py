@@ -133,6 +133,7 @@ class SupplierResponse(BaseModel):
     retencion_iva: bool = False
     porcentaje_retencion_iva: int = 30
     agente_retencion: bool = False
+    total_productos: Optional[int] = 0
     created_at: datetime
     updated_at: datetime
 

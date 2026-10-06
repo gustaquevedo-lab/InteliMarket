@@ -136,32 +136,57 @@ async def list_suppliers(
     company_id: str,
     search: str | None = None,
     solo_mercaderia: bool = False,
+    con_productos: bool = False,
 ) -> list[Supplier]:
-    query = select(Supplier).where(Supplier.company_id == uuid.UUID(company_id))
+    prod_cnt_subq = (
+        select(func.count(Product.id))
+        .where(Product.supplier_id == Supplier.id, Product.activo == True)
+        .correlate(Supplier)
+        .scalar_subquery()
+    )
 
-    if solo_mercaderia:
-        subq = (
+    query = select(Supplier, prod_cnt_subq.label("total_productos")).where(Supplier.company_id == uuid.UUID(company_id))
+
+    if con_productos:
+        subq_prods = select(Product.supplier_id).where(Product.supplier_id.is_not(None), Product.activo == True).distinct()
+        query = query.where(Supplier.id.in_(subq_prods))
+    elif solo_mercaderia:
+        subq_prods = select(Product.supplier_id).where(Product.supplier_id.is_not(None), Product.activo == True).distinct()
+        subq_po = (
             select(PurchaseOrder.supplier_id)
             .join(PurchaseOrderItem, PurchaseOrderItem.purchase_order_id == PurchaseOrder.id)
             .where(PurchaseOrder.supplier_id.is_not(None))
             .distinct()
         )
-        query = query.where(Supplier.id.in_(subq))
+        query = query.where(
+            (Supplier.id.in_(subq_prods)) | (Supplier.id.in_(subq_po))
+        )
 
     if search:
         query = query.where(
             (Supplier.razon_social.ilike(f"%{search}%")) |
             (Supplier.ruc.ilike(f"%{search}%")) |
-            (Supplier.contacto_nombre.ilike(f"%{search}%"))
+            (Supplier.contacto_nombre.ilike(f"%{search}%")) |
+            (Supplier.nombre_fantasia.ilike(f"%{search}%"))
         )
     query = query.order_by(Supplier.razon_social)
     result = await db.execute(query)
-    return list(result.scalars().all())
+    suppliers: list[Supplier] = []
+    for sup, cnt in result.all():
+        setattr(sup, "total_productos", int(cnt or 0))
+        suppliers.append(sup)
+    return suppliers
 
 
 async def get_supplier(db: AsyncSession, supplier_id: str) -> Supplier | None:
     result = await db.execute(select(Supplier).where(Supplier.id == uuid.UUID(supplier_id)))
-    return result.scalar_one_or_none()
+    sup = result.scalar_one_or_none()
+    if sup:
+        cnt = await db.scalar(
+            select(func.count(Product.id)).where(Product.supplier_id == sup.id, Product.activo == True)
+        )
+        setattr(sup, "total_productos", int(cnt or 0))
+    return sup
 
 
 async def update_supplier(db: AsyncSession, supplier_id: str, data: SupplierUpdate) -> Supplier | None:

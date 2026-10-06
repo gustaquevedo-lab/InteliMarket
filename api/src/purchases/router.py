@@ -61,9 +61,10 @@ async def list_suppliers(
     company_id: str,
     search: str | None = Query(None),
     solo_mercaderia: bool = Query(False),
+    con_productos: bool = Query(False),
     db: AsyncSession = Depends(get_db)
 ):
-    return await service.list_suppliers(db, company_id, search, solo_mercaderia=solo_mercaderia)
+    return await service.list_suppliers(db, company_id, search, solo_mercaderia=solo_mercaderia, con_productos=con_productos)
 
 
 @router.get("/suppliers/{supplier_id}", response_model=SupplierResponse)

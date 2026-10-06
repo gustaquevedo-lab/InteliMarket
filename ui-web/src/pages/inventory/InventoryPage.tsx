@@ -913,11 +913,26 @@ export default function InventoryPage() {
                     className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 dark:text-slate-200 max-w-xs"
                   >
                     <option value="all">🏭 Todos los Proveedores</option>
-                    {suppliersList.map((s: any) => (
-                      <option key={s.id} value={s.id}>
-                        {s.razon_social || s.nombre_fantasia || "Proveedor"} {s.ruc ? `(${s.ruc})` : ""}
-                      </option>
-                    ))}
+                    {suppliersList.filter((s: any) => (s.total_productos || 0) > 0).length > 0 && (
+                      <optgroup label={`📦 Con Mercaderías (${suppliersList.filter((s: any) => (s.total_productos || 0) > 0).length})`}>
+                        {suppliersList
+                          .filter((s: any) => (s.total_productos || 0) > 0)
+                          .map((s: any) => (
+                            <option key={s.id} value={s.id}>
+                              {s.razon_social || s.nombre_fantasia || "Proveedor"} ({s.total_productos} prods)
+                            </option>
+                          ))}
+                      </optgroup>
+                    )}
+                    <optgroup label={`📋 Otros Proveedores (${suppliersList.filter((s: any) => (s.total_productos || 0) === 0).length})`}>
+                      {suppliersList
+                        .filter((s: any) => (s.total_productos || 0) === 0)
+                        .map((s: any) => (
+                          <option key={s.id} value={s.id}>
+                            {s.razon_social || s.nombre_fantasia || "Proveedor"} {s.ruc ? `(${s.ruc})` : ""}
+                          </option>
+                        ))}
+                    </optgroup>
                   </select>
                 </div>
 

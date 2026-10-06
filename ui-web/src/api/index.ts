@@ -466,6 +466,7 @@ export interface Supplier {
   nombre_fantasia?: string
   tipo_persona?: string
   tipo_provision?: "bienes" | "servicios" | "mixto" | string
+  total_productos?: number
   rubro?: string
   pais?: string
   limite_credito?: number
@@ -2495,7 +2496,7 @@ export const api = {
     cancelReceipt: (id: string) => client.post<PurchaseReceipt>(`/v1/purchase-receipts/${id}/cancel`),
     createReceipt: (data: Partial<PurchaseReceipt>) => client.post<PurchaseReceipt>("/v1/purchase-receipts", { ...data, company_id: COMPANY_ID }),
     suppliers: (search?: string, solo_mercaderia?: boolean) => client.get<Supplier[]>(`/v1/companies/${COMPANY_ID}/suppliers`, { search, solo_mercaderia }),
-    listSuppliers: (params?: { search?: string; solo_mercaderia?: boolean }) => client.get<Supplier[]>(`/v1/companies/${COMPANY_ID}/suppliers`, params),
+    listSuppliers: (params?: { search?: string; solo_mercaderia?: boolean; con_productos?: boolean }) => client.get<Supplier[]>(`/v1/companies/${COMPANY_ID}/suppliers`, params),
     getSupplier: (id: string) => client.get<Supplier>(`/v1/suppliers/${id}`),
     createSupplier: (data: Partial<Supplier>) => client.post<Supplier>("/v1/suppliers", { ...data, company_id: COMPANY_ID }),
     updateSupplier: (id: string, data: Partial<Supplier>) => client.patch<Supplier>(`/v1/suppliers/${id}`, data),

@@ -17,6 +17,7 @@ import {
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDateTime } from "../../utils/format"
+import SupplierSearchInput from "../../components/SupplierSearchInput"
 
 interface TomaFisicaTabProps {
   warehouses: WarehouseType[]
@@ -1317,14 +1318,29 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
           <select
             value={filterSupplier}
             onChange={(e) => setFilterSupplier(e.target.value)}
-            className="input-field text-xs py-2 max-w-[190px]"
+            className="input-field text-xs py-2 max-w-[220px]"
           >
-            <option value="all">Todos los proveedores</option>
-            {suppliers.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.razon_social || s.nombre}
-              </option>
-            ))}
+            <option value="all">🏭 Todos los proveedores</option>
+            {suppliers.filter((s) => (s.total_productos || 0) > 0).length > 0 && (
+              <optgroup label={`📦 Con Mercaderías (${suppliers.filter((s) => (s.total_productos || 0) > 0).length})`}>
+                {suppliers
+                  .filter((s) => (s.total_productos || 0) > 0)
+                  .map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.razon_social || s.nombre} ({s.total_productos} prods)
+                    </option>
+                  ))}
+              </optgroup>
+            )}
+            <optgroup label={`📋 Otros Proveedores (${suppliers.filter((s) => (s.total_productos || 0) === 0).length})`}>
+              {suppliers
+                .filter((s) => (s.total_productos || 0) === 0)
+                .map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.razon_social || s.nombre}
+                  </option>
+                ))}
+            </optgroup>
           </select>
 
           {/* Sector / Categoría */}
@@ -1606,28 +1622,28 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
 
                 {/* Selector específico: Proveedor */}
                 {newTipo === "proveedor" && (
-                  <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-2xl space-y-1.5">
-                    <label className="block text-xs font-extrabold text-amber-800 dark:text-amber-300">
-                      Seleccionar Proveedor a Inventariar *
-                    </label>
-                    <select
-                      value={newSupplierId}
-                      onChange={(e) => setNewSupplierId(e.target.value)}
+                  <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-2xl space-y-2">
+                    <SupplierSearchInput
+                      label="Seleccionar Proveedor a Inventariar"
+                      placeholder="Buscar por Razón Social o RUC..."
                       required
-                      className="input-field text-xs py-2 w-full bg-white dark:bg-slate-900 font-medium"
-                    >
-                      <option value="">Elegí un proveedor...</option>
-                      {suppliers.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.razon_social || s.nombre} {s.ruc ? `(RUC: ${s.ruc})` : ""}
-                        </option>
-                      ))}
-                    </select>
+                      showTypeToggle
+                      showProductCount
+                      allowManual={false}
+                      soloMercaderia={true}
+                      suppliers={suppliers}
+                      supplierId={newSupplierId}
+                      value={suppliers.find((s) => s.id === newSupplierId)?.razon_social || suppliers.find((s) => s.id === newSupplierId)?.nombre || ""}
+                      onSelectSupplier={(res) => {
+                        setNewSupplierId(res.id || "")
+                      }}
+                      onClear={() => setNewSupplierId("")}
+                    />
                     {newSupplierId && (
                       <p className="text-[11px] font-bold text-amber-700 dark:text-amber-400 flex items-center gap-1 pt-1">
                         <CheckCircle2 className="w-3.5 h-3.5" />
                         <span>
-                          {products.filter((p) => p.supplier_id === newSupplierId).length} productos asociados en catálogo listos para ser precargados.
+                          {products.filter((p) => p.supplier_id === newSupplierId).length || suppliers.find((s) => s.id === newSupplierId)?.total_productos || 0} productos asociados en catálogo listos para ser precargados.
                         </span>
                       </p>
                     )}

@@ -72,9 +72,44 @@ export default function ConteoVencimientosPage() {
   const [conteoScope, setConteoScope] = useState<"sector" | "proveedor">("sector")
   const [suppliers, setSuppliers] = useState<any[]>([])
   const [selectedSupplierId, setSelectedSupplierId] = useState("")
+  const [supplierFilterType, setSupplierFilterType] = useState<"mercaderia" | "todos">("mercaderia")
+  const [supplierSearchQuery, setSupplierSearchQuery] = useState("")
   const [selectedArea, setSelectedArea] = useState(AREAS[0].key)
   const [ubicacion, setUbicacion] = useState("")
   const [startingSession, setStartingSession] = useState(false)
+
+  const mercaderiasSuppliersCount = useMemo(() => {
+    return suppliers.filter((s) => (s.total_productos || 0) > 0 || s.tipo_provision === "bienes" || s.tipo_provision === "mixto").length
+  }, [suppliers])
+
+  const filteredSuppliers = useMemo(() => {
+    let list = suppliers
+    if (supplierFilterType === "mercaderia") {
+      list = list.filter((s) => (s.total_productos || 0) > 0)
+    }
+    const q = supplierSearchQuery.trim().toLowerCase()
+    if (!q) return list
+    const qClean = q.replace(/[^0-9kK]/g, "")
+    return list.filter((s) => {
+      const razon = (s.razon_social || "").toLowerCase()
+      const fantasia = (s.nombre_fantasia || "").toLowerCase()
+      const nombre = (s.nombre || "").toLowerCase()
+      const rucRaw = (s.ruc || "").toLowerCase()
+      const rucClean = rucRaw.replace(/[^0-9kK]/g, "")
+      return (
+        razon.includes(q) ||
+        fantasia.includes(q) ||
+        nombre.includes(q) ||
+        rucRaw.includes(q) ||
+        (qClean.length >= 2 && rucClean.includes(qClean))
+      )
+    })
+  }, [suppliers, supplierFilterType, supplierSearchQuery])
+
+  const selectedSupplierObj = useMemo(() => {
+    if (!selectedSupplierId) return null
+    return suppliers.find((s) => s.id === selectedSupplierId) || null
+  }, [suppliers, selectedSupplierId])
 
   // ── Login Táctil Móvil (cuando no hay sesión activa) ──
   const [staffList, setStaffList] = useState<StaffMember[]>([])
@@ -914,22 +949,185 @@ export default function ConteoVencimientosPage() {
                 })}
               </div>
             ) : (
-              <div className="space-y-2 p-3 bg-slate-950 border border-slate-800 rounded-2xl">
-                <label className="text-xs font-bold text-slate-300 block">
-                  Seleccioná el proveedor a contar en el salón:
-                </label>
-                <select
-                  value={selectedSupplierId}
-                  onChange={(e) => setSelectedSupplierId(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white outline-none focus:border-cyan-400"
-                >
-                  <option value="">Elegí un proveedor de la lista...</option>
-                  {suppliers.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.razon_social || s.nombre} {s.ruc ? `(${s.ruc})` : ""}
-                    </option>
-                  ))}
-                </select>
+              <div className="space-y-3 p-3.5 bg-slate-950 border border-slate-800 rounded-2xl">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                    <Building2 className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Proveedor a contar en el salón:</span>
+                  </label>
+                  {selectedSupplierObj && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedSupplierId("")}
+                      className="text-[11px] font-bold text-cyan-400 hover:text-cyan-300 hover:underline"
+                    >
+                      Cambiar
+                    </button>
+                  )}
+                </div>
+
+                {selectedSupplierObj ? (
+                  /* Tarjeta del Proveedor Seleccionado */
+                  <div className="p-3 bg-cyan-950/40 border border-cyan-500/40 rounded-xl space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <h4 className="text-sm font-black text-white truncate">
+                          {selectedSupplierObj.razon_social || selectedSupplierObj.nombre}
+                        </h4>
+                        {selectedSupplierObj.nombre_fantasia && selectedSupplierObj.nombre_fantasia !== selectedSupplierObj.razon_social && (
+                          <p className="text-[11px] text-cyan-300 truncate">
+                            Fantasía: {selectedSupplierObj.nombre_fantasia}
+                          </p>
+                        )}
+                        <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                          {selectedSupplierObj.ruc && (
+                            <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-slate-800/90 text-slate-300 font-bold">
+                              RUC: {selectedSupplierObj.ruc}
+                            </span>
+                          )}
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                            (selectedSupplierObj.total_productos || 0) > 0
+                              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                              : "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                          }`}>
+                            {selectedSupplierObj.total_productos || 0} artículos en catálogo
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedSupplierId("")}
+                        className="p-1.5 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-400 hover:text-white rounded-lg transition shrink-0"
+                        title="Deseleccionar proveedor"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {(selectedSupplierObj.total_productos || 0) === 0 && (
+                      <div className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg flex items-center gap-2 text-[11px] text-amber-300">
+                        <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                        <span>Este proveedor no posee artículos activos asignados en catálogo. La lista precargada iniciará vacía.</span>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  /* Selector Interactivo y Buscador de Proveedores */
+                  <div className="space-y-2">
+                    {/* Filtro: Mercadería de Venta vs Todos */}
+                    <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setSupplierFilterType("mercaderia")}
+                        className={`flex-1 py-1.5 px-2 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1.5 ${
+                          supplierFilterType === "mercaderia"
+                            ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        <span>📦 Mercaderías ({mercaderiasSuppliersCount})</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSupplierFilterType("todos")}
+                        className={`flex-1 py-1.5 px-2 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1.5 ${
+                          supplierFilterType === "todos"
+                            ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        <span>📋 Todos ({suppliers.length})</span>
+                      </button>
+                    </div>
+
+                    {/* Buscador táctil */}
+                    <div className="relative flex items-center">
+                      <Search className="w-4 h-4 text-slate-500 absolute left-3 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={supplierSearchQuery}
+                        onChange={(e) => setSupplierSearchQuery(e.target.value)}
+                        placeholder="Buscar por nombre, fantasía o RUC..."
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-9 pr-8 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-cyan-400 transition"
+                      />
+                      {supplierSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setSupplierSearchQuery("")}
+                          className="absolute right-2.5 p-1 rounded-full text-slate-400 hover:text-white"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Lista Scrolleable Táctil */}
+                    <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1 divide-y divide-slate-800/60">
+                      {filteredSuppliers.length === 0 ? (
+                        <div className="p-4 text-center text-xs text-slate-500 space-y-1">
+                          <p>No se encontraron proveedores coincidentes.</p>
+                          {supplierFilterType === "mercaderia" && (
+                            <button
+                              type="button"
+                              onClick={() => setSupplierFilterType("todos")}
+                              className="text-xs font-bold text-cyan-400 hover:underline"
+                            >
+                              Ver en todos los proveedores ({suppliers.length})
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        filteredSuppliers.slice(0, 40).map((s) => {
+                          const isSelected = selectedSupplierId === s.id
+                          const prods = s.total_productos || 0
+                          return (
+                            <button
+                              key={s.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedSupplierId(s.id)
+                                setSupplierSearchQuery("")
+                              }}
+                              className={`w-full text-left p-2.5 rounded-xl transition flex items-center justify-between gap-2 active:scale-[0.98] ${
+                                isSelected
+                                  ? "bg-cyan-500/20 border border-cyan-500/40 text-white"
+                                  : "hover:bg-slate-900 text-slate-200"
+                              }`}
+                            >
+                              <div className="min-w-0 pr-2">
+                                <p className="font-bold text-xs truncate">
+                                  {s.razon_social || s.nombre}
+                                </p>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  {s.ruc && (
+                                    <span className="font-mono text-[10px] text-slate-400">
+                                      RUC: {s.ruc}
+                                    </span>
+                                  )}
+                                  {s.nombre_fantasia && s.nombre_fantasia !== s.razon_social && (
+                                    <span className="text-[10px] text-slate-500 truncate">
+                                      • {s.nombre_fantasia}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="shrink-0 flex items-center gap-1.5">
+                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                                  prods > 0
+                                    ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30"
+                                    : "bg-slate-800 text-slate-500"
+                                }`}>
+                                  {prods} {prods === 1 ? "artículo" : "artículos"}
+                                </span>
+                              </div>
+                            </button>
+                          )
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

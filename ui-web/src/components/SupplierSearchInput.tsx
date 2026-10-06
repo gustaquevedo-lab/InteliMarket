@@ -9,6 +9,8 @@ export interface SupplierOption {
   nombre?: string
   ruc?: string
   telefono?: string
+  tipo_provision?: string
+  total_productos?: number
 }
 
 export interface SupplierSearchInputProps {
@@ -23,6 +25,9 @@ export interface SupplierSearchInputProps {
   disabled?: boolean
   className?: string
   allowManual?: boolean
+  soloMercaderia?: boolean
+  showTypeToggle?: boolean
+  showProductCount?: boolean
 }
 
 let cachedSuppliers: SupplierOption[] | null = null
@@ -39,11 +44,15 @@ export default function SupplierSearchInput({
   disabled = false,
   className = "",
   allowManual = true,
+  soloMercaderia = false,
+  showTypeToggle = false,
+  showProductCount = false,
 }: SupplierSearchInputProps) {
   const [internalSuppliers, setInternalSuppliers] = useState<SupplierOption[]>(() => propSuppliers || cachedSuppliers || [])
   const [loading, setLoading] = useState(false)
   const [query, setQuery] = useState("")
   const [isOpen, setIsOpen] = useState(false)
+  const [filterType, setFilterType] = useState<"mercaderia" | "todos">(soloMercaderia ? "mercaderia" : "todos")
   const wrapperRef = useRef<HTMLDivElement>(null)
 
   // Sincronizar o cargar proveedores automáticamente si no se pasaron como prop
@@ -81,11 +90,19 @@ export default function SupplierSearchInput({
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
 
+  const mercaderiasCount = useMemo(() => {
+    return internalSuppliers.filter((s) => (s.total_productos || 0) > 0 || s.tipo_provision === "bienes" || s.tipo_provision === "mixto").length
+  }, [internalSuppliers])
+
   const filteredSuppliers = useMemo(() => {
+    let list = internalSuppliers
+    if (filterType === "mercaderia") {
+      list = list.filter((s) => (s.total_productos || 0) > 0)
+    }
     const q = query.trim().toLowerCase()
-    if (!q) return internalSuppliers.slice(0, 20)
+    if (!q) return list.slice(0, 30)
     const qClean = q.replace(/[^0-9kK]/g, "")
-    return internalSuppliers
+    return list
       .filter((s) => {
         const razon = (s.razon_social || "").toLowerCase()
         const fantasia = (s.nombre_fantasia || "").toLowerCase()
@@ -97,8 +114,8 @@ export default function SupplierSearchInput({
         const matchRuc = rucRaw.includes(q) || (qClean.length >= 2 && rucClean.includes(qClean))
         return matchText || matchRuc
       })
-      .slice(0, 30)
-  }, [internalSuppliers, query])
+      .slice(0, 40)
+  }, [internalSuppliers, query, filterType])
 
   const selectedSupplierObj = useMemo(() => {
     if (!supplierId && !value) return null
@@ -173,6 +190,15 @@ export default function SupplierSearchInput({
                     RUC: {selectedSupplierObj?.ruc || "Registrado"}
                   </span>
                 )}
+                {showProductCount && selectedSupplierObj?.total_productos !== undefined && (
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${
+                    selectedSupplierObj.total_productos > 0
+                      ? "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300"
+                      : "bg-slate-200 dark:bg-slate-700 text-slate-500"
+                  }`}>
+                    {selectedSupplierObj.total_productos} {selectedSupplierObj.total_productos === 1 ? "artículo" : "artículos"}
+                  </span>
+                )}
               </div>
               {selectedSupplierObj?.nombre_fantasia && selectedSupplierObj.nombre_fantasia !== value && (
                 <p className="text-[10px] text-slate-400 truncate">Fantasia: {selectedSupplierObj.nombre_fantasia}</p>
@@ -225,7 +251,35 @@ export default function SupplierSearchInput({
 
           {/* Menú Desplegable con Resultados */}
           {isOpen && (
-            <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl max-h-64 overflow-y-auto animate-in fade-in slide-in-from-top-1 duration-150">
+            <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl max-h-72 overflow-y-auto animate-in fade-in slide-in-from-top-1 duration-150">
+              {/* Selector de Tipo de Proveedor (Mercaderías vs Todos) */}
+              {showTypeToggle && (
+                <div className="sticky top-0 z-10 flex items-center gap-1 p-1.5 bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => setFilterType("mercaderia")}
+                    className={`flex-1 py-1.5 px-2 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1.5 ${
+                      filterType === "mercaderia"
+                        ? "bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-300 shadow-sm"
+                        : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                    }`}
+                  >
+                    <span>📦 Mercaderías ({mercaderiasCount})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFilterType("todos")}
+                    className={`flex-1 py-1.5 px-2 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1.5 ${
+                      filterType === "todos"
+                        ? "bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-300 shadow-sm"
+                        : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                    }`}
+                  >
+                    <span>📋 Todos ({internalSuppliers.length})</span>
+                  </button>
+                </div>
+              )}
+
               {/* Opción de usar el texto manual tipeado (solo si allowManual es true) */}
               {allowManual && query.trim().length > 0 && (
                 <button
@@ -255,6 +309,15 @@ export default function SupplierSearchInput({
                   ) : (
                     <div>
                       <p>No se encontraron proveedores con ese criterio de búsqueda.</p>
+                      {filterType === "mercaderia" && (
+                        <button
+                          type="button"
+                          onClick={() => setFilterType("todos")}
+                          className="mt-2 text-xs font-bold text-purple-600 dark:text-purple-400 hover:underline"
+                        >
+                          Ver en todos los proveedores ({internalSuppliers.length})
+                        </button>
+                      )}
                       {allowManual && query.trim() && (
                         <p className="text-[11px] text-slate-500 mt-1">
                           Podés pulsar arriba para usarlo como beneficiario manual.
@@ -265,8 +328,9 @@ export default function SupplierSearchInput({
                 </div>
               ) : (
                 <div className="py-1">
-                  <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-50/50 dark:bg-slate-800/50">
-                    Proveedores Registrados
+                  <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-50/50 dark:bg-slate-800/50 flex items-center justify-between">
+                    <span>{filterType === "mercaderia" ? "Proveedores con Mercaderías" : "Todos los Proveedores"}</span>
+                    <span>{filteredSuppliers.length} mostrados</span>
                   </div>
                   {filteredSuppliers.map((s) => {
                     const name = s.razon_social || s.nombre_fantasia || s.nombre || "Proveedor"
@@ -288,14 +352,29 @@ export default function SupplierSearchInput({
                               <span className="text-[10px] text-slate-400 truncate">({s.nombre_fantasia})</span>
                             )}
                           </div>
-                          {s.ruc && (
-                            <span className="font-mono text-[10px] text-slate-500 dark:text-slate-400">
-                              RUC: {s.ruc}
-                            </span>
-                          )}
+                          <div className="flex items-center gap-2 mt-0.5">
+                            {s.ruc && (
+                              <span className="font-mono text-[10px] text-slate-500 dark:text-slate-400">
+                                RUC: {s.ruc}
+                              </span>
+                            )}
+                          </div>
                         </div>
 
-                        {isSelected && <Check className="w-4 h-4 text-purple-600 shrink-0" />}
+                        <div className="flex items-center gap-2 shrink-0">
+                          {showProductCount && s.total_productos !== undefined && (
+                            <span
+                              className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                                s.total_productos > 0
+                                  ? "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300/40"
+                                  : "bg-slate-100 dark:bg-slate-800 text-slate-400"
+                              }`}
+                            >
+                              {s.total_productos} {s.total_productos === 1 ? "artículo" : "artículos"}
+                            </span>
+                          )}
+                          {isSelected && <Check className="w-4 h-4 text-purple-600 shrink-0" />}
+                        </div>
                       </button>
                     )
                   })}
