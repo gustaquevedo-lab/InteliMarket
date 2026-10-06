@@ -285,8 +285,11 @@ class RejectAdjustmentBody(BaseModel):
 class PhysicalSessionCreate(BaseModel):
     company_id: UUID
     warehouse_id: UUID
-    tipo: str = Field(default="total", description="total | parcial | ciclico")
+    tipo: str = Field(default="total", description="total | parcial | ciclico | proveedor | sector")
     categoria_id: Optional[UUID] = None
+    categoria_nombre: Optional[str] = None
+    supplier_id: Optional[UUID] = None
+    supplier_nombre: Optional[str] = None
     pasillo: Optional[str] = None
     descripcion_alcance: Optional[str] = None
     notas: Optional[str] = None
@@ -338,6 +341,9 @@ class PhysicalSessionResponse(BaseModel):
     tipo: str
     estado: str
     categoria_id: Optional[UUID] = None
+    categoria_nombre: Optional[str] = None
+    supplier_id: Optional[UUID] = None
+    supplier_nombre: Optional[str] = None
     pasillo: Optional[str] = None
     descripcion_alcance: Optional[str] = None
     notas: Optional[str] = None

@@ -1338,6 +1338,21 @@ async def create_physical_session(
     """
     from sqlalchemy import text as sqtext
 
+    # Resolver nombres legibles de proveedor o categoría si no vinieron explícitos
+    supplier_nom = data.supplier_nombre
+    if data.supplier_id and not supplier_nom:
+        sup_r = await db.execute(sqtext("SELECT razon_social FROM suppliers WHERE id = :sid"), {"sid": data.supplier_id})
+        sup_row = sup_r.fetchone()
+        if sup_row:
+            supplier_nom = sup_row[0]
+
+    categoria_nom = data.categoria_nombre
+    if data.categoria_id and not categoria_nom:
+        cat_r = await db.execute(sqtext("SELECT nombre FROM product_categories WHERE id = :cid"), {"cid": data.categoria_id})
+        cat_row = cat_r.fetchone()
+        if cat_row:
+            categoria_nom = cat_row[0]
+
     session_code = f"TF-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M')}-{uuid.uuid4().hex[:4].upper()}"
     session = PhysicalInventorySession(
         company_id=data.company_id,
@@ -1345,6 +1360,9 @@ async def create_physical_session(
         codigo=session_code,
         tipo=data.tipo,
         categoria_id=data.categoria_id,
+        categoria_nombre=categoria_nom,
+        supplier_id=data.supplier_id,
+        supplier_nombre=supplier_nom,
         pasillo=data.pasillo,
         descripcion_alcance=data.descripcion_alcance,
         notas=data.notas,
@@ -1361,22 +1379,49 @@ async def create_physical_session(
     await db.flush()
 
     # Pre-cargar ítems con stock actual del depósito
-    query_params: dict = {"wh_id": data.warehouse_id}
-    items_query = """
-        SELECT
-            s.product_id,
-            p.nombre as product_nombre,
-            p.sku as product_sku,
-            COALESCE(p.codigo_barra, '') as product_codigo_barra,
-            s.cantidad as cantidad_sistema,
-            COALESCE(s.costo_unitario, p.costo_promedio, p.ultimo_costo, 0) as costo_unitario
-        FROM stock s
-        JOIN products p ON p.id = s.product_id
-        WHERE s.warehouse_id = :wh_id AND p.activo = true
-    """
-    if data.categoria_id:
-        items_query += " AND p.categoria_id = :cat_id"
+    query_params: dict = {"wh_id": data.warehouse_id, "comp_id": data.company_id}
+
+    if data.tipo == "proveedor" or data.supplier_id:
+        items_query = """
+            SELECT
+                p.id as product_id,
+                p.nombre as product_nombre,
+                p.sku as product_sku,
+                COALESCE(p.codigo_barra, '') as product_codigo_barra,
+                COALESCE(s.cantidad, 0) as cantidad_sistema,
+                COALESCE(s.costo_unitario, p.costo_promedio, p.ultimo_costo, 0) as costo_unitario
+            FROM products p
+            LEFT JOIN stock s ON s.product_id = p.id AND s.warehouse_id = :wh_id
+            WHERE p.company_id = :comp_id AND p.activo = true AND p.supplier_id = :sup_id
+        """
+        query_params["sup_id"] = data.supplier_id
+    elif data.tipo == "sector" or data.categoria_id:
+        items_query = """
+            SELECT
+                p.id as product_id,
+                p.nombre as product_nombre,
+                p.sku as product_sku,
+                COALESCE(p.codigo_barra, '') as product_codigo_barra,
+                COALESCE(s.cantidad, 0) as cantidad_sistema,
+                COALESCE(s.costo_unitario, p.costo_promedio, p.ultimo_costo, 0) as costo_unitario
+            FROM products p
+            LEFT JOIN stock s ON s.product_id = p.id AND s.warehouse_id = :wh_id
+            WHERE p.company_id = :comp_id AND p.activo = true AND p.categoria_id = :cat_id
+        """
         query_params["cat_id"] = data.categoria_id
+    else:
+        items_query = """
+            SELECT
+                s.product_id,
+                p.nombre as product_nombre,
+                p.sku as product_sku,
+                COALESCE(p.codigo_barra, '') as product_codigo_barra,
+                s.cantidad as cantidad_sistema,
+                COALESCE(s.costo_unitario, p.costo_promedio, p.ultimo_costo, 0) as costo_unitario
+            FROM stock s
+            JOIN products p ON p.id = s.product_id
+            WHERE s.warehouse_id = :wh_id AND p.activo = true
+        """
 
     items_query += " ORDER BY p.nombre"
 
@@ -1416,6 +1461,8 @@ async def list_physical_sessions(
     company_id: str,
     warehouse_id: str | None = None,
     estado: str | None = None,
+    supplier_id: str | None = None,
+    categoria_id: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict]:
@@ -1431,6 +1478,12 @@ async def list_physical_sessions(
     if estado:
         where += " AND s.estado = :estado"
         params["estado"] = estado
+    if supplier_id:
+        where += " AND s.supplier_id = :sup_id"
+        params["sup_id"] = uuid.UUID(supplier_id) if isinstance(supplier_id, str) else supplier_id
+    if categoria_id:
+        where += " AND s.categoria_id = :cat_id"
+        params["cat_id"] = uuid.UUID(categoria_id) if isinstance(categoria_id, str) else categoria_id
 
     query = f"""
         SELECT
@@ -1441,6 +1494,7 @@ async def list_physical_sessions(
             s.fecha_inicio, s.fecha_cierre,
             s.adjustment_id, s.notas, s.descripcion_alcance,
             s.created_at,
+            s.supplier_id, s.supplier_nombre, s.categoria_id, s.categoria_nombre,
             w.nombre as warehouse_nombre
         FROM physical_inventory_sessions s
         LEFT JOIN warehouses w ON w.id = s.warehouse_id

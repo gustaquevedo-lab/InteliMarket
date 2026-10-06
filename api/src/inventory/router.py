@@ -467,11 +467,13 @@ async def list_physical_sessions(
     company_id: str,
     warehouse_id: str | None = Query(None),
     estado: str | None = Query(None),
+    supplier_id: str | None = Query(None),
+    categoria_id: str | None = Query(None),
     limit: int = Query(50, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_physical_sessions(db, company_id, warehouse_id, estado, limit, offset)
+    return await service.list_physical_sessions(db, company_id, warehouse_id, estado, supplier_id, categoria_id, limit, offset)
 
 
 @router.get("/inventory/physical-sessions/{session_id}", response_model=PhysicalSessionResponse)

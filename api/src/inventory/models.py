@@ -296,8 +296,11 @@ class PhysicalInventorySession(Base):
     # Tipo: total (todo el depósito) | parcial (por categoría/pasillo) | ciclico (por rotation)
     tipo = Column(String(20), nullable=False, default="total")
 
-    # Alcance opcional (para tomas parciales)
+    # Alcance opcional (para tomas parciales, por proveedor o por sector)
     categoria_id = Column(UUID(as_uuid=True))
+    categoria_nombre = Column(String(150))
+    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id", ondelete="SET NULL"), nullable=True, index=True)
+    supplier_nombre = Column(String(150))
     pasillo = Column(String(50))
     descripcion_alcance = Column(Text)
 

@@ -4,7 +4,8 @@ import {
   Barcode, CheckCircle2, AlertTriangle, Clock, X, Plus, Search,
   Filter, RefreshCw, Eye, UserCheck, ShieldAlert, ArrowRight,
   TrendingDown, Check, Layers, ChevronRight, AlertCircle, Sparkles,
-  ClipboardList, Users, Shield, ShieldCheck, ArrowLeft, Send
+  ClipboardList, Users, Shield, ShieldCheck, ArrowLeft, Send,
+  Printer, Building2, Tag, FileSpreadsheet
 } from "lucide-react"
 import {
   api,
@@ -54,9 +55,15 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
   const [sessions, setSessions] = useState<PhysicalSession[]>([])
   const [loadingSessions, setLoadingSessions] = useState(true)
 
-  // Filtros
+  // Catálogos para filtros y creación por proveedor/sector
+  const [suppliers, setSuppliers] = useState<any[]>([])
+  const [categories, setCategories] = useState<any[]>([])
+
+  // Filtros de listado
   const [filterWarehouse, setFilterWarehouse] = useState<string>("all")
   const [filterEstado, setFilterEstado] = useState<string>("all")
+  const [filterSupplier, setFilterSupplier] = useState<string>("all")
+  const [filterCategory, setFilterCategory] = useState<string>("all")
   const [searchTerm, setSearchTerm] = useState("")
 
   // Sesión Activa / Seleccionada para Conteo
@@ -72,13 +79,18 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
   // Modal Nueva Toma Física (Wizard)
   const [showNewSessionModal, setShowNewSessionModal] = useState(false)
   const [newWhId, setNewWhId] = useState("")
-  const [newTipo, setNewTipo] = useState<"total" | "parcial" | "ciclico">("total")
+  const [newTipo, setNewTipo] = useState<"proveedor" | "sector" | "total" | "parcial" | "ciclico">("proveedor")
+  const [newSupplierId, setNewSupplierId] = useState("")
+  const [newCategoriaId, setNewCategoriaId] = useState("")
   const [newPasillo, setNewPasillo] = useState("")
   const [newDescripcion, setNewDescripcion] = useState("")
   const [newContador1, setNewContador1] = useState("")
   const [newContador2, setNewContador2] = useState("")
   const [newNotas, setNewNotas] = useState("")
   const [submittingNew, setSubmittingNew] = useState(false)
+
+  // Modal Planilla Imprimible de Conteo Físico
+  const [showPrintModal, setShowPrintModal] = useState(false)
 
   // Modal Reconciliación de Ítem
   const [reconcileTarget, setReconcileTarget] = useState<PhysicalSessionItem | null>(null)
@@ -95,6 +107,25 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
   const scannerInputRef = useRef<HTMLInputElement>(null)
 
   // ---------------------------------------------------------------------------
+  // CARGA DE PROVEEDORES Y CATEGORÍAS
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    let cancelled = false
+    api.purchases.listSuppliers()
+      .then((res: any) => {
+        if (!cancelled && Array.isArray(res)) setSuppliers(res)
+      })
+      .catch(() => {})
+
+    api.categories.list()
+      .then((res: any) => {
+        if (!cancelled && Array.isArray(res)) setCategories(res)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  // ---------------------------------------------------------------------------
   // CARGA DE SESIONES
   // ---------------------------------------------------------------------------
   const loadSessions = useCallback(async () => {
@@ -103,6 +134,8 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
       const res = await api.inventory.physicalSessions.list({
         warehouse_id: filterWarehouse === "all" ? undefined : filterWarehouse,
         estado: filterEstado === "all" ? undefined : filterEstado,
+        supplier_id: filterSupplier === "all" ? undefined : filterSupplier,
+        categoria_id: filterCategory === "all" ? undefined : filterCategory,
         limit: 50,
       })
       setSessions(res || [])
@@ -111,7 +144,7 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
     } finally {
       setLoadingSessions(false)
     }
-  }, [filterWarehouse, filterEstado])
+  }, [filterWarehouse, filterEstado, filterSupplier, filterCategory])
 
   useEffect(() => {
     loadSessions()
@@ -155,25 +188,49 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
       return
     }
 
+    if (newTipo === "proveedor" && !newSupplierId) {
+      toast.error("Seleccione el proveedor a inventariar")
+      return
+    }
+
+    if (newTipo === "sector" && !newCategoriaId) {
+      toast.error("Seleccione el sector / categoría a inventariar")
+      return
+    }
+
+    const selectedSup = suppliers.find((s) => s.id === newSupplierId)
+    const selectedCat = categories.find((c) => c.id === newCategoriaId)
+
     setSubmittingNew(true)
     try {
       const res = await api.inventory.physicalSessions.create({
         warehouse_id: newWhId,
         tipo: newTipo,
+        supplier_id: newTipo === "proveedor" ? newSupplierId : undefined,
+        supplier_nombre: newTipo === "proveedor" ? (selectedSup?.razon_social || selectedSup?.nombre) : undefined,
+        categoria_id: newTipo === "sector" ? newCategoriaId : undefined,
+        categoria_nombre: newTipo === "sector" ? selectedCat?.nombre : undefined,
         pasillo: newPasillo.trim() || undefined,
-        descripcion_alcance: newDescripcion.trim() || undefined,
+        descripcion_alcance:
+          newTipo === "proveedor"
+            ? `Proveedor: ${selectedSup?.razon_social || selectedSup?.nombre || "Seleccionado"}`
+            : newTipo === "sector"
+            ? `Sector: ${selectedCat?.nombre || "Seleccionado"}`
+            : newDescripcion.trim() || undefined,
         contador_1_nombre: newContador1.trim() || undefined,
         contador_2_nombre: newContador2.trim() || undefined,
         notas: newNotas.trim() || undefined,
       })
       toast.success(
         "Sesión de Toma Física Creada",
-        `Código: ${res.codigo}. Se precargaron los productos del depósito para el conteo.`
+        `Código: ${res.codigo}. Se precargaron los productos para el conteo.`
       )
       setShowNewSessionModal(false)
       // reset
       setNewWhId("")
-      setNewTipo("total")
+      setNewTipo("proveedor")
+      setNewSupplierId("")
+      setNewCategoriaId("")
       setNewPasillo("")
       setNewDescripcion("")
       setNewContador1("")
@@ -181,7 +238,7 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
       setNewNotas("")
       loadSessions()
 
-      // Abrir inmediatamente la nueva sesión
+      // Abrir inmediatamente la nueva sesión para iniciar el conteo
       if (res.id) {
         openSessionDetail(res)
       }
@@ -404,14 +461,42 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                   {ESTADO_SESSION_CONFIG[activeSession.estado]?.label || activeSession.estado}
                 </span>
               </div>
-              <p className="text-xs text-slate-500">
-                Depósito: <strong>{activeSession.warehouse_nombre || "Principal"}</strong> | Tipo:{" "}
-                <span className="uppercase font-bold">{activeSession.tipo}</span>
-              </p>
+              <div className="flex flex-wrap items-center gap-2 mt-1">
+                <span className="text-xs text-slate-500">
+                  Depósito: <strong className="text-slate-800 dark:text-slate-200">{activeSession.warehouse_nombre || "Principal"}</strong> | Tipo:{" "}
+                  <span className="uppercase font-bold">{activeSession.tipo}</span>
+                </span>
+                {activeSession.supplier_nombre && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                    <Building2 className="w-3 h-3" />
+                    <span>Proveedor: {activeSession.supplier_nombre}</span>
+                  </span>
+                )}
+                {activeSession.categoria_nombre && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                    <Tag className="w-3 h-3" />
+                    <span>Sector: {activeSession.categoria_nombre}</span>
+                  </span>
+                )}
+                {activeSession.pasillo && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20">
+                    <span>📍 {activeSession.pasillo}</span>
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+            <button
+              onClick={() => setShowPrintModal(true)}
+              className="px-3 py-2 text-xs font-bold rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 shadow-xs flex items-center gap-1.5 transition"
+              title="Generar o imprimir planilla de conteo físico"
+            >
+              <Printer className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <span>Imprimir Planilla</span>
+            </button>
+
             <button
               onClick={refreshActiveSession}
               className="p-2 text-slate-500 hover:text-slate-900 dark:hover:text-white rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition"
@@ -995,6 +1080,165 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
             </div>,
             document.body
           )}
+
+        {/* ── MODAL / PLANILLA DE CONTEO FÍSICO IMPRIMIBLE ───────────────────── */}
+        {showPrintModal &&
+          createPortal(
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+              <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                {/* Header de la ventana (no imprimible) */}
+                <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/50 print:hidden">
+                  <div className="flex items-center gap-2">
+                    <Printer className="w-5 h-5 text-emerald-600" />
+                    <div>
+                      <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                        Planilla de Conteo Físico #{activeSession.codigo}
+                      </h3>
+                      <p className="text-[11px] text-slate-500">
+                        {activeSession.warehouse_nombre} •{" "}
+                        {activeSession.tipo === "proveedor"
+                          ? `Proveedor: ${activeSession.supplier_nombre || "Específico"}`
+                          : activeSession.tipo === "sector"
+                          ? `Sector: ${activeSession.categoria_nombre || "Específico"}`
+                          : `Modalidad: ${activeSession.tipo}`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => window.print()}
+                      className="btn-primary px-4 py-1.5 text-xs font-bold uppercase rounded-xl bg-emerald-600 hover:bg-emerald-700 flex items-center gap-1.5 shadow-sm"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      <span>Imprimir / PDF</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowPrintModal(false)}
+                      className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Hoja Imprimible */}
+                <div className="p-6 overflow-y-auto space-y-4 print:p-0 print:overflow-visible text-slate-900 dark:text-slate-100">
+                  {/* Membrete Supermercado */}
+                  <div className="border-b pb-3 mb-3 border-slate-200 flex justify-between items-start">
+                    <div>
+                      <h2 className="text-base font-black uppercase tracking-tight text-slate-900">
+                        EXTRA SUPERMERCADO MAYORISTA
+                      </h2>
+                      <p className="text-xs text-slate-600 font-medium">
+                        GRUPO SANTA TERESA E.A.S. • RUC: 80150377-9
+                      </p>
+                      <p className="text-xs font-bold text-emerald-700 mt-1">
+                        PLANILLA DE CONTEO FÍSICO Y AUDITORÍA DE STOCK
+                      </p>
+                    </div>
+                    <div className="text-right text-xs text-slate-600 space-y-0.5">
+                      <p className="font-mono font-bold text-sm text-slate-900">TOMA #{activeSession.codigo}</p>
+                      <p>Fecha: {formatDateTime(activeSession.created_at)}</p>
+                      <p>
+                        Depósito: <strong className="text-slate-900">{activeSession.warehouse_nombre}</strong>
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Metadatos del alcance de inventario */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-slate-700">
+                    <div>
+                      <span className="text-[10px] text-slate-400 uppercase font-bold block">Alcance / Tipo:</span>
+                      <strong className="capitalize">{activeSession.tipo}</strong>
+                    </div>
+                    {activeSession.supplier_nombre && (
+                      <div>
+                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Proveedor:</span>
+                        <strong className="text-blue-700">{activeSession.supplier_nombre}</strong>
+                      </div>
+                    )}
+                    {activeSession.categoria_nombre && (
+                      <div>
+                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Sector / Categoría:</span>
+                        <strong className="text-purple-700">{activeSession.categoria_nombre}</strong>
+                      </div>
+                    )}
+                    {activeSession.pasillo && (
+                      <div>
+                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Pasillo / Góndola:</span>
+                        <strong>{activeSession.pasillo}</strong>
+                      </div>
+                    )}
+                    <div>
+                      <span className="text-[10px] text-slate-400 uppercase font-bold block">Contador 1:</span>
+                      <strong>{activeSession.contador_1_nombre || "Operador 1"}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 uppercase font-bold block">Contador 2 (Ciego):</span>
+                      <strong>{activeSession.contador_2_nombre || "Operador 2"}</strong>
+                    </div>
+                  </div>
+
+                  {/* Tabla de Artículos a Contar */}
+                  <table className="w-full text-left text-xs border border-slate-200 rounded-lg overflow-hidden">
+                    <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                      <tr>
+                        <th className="p-2 w-10 text-center">#</th>
+                        <th className="p-2 w-32 font-mono">Cód. Barras</th>
+                        <th className="p-2">Descripción de Producto</th>
+                        <th className="p-2 w-24 text-right">Stock Sist.</th>
+                        <th className="p-2 w-24 text-center border-l border-slate-200">Conteo 1</th>
+                        <th className="p-2 w-24 text-center border-l border-slate-200">Conteo 2</th>
+                        <th className="p-2 w-32 border-l border-slate-200">Obs / Vto.</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {(activeSession.items || []).map((item, idx) => (
+                        <tr key={item.id} className="hover:bg-slate-50">
+                          <td className="p-2 text-center text-slate-400">{idx + 1}</td>
+                          <td className="p-2 font-mono text-slate-600">{item.product_codigo_barra || "-"}</td>
+                          <td className="p-2 font-medium text-slate-900">{item.product_nombre}</td>
+                          <td className="p-2 text-right font-mono font-bold text-slate-600">
+                            {Number(item.cantidad_sistema).toLocaleString("es-PY")}
+                          </td>
+                          <td className="p-2 text-center border-l border-slate-200 font-mono font-black text-blue-700 bg-slate-50/50">
+                            {item.cantidad_conteo_1 !== null && item.cantidad_conteo_1 !== undefined
+                              ? Number(item.cantidad_conteo_1).toLocaleString("es-PY")
+                              : ""}
+                          </td>
+                          <td className="p-2 text-center border-l border-slate-200 font-mono font-black text-purple-700 bg-slate-50/50">
+                            {item.cantidad_conteo_2 !== null && item.cantidad_conteo_2 !== undefined
+                              ? Number(item.cantidad_conteo_2).toLocaleString("es-PY")
+                              : ""}
+                          </td>
+                          <td className="p-2 border-l border-slate-200 text-[11px] text-slate-500"></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  {/* Firmas de Control de Inventario */}
+                  <div className="grid grid-cols-3 gap-6 pt-10 text-center text-xs text-slate-600 border-t border-slate-200 mt-6">
+                    <div className="border-t border-dashed border-slate-400 pt-2">
+                      <p className="font-bold text-slate-800">{activeSession.contador_1_nombre || "Contador 1"}</p>
+                      <p className="text-[10px] text-slate-400">Primer Conteo Físico</p>
+                    </div>
+                    <div className="border-t border-dashed border-slate-400 pt-2">
+                      <p className="font-bold text-slate-800">{activeSession.contador_2_nombre || "Contador 2"}</p>
+                      <p className="text-[10px] text-slate-400">Segundo Conteo Ciego</p>
+                    </div>
+                    <div className="border-t border-dashed border-slate-400 pt-2">
+                      <p className="font-bold text-slate-800">Encargado de Stock / Auditor</p>
+                      <p className="text-[10px] text-slate-400">Aprobación & Firma</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
       </div>
     )
   }
@@ -1069,6 +1313,34 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
             ))}
           </select>
 
+          {/* Proveedor */}
+          <select
+            value={filterSupplier}
+            onChange={(e) => setFilterSupplier(e.target.value)}
+            className="input-field text-xs py-2 max-w-[190px]"
+          >
+            <option value="all">Todos los proveedores</option>
+            {suppliers.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.razon_social || s.nombre}
+              </option>
+            ))}
+          </select>
+
+          {/* Sector / Categoría */}
+          <select
+            value={filterCategory}
+            onChange={(e) => setFilterCategory(e.target.value)}
+            className="input-field text-xs py-2 max-w-[170px]"
+          >
+            <option value="all">Todos los sectores</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nombre}
+              </option>
+            ))}
+          </select>
+
           {/* Estado */}
           <select
             value={filterEstado}
@@ -1120,11 +1392,12 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs min-w-[850px]">
+            <table className="w-full text-left text-xs min-w-[950px]">
               <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-100 dark:border-slate-800">
                 <tr>
                   <th className="p-3.5">Código / Fecha</th>
                   <th className="p-3.5">Depósito & Tipo</th>
+                  <th className="p-3.5">Alcance (Proveedor / Sector)</th>
                   <th className="p-3.5">Operadores Asignados</th>
                   <th className="p-3.5 text-right">Total Ítems</th>
                   <th className="p-3.5 text-right">Discrepancias</th>
@@ -1166,6 +1439,27 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                         <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded text-slate-500">
                           {session.tipo}
                         </span>
+                      </td>
+
+                      {/* Alcance / Proveedor / Sector */}
+                      <td className="p-3.5">
+                        {session.supplier_nombre ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded border border-amber-200 dark:border-amber-800">
+                            <Building2 className="w-3 h-3 shrink-0" />
+                            <span className="truncate max-w-[160px]">{session.supplier_nombre}</span>
+                          </span>
+                        ) : session.categoria_nombre ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-800">
+                            <Tag className="w-3 h-3 shrink-0" />
+                            <span className="truncate max-w-[150px]">{session.categoria_nombre}</span>
+                          </span>
+                        ) : session.pasillo ? (
+                          <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                            📍 {session.pasillo}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-slate-400">Total Depósito</span>
+                        )}
                       </td>
 
                       {/* Operadores */}
@@ -1276,38 +1570,105 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                   </select>
                 </div>
 
-                {/* Tipo de Toma */}
+                {/* Tipo de Toma / Alcance */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Alcance / Tipo de Toma *
+                    Alcance del Conteo *
                   </label>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {[
-                      { id: "total", label: "Inventario Total" },
-                      { id: "parcial", label: "Parcial / Pasillo" },
-                      { id: "ciclico", label: "Cíclico Rotativo" },
-                    ].map((t) => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        onClick={() => setNewTipo(t.id as any)}
-                        className={`p-2 rounded-xl text-xs font-bold border transition ${
-                          newTipo === t.id
-                            ? "bg-emerald-500 text-white border-emerald-600 shadow-xs"
-                            : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700"
-                        }`}
-                      >
-                        {t.label}
-                      </button>
-                    ))}
+                      { id: "proveedor", label: "Por Proveedor", icon: Building2 },
+                      { id: "sector", label: "Por Sector / Categoría", icon: Tag },
+                      { id: "total", label: "Inventario Total", icon: Layers },
+                      { id: "parcial", label: "Por Pasillo / Góndola", icon: Filter },
+                      { id: "ciclico", label: "Cíclico Rotativo", icon: RefreshCw },
+                    ].map((t) => {
+                      const Icon = t.icon
+                      const isSel = newTipo === t.id
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => setNewTipo(t.id as any)}
+                          className={`p-2.5 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 justify-center ${
+                            isSel
+                              ? "bg-emerald-600 text-white border-emerald-700 shadow-sm"
+                              : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100"
+                          }`}
+                        >
+                          <Icon className="w-3.5 h-3.5 shrink-0" />
+                          <span className="truncate">{t.label}</span>
+                        </button>
+                      )
+                    })}
                   </div>
                 </div>
 
-                {/* Pasillo o Sector */}
-                {newTipo !== "total" && (
+                {/* Selector específico: Proveedor */}
+                {newTipo === "proveedor" && (
+                  <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-2xl space-y-1.5">
+                    <label className="block text-xs font-extrabold text-amber-800 dark:text-amber-300">
+                      Seleccionar Proveedor a Inventariar *
+                    </label>
+                    <select
+                      value={newSupplierId}
+                      onChange={(e) => setNewSupplierId(e.target.value)}
+                      required
+                      className="input-field text-xs py-2 w-full bg-white dark:bg-slate-900 font-medium"
+                    >
+                      <option value="">Elegí un proveedor...</option>
+                      {suppliers.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.razon_social || s.nombre} {s.ruc ? `(RUC: ${s.ruc})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    {newSupplierId && (
+                      <p className="text-[11px] font-bold text-amber-700 dark:text-amber-400 flex items-center gap-1 pt-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>
+                          {products.filter((p) => p.supplier_id === newSupplierId).length} productos asociados en catálogo listos para ser precargados.
+                        </span>
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Selector específico: Sector / Categoría */}
+                {newTipo === "sector" && (
+                  <div className="p-3.5 bg-blue-500/10 border border-blue-500/20 rounded-2xl space-y-1.5">
+                    <label className="block text-xs font-extrabold text-blue-800 dark:text-blue-300">
+                      Seleccionar Sector o Categoría *
+                    </label>
+                    <select
+                      value={newCategoriaId}
+                      onChange={(e) => setNewCategoriaId(e.target.value)}
+                      required
+                      className="input-field text-xs py-2 w-full bg-white dark:bg-slate-900 font-medium"
+                    >
+                      <option value="">Elegí un sector / categoría...</option>
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.nombre} {c.codigo ? `(${c.codigo})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    {newCategoriaId && (
+                      <p className="text-[11px] font-bold text-blue-700 dark:text-blue-400 flex items-center gap-1 pt-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>
+                          {products.filter((p) => p.categoria_id === newCategoriaId).length} productos en este sector en catálogo.
+                        </span>
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Pasillo o Sector puntual */}
+                {(newTipo === "parcial" || newTipo === "ciclico") && (
                   <div>
                     <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      Pasillo, Sector o Góndola
+                      Pasillo, Sector o Góndola Específica
                     </label>
                     <input
                       type="text"
@@ -1376,7 +1737,7 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                     disabled={submittingNew}
                     className="btn-primary px-6 py-2 text-xs font-extrabold uppercase rounded-xl bg-emerald-600 hover:bg-emerald-700 shadow-sm"
                   >
-                    {submittingNew ? "Iniciando..." : "Crear & Precargar Stock"}
+                    {submittingNew ? "Iniciando..." : "Crear e Iniciar Toma Física"}
                   </button>
                 </div>
               </form>

@@ -985,9 +985,12 @@ export interface PhysicalSession {
   warehouse_id: string
   warehouse_nombre?: string
   codigo: string
-  tipo: "total" | "parcial" | "ciclico"
+  tipo: "total" | "parcial" | "ciclico" | "proveedor" | "sector"
   estado: "abierta" | "en_conteo" | "cerrada" | "cancelada"
   categoria_id?: string | null
+  categoria_nombre?: string | null
+  supplier_id?: string | null
+  supplier_nombre?: string | null
   pasillo?: string | null
   descripcion_alcance?: string | null
   notas?: string | null
@@ -1913,10 +1916,10 @@ export const api = {
       return requestMultipart<{ url: string; filename: string }>("/v1/petty-cash/upload-comprobante", fd)
     },
     physicalSessions: {
-      list: (params?: { warehouse_id?: string; estado?: string; limit?: number; offset?: number }) =>
+      list: (params?: { warehouse_id?: string; estado?: string; supplier_id?: string; categoria_id?: string; limit?: number; offset?: number }) =>
         client.get<PhysicalSession[]>(`/v1/companies/${COMPANY_ID}/inventory/physical-sessions`, params as any),
       get: (id: string) => client.get<PhysicalSession>(`/v1/inventory/physical-sessions/${id}`),
-      create: (data: { warehouse_id: string; tipo: string; categoria_id?: string; pasillo?: string; descripcion_alcance?: string; notas?: string; contador_1_nombre?: string; contador_2_nombre?: string }) =>
+      create: (data: { warehouse_id: string; tipo: string; categoria_id?: string; categoria_nombre?: string; supplier_id?: string; supplier_nombre?: string; pasillo?: string; descripcion_alcance?: string; notas?: string; contador_1_nombre?: string; contador_2_nombre?: string }) =>
         client.post<any>(`/v1/inventory/physical-sessions`, { ...data, company_id: COMPANY_ID }),
       registerCount: (sessionId: string, itemId: string, data: { cantidad: number; numero_conteo: 1 | 2 }) =>
         client.put<PhysicalSessionItem>(`/v1/inventory/physical-sessions/${sessionId}/items/${itemId}/count`, data),

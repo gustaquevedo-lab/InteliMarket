@@ -4,6 +4,7 @@ import {
   Calendar, Hash, ImagePlus, ChevronRight, ClipboardList,
   AlertTriangle, CheckCircle2, Search, Download, RefreshCcw, RefreshCw, Zap,
   LogIn, LogOut, User as UserIcon, Lock, Eye, EyeOff, ShieldCheck,
+  Building2, Tag
 } from "lucide-react"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
@@ -68,6 +69,9 @@ export default function ConteoVencimientosPage() {
   const [session, setSession] = useState<CountSession | null>(null)
   const [openSessions, setOpenSessions] = useState<CountSession[]>([])
   const [loadingSessions, setLoadingSessions] = useState(false)
+  const [conteoScope, setConteoScope] = useState<"sector" | "proveedor">("sector")
+  const [suppliers, setSuppliers] = useState<any[]>([])
+  const [selectedSupplierId, setSelectedSupplierId] = useState("")
   const [selectedArea, setSelectedArea] = useState(AREAS[0].key)
   const [ubicacion, setUbicacion] = useState("")
   const [startingSession, setStartingSession] = useState(false)
@@ -143,6 +147,17 @@ export default function ConteoVencimientosPage() {
     return () => { cancelled = true }
   }, [user, toast])
 
+  // ── Cargar proveedores al montar ──
+  useEffect(() => {
+    let cancelled = false
+    api.purchases.listSuppliers()
+      .then((res: any) => {
+        if (!cancelled && Array.isArray(res)) setSuppliers(res)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
   // ── Refrescar items de la sesion activa ──
   const refreshItems = useCallback(async (sessionId: string) => {
     try {
@@ -214,6 +229,12 @@ export default function ConteoVencimientosPage() {
   const startSession = async () => {
     setStartingSession(true)
     try {
+      if (conteoScope === "proveedor" && !selectedSupplierId) {
+        toast.warning("Falta proveedor", "Seleccioná un proveedor para iniciar el conteo.")
+        setStartingSession(false)
+        return
+      }
+
       // Auto-iniciar sesión rápida si no hay usuario para garantizar que el conteo no falle
       let activeUserId = user?.id
       if (!user) {
@@ -239,8 +260,12 @@ export default function ConteoVencimientosPage() {
       const rand = Math.random().toString(36).slice(2, 6).toUpperCase()
       const codigo = `SAL-${dParts}-${rand}`
 
+      const selectedSupObj = suppliers.find((s) => s.id === selectedSupplierId)
       const areaObj = AREAS.find((a) => a.key === selectedArea)
-      const areaLabel = areaObj?.label || selectedArea
+      const areaLabel =
+        conteoScope === "proveedor"
+          ? `Proveedor: ${selectedSupObj?.razon_social || selectedSupObj?.nombre || "General"}`
+          : (areaObj?.label || selectedArea)
 
       const isUuid = (str?: string) => !!str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str)
 
@@ -683,35 +708,83 @@ export default function ConteoVencimientosPage() {
             </div>
           ) : null}
 
-          {/* Bloque Nueva Sesión con Selector de Sector */}
+          {/* Bloque Nueva Sesión con Selector de Sector o Proveedor */}
           <div className="bg-slate-900/60 border border-slate-800/80 rounded-3xl p-4 sm:p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <p className="text-xs font-black text-cyan-400 uppercase tracking-wider">Paso 1: Seleccioná el Sector</p>
-              <span className="text-[11px] font-bold text-slate-400">
+              <p className="text-xs font-black text-cyan-400 uppercase tracking-wider">Paso 1: Alcance del Conteo</p>
+              <span className="text-[11px] font-bold text-slate-400 truncate max-w-[200px]">
                 Seleccionado: <span className="text-white">{selectedAreaLabel}</span>
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5">
-              {AREAS.map((a) => {
-                const isSelected = selectedArea === a.key
-                return (
-                  <button
-                    key={a.key}
-                    type="button"
-                    onClick={() => setSelectedArea(a.key)}
-                    className={`px-3.5 py-3 rounded-2xl text-sm font-bold border transition text-left flex items-center justify-between cursor-pointer active:scale-95 ${
-                      isSelected
-                        ? "bg-cyan-500/20 border-cyan-400 text-white shadow-lg shadow-cyan-500/10 ring-2 ring-cyan-500/20"
-                        : "bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700"
-                    }`}
-                  >
-                    <span>{a.label}</span>
-                    {isSelected && <Check className="w-4 h-4 text-cyan-400 shrink-0" />}
-                  </button>
-                )
-              })}
+            {/* Selector de Modalidad: Sector vs Proveedor */}
+            <div className="flex rounded-2xl bg-slate-950 p-1 border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setConteoScope("sector")}
+                className={`flex-1 py-2 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 ${
+                  conteoScope === "sector"
+                    ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <Tag className="w-3.5 h-3.5" />
+                <span>Por Sector de Salón</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setConteoScope("proveedor")}
+                className={`flex-1 py-2 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 ${
+                  conteoScope === "proveedor"
+                    ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <Building2 className="w-3.5 h-3.5" />
+                <span>Por Proveedor</span>
+              </button>
             </div>
+
+            {conteoScope === "sector" ? (
+              <div className="grid grid-cols-2 gap-2.5">
+                {AREAS.map((a) => {
+                  const isSelected = selectedArea === a.key
+                  return (
+                    <button
+                      key={a.key}
+                      type="button"
+                      onClick={() => setSelectedArea(a.key)}
+                      className={`px-3.5 py-3 rounded-2xl text-sm font-bold border transition text-left flex items-center justify-between cursor-pointer active:scale-95 ${
+                        isSelected
+                          ? "bg-cyan-500/20 border-cyan-400 text-white shadow-lg shadow-cyan-500/10 ring-2 ring-cyan-500/20"
+                          : "bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700"
+                      }`}
+                    >
+                      <span>{a.label}</span>
+                      {isSelected && <Check className="w-4 h-4 text-cyan-400 shrink-0" />}
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="space-y-2 p-3 bg-slate-950 border border-slate-800 rounded-2xl">
+                <label className="text-xs font-bold text-slate-300 block">
+                  Seleccioná el proveedor a contar en el salón:
+                </label>
+                <select
+                  value={selectedSupplierId}
+                  onChange={(e) => setSelectedSupplierId(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white outline-none focus:border-cyan-400"
+                >
+                  <option value="">Elegí un proveedor de la lista...</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.razon_social || s.nombre} {s.ruc ? `(${s.ruc})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div className="space-y-1.5 pt-1">
               <label className="text-[11px] font-black uppercase tracking-wider text-slate-400 px-1">
