@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import {
   Camera, CameraOff, Loader2, Package, Check, X, Plus,
   Calendar, Hash, ImagePlus, ChevronRight, ClipboardList,
   AlertTriangle, CheckCircle2, Search, Download, RefreshCcw, RefreshCw, Zap,
   LogIn, LogOut, User as UserIcon, Lock, Eye, EyeOff, ShieldCheck,
-  Building2, Tag
+  Building2, Tag, Layers, Barcode, DollarSign, AlertCircle, Filter, ArrowLeft
 } from "lucide-react"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
@@ -89,6 +89,25 @@ export default function ConteoVencimientosPage() {
   // ── Items ya contados en esta sesion ──
   const [items, setItems] = useState<CountedItem[]>([])
 
+  // ── Modos de visualización de la sesión ──
+  const [countViewMode, setCountViewMode] = useState<"camera" | "search" | "list" | "counted">("camera")
+
+  // ── Búsqueda de productos en catálogo (por nombre, código, sku, etc.) ──
+  const [catalogSearch, setCatalogSearch] = useState("")
+  const [catalogSearchResults, setCatalogSearchResults] = useState<Product[]>([])
+  const [searchingCatalog, setSearchingCatalog] = useState(false)
+
+  // ── Búsqueda rápida bajo la cámara ──
+  const [quickSearch, setQuickSearch] = useState("")
+  const [quickSearchResults, setQuickSearchResults] = useState<Product[]>([])
+  const [searchingQuick, setSearchingQuick] = useState(false)
+
+  // ── Listado de productos del alcance de la sesión (ej. Proveedor o Sector) ──
+  const [scopeProducts, setScopeProducts] = useState<Product[]>([])
+  const [loadingScopeProducts, setLoadingScopeProducts] = useState(false)
+  const [scopeFilter, setScopeFilter] = useState<"todos" | "pendientes" | "contados">("todos")
+  const [scopeSearchTerm, setScopeSearchTerm] = useState("")
+
   // ── Cámara / escáner manual ──
   const [manualCode, setManualCode] = useState("")
   const [searching, setSearching] = useState(false)
@@ -103,6 +122,12 @@ export default function ConteoVencimientosPage() {
   const [fotoFile, setFotoFile] = useState<File | null>(null)
   const [fotoPreview, setFotoPreview] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+
+  // Blindaje anti-loop para la cámara
+  const scannedProductRef = useRef<Product | null>(null)
+  scannedProductRef.current = scannedProduct
+  const searchingRef = useRef<boolean>(false)
+  searchingRef.current = searching
 
   // ── Cargar lista pública de personal si no hay sesión iniciada ──
   useEffect(() => {
@@ -302,37 +327,73 @@ export default function ConteoVencimientosPage() {
   }
 
   // ── Buscar producto por codigo (local + servidor, igual que POS/Salon) ──
-  const lookupProduct = useCallback(async (raw: string) => {
-    const code = raw.trim()
-    if (!code) return
-    setSearching(true)
-    try {
-      const res = await api.products.list({ search: code, limit: 5 })
-      const found = (res || []).find((p) => p.codigo_barra === code || p.sku === code) || (res || [])[0]
-      if (!found) {
-        toast.warning("Producto no encontrado", `Código '${code}' no está en el catálogo.`)
-        return
-      }
-      setScannedProduct(found)
+  // ── Seleccionar producto para registrar conteo y vencimiento ──
+  const selectProductForCount = useCallback(
+    async (prod: Product) => {
+      setScannedProduct(prod)
       setCantidadContada("")
       setLote("")
       setFechaVencimiento("")
       setTieneVencimiento(false)
       setFotoFile(null)
       setFotoPreview(null)
-      try {
-        const stock = await api.inventory.getProductStock(found.id)
-        setCantidadSistema(Number((stock as any)?.cantidad_disponible ?? 0))
-      } catch {
-        setCantidadSistema(0)
+
+      // Si ya fue contado en esta sesión, precargar datos previos
+      const already = items.find((it) => it.producto_id === prod.id)
+      if (already && already.cantidad_contada !== null && already.cantidad_contada !== undefined) {
+        setCantidadContada(String(already.cantidad_contada))
+        if (already.lote) {
+          setLote(already.lote)
+          setTieneVencimiento(true)
+        }
+        if (already.fecha_vencimiento) {
+          setFechaVencimiento(already.fecha_vencimiento)
+          setTieneVencimiento(true)
+        }
       }
-      if (navigator.vibrate) navigator.vibrate(50)
-    } catch (e: any) {
-      toast.error("Error al buscar", e?.message || "No se pudo consultar el producto.")
-    } finally {
-      setSearching(false)
-    }
-  }, [toast])
+
+      try {
+        const stockRes = await api.inventory.getProductStock(prod.id)
+        const qty =
+          typeof stockRes === "number"
+            ? stockRes
+            : Number((stockRes as any)?.cantidad_disponible ?? (stockRes as any)?.cantidad ?? (prod.stock ?? 0))
+        setCantidadSistema(qty)
+      } catch {
+        setCantidadSistema(Number(prod.stock ?? 0))
+      }
+      if (navigator.vibrate) navigator.vibrate(40)
+    },
+    [items]
+  )
+
+  // ── Buscar producto por codigo (con blindaje anti-loop) ──
+  const lookupProduct = useCallback(
+    async (raw: string) => {
+      // Si ya hay un producto desplegado para conteo o ya está buscando, ignorar llamadas de la cámara
+      if (scannedProductRef.current || searchingRef.current) return
+      const code = raw.trim()
+      if (!code) return
+
+      setSearching(true)
+      try {
+        const res = await api.products.list({ search: code, limit: 10 })
+        const found =
+          (res || []).find((p) => p.codigo_barra === code || p.sku === code) ||
+          (res || [])[0]
+        if (!found) {
+          toast.warning("Producto no encontrado", `Código '${code}' no está en el catálogo.`)
+          return
+        }
+        await selectProductForCount(found)
+      } catch (e: any) {
+        toast.error("Error al buscar", e?.message || "No se pudo consultar el producto.")
+      } finally {
+        setSearching(false)
+      }
+    },
+    [toast, selectProductForCount]
+  )
 
   // ── Cámara y escáner universal con fallback ZXing y detección de cámara trasera ──
   const {
@@ -348,7 +409,93 @@ export default function ConteoVencimientosPage() {
   } = useBarcodeScannerCamera({
     onScan: lookupProduct,
     storageKey: "extra_conteo_camera_id",
+    paused: !!scannedProduct || searching,
   })
+
+  // ── Búsqueda en catálogo (Pestaña "Buscar Producto") ──
+  useEffect(() => {
+    const q = catalogSearch.trim()
+    if (!q || q.length < 2) {
+      setCatalogSearchResults([])
+      return
+    }
+    const timer = setTimeout(async () => {
+      setSearchingCatalog(true)
+      try {
+        const res = await api.products.list({ search: q, limit: 30 })
+        setCatalogSearchResults(Array.isArray(res) ? res : [])
+      } catch (err) {
+        console.warn("Error en búsqueda de catálogo:", err)
+      } finally {
+        setSearchingCatalog(false)
+      }
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [catalogSearch])
+
+  // ── Búsqueda rápida en tiempo real bajo la cámara ──
+  useEffect(() => {
+    const q = quickSearch.trim()
+    if (!q || q.length < 2) {
+      setQuickSearchResults([])
+      return
+    }
+    const timer = setTimeout(async () => {
+      setSearchingQuick(true)
+      try {
+        const res = await api.products.list({ search: q, limit: 8 })
+        setQuickSearchResults(Array.isArray(res) ? res : [])
+      } catch (err) {
+        console.warn("Error en búsqueda rápida:", err)
+      } finally {
+        setSearchingQuick(false)
+      }
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [quickSearch])
+
+  // ── Cargar productos del alcance de la sesión (Pestaña "Lista Catálogo") ──
+  useEffect(() => {
+    if (!session) {
+      setScopeProducts([])
+      return
+    }
+    let cancelled = false
+    setLoadingScopeProducts(true)
+
+    const fetchScope = async () => {
+      try {
+        const params: any = { limit: 250, activo: true }
+        if (session.area.startsWith("Proveedor:")) {
+          const supName = session.area.replace("Proveedor:", "").trim().toLowerCase()
+          const matchedSup = suppliers.find(
+            (s) =>
+              (s.razon_social && s.razon_social.toLowerCase().includes(supName)) ||
+              (s.nombre && s.nombre.toLowerCase().includes(supName)) ||
+              s.id === selectedSupplierId
+          )
+          if (matchedSup) {
+            params.supplier_id = matchedSup.id
+          } else {
+            params.search = supName
+          }
+        }
+        const res = await api.products.list(params)
+        if (!cancelled) {
+          setScopeProducts(Array.isArray(res) ? res : [])
+        }
+      } catch (e) {
+        console.warn("Error cargando productos del alcance:", e)
+      } finally {
+        if (!cancelled) setLoadingScopeProducts(false)
+      }
+    }
+
+    fetchScope()
+    return () => {
+      cancelled = true
+    }
+  }, [session, suppliers, selectedSupplierId])
 
   const handleFotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
@@ -821,26 +968,314 @@ export default function ConteoVencimientosPage() {
     )
   }
 
-  // 4. VISTA DE CONTEO EN VIVO CON CÁMARA
+  // ── Cálculos para filtrado y estado de productos del alcance ──
+  const countedProductIds = useMemo(() => new Set(items.map((it) => it.producto_id)), [items])
+
+  const pendientesCount = useMemo(
+    () => scopeProducts.filter((p) => !countedProductIds.has(p.id)).length,
+    [scopeProducts, countedProductIds]
+  )
+
+  const filteredScopeProducts = useMemo<Product[]>(() => {
+    let list: Product[] = scopeProducts
+    if (scopeSearchTerm.trim()) {
+      const q = scopeSearchTerm.trim().toLowerCase()
+      list = list.filter(
+        (p: Product) =>
+          p.nombre.toLowerCase().includes(q) ||
+          (p.codigo_barra && p.codigo_barra.toLowerCase().includes(q)) ||
+          (p.sku && p.sku.toLowerCase().includes(q))
+      )
+    }
+    if (scopeFilter === "pendientes") {
+      list = list.filter((p: Product) => !countedProductIds.has(p.id))
+    } else if (scopeFilter === "contados") {
+      list = list.filter((p: Product) => countedProductIds.has(p.id))
+    }
+    return list
+  }, [scopeProducts, scopeSearchTerm, scopeFilter, countedProductIds])
+
+  // 4. VISTA DE CONTEO EN VIVO (CÁMARA, BÚSQUEDA Y LISTADO)
   return (
     <div className="min-h-screen bg-slate-950 text-white flex flex-col">
-      <div className="p-3 border-b border-slate-800 bg-slate-900/60 backdrop-blur-md flex items-center justify-between">
-        <div>
-          <div className="font-bold text-sm text-cyan-300">{session.area}</div>
-          <div className="text-[11px] text-slate-400">{session.codigo} · {items.length} contados</div>
+      {/* ── CABECERA DE SESIÓN ACTIVA ── */}
+      <div className="p-3 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md space-y-2.5">
+        <div className="flex items-center justify-between">
+          <div className="min-w-0">
+            <div className="font-black text-sm text-cyan-300 truncate">{session.area}</div>
+            <div className="text-[11px] text-slate-400 font-mono">
+              {session.codigo} · <strong className="text-white">{items.length}</strong> contados
+            </div>
+          </div>
+          <button
+            onClick={finishSession}
+            className="text-xs font-bold bg-emerald-600 hover:bg-emerald-500 rounded-xl px-3 py-2 flex items-center gap-1.5 cursor-pointer transition shadow-sm active:scale-95 shrink-0"
+          >
+            <CheckCircle2 className="w-4 h-4" /> Finalizar
+          </button>
         </div>
-        <button
-          onClick={finishSession}
-          className="text-xs font-bold bg-emerald-600 hover:bg-emerald-500 rounded-xl px-3 py-2 flex items-center gap-1 cursor-pointer transition shadow-sm active:scale-95"
-        >
-          <CheckCircle2 className="w-4 h-4" /> Finalizar
-        </button>
+
+        {/* ── SELECTOR DE MODALIDAD / PESTAÑAS ── */}
+        {!scannedProduct && (
+          <div className="grid grid-cols-4 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-[11px]">
+            <button
+              onClick={() => setCountViewMode("camera")}
+              className={`py-1.5 px-1 rounded-lg font-bold flex items-center justify-center gap-1 transition ${
+                countViewMode === "camera"
+                  ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-xs"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>Cámara</span>
+            </button>
+
+            <button
+              onClick={() => setCountViewMode("search")}
+              className={`py-1.5 px-1 rounded-lg font-bold flex items-center justify-center gap-1 transition ${
+                countViewMode === "search"
+                  ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-xs"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <Search className="w-3.5 h-3.5" />
+              <span>Buscar</span>
+            </button>
+
+            <button
+              onClick={() => setCountViewMode("list")}
+              className={`py-1.5 px-1 rounded-lg font-bold flex items-center justify-center gap-1 transition ${
+                countViewMode === "list"
+                  ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-xs"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>Artículos</span>
+            </button>
+
+            <button
+              onClick={() => setCountViewMode("counted")}
+              className={`py-1.5 px-1 rounded-lg font-bold flex items-center justify-center gap-1 transition ${
+                countViewMode === "counted"
+                  ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-xs"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Contados ({items.length})</span>
+            </button>
+          </div>
+        )}
       </div>
 
-      {!scannedProduct ? (
-        <div className="flex-1 flex flex-col">
-          <div className="relative bg-black aspect-square max-h-[50vh] overflow-hidden">
-            {/* El elemento video permanece SIEMPRE en el DOM para que la referencia no sea null */}
+      {/* ── CUERPO PRINCIPAL: FORMULARIO DE CONTEO O VISTA ACTIVA ── */}
+      {scannedProduct ? (
+        /* ══════════════════════════════════════════════════════════════════════
+           PANTALLA DE INGRESO DE CONTEO & VENCIMIENTO DE PRODUCTO
+           ══════════════════════════════════════════════════════════════════════ */
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <button
+              onClick={cancelScanned}
+              className="text-xs font-bold text-slate-400 hover:text-white flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" /> Volver
+            </button>
+            <span className="text-[11px] text-slate-500 font-mono">
+              SKU: {scannedProduct.sku}
+            </span>
+          </div>
+
+          {/* Tarjeta de información completa del producto */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+            <div className="flex gap-3 items-start">
+              <div className="w-16 h-16 bg-slate-800 rounded-xl flex items-center justify-center shrink-0 overflow-hidden border border-slate-700/60">
+                {scannedProduct.imagen_url ? (
+                  <img src={scannedProduct.imagen_url} className="w-full h-full object-cover" />
+                ) : (
+                  <Package className="w-8 h-8 text-slate-500" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="font-black text-sm text-white leading-tight">
+                  {scannedProduct.nombre}
+                </h3>
+                <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs text-slate-400">
+                  <span className="font-mono bg-slate-800 px-2 py-0.5 rounded text-[11px] text-slate-300">
+                    {scannedProduct.codigo_barra || "Sin código de barras"}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Precios e Información Fiscal/Comercial */}
+            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800/80">
+              <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                  Precio Minorista
+                </span>
+                <span className="text-sm font-black font-mono text-emerald-400">
+                  {formatPYG(scannedProduct.precio_venta || 0)}
+                </span>
+              </div>
+              <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                  Precio Mayorista
+                </span>
+                <span className="text-sm font-black font-mono text-amber-400">
+                  {scannedProduct.precio_mayorista
+                    ? formatPYG(scannedProduct.precio_mayorista)
+                    : "No configurado"}
+                </span>
+              </div>
+            </div>
+
+            {/* Estado de Stock en Sistema */}
+            <div>
+              {cantidadSistema <= 0 ? (
+                <div className="p-2.5 rounded-xl bg-rose-950/40 border border-rose-600/50 text-rose-300 text-xs font-bold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span>Sin stock registrado en sistema (0 unidades)</span>
+                </div>
+              ) : (
+                <div className="p-2.5 rounded-xl bg-blue-950/40 border border-blue-600/50 text-blue-300 text-xs font-bold flex items-center gap-2">
+                  <Package className="w-4 h-4 text-blue-400 shrink-0" />
+                  <span>Stock en sistema: {cantidadSistema} unidades</span>
+                </div>
+              )}
+            </div>
+
+            {/* Aviso si ya fue contado */}
+            {items.some((it) => it.producto_id === scannedProduct.id) && (
+              <div className="p-2 rounded-xl bg-amber-950/30 border border-amber-600/40 text-amber-300 text-xs font-medium">
+                ℹ️ Este producto ya tenía un conteo registrado en esta sesión. Modificar la cantidad actualizará su valor.
+              </div>
+            )}
+          </div>
+
+          {/* Input de Cantidad Contada */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-300 block">
+              Cantidad física contada:
+            </label>
+            <input
+              type="number"
+              inputMode="decimal"
+              value={cantidadContada}
+              onChange={(e) => setCantidadContada(e.target.value)}
+              autoFocus
+              placeholder="0"
+              className="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3.5 text-2xl font-black text-center text-cyan-400 outline-none focus:border-cyan-400 shadow-inner"
+            />
+
+            {/* Atajos numéricos rápidos para agilizar conteo táctil */}
+            <div className="flex gap-1.5 justify-center pt-1">
+              {[1, 5, 10, 24, 50].map((inc) => (
+                <button
+                  key={inc}
+                  type="button"
+                  onClick={() => {
+                    const curr = parseFloat(cantidadContada) || 0
+                    setCantidadContada(String(curr + inc))
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 active:scale-95 transition cursor-pointer"
+                >
+                  +{inc}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setCantidadContada("")}
+                className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs font-bold text-rose-400 hover:bg-slate-800 active:scale-95 transition cursor-pointer"
+              >
+                Limpiar
+              </button>
+            </div>
+          </div>
+
+          {/* Interruptor de Vencimiento y Lote */}
+          <button
+            onClick={() => setTieneVencimiento((v) => !v)}
+            className={`w-full flex items-center justify-between rounded-2xl px-4 py-3 border text-xs font-bold transition cursor-pointer ${
+              tieneVencimiento
+                ? "bg-amber-600/20 border-amber-500 text-amber-300"
+                : "bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700"
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-amber-400" />
+              <span>{tieneVencimiento ? "Registrando Lote y Fecha de Vencimiento" : "¿Lleva fecha de vencimiento o lote?"}</span>
+            </div>
+            <span className="text-[10px] uppercase font-black px-2 py-0.5 rounded bg-slate-800">
+              {tieneVencimiento ? "Activo" : "Opcional"}
+            </span>
+          </button>
+
+          {tieneVencimiento && (
+            <div className="grid grid-cols-2 gap-2 bg-slate-900/60 p-3 rounded-2xl border border-slate-800 animate-in fade-in duration-150">
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 mb-1 block flex items-center gap-1">
+                  <Hash className="w-3 h-3" /> Lote
+                </label>
+                <input
+                  value={lote}
+                  onChange={(e) => setLote(e.target.value)}
+                  placeholder="Ej. L-4091"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs outline-none focus:border-cyan-400 text-white"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 mb-1 block">
+                  Fecha Vencimiento
+                </label>
+                <input
+                  type="date"
+                  value={fechaVencimiento}
+                  onChange={(e) => setFechaVencimiento(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs outline-none focus:border-cyan-400 text-white"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Foto de Evidencia Opcional */}
+          <div>
+            <label className="w-full flex items-center justify-center gap-2 bg-slate-900 border border-slate-800 border-dashed rounded-2xl px-4 py-3 text-xs font-bold text-slate-300 cursor-pointer hover:border-slate-700 transition">
+              <ImagePlus className="w-4 h-4 text-cyan-400" />
+              {fotoPreview ? "Foto adjuntada — tocá para cambiar" : "Sacar foto de evidencia (opcional)"}
+              <input type="file" accept="image/*" capture="environment" onChange={handleFotoChange} className="hidden" />
+            </label>
+            {fotoPreview && (
+              <img src={fotoPreview} className="mt-2 w-full max-h-36 object-contain rounded-xl border border-slate-800" />
+            )}
+          </div>
+
+          {/* Botones de Acción */}
+          <div className="flex gap-2 pt-2 pb-4">
+            <button
+              onClick={cancelScanned}
+              className="flex-1 bg-slate-800 hover:bg-slate-700 rounded-2xl py-3.5 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition"
+            >
+              <X className="w-4 h-4" /> Cancelar
+            </button>
+            <button
+              onClick={saveCount}
+              disabled={saving}
+              className="flex-2 bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 text-slate-950 disabled:opacity-50 rounded-2xl py-3.5 font-black text-xs uppercase flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition shadow-lg shadow-cyan-500/20"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+              <span>{saving ? "Guardando..." : "Guardar Conteo"}</span>
+            </button>
+          </div>
+        </div>
+      ) : countViewMode === "camera" ? (
+        /* ══════════════════════════════════════════════════════════════════════
+           MODO 1: CÁMARA & ESCÁNER (CON ANTI-LOOP Y BÚSQUEDA RÁPIDA)
+           ══════════════════════════════════════════════════════════════════════ */
+        <div className="flex-1 flex flex-col overflow-y-auto">
+          {/* Contenedor del Video */}
+          <div className="relative bg-black aspect-video max-h-[40vh] overflow-hidden shrink-0">
             <video
               ref={setVideoRef}
               className={`w-full h-full object-cover ${cameraActive ? "block" : "hidden"}`}
@@ -849,81 +1284,142 @@ export default function ConteoVencimientosPage() {
               autoPlay
             />
             {!cameraActive && (
-              <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-slate-500 p-4">
-                <Camera className="w-10 h-10 text-slate-600" />
+              <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-slate-500 p-4">
+                <Camera className="w-8 h-8 text-slate-600" />
                 <button
                   type="button"
                   onClick={() => startCamera()}
-                  className="bg-cyan-600 hover:bg-cyan-500 text-slate-950 text-sm font-black px-4 py-2.5 rounded-xl cursor-pointer active:scale-95 transition shadow-md shadow-cyan-500/20"
+                  className="bg-cyan-600 hover:bg-cyan-500 text-slate-950 text-xs font-black px-4 py-2 rounded-xl cursor-pointer active:scale-95 transition shadow-md shadow-cyan-500/20"
                 >
-                  Activar cámara
+                  Activar cámara de escaneo
                 </button>
                 {cameraError && (
-                  <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs max-w-[90%] text-center font-medium">
+                  <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs max-w-[90%] text-center">
                     {cameraError}
                   </div>
                 )}
               </div>
             )}
             {cameraActive && (
-              <div className="absolute top-3 right-3 flex items-center gap-2">
+              <div className="absolute top-2.5 right-2.5 flex items-center gap-2">
                 <button
                   onClick={switchCamera}
-                  className="px-2.5 py-1.5 rounded-full bg-black/60 text-white border border-white/20 hover:bg-black/80 backdrop-blur-md cursor-pointer flex items-center gap-1.5 text-xs font-bold"
+                  className="px-2.5 py-1 rounded-full bg-black/60 text-white border border-white/20 hover:bg-black/80 backdrop-blur-md cursor-pointer flex items-center gap-1 text-[11px] font-bold"
                   title={activeCameraLabel || "Cambiar Cámara"}
                 >
-                  <RefreshCcw className="w-3.5 h-3.5" />
-                  <span className="text-[10px]">
-                    {activeCameraLabel ? (activeCameraLabel.includes("Trasera") ? "Trasera" : activeCameraLabel.includes("Frontal") ? "Frontal" : "Cámara") : "Cámara"}
-                    {availableCameras.length > 1 ? ` (${Math.max(1, availableCameras.findIndex(c => c.deviceId === selectedCameraId) + 1)}/${availableCameras.length})` : ""}
-                  </span>
+                  <RefreshCcw className="w-3 h-3" />
+                  <span>{activeCameraLabel?.includes("Frontal") ? "Frontal" : "Trasera"}</span>
                 </button>
                 <button
                   onClick={stopCamera}
-                  className="bg-black/60 rounded-full p-2 text-white border border-white/20 hover:bg-black/80 backdrop-blur-md cursor-pointer"
+                  className="bg-black/60 rounded-full p-1.5 text-white border border-white/20 hover:bg-black/80 backdrop-blur-md cursor-pointer"
                   title="Apagar Cámara"
                 >
-                  <CameraOff className="w-4 h-4" />
+                  <CameraOff className="w-3.5 h-3.5" />
                 </button>
               </div>
             )}
             {searching && (
-              <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
+              <div className="absolute inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center gap-2 text-cyan-300 font-bold text-xs">
+                <Loader2 className="w-6 h-6 animate-spin text-cyan-400" />
+                <span>Identificando producto...</span>
               </div>
             )}
           </div>
 
-          <div className="p-4 space-y-3">
-            <form onSubmit={(e) => { e.preventDefault(); lookupProduct(manualCode); setManualCode("") }} className="relative">
+          {/* Búsqueda rápida y lista inmediata */}
+          <div className="p-3 space-y-3 flex-1">
+            {/* Buscador Rápido en Vivo */}
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
-                value={manualCode}
-                onChange={(e) => setManualCode(e.target.value)}
-                placeholder="Código de barra o SKU manual"
-                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 pr-11 text-sm outline-none focus:border-blue-500"
+                value={quickSearch}
+                onChange={(e) => setQuickSearch(e.target.value)}
+                placeholder="Buscar por nombre, código de barra o SKU..."
+                className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-9 py-2.5 text-xs text-white placeholder-slate-500 outline-none focus:border-cyan-400"
               />
-              <button type="submit" className="absolute right-2 top-2 bottom-2 px-2 text-slate-400">
-                <Search className="w-5 h-5" />
-              </button>
-            </form>
+              {quickSearch && (
+                <button
+                  type="button"
+                  onClick={() => setQuickSearch("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
 
-            {items.length > 0 && (
+            {/* Resultados de búsqueda rápida */}
+            {searchingQuick && (
+              <div className="flex items-center justify-center gap-2 py-2 text-xs text-slate-400">
+                <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
+                <span>Buscando en catálogo...</span>
+              </div>
+            )}
+
+            {quickSearchResults.length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                  Resultados encontrados ({quickSearchResults.length})
+                </p>
+                <div className="space-y-1 max-h-56 overflow-y-auto">
+                  {quickSearchResults.map((prod) => (
+                    <button
+                      key={prod.id}
+                      type="button"
+                      onClick={() => selectProductForCount(prod)}
+                      className="w-full text-left bg-slate-900 hover:bg-slate-800/80 border border-slate-800 rounded-xl p-2.5 flex items-center justify-between gap-2 transition cursor-pointer active:scale-98"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="font-bold text-xs text-white truncate">{prod.nombre}</div>
+                        <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
+                          <span className="font-mono">{prod.codigo_barra || prod.sku}</span>
+                          <span className="text-emerald-400 font-bold">{formatPYG(prod.precio_venta || 0)}</span>
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        {(prod.stock ?? 0) <= 0 ? (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                            Sin stock
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                            {prod.stock} un.
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Historial de contados en esta sesión */}
+            {items.length > 0 && quickSearchResults.length === 0 && (
               <div>
-                <p className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Contados en esta sesión</p>
-                <div className="space-y-1.5 max-h-[30vh] overflow-y-auto">
+                <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1.5">
+                  Contados recientemente en esta sesión
+                </p>
+                <div className="space-y-1 max-h-52 overflow-y-auto">
                   {items.slice().reverse().map((it) => (
-                    <div key={it.id} className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs">
-                      <div className="min-w-0">
-                        <div className="font-bold truncate">{it.producto_nombre}</div>
-                        <div className="text-slate-500">
-                          Sistema {it.cantidad_sistema} · Contado {it.cantidad_contada}
-                          {it.fecha_vencimiento ? ` · Vence ${it.fecha_vencimiento}` : ""}
+                    <div
+                      key={it.id}
+                      className="flex items-center justify-between bg-slate-900/80 border border-slate-800/80 rounded-xl px-3 py-2 text-xs"
+                    >
+                      <div className="min-w-0 flex-1 pr-2">
+                        <div className="font-bold truncate text-slate-200">{it.producto_nombre}</div>
+                        <div className="text-[11px] text-slate-400">
+                          Sist: <strong className="text-slate-300">{it.cantidad_sistema}</strong> · Contado:{" "}
+                          <strong className="text-cyan-300">{it.cantidad_contada}</strong>
+                          {it.fecha_vencimiento ? ` · Vto: ${it.fecha_vencimiento}` : ""}
                         </div>
                       </div>
                       {!!it.diferencia && Math.abs(it.diferencia) > 0 ? (
-                        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+                          Dif: {it.diferencia > 0 ? `+${it.diferencia}` : it.diferencia}
+                        </span>
                       ) : (
-                        <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                       )}
                     </div>
                   ))}
@@ -932,95 +1428,279 @@ export default function ConteoVencimientosPage() {
             )}
           </div>
         </div>
-      ) : (
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex gap-3">
-            <div className="w-16 h-16 bg-slate-800 rounded-lg flex items-center justify-center shrink-0 overflow-hidden">
-              {scannedProduct.imagen_url ? (
-                <img src={scannedProduct.imagen_url} className="w-full h-full object-cover" />
-              ) : (
-                <Package className="w-7 h-7 text-slate-600" />
-              )}
-            </div>
-            <div className="min-w-0">
-              <div className="font-bold text-sm truncate">{scannedProduct.nombre}</div>
-              <div className="text-xs text-slate-400">{scannedProduct.sku} · {formatPYG(scannedProduct.precio_venta || 0)}</div>
-              <div className="text-xs text-blue-400 mt-1">Sistema: {cantidadSistema} unidades</div>
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs font-bold text-slate-400 mb-1 block">Cantidad contada</label>
+      ) : countViewMode === "search" ? (
+        /* ══════════════════════════════════════════════════════════════════════
+           MODO 2: BÚSQUEDA EXHAUSTIVA EN CATÁLOGO CON PRECIOS Y STOCK
+           ══════════════════════════════════════════════════════════════════════ */
+        <div className="flex-1 flex flex-col overflow-y-auto p-4 space-y-3">
+          {/* Campo de búsqueda */}
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
-              type="number"
-              inputMode="decimal"
-              value={cantidadContada}
-              onChange={(e) => setCantidadContada(e.target.value)}
+              type="text"
+              value={catalogSearch}
+              onChange={(e) => setCatalogSearch(e.target.value)}
               autoFocus
-              placeholder="0"
-              className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-lg font-bold outline-none focus:border-blue-500"
+              placeholder="Escribí nombre del producto, código de barra o SKU..."
+              className="w-full bg-slate-900 border border-slate-800 rounded-2xl pl-10 pr-9 py-3 text-xs text-white placeholder-slate-500 outline-none focus:border-cyan-400 shadow-sm"
             />
-          </div>
-
-          <button
-            onClick={() => setTieneVencimiento((v) => !v)}
-            className={`w-full flex items-center gap-2 rounded-xl px-4 py-3 border text-sm font-bold transition ${
-              tieneVencimiento ? "bg-amber-600/20 border-amber-600 text-amber-300" : "bg-slate-900 border-slate-800 text-slate-300"
-            }`}
-          >
-            <Calendar className="w-4 h-4" />
-            {tieneVencimiento ? "Lleva vencimiento — registrando lote y fecha" : "¿Tiene fecha de vencimiento?"}
-          </button>
-
-          {tieneVencimiento && (
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-xs font-bold text-slate-400 mb-1 block flex items-center gap-1"><Hash className="w-3 h-3" /> Lote</label>
-                <input
-                  value={lote}
-                  onChange={(e) => setLote(e.target.value)}
-                  placeholder="Opcional"
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-400 mb-1 block">Vencimiento</label>
-                <input
-                  type="date"
-                  value={fechaVencimiento}
-                  onChange={(e) => setFechaVencimiento(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-blue-500"
-                />
-              </div>
-            </div>
-          )}
-
-          <div>
-            <label className="w-full flex items-center gap-2 bg-slate-900 border border-slate-800 border-dashed rounded-xl px-4 py-3 text-sm text-slate-300 cursor-pointer">
-              <ImagePlus className="w-4 h-4" />
-              {fotoPreview ? "Foto lista — tocá para cambiarla" : "Sacar foto de respaldo (opcional)"}
-              <input type="file" accept="image/*" capture="environment" onChange={handleFotoChange} className="hidden" />
-            </label>
-            {fotoPreview && (
-              <img src={fotoPreview} className="mt-2 w-full max-h-40 object-contain rounded-xl border border-slate-800" />
+            {catalogSearch && (
+              <button
+                type="button"
+                onClick={() => setCatalogSearch("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
             )}
           </div>
 
-          <div className="flex gap-2 pt-2">
-            <button
-              onClick={cancelScanned}
-              className="flex-1 bg-slate-800 hover:bg-slate-700 rounded-xl py-3 font-bold text-sm flex items-center justify-center gap-1"
-            >
-              <X className="w-4 h-4" /> Cancelar
-            </button>
-            <button
-              onClick={saveCount}
-              disabled={saving}
-              className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-xl py-3 font-bold text-sm flex items-center justify-center gap-1"
-            >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Guardar
-            </button>
+          {searchingCatalog && (
+            <div className="flex items-center justify-center gap-2 py-4 text-xs text-slate-400">
+              <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
+              <span>Buscando productos en el catálogo...</span>
+            </div>
+          )}
+
+          {!searchingCatalog && catalogSearch.trim().length >= 2 && catalogSearchResults.length === 0 && (
+            <div className="p-6 text-center text-slate-500 text-xs">
+              No se encontraron productos coincidentes con '{catalogSearch}'.
+            </div>
+          )}
+
+          {/* Listado de Tarjetas de Productos Encontrados */}
+          <div className="space-y-2">
+            {catalogSearchResults.map((prod) => {
+              const already = items.find((it) => it.producto_id === prod.id)
+              const hasNoStock = (prod.stock ?? 0) <= 0
+
+              return (
+                <div
+                  key={prod.id}
+                  onClick={() => selectProductForCount(prod)}
+                  className="bg-slate-900 hover:bg-slate-800/90 border border-slate-800 rounded-2xl p-3 flex gap-3 items-center justify-between cursor-pointer transition active:scale-98 shadow-xs"
+                >
+                  <div className="w-12 h-12 bg-slate-800 rounded-xl flex items-center justify-center shrink-0 overflow-hidden border border-slate-700/60">
+                    {prod.imagen_url ? (
+                      <img src={prod.imagen_url} className="w-full h-full object-cover" />
+                    ) : (
+                      <Package className="w-6 h-6 text-slate-500" />
+                    )}
+                  </div>
+
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <h4 className="font-bold text-xs text-white truncate">{prod.nombre}</h4>
+                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+                      <span className="font-mono">{prod.codigo_barra || prod.sku}</span>
+                      <span className="font-mono font-bold text-emerald-400">
+                        {formatPYG(prod.precio_venta || 0)}
+                      </span>
+                      {prod.precio_mayorista ? (
+                        <span className="font-mono text-amber-400 text-[10px]">
+                          May: {formatPYG(prod.precio_mayorista)}
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-0.5">
+                      {hasNoStock ? (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-black bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                          ⚠️ Sin stock (0)
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40">
+                          Stock: {prod.stock} un.
+                        </span>
+                      )}
+
+                      {already && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                          ✓ Contado: {already.cantidad_contada} un.
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 text-cyan-400 pl-1">
+                    <ChevronRight className="w-5 h-5" />
+                  </div>
+                </div>
+              )
+            })}
           </div>
+        </div>
+      ) : countViewMode === "list" ? (
+        /* ══════════════════════════════════════════════════════════════════════
+           MODO 3: LISTADO DE PRODUCTOS DEL ALCANCE (PROVEEDOR O SECTOR)
+           ══════════════════════════════════════════════════════════════════════ */
+        <div className="flex-1 flex flex-col overflow-y-auto p-4 space-y-3">
+          {/* Filtros de la lista */}
+          <div className="space-y-2">
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={scopeSearchTerm}
+                onChange={(e) => setScopeSearchTerm(e.target.value)}
+                placeholder="Filtrar productos de este alcance..."
+                className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-9 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-cyan-400"
+              />
+              {scopeSearchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setScopeSearchTerm("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1.5 text-[11px]">
+              <button
+                type="button"
+                onClick={() => setScopeFilter("todos")}
+                className={`flex-1 py-1 px-2 rounded-lg font-bold transition ${
+                  scopeFilter === "todos"
+                    ? "bg-slate-800 text-white border border-slate-700"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                Todos ({scopeProducts.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setScopeFilter("pendientes")}
+                className={`flex-1 py-1 px-2 rounded-lg font-bold transition ${
+                  scopeFilter === "pendientes"
+                    ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                Pendientes ({pendientesCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setScopeFilter("contados")}
+                className={`flex-1 py-1 px-2 rounded-lg font-bold transition ${
+                  scopeFilter === "contados"
+                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                Contados ({items.length})
+              </button>
+            </div>
+          </div>
+
+          {loadingScopeProducts && (
+            <div className="flex items-center justify-center gap-2 py-4 text-xs text-slate-400">
+              <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
+              <span>Cargando planilla de productos del alcance...</span>
+            </div>
+          )}
+
+          {/* Listado Clickeable */}
+          <div className="space-y-1.5">
+            {filteredScopeProducts.map((prod: Product) => {
+              const already = items.find((it) => it.producto_id === prod.id)
+              const hasNoStock = (prod.stock ?? 0) <= 0
+
+              return (
+                <div
+                  key={prod.id}
+                  onClick={() => selectProductForCount(prod)}
+                  className="bg-slate-900 hover:bg-slate-800/90 border border-slate-800 rounded-xl p-2.5 flex items-center justify-between gap-2 cursor-pointer transition active:scale-98"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="font-bold text-xs text-white truncate">{prod.nombre}</div>
+                    <div className="text-[11px] text-slate-400 flex flex-wrap items-center gap-2 mt-0.5">
+                      <span className="font-mono">{prod.codigo_barra || prod.sku}</span>
+                      <span className="text-emerald-400 font-bold font-mono">
+                        {formatPYG(prod.precio_venta || 0)}
+                      </span>
+                      {hasNoStock ? (
+                        <span className="text-rose-400 font-bold text-[10px]">
+                          Sin stock
+                        </span>
+                      ) : (
+                        <span className="text-blue-400 text-[10px]">
+                          Stock: {prod.stock}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 flex items-center gap-2">
+                    {already ? (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        {already.cantidad_contada} un.
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400">
+                        Contar
+                      </span>
+                    )}
+                    <ChevronRight className="w-4 h-4 text-slate-500" />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      ) : (
+        /* ══════════════════════════════════════════════════════════════════════
+           MODO 4: LISTA COMPLETA DE ARTÍCULOS YA CONTADOS EN ESTA SESIÓN
+           ══════════════════════════════════════════════════════════════════════ */
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <div className="flex items-center justify-between text-xs font-bold text-slate-400">
+            <span>Artículos contados en esta sesión ({items.length})</span>
+            <span className="text-cyan-300 font-mono">Tocá cualquiera para editar</span>
+          </div>
+
+          {items.length === 0 ? (
+            <div className="p-8 text-center text-slate-500 text-xs">
+              Aún no se ha contado ningún producto en esta sesión.
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {items.slice().reverse().map((it) => (
+                <div
+                  key={it.id}
+                  onClick={async () => {
+                    try {
+                      const prod = await api.products.get(it.producto_id)
+                      if (prod) selectProductForCount(prod)
+                    } catch {}
+                  }}
+                  className="bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl p-3 flex items-center justify-between gap-3 cursor-pointer transition active:scale-98"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="font-bold text-xs text-white truncate">{it.producto_nombre}</div>
+                    <div className="text-[11px] text-slate-400 flex flex-wrap items-center gap-2 mt-0.5">
+                      <span>Sistema: <strong className="text-slate-300">{it.cantidad_sistema}</strong></span>
+                      <span>Contado: <strong className="text-cyan-300">{it.cantidad_contada}</strong></span>
+                      {it.fecha_vencimiento && (
+                        <span className="text-amber-400">Vto: {it.fecha_vencimiento}</span>
+                      )}
+                      {it.lote && <span className="text-slate-400">Lote: {it.lote}</span>}
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 flex items-center gap-2">
+                    {!!it.diferencia && Math.abs(it.diferencia) > 0 ? (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        {it.diferencia > 0 ? `+${it.diferencia}` : it.diferencia}
+                      </span>
+                    ) : (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    )}
+                    <ChevronRight className="w-4 h-4 text-slate-500" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

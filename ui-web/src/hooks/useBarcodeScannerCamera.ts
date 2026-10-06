@@ -19,6 +19,7 @@ export interface UseBarcodeScannerCameraOptions {
   formats?: BarcodeFormat[]
   scanCooldownMs?: number
   storageKey?: string
+  paused?: boolean
 }
 
 export interface UseBarcodeScannerCameraReturn {
@@ -58,10 +59,14 @@ export function useBarcodeScannerCamera(
     formats = DEFAULT_FORMATS,
     scanCooldownMs = 1500,
     storageKey = "intelimarket_preferred_camera_id",
+    paused = false,
   } = options
 
   const onScanRef = useRef(onScan)
   onScanRef.current = onScan
+
+  const pausedRef = useRef(paused)
+  pausedRef.current = paused
 
   const [cameraActive, setCameraActive] = useState(false)
   const [cameraLoading, setCameraLoading] = useState(false)
@@ -110,6 +115,7 @@ export function useBarcodeScannerCamera(
   // Despachador seguro con debounce
   const handleCodeScanned = useCallback(
     (raw: string) => {
+      if (pausedRef.current) return
       const code = (raw || "").trim()
       if (!code) return
 
