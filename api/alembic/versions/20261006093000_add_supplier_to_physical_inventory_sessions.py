@@ -22,9 +22,11 @@ def upgrade() -> None:
         ALTER TABLE physical_inventory_sessions
         ADD COLUMN IF NOT EXISTS supplier_id UUID REFERENCES suppliers(id) ON DELETE SET NULL,
         ADD COLUMN IF NOT EXISTS supplier_nombre VARCHAR(150),
-        ADD COLUMN IF NOT EXISTS categoria_nombre VARCHAR(150);
+        ADD COLUMN IF NOT EXISTS categoria_nombre VARCHAR(150)
+    """)
 
-        CREATE INDEX IF NOT EXISTS idx_phys_session_supplier ON physical_inventory_sessions(supplier_id);
+    op.execute("""
+        CREATE INDEX IF NOT EXISTS idx_phys_session_supplier ON physical_inventory_sessions(supplier_id)
     """)
 
     op.execute("""
@@ -44,11 +46,14 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute("""
-        DROP INDEX IF EXISTS idx_phys_session_supplier;
+        DROP INDEX IF EXISTS idx_phys_session_supplier
+    """)
+
+    op.execute("""
         ALTER TABLE physical_inventory_sessions
         DROP COLUMN IF EXISTS supplier_id,
         DROP COLUMN IF EXISTS supplier_nombre,
-        DROP COLUMN IF EXISTS categoria_nombre;
+        DROP COLUMN IF EXISTS categoria_nombre
     """)
 
     op.execute("""
