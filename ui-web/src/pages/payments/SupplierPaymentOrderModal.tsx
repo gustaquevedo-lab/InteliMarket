@@ -71,7 +71,9 @@ export default function SupplierPaymentOrderModal({
   onSuccess,
 }: Props) {
   const toast = useToast()
-  const [step, setStep] = useState<"step1_facturas" | "step2_desembolso">("step1_facturas")
+  const [step, setStep] = useState<"step1_facturas" | "step2_desembolso">(
+    existingOrder ? "step2_desembolso" : "step1_facturas"
+  )
   const [submitting, setSubmitting] = useState(false)
 
   // Facturas y amortizaciones seleccionadas
@@ -1684,18 +1686,20 @@ export default function SupplierPaymentOrderModal({
               Cancelar
             </button>
 
-            {step === "step1_facturas" && !existingOrder && (
+            {step === "step1_facturas" && (
               <>
-                <button
-                  type="button"
-                  onClick={handleSaveOnlyRegister}
-                  disabled={submitting}
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-700 transition"
-                  title="Crea la Orden de Pago en estado 'registrado' sin mover fondos todavía"
-                >
-                  {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin inline mr-1" /> : null}
-                  Guardar como Registrado (Paso 1)
-                </button>
+                {!existingOrder && (
+                  <button
+                    type="button"
+                    onClick={handleSaveOnlyRegister}
+                    disabled={submitting}
+                    className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-700 transition"
+                    title="Crea la Orden de Pago en estado 'registrado' sin mover fondos todavía"
+                  >
+                    {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin inline mr-1" /> : null}
+                    Guardar como Registrado (Paso 1)
+                  </button>
+                )}
 
                 <button
                   type="button"

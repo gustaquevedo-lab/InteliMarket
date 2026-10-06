@@ -367,7 +367,10 @@ export default function PaymentsPage() {
         (o.supplier_nombre || "").toLowerCase().includes(searchOrders.toLowerCase()) ||
         (o.recibo_proveedor || "").toLowerCase().includes(searchOrders.toLowerCase())
 
-      const matchesEstado = filterOrderEstado === "all" || o.estado === filterOrderEstado
+      const matchesEstado = filterOrderEstado === "all" ||
+        (filterOrderEstado === "pendiente" || filterOrderEstado === "registrado"
+          ? (o.estado !== "pagado" && o.estado !== "anulado")
+          : o.estado === filterOrderEstado)
       const matchesSupplier = filterOrderSupplier === "all" || o.supplier_id === filterOrderSupplier
       const matchesFormaPago = filterOrderFormaPago === "all" ||
         (o.formas_pago_resumen || "").toLowerCase().includes(filterOrderFormaPago.toLowerCase())
@@ -1326,7 +1329,7 @@ export default function PaymentsPage() {
                 className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-medium"
               >
                 <option value="all">Todos los Estados</option>
-                <option value="registrado">🟡 Registrado (Pte. Pago)</option>
+                <option value="pendiente">🟡 Pendientes de Pago / Desembolso</option>
                 <option value="pagado">🟢 Pagado (Liquidado)</option>
               </select>
 
@@ -1388,7 +1391,8 @@ export default function PaymentsPage() {
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
                     {filteredOrders.map((order) => {
                       const isPaid = order.estado === "pagado"
-                      const isRegistrado = order.estado === "registrado"
+                      const isAnulado = order.estado === "anulado"
+                      const isPendingDisburse = !isPaid && !isAnulado
                       const isLote = order.observaciones?.includes("[Lote") || order.formas_pago_resumen?.toLowerCase().includes("lote")
 
                       return (
@@ -1443,20 +1447,23 @@ export default function PaymentsPage() {
                             <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase border ${
                               isPaid
                                 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                                : isAnulado
+                                ? "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20"
                                 : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
                             }`}>
-                              {order.estado}
+                              {order.estado === "aguardando_pago" ? "Pte. Desembolso" : order.estado}
                             </span>
                           </td>
                           <td className="p-3.5 text-right">
                             <div className="flex items-center justify-end gap-1.5">
-                              {isRegistrado && (
+                              {isPendingDisburse && (
                                 <button
                                   onClick={() => handleOpenDisburseForOrder(order)}
-                                  className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] transition shadow-xs flex items-center gap-1"
-                                  title="Liquidar / Asignar Medios de Pago"
+                                  className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-[11px] transition shadow-xs flex items-center gap-1 animate-pulse"
+                                  title="Asignar Medios de Pago y Liquidar Orden (Paso 2)"
                                 >
-                                  <Wallet className="w-3 h-3" /> Liquidar
+                                  <Wallet className="w-3.5 h-3.5" />
+                                  <span>Pagar / Liquidar</span>
                                 </button>
                               )}
                               <button
@@ -1961,14 +1968,30 @@ export default function PaymentsPage() {
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => setOrderToEdit(null)}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 rounded-xl transition"
-              >
-                Cancelar
-              </button>
+            <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800 gap-2">
+              {orderToEdit.estado !== "pagado" && orderToEdit.estado !== "anulado" ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const targetOrder = paymentOrders.find(o => o.id === orderToEdit.id)
+                    setOrderToEdit(null)
+                    if (targetOrder) handleOpenDisburseForOrder(targetOrder)
+                  }}
+                  className="px-3.5 py-2 text-xs font-extrabold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl transition flex items-center gap-1.5 shadow-sm"
+                  title="Abrir asistente para asignar fondos y liquidar esta orden"
+                >
+                  <Wallet className="w-3.5 h-3.5" /> Asignar Medios & Pagar
+                </button>
+              ) : <div />}
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setOrderToEdit(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 rounded-xl transition"
+                >
+                  Cancelar
+                </button>
               <button
                 type="button"
                 disabled={savingEditOrder}
@@ -1988,7 +2011,8 @@ export default function PaymentsPage() {
             </div>
           </div>
         </div>
-      )}
+      </div>
+    )}
 
       {/* MODAL ELIMINAR ORDEN DE PAGO */}
       {orderToDelete && (

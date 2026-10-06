@@ -17,7 +17,8 @@ export default function SupplierPaymentOrderDetailModal({
   onDisburseRequest,
 }: Props) {
   const isPaid = order.estado === "pagado"
-  const isRegistrado = order.estado === "registrado"
+  const isAnulado = order.estado === "anulado"
+  const isPendingDisburse = !isPaid && !isAnulado
   const isLote = order.observaciones?.includes("[Lote") || order.disbursements?.some((d: any) => d.cheque_id)
   const chequeDisb = order.disbursements?.find((d: any) => d.cheque_id)
 
@@ -87,6 +88,19 @@ export default function SupplierPaymentOrderDetailModal({
           </div>
 
           <div className="flex items-center gap-2">
+            {isPendingDisburse && onDisburseRequest && (
+              <button
+                onClick={() => {
+                  onClose()
+                  onDisburseRequest(order)
+                }}
+                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold flex items-center gap-1.5 transition shadow-sm animate-pulse"
+                title="Abrir Asistente para Asignar Medios de Pago y Liquidar"
+              >
+                <Wallet className="w-4 h-4" />
+                <span>Pagar / Asignar Medios</span>
+              </button>
+            )}
             {isLote && (
               <button
                 onClick={handleDownloadBatchReport}
@@ -208,16 +222,16 @@ export default function SupplierPaymentOrderDetailModal({
 
             {(!order.disbursements || order.disbursements.length === 0) ? (
               <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 text-xs text-amber-800 dark:text-amber-300 flex items-center justify-between">
-                <span>Esta orden se encuentra registrada pero aún no ha sido liquidada.</span>
-                {isRegistrado && onDisburseRequest && (
+                <span>Esta orden aún no ha sido liquidada (pendiente de asignación de medios de pago).</span>
+                {isPendingDisburse && onDisburseRequest && (
                   <button
                     onClick={() => {
                       onClose()
                       onDisburseRequest(order)
                     }}
-                    className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold transition shadow-sm"
+                    className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold transition shadow-sm flex items-center gap-1.5"
                   >
-                    Asignar Medio y Liquidar Ahora
+                    <Wallet className="w-3.5 h-3.5" /> Asignar Medio y Liquidar Ahora
                   </button>
                 )}
               </div>
