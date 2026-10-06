@@ -42,6 +42,7 @@ export default function PaymentsPage() {
 
   // Filtros pestaña Órdenes de Pago
   const [searchOrders, setSearchOrders] = useState("")
+  const [filterOrderSubtipo, setFilterOrderSubtipo] = useState("all")
   const [filterOrderEstado, setFilterOrderEstado] = useState("all")
   const [filterOrderFormaPago, setFilterOrderFormaPago] = useState("all")
   const [filterOrderSupplier, setFilterOrderSupplier] = useState("all")
@@ -365,7 +366,12 @@ export default function PaymentsPage() {
       const matchesSearch = !searchOrders ||
         (o.numero_orden || "").toLowerCase().includes(searchOrders.toLowerCase()) ||
         (o.supplier_nombre || "").toLowerCase().includes(searchOrders.toLowerCase()) ||
+        (o.beneficiario_nombre || "").toLowerCase().includes(searchOrders.toLowerCase()) ||
+        (o.periodo_nomina || "").toLowerCase().includes(searchOrders.toLowerCase()) ||
         (o.recibo_proveedor || "").toLowerCase().includes(searchOrders.toLowerCase())
+
+      const matchesSubtipo = filterOrderSubtipo === "all" ||
+        (o.subtipo || "proveedor") === filterOrderSubtipo
 
       const matchesEstado = filterOrderEstado === "all" ||
         (filterOrderEstado === "pendiente" || filterOrderEstado === "registrado"
@@ -375,13 +381,13 @@ export default function PaymentsPage() {
       const matchesFormaPago = filterOrderFormaPago === "all" ||
         (o.formas_pago_resumen || "").toLowerCase().includes(filterOrderFormaPago.toLowerCase())
 
-      return matchesSearch && matchesEstado && matchesSupplier && matchesFormaPago
+      return matchesSearch && matchesSubtipo && matchesEstado && matchesSupplier && matchesFormaPago
     }).sort((a, b) => {
       const dateA = new Date(a.fecha_emision || a.created_at || 0).getTime()
       const dateB = new Date(b.fecha_emision || b.created_at || 0).getTime()
       return dateB - dateA
     })
-  }, [paymentOrders, searchOrders, filterOrderEstado, filterOrderSupplier, filterOrderFormaPago])
+  }, [paymentOrders, searchOrders, filterOrderSubtipo, filterOrderEstado, filterOrderSupplier, filterOrderFormaPago])
 
   // Selección múltiple facturas
   const toggleSelectInvoice = (id: string) => {
@@ -1324,6 +1330,18 @@ export default function PaymentsPage() {
               </div>
 
               <select
+                value={filterOrderSubtipo}
+                onChange={(e) => setFilterOrderSubtipo(e.target.value)}
+                className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-medium"
+              >
+                <option value="all">Todos los Subtipos</option>
+                <option value="proveedor">🏢 Proveedores Comerciales</option>
+                <option value="nomina_salarios">👥 Nómina de Salarios (SueldOK)</option>
+                <option value="finiquito">📋 Finiquitos Laborales</option>
+                <option value="anticipo_sueldo">💵 Anticipos de Sueldo</option>
+              </select>
+
+              <select
                 value={filterOrderEstado}
                 onChange={(e) => setFilterOrderEstado(e.target.value)}
                 className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-medium"
@@ -1380,8 +1398,8 @@ export default function PaymentsPage() {
                   <thead className="bg-slate-50 dark:bg-slate-850/80 text-slate-500 uppercase text-[10px] font-extrabold border-b border-slate-200 dark:border-slate-800">
                     <tr>
                       <th className="p-3.5">N° Orden & Fecha</th>
-                      <th className="p-3.5">Proveedor</th>
-                      <th className="p-3.5 text-center">Facturas</th>
+                      <th className="p-3.5">Beneficiario / Proveedor</th>
+                      <th className="p-3.5 text-center">Tipo / Facturas</th>
                       <th className="p-3.5">Medios de Pago Asignados</th>
                       <th className="p-3.5 text-right">Monto Neto</th>
                       <th className="p-3.5 text-center">Estado</th>
@@ -1394,15 +1412,33 @@ export default function PaymentsPage() {
                       const isAnulado = order.estado === "anulado"
                       const isPendingDisburse = !isPaid && !isAnulado
                       const isLote = order.observaciones?.includes("[Lote") || order.formas_pago_resumen?.toLowerCase().includes("lote")
+                      const isNomina = order.subtipo === "nomina_salarios"
+                      const isFiniquito = order.subtipo === "finiquito"
+                      const isAnticipo = order.subtipo === "anticipo_sueldo"
 
                       return (
                         <tr key={order.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition">
                           <td className="p-3.5">
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <p className="font-mono font-black text-slate-900 dark:text-white text-xs">{order.numero_orden}</p>
                               {isLote && (
                                 <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                                   LOTE
+                                </span>
+                              )}
+                              {isNomina && (
+                                <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
+                                  NÓMINA
+                                </span>
+                              )}
+                              {isFiniquito && (
+                                <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                                  FINIQUITO
+                                </span>
+                              )}
+                              {isAnticipo && (
+                                <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+                                  ANTICIPO
                                 </span>
                               )}
                             </div>
@@ -1411,13 +1447,35 @@ export default function PaymentsPage() {
                             </p>
                           </td>
                           <td className="p-3.5">
-                            <p className="font-bold text-slate-800 dark:text-slate-200">{order.supplier_nombre}</p>
-                            <p className="text-[10px] text-slate-400 font-mono">RUC: {order.supplier_ruc || "-"}</p>
+                            <p className="font-bold text-slate-800 dark:text-slate-200">
+                              {order.beneficiario_nombre || order.supplier_nombre || (isNomina ? "Personal Planilla SueldOK" : "Sin Beneficiario")}
+                            </p>
+                            <p className="text-[10px] text-slate-400 font-mono">
+                              {order.beneficiario_documento
+                                ? `Doc/CI: ${order.beneficiario_documento}`
+                                : order.supplier_ruc
+                                ? `RUC: ${order.supplier_ruc}`
+                                : (order.periodo_nomina ? `Período: ${order.periodo_nomina}` : "-")}
+                            </p>
                           </td>
                           <td className="p-3.5 text-center">
-                            <span className="font-mono font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-lg">
-                              {order.total_facturas || 1} fac.
-                            </span>
+                            {isNomina ? (
+                              <span className="font-mono font-bold text-[10px] text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/50 px-2 py-0.5 rounded-lg border border-indigo-500/20">
+                                Planilla {order.periodo_nomina || ""}
+                              </span>
+                            ) : isFiniquito ? (
+                              <span className="font-mono font-bold text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/50 px-2 py-0.5 rounded-lg border border-amber-500/20">
+                                Liquidación
+                              </span>
+                            ) : isAnticipo ? (
+                              <span className="font-mono font-bold text-[10px] text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/50 px-2 py-0.5 rounded-lg border border-purple-500/20">
+                                Anticipo
+                              </span>
+                            ) : (
+                              <span className="font-mono font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-lg">
+                                {order.total_facturas || 1} fac.
+                              </span>
+                            )}
                           </td>
                           <td className="p-3.5">
                             <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300 bg-slate-100/80 dark:bg-slate-800/60 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700/60">

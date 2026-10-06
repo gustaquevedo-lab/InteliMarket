@@ -606,12 +606,18 @@ class SupplierLegalInvoiceInput(BaseModel):
 
 
 class SupplierPaymentOrderCreate(BaseModel):
-    supplier_id: UUID
+    supplier_id: Optional[UUID] = None
+    subtipo: Optional[str] = "proveedor"  # proveedor | nomina_salarios | finiquito | anticipo_sueldo | otro
+    beneficiario_nombre: Optional[str] = None
+    beneficiario_documento: Optional[str] = None
+    periodo_nomina: Optional[str] = None
+    sueldok_sync_id: Optional[str] = None
+    monto_neto: Optional[Decimal] = None
     fecha_emision: Optional[date] = None
     observaciones: Optional[str] = None
     recibo_proveedor: Optional[str] = None
     estado: Optional[str] = "registrado"  # "registrado", "aguardando_pago", etc.
-    allocations: list[PaymentOrderAllocationCreate]
+    allocations: Optional[list[PaymentOrderAllocationCreate]] = []
     disbursements: Optional[list[PaymentOrderDisbursementCreate]] = None
     legal_invoices: Optional[list[SupplierLegalInvoiceInput]] = None
     diferencia_redondeo: Optional[Decimal] = Decimal("0")
@@ -815,7 +821,12 @@ class PaymentOrderDisbursementResponse(BaseModel):
 class SupplierPaymentOrderResponse(BaseModel):
     id: UUID
     company_id: UUID
-    supplier_id: UUID
+    supplier_id: Optional[UUID] = None
+    subtipo: Optional[str] = "proveedor"
+    beneficiario_nombre: Optional[str] = None
+    beneficiario_documento: Optional[str] = None
+    periodo_nomina: Optional[str] = None
+    sueldok_sync_id: Optional[str] = None
     supplier_nombre: Optional[str] = None
     supplier_ruc: Optional[str] = None
     numero_orden: str

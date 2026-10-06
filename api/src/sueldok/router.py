@@ -6,7 +6,7 @@ from typing import Optional, List, Dict, Any
 
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
-from api.src.sueldok import service
+from api.src.sueldok import service, schemas
 
 router = APIRouter(prefix="/api/v1/sueldok", tags=["sueldok"])
 
@@ -147,3 +147,46 @@ async def sync_commissions(
 @router.get("/events")
 async def available_events():
     return service.get_available_events()
+
+
+@router.post("/payroll-payment-order")
+async def create_payroll_payment_order(
+    payload: schemas.PayrollPaymentOrderCreate,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: Any = Depends(require_auth)
+):
+    """
+    Emite una Orden de Pago (SupplierPaymentOrder) con subtipo 'nomina_salarios'
+    para la masa salarial neta liquidada en SueldOK.
+    """
+    user_id = str(user.get("id")) if isinstance(user, dict) else str(getattr(user, "id", ""))
+    return await service.generate_payroll_payment_order(db, company_id, payload, user_id)
+
+
+@router.post("/settlements")
+async def create_settlement(
+    payload: schemas.SettlementCreate,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: Any = Depends(require_auth)
+):
+    """
+    Registra una liquidación final / finiquito laboral paraguayo y emite
+    su Orden de Pago asociada (subtipo 'finiquito') en Tesorería.
+    """
+    user_id = str(user.get("id")) if isinstance(user, dict) else str(getattr(user, "id", ""))
+    return await service.create_labor_settlement(db, company_id, payload, user_id)
+
+
+@router.get("/settlements")
+async def list_settlements(
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: Any = Depends(require_auth)
+):
+    """
+    Lista el historial de finiquitos y liquidaciones laborales con estado de pago y OP.
+    """
+    return await service.list_labor_settlements(db, company_id)
+

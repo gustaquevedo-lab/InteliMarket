@@ -863,6 +863,7 @@ async def create_payment_order(
 async def list_payment_orders(
     company_id: str = Query(),
     supplier_id: str | None = Query(None),
+    subtipo: str | None = Query(None),
     estado: str | None = Query(None),
     forma_pago: str | None = Query(None),
     fecha_desde: date | None = Query(None),
@@ -872,7 +873,7 @@ async def list_payment_orders(
     db: AsyncSession = Depends(get_db)
 ):
     return await service.list_supplier_payment_orders(
-        db, company_id, supplier_id, estado, forma_pago, fecha_desde, fecha_hasta, limit, offset
+        db, company_id, supplier_id, subtipo, estado, forma_pago, fecha_desde, fecha_hasta, limit, offset
     )
 
 

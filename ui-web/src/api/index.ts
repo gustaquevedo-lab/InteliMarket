@@ -1170,7 +1170,12 @@ export interface PaymentOrderDisbursement {
 export interface SupplierPaymentOrder {
   id: string;
   company_id: string;
-  supplier_id: string;
+  supplier_id?: string | null;
+  subtipo?: 'proveedor' | 'nomina_salarios' | 'finiquito' | 'anticipo_sueldo' | 'otro' | string;
+  beneficiario_nombre?: string | null;
+  beneficiario_documento?: string | null;
+  periodo_nomina?: string | null;
+  sueldok_sync_id?: string | null;
   supplier_nombre?: string;
   supplier_ruc?: string;
   numero_orden: string;
@@ -1436,6 +1441,34 @@ export interface BankAccount { id: string; company_id?: string; alias?: string |
 export interface BankBalanceCorrection { id: string; company_id?: string; bank_account_id: string; origen: string; saldo_actual: number; saldo_propuesto: number; motivo?: string; estado: string; solicitado_por?: string | null; aprobado_supervisor_id?: string | null; aprobado_supervisor_at?: string | null; aprobado_gerente_id?: string | null; aprobado_gerente_at?: string | null; rechazado_por?: string | null; rechazado_motivo?: string | null; created_at?: string }
 export interface BankTransaction { id: string; company_id?: string; bank_account_id?: string; fecha?: string; tipo?: string; monto?: number; moneda?: string; descripcion?: string; referencia?: string; contraparte?: string; conciliado?: boolean; categoria?: string; invoice_id?: string; created_at?: string }
 export interface CashFlowProjection { id: string; company_id?: string; fecha?: string; saldo_inicial?: number; ingresos_estimados?: number; egresos_estimados?: number; saldo_final_proyectado?: number; ingresos_reales?: number; egresos_reales?: number; saldo_final_real?: number; created_at?: string }
+export interface LaborSettlement {
+  id: string
+  company_id?: string
+  employee_id: string
+  employee_nombre: string
+  employee_ci?: string | null
+  fecha_ingreso?: string | null
+  fecha_egreso: string
+  motivo_egreso: string
+  dias_trabajados_mes: number
+  salario_mes_monto: number
+  vacaciones_causadas_monto: number
+  aguinaldo_proporcional_monto: number
+  preaviso_monto: number
+  indemnizacion_monto: number
+  descuentos_monto: number
+  total_neto: number
+  estado: string
+  payment_order_id?: string | null
+  observaciones?: string | null
+  created_at: string
+  payment_order?: {
+    id: string
+    numero_orden: string
+    estado: string
+    monto_neto: number
+  } | null
+}
 export interface Budget { id: string; company_id?: string; nombre?: string; periodo?: string; categoria?: string; monto_presupuestado?: number; monto_ejecutado?: number; monto_disponible?: number; area?: string; tipo?: string; created_at?: string }
 export interface PaymentRun { id: string; company_id?: string; nombre?: string; fecha_programada?: string; total_monto?: number; estado?: string; metodo_pago?: string; bank_account_id?: string; created_by?: string; approved_by?: string; items?: PaymentRunItem[]; created_at?: string }
 export interface PaymentRunItem { id: string; payment_run_id?: string; invoice_id?: string; supplier_id?: string; monto_programado?: number; monto_pagado?: number; estado?: string; created_at?: string }
@@ -3497,6 +3530,33 @@ export const api = {
     syncPayroll: (data: unknown) => client.post<any>("/v1/sueldok/sync/payroll", data),
     syncCommissions: (companyId: string, periodo: string) => client.post<any>("/v1/sueldok/sync/sales-commissions", { company_id: companyId, periodo }),
     events: () => client.get<string[]>("/v1/sueldok/events"),
+    generatePayrollPaymentOrder: (data: {
+      periodo: string
+      total_neto?: number
+      monto_neto?: number
+      colaboradores_count?: number
+      cantidad_funcionarios?: number
+      observaciones?: string
+      liquidar_inmediato?: boolean
+      desembolso_inmediato?: boolean
+      forma_pago?: string
+      metodo_pago?: string
+      bank_account_id?: string
+      referencia?: string
+      referencia_transferencia?: string
+      numero_cheque?: string
+      banco_cheque?: string
+      fecha_pago?: string
+    }) => client.post<SupplierPaymentOrder>(`/v1/sueldok/payroll-payment-order?company_id=${COMPANY_ID}`, {
+      ...data,
+      total_neto: data.total_neto ?? data.monto_neto,
+      colaboradores_count: data.colaboradores_count ?? data.cantidad_funcionarios,
+      liquidar_inmediato: data.liquidar_inmediato ?? data.desembolso_inmediato,
+      forma_pago: data.forma_pago ?? data.metodo_pago,
+      referencia_transferencia: data.referencia_transferencia ?? data.referencia,
+    }),
+    createSettlement: (data: any) => client.post<LaborSettlement>(`/v1/sueldok/settlements?company_id=${COMPANY_ID}`, data),
+    listSettlements: () => client.get<LaborSettlement[]>(`/v1/sueldok/settlements`, { company_id: COMPANY_ID }),
   },
   security: {
     apiKeys: () => client.get<SecurityApiKey[]>("/v1/security/api-keys"),
@@ -3810,7 +3870,8 @@ export const api = {
     funds: {
       list: (params?: { activo?: boolean }) => client.get<PettyCashFund[]>("/v1/petty-cash-funds", params as any),
       create: (data: { branch_id?: string; nombre: string; custodio_id?: string; monto_autorizado: number; cost_center_id?: string; monto_maximo_por_gasto?: number; dotacion_inicial?: boolean; medio_dotacion?: string; caja_boveda_id?: string; bank_account_id?: string }) => client.post<PettyCashFund>("/v1/petty-cash-funds", data),
-      update: (id: string, data: { nombre?: string; custodio_id?: string; activo?: boolean }) => client.patch<PettyCashFund>(`/v1/petty-cash-funds/${id}`, data),
+      update: (id: string, data: { nombre?: string; custodio_id?: string; cost_center_id?: string; monto_autorizado?: number; monto_maximo_por_gasto?: number; activo?: boolean }) => client.patch<PettyCashFund>(`/v1/petty-cash-funds/${id}`, data),
+      delete: (id: string) => client.delete<void>(`/v1/petty-cash-funds/${id}`),
       movements: (id: string, limit?: number) => client.get<PettyCashFundMovement[]>(`/v1/petty-cash-funds/${id}/movements`, limit ? { limit } : undefined),
       replenish: (id: string, data: { monto: number; bank_account_id?: string; referencia?: string; observaciones?: string }) => client.post<PettyCashFund>(`/v1/petty-cash-funds/${id}/replenish`, data),
       counts: {
@@ -3866,11 +3927,11 @@ export const api = {
       downloadStatementPdf: (supplierId: string) => downloadAuthenticated(`/v1/financial/suppliers/${supplierId}/statement.pdf`, { company_id: COMPANY_ID }, `estado_cuenta_proveedor_${supplierId.slice(0, 8)}.pdf`),
     },
     paymentOrders: {
-      list: (params?: { supplier_id?: string; estado?: string; forma_pago?: string; fecha_desde?: string; fecha_hasta?: string; limit?: number; offset?: number }) =>
+      list: (params?: { supplier_id?: string; subtipo?: string; estado?: string; forma_pago?: string; fecha_desde?: string; fecha_hasta?: string; limit?: number; offset?: number }) =>
         client.get<{ items: SupplierPaymentOrder[]; total: number }>("/v1/financial/payment-orders", { company_id: COMPANY_ID, ...params } as any),
       get: (orderId: string) =>
         client.get<SupplierPaymentOrder>(`/v1/financial/payment-orders/${orderId}`, { company_id: COMPANY_ID } as any),
-      create: (data: { supplier_id: string; fecha_emision?: string; observaciones?: string; recibo_proveedor?: string; estado?: string; allocations: any[]; disbursements?: any[]; legal_invoices?: any[]; diferencia_redondeo?: number }) =>
+      create: (data: { supplier_id?: string | null; subtipo?: string; beneficiario_nombre?: string; beneficiario_documento?: string; periodo_nomina?: string; sueldok_sync_id?: string; monto_neto?: number; fecha_emision?: string; observaciones?: string; recibo_proveedor?: string; estado?: string; allocations?: any[]; disbursements?: any[]; legal_invoices?: any[]; diferencia_redondeo?: number }) =>
         client.post<SupplierPaymentOrder>(`/v1/financial/payment-orders?company_id=${COMPANY_ID}`, data),
       disburse: (orderId: string, data: { fecha_pago?: string; recibo_proveedor?: string; observaciones?: string; disbursements: any[]; legal_invoices?: any[]; diferencia_redondeo?: number }) =>
         client.post<SupplierPaymentOrder>(`/v1/financial/payment-orders/${orderId}/disburse?company_id=${COMPANY_ID}`, data),

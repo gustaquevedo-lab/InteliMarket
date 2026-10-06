@@ -347,3 +347,198 @@ async def sync_salary_advance_deduction(
 def get_available_events() -> list[str]:
     return SYNC_EVENTS
 
+
+async def generate_payroll_payment_order(
+    db: AsyncSession,
+    company_id: str,
+    data: PayrollPaymentOrderCreate,
+    user_id: str | None = None
+) -> dict:
+    """Genera una Orden de Pago para la nómina general de SueldOK, con opción de liquidación inmediata."""
+    from decimal import Decimal
+    import uuid
+    from api.src.financial.schemas import SupplierPaymentOrderCreate, PaymentOrderDisbursementCreate
+    from api.src.financial import service as financial_service
+
+    disbursements = None
+    if data.liquidar_inmediato:
+        disbursements = [
+            PaymentOrderDisbursementCreate(
+                forma_pago=data.forma_pago or "transferencia",
+                monto=Decimal(str(data.total_neto)),
+                moneda="PYG",
+                tipo_cambio=Decimal("1"),
+                monto_pyg=Decimal(str(data.total_neto)),
+                bank_account_id=uuid.UUID(data.bank_account_id) if data.bank_account_id else None,
+                referencia_transferencia=data.referencia_transferencia or f"SIPAP Nómina {data.periodo}",
+                numero_cheque=data.numero_cheque,
+                banco_cheque=data.banco_cheque,
+                observaciones=data.observaciones or f"Liquidación Salarial Período {data.periodo}"
+            )
+        ]
+
+    po_data = SupplierPaymentOrderCreate(
+        subtipo="nomina_salarios",
+        beneficiario_nombre=f"Planilla Nómina General {data.periodo}",
+        periodo_nomina=data.periodo,
+        monto_neto=Decimal(str(data.total_neto)),
+        observaciones=data.observaciones or f"Nómina salarial período {data.periodo} ({data.colaboradores_count} colaboradores liquidados vía SueldOK).",
+        disbursements=disbursements,
+    )
+
+    order = await financial_service.create_supplier_payment_order(db, company_id, po_data, user_id)
+    return order
+
+
+async def create_labor_settlement(
+    db: AsyncSession,
+    company_id: str,
+    data: SettlementCreate,
+    user_id: str | None = None
+) -> dict:
+    """Registra una liquidación final / finiquito laboral y opcionalmente emite su Orden de Pago."""
+    from decimal import Decimal
+    import uuid
+    from api.src.financial.schemas import SupplierPaymentOrderCreate, PaymentOrderDisbursementCreate
+    from api.src.financial import service as financial_service
+    from api.src.sueldok.models import LaborSettlement
+
+    cid = uuid.UUID(company_id)
+    payment_order = None
+    payment_order_id = None
+    payment_order_num = None
+
+    if data.generar_op:
+        disbursements = None
+        if data.liquidar_inmediato:
+            disbursements = [
+                PaymentOrderDisbursementCreate(
+                    forma_pago=data.forma_pago or "transferencia",
+                    monto=Decimal(str(data.total_liquidacion_neta)),
+                    moneda="PYG",
+                    tipo_cambio=Decimal("1"),
+                    monto_pyg=Decimal(str(data.total_liquidacion_neta)),
+                    bank_account_id=uuid.UUID(data.bank_account_id) if data.bank_account_id else None,
+                    referencia_transferencia=data.referencia_transferencia or f"Finiquito {data.employee_nombre}",
+                    numero_cheque=data.numero_cheque,
+                    banco_cheque=data.banco_cheque,
+                    titular_cheque=data.employee_nombre,
+                    observaciones=f"Finiquito Laboral - {data.employee_nombre} (CI: {data.employee_ci or '-'})"
+                )
+            ]
+
+        po_data = SupplierPaymentOrderCreate(
+            subtipo="finiquito",
+            beneficiario_nombre=data.employee_nombre,
+            beneficiario_documento=data.employee_ci,
+            monto_neto=Decimal(str(data.total_liquidacion_neta)),
+            observaciones=f"Finiquito Laboral - {data.employee_nombre} (CI: {data.employee_ci or '-'}). Motivo: {data.motivo}. {data.observaciones or ''}",
+            disbursements=disbursements,
+        )
+        payment_order = await financial_service.create_supplier_payment_order(db, company_id, po_data, user_id)
+        payment_order_id = uuid.UUID(payment_order["id"]) if payment_order.get("id") else None
+        payment_order_num = payment_order.get("numero_orden")
+
+    settlement = LaborSettlement(
+        company_id=cid,
+        employee_id=data.employee_id,
+        employee_nombre=data.employee_nombre,
+        employee_ci=data.employee_ci,
+        employee_cargo=data.employee_cargo,
+        fecha_ingreso=datetime.fromisoformat(data.fecha_ingreso) if data.fecha_ingreso else None,
+        fecha_salida=datetime.fromisoformat(data.fecha_salida) if data.fecha_salida else datetime.now(timezone.utc),
+        motivo=data.motivo or "despido_injustificado",
+        salario_base=Decimal(str(data.salario_base)),
+        dias_trabajados_mes=Decimal(str(data.dias_trabajados_mes or 0)),
+        monto_dias_trabajados=Decimal(str(data.monto_dias_trabajados or 0)),
+        vacaciones_monto=Decimal(str(data.vacaciones_monto or 0)),
+        aguinaldo_proporcional=Decimal(str(data.aguinaldo_proporcional or 0)),
+        preaviso=Decimal(str(data.preaviso or 0)),
+        indemnizacion_legal=Decimal(str(data.indemnizacion_legal or 0)),
+        descuentos_varios=Decimal(str(data.descuentos_varios or 0)),
+        total_liquidacion_neta=Decimal(str(data.total_liquidacion_neta)),
+        payment_order_id=payment_order_id,
+        estado="pagado" if data.liquidar_inmediato else "pendiente",
+        observaciones=data.observaciones,
+        created_by=uuid.UUID(user_id) if user_id else None,
+    )
+    db.add(settlement)
+    await db.commit()
+
+    return {
+        "id": str(settlement.id),
+        "company_id": str(settlement.company_id),
+        "employee_id": settlement.employee_id,
+        "employee_nombre": settlement.employee_nombre,
+        "employee_ci": settlement.employee_ci,
+        "employee_cargo": settlement.employee_cargo,
+        "fecha_ingreso": settlement.fecha_ingreso.isoformat() if settlement.fecha_ingreso else None,
+        "fecha_salida": settlement.fecha_salida.isoformat() if settlement.fecha_salida else None,
+        "motivo": settlement.motivo,
+        "salario_base": float(settlement.salario_base),
+        "dias_trabajados_mes": int(settlement.dias_trabajados_mes or 0),
+        "monto_dias_trabajados": float(settlement.monto_dias_trabajados or 0),
+        "vacaciones_monto": float(settlement.vacaciones_monto or 0),
+        "aguinaldo_proporcional": float(settlement.aguinaldo_proporcional or 0),
+        "preaviso": float(settlement.preaviso or 0),
+        "indemnizacion_legal": float(settlement.indemnizacion_legal or 0),
+        "descuentos_varios": float(settlement.descuentos_varios or 0),
+        "total_liquidacion_neta": float(settlement.total_liquidacion_neta),
+        "payment_order_id": str(payment_order_id) if payment_order_id else None,
+        "payment_order_numero": payment_order_num,
+        "estado": settlement.estado,
+        "observaciones": settlement.observaciones,
+        "created_at": settlement.created_at.isoformat() if settlement.created_at else None,
+        "order": payment_order
+    }
+
+
+async def list_labor_settlements(db: AsyncSession, company_id: str) -> list[dict]:
+    """Lista las liquidaciones laborales registradas con su estado de pago y OP asociada."""
+    from sqlalchemy import select
+    import uuid
+    from api.src.sueldok.models import LaborSettlement
+    from api.src.financial.models import SupplierPaymentOrder
+
+    cid = uuid.UUID(company_id)
+    query = (
+        select(LaborSettlement, SupplierPaymentOrder.numero_orden, SupplierPaymentOrder.estado.label("order_estado"))
+        .outerjoin(SupplierPaymentOrder, SupplierPaymentOrder.id == LaborSettlement.payment_order_id)
+        .where(LaborSettlement.company_id == cid)
+        .order_by(LaborSettlement.created_at.desc())
+    )
+    results = (await db.execute(query)).all()
+
+    items = []
+    for r in results:
+        s = r.LaborSettlement
+        num_op = getattr(r, "numero_orden", None)
+        ord_est = getattr(r, "order_estado", None)
+        items.append({
+            "id": str(s.id),
+            "company_id": str(s.company_id),
+            "employee_id": s.employee_id,
+            "employee_nombre": s.employee_nombre,
+            "employee_ci": s.employee_ci,
+            "employee_cargo": s.employee_cargo,
+            "fecha_ingreso": s.fecha_ingreso.isoformat() if s.fecha_ingreso else None,
+            "fecha_salida": s.fecha_salida.isoformat() if s.fecha_salida else None,
+            "motivo": s.motivo,
+            "salario_base": float(s.salario_base),
+            "dias_trabajados_mes": int(s.dias_trabajados_mes or 0),
+            "monto_dias_trabajados": float(s.monto_dias_trabajados or 0),
+            "vacaciones_monto": float(s.vacaciones_monto or 0),
+            "aguinaldo_proporcional": float(s.aguinaldo_proporcional or 0),
+            "preaviso": float(s.preaviso or 0),
+            "indemnizacion_legal": float(s.indemnizacion_legal or 0),
+            "descuentos_varios": float(s.descuentos_varios or 0),
+            "total_liquidacion_neta": float(s.total_liquidacion_neta),
+            "payment_order_id": str(s.payment_order_id) if s.payment_order_id else None,
+            "payment_order_numero": num_op,
+            "estado": ord_est or s.estado,
+            "observaciones": s.observaciones,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+        })
+    return items
+
+

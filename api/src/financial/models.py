@@ -353,7 +353,12 @@ class SupplierPaymentOrder(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=False, index=True)
+    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=True, index=True)
+    subtipo = Column(String(50), nullable=False, default="proveedor", server_default="proveedor")  # proveedor, nomina_salarios, finiquito, anticipo_sueldo, otro
+    beneficiario_nombre = Column(String(200), nullable=True)
+    beneficiario_documento = Column(String(50), nullable=True)
+    periodo_nomina = Column(String(20), nullable=True)
+    sueldok_sync_id = Column(String(100), nullable=True)
     numero_orden = Column(String(50), nullable=False, unique=True, index=True)
     fecha_emision = Column(Date, nullable=False, server_default=func.current_date())
     fecha_pago = Column(Date, nullable=True)

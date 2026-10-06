@@ -3367,116 +3367,156 @@ async def create_supplier_payment_order(
     """
     cid = uuid.UUID(company_id)
     sup_id = data.supplier_id
+    subtipo = (data.subtipo or "proveedor").lower().strip()
 
-    # 1. Validar Proveedor
-    sup_res = await db.execute(select(Supplier).where(Supplier.id == sup_id, Supplier.company_id == cid))
-    supplier = sup_res.scalar_one_or_none()
-    if not supplier:
-        raise HTTPException(status_code=404, detail="Proveedor no encontrado en esta empresa.")
-
-    if not data.allocations:
-        raise HTTPException(status_code=400, detail="Debe incluir al menos una factura a pagar en la orden.")
-
-    # 2. Validar Facturas
-    inv_ids = [a.invoice_id for a in data.allocations]
-    invoices_res = await db.execute(
-        select(SupplierInvoice).where(
-            SupplierInvoice.id.in_(inv_ids),
-            SupplierInvoice.company_id == cid,
-            SupplierInvoice.supplier_id == sup_id
-        )
-    )
-    invoices_by_id = {inv.id: inv for inv in invoices_res.scalars().all()}
-
-    if len(invoices_by_id) != len(inv_ids):
-        raise HTTPException(
-            status_code=400,
-            detail="Una o más facturas seleccionadas no pertenecen a este proveedor o no existen."
-        )
-
+    supplier = None
+    allocations_to_create = []
+    diff_redondeo = Decimal("0")
     monto_total = Decimal("0")
     monto_retenido = Decimal("0")
-    allocations_to_create = []
+    monto_neto_efectivo = Decimal("0")
 
-    auto_redondeo_exceso = Decimal("0")
+    if subtipo == "proveedor":
+        # 1. Validar Proveedor
+        if not sup_id:
+            raise HTTPException(status_code=400, detail="Debe especificar un proveedor para órdenes de tipo 'proveedor'.")
+        sup_res = await db.execute(select(Supplier).where(Supplier.id == sup_id, Supplier.company_id == cid))
+        supplier = sup_res.scalar_one_or_none()
+        if not supplier:
+            raise HTTPException(status_code=404, detail="Proveedor no encontrado en esta empresa.")
 
-    for alloc_in in data.allocations:
-        inv = invoices_by_id[alloc_in.invoice_id]
-        if inv.estado in ("pagada", "cancelada"):
+        if not data.allocations:
+            raise HTTPException(status_code=400, detail="Debe incluir al menos una factura a pagar en la orden de proveedor.")
+
+        # 2. Validar Facturas
+        inv_ids = [a.invoice_id for a in data.allocations]
+        invoices_res = await db.execute(
+            select(SupplierInvoice).where(
+                SupplierInvoice.id.in_(inv_ids),
+                SupplierInvoice.company_id == cid,
+                SupplierInvoice.supplier_id == sup_id
+            )
+        )
+        invoices_by_id = {inv.id: inv for inv in invoices_res.scalars().all()}
+
+        if len(invoices_by_id) != len(inv_ids):
             raise HTTPException(
                 status_code=400,
-                detail=f"La factura {inv.numero_factura} ya se encuentra {inv.estado}."
+                detail="Una o más facturas seleccionadas no pertenecen a este proveedor o no existen."
             )
 
-        aplicado = alloc_in.monto_aplicado
-        retencion = alloc_in.monto_retencion or Decimal("0")
+        auto_redondeo_exceso = Decimal("0")
 
-        if aplicado <= Decimal("0"):
-            raise HTTPException(
-                status_code=400,
-                detail=f"El monto a amortizar de la factura {inv.numero_factura} debe ser mayor a 0."
-            )
-
-        if retencion < Decimal("0"):
-            raise HTTPException(
-                status_code=400,
-                detail=f"La retención de la factura {inv.numero_factura} no puede ser negativa."
-            )
-
-        if retencion > aplicado:
-            raise HTTPException(
-                status_code=400,
-                detail=f"La retención (₲ {retencion:,.0f}) no puede superar el monto amortizado (₲ {aplicado:,.0f}) de la factura {inv.numero_factura}."
-            )
-
-        total_amortizar = aplicado
-
-        if total_amortizar > inv.saldo_pendiente:
-            diff_exceso = total_amortizar - inv.saldo_pendiente
-            if diff_exceso <= Decimal("5000") and Decimal(str(getattr(data, "diferencia_redondeo", 0) or 0)) == Decimal("0"):
-                auto_redondeo_exceso += diff_exceso
-                total_amortizar = inv.saldo_pendiente
-                aplicado = inv.saldo_pendiente
-            else:
+        for alloc_in in data.allocations:
+            inv = invoices_by_id[alloc_in.invoice_id]
+            if inv.estado in ("pagada", "cancelada"):
                 raise HTTPException(
                     status_code=400,
-                    detail=f"El monto a amortizar (₲ {total_amortizar:,.0f}) supera el saldo pendiente (₲ {inv.saldo_pendiente:,.0f}) de la factura {inv.numero_factura}."
+                    detail=f"La factura {inv.numero_factura} ya se encuentra {inv.estado}."
                 )
 
-        saldo_anterior = inv.saldo_pendiente
-        saldo_restante = saldo_anterior - total_amortizar
+            aplicado = alloc_in.monto_aplicado
+            retencion = alloc_in.monto_retencion or Decimal("0")
 
-        monto_total += aplicado
-        monto_retenido += retencion
+            if aplicado <= Decimal("0"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"El monto a amortizar de la factura {inv.numero_factura} debe ser mayor a 0."
+                )
 
-        allocations_to_create.append({
-            "invoice": inv,
-            "monto_aplicado": aplicado,
-            "monto_retencion": retencion,
-            "saldo_anterior": saldo_anterior,
-            "saldo_restante": saldo_restante,
-        })
+            if retencion < Decimal("0"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"La retención de la factura {inv.numero_factura} no puede ser negativa."
+                )
 
-    monto_neto = monto_total - monto_retenido
-    if monto_neto < Decimal("0"):
-        raise HTTPException(status_code=400, detail="El monto retenido no puede superar el monto total.")
+            if retencion > aplicado:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"La retención (₲ {retencion:,.0f}) no puede superar el monto amortizado (₲ {aplicado:,.0f}) de la factura {inv.numero_factura}."
+                )
 
-    diff_redondeo = Decimal(str(getattr(data, "diferencia_redondeo", 0) or 0)) + auto_redondeo_exceso
-    if abs(diff_redondeo) > Decimal("5000"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"El ajuste por redondeo (₲ {diff_redondeo:+,.0f}) supera la tolerancia máxima permitida de ±₲ 5.000."
-        )
+            total_amortizar = aplicado
 
-    monto_neto_efectivo = monto_neto + diff_redondeo
-    if monto_neto_efectivo < Decimal("0"):
-        raise HTTPException(status_code=400, detail="El monto neto a desembolsar no puede ser negativo.")
+            if total_amortizar > inv.saldo_pendiente:
+                diff_exceso = total_amortizar - inv.saldo_pendiente
+                if diff_exceso <= Decimal("5000") and Decimal(str(getattr(data, "diferencia_redondeo", 0) or 0)) == Decimal("0"):
+                    auto_redondeo_exceso += diff_exceso
+                    total_amortizar = inv.saldo_pendiente
+                    aplicado = inv.saldo_pendiente
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"El monto a amortizar (₲ {total_amortizar:,.0f}) supera el saldo pendiente (₲ {inv.saldo_pendiente:,.0f}) de la factura {inv.numero_factura}."
+                    )
+
+            saldo_anterior = inv.saldo_pendiente
+            saldo_restante = saldo_anterior - total_amortizar
+
+            monto_total += aplicado
+            monto_retenido += retencion
+
+            allocations_to_create.append({
+                "invoice": inv,
+                "monto_aplicado": aplicado,
+                "monto_retencion": retencion,
+                "saldo_anterior": saldo_anterior,
+                "saldo_restante": saldo_restante,
+            })
+
+        monto_neto = monto_total - monto_retenido
+        if monto_neto < Decimal("0"):
+            raise HTTPException(status_code=400, detail="El monto retenido no puede superar el monto total.")
+
+        diff_redondeo = Decimal(str(getattr(data, "diferencia_redondeo", 0) or 0)) + auto_redondeo_exceso
+        if abs(diff_redondeo) > Decimal("5000"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"El ajuste por redondeo (₲ {diff_redondeo:+,.0f}) supera la tolerancia máxima permitida de ±₲ 5.000."
+            )
+
+        monto_neto_efectivo = monto_neto + diff_redondeo
+        if monto_neto_efectivo < Decimal("0"):
+            raise HTTPException(status_code=400, detail="El monto neto a desembolsar no puede ser negativo.")
+
+    else:
+        # Subtipos: nomina_salarios, finiquito, anticipo_sueldo, otro
+        if sup_id:
+            sup_res = await db.execute(select(Supplier).where(Supplier.id == sup_id, Supplier.company_id == cid))
+            supplier = sup_res.scalar_one_or_none()
+
+        # Determinar monto neto desde el payload o la suma de desembolsos
+        if data.monto_neto is not None and Decimal(str(data.monto_neto)) > Decimal("0"):
+            monto_neto_efectivo = Decimal(str(data.monto_neto))
+        elif data.disbursements and len(data.disbursements) > 0:
+            monto_neto_efectivo = sum(
+                Decimal(str(d.monto)) * (d.tipo_cambio or Decimal("1"))
+                for d in data.disbursements
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Debe especificar el monto neto o los medios de pago para una orden de tipo '{subtipo}'."
+            )
+
+        monto_total = monto_neto_efectivo
+        monto_retenido = Decimal("0")
 
     # 3. Crear Orden de Pago
     num_orden = await _generate_order_number(db, cid)
+    benef_nombre = data.beneficiario_nombre or (
+        supplier.razon_social if supplier else (
+            f"Planilla Salarial {data.periodo_nomina}" if data.periodo_nomina else "Beneficiario RH"
+        )
+    )
     order = SupplierPaymentOrder(
         company_id=cid,
         supplier_id=sup_id,
+        subtipo=subtipo,
+        beneficiario_nombre=benef_nombre,
+        beneficiario_documento=data.beneficiario_documento or (supplier.ruc if supplier else None),
+        periodo_nomina=data.periodo_nomina,
+        sueldok_sync_id=data.sueldok_sync_id,
         numero_orden=num_orden,
         fecha_emision=data.fecha_emision or _today(),
         estado=data.estado or "registrado",
@@ -3664,7 +3704,7 @@ async def _process_payment_order_legal_invoices(
 async def _execute_disbursements_internal(
     db: AsyncSession,
     order: SupplierPaymentOrder,
-    supplier: Supplier,
+    supplier: Supplier | None,
     payload: SupplierPaymentOrderDisburse,
     user_id: str | None,
     user_nombre: str | None
@@ -3672,6 +3712,15 @@ async def _execute_disbursements_internal(
     """Lógica atómica interna de liquidación de medios de pago para una Orden de Pago."""
     cid = order.company_id
     total_desembolso_pyg = Decimal("0")
+    contraparte_str = (
+        supplier.razon_social if supplier else (
+            order.beneficiario_nombre or (f"Nómina {order.periodo_nomina}" if order.periodo_nomina else "Beneficiario RH")
+        )
+    )
+    categoria_trans = (
+        "salarios" if getattr(order, "subtipo", "proveedor") in ("nomina_salarios", "anticipo_sueldo")
+        else ("indemnizaciones_finiquitos" if getattr(order, "subtipo", "proveedor") == "finiquito" else "proveedores")
+    )
 
     if not payload.disbursements:
         raise HTTPException(status_code=400, detail="Debe asignar al menos un medio de pago para liquidar la orden.")
@@ -3818,7 +3867,7 @@ async def _execute_disbursements_internal(
                         moneda="BRL",
                         fecha=datetime.now(TZ_ASUNCION),
                         usuario=user_nombre or "Tesorería",
-                        observaciones=f"Pago Proveedor {order.numero_orden} (R$ {monto_solicitado_brl:,.2f} @ TC {tc:,.0f}) - {supplier.razon_social}",
+                        observaciones=f"Pago {order.numero_orden} (R$ {monto_solicitado_brl:,.2f} @ TC {tc:,.0f}) - {contraparte_str}",
                     ))
             else:
                 # Verificar saldo en bóveda en Guaraníes (₲)
@@ -3858,14 +3907,14 @@ async def _execute_disbursements_internal(
                                 monto_brl=Decimal("0"),
                                 estado="pagado_proveedor",
                                 fecha_deposito=now_dt,
-                                observaciones=f"Egreso por Pago Proveedor {order.numero_orden}",
+                                observaciones=f"Egreso por Pago {order.numero_orden}",
                                 registrado_por=uuid.UUID(user_id) if user_id else None,
                             ))
                             e.monto_pyg = Decimal("0")
                         else:
                             e.estado = "pagado_proveedor"
                             e.fecha_deposito = now_dt
-                            e.observaciones = f"Egreso por Pago Proveedor {order.numero_orden}"
+                            e.observaciones = f"Egreso por Pago {order.numero_orden}"
                             if user_id:
                                 e.registrado_por = uuid.UUID(user_id)
                         remaining -= e_monto
@@ -3880,7 +3929,7 @@ async def _execute_disbursements_internal(
                             monto_brl=Decimal("0"),
                             estado="pagado_proveedor",
                             fecha_deposito=now_dt,
-                            observaciones=f"Egreso parcial por Pago Proveedor {order.numero_orden}",
+                            observaciones=f"Egreso parcial por Pago {order.numero_orden}",
                             registrado_por=uuid.UUID(user_id) if user_id else None,
                         ))
                         e.monto_pyg = e_monto - remaining
@@ -3902,7 +3951,7 @@ async def _execute_disbursements_internal(
                         moneda="PYG",
                         fecha=datetime.now(TZ_ASUNCION),
                         usuario=user_nombre or "Tesorería",
-                        observaciones=f"Pago Proveedor {order.numero_orden} - {supplier.razon_social}",
+                        observaciones=f"Pago {order.numero_orden} - {contraparte_str}",
                     ))
 
         # ── B. EFECTIVO FONDO FIJO (CAJA CHICA) ──────────────────────────────
@@ -3935,7 +3984,7 @@ async def _execute_disbursements_internal(
                 saldo_nuevo=s_nuevo,
                 referencia_type="payment_order",
                 referencia_id=order.id,
-                observaciones=f"Pago Proveedor {order.numero_orden} - {supplier.razon_social}",
+                observaciones=f"Pago {order.numero_orden} - {contraparte_str}",
                 created_by=uuid.UUID(user_id) if user_id else None,
             ))
             disb_record.petty_cash_fund_id = fund.id
@@ -3961,13 +4010,13 @@ async def _execute_disbursements_internal(
                 tipo="debito",
                 monto=m_pyg,
                 moneda="PYG",
-                descripcion=f"Pago Proveedor {order.numero_orden} - {supplier.razon_social}",
+                descripcion=f"Pago {order.numero_orden} - {contraparte_str}",
                 referencia=d.referencia_transferencia,
-                contraparte=supplier.razon_social,
+                contraparte=contraparte_str,
                 conciliado=True,
                 fecha_conciliacion=datetime.now(timezone.utc),
                 invoice_id=primera_factura_id,
-                categoria="proveedores",
+                categoria=categoria_trans,
             )
             db.add(bt)
             disb_record.bank_account_id = bank_acc.id
@@ -4007,7 +4056,7 @@ async def _execute_disbursements_internal(
                     estado_nuevo=cheque.estado,
                     user_id=uuid.UUID(user_id) if user_id else None,
                     user_nombre=user_nombre or "Finanzas",
-                    notas=f"Vinculado a OP {order.numero_orden} ({supplier.razon_social}) por ₲ {m_pyg:,.0f}",
+                    notas=f"Vinculado a OP {order.numero_orden} ({contraparte_str}) por ₲ {m_pyg:,.0f}",
                 ))
 
                 disb_record.cheque_id = cheque.id
@@ -4035,8 +4084,8 @@ async def _execute_disbursements_internal(
                     numero_confiable=True,
                     banco_emisor=d.banco_cheque or "Banco",
                     bank_account_id=d.bank_account_id,
-                    beneficiario=d.titular_cheque or supplier.razon_social,
-                    supplier_id=supplier.id,
+                    beneficiario=d.titular_cheque or contraparte_str,
+                    supplier_id=supplier.id if supplier else None,
                     tipo_cheque="emitido",
                     monto=monto_cheque,
                     moneda="PYG",
@@ -4045,7 +4094,7 @@ async def _execute_disbursements_internal(
                     fecha_pago=fecha_venc,
                     diferido=es_dif,
                     estado="pendiente",
-                    concepto=f"Pago Proveedor {order.numero_orden}" if monto_cheque == m_pyg else f"Cheque Compartido / Matriz (OP {order.numero_orden})",
+                    concepto=f"Pago {order.numero_orden}" if monto_cheque == m_pyg else f"Cheque Compartido / Matriz (OP {order.numero_orden})",
                     notas=f"OP {order.numero_orden} - Ref: {d.observaciones or ''}",
                     created_by=uuid.UUID(user_id) if user_id else None,
                 )
@@ -4068,7 +4117,7 @@ async def _execute_disbursements_internal(
                 disb_record.fecha_cheque_emision = fecha_em
                 disb_record.fecha_cheque_vencimiento = fecha_venc
                 disb_record.es_cheque_diferido = es_dif
-                disb_record.titular_cheque = d.titular_cheque or supplier.razon_social
+                disb_record.titular_cheque = d.titular_cheque or contraparte_str
 
         # ── E. NOTA DE CRÉDITO DE PROVEEDOR ──────────────────────────────────
         elif fp == "nota_credito":
@@ -4190,10 +4239,12 @@ async def disburse_supplier_payment_order(
             detail=f"La orden no puede ser liquidada porque su estado actual es '{order.estado}'."
         )
 
-    sup_res = await db.execute(select(Supplier).where(Supplier.id == order.supplier_id))
-    supplier = sup_res.scalar_one_or_none()
-    if not supplier:
-        raise HTTPException(status_code=404, detail="Proveedor de la orden no encontrado.")
+    supplier = None
+    if order.supplier_id:
+        sup_res = await db.execute(select(Supplier).where(Supplier.id == order.supplier_id))
+        supplier = sup_res.scalar_one_or_none()
+        if not supplier and (order.subtipo or "proveedor") == "proveedor":
+            raise HTTPException(status_code=404, detail="Proveedor de la orden no encontrado.")
 
     await _execute_disbursements_internal(
         db=db,
@@ -4211,6 +4262,7 @@ async def list_supplier_payment_orders(
     db: AsyncSession,
     company_id: str,
     supplier_id: str | None = None,
+    subtipo: str | None = None,
     estado: str | None = None,
     forma_pago: str | None = None,
     fecha_desde: date | None = None,
@@ -4218,7 +4270,7 @@ async def list_supplier_payment_orders(
     limit: int = 100,
     offset: int = 0
 ) -> dict:
-    """Lista las Órdenes de Pago a proveedores con filtros y metadatos calculados."""
+    """Lista las Órdenes de Pago a proveedores y RH con filtros y metadatos calculados."""
     cid = uuid.UUID(company_id)
     query = (
         select(
@@ -4235,6 +4287,8 @@ async def list_supplier_payment_orders(
 
     if supplier_id:
         query = query.where(SupplierPaymentOrder.supplier_id == uuid.UUID(supplier_id))
+    if subtipo:
+        query = query.where(SupplierPaymentOrder.subtipo == subtipo)
     if estado:
         query = query.where(SupplierPaymentOrder.estado == estado)
     if fecha_desde:
@@ -4287,8 +4341,10 @@ async def list_supplier_payment_orders(
 
     for r in results:
         o = getattr(r, "SupplierPaymentOrder", None) or (r if hasattr(r, "numero_orden") else r[0])
-        sup_nombre = getattr(r, "supplier_nombre", None) or "Proveedor General"
-        sup_ruc = getattr(r, "supplier_ruc", None) or "-"
+        sup_nombre = getattr(r, "supplier_nombre", None) or o.beneficiario_nombre or (
+            f"Nómina {o.periodo_nomina}" if o.periodo_nomina else "Proveedor General"
+        )
+        sup_ruc = getattr(r, "supplier_ruc", None) or o.beneficiario_documento or "-"
         tot_fac = getattr(r, "total_facturas", 0) or 0
 
         fps = list(dict.fromkeys(disb_map.get(o.id, [])))
@@ -4303,7 +4359,12 @@ async def list_supplier_payment_orders(
         orders_list.append({
             "id": str(o.id),
             "company_id": str(o.company_id),
-            "supplier_id": str(o.supplier_id),
+            "supplier_id": str(o.supplier_id) if o.supplier_id else None,
+            "subtipo": o.subtipo or "proveedor",
+            "beneficiario_nombre": o.beneficiario_nombre,
+            "beneficiario_documento": o.beneficiario_documento,
+            "periodo_nomina": o.periodo_nomina,
+            "sueldok_sync_id": o.sueldok_sync_id,
             "supplier_nombre": sup_nombre,
             "supplier_ruc": sup_ruc,
             "numero_orden": o.numero_orden,
@@ -4483,12 +4544,22 @@ async def get_supplier_payment_order_detail(
         for d in disbursements_data if d["forma_pago"] == "nota_credito"
     ]
 
+    sup_nombre = getattr(row, "supplier_nombre", None) or o.beneficiario_nombre or (
+        f"Nómina {o.periodo_nomina}" if o.periodo_nomina else "Proveedor General"
+    )
+    sup_ruc = getattr(row, "supplier_ruc", None) or o.beneficiario_documento or "-"
+
     return {
         "id": str(o.id),
         "company_id": str(o.company_id),
-        "supplier_id": str(o.supplier_id),
-        "supplier_nombre": row.supplier_nombre or "Proveedor General",
-        "supplier_ruc": row.supplier_ruc or "-",
+        "supplier_id": str(o.supplier_id) if o.supplier_id else None,
+        "subtipo": o.subtipo or "proveedor",
+        "beneficiario_nombre": o.beneficiario_nombre,
+        "beneficiario_documento": o.beneficiario_documento,
+        "periodo_nomina": o.periodo_nomina,
+        "sueldok_sync_id": o.sueldok_sync_id,
+        "supplier_nombre": sup_nombre,
+        "supplier_ruc": sup_ruc,
         "numero_orden": o.numero_orden,
         "fecha_emision": o.fecha_emision.isoformat() if o.fecha_emision else None,
         "fecha_pago": o.fecha_pago.isoformat() if o.fecha_pago else None,
