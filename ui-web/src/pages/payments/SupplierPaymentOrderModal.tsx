@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from "react"
 import {
   X, Check, AlertTriangle, Plus, Trash2, CreditCard,
   Building2, Wallet, FileText, Calendar, CheckCircle2,
-  DollarSign, ShieldAlert, ArrowRight, Loader2
+  DollarSign, ShieldAlert, ArrowRight, Loader2, ReceiptText, Sparkles
 } from "lucide-react"
 import { api, SupplierPaymentOrder } from "../../api"
 import { formatPYG, formatDate } from "../../utils/format"
@@ -136,6 +136,28 @@ export default function SupplierPaymentOrderModal({
         const diff = Number(existingOrder.diferencia_cambio) || 0
         setAjusteSigno(diff < 0 ? "-" : "+")
         setAjusteMonto(Math.abs(diff))
+      }
+      if (existingOrder.disbursements && existingOrder.disbursements.length > 0) {
+        setDisbursements(
+          existingOrder.disbursements.map((d: any) => ({
+            forma_pago: d.forma_pago,
+            monto: Number(d.monto || 0),
+            moneda: d.moneda || "PYG",
+            tipo_cambio: Number(d.tipo_cambio || 1),
+            credit_note_id: d.credit_note_id,
+            bank_account_id: d.bank_account_id,
+            referencia_transferencia: d.referencia_transferencia,
+            cheque_id: d.cheque_id,
+            numero_cheque: d.numero_cheque,
+            banco_cheque: d.banco_cheque,
+            fecha_cheque_emision: d.fecha_cheque_emision,
+            fecha_cheque_vencimiento: d.fecha_cheque_vencimiento,
+            es_cheque_diferido: d.es_cheque_diferido,
+            titular_cheque: d.titular_cheque,
+            petty_cash_fund_id: d.petty_cash_fund_id,
+            observaciones: d.observaciones,
+          }))
+        )
       }
       setSelectedInvoicesMap(map)
       setStep("step2_desembolso")
@@ -465,6 +487,61 @@ export default function SupplierPaymentOrderModal({
 
   const updateDisbursementRow = (index: number, patch: Partial<DisbursementRow>) => {
     setDisbursements(prev => prev.map((d, i) => i === index ? { ...d, ...patch } : d))
+  }
+
+  // Aplicar Nota de Crédito individual a los desembolsos
+  const applyCreditNote = (nc: any) => {
+    if (disbursements.some(d => d.credit_note_id === nc.id)) {
+      toast.info("Ya incluida", `La NC N° ${nc.numero} ya está agregada como desembolso.`)
+      return
+    }
+    const saldoDisp = Number(nc.saldo_disponible ?? nc.monto ?? 0)
+    const restante = Math.max(0, summaryDesembolsos.diferencia)
+    const montoAAplicar = restante > 0 ? Math.min(saldoDisp, restante) : saldoDisp
+    setDisbursements(prev => [
+      ...prev,
+      {
+        forma_pago: "nota_credito",
+        moneda: "PYG",
+        monto: montoAAplicar,
+        credit_note_id: nc.id,
+        observaciones: `Compensación NC ${nc.numero}`,
+      }
+    ])
+    toast.success("Nota de Crédito agregada", `NC ${nc.numero} agregada por ${formatPYG(montoAAplicar)}.`)
+  }
+
+  // Aplicar todas las Notas de Crédito disponibles de una sola vez
+  const applyAllCreditNotes = () => {
+    const yaAgregadas = new Set(disbursements.map(d => d.credit_note_id).filter(Boolean))
+    const disponibles = creditNotes.filter(nc => !yaAgregadas.has(nc.id))
+    if (disponibles.length === 0) {
+      toast.info("Sin NCs pendientes", "Todas las Notas de Crédito disponibles ya están agregadas.")
+      return
+    }
+    const nuevas: DisbursementRow[] = []
+    let restanteActual = Math.max(0, summaryDesembolsos.diferencia)
+
+    for (const nc of disponibles) {
+      const saldoDisp = Number(nc.saldo_disponible ?? nc.monto ?? 0)
+      if (saldoDisp <= 0) continue
+      const montoAAplicar = restanteActual > 0 ? Math.min(saldoDisp, restanteActual) : saldoDisp
+      nuevas.push({
+        forma_pago: "nota_credito",
+        moneda: "PYG",
+        monto: montoAAplicar,
+        credit_note_id: nc.id,
+        observaciones: `Compensación NC ${nc.numero}`,
+      })
+      if (restanteActual > 0) {
+        restanteActual = Math.max(0, restanteActual - montoAAplicar)
+      }
+    }
+
+    if (nuevas.length > 0) {
+      setDisbursements(prev => [...prev, ...nuevas])
+      toast.success("Notas de Crédito aplicadas", `Se aplicaron ${nuevas.length} Nota(s) de Crédito para compensación.`)
+    }
   }
 
   // Guardar Paso 1: Sólo Registrar Orden de Pago (sin mover fondos)
@@ -1199,8 +1276,98 @@ export default function SupplierPaymentOrderModal({
                 </div>
               </div>
 
+              {/* NOTAS DE CRÉDITO DISPONIBLES PARA COMPENSACIÓN */}
+              {creditNotes.length > 0 && (
+                <div className="p-4 rounded-2xl border border-purple-200 dark:border-purple-900/50 bg-gradient-to-br from-purple-50/70 via-white to-purple-50/40 dark:from-purple-950/20 dark:via-slate-900 dark:to-purple-950/10 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+                        <ReceiptText className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-black text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                          Notas de Crédito Disponibles del Proveedor ({creditNotes.length})
+                          <span className="text-[10px] bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 px-2 py-0.5 rounded-full font-mono font-bold">
+                            Total Disp: {formatPYG(creditNotes.reduce((acc: number, n: any) => acc + Number(n.saldo_disponible ?? n.monto ?? 0), 0))}
+                          </span>
+                        </h4>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Compensa saldos a favor con un clic para no desembolsar fondos innecesarios en efectivo o bancos.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={applyAllCreditNotes}
+                      className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 active:scale-95 text-white font-bold text-xs shadow-sm shadow-purple-500/20 flex items-center gap-1.5 transition self-start sm:self-auto cursor-pointer"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                      Aplicar Todas ({creditNotes.length})
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-1 max-h-48 overflow-y-auto">
+                    {creditNotes.map((nc: any) => {
+                      const isApplied = disbursements.some(d => d.credit_note_id === nc.id)
+                      const saldoDisp = Number(nc.saldo_disponible ?? nc.monto ?? 0)
+                      return (
+                        <div
+                          key={nc.id}
+                          className={`p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2 transition ${
+                            isApplied
+                              ? "bg-purple-100/40 dark:bg-purple-950/30 border-purple-200 dark:border-purple-800/50 opacity-75"
+                              : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-purple-400 dark:hover:border-purple-700 shadow-sm"
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div className="font-bold text-slate-800 dark:text-slate-200 truncate flex items-center gap-1.5">
+                              <span>NC {nc.numero}</span>
+                              {isApplied && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500 text-white font-bold">Aplicada</span>
+                              )}
+                            </div>
+                            <div className="text-[10px] font-mono text-purple-600 dark:text-purple-400 font-bold">
+                              Saldo: {formatPYG(saldoDisp)}
+                            </div>
+                          </div>
+                          {!isApplied && (
+                            <button
+                              type="button"
+                              onClick={() => applyCreditNote(nc)}
+                              className="px-2.5 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/30 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 font-bold text-[11px] border border-purple-200 dark:border-purple-800 transition shrink-0 cursor-pointer"
+                            >
+                              + Aplicar
+                            </button>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* LISTA DE RENGLONES DE DESEMBOLSO */}
               <div className="space-y-3">
+                {disbursements.length === 0 && (
+                  <div className="p-6 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-750 text-center space-y-3 bg-slate-50/50 dark:bg-slate-900/50">
+                    <div className="w-12 h-12 rounded-2xl bg-slate-200 dark:bg-slate-800 text-slate-500 mx-auto flex items-center justify-center">
+                      <Wallet className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-700 dark:text-slate-300">No hay medios de pago asignados aún</h4>
+                      <p className="text-xs text-slate-500 max-w-md mx-auto mt-0.5">
+                        Puede aplicar las Notas de Crédito disponibles arriba para compensación o agregar una forma de pago en efectivo, banco o cheque.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addDisbursementRow}
+                      className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 text-white font-bold text-xs inline-flex items-center gap-2 transition cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" /> Agregar Medio de Pago
+                    </button>
+                  </div>
+                )}
                 {disbursements.map((d, index) => (
                   <div
                     key={index}

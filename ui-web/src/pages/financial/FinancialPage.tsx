@@ -1128,13 +1128,26 @@ export default function FinancialPage() {
           monto_retencion: 0,
         }))
 
+      const ncDisbursements = currentSelectedSupplier.creditNotes
+        .filter(n => selectedOpCreditNoteIds.has(n.id))
+        .map(n => {
+          const saldo = Number(n.saldo_disponible !== undefined ? n.saldo_disponible : n.monto || 0)
+          return {
+            forma_pago: "nota_credito" as const,
+            monto: saldo,
+            monto_pyg: saldo,
+            credit_note_id: n.id,
+            observaciones: `Compensación NC N° ${n.numero || "S/N"} (Timbrado: ${n.timbrado || "-"})`,
+          }
+        })
+
       const res = await api.financial.paymentOrders.create({
         supplier_id: currentSelectedSupplier.supplier_id,
         fecha_emision: getTodayAsuncion(),
         estado: "aguardando_pago",
         observaciones: opObservaciones ? `[AGUARDANDO PAGO] ${opObservaciones}` : "[AGUARDANDO PAGO] Orden de pago generada desde preparación de liquidación AP",
         allocations,
-        disbursements: [],
+        disbursements: ncDisbursements,
       })
 
       toast.success("Orden de Pago Creada", `Se generó la OP ${(res as any)?.numero_orden || ""} en estado AGUARDANDO PAGO`)

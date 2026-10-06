@@ -4184,7 +4184,7 @@ async def disburse_supplier_payment_order(
     if not order:
         raise HTTPException(status_code=404, detail="Orden de Pago no encontrada.")
 
-    if order.estado != "registrado":
+    if order.estado not in ("registrado", "aguardando_pago", "pendiente"):
         raise HTTPException(
             status_code=400,
             detail=f"La orden no puede ser liquidada porque su estado actual es '{order.estado}'."
