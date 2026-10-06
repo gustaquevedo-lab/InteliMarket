@@ -1653,7 +1653,7 @@ async def inventory_list_items(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_permission("inventory:cycle_count")),
 ):
-    return await service_inventory.list_count_items(session_id, requiere_ajuste)
+    return await service_inventory.list_count_items(session_id, db, requiere_ajuste)
 
 
 @router.post("/inventory/sessions/{session_id}/items", response_model=CountItemResponse, status_code=201)

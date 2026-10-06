@@ -143,6 +143,33 @@ export default function ConteoVencimientosPage() {
   const [scopeFilter, setScopeFilter] = useState<"todos" | "pendientes" | "contados">("todos")
   const [scopeSearchTerm, setScopeSearchTerm] = useState("")
 
+  // ── Cálculos para filtrado y estado de productos del alcance ──
+  const countedProductIds = useMemo(() => new Set(items.map((it) => it.producto_id)), [items])
+
+  const pendientesCount = useMemo(
+    () => scopeProducts.filter((p) => !countedProductIds.has(p.id)).length,
+    [scopeProducts, countedProductIds]
+  )
+
+  const filteredScopeProducts = useMemo<Product[]>(() => {
+    let list: Product[] = scopeProducts
+    if (scopeSearchTerm.trim()) {
+      const q = scopeSearchTerm.trim().toLowerCase()
+      list = list.filter(
+        (p: Product) =>
+          p.nombre.toLowerCase().includes(q) ||
+          (p.codigo_barra && p.codigo_barra.toLowerCase().includes(q)) ||
+          (p.sku && p.sku.toLowerCase().includes(q))
+      )
+    }
+    if (scopeFilter === "pendientes") {
+      list = list.filter((p: Product) => !countedProductIds.has(p.id))
+    } else if (scopeFilter === "contados") {
+      list = list.filter((p: Product) => countedProductIds.has(p.id))
+    }
+    return list
+  }, [scopeProducts, scopeSearchTerm, scopeFilter, countedProductIds])
+
   // ── Cámara / escáner manual ──
   const [manualCode, setManualCode] = useState("")
   const [searching, setSearching] = useState(false)
@@ -1166,32 +1193,6 @@ export default function ConteoVencimientosPage() {
     )
   }
 
-  // ── Cálculos para filtrado y estado de productos del alcance ──
-  const countedProductIds = useMemo(() => new Set(items.map((it) => it.producto_id)), [items])
-
-  const pendientesCount = useMemo(
-    () => scopeProducts.filter((p) => !countedProductIds.has(p.id)).length,
-    [scopeProducts, countedProductIds]
-  )
-
-  const filteredScopeProducts = useMemo<Product[]>(() => {
-    let list: Product[] = scopeProducts
-    if (scopeSearchTerm.trim()) {
-      const q = scopeSearchTerm.trim().toLowerCase()
-      list = list.filter(
-        (p: Product) =>
-          p.nombre.toLowerCase().includes(q) ||
-          (p.codigo_barra && p.codigo_barra.toLowerCase().includes(q)) ||
-          (p.sku && p.sku.toLowerCase().includes(q))
-      )
-    }
-    if (scopeFilter === "pendientes") {
-      list = list.filter((p: Product) => !countedProductIds.has(p.id))
-    } else if (scopeFilter === "contados") {
-      list = list.filter((p: Product) => countedProductIds.has(p.id))
-    }
-    return list
-  }, [scopeProducts, scopeSearchTerm, scopeFilter, countedProductIds])
 
   // 4. VISTA DE CONTEO EN VIVO (CÁMARA, BÚSQUEDA Y LISTADO)
   return (
