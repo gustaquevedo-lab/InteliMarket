@@ -36,9 +36,10 @@ from api.src.purchases.schemas import (
     SupplierNcRequestResponse, ResolveSupplierNcRequest,
     SupplierProductItemResponse, ProductInvoiceOptionResponse,
     SupplierReturnCreateInput, SupplierReturnUpdateInput, SupplierReturnRejectInput, SupplierReturnCompleteInput,
-    SupplierReturnNCItem, SupplierReturnAddNCInput,
     ProductSupplierComparisonResponse, SupplierPriceComparisonItem,
+    ConsignmentSettlementCreate, ConsignmentSettlementResponse, ConsignmentSettlementPreview,
 )
+from datetime import date
 from api.src.purchases import service
 from api.src.purchases import imap_service
 from api.src.purchases import matching_service
@@ -334,7 +335,7 @@ async def convert_requisition_to_po(
 @router.post("/purchase-receipts", response_model=ReceiptResponse, status_code=status.HTTP_201_CREATED)
 async def create_receipt(body: ReceiptCreate, db: AsyncSession = Depends(get_db), _=Depends(require_permission("purchases:receive"))):
     receipt = await service.create_receipt(db, body)
-    if receipt.purchase_order_id:
+    if receipt.purchase_order_id and getattr(receipt, "tipo_recepcion", "compra_directa") != "consignacion_remision":
         try:
             async with db.begin_nested():
                 from api.src.financial.service import auto_create_invoice_from_receipt
@@ -368,6 +369,63 @@ async def cancel_receipt(receipt_id: str, db: AsyncSession = Depends(get_db), _=
         return await service.cancel_receipt(db, receipt_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── Consignment Settlements (Scan-Based Trading / VMI) ────────────────────────
+
+@router.get("/purchases/consignments/preview", response_model=ConsignmentSettlementPreview)
+async def preview_consignment_settlement_endpoint(
+    company_id: str = Query(...),
+    supplier_id: str = Query(...),
+    fecha_desde: date = Query(...),
+    fecha_hasta: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_permission("purchases:read")),
+):
+    """Calcula automáticamente el corte de liquidación de consignación cotejando remisiones y ventas POS."""
+    try:
+        return await service.preview_consignment_settlement(db, company_id, supplier_id, fecha_desde, fecha_hasta)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/purchases/consignments/settle", response_model=ConsignmentSettlementResponse, status_code=status.HTTP_201_CREATED)
+async def create_consignment_settlement_endpoint(
+    body: ConsignmentSettlementCreate,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+    _=Depends(require_permission("purchases:create")),
+):
+    """Cierra la liquidación de consignación y, si se indica factura del proveedor, crea la cuenta a pagar."""
+    body.user_id = uuid.UUID(user["id"]) if user and user.get("id") else body.user_id
+    try:
+        return await service.create_consignment_settlement(db, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/companies/{company_id}/consignments/settlements", response_model=list[ConsignmentSettlementResponse])
+async def list_consignment_settlements_endpoint(
+    company_id: str,
+    supplier_id: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_permission("purchases:read")),
+):
+    """Lista las liquidaciones de consignación históricas."""
+    return await service.list_consignment_settlements(db, company_id, supplier_id)
+
+
+@router.get("/purchases/consignments/settlements/{settlement_id}", response_model=ConsignmentSettlementResponse)
+async def get_consignment_settlement_endpoint(
+    settlement_id: str,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_permission("purchases:read")),
+):
+    """Detalle de una liquidación de consignación con sus líneas de productos."""
+    item = await service.get_consignment_settlement(db, settlement_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Liquidación no encontrada")
+    return item
 
 
 # ── Forecasting ───────────────────────────────────────────────────────────────

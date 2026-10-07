@@ -307,7 +307,7 @@ export async function downloadAuthenticatedPost(path: string, body: any, filenam
 }
 
 // ========== TYPE STUBS ==========
-export interface Product { id: string; sku: string; nombre: string; descripcion?: string | null; categoria_id?: string | null; supplier_id?: string; supplier_nombre?: string; codigo_barra?: string; unidad_medida?: string; tipo?: string; tipo_producto?: "producto" | "materia_prima" | "insumo" | "servicio"; tipo_venta?: string; iva_tasa?: number; stock_minimo?: number; stock_maximo?: number; peso_kg?: number; plu_balanza?: number | null; es_pesable?: boolean; tiene_vencimiento?: boolean; tiene_lotes?: boolean; imagen_url?: string | null; precio_venta?: number; precio_regular?: number; precio_promo?: number; en_promocion?: boolean; promocion_id?: string | null; promocion_nombre?: string | null; promo_dias_semana?: number[] | null; promo_valido_hasta?: string | null; promo_horario_desde?: string | null; promo_horario_hasta?: string | null; precio_mayorista?: number | null; precio_mayorista_min_qty?: number | null; precio_promedio_real?: number | null; costo_promedio?: number; ultimo_costo?: number; costo_landed?: number; costo_unitario?: number; precio_costo?: number; activo?: boolean; created_at?: string; updated_at?: string; precio?: number; categoria?: Category; stock?: number }
+export interface Product { id: string; sku: string; nombre: string; descripcion?: string | null; categoria_id?: string | null; supplier_id?: string; supplier_nombre?: string; codigo_barra?: string; unidad_medida?: string; tipo?: string; tipo_producto?: "producto" | "materia_prima" | "insumo" | "servicio"; modalidad_abastecimiento?: "propio" | "consignacion"; tipo_venta?: string; iva_tasa?: number; stock_minimo?: number; stock_maximo?: number; peso_kg?: number; plu_balanza?: number | null; es_pesable?: boolean; tiene_vencimiento?: boolean; tiene_lotes?: boolean; imagen_url?: string | null; precio_venta?: number; precio_regular?: number; precio_promo?: number; en_promocion?: boolean; promocion_id?: string | null; promocion_nombre?: string | null; promo_dias_semana?: number[] | null; promo_valido_hasta?: string | null; promo_horario_desde?: string | null; promo_horario_hasta?: string | null; precio_mayorista?: number | null; precio_mayorista_min_qty?: number | null; precio_promedio_real?: number | null; costo_promedio?: number; ultimo_costo?: number; costo_landed?: number; costo_unitario?: number; precio_costo?: number; activo?: boolean; created_at?: string; updated_at?: string; precio?: number; categoria?: Category; stock?: number }
 export interface Category { id: string; nombre: string; codigo?: string; parent_id?: string; company_id?: string; activo?: boolean; created_at?: string }
 export interface Customer { id: string; nombre: string; email?: string; telefono?: string; ruc?: string; extra_club_numero?: string | null; empresa_vinculada_nombre?: string | null; empresa_vinculada_ruc?: string | null; razon_social?: string; nombre_fantasia?: string | null; ci?: string; direccion?: string; ciudad?: string; departamento?: string | null; condicion_iva?: string | null; pago_default?: string | null; contacto?: string | null; tipo?: string; tipo_persona?: string; activo?: boolean; es_agente_retencion?: boolean; regimen_retencion?: string; porcentaje_retencion_iva?: number; saldo_pendiente?: number; limite_credito?: number; credito_limite?: number; credito_usado?: number; created_at?: string; updated_at?: string }
 export interface Sale { id: string; company_id?: string; customer_id?: string; customer?: Customer; customer_nombre?: string; customer_doc?: string; customer_extra_club?: string; user_id?: string; user?: any; cajero_nombre?: string; caja_nombre?: string; items?: SaleItem[]; total?: number; subtotal?: number; total_iva?: number; estado?: string; condicion?: string; forma_pago?: string; tipo_comprobante?: string; fecha?: string; session_id?: string; caja_session_id?: string; usuario_id?: string; observaciones?: string; numero?: string; numero_interno?: string; recibo_html?: string; recibo_escpos_b64?: string; total_pagado?: number; saldo?: number; iva_10?: number; iva_5?: number; descuento_total?: number; sifen_estado?: string; cdc?: string; created_at?: string }
@@ -432,8 +432,88 @@ export interface PurchaseRfq { id: string; company_id: string; requisition_id?: 
 export interface PurchaseRfqWithDetail extends PurchaseRfq { items: PurchaseRfqItem[]; responses: PurchaseRfqResponse[] }
 export interface PurchaseBudget { id: string; company_id: string; nombre: string; anio: number; mes?: number | null; tipo?: string | null; moneda?: string | null; monto_presupuestado: number; monto_ejecutado?: number | null; monto_disponible?: number | null; categoria_id?: string | null; departamento?: string | null; activo: boolean; observaciones?: string | null; user_id?: string | null; created_at?: string; updated_at?: string }
 export interface PurchaseBudgetConsumption { budget_id: string; nombre: string; anio: number; mes?: number | null; monto_presupuestado: number; monto_ejecutado: number; monto_disponible: number; porcentaje_ejecutado: number }
-export interface PurchaseReceipt { id: string; company_id?: string; purchase_order_id?: string | null; orden?: PurchaseOrder; supplier_id?: string; supplier?: Supplier; warehouse_id?: string; numero?: string; fecha?: string; estado?: string; proveedor_ref?: string | null; total?: number; total_brl?: number; tipo_cambio?: number; total_factura_impreso?: number; user_id?: string | null; observaciones?: string | null; requiere_revision?: boolean; motivo_revision?: string | null; items?: PurchaseReceiptItem[]; created_at?: string; updated_at?: string }
+export interface PurchaseReceipt { id: string; company_id?: string; purchase_order_id?: string | null; orden?: PurchaseOrder; supplier_id?: string; supplier?: Supplier; warehouse_id?: string; numero?: string; fecha?: string; estado?: string; proveedor_ref?: string | null; tipo_recepcion?: 'compra_directa' | 'consignacion_remision'; numero_remision?: string | null; total?: number; total_brl?: number; tipo_cambio?: number; total_factura_impreso?: number; user_id?: string | null; observaciones?: string | null; requiere_revision?: boolean; motivo_revision?: string | null; items?: PurchaseReceiptItem[]; created_at?: string; updated_at?: string }
 export interface PurchaseReceiptItem { id?: string; receipt_id?: string; product_id?: string; producto?: Product; variant_id?: string | null; cantidad_ordenada?: number | null; cantidad_recibida?: number; precio_unitario?: number; costo_unitario?: number; total?: number; batch_id?: string | null; cantidad_rechazada?: number | null; motivo_rechazo?: string | null; created_at?: string }
+
+export interface ConsignmentSettlementItemPreview {
+  product_id: string
+  product_sku: string
+  product_nombre: string
+  stock_actual: number
+  entradas_remision: number
+  ventas_pos: number
+  devoluciones_rtv: number
+  unidades_a_liquidar: number
+  costo_unitario: number
+  precio_venta: number
+  total_costo: number
+  total_venta: number
+  margen_ganancia: number
+}
+
+export interface ConsignmentSettlementPreview {
+  supplier_id: string
+  supplier_nombre: string
+  supplier_ruc?: string | null
+  fecha_desde: string
+  fecha_hasta: string
+  items: ConsignmentSettlementItemPreview[]
+  total_unidades_recibidas: number
+  total_unidades_vendidas: number
+  total_unidades_devueltas: number
+  total_unidades_liquidadas: number
+  total_costo_liquidado: number
+  total_recaudado_pos: number
+  margen_ganancia: number
+}
+
+export interface ConsignmentSettlementItem {
+  id: string
+  settlement_id?: string
+  product_id: string
+  product_nombre?: string
+  product_sku?: string
+  stock_inicial: number
+  cantidad_recibida: number
+  cantidad_vendida: number
+  cantidad_devuelta: number
+  stock_final_teorico: number
+  stock_fisico_remanente: number
+  diferencia_merma: number
+  unidades_a_liquidar: number
+  costo_unitario: number
+  precio_venta_promedio: number
+  total_costo: number
+  total_venta: number
+  margen_ganancia: number
+  created_at?: string
+}
+
+export interface ConsignmentSettlement {
+  id: string
+  company_id: string
+  supplier_id: string
+  supplier_nombre?: string
+  numero: string
+  fecha_desde: string
+  fecha_hasta: string
+  estado: string
+  total_unidades_recibidas: number
+  total_unidades_vendidas: number
+  total_unidades_devueltas: number
+  total_unidades_liquidadas: number
+  total_costo_liquidado: number
+  total_recaudado_pos: number
+  margen_ganancia: number
+  supplier_invoice_id?: string | null
+  numero_factura_proveedor?: string | null
+  observaciones?: string | null
+  liquidado_por?: string | null
+  fecha_liquidacion?: string | null
+  created_at: string
+  updated_at: string
+  items?: ConsignmentSettlementItem[]
+}
 
 
 export interface SmartReplenishmentRequest {
@@ -2534,6 +2614,16 @@ export const api = {
     getReceipt: (id: string) => client.get<PurchaseReceipt>(`/v1/purchase-receipts/${id}`),
     cancelReceipt: (id: string) => client.post<PurchaseReceipt>(`/v1/purchase-receipts/${id}/cancel`),
     createReceipt: (data: Partial<PurchaseReceipt>) => client.post<PurchaseReceipt>("/v1/purchase-receipts", { ...data, company_id: COMPANY_ID }),
+    consignments: {
+      previewSettlement: (params: { supplier_id: string; fecha_desde: string; fecha_hasta: string }) =>
+        client.get<ConsignmentSettlementPreview>("/v1/purchases/consignments/preview", { ...params, company_id: COMPANY_ID }),
+      settle: (data: { supplier_id: string; fecha_desde: string; fecha_hasta: string; numero_factura_proveedor?: string; timbrado_factura?: string; fecha_vencimiento_factura?: string; observaciones?: string; items?: any[] }) =>
+        client.post<ConsignmentSettlement>("/v1/purchases/consignments/settle", { ...data, company_id: COMPANY_ID }),
+      listSettlements: (supplier_id?: string) =>
+        client.get<ConsignmentSettlement[]>(`/v1/companies/${COMPANY_ID}/consignments/settlements`, supplier_id ? { supplier_id } : undefined),
+      getSettlement: (id: string) =>
+        client.get<ConsignmentSettlement>(`/v1/purchases/consignments/settlements/${id}`),
+    },
     suppliers: (search?: string, solo_mercaderia?: boolean) => client.get<Supplier[]>(`/v1/companies/${COMPANY_ID}/suppliers`, { search, solo_mercaderia }),
     listSuppliers: (params?: { search?: string; solo_mercaderia?: boolean; con_productos?: boolean }) => client.get<Supplier[]>(`/v1/companies/${COMPANY_ID}/suppliers`, params),
     getSupplier: (id: string) => client.get<Supplier>(`/v1/suppliers/${id}`),

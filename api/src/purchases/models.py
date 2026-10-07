@@ -156,6 +156,8 @@ class PurchaseReceipt(Base):
     fecha = Column(DateTime(timezone=True), server_default=func.now())
     total = Column(Numeric(15, 0), nullable=False, default=0)
     proveedor_ref = Column(String(50))
+    tipo_recepcion = Column(String(30), nullable=False, default="compra_directa", server_default="compra_directa", comment="compra_directa o consignacion_remision")
+    numero_remision = Column(String(50), nullable=True)
     estado = Column(String(20), default="completado")
     observaciones = Column(Text)
     user_id = Column(UUID(as_uuid=True))
@@ -544,4 +546,59 @@ class SupplierNcRequest(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     resolved_at = Column(DateTime(timezone=True))
+
+
+class ConsignmentSettlement(Base):
+    __tablename__ = "consignment_settlements"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=False, index=True)
+    numero = Column(String(30), nullable=False, unique=True)
+    fecha_desde = Column(Date, nullable=False)
+    fecha_hasta = Column(Date, nullable=False)
+    estado = Column(String(20), nullable=False, default="borrador", index=True)  # borrador, conciliado, facturado, cerrado, anulado
+    total_unidades_recibidas = Column(Numeric(12, 3), nullable=False, default=0)
+    total_unidades_vendidas = Column(Numeric(12, 3), nullable=False, default=0)
+    total_unidades_devueltas = Column(Numeric(12, 3), nullable=False, default=0)
+    total_unidades_liquidadas = Column(Numeric(12, 3), nullable=False, default=0)
+    total_costo_liquidado = Column(Numeric(15, 0), nullable=False, default=0)
+    total_recaudado_pos = Column(Numeric(15, 0), nullable=False, default=0)
+    margen_ganancia = Column(Numeric(15, 0), nullable=False, default=0)
+    supplier_invoice_id = Column(UUID(as_uuid=True), ForeignKey("supplier_invoices.id"), nullable=True)
+    numero_factura_proveedor = Column(String(50), nullable=True)
+    observaciones = Column(Text)
+    liquidado_por = Column(UUID(as_uuid=True))
+    fecha_liquidacion = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    items = relationship("ConsignmentSettlementItem", back_populates="settlement", cascade="all, delete-orphan")
+    supplier = relationship("Supplier", foreign_keys=[supplier_id])
+
+
+class ConsignmentSettlementItem(Base):
+    __tablename__ = "consignment_settlement_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    settlement_id = Column(UUID(as_uuid=True), ForeignKey("consignment_settlements.id", ondelete="CASCADE"), nullable=False, index=True)
+    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False, index=True)
+    stock_inicial = Column(Numeric(12, 3), nullable=False, default=0)
+    cantidad_recibida = Column(Numeric(12, 3), nullable=False, default=0)
+    cantidad_vendida = Column(Numeric(12, 3), nullable=False, default=0)
+    cantidad_devuelta = Column(Numeric(12, 3), nullable=False, default=0)
+    stock_final_teorico = Column(Numeric(12, 3), nullable=False, default=0)
+    stock_fisico_remanente = Column(Numeric(12, 3), nullable=False, default=0)
+    diferencia_merma = Column(Numeric(12, 3), nullable=False, default=0)
+    unidades_a_liquidar = Column(Numeric(12, 3), nullable=False, default=0)
+    costo_unitario = Column(Numeric(15, 0), nullable=False, default=0)
+    precio_venta_promedio = Column(Numeric(15, 0), nullable=False, default=0)
+    total_costo = Column(Numeric(15, 0), nullable=False, default=0)
+    total_venta = Column(Numeric(15, 0), nullable=False, default=0)
+    margen_ganancia = Column(Numeric(15, 0), nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    settlement = relationship("ConsignmentSettlement", back_populates="items")
+    product = relationship("Product", foreign_keys=[product_id])
+
 

@@ -330,6 +330,8 @@ class ReceiptCreate(BaseModel):
     supplier_id: Optional[UUID] = None
     warehouse_id: Optional[UUID] = None
     proveedor_ref: Optional[str] = None
+    tipo_recepcion: str = "compra_directa"  # compra_directa | consignacion_remision
+    numero_remision: Optional[str] = None
     total_brl: Optional[Decimal] = None
     tipo_cambio: Optional[Decimal] = None
     total_factura_impreso: Optional[Decimal] = None
@@ -359,6 +361,8 @@ class ReceiptResponse(BaseModel):
     fecha: datetime
     total: Decimal
     proveedor_ref: Optional[str] = None
+    tipo_recepcion: str = "compra_directa"
+    numero_remision: Optional[str] = None
     estado: str
     observaciones: Optional[str] = None
     requiere_revision: bool = False
@@ -1387,5 +1391,123 @@ class ProductSupplierComparisonResponse(BaseModel):
     ahorro_maximo_gs: Decimal = Decimal("0")
     ahorro_maximo_pct: Decimal = Decimal("0")
     proveedores: list[SupplierPriceComparisonItem]
+
+
+# ── Mercaderías en Consignación (Scan-Based Trading / VMI) ────────────────────
+
+class ConsignmentSettlementItemPreview(BaseModel):
+    product_id: UUID
+    product_sku: str
+    product_nombre: str
+    stock_actual: Decimal = Decimal("0")
+    entradas_remision: Decimal = Decimal("0")
+    ventas_pos: Decimal = Decimal("0")
+    devoluciones_rtv: Decimal = Decimal("0")
+    unidades_a_liquidar: Decimal = Decimal("0")
+    costo_unitario: Decimal = Decimal("0")
+    precio_venta: Decimal = Decimal("0")
+    total_costo: Decimal = Decimal("0")
+    total_venta: Decimal = Decimal("0")
+    margen_ganancia: Decimal = Decimal("0")
+
+
+class ConsignmentSettlementPreview(BaseModel):
+    supplier_id: UUID
+    supplier_nombre: str
+    supplier_ruc: Optional[str] = None
+    fecha_desde: date
+    fecha_hasta: date
+    items: list[ConsignmentSettlementItemPreview] = []
+    total_unidades_recibidas: Decimal = Decimal("0")
+    total_unidades_vendidas: Decimal = Decimal("0")
+    total_unidades_devueltas: Decimal = Decimal("0")
+    total_unidades_liquidadas: Decimal = Decimal("0")
+    total_costo_liquidado: Decimal = Decimal("0")
+    total_recaudado_pos: Decimal = Decimal("0")
+    margen_ganancia: Decimal = Decimal("0")
+
+
+class ConsignmentSettlementItemCreate(BaseModel):
+    product_id: UUID
+    stock_inicial: Optional[Decimal] = Decimal("0")
+    cantidad_recibida: Optional[Decimal] = Decimal("0")
+    cantidad_vendida: Optional[Decimal] = Decimal("0")
+    cantidad_devuelta: Optional[Decimal] = Decimal("0")
+    stock_final_teorico: Optional[Decimal] = Decimal("0")
+    stock_fisico_remanente: Optional[Decimal] = Decimal("0")
+    diferencia_merma: Optional[Decimal] = Decimal("0")
+    unidades_a_liquidar: Decimal
+    costo_unitario: Decimal
+    precio_venta_promedio: Optional[Decimal] = Decimal("0")
+    total_costo: Decimal
+    total_venta: Optional[Decimal] = Decimal("0")
+    margen_ganancia: Optional[Decimal] = Decimal("0")
+
+
+class ConsignmentSettlementCreate(BaseModel):
+    company_id: UUID
+    supplier_id: UUID
+    fecha_desde: date
+    fecha_hasta: date
+    numero_factura_proveedor: Optional[str] = None
+    timbrado_factura: Optional[str] = None
+    fecha_vencimiento_factura: Optional[date] = None
+    observaciones: Optional[str] = None
+    user_id: Optional[UUID] = None
+    items: Optional[list[ConsignmentSettlementItemCreate]] = None
+
+
+class ConsignmentSettlementItemResponse(BaseModel):
+    id: UUID
+    product_id: UUID
+    product_nombre: Optional[str] = None
+    product_sku: Optional[str] = None
+    stock_inicial: Decimal
+    cantidad_recibida: Decimal
+    cantidad_vendida: Decimal
+    cantidad_devuelta: Decimal
+    stock_final_teorico: Decimal
+    stock_fisico_remanente: Decimal
+    diferencia_merma: Decimal
+    unidades_a_liquidar: Decimal
+    costo_unitario: Decimal
+    precio_venta_promedio: Decimal
+    total_costo: Decimal
+    total_venta: Decimal
+    margen_ganancia: Decimal
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ConsignmentSettlementResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    supplier_id: UUID
+    supplier_nombre: Optional[str] = None
+    numero: str
+    fecha_desde: date
+    fecha_hasta: date
+    estado: str
+    total_unidades_recibidas: Decimal
+    total_unidades_vendidas: Decimal
+    total_unidades_devueltas: Decimal
+    total_unidades_liquidadas: Decimal
+    total_costo_liquidado: Decimal
+    total_recaudado_pos: Decimal
+    margen_ganancia: Decimal
+    supplier_invoice_id: Optional[UUID] = None
+    numero_factura_proveedor: Optional[str] = None
+    observaciones: Optional[str] = None
+    liquidado_por: Optional[UUID] = None
+    fecha_liquidacion: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+    items: list[ConsignmentSettlementItemResponse] = []
+
+    class Config:
+        from_attributes = True
+
 
 

@@ -762,6 +762,8 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         numero=numero,
         total=total.quantize(Decimal("1")),
         proveedor_ref=data.proveedor_ref,
+        tipo_recepcion=getattr(data, "tipo_recepcion", "compra_directa") or "compra_directa",
+        numero_remision=getattr(data, "numero_remision", None),
         observaciones=data.observaciones,
         user_id=data.user_id,
     )
@@ -831,6 +833,9 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
             stock_obj.costo_unitario = ((old_cost * old_qty + cost * qty) / (old_qty + qty)).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
         stock_obj.updated_at = datetime.now(timezone.utc)
 
+        ref_lote = f"REM:{data.numero_remision} - {receipt.numero}" if getattr(data, "numero_remision", None) else (
+            f"{item_data.lote} - {receipt.numero}" if item_data.lote else receipt.numero
+        )
         stock_lot = StockLot(
             company_id=company_id,
             warehouse_id=warehouse_id,
@@ -840,7 +845,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
             cantidad_disponible=qty,
             costo_unitario=cost,
             costo_total=cost * qty,
-            referencia=f"{item_data.lote} - {receipt.numero}" if item_data.lote else receipt.numero,
+            referencia=ref_lote,
             fecha_vencimiento=item_data.fecha_vencimiento,
         )
         db.add(stock_lot)
@@ -854,12 +859,13 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
                 if not prod_obj.costo_promedio or prod_obj.costo_promedio == Decimal("0"):
                     prod_obj.costo_promedio = cost
 
+        mov_tipo = "entrada_consignacion" if receipt.tipo_recepcion == "consignacion_remision" else "entrada_compra"
         movement = InventoryMovement(
             company_id=company_id,
             warehouse_id=warehouse_id,
             product_id=item_data.product_id,
             variant_id=item_data.variant_id,
-            tipo="entrada_compra",
+            tipo=mov_tipo,
             cantidad=qty,
             costo_unitario=cost,
             referencia_type="purchase_receipt",
@@ -3341,3 +3347,299 @@ async def update_lost_demand(
     await db.commit()
     await db.refresh(item)
     return item
+
+
+# ── Consignment Settlements (Scan-Based Trading / VMI) ────────────────────────
+
+async def generate_consignment_settlement_number(db: AsyncSession) -> str:
+    date_part = datetime.now(timezone.utc).strftime("%Y%m%d")
+    result = await db.execute(
+        select(ConsignmentSettlement).order_by(ConsignmentSettlement.created_at.desc()).limit(1)
+    )
+    last = result.scalar_one_or_none()
+    seq = int(last.numero.split("-")[-1]) + 1 if last and last.numero and "-" in last.numero else 1
+    return f"LIQ-{date_part}-{seq:06d}"
+
+
+async def preview_consignment_settlement(
+    db: AsyncSession,
+    company_id: str,
+    supplier_id: str,
+    fecha_desde: date,
+    fecha_hasta: date,
+) -> dict:
+    from api.src.products.models import Product
+    from api.src.inventory.models import Stock
+    from api.src.sales.models import Sale, SaleItem
+
+    c_uuid = UUID(company_id)
+    s_uuid = UUID(supplier_id)
+
+    sup = await db.get(Supplier, s_uuid)
+    if not sup:
+        raise ValueError("Proveedor no encontrado")
+
+    prods_stmt = (
+        select(Product)
+        .where(
+            Product.company_id == c_uuid,
+            Product.supplier_id == s_uuid,
+            Product.activo == True,
+        )
+        .order_by(Product.nombre.asc())
+    )
+    prods_res = await db.execute(prods_stmt)
+    products = prods_res.scalars().all()
+
+    if not products:
+        receipt_prods_subq = (
+            select(PurchaseReceiptItem.product_id)
+            .join(PurchaseReceipt, PurchaseReceipt.id == PurchaseReceiptItem.receipt_id)
+            .where(
+                PurchaseReceipt.company_id == c_uuid,
+                PurchaseReceipt.supplier_id == s_uuid,
+                PurchaseReceipt.tipo_recepcion == "consignacion_remision",
+            )
+            .distinct()
+        )
+        prods_res = await db.execute(select(Product).where(Product.id.in_(receipt_prods_subq)))
+        products = prods_res.scalars().all()
+
+    start_dt = datetime.combine(fecha_desde, datetime.min.time(), tzinfo=timezone.utc)
+    end_dt = datetime.combine(fecha_hasta, datetime.max.time(), tzinfo=timezone.utc)
+
+    items_preview = []
+    tot_recibidas = Decimal("0")
+    tot_vendidas = Decimal("0")
+    tot_devueltas = Decimal("0")
+    tot_liquidadas = Decimal("0")
+    tot_costo = Decimal("0")
+    tot_venta = Decimal("0")
+
+    for prod in products:
+        stk_res = await db.execute(
+            select(Stock.cantidad).where(Stock.product_id == prod.id).limit(1)
+        )
+        stk_actual = Decimal(str(stk_res.scalar() or 0))
+
+        rec_stmt = (
+            select(func.coalesce(func.sum(PurchaseReceiptItem.cantidad_recibida), 0))
+            .join(PurchaseReceipt, PurchaseReceipt.id == PurchaseReceiptItem.receipt_id)
+            .where(
+                PurchaseReceipt.company_id == c_uuid,
+                PurchaseReceipt.supplier_id == s_uuid,
+                PurchaseReceipt.tipo_recepcion == "consignacion_remision",
+                PurchaseReceiptItem.product_id == prod.id,
+                PurchaseReceipt.fecha >= start_dt,
+                PurchaseReceipt.fecha <= end_dt,
+            )
+        )
+        rec_res = await db.execute(rec_stmt)
+        entradas_remision = Decimal(str(rec_res.scalar() or 0))
+
+        ventas_stmt = (
+            select(
+                func.coalesce(func.sum(SaleItem.cantidad), 0),
+                func.coalesce(func.sum(SaleItem.total), 0),
+            )
+            .join(Sale, Sale.id == SaleItem.sale_id)
+            .where(
+                Sale.company_id == c_uuid,
+                SaleItem.product_id == prod.id,
+                Sale.fecha >= start_dt,
+                Sale.fecha <= end_dt,
+                Sale.estado != "cancelada",
+            )
+        )
+        ventas_res = await db.execute(ventas_stmt)
+        row_ventas = ventas_res.first()
+        cant_vendida = Decimal(str(row_ventas[0] if row_ventas else 0))
+        monto_vendido = Decimal(str(row_ventas[1] if row_ventas else 0))
+
+        unidades_liquidar = cant_vendida
+        costo_u = Decimal(str(prod.ultimo_costo or prod.costo_promedio or 0))
+        precio_v = Decimal(str(prod.precio_venta or 0))
+
+        costo_linea = (unidades_liquidar * costo_u).quantize(Decimal("1"))
+        margen_linea = monto_vendido - costo_linea
+
+        tot_recibidas += entradas_remision
+        tot_vendidas += cant_vendida
+        tot_liquidadas += unidades_liquidar
+        tot_costo += costo_linea
+        tot_venta += monto_vendido
+
+        items_preview.append({
+            "product_id": prod.id,
+            "product_sku": prod.sku,
+            "product_nombre": prod.nombre,
+            "stock_actual": stk_actual,
+            "entradas_remision": entradas_remision,
+            "ventas_pos": cant_vendida,
+            "devoluciones_rtv": Decimal("0"),
+            "unidades_a_liquidar": unidades_liquidar,
+            "costo_unitario": costo_u,
+            "precio_venta": precio_v,
+            "total_costo": costo_linea,
+            "total_venta": monto_vendido,
+            "margen_ganancia": margen_linea,
+        })
+
+    margen_total = tot_venta - tot_costo
+
+    return {
+        "supplier_id": sup.id,
+        "supplier_nombre": sup.razon_social,
+        "supplier_ruc": sup.ruc,
+        "fecha_desde": fecha_desde,
+        "fecha_hasta": fecha_hasta,
+        "items": items_preview,
+        "total_unidades_recibidas": tot_recibidas,
+        "total_unidades_vendidas": tot_vendidas,
+        "total_unidades_devueltas": tot_devueltas,
+        "total_unidades_liquidadas": tot_liquidadas,
+        "total_costo_liquidado": tot_costo,
+        "total_recaudado_pos": tot_venta,
+        "margen_ganancia": margen_total,
+    }
+
+
+async def create_consignment_settlement(
+    db: AsyncSession,
+    data: ConsignmentSettlementCreate,
+) -> ConsignmentSettlement:
+    from api.src.financial.models import SupplierInvoice
+    from .models import ConsignmentSettlement, ConsignmentSettlementItem
+
+    numero = await generate_consignment_settlement_number(db)
+    now_utc = datetime.now(timezone.utc)
+
+    # Si no vinieron items explícitos, calcular con el preview
+    items_to_save = data.items
+    if not items_to_save:
+        preview = await preview_consignment_settlement(
+            db, str(data.company_id), str(data.supplier_id), data.fecha_desde, data.fecha_hasta
+        )
+        items_to_save = [
+            ConsignmentSettlementItemCreate(**it) for it in preview["items"]
+        ]
+
+    tot_recibidas = sum((it.cantidad_recibida or Decimal("0") for it in items_to_save), Decimal("0"))
+    tot_vendidas = sum((it.cantidad_vendida or Decimal("0") for it in items_to_save), Decimal("0"))
+    tot_devueltas = sum((it.cantidad_devuelta or Decimal("0") for it in items_to_save), Decimal("0"))
+    tot_liquidadas = sum((it.unidades_a_liquidar for it in items_to_save), Decimal("0"))
+    tot_costo = sum((it.total_costo for it in items_to_save), Decimal("0")).quantize(Decimal("1"))
+    tot_venta = sum((it.total_venta or Decimal("0") for it in items_to_save), Decimal("0")).quantize(Decimal("1"))
+    margen_total = tot_venta - tot_costo
+
+    invoice_id = None
+    estado_settlement = "conciliado"
+
+    if data.numero_factura_proveedor and tot_costo > Decimal("0"):
+        invoice = SupplierInvoice(
+            company_id=data.company_id,
+            supplier_id=data.supplier_id,
+            numero_factura=data.numero_factura_proveedor,
+            timbrado=data.timbrado_factura or "18545636",
+            fecha_emision=data.fecha_hasta,
+            fecha_recepcion=func.current_date(),
+            fecha_vencimiento=data.fecha_vencimiento_factura or data.fecha_hasta,
+            subtotal=tot_costo,
+            total=tot_costo,
+            saldo_pendiente=tot_costo,
+            condicion="credito",
+            concepto=f"Liquidación Consignación {numero} ({data.fecha_desde} a {data.fecha_hasta})",
+            estado="pendiente",
+            created_by=data.user_id,
+        )
+        db.add(invoice)
+        await db.flush()
+        invoice_id = invoice.id
+        estado_settlement = "facturado"
+
+    settlement = ConsignmentSettlement(
+        company_id=data.company_id,
+        supplier_id=data.supplier_id,
+        numero=numero,
+        fecha_desde=data.fecha_desde,
+        fecha_hasta=data.fecha_hasta,
+        estado=estado_settlement,
+        total_unidades_recibidas=tot_recibidas,
+        total_unidades_vendidas=tot_vendidas,
+        total_unidades_devueltas=tot_devueltas,
+        total_unidades_liquidadas=tot_liquidadas,
+        total_costo_liquidado=tot_costo,
+        total_recaudado_pos=tot_venta,
+        margen_ganancia=margen_total,
+        supplier_invoice_id=invoice_id,
+        numero_factura_proveedor=data.numero_factura_proveedor,
+        observaciones=data.observaciones,
+        liquidado_por=data.user_id,
+        fecha_liquidacion=now_utc,
+    )
+    db.add(settlement)
+    await db.flush()
+
+    for it in items_to_save:
+        item_obj = ConsignmentSettlementItem(
+            settlement_id=settlement.id,
+            product_id=it.product_id,
+            stock_inicial=it.stock_inicial or Decimal("0"),
+            cantidad_recibida=it.cantidad_recibida or Decimal("0"),
+            cantidad_vendida=it.cantidad_vendida or Decimal("0"),
+            cantidad_devuelta=it.cantidad_devuelta or Decimal("0"),
+            stock_final_teorico=it.stock_final_teorico or Decimal("0"),
+            stock_fisico_remanente=it.stock_fisico_remanente or Decimal("0"),
+            diferencia_merma=it.diferencia_merma or Decimal("0"),
+            unidades_a_liquidar=it.unidades_a_liquidar,
+            costo_unitario=it.costo_unitario,
+            precio_venta_promedio=it.precio_venta_promedio or Decimal("0"),
+            total_costo=it.total_costo,
+            total_venta=it.total_venta or Decimal("0"),
+            margen_ganancia=it.margen_ganancia or Decimal("0"),
+        )
+        db.add(item_obj)
+
+    await db.commit()
+    await db.refresh(settlement)
+    return settlement
+
+
+async def list_consignment_settlements(
+    db: AsyncSession,
+    company_id: str,
+    supplier_id: str | None = None,
+) -> list[ConsignmentSettlement]:
+    from .models import ConsignmentSettlement
+    c_uuid = UUID(company_id)
+    stmt = (
+        select(ConsignmentSettlement)
+        .options(
+            selectinload(ConsignmentSettlement.items).joinedload(ConsignmentSettlementItem.product),
+            selectinload(ConsignmentSettlement.supplier),
+        )
+        .where(ConsignmentSettlement.company_id == c_uuid)
+        .order_by(ConsignmentSettlement.created_at.desc())
+    )
+    if supplier_id:
+        stmt = stmt.where(ConsignmentSettlement.supplier_id == UUID(supplier_id))
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
+
+async def get_consignment_settlement(
+    db: AsyncSession,
+    settlement_id: str,
+) -> ConsignmentSettlement | None:
+    from .models import ConsignmentSettlement
+    stmt = (
+        select(ConsignmentSettlement)
+        .options(
+            selectinload(ConsignmentSettlement.items).joinedload(ConsignmentSettlementItem.product),
+            selectinload(ConsignmentSettlement.supplier),
+        )
+        .where(ConsignmentSettlement.id == UUID(settlement_id))
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+

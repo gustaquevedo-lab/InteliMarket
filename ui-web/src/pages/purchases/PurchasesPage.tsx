@@ -38,9 +38,10 @@ import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate, formatCurrency } from "../../utils/format"
 import { DevolucionProveedorPrintModal } from "./DevolucionProveedorPrintModal"
 import { PdfViewerModal } from "../../components/PdfViewerModal"
+import { ConsignacionesTab } from "./ConsignacionesTab"
 import CurrencyInput from "../../components/CurrencyInput"
 
-type MainTab = "asistente_ia" | "demandas_clientes" | "ordenes" | "recepciones" | "facturas_p2p" | "devoluciones" | "matching" | "proveedores" | "requisiciones" | "cotizaciones" | "presupuestos" | "reportes"
+type MainTab = "asistente_ia" | "demandas_clientes" | "ordenes" | "recepciones" | "consignaciones" | "facturas_p2p" | "devoluciones" | "matching" | "proveedores" | "requisiciones" | "cotizaciones" | "presupuestos" | "reportes"
 
 const poStatusMap: Record<string, { label: string; bg: string; text: string }> = {
   borrador: { label: "Borrador", bg: "bg-slate-100 dark:bg-slate-800", text: "text-slate-600 dark:text-slate-300" },
@@ -430,6 +431,8 @@ export default function PurchasesPage() {
     purchase_order_id: string
     proveedor_ref: string
     observaciones: string
+    tipo_recepcion?: "compra_directa" | "consignacion_remision"
+    numero_remision?: string
     es_br?: boolean
     total_brl?: string
     tipo_cambio?: string
@@ -455,6 +458,8 @@ export default function PurchasesPage() {
     purchase_order_id: "",
     proveedor_ref: "",
     observaciones: "",
+    tipo_recepcion: "compra_directa",
+    numero_remision: "",
     es_br: false,
     total_brl: "",
     tipo_cambio: "1350",
@@ -1203,6 +1208,8 @@ export default function PurchasesPage() {
         purchase_order_id: targetPO.id,
         proveedor_ref: "",
         observaciones: "",
+        tipo_recepcion: "compra_directa",
+        numero_remision: "",
         es_br: isBr,
         total_brl: "",
         tipo_cambio: "1350",
@@ -1292,6 +1299,8 @@ export default function PurchasesPage() {
     try {
       const created = await api.purchases.createReceipt({
         purchase_order_id: receiptForm.purchase_order_id,
+        tipo_recepcion: receiptForm.tipo_recepcion || "compra_directa",
+        numero_remision: receiptForm.numero_remision || undefined,
         proveedor_ref: receiptForm.proveedor_ref || undefined,
         observaciones: receiptForm.observaciones || undefined,
         total_brl: (receiptForm.es_br && receiptForm.total_brl) ? Number(receiptForm.total_brl) : undefined,
@@ -3112,6 +3121,7 @@ export default function PurchasesPage() {
           { id: "asistente_ia", label: "Asistente IA de Abastecimiento", icon: Sparkles, badge: totalQuiebresInminentes > 0 ? `${totalQuiebresInminentes}` : undefined },
           { id: "ordenes", label: "Órdenes de Compra (OC)", icon: ShoppingCart, count: orders.length },
           { id: "recepciones", label: "Recepción en Muelle", icon: Truck, count: receipts.length },
+          { id: "consignaciones", label: "Consignaciones (SBT)", icon: Box, badge: "NUEVO" },
           { id: "facturas_p2p", label: "Facturas Proveedor (P2P)", icon: Receipt, count: allSupplierInvoices.length },
           { id: "devoluciones", label: "Devoluciones & NC", icon: Undo2, count: supplierReturns.length + supplierCreditNotes.length },
           { id: "matching", label: "3-Way Matching", icon: Scale, count: invoices.length },
@@ -4342,6 +4352,18 @@ export default function PurchasesPage() {
             )}
           </div>
         </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          TAB: CONSIGNACIONES (SCAN-BASED TRADING / VMI)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {tab === "consignaciones" && (
+        <ConsignacionesTab
+          suppliers={suppliers}
+          onSettled={() => {
+            fetchAll()
+          }}
+        />
       )}
 
       {/* ──────────────────────────────────────────────────────────────────────────
@@ -6787,6 +6809,49 @@ export default function PurchasesPage() {
                       <div className="input-field w-full text-xs font-mono font-black text-right bg-white dark:bg-slate-800 flex items-center justify-end px-3">
                         {formatPYG(Math.round((Number(receiptForm.total_brl) || 0) * (Number(receiptForm.tipo_cambio) || 1)))}
                       </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Sección Modalidad: Recepción en Consignación (Nota de Remisión / VMI) */}
+              <div className="p-3 bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800/60 rounded-xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-purple-900 dark:text-purple-200">
+                    <input
+                      type="checkbox"
+                      checked={receiptForm.tipo_recepcion === "consignacion_remision"}
+                      onChange={(e) => setReceiptForm(prev => ({
+                        ...prev,
+                        tipo_recepcion: e.target.checked ? "consignacion_remision" : "compra_directa",
+                        numero_remision: e.target.checked ? (prev.numero_remision || prev.proveedor_ref) : ""
+                      }))}
+                      className="rounded border-purple-400 text-purple-600 focus:ring-purple-500"
+                    />
+                    <span>📦 Recepción en Consignación (Nota de Remisión / VMI)</span>
+                  </label>
+                  <span className="text-[10px] text-purple-600 dark:text-purple-400 font-medium">
+                    Suma stock físico sin generar deuda comercial hasta la venta POS
+                  </span>
+                </div>
+
+                {receiptForm.tipo_recepcion === "consignacion_remision" && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-purple-200/60 dark:border-purple-800/40">
+                    <div>
+                      <label className="text-[10px] font-bold text-purple-800 dark:text-purple-300 block mb-1">
+                        N° Nota de Remisión Oficial del Proveedor *
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ej. 001-002-0001234"
+                        value={receiptForm.numero_remision || ""}
+                        onChange={(e) => setReceiptForm(prev => ({ ...prev, numero_remision: e.target.value }))}
+                        className="input-field w-full text-xs font-mono"
+                        required={receiptForm.tipo_recepcion === "consignacion_remision"}
+                      />
+                    </div>
+                    <div className="flex items-center text-xs text-purple-700 dark:text-purple-300 bg-purple-100/50 dark:bg-purple-900/30 p-2.5 rounded-lg border border-purple-200 dark:border-purple-800">
+                      <span>💡 <strong>Scan-Based Trading:</strong> La factura legal a pagar se generará periódicamente desde la pestaña <strong>Consignaciones</strong> al cotejar los cartones/unidades vendidas en cajas.</span>
                     </div>
                   </div>
                 )}
