@@ -290,25 +290,26 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!createWarehouseId) {
-      toast.error("Seleccione un depósito")
+      toast.warning("Falta depósito", "Seleccione un depósito para el ajuste.")
       return
     }
     if (!createMotivoCodigo) {
-      toast.error("Seleccione el motivo del ajuste")
+      toast.warning("Falta motivo", "Seleccione el motivo oficial del ajuste.")
       return
     }
     if (!createMotivoDetalle || createMotivoDetalle.trim().length < 20) {
-      toast.error("La justificación debe tener al menos 20 caracteres obligatorios")
+      toast.warning("Justificación insuficiente", "La justificación debe tener al menos 20 caracteres obligatorios.")
       return
     }
     if (createItems.length === 0) {
-      toast.error("Debe agregar al menos un producto a ajustar")
+      toast.warning("Lista vacía", "Debe agregar al menos un producto a ajustar antes de guardar.")
       return
     }
 
     // Validación de evidencia para riesgo alto/severo
     if (selectedMotivoInfo?.requiere_evidencia && createEvidenciaUrls.length === 0) {
-      toast.error(
+      toast.warning(
+        "Evidencia requerida",
         `El motivo seleccionado tiene riesgo ${selectedMotivoInfo.riesgo.toUpperCase()} y exige al menos una evidencia fotográfica o documental adjunta.`
       )
       return
@@ -890,7 +891,20 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                       type="text"
                       value={productSearch}
                       onChange={(e) => setProductSearch(e.target.value)}
-                      placeholder="Buscar producto por nombre, SKU o código de barra..."
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault()
+                          if (productSearchResults.length > 0) {
+                            const exact = productSearchResults.find(
+                              (p) =>
+                                (p.codigo_barra && p.codigo_barra.toLowerCase() === productSearch.trim().toLowerCase()) ||
+                                (p.sku && p.sku.toLowerCase() === productSearch.trim().toLowerCase())
+                            )
+                            addItemToCreate(exact || productSearchResults[0])
+                          }
+                        }
+                      }}
+                      placeholder="Buscar producto por nombre, SKU o código de barra (Enter para agregar)..."
                       className="input-field pl-9 text-xs py-2 w-full"
                     />
 
@@ -1084,8 +1098,8 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                   </button>
                   <button
                     type="submit"
-                    disabled={submittingCreate}
-                    className="btn-primary px-6 py-2 text-xs font-extrabold uppercase rounded-xl shadow-sm flex items-center gap-2"
+                    disabled={submittingCreate || createItems.length === 0}
+                    className="btn-primary px-6 py-2 text-xs font-extrabold uppercase rounded-xl shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {submittingCreate ? (
                       <RefreshCw className="w-4 h-4 animate-spin" />
