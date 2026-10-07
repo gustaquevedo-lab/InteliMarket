@@ -43,6 +43,34 @@ import CurrencyInput from "../../components/CurrencyInput"
 
 type MainTab = "asistente_ia" | "demandas_clientes" | "ordenes" | "recepciones" | "consignaciones" | "facturas_p2p" | "devoluciones" | "matching" | "proveedores" | "requisiciones" | "cotizaciones" | "presupuestos" | "reportes"
 
+type MacroTab = "abastecimiento" | "ordenes_proveedores" | "muelle_recepcion" | "p2p_control"
+
+const MACRO_TAB_BY_SUB_TAB: Record<MainTab, MacroTab> = {
+  asistente_ia: "abastecimiento",
+  demandas_clientes: "abastecimiento",
+  requisiciones: "abastecimiento",
+  cotizaciones: "abastecimiento",
+  presupuestos: "abastecimiento",
+
+  ordenes: "ordenes_proveedores",
+  proveedores: "ordenes_proveedores",
+
+  recepciones: "muelle_recepcion",
+  consignaciones: "muelle_recepcion",
+  devoluciones: "muelle_recepcion",
+
+  facturas_p2p: "p2p_control",
+  matching: "p2p_control",
+  reportes: "p2p_control",
+}
+
+const DEFAULT_SUB_TAB_BY_MACRO: Record<MacroTab, MainTab> = {
+  abastecimiento: "asistente_ia",
+  ordenes_proveedores: "ordenes",
+  muelle_recepcion: "recepciones",
+  p2p_control: "facturas_p2p",
+}
+
 const poStatusMap: Record<string, { label: string; bg: string; text: string }> = {
   borrador: { label: "Borrador", bg: "bg-slate-100 dark:bg-slate-800", text: "text-slate-600 dark:text-slate-300" },
   confirmado: { label: "Confirmada", bg: "bg-blue-50 dark:bg-blue-900/30", text: "text-blue-600 dark:text-blue-400" },
@@ -3115,51 +3143,182 @@ export default function PurchasesPage() {
         </div>
       )}
 
-      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
-      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex items-center gap-1.5 overflow-x-auto shadow-sm">
-        {[
-          { id: "asistente_ia", label: "Asistente IA de Abastecimiento", icon: Sparkles, badge: totalQuiebresInminentes > 0 ? `${totalQuiebresInminentes}` : undefined },
-          { id: "ordenes", label: "Órdenes de Compra (OC)", icon: ShoppingCart, count: orders.length },
-          { id: "recepciones", label: "Recepción en Muelle", icon: Truck, count: receipts.length },
-          { id: "consignaciones", label: "Consignaciones (SBT)", icon: Box, badge: "NUEVO" },
-          { id: "facturas_p2p", label: "Facturas Proveedor (P2P)", icon: Receipt, count: allSupplierInvoices.length },
-          { id: "devoluciones", label: "Devoluciones & NC", icon: Undo2, count: supplierReturns.length + supplierCreditNotes.length },
-          { id: "matching", label: "3-Way Matching", icon: Scale, count: invoices.length },
-          { id: "proveedores", label: "Proveedores & Scorecard", icon: Building2, count: suppliers.length },
-          { id: "requisiciones", label: "Requisiciones Internas", icon: ClipboardList, count: requisitions.length },
-          { id: "cotizaciones", label: "Cotizaciones (RFQ)", icon: FileSpreadsheet, count: rfqs.length },
-          { id: "presupuestos", label: "Presupuestos", icon: BarChart3, count: budgets.length },
-          { id: "reportes", label: "Reportes & Precios", icon: PieChart },
-        ].map((t) => {
-          const Icon = t.icon
-          const active = tab === t.id
-          return (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id as MainTab)}
-              className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
-                active
-                  ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
-              }`}
-            >
-              <Icon className={`w-4 h-4 shrink-0 ${active ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400"}`} />
-              <span>{t.label}</span>
-              {t.count !== undefined && (
-                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
-                  active ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
-                }`}>
-                  {t.count}
-                </span>
-              )}
-              {t.badge && (
-                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-black bg-rose-500 text-white animate-pulse">
-                  {t.badge}
-                </span>
-              )}
-            </button>
-          )
-        })}
+      {/* 🧭 NAVEGACIÓN JERÁRQUICA: 4 MACRO-FLUJOS + SUB-PILLS */}
+      <div className="space-y-3">
+        {/* NIVEL 1: 4 MACRO-TABS CON GLASSMORPHISM Y KPIs RESUMIDOS */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+          {[
+            {
+              id: "abastecimiento" as MacroTab,
+              label: "Abastecimiento & IA",
+              subtitle: "Planificación, RFQ & Presupuestos",
+              icon: Sparkles,
+              badge: totalQuiebresInminentes > 0 ? `${totalQuiebresInminentes} quiebres` : undefined,
+              badgeColor: "bg-rose-500 text-white animate-pulse",
+            },
+            {
+              id: "ordenes_proveedores" as MacroTab,
+              label: "Órdenes & Proveedores",
+              subtitle: "Emisión de OC y Scorecard 360",
+              icon: ShoppingCart,
+              count: orders.length,
+            },
+            {
+              id: "muelle_recepcion" as MacroTab,
+              label: "Muelle & Logística",
+              subtitle: "Descarga, Consignación & RTV",
+              icon: Truck,
+              count: receipts.length,
+            },
+            {
+              id: "p2p_control" as MacroTab,
+              label: "Procure-to-Pay & Control",
+              subtitle: "3-Way Matching & Facturas SIFEN",
+              icon: Scale,
+              count: allSupplierInvoices.length,
+            },
+          ].map((macro) => {
+            const Icon = macro.icon
+            const isMacroActive = MACRO_TAB_BY_SUB_TAB[tab] === macro.id
+
+            return (
+              <button
+                key={macro.id}
+                onClick={() => {
+                  if (!isMacroActive) {
+                    setTab(DEFAULT_SUB_TAB_BY_MACRO[macro.id])
+                  }
+                }}
+                className={`group relative text-left p-3.5 sm:p-4 rounded-2xl transition-all duration-200 border ${
+                  isMacroActive
+                    ? "bg-white dark:bg-slate-850 shadow-md ring-2 ring-indigo-500/80 border-transparent dark:ring-indigo-400"
+                    : "bg-slate-100/80 dark:bg-slate-800/60 hover:bg-white/80 dark:hover:bg-slate-800 border-slate-200/80 dark:border-slate-700/60 hover:shadow-sm"
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div
+                    className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
+                      isMacroActive
+                        ? "bg-indigo-600 text-white shadow-sm shadow-indigo-500/30"
+                        : "bg-white dark:bg-slate-700/80 text-slate-500 dark:text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400"
+                    }`}
+                  >
+                    <Icon className="w-4 h-4 sm:w-5 sm:h-5" />
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    {macro.badge && (
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${macro.badgeColor || "bg-indigo-100 text-indigo-700"}`}>
+                        {macro.badge}
+                      </span>
+                    )}
+                    {macro.count !== undefined && !macro.badge && (
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[11px] font-black ${
+                          isMacroActive
+                            ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/80 dark:text-indigo-300"
+                            : "bg-slate-200/70 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+                        }`}
+                      >
+                        {macro.count}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <h4
+                    className={`text-xs sm:text-sm font-extrabold tracking-tight transition-colors ${
+                      isMacroActive
+                        ? "text-slate-900 dark:text-white"
+                        : "text-slate-700 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-white"
+                    }`}
+                  >
+                    {macro.label}
+                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5 font-medium">
+                    {macro.subtitle}
+                  </p>
+                </div>
+
+                {isMacroActive && (
+                  <div className="absolute -bottom-px left-1/2 -translate-x-1/2 w-12 h-1 bg-indigo-600 rounded-t-full hidden lg:block" />
+                )}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* NIVEL 2: SUB-PESTAÑAS PILLS CONTEXTUALES DEL MACRO-TAB ACTIVO */}
+        <div className="p-1.5 bg-slate-100/90 dark:bg-slate-800/80 backdrop-blur-md rounded-2xl border border-slate-200/80 dark:border-slate-700/80 flex items-center gap-1.5 overflow-x-auto shadow-sm">
+          {(() => {
+            const currentMacro = MACRO_TAB_BY_SUB_TAB[tab] || "abastecimiento"
+
+            const subTabsMap: Record<
+              MacroTab,
+              { id: MainTab; label: string; icon: any; count?: number; badge?: string }[]
+            > = {
+              abastecimiento: [
+                { id: "asistente_ia", label: "Asistente IA (Sugerencias)", icon: Sparkles, badge: totalQuiebresInminentes > 0 ? `${totalQuiebresInminentes}` : undefined },
+                { id: "requisiciones", label: "Requisiciones Internas", icon: ClipboardList, count: requisitions.length },
+                { id: "cotizaciones", label: "Cotizaciones (RFQ)", icon: FileSpreadsheet, count: rfqs.length },
+                { id: "presupuestos", label: "Presupuestos de Compra", icon: BarChart3, count: budgets.length },
+              ],
+              ordenes_proveedores: [
+                { id: "ordenes", label: "Órdenes de Compra (OC)", icon: ShoppingCart, count: orders.length },
+                { id: "proveedores", label: "Proveedores & Scorecard", icon: Building2, count: suppliers.length },
+              ],
+              muelle_recepcion: [
+                { id: "recepciones", label: "Recepción en Muelle", icon: Truck, count: receipts.length },
+                { id: "consignaciones", label: "Consignaciones (SBT)", icon: Box, badge: "NUEVO" },
+                { id: "devoluciones", label: "Devoluciones & NC (RTV)", icon: Undo2, count: supplierReturns.length + supplierCreditNotes.length },
+              ],
+              p2p_control: [
+                { id: "facturas_p2p", label: "Facturas Proveedor (P2P)", icon: Receipt, count: allSupplierInvoices.length },
+                { id: "matching", label: "3-Way Matching", icon: Scale, count: invoices.length },
+                { id: "reportes", label: "Reportes & Precios", icon: PieChart },
+              ],
+            }
+
+            const currentSubTabs = subTabsMap[currentMacro] || []
+
+            return currentSubTabs.map((sub) => {
+              const SubIcon = sub.icon
+              const isSubActive = tab === sub.id
+
+              return (
+                <button
+                  key={sub.id}
+                  onClick={() => setTab(sub.id)}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                    isSubActive
+                      ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800/60"
+                  }`}
+                >
+                  <SubIcon className={`w-4 h-4 shrink-0 ${isSubActive ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400"}`} />
+                  <span>{sub.label}</span>
+                  {sub.count !== undefined && (
+                    <span
+                      className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                        isSubActive
+                          ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300"
+                          : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                      }`}
+                    >
+                      {sub.count}
+                    </span>
+                  )}
+                  {sub.badge && (
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] font-black bg-rose-500 text-white animate-pulse">
+                      {sub.badge}
+                    </span>
+                  )}
+                </button>
+              )
+            })
+          })()}
+        </div>
       </div>
 
       {/* ──────────────────────────────────────────────────────────────────────────
