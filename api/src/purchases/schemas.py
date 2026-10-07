@@ -1188,6 +1188,16 @@ class AssociatePurchaseOrderRequest(BaseModel):
     user_id: Optional[UUID] = None
 
 
+class AssociateReceiptRequest(BaseModel):
+    receipt_id: UUID
+    user_id: Optional[UUID] = None
+
+
+class ApproveMatchingRequest(BaseModel):
+    motivo_aprobacion: str
+    user_id: Optional[UUID] = None
+
+
 class MatchItemLine(BaseModel):
     product_id: Optional[str] = None
     descripcion: str

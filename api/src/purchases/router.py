@@ -33,6 +33,7 @@ from api.src.purchases.schemas import (
     PurchaseInboxConfigCreate, PurchaseInboxConfigUpdate, PurchaseInboxConfigResponse,
     SyncInboxResponse, UploadXmlResponse,
     Perform3WayMatchRequest, Perform3WayMatchResponse, AssociatePurchaseOrderRequest,
+    AssociateReceiptRequest, ApproveMatchingRequest,
     SupplierNcRequestResponse, ResolveSupplierNcRequest,
     SupplierProductItemResponse, ProductInvoiceOptionResponse,
     SupplierReturnCreateInput, SupplierReturnUpdateInput, SupplierReturnRejectInput, SupplierReturnCompleteInput,
@@ -898,6 +899,90 @@ async def associate_po_to_invoice(
         raise
     except Exception as e:
         logger.error(f"Error al asociar Pedido a Factura: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/purchases/invoices/{invoice_id}/associate-receipt", response_model=Perform3WayMatchResponse)
+async def associate_receipt_to_invoice(
+    invoice_id: str,
+    body: AssociateReceiptRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        from api.src.financial.models import SupplierInvoice
+        from sqlalchemy import select
+        import uuid
+
+        inv_uuid = uuid.UUID(invoice_id)
+        rc_uuid = body.receipt_id
+
+        inv_q = select(SupplierInvoice).where(SupplierInvoice.id == inv_uuid)
+        inv_res = await db.execute(inv_q)
+        invoice = inv_res.scalar_one_or_none()
+        if not invoice:
+            raise HTTPException(status_code=404, detail="Factura no encontrada.")
+
+        invoice.receipt_id = rc_uuid
+        await db.commit()
+
+        return await matching_service.perform_3way_match(
+            db=db,
+            invoice_id=invoice_id,
+            user_id=str(body.user_id) if body.user_id else None
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al asociar Recepción a Factura: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/purchases/invoices/{invoice_id}/approve-matching")
+async def approve_matching_for_invoice(
+    invoice_id: str,
+    body: ApproveMatchingRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        from api.src.financial.models import SupplierInvoice
+        from sqlalchemy import select
+        import uuid
+
+        inv_uuid = uuid.UUID(invoice_id)
+        inv_q = select(SupplierInvoice).where(SupplierInvoice.id == inv_uuid)
+        inv_res = await db.execute(inv_q)
+        invoice = inv_res.scalar_one_or_none()
+        if not invoice:
+            raise HTTPException(status_code=404, detail="Factura no encontrada.")
+
+        invoice.bloqueada_para_pago = False
+        invoice.estado = "aprobada"
+        invoice.motivo_bloqueo = None
+        invoice.notas = f"Matching aprobado manualmente: {body.motivo_aprobacion}. {invoice.notas or ''}".strip()
+        if body.user_id:
+            invoice.approved_by = body.user_id
+        await db.commit()
+
+        return {
+            "success": True,
+            "invoice_id": invoice_id,
+            "bloqueada_para_pago": False,
+            "estado": invoice.estado,
+            "mensaje": "Factura aprobada y habilitada para Tesorería."
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al aprobar matching: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/companies/{company_id}/purchase-invoices/auto-link-receipts")
+async def auto_link_receipts(company_id: str, db: AsyncSession = Depends(get_db)):
+    try:
+        return await service.auto_link_receipts_to_invoices(db, company_id)
+    except Exception as e:
+        logger.error(f"Error en auto-link de recepciones: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
 
 

@@ -23,8 +23,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.financial.models import SupplierInvoice, SupplierInvoiceItem
-from api.src.purchases.models import Supplier, PurchaseOrder, PurchaseInboxConfig
+from api.src.purchases.models import Supplier, PurchaseOrder, PurchaseInboxConfig, PurchaseReceipt
 from api.src.purchases.sifen_xml_parser import parse_sifen_xml, map_sifen_items_to_catalog
+from api.src.purchases.utils import normalize_invoice_number, invoice_numbers_match
 
 logger = logging.getLogger(__name__)
 
@@ -121,44 +122,55 @@ async def sync_inbox_emails(
             # Extraer adjuntos XML
             xml_payloads = []
             for part in msg.walk():
-                content_disposition = str(part.get("Content-Disposition", ""))
-                filename = part.get_filename()
-                if filename:
-                    filename = _decode_mime_header(filename).lower()
+                ctype = (part.get_content_type() or "").lower()
+                raw_fname = part.get_filename() or part.get_param("name")
+                filename = _decode_mime_header(raw_fname).strip().lower() if raw_fname else ""
 
                 payload = part.get_payload(decode=True)
                 if not payload:
                     continue
 
-                if filename and filename.endswith(".xml"):
-                    xml_payloads.append((filename, payload))
-                elif filename and filename.endswith(".zip"):
+                is_zip = filename.endswith(".zip") or "zip" in ctype or payload.startswith(b"PK\x03\x04")
+                is_xml = (
+                    filename.endswith(".xml") or
+                    "xml" in ctype or
+                    payload.lstrip().startswith(b"<?xml") or
+                    payload.lstrip().startswith(b"<rDE") or
+                    b"<dVerFor>" in payload
+                )
+
+                if is_xml and not is_zip:
+                    xml_payloads.append((filename or f"factura_{eid.decode()}.xml", payload))
+                elif is_zip:
                     # Descomprimir zip en memoria por si el XML viene empaquetado
                     try:
                         with zipfile.ZipFile(io.BytesIO(payload)) as z:
                             for zname in z.namelist():
-                                if zname.lower().endswith(".xml"):
+                                z_lower = zname.lower()
+                                if z_lower.endswith(".xml"):
                                     xml_payloads.append((zname, z.read(zname)))
                     except Exception as e:
-                        logger.warning(f"Error al descomprimir adjunto ZIP {filename}: {e}")
+                        logger.warning(f"Error al descomprimir adjunto ZIP {filename or 'archivo.zip'}: {e}")
 
             # Procesar cada XML encontrado
             for filename, xml_bytes in xml_payloads:
                 try:
-                    dte_data = parse_sifen_xml(xml_bytes)
-                    invoice_res = await ingest_parsed_dte(
-                        db=db,
-                        company_id=company_id,
-                        dte_data=dte_data,
-                        xml_raw=xml_bytes.decode("utf-8", errors="replace"),
-                        origen="imap",
-                        origen_info=f"Asunto: {subject} | De: {sender} | Archivo: {filename}"
-                    )
-                    if invoice_res.get("created"):
-                        resumen["facturas_nuevas"] += 1
-                        resumen["facturas"].append(invoice_res)
-                    else:
-                        resumen["facturas_existentes"] += 1
+                    async with db.begin_nested():
+                        dte_data = parse_sifen_xml(xml_bytes)
+                        invoice_res = await ingest_parsed_dte(
+                            db=db,
+                            company_id=company_id,
+                            dte_data=dte_data,
+                            xml_raw=xml_bytes.decode("utf-8", errors="replace"),
+                            origen="imap",
+                            origen_info=f"Asunto: {subject} | De: {sender} | Archivo: {filename}"
+                        )
+                        if invoice_res.get("created"):
+                            resumen["facturas_nuevas"] += 1
+                            resumen["facturas"].append(invoice_res)
+                        else:
+                            resumen["facturas_existentes"] += 1
+                    await db.commit()
                 except Exception as e:
                     err_msg = f"Error al procesar {filename} en correo '{subject}': {str(e)}"
                     logger.warning(err_msg)
@@ -202,10 +214,11 @@ async def ingest_parsed_dte(
     """Ingesta y persiste un DTE ya parseado en la base de datos como Factura de Proveedor."""
     company_uuid = uuid.UUID(company_id)
     cdc = dte_data.get("cdc")
-    numero_factura = dte_data.get("numero_factura")
+    raw_numero_factura = dte_data.get("numero_factura")
+    numero_factura = normalize_invoice_number(raw_numero_factura) or raw_numero_factura
     timbrado = dte_data.get("timbrado")
 
-    # 1. Verificar si ya existe por CDC o por (supplier, timbrado, numero_factura)
+    # 1. Verificar si ya existe por CDC
     if cdc:
         existing_q = select(SupplierInvoice).where(
             SupplierInvoice.company_id == company_uuid,
@@ -228,10 +241,16 @@ async def ingest_parsed_dte(
     supplier: Optional[Supplier] = None
 
     if emisor_ruc:
-        # Buscar por RUC limpio (sin guion y con guion)
+        ruc_full = emisor.get("ruc")
+        ruc_sin_dv = emisor.get("ruc_sin_dv")
+        candidates = [c for c in [ruc_full, ruc_sin_dv, emisor_ruc] if c]
+        from sqlalchemy import or_
         sup_q = select(Supplier).where(
             Supplier.company_id == company_uuid,
-            Supplier.ruc.in_([emisor_ruc, emisor.get("ruc_sin_dv"), emisor.get("ruc")])
+            or_(
+                Supplier.ruc.in_(candidates),
+                Supplier.ruc.like(f"{ruc_sin_dv}-%") if ruc_sin_dv else False
+            )
         )
         sup_res = await db.execute(sup_q)
         supplier = sup_res.scalars().first()
@@ -252,6 +271,24 @@ async def ingest_parsed_dte(
         )
         db.add(supplier)
         await db.flush()
+
+    # Verificar si ya existe factura con este número para este proveedor
+    if supplier and numero_factura:
+        ex_q = select(SupplierInvoice).where(
+            SupplierInvoice.company_id == company_uuid,
+            SupplierInvoice.supplier_id == supplier.id,
+            SupplierInvoice.numero_factura == numero_factura
+        )
+        ex_res = await db.execute(ex_q)
+        ex_inv = ex_res.scalar_one_or_none()
+        if ex_inv:
+            return {
+                "created": False,
+                "id": str(ex_inv.id),
+                "numero_factura": ex_inv.numero_factura,
+                "cdc": ex_inv.cdc,
+                "mensaje": f"Factura {numero_factura} ya registrada anteriormente para {supplier.razon_social}."
+            }
 
     # 3. Mapear los ítems contra el catálogo de productos local
     raw_items = dte_data.get("items", [])
@@ -284,6 +321,28 @@ async def ingest_parsed_dte(
         if not po_candidata and pos:
             po_candidata = pos[0]
 
+    # 4b. Buscar Recepción en Muelle (PurchaseReceipt) candidata para pre-asociar
+    receipt_candidata: Optional[PurchaseReceipt] = None
+    if po_candidata:
+        rec_q = select(PurchaseReceipt).where(
+            PurchaseReceipt.purchase_order_id == po_candidata.id,
+            PurchaseReceipt.estado != "cancelado"
+        ).order_by(PurchaseReceipt.created_at.desc())
+        rec_res = await db.execute(rec_q)
+        receipt_candidata = rec_res.scalars().first()
+
+    if not receipt_candidata and supplier and numero_factura:
+        rec_q = select(PurchaseReceipt).where(
+            PurchaseReceipt.company_id == company_uuid,
+            PurchaseReceipt.supplier_id == supplier.id,
+            PurchaseReceipt.estado != "cancelado"
+        ).order_by(PurchaseReceipt.created_at.desc()).limit(30)
+        rec_res = await db.execute(rec_q)
+        for cand in rec_res.scalars().all():
+            if cand.proveedor_ref and invoice_numbers_match(cand.proveedor_ref, numero_factura):
+                receipt_candidata = cand
+                break
+
     # 5. Crear la Factura de Proveedor
     total = dte_data.get("total", Decimal("0"))
     invoice = SupplierInvoice(
@@ -308,10 +367,11 @@ async def ingest_parsed_dte(
         estado="pendiente",
         concepto=f"Factura SIFEN {numero_factura} de {supplier.razon_social}",
         notas=f"Ingresado vía {origen}. {origen_info or ''}".strip(),
-        xml_sifen_url=xml_raw[:1000] if xml_raw else None,
+        xml_sifen_url=xml_raw if xml_raw else None,
         purchase_order_id=po_candidata.id if po_candidata else None,
+        receipt_id=receipt_candidata.id if receipt_candidata else None,
         created_by=uuid.UUID(user_id) if user_id else None,
-        bloqueada_para_pago=True if po_candidata else False,
+        bloqueada_para_pago=True if (po_candidata or receipt_candidata) else False,
     )
     db.add(invoice)
     await db.flush()
@@ -336,9 +396,9 @@ async def ingest_parsed_dte(
 
     await db.flush()
 
-    # 7. Ejecutar matching de inmediato contra el pedido si está asociado
+    # 7. Ejecutar matching de inmediato contra el pedido y/o recepción si están asociados
     matching_info = None
-    if po_candidata:
+    if po_candidata or receipt_candidata:
         from api.src.purchases.matching_service import perform_3way_match
         try:
             matching_info = await perform_3way_match(db, str(invoice.id), user_id)

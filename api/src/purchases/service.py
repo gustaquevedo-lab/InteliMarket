@@ -38,6 +38,7 @@ from api.src.purchases.schemas import (
 from api.src.inventory.models import Stock, StockLot, InventoryMovement
 from api.src.financial.models import SupplierInvoice, SupplierInvoiceItem
 from api.src.products.models import Product
+from api.src.purchases.utils import normalize_invoice_number, invoice_numbers_match
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -762,7 +763,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         warehouse_id=warehouse_id,
         numero=numero,
         total=total.quantize(Decimal("1")),
-        proveedor_ref=data.proveedor_ref,
+        proveedor_ref=normalize_invoice_number(data.proveedor_ref) or data.proveedor_ref,
         tipo_recepcion=getattr(data, "tipo_recepcion", "compra_directa") or "compra_directa",
         numero_remision=getattr(data, "numero_remision", None),
         observaciones=data.observaciones,
@@ -927,68 +928,104 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         fecha_emision = date.today()
         fecha_vencimiento = fecha_emision + timedelta(days=plazo_dias)
 
-        invoice_num = (data.proveedor_ref or receipt.numero).strip()
-        diff_redondeo = Decimal("0")
-        factura_total = receipt.total
-        if data.total_factura_impreso is not None and data.total_factura_impreso > 0:
-            diff_redondeo = (data.total_factura_impreso - receipt.total).quantize(Decimal("1"))
-            factura_total = data.total_factura_impreso.quantize(Decimal("1"))
+        norm_ref = normalize_invoice_number(data.proveedor_ref) if data.proveedor_ref else None
+        invoice_num = norm_ref or (data.proveedor_ref or receipt.numero).strip()
 
-        iva_10 = (factura_total / Decimal("11")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        # Verificar si ya existe una factura para este proveedor con este comprobante
+        existing_inv = None
+        if norm_ref or data.proveedor_ref:
+            cands = [c for c in [norm_ref, data.proveedor_ref] if c]
+            ex_res = await db.execute(
+                select(SupplierInvoice).where(
+                    SupplierInvoice.company_id == company_id,
+                    SupplierInvoice.supplier_id == supplier_id,
+                    SupplierInvoice.numero_factura.in_(cands)
+                )
+            )
+            existing_inv = ex_res.scalars().first()
 
-        inv_moneda = "BRL" if (data.total_brl is not None and data.total_brl > 0 and getattr(data, "moneda", "") == "BRL") else "PYG"
-        inv_tc = data.tipo_cambio or Decimal("1")
-        inv_total_brl = data.total_brl if inv_moneda == "BRL" else None
+        if existing_inv:
+            inv = existing_inv
+            inv.receipt_id = receipt.id
+            if data.purchase_order_id and not inv.purchase_order_id:
+                inv.purchase_order_id = data.purchase_order_id
+            await db.flush()
+        else:
+            diff_redondeo = Decimal("0")
+            factura_total = receipt.total
+            if data.total_factura_impreso is not None and data.total_factura_impreso > 0:
+                diff_redondeo = (data.total_factura_impreso - receipt.total).quantize(Decimal("1"))
+                factura_total = data.total_factura_impreso.quantize(Decimal("1"))
 
-        inv = SupplierInvoice(
-            company_id=company_id,
-            supplier_id=supplier_id,
-            numero_factura=invoice_num,
-            fecha_emision=fecha_emision,
-            fecha_recepcion=fecha_emision,
-            fecha_vencimiento=fecha_vencimiento,
-            subtotal=factura_total - iva_10,
-            descuento=Decimal("0"),
-            iva_10=iva_10,
-            iva_5=Decimal("0"),
-            total=factura_total,
-            saldo_pendiente=factura_total,
-            moneda=inv_moneda,
-            tipo_cambio=inv_tc,
-            total_brl=inv_total_brl,
-            saldo_pendiente_brl=inv_total_brl,
-            purchase_order_id=data.purchase_order_id,
-            receipt_id=receipt.id,
-            condicion="credito" if plazo_dias > 0 else "contado",
-            tipo_comprobante="factura",
-            estado="pendiente",
-            concepto=(
-                f"Recepción de mercadería {receipt.numero}"
-                + (f" - Ref: {data.proveedor_ref}" if data.proveedor_ref else "")
-                + (f" [Ajuste Redondeo Factura: {diff_redondeo:+,} ₲]" if diff_redondeo != 0 else "")
-                + (f" - Obs: {data.observaciones}" if data.observaciones else "")
-            ),
-            created_by=data.user_id,
-        )
-        db.add(inv)
-        await db.flush()
+            iva_10 = (factura_total / Decimal("11")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
-        for itm in data.items:
-            cant_rec = Decimal(str(itm.cantidad_recibida or 0))
-            cant_rech = Decimal(str(itm.cantidad_rechazada or 0))
-            cant_fac = (cant_rec + cant_rech) if (cant_rec + cant_rech) > 0 else (Decimal(str(itm.cantidad_ordenada or 1)))
-            cost = itm.costo_unitario or Decimal("0")
-            db.add(SupplierInvoiceItem(
-                invoice_id=inv.id,
-                product_id=itm.product_id,
-                variant_id=itm.variant_id,
-                cantidad=cant_fac,
-                precio_unitario=cost,
-                total=(cost * cant_fac).quantize(Decimal("1")),
-                descripcion=None,
-            ))
+            inv_moneda = "BRL" if (data.total_brl is not None and data.total_brl > 0 and getattr(data, "moneda", "") == "BRL") else "PYG"
+            inv_tc = data.tipo_cambio or Decimal("1")
+            inv_total_brl = data.total_brl if inv_moneda == "BRL" else None
+
+            inv = SupplierInvoice(
+                company_id=company_id,
+                supplier_id=supplier_id,
+                numero_factura=invoice_num,
+                fecha_emision=fecha_emision,
+                fecha_recepcion=fecha_emision,
+                fecha_vencimiento=fecha_vencimiento,
+                subtotal=factura_total - iva_10,
+                descuento=Decimal("0"),
+                iva_10=iva_10,
+                iva_5=Decimal("0"),
+                total=factura_total,
+                saldo_pendiente=factura_total,
+                moneda=inv_moneda,
+                tipo_cambio=inv_tc,
+                total_brl=inv_total_brl,
+                saldo_pendiente_brl=inv_total_brl,
+                purchase_order_id=data.purchase_order_id,
+                receipt_id=receipt.id,
+                condicion="credito" if plazo_dias > 0 else "contado",
+                tipo_comprobante="factura",
+                estado="pendiente",
+                concepto=(
+                    f"Recepción de mercadería {receipt.numero}"
+                    + (f" - Ref: {invoice_num}" if data.proveedor_ref else "")
+                    + (f" [Ajuste Redondeo Factura: {diff_redondeo:+,} ₲]" if diff_redondeo != 0 else "")
+                    + (f" - Obs: {data.observaciones}" if data.observaciones else "")
+                ),
+                created_by=data.user_id,
+            )
+            db.add(inv)
+            await db.flush()
+
+            # Registrar ítems detallados para la nueva factura
+            for itm in data.items:
+                cant_rec = Decimal(str(itm.cantidad_recibida or 0))
+                cant_rech = Decimal(str(itm.cantidad_rechazada or 0))
+                cant_fac = (cant_rec + cant_rech) if (cant_rec + cant_rech) > 0 else (Decimal(str(itm.cantidad_ordenada or 1)))
+                cost = itm.costo_unitario or Decimal("0")
+                prod_id = itm.product_id
+
+                db.add(SupplierInvoiceItem(
+                    invoice_id=inv.id,
+                    product_id=prod_id,
+                    cantidad=cant_fac,
+                    precio_unitario=cost,
+                    descuento=Decimal("0"),
+                    iva_tasa=Decimal("10"),
+                    total=(cost * cant_fac).quantize(Decimal("1")),
+                    descripcion=f"Producto {str(prod_id)[:8]}",
+                ))
+            await db.flush()
+
+        # Ejecutar 3-way match
+        if inv.purchase_order_id or inv.receipt_id:
+            from api.src.purchases.matching_service import perform_3way_match
+            try:
+                await perform_3way_match(db, str(inv.id), str(data.user_id) if data.user_id else None)
+            except Exception as e:
+                logger.warning(f"Error al ejecutar matching post-recepción factura {inv.id}: {e}")
+
     except Exception as e:
-        logger.warning("No se pudo crear automáticamente la factura en Cuentas por Pagar: %s", e)
+        logger.warning("No se pudo auto-vincular o crear factura en Cuentas por Pagar: %s", e)
 
     await db.flush()
     await db.refresh(receipt)
@@ -3643,4 +3680,77 @@ async def get_consignment_settlement(
     )
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
+
+
+async def auto_link_receipts_to_invoices(db: AsyncSession, company_id: str) -> dict[str, Any]:
+    """Escanea facturas de compras sin recepción asignada y las vincula inteligentemente
+    con recepciones de muelle coincidentes (por proveedor y número de factura normalizado o por OC).
+    """
+    cid = UUID(str(company_id))
+
+    # 1. Facturas de esta empresa sin receipt_id
+    q_inv = select(SupplierInvoice).where(
+        SupplierInvoice.company_id == cid,
+        SupplierInvoice.receipt_id.is_(None)
+    ).order_by(SupplierInvoice.created_at.desc())
+    res_inv = await db.execute(q_inv)
+    invoices = res_inv.scalars().all()
+
+    # 2. Recepciones existentes no canceladas
+    q_rec = select(PurchaseReceipt).where(
+        PurchaseReceipt.company_id == cid,
+        PurchaseReceipt.estado != "cancelado"
+    ).order_by(PurchaseReceipt.created_at.desc())
+    res_rec = await db.execute(q_rec)
+    receipts = res_rec.scalars().all()
+
+    vinculadas = 0
+    detalles = []
+
+    from api.src.purchases.matching_service import perform_3way_match
+
+    for inv in invoices:
+        matched_receipt = None
+        for r in receipts:
+            # Cotejar por proveedor y número de factura tolerante
+            if r.supplier_id == inv.supplier_id and r.proveedor_ref:
+                if invoice_numbers_match(r.proveedor_ref, inv.numero_factura):
+                    matched_receipt = r
+                    break
+            # O por Orden de Compra idéntica
+            if inv.purchase_order_id and r.purchase_order_id == inv.purchase_order_id:
+                matched_receipt = r
+                break
+
+        if matched_receipt:
+            inv.receipt_id = matched_receipt.id
+            if not inv.purchase_order_id and matched_receipt.purchase_order_id:
+                inv.purchase_order_id = matched_receipt.purchase_order_id
+
+            match_res = None
+            try:
+                match_res = await perform_3way_match(db, str(inv.id))
+            except Exception as e:
+                logger.warning(f"Error en match post-vinculacion factura {inv.id}: {e}")
+
+            vinculadas += 1
+            detalles.append({
+                "invoice_id": str(inv.id),
+                "numero_factura": inv.numero_factura,
+                "receipt_id": str(matched_receipt.id),
+                "receipt_numero": matched_receipt.numero,
+                "proveedor_ref": matched_receipt.proveedor_ref,
+                "estado_matching": match_res.get("estado_matching") if match_res else None,
+            })
+
+    if vinculadas > 0:
+        await db.commit()
+
+    return {
+        "success": True,
+        "total_evaluadas": len(invoices),
+        "vinculadas": vinculadas,
+        "detalles": detalles,
+    }
+
 

@@ -2755,6 +2755,12 @@ export const api = {
     },
     reconcile3WayMatch: (invoiceId: string, userId?: string) =>
       client.post<any>("/v1/purchases/matching/reconcile", { invoice_id: invoiceId, user_id: userId }),
+    associateInvoiceToReceipt: (invoiceId: string, receiptId: string, userId?: string) =>
+      client.post<any>(`/v1/purchases/invoices/${invoiceId}/associate-receipt`, { receipt_id: receiptId, user_id: userId }),
+    approveInvoiceMatching: (invoiceId: string, motivo: string, userId?: string) =>
+      client.post<any>(`/v1/purchases/invoices/${invoiceId}/approve-matching`, { motivo_aprobacion: motivo, user_id: userId }),
+    autoLinkReceipts: (companyId?: string) =>
+      client.post<any>(`/v1/companies/${companyId || COMPANY_ID}/purchase-invoices/auto-link-receipts`, {}),
     getInvoice3WayMatch: (invoiceId: string) =>
       client.get<any>(`/v1/purchases/invoices/${invoiceId}/3way-match`),
     listSupplierNcRequests: (params?: { estado?: string; supplier_id?: string }, companyId?: string) =>

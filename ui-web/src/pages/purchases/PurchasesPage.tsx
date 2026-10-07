@@ -40,6 +40,7 @@ import { DevolucionProveedorPrintModal } from "./DevolucionProveedorPrintModal"
 import { PdfViewerModal } from "../../components/PdfViewerModal"
 import { ConsignacionesTab } from "./ConsignacionesTab"
 import CurrencyInput from "../../components/CurrencyInput"
+import { ManualSupplierInvoiceModal } from "./ManualSupplierInvoiceModal"
 
 type MainTab = "asistente_ia" | "demandas_clientes" | "ordenes" | "recepciones" | "consignaciones" | "facturas_p2p" | "devoluciones" | "matching" | "proveedores" | "requisiciones" | "cotizaciones" | "presupuestos" | "reportes"
 
@@ -313,6 +314,7 @@ export default function PurchasesPage() {
   const [supplierNcRequests, setSupplierNcRequests] = useState<any[]>([])
   const [showMatchModal, setShowMatchModal] = useState(false)
   const [matchResult, setMatchResult] = useState<any>(null)
+  const [selectedMatchReceiptId, setSelectedMatchReceiptId] = useState("")
   const [performingMatch, setPerformingMatch] = useState(false)
   const [showResolveNcModal, setShowResolveNcModal] = useState(false)
   const [selectedNcRequestForResolve, setSelectedNcRequestForResolve] = useState<any>(null)
@@ -342,21 +344,6 @@ export default function PurchasesPage() {
 
   // Carga manual de Facturas de Compra (Nacional / Proveedores BR)
   const [showManualInvoiceModal, setShowManualInvoiceModal] = useState(false)
-  const [manualInvoiceForm, setManualInvoiceForm] = useState({
-    supplier_id: "",
-    numero_factura: "",
-    timbrado: "",
-    fecha_emision: new Date().toISOString().split("T")[0],
-    fecha_vencimiento: new Date().toISOString().split("T")[0],
-    condicion: "credito",
-    tipo_clasificacion: "mercaderia",
-    moneda: "PYG" as "PYG" | "BRL",
-    total_brl: "",
-    tipo_cambio: "1350",
-    total_pyg: "",
-    concepto: "",
-  })
-  const [savingManualInvoice, setSavingManualInvoice] = useState(false)
 
   // Adición extraordinaria en recepción
   const [extraordinarySearch, setExtraordinarySearch] = useState("")
@@ -1358,61 +1345,6 @@ export default function PurchasesPage() {
     }
   }
 
-  const handleSaveManualInvoice = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!manualInvoiceForm.supplier_id) {
-      toast.error("Proveedor Requerido", "Debe seleccionar un proveedor.")
-      return
-    }
-    if (!manualInvoiceForm.numero_factura.trim()) {
-      toast.error("Número de Factura", "Debe ingresar el número de comprobante o factura fiscal.")
-      return
-    }
-
-    const isBrl = manualInvoiceForm.moneda === "BRL"
-    const totalBrl = isBrl ? Number(manualInvoiceForm.total_brl) : 0
-    const tc = isBrl ? Number(manualInvoiceForm.tipo_cambio || 1) : 1
-    const totalPyg = isBrl ? Math.round(totalBrl * tc) : Number(manualInvoiceForm.total_pyg)
-
-    if (totalPyg <= 0) {
-      toast.error("Importe Inválido", "El monto de la factura debe ser mayor a 0.")
-      return
-    }
-
-    setSavingManualInvoice(true)
-    try {
-      await api.financial.invoices.create({
-        supplier_id: manualInvoiceForm.supplier_id,
-        numero_factura: manualInvoiceForm.numero_factura.trim(),
-        timbrado: manualInvoiceForm.timbrado.trim() || undefined,
-        fecha_emision: manualInvoiceForm.fecha_emision,
-        fecha_vencimiento: manualInvoiceForm.fecha_vencimiento,
-        condicion: manualInvoiceForm.condicion,
-        tipo_comprobante: manualInvoiceForm.tipo_clasificacion === "insumo_gasto" ? "gasto" : "factura",
-        moneda: isBrl ? "BRL" : "PYG",
-        tipo_cambio: tc,
-        total: totalPyg,
-        total_brl: isBrl ? totalBrl : undefined,
-        saldo_pendiente: totalPyg,
-        saldo_pendiente_brl: isBrl ? totalBrl : undefined,
-        concepto: manualInvoiceForm.concepto.trim() || undefined,
-      })
-
-      toast.success(
-        "Factura de Compra Registrada",
-        isBrl
-          ? `Factura en Reales registrada por R$ ${totalBrl.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} (Eq. ${formatPYG(totalPyg)}). Disponible para cancelar desde Bóveda.`
-          : `Factura registrada por ${formatPYG(totalPyg)}.`
-      )
-      setShowManualInvoiceModal(false)
-      fetchAll()
-    } catch (err: any) {
-      toast.error("Error al registrar factura", err.message || String(err))
-    } finally {
-      setSavingManualInvoice(false)
-    }
-  }
-
   const handleSearchExtraordinary = async (q: string) => {
     setExtraordinarySearch(q)
     if (!q.trim() || q.trim().length < 2) {
@@ -1754,6 +1686,62 @@ export default function PurchasesPage() {
     } catch (e: any) {
       toast.error("Error al conciliar 3-Way Match", e.message)
       setShowMatchModal(false)
+    } finally {
+      setPerformingMatch(false)
+    }
+  }
+
+  const [autoLinkingReceipts, setAutoLinkingReceipts] = useState(false)
+  const handleAutoLinkReceipts = async () => {
+    setAutoLinkingReceipts(true)
+    try {
+      const res = await api.purchases.autoLinkReceipts()
+      if (res && res.vinculadas > 0) {
+        toast.success(
+          "Vinculación Exitosa",
+          `Se vincularon ${res.vinculadas} facturas con sus recepciones en muelle coincidentes.`
+        )
+        fetchAll()
+      } else {
+        toast.info(
+          "Sin nuevas vinculaciones",
+          "Todas las facturas ya están vinculadas o no se encontraron nuevas coincidencias de comprobante."
+        )
+      }
+    } catch (err: any) {
+      toast.error("Error al auto-vincular recepciones", err.message || String(err))
+    } finally {
+      setAutoLinkingReceipts(false)
+    }
+  }
+
+  const [approvingMatch, setApprovingMatch] = useState(false)
+  const handleApproveMatch = async (invoiceId: string) => {
+    const motivo = window.prompt("Ingrese el motivo o justificación de aprobación:", "Aprobado por tolerancia operativa / ajuste autorizado")
+    if (!motivo) return
+    setApprovingMatch(true)
+    try {
+      await api.purchases.approveInvoiceMatching(invoiceId, motivo, user?.id)
+      toast.success("Factura Habilitada", "La factura ha sido aprobada y habilitada para pago en Tesorería.")
+      setShowMatchModal(false)
+      fetchAll()
+    } catch (err: any) {
+      toast.error("Error al aprobar matching", err.message || String(err))
+    } finally {
+      setApprovingMatch(false)
+    }
+  }
+
+  const handleAssociateReceiptInMatch = async (invoiceId: string, receiptId: string) => {
+    if (!receiptId) return
+    setPerformingMatch(true)
+    try {
+      const res = await api.purchases.associateInvoiceToReceipt(invoiceId, receiptId, user?.id)
+      setMatchResult(res)
+      toast.success("Recepción Vinculada", "Se asoció el remito de muelle y se recalculó el 3-way match.")
+      fetchAll()
+    } catch (err: any) {
+      toast.error("Error al vincular recepción", err.message || String(err))
     } finally {
       setPerformingMatch(false)
     }
@@ -4642,27 +4630,22 @@ export default function PurchasesPage() {
             <div className="flex flex-wrap items-center gap-2.5">
               <button
                 type="button"
-                onClick={() => {
-                  setManualInvoiceForm({
-                    supplier_id: suppliers[0]?.id || "",
-                    numero_factura: "",
-                    timbrado: "",
-                    fecha_emision: new Date().toISOString().split("T")[0],
-                    fecha_vencimiento: new Date().toISOString().split("T")[0],
-                    condicion: "credito",
-                    tipo_clasificacion: "mercaderia",
-                    moneda: "PYG",
-                    total_brl: "",
-                    tipo_cambio: "1350",
-                    total_pyg: "",
-                    concepto: "",
-                  })
-                  setShowManualInvoiceModal(true)
-                }}
+                onClick={() => setShowManualInvoiceModal(true)}
                 className="btn-primary text-xs px-3.5 py-2 flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-xs"
               >
                 <Plus className="w-3.5 h-3.5 text-white" />
                 <span>+ Cargar Factura (Nac. / BR)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleAutoLinkReceipts}
+                disabled={autoLinkingReceipts}
+                className="btn-secondary text-xs px-3.5 py-2 flex items-center gap-1.5 font-bold rounded-xl border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                title="Cruzar y vincular automáticamente facturas huérfanas con recepciones coincidentes de muelle"
+              >
+                <Link2 className={`w-3.5 h-3.5 text-indigo-500 ${autoLinkingReceipts ? "animate-spin" : ""}`} />
+                <span>{autoLinkingReceipts ? "Vinculando..." : "Auto-Vincular Muelle"}</span>
               </button>
 
               <div className="relative w-full sm:w-64">
@@ -7301,277 +7284,17 @@ export default function PurchasesPage() {
       )}
 
       {/* ──────────────────────────────────────────────────────────────────────────
-          MODAL: CARGAR FACTURA DE COMPRA MANUAL (NACIONAL / PROVEEDOR BR)
+          MODAL: CARGAR FACTURA DE COMPRA MANUAL (CANÓNICO CON IVA Y CRUCE DE MUELLE)
       ────────────────────────────────────────────────────────────────────────── */}
-      {showManualInvoiceModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-2xl w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
-              <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
-                <Receipt className="w-5 h-5 text-emerald-600" /> Cargar Factura de Compra (Nacional / Proveedor BR)
-              </h3>
-              <button
-                onClick={() => setShowManualInvoiceModal(false)}
-                className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveManualInvoice} className="space-y-4 text-xs">
-              {/* Selector de Proveedor */}
-              <div>
-                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase block mb-1">
-                  Proveedor *
-                </label>
-                <select
-                  required
-                  value={manualInvoiceForm.supplier_id}
-                  onChange={(e) => {
-                    const sId = e.target.value
-                    const sup = suppliers.find(s => s.id === sId)
-                    const isBr = Boolean((sup?.pais || "").toUpperCase().includes("BR") || (sup?.razon_social || "").toUpperCase().includes("BRASIL"))
-                    setManualInvoiceForm(prev => ({
-                      ...prev,
-                      supplier_id: sId,
-                      moneda: isBr ? "BRL" : prev.moneda,
-                    }))
-                  }}
-                  className="input-field w-full text-xs font-semibold"
-                >
-                  <option value="">-- Seleccione Proveedor --</option>
-                  {suppliers.map(s => (
-                    <option key={s.id} value={s.id}>
-                      {s.razon_social || s.nombre} {s.ruc ? `(RUC: ${s.ruc})` : ""} {s.pais ? `[${s.pais}]` : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Nro Factura, Timbrado y Condición */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="sm:col-span-1">
-                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
-                    N° Factura Fiscal *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ej: 001-001-0045892 o NF 1204"
-                    value={manualInvoiceForm.numero_factura}
-                    onChange={(e) => setManualInvoiceForm(prev => ({ ...prev, numero_factura: e.target.value }))}
-                    className="input-field w-full font-mono font-bold text-xs"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
-                    Timbrado (Opcional)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Ej: 18545636"
-                    value={manualInvoiceForm.timbrado}
-                    onChange={(e) => setManualInvoiceForm(prev => ({ ...prev, timbrado: e.target.value }))}
-                    className="input-field w-full font-mono text-xs"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
-                    Condición de Pago
-                  </label>
-                  <select
-                    value={manualInvoiceForm.condicion}
-                    onChange={(e) => setManualInvoiceForm(prev => ({ ...prev, condicion: e.target.value }))}
-                    className="input-field w-full text-xs font-semibold"
-                  >
-                    <option value="credito">Crédito (A Pagar)</option>
-                    <option value="contado">Contado</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
-                    Clasificación
-                  </label>
-                  <select
-                    value={manualInvoiceForm.tipo_clasificacion}
-                    onChange={(e) => setManualInvoiceForm(prev => ({ ...prev, tipo_clasificacion: e.target.value }))}
-                    className="input-field w-full text-xs font-semibold bg-amber-50/50 dark:bg-amber-950/20 border-amber-300 dark:border-amber-800"
-                  >
-                    <option value="mercaderia">📦 Mercadería (Reventa)</option>
-                    <option value="insumo_gasto">🛠️ Insumo / Gasto Operativo</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Fechas */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
-                    Fecha de Emisión *
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={manualInvoiceForm.fecha_emision}
-                    onChange={(e) => setManualInvoiceForm(prev => ({ ...prev, fecha_emision: e.target.value }))}
-                    className="input-field w-full text-xs font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
-                    Fecha de Vencimiento *
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={manualInvoiceForm.fecha_vencimiento}
-                    onChange={(e) => setManualInvoiceForm(prev => ({ ...prev, fecha_vencimiento: e.target.value }))}
-                    className="input-field w-full text-xs font-mono font-bold"
-                  />
-                </div>
-              </div>
-
-              {/* Moneda y Montos */}
-              <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-extrabold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
-                    Moneda de la Factura
-                  </label>
-                  <div className="flex items-center bg-slate-200 dark:bg-slate-800 p-0.5 rounded-lg text-xs font-bold">
-                    <button
-                      type="button"
-                      onClick={() => setManualInvoiceForm(prev => ({ ...prev, moneda: "PYG", total_brl: "" }))}
-                      className={`px-3 py-1 rounded transition ${
-                        manualInvoiceForm.moneda === "PYG"
-                          ? "bg-white dark:bg-slate-900 shadow-xs text-slate-900 dark:text-white"
-                          : "text-slate-500"
-                      }`}
-                    >
-                      🇵🇾 Guaraníes (₲)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setManualInvoiceForm(prev => ({ ...prev, moneda: "BRL" }))}
-                      className={`px-3 py-1 rounded transition ${
-                        manualInvoiceForm.moneda === "BRL"
-                          ? "bg-emerald-600 text-white shadow-xs"
-                          : "text-slate-500"
-                      }`}
-                    >
-                      🇧🇷 Reales (R$)
-                    </button>
-                  </div>
-                </div>
-
-                {manualInvoiceForm.moneda === "BRL" ? (
-                  <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div>
-                        <label className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 block mb-1">
-                          Monto Total Reales (R$) *
-                        </label>
-                        <CurrencyInput
-                          currency="BRL"
-                          required
-                          placeholder="0,00"
-                          value={manualInvoiceForm.total_brl}
-                          onChangeValue={(numVal) => {
-                            const brl = numVal
-                            const tc = Number(manualInvoiceForm.tipo_cambio || 1350)
-                            const pyg = Math.round(brl * tc)
-                            setManualInvoiceForm(prev => ({ ...prev, total_brl: String(brl), total_pyg: String(pyg) }))
-                          }}
-                          className="input-field w-full text-xs font-mono font-bold text-right border-emerald-400 text-emerald-600 dark:text-emerald-400"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
-                          Cotización R$ (₲ / R$) *
-                        </label>
-                        <CurrencyInput
-                          currency="PYG"
-                          required
-                          value={manualInvoiceForm.tipo_cambio}
-                          onChangeValue={(tc) => {
-                            const validTc = tc || 1
-                            const pyg = Math.round(Number(manualInvoiceForm.total_brl || 0) * validTc)
-                            setManualInvoiceForm(prev => ({ ...prev, tipo_cambio: String(validTc), total_pyg: String(pyg) }))
-                          }}
-                          className="input-field w-full text-xs font-mono font-bold text-right"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
-                          Eq. Fiscal en Guaraníes (₲)
-                        </label>
-                        <div className="input-field w-full text-xs font-mono font-black text-right bg-white dark:bg-slate-800 flex items-center justify-end px-3">
-                          {formatPYG(Math.round((Number(manualInvoiceForm.total_brl) || 0) * (Number(manualInvoiceForm.tipo_cambio) || 1)))}
-                        </div>
-                      </div>
-                    </div>
-
-                    <p className="text-[10px] text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 p-2 rounded-lg border border-emerald-200 dark:border-emerald-800">
-                      ℹ️ La factura quedará registrada con su saldo en Reales (R$) para poder liquidarse directamente desde el efectivo en R$ de Bóveda Central o amortizarse por Orden de Pago.
-                    </p>
-                  </div>
-                ) : (
-                  <div>
-                    <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
-                      Monto Total en Guaraníes (₲) *
-                    </label>
-                    <CurrencyInput
-                      currency="PYG"
-                      required
-                      placeholder="Ej: 1.500.000"
-                      value={manualInvoiceForm.total_pyg}
-                      onChangeValue={(val) => setManualInvoiceForm(prev => ({ ...prev, total_pyg: String(val) }))}
-                      className="input-field w-full text-xs font-mono font-bold text-right"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Concepto */}
-              <div>
-                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
-                  Concepto / Observaciones
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ej: Compra de frutas y verduras frescas de Foz / CDE"
-                  value={manualInvoiceForm.concepto}
-                  onChange={(e) => setManualInvoiceForm(prev => ({ ...prev, concepto: e.target.value }))}
-                  className="input-field w-full text-xs"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-700">
-                <button
-                  type="button"
-                  onClick={() => setShowManualInvoiceModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingManualInvoice}
-                  className="btn-primary text-xs flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
-                >
-                  {savingManualInvoice ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                  {savingManualInvoice ? "Guardando..." : "Guardar Factura en Cartera"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <ManualSupplierInvoiceModal
+        isOpen={showManualInvoiceModal}
+        onClose={() => setShowManualInvoiceModal(false)}
+        onSuccess={fetchAll}
+        companyId="00000000-0000-0000-0000-000000000001"
+        suppliers={suppliers}
+        purchaseOrders={orders}
+        receipts={receipts}
+      />
 
       {/* ──────────────────────────────────────────────────────────────────────────
           MODAL: NUEVA REQUISICIÓN INTERNA
@@ -8415,10 +8138,63 @@ export default function PurchasesPage() {
                     </p>
                   </div>
                 )}
+
+                {/* Si la factura no tiene recepción asociada, permitir asociar una recepción de muelle manualmente */}
+                {!matchResult.receipt_id && (
+                  <div className="p-4 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Link2 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                      <span className="text-xs font-bold text-blue-900 dark:text-blue-200">
+                        Vincular Remito de Muelle Coincidente
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-blue-700 dark:text-blue-300">
+                      Esta factura no tiene una recepción asociada directa. Seleccione una recepción del muelle para cotejar cantidades y costos:
+                    </p>
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      <select
+                        value={selectedMatchReceiptId}
+                        onChange={(e) => setSelectedMatchReceiptId(e.target.value)}
+                        className="input-field text-xs flex-1"
+                      >
+                        <option value="">-- Seleccionar Recepción de Muelle --</option>
+                        {receipts.slice(0, 50).map((rc) => (
+                          <option key={rc.id} value={rc.id}>
+                            {rc.numero} • {rc.proveedor_ref ? `Ref: ${rc.proveedor_ref}` : "Sin ref"} • {rc.supplier?.razon_social || "Proveedor"} ({formatDate(rc.created_at)})
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        disabled={!selectedMatchReceiptId || performingMatch}
+                        onClick={() => handleAssociateReceiptInMatch(matchResult.invoice_id, selectedMatchReceiptId)}
+                        className="btn-primary text-xs px-4 py-2 font-bold whitespace-nowrap bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center gap-1.5"
+                      >
+                        {performingMatch ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
+                        <span>Vincular y Recalcular</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : null}
 
-            <div className="flex justify-end pt-3 border-t border-slate-100 dark:border-slate-700">
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-700">
+              <div>
+                {matchResult?.bloqueada_para_pago && (
+                  <button
+                    type="button"
+                    onClick={() => handleApproveMatch(matchResult.invoice_id)}
+                    disabled={approvingMatch}
+                    className="btn-secondary text-xs px-4 py-2 flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl shadow-xs"
+                    title="Aprobar bajo tolerancia operativa o justificación comercial para desbloquear el pago en Tesorería"
+                  >
+                    {approvingMatch ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Unlock className="w-3.5 h-3.5" />}
+                    <span>Aprobar Tolerancia / Habilitar Pago</span>
+                  </button>
+                )}
+              </div>
+
               <button
                 type="button"
                 onClick={() => setShowMatchModal(false)}

@@ -35,6 +35,7 @@ class SupplierInvoice(Base):
     tipo_comprobante = Column(String(20), default="factura")
     estado = Column(String(50), nullable=False, default="pendiente")
     concepto = Column(Text)
+    notas = Column(Text)
     bloqueada_para_pago = Column(Boolean, default=False)
     motivo_bloqueo = Column(Text)
     monto_retenido_nc = Column(Numeric(15, 0), default=0)

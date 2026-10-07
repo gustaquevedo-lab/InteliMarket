@@ -228,6 +228,7 @@ export function formatInputDecimal(raw: string | number | null | undefined): { f
   return { formatted, numValue: isNaN(numVal) ? 0 : numVal }
 }
 
+
 /**
  * Parsea un string decimal (en formato "1.250,50" o "1250.5") a number
  */
@@ -250,4 +251,55 @@ export function parseInputDecimal(raw: string | number | null | undefined): numb
   const val = parseFloat(str.replace(/,/g, ""))
   return isNaN(val) ? 0 : val
 }
+
+/**
+ * Normaliza un número de comprobante fiscal o referencia de proveedor (Paraguay).
+ * Convierte formatos numéricos continuos (ej: '0010010008221') o parciales ('8221')
+ * al formato canónico DNIT: '001-001-0008221' (13 dígitos: 3-3-7).
+ */
+export function normalizeInvoiceNumber(raw: string | null | undefined): string {
+  if (!raw) return ""
+  const trimmed = raw.trim()
+  if (!trimmed) return ""
+  // Si ya tiene formato 001-001-0008221
+  const m = trimmed.match(/^(\d{1,3})[-/](\d{1,3})[-/](\d{1,7})$/)
+  if (m) {
+    return `${m[1].padStart(3, "0")}-${m[2].padStart(3, "0")}-${m[3].padStart(7, "0")}`
+  }
+  const digits = trimmed.replace(/\D/g, "")
+  if (!digits) return trimmed // Devolver original si no tiene dígitos
+  if (digits.length === 13) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`
+  }
+  if (digits.length <= 7) {
+    return `001-001-${digits.padStart(7, "0")}`
+  }
+  if (digits.length < 13) {
+    const padded = digits.padStart(13, "0")
+    return `${padded.slice(0, 3)}-${padded.slice(3, 6)}-${padded.slice(6)}`
+  }
+  const d = digits.slice(-13)
+  return `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`
+}
+
+/**
+ * Compara tolerante si dos números de factura / referencias corresponden al mismo documento.
+ */
+export function matchInvoiceNumbers(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false
+  if (a.trim().toLowerCase() === b.trim().toLowerCase()) return true
+  const normA = normalizeInvoiceNumber(a)
+  const normB = normalizeInvoiceNumber(b)
+  if (normA && normB && normA === normB) return true
+  const digA = a.replace(/\D/g, "")
+  const digB = b.replace(/\D/g, "")
+  if (digA && digB) {
+    if (digA === digB) return true
+    const seqA = digA.length >= 7 ? digA.slice(-7) : digA.padStart(7, "0")
+    const seqB = digB.length >= 7 ? digB.slice(-7) : digB.padStart(7, "0")
+    if (seqA === seqB && digA.length >= 3 && digB.length >= 3) return true
+  }
+  return false
+}
+
 
