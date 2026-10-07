@@ -6,6 +6,7 @@ from sqlalchemy.orm import selectinload
 from datetime import datetime, timezone, date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import uuid
+from uuid import UUID
 import math
 import logging
 
@@ -3540,7 +3541,7 @@ async def create_consignment_settlement(
             company_id=data.company_id,
             supplier_id=data.supplier_id,
             numero_factura=data.numero_factura_proveedor,
-            timbrado=data.timbrado_factura or "18545636",
+            timbrado=data.timbrado_factura or "",
             fecha_emision=data.fecha_hasta,
             fecha_recepcion=func.current_date(),
             fecha_vencimiento=data.fecha_vencimiento_factura or data.fecha_hasta,
