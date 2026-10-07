@@ -23,6 +23,12 @@ jobs:
     name: Deploy to ${{ inputs.environment || 'staging' }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment || 'staging' }}
+    env:
+      # El contexto `secrets` NO se puede usar directamente en un `if:` de
+      # step: GitHub invalida el workflow completo y registra una corrida
+      # fallida ("No jobs were run") en cada push a cualquier rama. Se pasa
+      # por una variable de entorno del job, donde si esta permitido.
+      HAS_DEPLOY_HOST: ${{ secrets.DEPLOY_HOST != '' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -85,7 +91,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Deploy via SSH
-        if: ${{ secrets.DEPLOY_HOST }}
+        if: ${{ env.HAS_DEPLOY_HOST == 'true' }}
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DEPLOY_HOST }}
