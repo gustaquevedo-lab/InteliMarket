@@ -6,12 +6,12 @@ SaaS ERP verticalizable para comercios y distribuidores en Paraguay. Multi-moned
 
 - **Frontend:** React + Vite + Tailwind CSS + lucide-react
 - **Backend:** Python + FastAPI + PostgreSQL
-- **Infra:** Docker Compose, Redis (cache)
+- **Infra:** Redis (cache)
 - **Multi-tenancy:** Schema per tenant
 
 ## Quick Start
 
-### Local (sin Docker)
+### Local
 
 ```bash
 # Backend
@@ -23,12 +23,6 @@ uvicorn api.src.main:app --reload
 cd ui-web
 npm install
 npm run dev
-```
-
-### Docker
-
-```bash
-docker compose up -d
 ```
 
 - API: http://localhost:8000
@@ -90,8 +84,7 @@ docker compose up -d
 │   └── context/       # Auth y Theme
 ├── db/
 │   └── schema.sql     # Schema maestro
-├── docs/              # Documentación técnica
-└── docker-compose.yml
+└── docs/              # Documentación técnica
 ```
 
 ## License
