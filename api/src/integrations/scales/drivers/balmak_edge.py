@@ -117,12 +117,31 @@ class BalmakEdgeDriver(ScaleDriver):
         self._weight_driver = ToledoP03Driver(config)
 
     async def _open(self):
+        """Conecta con reintentos: la balanza (equipo embebido, una sola sesion a la vez)
+        rechaza con `Connection refused` mientras cierra la sesion anterior."""
         if not self.config.host:
             raise RuntimeError("Balanza sin host configurado")
-        return await asyncio.wait_for(
-            asyncio.open_connection(self.config.host, self.config.puerto_tcp),
-            timeout=self.config.timeout,
-        )
+        ultimo = None
+        for intento in range(4):
+            try:
+                return await asyncio.wait_for(
+                    asyncio.open_connection(self.config.host, self.config.puerto_tcp),
+                    timeout=self.config.timeout,
+                )
+            except (ConnectionRefusedError, asyncio.TimeoutError) as e:
+                ultimo = e
+                await asyncio.sleep(2 + intento * 2)
+        raise ultimo
+
+    @staticmethod
+    async def _close(writer):
+        """Cierre ordenado: esperar el cierre completo antes de que alguien abra otra sesion."""
+        writer.close()
+        try:
+            await asyncio.wait_for(writer.wait_closed(), timeout=3)
+        except Exception:  # noqa: BLE001
+            pass
+        await asyncio.sleep(0.5)
 
     async def connect(self) -> bool:
         status = await self.test_connection()
@@ -153,7 +172,7 @@ class BalmakEdgeDriver(ScaleDriver):
                 writer.write(b"UPL\tEND\t\r\n")
                 await writer.drain()
             finally:
-                writer.close()
+                await self._close(writer)
             latencia_ms = int((time.monotonic() - start) * 1000)
 
             text = raw.decode("utf-8", errors="replace")
@@ -215,9 +234,9 @@ class BalmakEdgeDriver(ScaleDriver):
             await self._sync_time(reader, writer)
             writer.write(payload)
             await writer.drain()
-            ack = await asyncio.wait_for(reader.readuntil(b"END\tPLU"), timeout=max(self.config.timeout, 15))
+            ack = await asyncio.wait_for(reader.readuntil(b"END\tPLU"), timeout=max(self.config.timeout, 20 + len(records) * 0.1))
         finally:
-            writer.close()
+            await self._close(writer)
 
         ack_text = ack.decode("utf-8", errors="replace")
         if "DWL\tPLU" not in ack_text:

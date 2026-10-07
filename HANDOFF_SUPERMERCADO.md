@@ -9,6 +9,26 @@
 
 ---
 
+## ⚖️ SESIÓN 2026-10-07 — Balanzas: "hay que transmitir a mano cada vez" -> reconciliador con reintento
+
+Reclamo del supermercado: los cambios de precio no llegan solos a la balanza. **La conexión funciona** (INF OK a las 3), pero el envío de los hooks (edición de producto, promos, markdown, Ñemuha) es *dispara-y-olvida*: si falla solo queda un `logger.warning` y nunca se reintenta. Evidencia: de noche (00-07 y 21-23 h) fallan el **100%** de los envíos (balanzas apagadas; ej. promo que revierte a las 00:01/00:05 nunca llegaba y la mañana siguiente la balanza seguía con precio de oferta), y de día hubo ráfagas de `Connection refused` (55 en la hora de las 17).
+
+**Causas encontradas**
+1. Sin reintento ni estado: nada reparaba un envío fallido.
+2. La balanza (equipo embebido, una sesión a la vez) **rechaza conexiones nuevas** mientras cierra la anterior. El driver hacía `writer.close()` sin esperar y abría una conexión por producto (el job de promos cada 30 min dispara cientos) -> tormenta de conexiones.
+3. Datos: 3 PLU ambiguos con 2 productos activos cada uno (553 LANCHE KG / UPISA PATE DE HIGADO KG; 347 PIÑA EN RODAJAS / MANDIOCA S/ CASCARA; 450 PASTA FROLA / PASTAFROLA) -> el reconciliador los **omite** y avisa en el log; el cliente debe corregirlos.
+
+**Solución**
+- `scripts/reconcile_balanzas.py` (cron cada 5 min, `flock`): por balanza compara `precio_venta`/`nombre` del sistema contra lo último transmitido con éxito (tablas nuevas `scale_plu_state`, `scale_sync_status`; migración `20261007180000`, public y sandbox) y empuja solo la diferencia en **un bloque por conexión**. Balanza offline = no pasa nada, reintenta a los 5 min; al volver hace carga completa. Carga completa diaria 08:20 (por si SDL.exe pisa al arrancar). Flags: `--dry-run`, `--full`, `--scale TEXTO`.
+- `balmak_edge.py`: `_open()` reintenta (4 intentos con espera), `_close()` cierra ordenado esperando el cierre, timeout del ack proporcional al tamaño del bloque.
+- Estado inicial: carga completa de 390 PLU a cada una de las 3 balanzas (confirmada con ack); segunda corrida = "al día"; probado el diff borrando el estado del PLU 7 -> reenvió exactamente 1.
+
+**Pendiente / ojo**
+- El API en ejecución todavía tiene el driver viejo hasta el próximo reinicio (no se reinició producción en horario de cajas). Los hooks siguen activos pero ya son redundantes: el reconciliador converge igual. Tras reiniciar, evaluar bajar el job de promos de 30 min (genera ráfagas de conexiones).
+- Si el personal sigue transmitiendo desde SDL.exe (PC de Compras) con precios viejos de `SDL.mdb`, pisa las balanzas; se corrige solo a las 08:20 o en la próxima carga completa. Conviene que dejen de usar SDL para transmitir.
+- Log: `/tmp/reconcile_balanzas.log`.
+
+
 ## ⚖️ SESIÓN 2026-09-11 — Promociones de precio fijo no llegaban a la balanza (trigger SQL invisible para Python)
 
 Pedido del cliente: cualquier cambio de precio de venta confirmado, si el producto es pesable (tiene `plu_balanza`), se transmite solo a la balanza. Ya estaba cubierto para edición manual de producto, markdown dinámico y el cron de Ñemuha (ver sesión 27-ago). El cliente reportó un caso real que no andaba: creó la promo "PROMOCION COSTILLA DE PRIMERA" (precio fijo Gs 27.977), el precio ya se veía en InteliMarket, pero la balanza de Carnicería seguía mostrando Gs 34.777.
