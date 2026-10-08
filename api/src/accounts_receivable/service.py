@@ -2,6 +2,7 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 from datetime import datetime, timezone, date, timedelta
+from zoneinfo import ZoneInfo
 import uuid
 import json
 
@@ -15,6 +16,7 @@ from api.src.integrated_finance.auto_posting import (
     ACC_IVA_CREDITO,
     ACC_DESCUENTOS_OTORGADOS,
     ACC_INGRESOS_ADMINISTRATIVOS,
+    ACC_GASTOS_VARIOS,
 )
 
 logger = logging.getLogger(__name__)
@@ -366,25 +368,39 @@ async def _post_ar_payment_accounting(
     tipo_diferencia: str = "exacto",
     diferencia_monto: Decimal = Decimal("0"),
     monto_facturas_canceladas: Decimal | None = None,
+    forma_pago: str = "efectivo",
 ) -> None:
-    """Genera el asiento contable de partida doble para el cobro de CxC:
-    - DEBE: Caja y Bancos (1.1.01) por el dinero neto recibido (monto_total - retención)
-    - DEBE: IVA Crédito Fiscal (1.1.05) por la retención soportada (comprobante Tesakã)
-    - DEBE: Descuentos Otorgados (5.1.02) si tipo_diferencia == 'descuento' (redondeo a favor del cliente)
-    - HABER: Cuentas por Cobrar Clientes (1.1.02) por el total cancelado de la deuda (monto_facturas_canceladas)
-    - HABER: Ingresos Administrativos / Cobranza (4.2.01) si tipo_diferencia == 'gastos_administrativos' (redondeo a favor del comercio)
+    """Genera el asiento contable de partida doble para el cobro o compensación de CxC:
+    - Si forma_pago == 'compensacion_interna':
+        DEBE: Gastos Operativos (6.1.07)
+        HABER: Cuentas por Cobrar Clientes (1.1.02)
+    - En cobros normales:
+        DEBE: Caja y Bancos (1.1.01) por el dinero neto recibido (monto_total - retención)
+        DEBE: IVA Crédito Fiscal (1.1.05) por la retención soportada (comprobante Tesakã)
+        DEBE: Descuentos Otorgados (5.1.02) si tipo_diferencia == 'descuento' (redondeo a favor del cliente)
+        HABER: Cuentas por Cobrar Clientes (1.1.02) por el total cancelado de la deuda (monto_facturas_canceladas)
+        HABER: Ingresos Administrativos / Cobranza (4.2.01) si tipo_diferencia == 'gastos_administrativos'
     Garantiza balance exacto (Total DEBE == Total HABER) y registro auditable."""
     try:
         engine = PostingEngine(db, company_id)
         await engine.ensure_accounts()
 
-        monto_entregado_q = Decimal(str(monto_total)).quantize(Decimal("1"))
-        monto_ret_q = Decimal(str(monto_retencion)).quantize(Decimal("1")) if aplica_retencion else Decimal("0")
-        monto_neto_caja = max(Decimal("0"), monto_entregado_q - monto_ret_q)
-
         monto_facturas_q = Decimal(
             str(monto_facturas_canceladas if monto_facturas_canceladas is not None else monto_total)
         ).quantize(Decimal("1"))
+
+        if forma_pago == "compensacion_interna":
+            lines_comp: list[tuple[str, str, Decimal]] = []
+            if monto_facturas_q > 0:
+                lines_comp.append((ACC_GASTOS_VARIOS, "debe", monto_facturas_q))
+                lines_comp.append((ACC_CXC, "haber", monto_facturas_q))
+            concepto_comp = f"Compensación Consumo Interno Recibo #{numero_recibo} - {customer_name}"
+            await engine.post(fecha, concepto_comp, "receivable_payment", payment_id, lines_comp)
+            return
+
+        monto_entregado_q = Decimal(str(monto_total)).quantize(Decimal("1"))
+        monto_ret_q = Decimal(str(monto_retencion)).quantize(Decimal("1")) if aplica_retencion else Decimal("0")
+        monto_neto_caja = max(Decimal("0"), monto_entregado_q - monto_ret_q)
         monto_dif_q = Decimal(str(diferencia_monto or 0)).quantize(Decimal("1"))
 
         lines: list[tuple[str, str, Decimal]] = []
@@ -822,6 +838,7 @@ async def create_receivable_payment(db: AsyncSession, company_id: str, data, reg
         tipo_diferencia=tipo_diferencia,
         diferencia_monto=diferencia_monto,
         monto_facturas_canceladas=monto_facturas,
+        forma_pago=data.forma_pago or "efectivo",
     )
 
     await db.flush()
@@ -1051,28 +1068,40 @@ async def apply_global_payment(
     monto_cheque = Decimal(str(getattr(data, "monto_cheque", 0) or 0))
     monto_transf = Decimal(str(getattr(data, "monto_transferencia", 0) or 0))
 
-    if monto_pyg > 0 or monto_brl > 0 or monto_usd > 0 or monto_cheque > 0 or monto_transf > 0:
-        monto_entregado_gs = (monto_pyg + (monto_brl * tasa_brl) + (monto_usd * tasa_usd) + monto_cheque + monto_transf).quantize(Decimal("1"))
-    else:
-        monto_entregado_gs = Decimal(str(data.monto_total)).quantize(Decimal("1"))
+    is_compensacion = getattr(data, "forma_pago", None) == "compensacion_interna"
+    categoria_nombre = None
 
-    monto_facturas = Decimal(str(getattr(data, "monto_facturas_canceladas", None) or data.monto_total)).quantize(Decimal("1"))
-
-    if monto_facturas > total_deuda:
-        return {
-            "error": f"El monto a cancelar de facturas (Gs. {int(monto_facturas):,}) excede el total de saldo pendiente disponible (Gs. {int(total_deuda):,})."
-        }
-
-    dif = monto_entregado_gs - monto_facturas
-    if dif < Decimal("0"):
-        tipo_diferencia = "descuento"
-        diferencia_monto = abs(dif)
-    elif dif > Decimal("0"):
-        tipo_diferencia = "gastos_administrativos"
-        diferencia_monto = dif
-    else:
+    if is_compensacion:
+        if not getattr(data, "category_id", None):
+            return {"error": "Debe seleccionar un rubro/categoría de gasto para la compensación de consumo interno."}
+        cat_check = await db.execute(
+            text("SELECT id, nombre FROM expense_categories WHERE id = :cid AND company_id = :comp_id"),
+            {"cid": str(data.category_id), "comp_id": company_id}
+        )
+        cat_row = cat_check.first()
+        if not cat_row:
+            return {"error": "El rubro de gasto seleccionado no existe o no pertenece a la empresa."}
+        categoria_nombre = cat_row.nombre
+        monto_entregado_gs = monto_facturas
+        dif = Decimal("0")
         tipo_diferencia = "exacto"
         diferencia_monto = Decimal("0")
+    else:
+        if monto_pyg > 0 or monto_brl > 0 or monto_usd > 0 or monto_cheque > 0 or monto_transf > 0:
+            monto_entregado_gs = (monto_pyg + (monto_brl * tasa_brl) + (monto_usd * tasa_usd) + monto_cheque + monto_transf).quantize(Decimal("1"))
+        else:
+            monto_entregado_gs = Decimal(str(data.monto_total)).quantize(Decimal("1"))
+
+        dif = monto_entregado_gs - monto_facturas
+        if dif < Decimal("0"):
+            tipo_diferencia = "descuento"
+            diferencia_monto = abs(dif)
+        elif dif > Decimal("0"):
+            tipo_diferencia = "gastos_administrativos"
+            diferencia_monto = dif
+        else:
+            tipo_diferencia = "exacto"
+            diferencia_monto = Decimal("0")
 
     # Obtener datos del cliente para el rastro y el comprobante
     cust_res = await db.execute(
@@ -1084,7 +1113,8 @@ async def apply_global_payment(
     customer_ruc = (cust_row.ruc or "—") if cust_row else "—"
 
     payment_id = uuid.uuid4()
-    fecha_pago = data.fecha or date.today()
+    asuncion_today = datetime.now(ZoneInfo("America/Asuncion")).date()
+    fecha_pago = data.fecha or asuncion_today
     p_date_str = fecha_pago.strftime("%Y%m%d")
     seq_res = await db.execute(
         text("SELECT count(*) FROM receivable_payments WHERE company_id = :cid AND fecha = :fec"),
@@ -1223,18 +1253,108 @@ async def apply_global_payment(
             {"monto": float(row.saldo_utilizado), "customer_id": str(data.customer_id)},
         )
 
-    treasury_res = await _record_treasury_ingress(
-        db=db,
-        company_id=company_id,
-        payment_id=payment_id,
-        customer_id=str(data.customer_id),
-        customer_name=customer_name,
-        customer_ruc=customer_ruc,
-        monto=monto_efectivo_recibido,
-        data=data,
-        registrado_por=registrado_por,
-        numero_recibo=numero_recibo,
-    )
+    if is_compensacion:
+        treasury_res = {"vault_entry_id": None, "bank_tx_id": None, "cheque_id": None}
+        await db.execute(
+            text("UPDATE receivable_payments SET destino_fondos = 'consumo_interno' WHERE id = :pid"),
+            {"pid": payment_id}
+        )
+
+        cat_id_str = str(data.category_id)
+        cost_center_id_str = str(data.cost_center_id) if getattr(data, "cost_center_id", None) else None
+
+        for app in aplicados:
+            doc_id = app["accounts_receivable_id"]
+            monto_aplicado = Decimal(str(app["monto_aplicado"]))
+            if monto_aplicado <= Decimal("0"):
+                continue
+
+            sale_info = await db.execute(
+                text("""
+                    SELECT s.branch_id, s.timbrado, s.base_gravada_10, s.base_gravada_5,
+                           s.base_exenta, s.iva_10, s.iva_5, s.total
+                    FROM accounts_receivable ar
+                    LEFT JOIN sales s ON s.id = ar.sale_id
+                    WHERE ar.id = :arid
+                """),
+                {"arid": doc_id},
+            )
+            srow = sale_info.first()
+
+            branch_id = srow.branch_id if (srow and srow.branch_id) else None
+            timbrado = (srow.timbrado if (srow and srow.timbrado) else None) or "18545636"
+
+            tot_sale = Decimal(str(srow.total)) if (srow and srow.total) else monto_aplicado
+            if srow and tot_sale > 0 and (srow.iva_10 > 0 or srow.iva_5 > 0 or srow.base_exenta > 0):
+                factor = min(Decimal("1"), monto_aplicado / tot_sale)
+                grav_10 = (Decimal(str(srow.base_gravada_10 or 0)) * factor).quantize(Decimal("1"))
+                grav_5 = (Decimal(str(srow.base_gravada_5 or 0)) * factor).quantize(Decimal("1"))
+                exen = (Decimal(str(srow.base_exenta or 0)) * factor).quantize(Decimal("1"))
+                iva_10 = (Decimal(str(srow.iva_10 or 0)) * factor).quantize(Decimal("1"))
+                iva_5 = (Decimal(str(srow.iva_5 or 0)) * factor).quantize(Decimal("1"))
+            else:
+                iva_10 = (monto_aplicado / Decimal("11")).quantize(Decimal("1"))
+                grav_10 = monto_aplicado - iva_10
+                grav_5 = Decimal("0")
+                iva_5 = Decimal("0")
+                exen = Decimal("0")
+
+            exp_id = uuid.uuid4()
+            obs_nota = f"Recibo AR #{numero_recibo}. {data.observaciones or ''}".strip()
+            desc_gasto = f"Consumo Interno - Factura {app['numero_documento']} ({customer_name})"
+
+            await db.execute(
+                text("""
+                    INSERT INTO expenses (
+                        id, company_id, branch_id, category_id, cost_center_id,
+                        monto, descripcion, proveedor, ruc, timbrado, numero_factura,
+                        tipo_comprobante, gravado_10, gravado_5, exentas, iva_10, iva_5,
+                        tipo_pago, fecha_gasto, fecha_pago, estado, forma_pago_resumen,
+                        notas, registrado_por, pagado_por, pagado_at, created_at
+                    ) VALUES (
+                        :id, :company_id, :branch_id, :category_id, :cost_center_id,
+                        :monto, :descripcion, :proveedor, :ruc, :timbrado, :numero_factura,
+                        'FACTURA_CONTADO', :gravado_10, :gravado_5, :exentas, :iva_10, :iva_5,
+                        'compensacion_interna', :fecha_gasto, :fecha_pago, 'pagado', 'COMPENSACION_CONSUMO_INTERNO',
+                        :notas, :user_id, :user_id, NOW(), NOW()
+                    )
+                """),
+                {
+                    "id": exp_id,
+                    "company_id": company_id,
+                    "branch_id": str(branch_id) if branch_id else None,
+                    "category_id": cat_id_str,
+                    "cost_center_id": cost_center_id_str,
+                    "monto": float(monto_aplicado),
+                    "descripcion": desc_gasto,
+                    "proveedor": customer_name,
+                    "ruc": customer_ruc,
+                    "timbrado": timbrado,
+                    "numero_factura": app["numero_documento"],
+                    "gravado_10": float(grav_10),
+                    "gravado_5": float(grav_5),
+                    "exentas": float(exen),
+                    "iva_10": float(iva_10),
+                    "iva_5": float(iva_5),
+                    "fecha_gasto": fecha_pago,
+                    "fecha_pago": fecha_pago,
+                    "notas": obs_nota,
+                    "user_id": registrado_por,
+                },
+            )
+    else:
+        treasury_res = await _record_treasury_ingress(
+            db=db,
+            company_id=company_id,
+            payment_id=payment_id,
+            customer_id=str(data.customer_id),
+            customer_name=customer_name,
+            customer_ruc=customer_ruc,
+            monto=monto_efectivo_recibido,
+            data=data,
+            registrado_por=registrado_por,
+            numero_recibo=numero_recibo,
+        )
 
     await _post_ar_payment_accounting(
         db=db,
@@ -1250,6 +1370,7 @@ async def apply_global_payment(
         tipo_diferencia=tipo_diferencia,
         diferencia_monto=diferencia_monto,
         monto_facturas_canceladas=monto_facturas,
+        forma_pago=data.forma_pago or "efectivo",
     )
 
     await db.flush()
@@ -1269,6 +1390,50 @@ async def apply_global_payment(
         "allocations": aplicados,
         "treasury": treasury_res,
     }
+
+
+async def compensate_internal_consumption(
+    db: AsyncSession,
+    company_id: str,
+    data,
+    registrado_por: str | None,
+) -> dict:
+    """Compensa facturas por cobrar por consumo interno de la empresa,
+    cancelándolas e imputando el importe directamente al rubro de gastos."""
+    ids = [str(i) for i in data.accounts_receivable_ids]
+    q = await db.execute(
+        text("""
+            SELECT id, saldo_pendiente
+            FROM accounts_receivable
+            WHERE id = ANY(:ids) AND company_id = :company_id AND customer_id = :customer_id AND estado = 'pendiente' AND saldo_pendiente > 0
+        """),
+        {"ids": ids, "company_id": company_id, "customer_id": str(data.customer_id)},
+    )
+    rows = q.fetchall()
+    if not rows:
+        return {"error": "No se encontraron facturas pendientes válidas para compensar en el cliente seleccionado."}
+
+    total_compensar = sum(Decimal(str(r.saldo_pendiente)) for r in rows)
+    if total_compensar <= Decimal("0"):
+        return {"error": "El total a compensar de las facturas seleccionadas es 0."}
+
+    asuncion_today = datetime.now(ZoneInfo("America/Asuncion")).date()
+
+    from api.src.accounts_receivable.schemas import ReceivableGlobalPaymentCreate
+
+    global_data = ReceivableGlobalPaymentCreate(
+        customer_id=data.customer_id,
+        monto_total=total_compensar,
+        monto_facturas_canceladas=total_compensar,
+        forma_pago="compensacion_interna",
+        destino_fondos="consumo_interno",
+        fecha=data.fecha or asuncion_today,
+        observaciones=data.observaciones or "Compensación Consumo Interno",
+        category_id=data.category_id,
+        cost_center_id=data.cost_center_id,
+        accounts_receivable_ids=data.accounts_receivable_ids,
+    )
+    return await apply_global_payment(db, company_id, global_data, registrado_por)
 
 
 # ── Datos para Reporte Detallado de Deuda y Recibo A6 ─────────────────

@@ -1870,6 +1870,79 @@ export interface Supplier360Response {
   }
 }
 
+export interface SupplierStatementMovement {
+  id: string
+  entidad_id: string
+  fecha: string
+  fecha_str: string
+  fecha_vencimiento_str?: string
+  tipo: "FACTURA" | "NOTA_CREDITO" | "PAGO"
+  tipo_badge: "FAC" | "NC" | "PAGO"
+  tipo_label: string
+  comprobante: string
+  timbrado?: string
+  concepto: string
+  debito: number
+  credito: number
+  saldo_progresivo: number
+  saldo_documento: number
+  estado: string
+  factura_relacionada?: string
+  punteado?: boolean
+}
+
+export interface SupplierAccountStatementResponse {
+  supplier: {
+    id: string
+    razon_social: string
+    ruc: string
+    ci?: string
+    telefono?: string
+    email?: string
+    direccion?: string
+    banco?: string
+    cuenta_bancaria?: string
+    plazo_pago_dias: number
+    moneda_default: string
+  }
+  periodo: {
+    fecha_desde: string
+    fecha_hasta: string
+    solo_pendientes: boolean
+    fecha_emision_reporte: string
+  }
+  saldo_anterior: number
+  movimientos: SupplierStatementMovement[]
+  totales: {
+    total_facturas_debito: number
+    total_nc_credito: number
+    total_pagos_credito: number
+    total_creditos: number
+    saldo_deudor_final: number
+    cheques_diferidos_transito_monto: number
+    cheques_diferidos_count: number
+    saldo_neto_con_cheques: number
+  }
+  cheques_diferidos: Array<{
+    id: string
+    numero: string
+    banco_emisor: string
+    monto: number
+    moneda: string
+    fecha_emision: string
+    fecha_pago: string
+    dias_restantes: number
+    concepto: string
+    estado: string
+  }>
+  resumen_items: {
+    total_movimientos: number
+    total_facturas: number
+    total_ncs: number
+    total_pagos: number
+  }
+}
+
 export interface SupplierPriceComparisonItem {
   supplier_id: string
   razon_social: string
@@ -2646,6 +2719,22 @@ export const api = {
       const tabSuffix = tab ? `_${tab}` : ""
       return downloadAuthenticated(`/v1/purchases/suppliers/${supplierId}/360/pdf?company_id=${COMPANY_ID}${tabParam}`, {}, `Informe_360_${clean}${tabSuffix}.pdf`)
     },
+    getSupplierAccountStatement: (supplierId: string, params?: { fecha_desde?: string; fecha_hasta?: string; solo_pendientes?: boolean }) => {
+      const q = new URLSearchParams({ company_id: COMPANY_ID })
+      if (params?.fecha_desde) q.set("fecha_desde", params.fecha_desde)
+      if (params?.fecha_hasta) q.set("fecha_hasta", params.fecha_hasta)
+      if (params?.solo_pendientes) q.set("solo_pendientes", "true")
+      return client.get<SupplierAccountStatementResponse>(`/v1/purchases/suppliers/${supplierId}/account-statement?${q.toString()}`)
+    },
+    downloadSupplierAccountStatementPdf: (supplierId: string, razonSocial?: string, params?: { fecha_desde?: string; fecha_hasta?: string; solo_pendientes?: boolean }) => {
+      const clean = (razonSocial || "proveedor").replace(/\s+/g, "_").replace(/\//g, "_")
+      const q = new URLSearchParams({ company_id: COMPANY_ID })
+      if (params?.fecha_desde) q.set("fecha_desde", params.fecha_desde)
+      if (params?.fecha_hasta) q.set("fecha_hasta", params.fecha_hasta)
+      if (params?.solo_pendientes) q.set("solo_pendientes", "true")
+      const pSuffix = (params?.fecha_desde && params?.fecha_hasta) ? `_${params.fecha_desde}_${params.fecha_hasta}` : ""
+      return downloadAuthenticated(`/v1/purchases/suppliers/${supplierId}/account-statement/pdf?${q.toString()}`, {}, `Extracto_Punteo_${clean}${pSuffix}.pdf`)
+    },
     getSupplierPerformance: (id: string) => client.get<{ supplier_id: string; razon_social: string; total_orders: number; total_spent: number; on_time_rate: number | null; avg_quality_score: number | null; avg_delivery_score: number | null; avg_price_score: number | null; avg_attention_score: number | null; overall_rating: number | null; last_evaluation_date: string | null }>(`/v1/suppliers/${id}/performance`),
     getSupplierPriceHistory: (id: string) => client.get<{ product_id: string; product_nombre: string; sku: string; purchase_order_id: string; fecha_orden: string; precio_unitario: number; cantidad: number }[]>(`/v1/suppliers/${id}/price-history`),
     getProductSupplierComparison: (productId: string) =>
@@ -3395,8 +3484,10 @@ export const api = {
     pendingForCustomer: (customerId: string) => client.get<{ id: string; numero_documento: string; fecha_emision: string; fecha_vencimiento: string | null; moneda: string; monto_original: number; saldo_pendiente: number; dias_mora: number }[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/customers/${customerId}/pending`),
     registerPayment: (data: { customer_id: string; monto_total: number; moneda?: string; forma_pago?: string; referencia?: string; fecha?: string; observaciones?: string; aplica_retencion?: boolean; monto_retencion?: number; retencion_numero_comprobante?: string; retencion_fecha?: string; retencion_porcentaje?: number; monto_efectivo_recibido?: number; monto_pyg?: number; monto_brl?: number; monto_usd?: number; monto_transferencia?: number; fecha_transferencia?: string; referencia_transferencia?: string; monto_cheque?: number; tasa_brl?: number; tasa_usd?: number; monto_facturas_canceladas?: number; diferencia_monto?: number; tipo_diferencia?: string; allocations: { accounts_receivable_id: string; monto: number }[] }) =>
       client.post<{ id: string; monto_total: number; allocations: { accounts_receivable_id: string; monto: number; nuevo_saldo: number; nuevo_estado: string }[] }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/payments`, data),
-    applyGlobalPayment: (data: { customer_id: string; monto_total: number; moneda?: string; forma_pago?: string; referencia?: string; fecha?: string; observaciones?: string; accounts_receivable_ids?: string[]; bank_account_id?: string; destino_fondos?: string; caja_session_id?: string; cheque_numero?: string; cheque_banco?: string; cheque_librador?: string; cheque_ruc?: string; cheque_fecha_emision?: string; cheque_fecha_cobro?: string; aplica_retencion?: boolean; monto_retencion?: number; retencion_numero_comprobante?: string; retencion_fecha?: string; retencion_porcentaje?: number; monto_efectivo_recibido?: number; monto_pyg?: number; monto_brl?: number; monto_usd?: number; monto_transferencia?: number; fecha_transferencia?: string; referencia_transferencia?: string; monto_cheque?: number; tasa_brl?: number; tasa_usd?: number; monto_facturas_canceladas?: number; diferencia_monto?: number; tipo_diferencia?: string }) =>
+    applyGlobalPayment: (data: { customer_id: string; monto_total: number; moneda?: string; forma_pago?: string; referencia?: string; fecha?: string; observaciones?: string; accounts_receivable_ids?: string[]; bank_account_id?: string; destino_fondos?: string; caja_session_id?: string; cheque_numero?: string; cheque_banco?: string; cheque_librador?: string; cheque_ruc?: string; cheque_fecha_emision?: string; cheque_fecha_cobro?: string; aplica_retencion?: boolean; monto_retencion?: number; retencion_numero_comprobante?: string; retencion_fecha?: string; retencion_porcentaje?: number; monto_efectivo_recibido?: number; monto_pyg?: number; monto_brl?: number; monto_usd?: number; monto_transferencia?: number; fecha_transferencia?: string; referencia_transferencia?: string; monto_cheque?: number; tasa_brl?: number; tasa_usd?: number; monto_facturas_canceladas?: number; diferencia_monto?: number; tipo_diferencia?: string; category_id?: string; cost_center_id?: string }) =>
       client.post<{ id: string; payment_id: string; numero_recibo: string; monto_total: number; documentos_afectados: number; allocations: any[]; treasury?: any }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/payments/apply-global`, data),
+    compensateInternalConsumption: (data: { customer_id: string; accounts_receivable_ids: string[]; category_id: string; cost_center_id?: string; fecha?: string; observaciones?: string }) =>
+      client.post<{ success: boolean; payment_id: string; numero_recibo: string; monto_total: number; facturas_canceladas: number; gastos_registrados: number }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/compensate-internal-consumption`, data),
     verifyReceipt: (paymentId: string) => client.get<any>(`/v1/accounts-receivable/receipts/${paymentId}/verify`),
     documentPayments: (id: string) => client.get<{ id: string; fecha: string; forma_pago: string | null; referencia: string | null; observaciones: string | null; monto: number; created_at: string }[]>(`/v1/accounts-receivable/${id}/payments`),
     customerPayments: (customerId: string) => client.get<{ id: string; fecha: string; monto_total: number; forma_pago: string | null; referencia: string | null; observaciones: string | null; created_at: string; allocations: { accounts_receivable_id: string; numero_documento: string; monto: number }[] }[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/customers/${customerId}/payments`),

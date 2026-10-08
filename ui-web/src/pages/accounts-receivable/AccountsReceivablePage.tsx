@@ -204,6 +204,12 @@ export default function AccountsReceivablePage() {
     porcentaje_retencion_iva?: number
   } | null>(null)
 
+  // 🔄 Compensación de Consumo Interno (Gastos Operativos)
+  const [expenseCategories, setExpenseCategories] = useState<{ id: string; nombre: string }[]>([])
+  const [costCenters, setCostCenters] = useState<{ id: string; nombre: string }[]>([])
+  const [payCategoryId, setPayCategoryId] = useState("")
+  const [payCostCenterId, setPayCostCenterId] = useState("")
+
   // ⚡ Modal de Inicio Rápido de Cobro (Cabecera)
   const [showQuickCobroModal, setShowQuickCobroModal] = useState(false)
   const [quickCustomerSearch, setQuickCustomerSearch] = useState("")
@@ -810,6 +816,10 @@ export default function AccountsReceivablePage() {
 
   useEffect(() => { setPage(0) }, [filterStatus, debouncedSearch])
   useEffect(() => { fetchData() }, [filterStatus, page, debouncedSearch])
+  useEffect(() => {
+    api.expenses.categories.list().then(setExpenseCategories).catch(() => [])
+    api.expenses.costCenters.list().then(setCostCenters).catch(() => [])
+  }, [])
 
   const fetchScoring = async () => {
     setScoresLoading(true)
@@ -999,6 +1009,8 @@ export default function AccountsReceivablePage() {
     setPayChequeRuc(custInfo?.ruc || "")
     setPayChequeFechaEmision(getTodayAsuncion())
     setPayChequeFechaCobro(getTodayAsuncion())
+    setPayCategoryId("")
+    setPayCostCenterId("")
 
     setPendingLoading(true)
     try {
@@ -1015,6 +1027,15 @@ export default function AccountsReceivablePage() {
     } finally {
       setPendingLoading(false)
     }
+  }
+
+  const openCompensacionModal = async (
+    customerId: string,
+    custInfo?: { razon_social: string; ruc?: string; empresa_vinculada?: string; es_agente_retencion?: boolean; regimen_retencion?: string; porcentaje_retencion_iva?: number },
+    targetDoc?: { id: string; saldo_pendiente: number }
+  ) => {
+    await openPaymentModal(customerId, custInfo, targetDoc)
+    setPayFormaPago("compensacion_interna")
   }
 
   const montoTotalPago = Object.values(allocations).reduce((sum, v) => sum + (parseFloat(v) || 0), 0)
@@ -1214,6 +1235,10 @@ export default function AccountsReceivablePage() {
       toast.warning("Monto no asignado", "Asigná o distribuí un monto a al menos una factura")
       return
     }
+    if (payFormaPago === "compensacion_interna" && !payCategoryId) {
+      toast.warning("Rubro requerido", "Seleccioná el Rubro de Gasto para imputar el consumo interno.")
+      return
+    }
     setSubmittingPayment(true)
     try {
       const selectedDocIds = Object.keys(allocations).filter(id => (parseFloat(allocations[id]) || 0) > 0)
@@ -1240,6 +1265,8 @@ export default function AccountsReceivablePage() {
         monto_facturas_canceladas: montoTotalPago,
         diferencia_monto: montoDiferenciaCompensacion,
         tipo_diferencia: tipoDiferenciaCompensacion,
+        category_id: payFormaPago === "compensacion_interna" ? payCategoryId : undefined,
+        cost_center_id: payFormaPago === "compensacion_interna" && payCostCenterId ? payCostCenterId : undefined,
         cheque_numero: (payFormaPago === "cheque" || payFormaPago === "mixto") ? (payChequeNumero || undefined) : undefined,
         cheque_banco: (payFormaPago === "cheque" || payFormaPago === "mixto") ? (payChequeBanco || undefined) : undefined,
         cheque_librador: (payFormaPago === "cheque" || payFormaPago === "mixto") ? (payChequeLibrador || undefined) : undefined,
@@ -1254,9 +1281,11 @@ export default function AccountsReceivablePage() {
         monto_efectivo_recibido: aplicaRetencion ? Math.max(0, (montoFisicoEntregadoGs > 0 ? montoFisicoEntregadoGs : montoTotalPago) - montoRetencionFinal) : (montoFisicoEntregadoGs > 0 ? montoFisicoEntregadoGs : montoTotalPago),
       })
 
-      const msgExito = aplicaRetencion && montoRetencionFinal > 0
-        ? `Cobro de ${formatPYG(montoTotalPago)} registrado con éxito (Retención Tesakã: ${formatPYG(montoRetencionFinal)} · Neto percibido: ${formatPYG(montoEfectivoRecibido)})`
-        : `${formatPYG(montoTotalPago)} imputado en cascada FIFO`
+      const msgExito = payFormaPago === "compensacion_interna"
+        ? `Compensación de Consumo Interno de ${formatPYG(montoTotalPago)} registrada. Se imputó al módulo de Gastos y se saldaron ${selectedDocIds.length} facturas.`
+        : (aplicaRetencion && montoRetencionFinal > 0
+          ? `Cobro de ${formatPYG(montoTotalPago)} registrado con éxito (Retención Tesakã: ${formatPYG(montoRetencionFinal)} · Neto percibido: ${formatPYG(montoEfectivoRecibido)})`
+          : `${formatPYG(montoTotalPago)} imputado en cascada FIFO`)
 
       toast.success("Pago registrado con éxito", msgExito)
       setShowPaymentModal(null)
@@ -1695,20 +1724,37 @@ export default function AccountsReceivablePage() {
                                   <Eye className="w-3.5 h-3.5" /> Detalle
                                 </button>
                                 {d.estado === "pendiente" && d.customer_id && (
-                                  <button
-                                    onClick={() => openPaymentModal(
-                                      d.customer_id!,
-                                      {
-                                        razon_social: d.customer_name || "Cliente",
-                                        ruc: d.customer_ruc,
-                                        empresa_vinculada: (d as any).customer?.empresa_vinculada_nombre,
-                                      },
-                                      { id: d.id, saldo_pendiente: d.saldo_pendiente || 0 }
-                                    )}
-                                    className="btn-primary py-1 px-2.5 text-xs"
-                                  >
-                                    Cobrar
-                                  </button>
+                                  <>
+                                    <button
+                                      onClick={() => openCompensacionModal(
+                                        d.customer_id!,
+                                        {
+                                          razon_social: d.customer_name || "Cliente",
+                                          ruc: d.customer_ruc,
+                                          empresa_vinculada: (d as any).customer?.empresa_vinculada_nombre,
+                                        },
+                                        { id: d.id, saldo_pendiente: d.saldo_pendiente || 0 }
+                                      )}
+                                      className="py-1 px-2.5 text-xs rounded-lg font-semibold bg-purple-100 hover:bg-purple-200 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300 flex items-center gap-1 transition-colors"
+                                      title="Compensar a Gasto de Consumo Interno"
+                                    >
+                                      <RotateCcw className="w-3 h-3" /> Compensar
+                                    </button>
+                                    <button
+                                      onClick={() => openPaymentModal(
+                                        d.customer_id!,
+                                        {
+                                          razon_social: d.customer_name || "Cliente",
+                                          ruc: d.customer_ruc,
+                                          empresa_vinculada: (d as any).customer?.empresa_vinculada_nombre,
+                                        },
+                                        { id: d.id, saldo_pendiente: d.saldo_pendiente || 0 }
+                                      )}
+                                      className="btn-primary py-1 px-2.5 text-xs"
+                                    >
+                                      Cobrar
+                                    </button>
+                                  </>
                                 )}
                               </div>
                             </td>
@@ -1839,6 +1885,17 @@ export default function AccountsReceivablePage() {
                                     <FileDown className="w-3.5 h-3.5 text-red-500" /> Estado de Cuenta
                                   </button>
                                   <button
+                                    onClick={() => openCompensacionModal(c.customer_id, {
+                                      razon_social: c.customer_name || "Cliente",
+                                      ruc: c.customer_ruc,
+                                      empresa_vinculada: (c as any).empresa_vinculada_nombre,
+                                    })}
+                                    className="py-1 px-2.5 text-xs rounded-lg font-semibold bg-purple-100 hover:bg-purple-200 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300 flex items-center gap-1 transition-colors"
+                                    title="Compensar facturas a Gastos de Consumo Interno"
+                                  >
+                                    <RotateCcw className="w-3.5 h-3.5" /> Compensar
+                                  </button>
+                                  <button
                                     onClick={() => openPaymentModal(c.customer_id, {
                                       razon_social: c.customer_name || "Cliente",
                                       ruc: c.customer_ruc,
@@ -1866,12 +1923,25 @@ export default function AccountsReceivablePage() {
                                           </span>
                                         )}
                                       </div>
-                                      <button
-                                        onClick={() => setShowCollectionForm(true)}
-                                        className="btn-outline py-1 px-2.5 text-xs flex items-center gap-1"
-                                      >
-                                        <PhoneCall className="w-3.5 h-3.5 text-primary" /> Registrar Gestión de Cobro
-                                      </button>
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          onClick={() => openCompensacionModal(c.customer_id, {
+                                            razon_social: c.customer_name || "Cliente",
+                                            ruc: c.customer_ruc,
+                                            empresa_vinculada: (c as any).empresa_vinculada_nombre,
+                                          })}
+                                          className="py-1 px-2.5 text-xs rounded-lg font-semibold bg-purple-100 hover:bg-purple-200 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300 flex items-center gap-1 transition-colors"
+                                          title="Compensar facturas de este cliente a Gastos de Consumo Interno"
+                                        >
+                                          <RotateCcw className="w-3.5 h-3.5" /> Compensar a Gastos
+                                        </button>
+                                        <button
+                                          onClick={() => setShowCollectionForm(true)}
+                                          className="btn-outline py-1 px-2.5 text-xs flex items-center gap-1"
+                                        >
+                                          <PhoneCall className="w-3.5 h-3.5 text-primary" /> Registrar Gestión de Cobro
+                                        </button>
+                                      </div>
                                     </div>
 
                                     {/* Lista de facturas de este cliente */}
@@ -1892,21 +1962,38 @@ export default function AccountsReceivablePage() {
                                               </span>
                                             </div>
                                             {d.estado !== "pagado" && (
-                                              <button
-                                                onClick={() => openPaymentModal(
-                                                  c.customer_id,
-                                                  {
-                                                    razon_social: c.customer_name || "Cliente",
-                                                    ruc: c.customer_ruc,
-                                                    empresa_vinculada: (c as any).empresa_vinculada_nombre,
-                                                  },
-                                                  { id: d.id, saldo_pendiente: d.saldo_pendiente || 0 }
-                                                )}
-                                                className="btn-primary py-1 px-2 text-[11px]"
-                                                title="Cobrar esta factura puntual"
-                                              >
-                                                Cobrar
-                                              </button>
+                                              <div className="flex items-center gap-1">
+                                                <button
+                                                  onClick={() => openCompensacionModal(
+                                                    c.customer_id,
+                                                    {
+                                                      razon_social: c.customer_name || "Cliente",
+                                                      ruc: c.customer_ruc,
+                                                      empresa_vinculada: (c as any).empresa_vinculada_nombre,
+                                                    },
+                                                    { id: d.id, saldo_pendiente: d.saldo_pendiente || 0 }
+                                                  )}
+                                                  className="py-1 px-2 text-[11px] rounded font-semibold bg-purple-100 hover:bg-purple-200 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300"
+                                                  title="Compensar a Gasto Interno"
+                                                >
+                                                  Compensar
+                                                </button>
+                                                <button
+                                                  onClick={() => openPaymentModal(
+                                                    c.customer_id,
+                                                    {
+                                                      razon_social: c.customer_name || "Cliente",
+                                                      ruc: c.customer_ruc,
+                                                      empresa_vinculada: (c as any).empresa_vinculada_nombre,
+                                                    },
+                                                    { id: d.id, saldo_pendiente: d.saldo_pendiente || 0 }
+                                                  )}
+                                                  className="btn-primary py-1 px-2 text-[11px]"
+                                                  title="Cobrar esta factura puntual"
+                                                >
+                                                  Cobrar
+                                                </button>
+                                              </div>
                                             )}
                                           </div>
                                         </div>
@@ -3349,24 +3436,78 @@ export default function AccountsReceivablePage() {
                     <option value="cheque">Cheque Recibido (Al día o Diferido)</option>
                     <option value="tarjeta_debito">Tarjeta Débito</option>
                     <option value="tarjeta_credito">Tarjeta Crédito</option>
+                    <option value="compensacion_interna">🔄 Compensación Consumo Interno (Gasto Operativo)</option>
                   </select>
                 </div>
                 <div>
                   <label className="label-field">
-                    {payFormaPago === "deposito_bancario" ? "N° Boleta de Depósito *" : "N° Referencia / Boleta"}
+                    {payFormaPago === "deposito_bancario" ? "N° Boleta de Depósito *" : (payFormaPago === "compensacion_interna" ? "Concepto / Ref. Interna" : "N° Referencia / Boleta")}
                   </label>
                   <input
                     className={`input-field text-xs ${payFormaPago === "deposito_bancario" && !payReferencia ? "border-blue-400 bg-blue-50/20" : ""}`}
-                    placeholder={payFormaPago === "deposito_bancario" ? "Ej: Boleta Dep. N° 451829" : "Ej: Transf. 984124"}
+                    placeholder={payFormaPago === "deposito_bancario" ? "Ej: Boleta Dep. N° 451829" : (payFormaPago === "compensacion_interna" ? "Ej: Consumo Panadería Sem. 41" : "Ej: Transf. 984124")}
                     value={payReferencia}
                     onChange={e => setPayReferencia(e.target.value)}
                   />
                 </div>
                 <div>
-                  <label className="label-field">Fecha de Cobro</label>
+                  <label className="label-field">Fecha de Cobro / Compensación</label>
                   <input className="input-field text-xs" type="date" value={payFecha} onChange={e => setPayFecha(e.target.value)} />
                 </div>
               </div>
+
+              {/* 🔄 PANEL DE COMPENSACIÓN DE CONSUMO INTERNO A GASTOS */}
+              {payFormaPago === "compensacion_interna" && (
+                <div className="p-4 rounded-xl border border-purple-200 dark:border-purple-900/60 bg-gradient-to-br from-purple-50/60 to-indigo-50/40 dark:from-purple-950/25 dark:to-indigo-950/25 space-y-3">
+                  <div className="flex items-start gap-2.5">
+                    <div className="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 shrink-0">
+                      <Sparkles className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-purple-900 dark:text-purple-200">
+                        Imputación Directa a Gastos Operativos (Sin Movimiento de Dinero)
+                      </h4>
+                      <p className="text-[11px] text-purple-700/80 dark:text-purple-300/80 mt-0.5 leading-relaxed">
+                        Las facturas seleccionadas se saldarán en Cuentas por Cobrar y se liberará la línea de crédito de la empresa. El importe total se registrará automáticamente en el <b>Módulo de Gastos</b> bajo el rubro y centro de costo elegidos. No afectará Bóveda ni Bancos.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <div>
+                      <label className="label-field text-purple-900 dark:text-purple-200">
+                        Rubro / Categoría de Gasto <span className="text-rose-500">*</span>
+                      </label>
+                      <select
+                        className={`input-field text-xs ${!payCategoryId ? "border-purple-400 bg-white dark:bg-slate-800 ring-1 ring-purple-300" : ""}`}
+                        value={payCategoryId}
+                        onChange={e => setPayCategoryId(e.target.value)}
+                      >
+                        <option value="">-- Seleccionar Rubro de Gasto --</option>
+                        {expenseCategories.map(cat => (
+                          <option key={cat.id} value={cat.id}>{cat.nombre}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="label-field text-purple-900 dark:text-purple-200">
+                        Centro de Costo / Sector
+                      </label>
+                      <select
+                        className="input-field text-xs"
+                        value={payCostCenterId}
+                        onChange={e => setPayCostCenterId(e.target.value)}
+                      >
+                        <option value="">-- Sin Centro de Costo Específico --</option>
+                        {costCenters.map(cc => (
+                          <option key={cc.id} value={cc.id}>{cc.nombre}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* 🏛️ PANEL DINÁMICO DE TESORERÍA / DESTINO DE FONDOS Y MULTIMONEDA */}
               {(payFormaPago === "efectivo" || payFormaPago === "mixto") && (
@@ -3951,14 +4092,23 @@ export default function AccountsReceivablePage() {
                   disabled={submittingPayment}
                   className={`w-full sm:w-auto px-7 py-3.5 rounded-xl text-sm font-black text-white shadow-xl flex items-center justify-center gap-2.5 active:scale-95 transition cursor-pointer ${
                     montoTotalPago > 0
-                      ? "bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-600/30"
+                      ? (payFormaPago === "compensacion_interna"
+                          ? "bg-gradient-to-r from-purple-600 via-indigo-600 to-indigo-700 hover:from-purple-500 hover:to-indigo-600 shadow-purple-600/30"
+                          : "bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-600/30")
                       : "bg-slate-500 hover:bg-slate-600 shadow-slate-900/20"
                   }`}
                 >
                   {submittingPayment ? (
                     <>
                       <Loader2 className="w-5 h-5 animate-spin" />
-                      <span>Procesando Cobro...</span>
+                      <span>{payFormaPago === "compensacion_interna" ? "Procesando Compensación..." : "Procesando Cobro..."}</span>
+                    </>
+                  ) : payFormaPago === "compensacion_interna" ? (
+                    <>
+                      <RotateCcw className="w-5 h-5" />
+                      <span>
+                        🔄 CONFIRMAR COMPENSACIÓN ({formatPYG(montoTotalPago)})
+                      </span>
                     </>
                   ) : (
                     <>

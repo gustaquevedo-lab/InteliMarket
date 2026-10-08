@@ -98,6 +98,8 @@ class ReceivablePaymentCreate(BaseModel):
     referencia_transferencia: Optional[str] = None
     monto_transferencia: Optional[Decimal] = Decimal("0")
     monto_cheque: Optional[Decimal] = Decimal("0")
+    category_id: Optional[UUID] = None
+    cost_center_id: Optional[UUID] = None
     allocations: list[ReceivableAllocationInput] = Field(min_length=1)
 
 
@@ -137,9 +139,20 @@ class ReceivableGlobalPaymentCreate(BaseModel):
     monto_facturas_canceladas: Optional[Decimal] = None
     diferencia_monto: Optional[Decimal] = Decimal("0")
     tipo_diferencia: Optional[str] = "exacto"
+    category_id: Optional[UUID] = None
+    cost_center_id: Optional[UUID] = None
     # Si viene None o vacío, se aplica en cascada FIFO a todas las facturas pendientes
     # Si viene con IDs, se aplica en cascada FIFO sólo a las facturas seleccionadas
     accounts_receivable_ids: Optional[list[UUID]] = None
+
+
+class CompensateInternalConsumptionInput(BaseModel):
+    customer_id: UUID
+    accounts_receivable_ids: list[UUID] = Field(min_length=1)
+    category_id: UUID
+    cost_center_id: Optional[UUID] = None
+    fecha: Optional[date] = None
+    observaciones: Optional[str] = None
 
 
 class CorporateRemissionCreate(BaseModel):

@@ -15,6 +15,7 @@ from api.src.accounts_receivable import pdf_reports as ar_pdf_reports
 from api.src.accounts_receivable.schemas import (
     ReceivablePaymentCreate,
     ReceivableGlobalPaymentCreate,
+    CompensateInternalConsumptionInput,
     CorporateRemissionCreate,
     CorporateRemissionPayInput,
     CorporateRemissionRevertInput,
@@ -268,6 +269,25 @@ async def apply_global_payment_endpoint(
     (a las más antiguas primero, y si hay remanente a las más nuevas).
     Permite tanto pagos de contado como pagos parciales o sobre un lote seleccionado."""
     result = await service.apply_global_payment(db, company_id, body, user.get("id"))
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+# ── Compensación de Consumo Interno (Gasto Operativo) ───────────────────
+
+@router.post("/companies/{company_id}/accounts-receivable/compensate-internal-consumption")
+async def compensate_internal_consumption_endpoint(
+    company_id: str,
+    body: CompensateInternalConsumptionInput,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Compensa facturas por cobrar generadas por consumo interno de la empresa.
+    Saldan las cuentas por cobrar, descargan la línea de crédito y generan los registros
+    correspondientes en el módulo de Gastos bajo el rubro y centro de costo elegidos.
+    CERO impacto en Bóveda o Bancos."""
+    result = await service.compensate_internal_consumption(db, company_id, body, user.get("id"))
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result

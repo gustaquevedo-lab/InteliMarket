@@ -1295,6 +1295,8 @@ async def export_purchase_supplier_return_pdf_endpoint(
 from api.src.purchases import supplier_360_service
 from api.src.purchases import supplier_360_pdf
 from api.src.purchases import supplier_return_pdf
+from api.src.purchases import supplier_statement_service
+from api.src.purchases import supplier_statement_pdf
 
 
 @router.get("/purchases/suppliers/{supplier_id}/360")
@@ -1338,3 +1340,58 @@ async def export_supplier_360_pdf_endpoint(
             "Content-Length": str(len(pdf_bytes)),
         },
     )
+
+
+# ── Extracto de Cuenta Corriente y Punteo Físico de Proveedor ──────────────────
+
+@router.get("/purchases/suppliers/{supplier_id}/account-statement")
+@router.get("/suppliers/{supplier_id}/account-statement")
+async def get_supplier_account_statement_endpoint(
+    supplier_id: str,
+    fecha_desde: Optional[date] = Query(None, description="Fecha inicio del extracto"),
+    fecha_hasta: Optional[date] = Query(None, description="Fecha fin del extracto"),
+    solo_pendientes: bool = Query(False, description="Filtrar solo comprobantes pendientes/con saldo"),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Retorna el extracto cronológico de cuenta corriente (facturas, NCs, pagos) con saldo progresivo acumulado."""
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    sid = uuid.UUID(supplier_id)
+    return await supplier_statement_service.get_supplier_account_statement(
+        db, cid, sid, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta, solo_pendientes=solo_pendientes
+    )
+
+
+@router.get("/purchases/suppliers/{supplier_id}/account-statement/pdf")
+@router.get("/suppliers/{supplier_id}/account-statement/pdf")
+async def export_supplier_account_statement_pdf_endpoint(
+    supplier_id: str,
+    fecha_desde: Optional[date] = Query(None, description="Fecha inicio del extracto"),
+    fecha_hasta: Optional[date] = Query(None, description="Fecha fin del extracto"),
+    solo_pendientes: bool = Query(False, description="Filtrar solo comprobantes pendientes/con saldo"),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Genera y descarga el PDF oficial A4 Landscape para punteo físico de deudas contra el extracto del proveedor."""
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    sid = uuid.UUID(supplier_id)
+    data = await supplier_statement_service.get_supplier_account_statement(
+        db, cid, sid, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta, solo_pendientes=solo_pendientes
+    )
+    company = await _get_company_info(db, str(cid))
+    user_name = user.get("nombre") or user.get("email") or "Tesorería / Cuentas por Pagar"
+    pdf_bytes = supplier_statement_pdf.generate_supplier_statement_pdf(company, data, generated_by=user_name)
+    rz_clean = (data.get("supplier", {}).get("razon_social") or "proveedor").replace(" ", "_").replace("/", "_")
+    p_suf = f"_{fecha_desde}_{fecha_hasta}" if (fecha_desde and fecha_hasta) else ""
+    filename = f"Extracto_Punteo_{rz_clean}{p_suf}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )
+
