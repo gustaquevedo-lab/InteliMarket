@@ -607,3 +607,8 @@ class ConsignmentSettlementItem(Base):
     product = relationship("Product", foreign_keys=[product_id])
 
 
+# Registrar modelo Product para relaciones cruzadas de SQLAlchemy
+from api.src.products.models import Product  # noqa: E402, F401
+
+
+
