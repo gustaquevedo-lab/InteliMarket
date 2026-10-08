@@ -604,6 +604,6 @@ class ConsignmentSettlementItem(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     settlement = relationship("ConsignmentSettlement", back_populates="items")
-    product = relationship("api.src.products.models.Product", foreign_keys=[product_id])
+    product = relationship("Product", foreign_keys=[product_id])
 
 
