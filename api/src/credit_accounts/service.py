@@ -70,11 +70,69 @@ async def list_credit_accounts(db: AsyncSession, company_id: str, activo: Option
         policy = await get_credit_blocking_policy(db, company_id)
         bloqueo_activo = policy.get("bloqueo_mora_activo", False)
         dias_limite = policy.get("dias_mora_limite", 60)
+
+        # Sincronización en lote del saldo utilizado real desde accounts_receivable (fuente única de verdad)
+        ar_tot_res = await db.execute(
+            text("""
+                SELECT customer_id, COALESCE(SUM(saldo_pendiente), 0) as real_utilizado
+                FROM accounts_receivable
+                WHERE company_id = :cid AND estado = 'pendiente'
+                GROUP BY customer_id
+            """),
+            {"cid": company_id},
+        )
+        util_map = {str(r.customer_id): Decimal(str(r.real_utilizado)) for r in ar_tot_res.fetchall()}
+
         for account in accounts:
             account.dias_mora_max = mora_map.get(str(account.customer_id), 0)
             account.en_mora = (account.dias_mora_max > dias_limite) if bloqueo_activo else False
+            real_util = util_map.get(str(account.customer_id), Decimal("0"))
+            if Decimal(str(account.saldo_utilizado)) != real_util:
+                account.saldo_utilizado = real_util
+                account.saldo_disponible = Decimal(str(account.limite_credito)) - real_util
 
     return accounts
+
+
+async def _sync_with_accounts_receivable(db: AsyncSession, account: CreditAccount) -> None:
+    """Garantiza coherencia total en vivo entre la cuenta de crédito y accounts_receivable.
+
+    accounts_receivable es la Fuente Única de Verdad de la deuda de los clientes.
+    Los comprobantes con estado = 'pendiente' constituyen la deuda activa real.
+    Los comprobantes 'pagado' o 'REMITIDO_EMPRESA' (convenios corporativos por nómina)
+    no restan disponible del funcionario.
+    """
+    if not account or not account.customer_id or not account.company_id:
+        return
+
+    ar_res = await db.execute(
+        text("""
+            SELECT COALESCE(SUM(saldo_pendiente), 0)
+            FROM accounts_receivable
+            WHERE company_id = :cid AND customer_id = :custid AND estado = 'pendiente'
+        """),
+        {"cid": account.company_id, "custid": account.customer_id},
+    )
+    real_utilizado = Decimal(str(ar_res.scalar() or "0"))
+    real_disponible = Decimal(str(account.limite_credito)) - real_utilizado
+
+    if Decimal(str(account.saldo_utilizado)) != real_utilizado or Decimal(str(account.saldo_disponible)) != real_disponible:
+        account.saldo_utilizado = real_utilizado
+        account.saldo_disponible = real_disponible
+        await db.execute(
+            text("""
+                UPDATE credit_accounts
+                SET saldo_utilizado = :util,
+                    saldo_disponible = :disp,
+                    updated_at = NOW()
+                WHERE id = :id
+            """),
+            {"util": real_utilizado, "disp": real_disponible, "id": account.id},
+        )
+        await db.execute(
+            text("UPDATE customers SET credito_usado = :util, updated_at = NOW() WHERE id = :cid"),
+            {"util": real_utilizado, "cid": account.customer_id},
+        )
 
 
 async def get_credit_account(db: AsyncSession, account_id: str) -> CreditAccount | None:
@@ -90,6 +148,7 @@ async def get_credit_account(db: AsyncSession, account_id: str) -> CreditAccount
     account.customer_nombre = razon_social
     account.customer_ruc = ruc
     account.empresa_vinculada_nombre = empresa_vinculada_nombre
+    await _sync_with_accounts_receivable(db, account)
     return account
 
 
@@ -109,6 +168,7 @@ async def get_credit_account_by_customer(db: AsyncSession, company_id: str, cust
     account.customer_nombre = razon_social
     account.customer_ruc = ruc
     account.empresa_vinculada_nombre = empresa_vinculada_nombre
+    await _sync_with_accounts_receivable(db, account)
     return account
 
 
