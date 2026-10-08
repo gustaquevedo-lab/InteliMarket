@@ -4,7 +4,7 @@ import {
   TrendingDown, TrendingUp, AlertTriangle, Clock, Landmark, CheckCircle,
   XCircle, FileText, Lock, KeyRound, DollarSign, ArrowUpRight, ArrowDownRight,
   ChevronRight, Building2, Store, Activity, Layers, Download, Check, Sparkles, X,
-  PackageCheck, Inbox, Send, FileSpreadsheet, Calendar, Search, Printer, Wallet
+  PackageCheck, Inbox, Send, FileSpreadsheet, Calendar, Search, Printer, Wallet, RotateCcw
 } from "lucide-react"
 import { api, downloadAuthenticated, type BankAccount, type BankTransaction, type VaultDashboard, type VaultEntry } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -374,6 +374,24 @@ export default function BovedaPage() {
       toast.error("Error al registrar depósito", e?.message || "Verifique los datos del depósito.")
     } finally {
       setSubmittingAmountDeposit(false)
+    }
+  }
+
+  const [revertingDepositId, setRevertingDepositId] = useState<string | null>(null)
+
+  const handleRevertDeposit = async (txId: string, boleta: string, monto: number) => {
+    if (!window.confirm(`¿Desea revertir este depósito bancario (Boleta #${boleta || "S/N"}) de ${formatPYG(monto)}?\n\nLos fondos volverán a ingresar inmediatamente a la Bóveda Central y se restará el monto del saldo bancario.`)) {
+      return
+    }
+    setRevertingDepositId(txId)
+    try {
+      const res = await api.financial.banks.deleteTransaction(txId)
+      toast.success("Depósito revertido", res.mensaje || "Los fondos han vuelto a ingresar a Bóveda con éxito.")
+      load()
+    } catch (e: any) {
+      toast.error("Error al revertir depósito", e?.message || "No se pudo revertir el depósito.")
+    } finally {
+      setRevertingDepositId(null)
     }
   }
 
@@ -1018,6 +1036,7 @@ export default function BovedaPage() {
                       <th className="p-3">Fecha</th>
                       <th className="p-3 text-right">Monto</th>
                       <th className="p-3 text-center">Conciliado</th>
+                      <th className="p-3 text-center">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -1037,6 +1056,23 @@ export default function BovedaPage() {
                           }`}>
                             {tx.conciliado ? "✓ Conciliado" : "Pendiente"}
                           </span>
+                        </td>
+                        <td className="p-3 text-center">
+                          {!tx.conciliado && (
+                            <button
+                              onClick={() => handleRevertDeposit(tx.id, tx.referencia || "", Number(tx.monto))}
+                              disabled={revertingDepositId === tx.id}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded border border-rose-200 dark:border-rose-900/50 transition disabled:opacity-50"
+                              title="Revertir depósito y reintegrar fondos a Bóveda"
+                            >
+                              {revertingDepositId === tx.id ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <RotateCcw className="w-3 h-3" />
+                              )}
+                              Revertir
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}

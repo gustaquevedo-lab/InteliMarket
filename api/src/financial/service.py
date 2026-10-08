@@ -1372,10 +1372,70 @@ async def delete_bank_transaction(db: AsyncSession, company_id: str, transaction
     if bt.conciliado:
         raise ValueError("No se puede eliminar un movimiento bancario ya conciliado. Desconcilie primero.")
 
+    if bt.cheque_id:
+        raise ValueError("Este movimiento está vinculado a un cheque. Gestione la anulación desde el módulo de cheques.")
+
+    if bt.invoice_id:
+        raise ValueError("Este movimiento está vinculado al pago de una factura de proveedor. Anule el pago desde Cuentas por Pagar.")
+
     acc_res = await db.execute(select(BankAccount).where(BankAccount.id == bt.bank_account_id))
     acc = acc_res.scalar_one_or_none()
     if acc:
-        acc.saldo_actual = (acc.saldo_actual or Decimal("0")) - (bt.monto if bt.tipo == "credito" else -bt.monto)
+        if bt.tipo in ("credito", "deposito"):
+            acc.saldo_actual = (acc.saldo_actual or Decimal("0")) - bt.monto
+        elif bt.tipo in ("debito", "retiro"):
+            acc.saldo_actual = (acc.saldo_actual or Decimal("0")) + bt.monto
+
+    # ── Reversión de Bóveda Central (VaultEntry) ──────────────────────────
+    # Si la transacción bancaria provino de un depósito de recaudación de bóveda,
+    # restauramos los fondos a la bóveda central (reintegrando sobres o remanentes).
+    vault_entries_res = await db.execute(
+        select(VaultEntry).where(
+            VaultEntry.bank_transaction_id == bt.id,
+            VaultEntry.company_id == cid,
+        )
+    )
+    vault_entries = list(vault_entries_res.scalars().all())
+
+    for ve in vault_entries:
+        if ve.handoff_id:
+            # Buscar si existe un sobre hermano/padre activo en bóveda
+            parent_res = await db.execute(
+                select(VaultEntry).where(
+                    VaultEntry.handoff_id == ve.handoff_id,
+                    VaultEntry.id != ve.id,
+                    VaultEntry.company_id == cid,
+                    VaultEntry.estado == "en_boveda",
+                ).order_by(VaultEntry.created_at.asc())
+            )
+            parent = parent_res.scalars().first()
+            if parent:
+                parent.monto_pyg = (parent.monto_pyg or Decimal("0")) + (ve.monto_pyg or Decimal("0"))
+                if parent.observaciones and "Remanente divisa" in parent.observaciones:
+                    parent.observaciones = (
+                        f"Restaurado en bóveda tras reversión de depósito bancario (Boleta #{bt.referencia or ''}). "
+                        f"Ref: {parent.observaciones}"
+                    )
+                await db.delete(ve)
+                continue
+
+        # Si no había hermano en bóveda (el sobre completo fue depositado o no tiene handoff_id como cobranzas AR)
+        ve.estado = "en_boveda"
+        ve.bank_transaction_id = None
+        ve.fecha_deposito = None
+
+    # ── Reversión en Libro Diario de Bóveda (CashRegisterMovement) ─────────
+    if bt.referencia:
+        crm_res = await db.execute(
+            select(CashRegisterMovement).where(
+                CashRegisterMovement.company_id == cid,
+                CashRegisterMovement.tipo == "retiro",
+                CashRegisterMovement.monto == bt.monto,
+                CashRegisterMovement.observaciones.like(f"%{bt.referencia}%"),
+            )
+        )
+        for crm in crm_res.scalars().all():
+            await db.delete(crm)
 
     await db.delete(bt)
     await db.flush()
@@ -1568,7 +1628,13 @@ async def list_bank_transactions(
     if hasta:
         query = query.where(BankTransaction.fecha <= hasta)
     if categoria:
-        query = query.where(BankTransaction.categoria == categoria)
+        if "," in categoria:
+            cats = [c.strip() for c in categoria.split(",") if c.strip()]
+            query = query.where(BankTransaction.categoria.in_(cats))
+        elif categoria == "deposito_caja":
+            query = query.where(BankTransaction.categoria.in_(["deposito_caja", "deposito_recaudacion_caja", "deposito_efectivo"]))
+        else:
+            query = query.where(BankTransaction.categoria == categoria)
     query = query.order_by(BankTransaction.fecha.desc()).offset(offset).limit(limit)
     result = await db.execute(query)
     return list(result.scalars().all())
