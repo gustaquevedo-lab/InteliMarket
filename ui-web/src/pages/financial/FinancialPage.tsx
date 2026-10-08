@@ -14,7 +14,7 @@ import {
   Layers, ShieldCheck, Check, Phone, ArrowRight, HelpCircle, Download,
   Upload, Paperclip, ExternalLink, Wallet, ArrowLeft, CheckSquare, Square,
   PackageMinus, Truck, Printer, Users, CheckCheck, FileCheck, CalendarClock,
-  LayoutGrid, ListFilter, CornerDownRight, Handshake, Banknote
+  LayoutGrid, ListFilter, CornerDownRight, Handshake, Banknote, X, RotateCcw
 } from "lucide-react"
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -100,6 +100,7 @@ export default function FinancialPage() {
   const [generatingProformaPdf, setGeneratingProformaPdf] = useState(false)
   const [supermerReturns, setSupermerReturns] = useState<any[]>([])
   const [detailDocFilter, setDetailDocFilter] = useState<"todos" | "facturas" | "notas_credito" | "devoluciones" | "cheques">("todos")
+  const [detailDocSearch, setDetailDocSearch] = useState("")
 
   // Cheques diferidos en cartera y Acuerdos Comerciales de Proveedores
   const [allCheques, setAllCheques] = useState<any[]>([])
@@ -1018,6 +1019,7 @@ export default function FinancialPage() {
     setSelectedOpCreditNoteIds(new Set(sup.creditNotes.map((n: any) => n.id)))
     setSelectedOpReturnIds(new Set(sup.devolucionesPendientes.map((r: any) => r.id)))
     setDetailDocFilter("todos")
+    setDetailDocSearch("")
     setOpObservaciones("")
   }
 
@@ -1116,8 +1118,38 @@ export default function FinancialPage() {
     else if (detailDocFilter === "devoluciones") filtered = docs.filter(d => d.docType === "devolucion")
     else if (detailDocFilter === "cheques") filtered = docs.filter(d => d.docType === "cheque")
 
+    // Filtrado por búsqueda de texto (N° factura, N° NC, timbrado, motivo, etc.)
+    if (detailDocSearch.trim()) {
+      const q = detailDocSearch.trim().toLowerCase()
+      filtered = filtered.filter(d => {
+        const numMatch = (d.numero || "").toLowerCase().includes(q)
+        const timbMatch = (d.timbrado || "").toLowerCase().includes(q)
+        const estMatch = (d.estado || "").toLowerCase().includes(q)
+        const motivoMatch = d.raw?.motivo ? String(d.raw.motivo).toLowerCase().includes(q) : false
+        const facOrigMatch = d.raw?.numero_factura_origen ? String(d.raw.numero_factura_origen).toLowerCase().includes(q) : false
+        return numMatch || timbMatch || estMatch || motivoMatch || facOrigMatch
+      })
+    }
+
     return filtered
-  }, [currentSelectedSupplier, selectedOpInvoiceIds, selectedOpCreditNoteIds, selectedOpReturnIds, detailDocFilter])
+  }, [currentSelectedSupplier, selectedOpInvoiceIds, selectedOpCreditNoteIds, selectedOpReturnIds, detailDocFilter, detailDocSearch])
+
+  // Comprobantes visibles elegibles para OP (excluye cheques diferidos)
+  const visibleSelectableDocs = useMemo(() => {
+    return unifiedSupplierDocs.filter(d => d.docType !== "cheque")
+  }, [unifiedSupplierDocs])
+
+  const visibleSelectedDocs = useMemo(() => {
+    return visibleSelectableDocs.filter(d => d.isSelected)
+  }, [visibleSelectableDocs])
+
+  const allVisibleSelected = useMemo(() => {
+    return visibleSelectableDocs.length > 0 && visibleSelectedDocs.length === visibleSelectableDocs.length
+  }, [visibleSelectableDocs, visibleSelectedDocs])
+
+  const totalSelectedCount = useMemo(() => {
+    return selectedOpInvoiceIds.size + selectedOpCreditNoteIds.size + selectedOpReturnIds.size
+  }, [selectedOpInvoiceIds, selectedOpCreditNoteIds, selectedOpReturnIds])
 
   // Manejo de selecciones en la vista detalle del proveedor
   const handleToggleOpInvoice = (id: string) => {
@@ -1168,36 +1200,55 @@ export default function FinancialPage() {
     }
   }
 
-  // Marcar / desmarcar todos los comprobantes que están visibles en la grilla
+  // Marcar todos los comprobantes visibles elegibles
+  const handleSelectAllVisibleDocs = () => {
+    if (!currentSelectedSupplier || visibleSelectableDocs.length === 0) return
+    const nextInv = new Set(selectedOpInvoiceIds)
+    const nextNc = new Set(selectedOpCreditNoteIds)
+    const nextRet = new Set(selectedOpReturnIds)
+
+    visibleSelectableDocs.forEach(d => {
+      if (d.docType === "factura") nextInv.add(d.id)
+      if (d.docType === "nota_credito") nextNc.add(d.id)
+      if (d.docType === "devolucion") nextRet.add(d.id)
+    })
+
+    setSelectedOpInvoiceIds(nextInv)
+    setSelectedOpCreditNoteIds(nextNc)
+    setSelectedOpReturnIds(nextRet)
+  }
+
+  // Desmarcar todos los comprobantes visibles elegibles
+  const handleDeselectAllVisibleDocs = () => {
+    if (!currentSelectedSupplier || visibleSelectableDocs.length === 0) return
+    const nextInv = new Set(selectedOpInvoiceIds)
+    const nextNc = new Set(selectedOpCreditNoteIds)
+    const nextRet = new Set(selectedOpReturnIds)
+
+    visibleSelectableDocs.forEach(d => {
+      if (d.docType === "factura") nextInv.delete(d.id)
+      if (d.docType === "nota_credito") nextNc.delete(d.id)
+      if (d.docType === "devolucion") nextRet.delete(d.id)
+    })
+
+    setSelectedOpInvoiceIds(nextInv)
+    setSelectedOpCreditNoteIds(nextNc)
+    setSelectedOpReturnIds(nextRet)
+  }
+
+  // Desmarcar absolutamente todo el proveedor
+  const handleDeselectAllDocs = () => {
+    setSelectedOpInvoiceIds(new Set())
+    setSelectedOpCreditNoteIds(new Set())
+    setSelectedOpReturnIds(new Set())
+  }
+
+  // Toggle para botón o master checkbox
   const handleToggleAllVisibleDocs = () => {
-    if (!currentSelectedSupplier) return
-    const allSelected = unifiedSupplierDocs.every(d => d.isSelected)
-    if (allSelected) {
-      // Deseleccionar visibles
-      const nextInv = new Set(selectedOpInvoiceIds)
-      const nextNc = new Set(selectedOpCreditNoteIds)
-      const nextRet = new Set(selectedOpReturnIds)
-      unifiedSupplierDocs.forEach(d => {
-        if (d.docType === "factura") nextInv.delete(d.id)
-        if (d.docType === "nota_credito") nextNc.delete(d.id)
-        if (d.docType === "devolucion") nextRet.delete(d.id)
-      })
-      setSelectedOpInvoiceIds(nextInv)
-      setSelectedOpCreditNoteIds(nextNc)
-      setSelectedOpReturnIds(nextRet)
+    if (allVisibleSelected) {
+      handleDeselectAllVisibleDocs()
     } else {
-      // Seleccionar visibles
-      const nextInv = new Set(selectedOpInvoiceIds)
-      const nextNc = new Set(selectedOpCreditNoteIds)
-      const nextRet = new Set(selectedOpReturnIds)
-      unifiedSupplierDocs.forEach(d => {
-        if (d.docType === "factura") nextInv.add(d.id)
-        if (d.docType === "nota_credito") nextNc.add(d.id)
-        if (d.docType === "devolucion") nextRet.add(d.id)
-      })
-      setSelectedOpInvoiceIds(nextInv)
-      setSelectedOpCreditNoteIds(nextNc)
-      setSelectedOpReturnIds(nextRet)
+      handleSelectAllVisibleDocs()
     }
   }
 
@@ -1830,24 +1881,24 @@ export default function FinancialPage() {
 
                   {/* ── TABLA DE COMPROBANTES DEL PROVEEDOR (FACTURAS, NCs Y DEVOLUCIONES) ── */}
                   <div className="card p-0 overflow-hidden border border-gray-200 dark:border-gray-800 shadow-sm">
-                    {/* Header con Tabs de Filtrado y Botón de Selección */}
-                    <div className="p-4 bg-gray-50 dark:bg-slate-800/80 border-b border-gray-200 dark:border-gray-700 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <Receipt className="w-4 h-4 text-indigo-500" />
-                          <h4 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider">
-                            Comprobantes & Deducciones del Proveedor
-                          </h4>
-                          <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300 font-bold">
-                            {selectedOpInvoiceIds.size} facturas + {selectedOpCreditNoteIds.size} NCs + {selectedOpReturnIds.size} devs. marcadas
-                          </span>
+                    {/* Header con Tabs de Filtrado, Buscador y Botones de Selección */}
+                    <div className="p-4 bg-gray-50 dark:bg-slate-800/80 border-b border-gray-200 dark:border-gray-700 flex flex-col gap-3">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <Receipt className="w-4 h-4 text-indigo-500" />
+                            <h4 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider">
+                              Comprobantes & Deducciones del Proveedor
+                            </h4>
+                            <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300 font-bold">
+                              {selectedOpInvoiceIds.size} facturas + {selectedOpCreditNoteIds.size} NCs + {selectedOpReturnIds.size} devs. marcadas
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-500">
+                            Seleccioná las facturas a pagar y las Notas de Crédito / Devoluciones que compensarán la Orden de Pago.
+                          </p>
                         </div>
-                        <p className="text-xs text-gray-500">
-                          Seleccioná las facturas a pagar y las Notas de Crédito / Devoluciones que compensarán la Orden de Pago.
-                        </p>
-                      </div>
 
-                      <div className="flex items-center gap-2 flex-wrap">
                         {/* Selector de Tabs de Comprobantes */}
                         <div className="flex items-center gap-1 p-1 bg-gray-200/70 dark:bg-slate-900 rounded-lg text-xs font-semibold flex-wrap">
                           <button
@@ -1906,17 +1957,71 @@ export default function FinancialPage() {
                             Devoluciones ({currentSelectedSupplier.devolucionesPendientes.length})
                           </button>
                         </div>
+                      </div>
 
-                        {/* Botón Marcar / Desmarcar Visibles */}
-                        <button
-                          type="button"
-                          onClick={handleToggleAllVisibleDocs}
-                          className="btn-ghost text-xs py-1.5 px-3 flex items-center gap-1.5 border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200"
-                          title="Alternar selección de las filas visibles"
-                        >
-                          <CheckCheck className="w-3.5 h-3.5 text-indigo-500" />
-                          <span>Marcar / Desmarcar</span>
-                        </button>
+                      {/* Fila 2: Buscador por N° Factura / NC y Botones Marcar / Desmarcar */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-2 border-t border-gray-200 dark:border-gray-700/80">
+                        {/* Input de Búsqueda rápida */}
+                        <div className="relative flex-1 max-w-sm sm:max-w-md">
+                          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          <input
+                            type="text"
+                            value={detailDocSearch}
+                            onChange={(e) => setDetailDocSearch(e.target.value)}
+                            placeholder="Buscar por N° factura (ej: 001-002-...), NC o timbrado..."
+                            className="w-full pl-9 pr-8 py-1.5 text-xs bg-white dark:bg-slate-900 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition text-gray-900 dark:text-gray-100 placeholder-gray-400"
+                          />
+                          {detailDocSearch && (
+                            <button
+                              type="button"
+                              onClick={() => setDetailDocSearch("")}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                              title="Limpiar búsqueda"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Botones de Acción de Selección */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {/* Botón Marcar Visibles */}
+                          <button
+                            type="button"
+                            onClick={handleSelectAllVisibleDocs}
+                            disabled={visibleSelectableDocs.length === 0}
+                            className="btn-ghost text-xs py-1.5 px-3 flex items-center gap-1.5 border border-indigo-200 dark:border-indigo-800 bg-indigo-50/60 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 rounded-lg transition disabled:opacity-40 font-medium cursor-pointer"
+                            title="Marcar todas las facturas y NCs visibles bajo este filtro"
+                          >
+                            <CheckSquare className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                            <span>Marcar Visibles ({visibleSelectableDocs.length})</span>
+                          </button>
+
+                          {/* Botón Desmarcar Visibles */}
+                          <button
+                            type="button"
+                            onClick={handleDeselectAllVisibleDocs}
+                            disabled={visibleSelectedDocs.length === 0}
+                            className="btn-ghost text-xs py-1.5 px-3 flex items-center gap-1.5 border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition disabled:opacity-40 font-medium cursor-pointer"
+                            title="Desmarcar comprobantes visibles"
+                          >
+                            <Square className="w-3.5 h-3.5 text-gray-500" />
+                            <span>Desmarcar Visibles ({visibleSelectedDocs.length})</span>
+                          </button>
+
+                          {/* Botón Desmarcar Todo (limpia toda la selección del proveedor) */}
+                          {totalSelectedCount > 0 && (
+                            <button
+                              type="button"
+                              onClick={handleDeselectAllDocs}
+                              className="btn-ghost text-xs py-1.5 px-3 flex items-center gap-1.5 border border-rose-200 dark:border-rose-900/50 bg-rose-50/50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900/50 rounded-lg transition font-medium cursor-pointer"
+                              title="Limpiar todas las selecciones marcadas en este proveedor"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5 text-rose-500" />
+                              <span>Desmarcar Todo ({totalSelectedCount})</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -1926,7 +2031,23 @@ export default function FinancialPage() {
                         <thead>
                           <tr className="bg-gray-100/70 dark:bg-slate-800/50 text-[11px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-200 dark:border-gray-700">
                             <th className="p-3.5 w-12 text-center">
-                              <span className="sr-only">Selección</span>
+                              <button
+                                type="button"
+                                onClick={handleToggleAllVisibleDocs}
+                                disabled={visibleSelectableDocs.length === 0}
+                                className="hover:scale-110 transition inline-flex items-center justify-center p-0.5 rounded cursor-pointer disabled:opacity-40"
+                                title={allVisibleSelected ? "Desmarcar todos los comprobantes visibles" : "Marcar todos los comprobantes visibles"}
+                              >
+                                {allVisibleSelected ? (
+                                  <CheckSquare className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                                ) : visibleSelectedDocs.length > 0 ? (
+                                  <div className="w-4 h-4 rounded border-2 border-indigo-500 bg-indigo-500/20 flex items-center justify-center">
+                                    <div className="w-2 h-0.5 bg-indigo-600 dark:bg-indigo-300 rounded" />
+                                  </div>
+                                ) : (
+                                  <Square className="w-5 h-5 text-gray-400 hover:text-gray-600" />
+                                )}
+                              </button>
                             </th>
                             <th className="p-3.5 w-32">Tipo Documento</th>
                             <th className="p-3.5 w-28">Timbrado / Banco</th>
@@ -1943,7 +2064,20 @@ export default function FinancialPage() {
                           {unifiedSupplierDocs.length === 0 ? (
                             <tr>
                               <td colSpan={10} className="p-8 text-center text-xs text-gray-400">
-                                No se encontraron comprobantes para el filtro seleccionado.
+                                {detailDocSearch ? (
+                                  <div className="space-y-2">
+                                    <p>No se encontraron comprobantes que coincidan con &quot;<span className="font-semibold text-gray-300">{detailDocSearch}</span>&quot;.</p>
+                                    <button
+                                      type="button"
+                                      onClick={() => setDetailDocSearch("")}
+                                      className="text-xs text-indigo-500 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                                    >
+                                      <RotateCcw className="w-3 h-3" /> Limpiar filtro de búsqueda
+                                    </button>
+                                  </div>
+                                ) : (
+                                  "No se encontraron comprobantes para el filtro seleccionado."
+                                )}
                               </td>
                             </tr>
                           ) : (
