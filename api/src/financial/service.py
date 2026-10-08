@@ -3555,24 +3555,58 @@ async def create_supplier_payment_order(
             allocated_invoices=[item["invoice"] for item in allocations_to_create]
         )
 
-    # 5. Si vinieron medios de pago, liquidar de inmediato
+    # 5. Si vinieron medios de pago
     if data.disbursements and len(data.disbursements) > 0:
-        disburse_payload = SupplierPaymentOrderDisburse(
-            fecha_pago=data.fecha_emision or _today(),
-            recibo_proveedor=data.recibo_proveedor,
-            observaciones=data.observaciones,
-            disbursements=data.disbursements,
-            legal_invoices=data.legal_invoices,
-            diferencia_redondeo=data.diferencia_redondeo,
-        )
-        await _execute_disbursements_internal(
-            db=db,
-            order=order,
-            supplier=supplier,
-            payload=disburse_payload,
-            user_id=user_id,
-            user_nombre=None
-        )
+        if order.estado == "aguardando_pago":
+            # Modo pre-asignación / borrador: La orden queda en estado 'aguardando_pago'.
+            # Se persisten los medios preliminares (ej. compensación de Notas de Crédito)
+            # sin debitar aún bancos ni amortizar facturas de forma definitiva,
+            # para que Tesorería complete la liquidación al momento de abonar.
+            for d in data.disbursements:
+                fp = (d.forma_pago or "").lower().strip()
+                tc = d.tipo_cambio or Decimal("1")
+                m_pyg = Decimal(str(d.monto)) * tc
+                monto_original = Decimal(str(d.monto))
+
+                disb_record = SupplierPaymentOrderDisbursement(
+                    payment_order_id=order.id,
+                    forma_pago=fp,
+                    monto=monto_original,
+                    moneda=d.moneda or "PYG",
+                    tipo_cambio=tc,
+                    monto_pyg=m_pyg,
+                    bank_account_id=uuid.UUID(str(d.bank_account_id)) if d.bank_account_id else None,
+                    referencia_transferencia=d.referencia_transferencia,
+                    cheque_id=uuid.UUID(str(d.cheque_id)) if d.cheque_id else None,
+                    numero_cheque=d.numero_cheque,
+                    banco_cheque=d.banco_cheque,
+                    fecha_cheque_emision=d.fecha_cheque_emision,
+                    fecha_cheque_vencimiento=d.fecha_cheque_vencimiento,
+                    es_cheque_diferido=d.es_cheque_diferido or False,
+                    titular_cheque=d.titular_cheque,
+                    petty_cash_fund_id=uuid.UUID(str(d.petty_cash_fund_id)) if d.petty_cash_fund_id else None,
+                    credit_note_id=uuid.UUID(str(d.credit_note_id)) if d.credit_note_id else None,
+                    comprobante_url=d.comprobante_url,
+                    observaciones=d.observaciones,
+                )
+                db.add(disb_record)
+        else:
+            disburse_payload = SupplierPaymentOrderDisburse(
+                fecha_pago=data.fecha_emision or _today(),
+                recibo_proveedor=data.recibo_proveedor,
+                observaciones=data.observaciones,
+                disbursements=data.disbursements,
+                legal_invoices=data.legal_invoices,
+                diferencia_redondeo=data.diferencia_redondeo,
+            )
+            await _execute_disbursements_internal(
+                db=db,
+                order=order,
+                supplier=supplier,
+                payload=disburse_payload,
+                user_id=user_id,
+                user_nombre=None
+            )
 
     await db.commit()
     return await get_supplier_payment_order_detail(db, company_id, str(order.id))
@@ -3759,6 +3793,12 @@ async def _execute_disbursements_internal(
     )
     allocations = list(alloc_res.scalars().all())
     primera_factura_id = allocations[0].invoice_id if allocations else None
+
+    # Limpiar desembolsos preliminares o previos de esta orden para evitar duplicación
+    await db.execute(
+        delete(SupplierPaymentOrderDisbursement)
+        .where(SupplierPaymentOrderDisbursement.payment_order_id == order.id)
+    )
 
     # 3. Procesar cada forma de pago
     for d in payload.disbursements:
@@ -4227,6 +4267,39 @@ async def _execute_disbursements_internal(
     if payload.observaciones:
         order.observaciones = (order.observaciones or "") + ("\n" if order.observaciones else "") + payload.observaciones
     order.paid_by = uuid.UUID(user_id) if user_id else None
+
+    # 5.1 Si la Orden correspondía a Nómina o Finiquito de SueldOK, notificar el desembolso a SueldOK
+    if getattr(order, "subtipo", None) in ("nomina_salarios", "finiquito") and getattr(order, "sueldok_sync_id", None):
+        try:
+            import httpx
+            import asyncio
+            from api.src.sueldok.service import SUELDOK_BASE_URL, SUELDOK_SYSTEM_KEY
+            entity_type = "payroll" if order.subtipo == "nomina_salarios" else "liquidation"
+            forma_pago_disp = (payload.disbursements[0].forma_pago if payload.disbursements else "transferencia")
+            confirm_payload = {
+                "apiKey": SUELDOK_SYSTEM_KEY,
+                "entityType": entity_type,
+                "entityId": str(order.sueldok_sync_id),
+                "status": "confirmed",
+                "externalReference": order.numero_orden,
+                "paymentVoucher": payload.recibo_proveedor or order.numero_orden,
+                "paymentMethod": forma_pago_disp,
+                "disbursedAt": int(datetime.now(timezone.utc).timestamp() * 1000),
+            }
+            async def _notify_sueldok(ep_url, ep_body):
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as cl:
+                        headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
+                        await cl.post(ep_url, json=ep_body, headers=headers)
+                except Exception as n_err:
+                    import logging
+                    logging.getLogger("financial").warning(f"Error confirmando en SueldOK: {n_err}")
+
+            webhook_url = f"{SUELDOK_BASE_URL.rstrip('/')}/http/api/financial/confirm"
+            asyncio.create_task(_notify_sueldok(webhook_url, confirm_payload))
+        except Exception as _e_hook:
+            import logging
+            logging.getLogger("financial").warning(f"Error despachando webhook a SueldOK: {_e_hook}")
 
 
 async def disburse_supplier_payment_order(
@@ -5704,6 +5777,44 @@ async def settle_vales_and_pay(
         "numero_factura": invoice.numero_factura,
         "monto_total": float(monto_factura),
         "total_vales_liquidados": len(vales_refs),
+    }
+
+
+async def update_supplier_payment_agreement(
+    db: AsyncSession,
+    supplier_id: str,
+    body: Any,
+) -> dict | None:
+    from api.src.purchases.models import Supplier
+    import uuid
+    res = await db.execute(select(Supplier).where(Supplier.id == uuid.UUID(supplier_id)))
+    sup = res.scalar_one_or_none()
+    if not sup:
+        return None
+
+    if body.plazo_credito_factura_dias is not None:
+        sup.plazo_credito_factura_dias = body.plazo_credito_factura_dias
+        sup.plazo_pago_dias = body.plazo_credito_factura_dias
+    if body.plazo_credito_cheque_dias is not None:
+        sup.plazo_credito_cheque_dias = body.plazo_credito_cheque_dias
+    if body.formas_pago_acordadas is not None:
+        sup.formas_pago_acordadas = body.formas_pago_acordadas
+    if body.acuerdo_pago_tipo is not None:
+        sup.acuerdo_pago_tipo = body.acuerdo_pago_tipo
+    if body.acuerdo_pago_notas is not None:
+        sup.acuerdo_pago_notas = body.acuerdo_pago_notas
+
+    await db.flush()
+    await db.refresh(sup)
+    return {
+        "id": str(sup.id),
+        "razon_social": sup.razon_social,
+        "plazo_pago_dias": sup.plazo_pago_dias,
+        "plazo_credito_factura_dias": sup.plazo_credito_factura_dias,
+        "plazo_credito_cheque_dias": sup.plazo_credito_cheque_dias,
+        "formas_pago_acordadas": sup.formas_pago_acordadas or [],
+        "acuerdo_pago_tipo": sup.acuerdo_pago_tipo or "contado",
+        "acuerdo_pago_notas": sup.acuerdo_pago_notas or "",
     }
 
 

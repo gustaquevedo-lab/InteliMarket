@@ -14,7 +14,7 @@ import {
   Layers, ShieldCheck, Check, Phone, ArrowRight, HelpCircle, Download,
   Upload, Paperclip, ExternalLink, Wallet, ArrowLeft, CheckSquare, Square,
   PackageMinus, Truck, Printer, Users, CheckCheck, FileCheck, CalendarClock,
-  LayoutGrid, ListFilter, CornerDownRight
+  LayoutGrid, ListFilter, CornerDownRight, Handshake, Banknote
 } from "lucide-react"
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -24,6 +24,22 @@ import {
 const FALLBACK_COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
 type Tab = "dashboard" | "ap" | "pagos" | "cashflow" | "presupuestos" | "credit_notes"
+
+export const FORMAS_PAGO_ACORDADAS_OPCIONES = [
+  { id: "cheque_diferido", label: "Cheque Diferido", icon: "🧾" },
+  { id: "cheque_al_dia", label: "Cheque al Día", icon: "💵" },
+  { id: "transferencia_sipap", label: "Transferencia SIPAP", icon: "🏦" },
+  { id: "efectivo", label: "Efectivo / Bóveda", icon: "💰" },
+  { id: "fondo_fijo", label: "Fondo Fijo / Caja Chica", icon: "📦" },
+]
+
+export const TIPOS_ACUERDO_PAGO = [
+  { id: "credito_factura", label: "Crédito contra Factura" },
+  { id: "credito_cheque", label: "Crédito contra Cheque Diferido" },
+  { id: "mixto", label: "Mixto (Factura + Cheque)" },
+  { id: "contado", label: "Contado / Inmediato" },
+  { id: "anticipado", label: "Anticipado" },
+]
 
 const MOTIVOS_NC = [
   { id: "devolucion_rotura", label: "Devolución por Rotura / Daño Físico", defaultImpact: "recuperacion_merma" },
@@ -74,8 +90,8 @@ export default function FinancialPage() {
   const [apViewMode, setApViewMode] = useState<"cards" | "table">("cards")
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null)
   const [apSupplierSearch, setApSupplierSearch] = useState("")
-  const [apSupplierFilter, setApSupplierFilter] = useState<"todos" | "con_vencidas" | "con_nc" | "con_devoluciones">("todos")
-  const [apSupplierSort, setApSupplierSort] = useState<"deuda_desc" | "vencimiento_asc" | "nombre_asc" | "facturas_desc">("deuda_desc")
+  const [apSupplierFilter, setApSupplierFilter] = useState<"todos" | "con_vencidas" | "con_cheques_diferidos" | "con_nc" | "con_devoluciones">("todos")
+  const [apSupplierSort, setApSupplierSort] = useState<"deuda_desc" | "facturas_deuda_desc" | "cheques_desc" | "vencimiento_asc" | "nombre_asc" | "facturas_desc">("deuda_desc")
   const [selectedOpInvoiceIds, setSelectedOpInvoiceIds] = useState<Set<string>>(new Set())
   const [selectedOpCreditNoteIds, setSelectedOpCreditNoteIds] = useState<Set<string>>(new Set())
   const [selectedOpReturnIds, setSelectedOpReturnIds] = useState<Set<string>>(new Set())
@@ -83,7 +99,20 @@ export default function FinancialPage() {
   const [creatingOp, setCreatingOp] = useState(false)
   const [generatingProformaPdf, setGeneratingProformaPdf] = useState(false)
   const [supermerReturns, setSupermerReturns] = useState<any[]>([])
-  const [detailDocFilter, setDetailDocFilter] = useState<"todos" | "facturas" | "notas_credito" | "devoluciones">("todos")
+  const [detailDocFilter, setDetailDocFilter] = useState<"todos" | "facturas" | "notas_credito" | "devoluciones" | "cheques">("todos")
+
+  // Cheques diferidos en cartera y Acuerdos Comerciales de Proveedores
+  const [allCheques, setAllCheques] = useState<any[]>([])
+  const [editingAgreementsSupplier, setEditingAgreementsSupplier] = useState<any | null>(null)
+  const [savingAgreements, setSavingAgreements] = useState(false)
+  const [agreementsForm, setAgreementsForm] = useState({
+    plazo_credito_factura_dias: 0,
+    plazo_credito_cheque_dias: 0,
+    formas_pago_acordadas: [] as string[],
+    acuerdo_pago_tipo: "credito_factura",
+    acuerdo_pago_notas: "",
+  })
+  const [viewingChequesSupplier, setViewingChequesSupplier] = useState<any | null>(null)
 
   const [search, setSearch] = useState("")
   const [filterEstado, setFilterEstado] = useState("todos")
@@ -199,6 +228,7 @@ export default function FinancialPage() {
         supsData,
         fundsData,
         smerRetData,
+        chqsData,
       ] = await Promise.allSettled([
         api.financial.apDashboard(),
         api.financial.invoices.list({ limit: 2500 }),
@@ -214,6 +244,7 @@ export default function FinancialPage() {
         api.purchases.suppliers().catch(() => []),
         api.expenses.funds.list().catch(() => []),
         api.supplierReturns.list().catch(() => []),
+        api.cheques.list({ limit: 5000 }).catch(() => []),
       ])
 
       if (dashData.status === "fulfilled") setDashboard(dashData.value)
@@ -233,6 +264,7 @@ export default function FinancialPage() {
       if (supsData.status === "fulfilled") setAllSuppliers(supsData.value || [])
       if (fundsData.status === "fulfilled") setFunds(fundsData.value || [])
       if (smerRetData.status === "fulfilled") setSupermerReturns(Array.isArray(smerRetData.value) ? smerRetData.value : [])
+      if (chqsData.status === "fulfilled") setAllCheques(Array.isArray(chqsData.value) ? chqsData.value : [])
     } catch {
       toast.error("Error", "No se pudieron sincronizar los datos financieros")
     } finally {
@@ -589,18 +621,93 @@ export default function FinancialPage() {
     }
   }
 
+  // ── Manejo de Acuerdos de Pago con Proveedores ──
+  const handleOpenAgreementsModal = (sup: any, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    setEditingAgreementsSupplier(sup)
+    setAgreementsForm({
+      plazo_credito_factura_dias: Number(sup.plazo_credito_factura_dias || 0),
+      plazo_credito_cheque_dias: Number(sup.plazo_credito_cheque_dias || 0),
+      formas_pago_acordadas: Array.isArray(sup.formas_pago_acordadas) ? [...sup.formas_pago_acordadas] : [],
+      acuerdo_pago_tipo: sup.acuerdo_pago_tipo || (Number(sup.plazo_credito_factura_dias) > 0 ? "credito_factura" : "contado"),
+      acuerdo_pago_notas: sup.acuerdo_pago_notas || "",
+    })
+  }
+
+  const handleSaveAgreements = async () => {
+    if (!editingAgreementsSupplier) return
+    setSavingAgreements(true)
+    try {
+      const supId = editingAgreementsSupplier.supplier_id
+      await api.financial.updateSupplierPaymentAgreement(supId, agreementsForm)
+      setAllSuppliers(prev => prev.map(s => {
+        if (s.id === supId) {
+          return {
+            ...s,
+            plazo_pago_dias: agreementsForm.plazo_credito_factura_dias,
+            plazo_credito_factura_dias: agreementsForm.plazo_credito_factura_dias,
+            plazo_credito_cheque_dias: agreementsForm.plazo_credito_cheque_dias,
+            formas_pago_acordadas: agreementsForm.formas_pago_acordadas,
+            acuerdo_pago_tipo: agreementsForm.acuerdo_pago_tipo,
+            acuerdo_pago_notas: agreementsForm.acuerdo_pago_notas,
+          }
+        }
+        return s
+      }))
+      toast.success("Acuerdos Guardados", `Se actualizaron los acuerdos de pago con ${editingAgreementsSupplier.supplier_nombre}.`)
+      setEditingAgreementsSupplier(null)
+    } catch (err: any) {
+      toast.error("Error al guardar acuerdos", err.message || "No se pudo actualizar el acuerdo de pago")
+    } finally {
+      setSavingAgreements(false)
+    }
+  }
+
   // ── Agrupación de Proveedores para Cards de Cuentas por Pagar ──
   const suppliersCardList = useMemo(() => {
     const today = getTodayAsuncion()
+
+    // 0. Pre-indexar cheques diferidos no compensados por supplier_id y por nombre beneficiario
+    const chequesBySupplierId = new Map<string, any[]>()
+    const chequesByNormalizedName = new Map<string, any[]>()
+
+    allCheques.forEach(c => {
+      const estado = String(c.estado || "pendiente").toLowerCase()
+      const isNoCompensado = estado === "pendiente" || estado === "entregado"
+      const isDiferido = Boolean(c.diferido || (c.fecha_pago && c.fecha_emision && String(c.fecha_pago).slice(0, 10) > String(c.fecha_emision).slice(0, 10)))
+      if (isNoCompensado && isDiferido) {
+        if (c.supplier_id) {
+          const sid = String(c.supplier_id)
+          if (!chequesBySupplierId.has(sid)) chequesBySupplierId.set(sid, [])
+          chequesBySupplierId.get(sid)!.push(c)
+        }
+        if (c.beneficiario) {
+          const norm = String(c.beneficiario).trim().toLowerCase()
+          if (!chequesByNormalizedName.has(norm)) chequesByNormalizedName.set(norm, [])
+          chequesByNormalizedName.get(norm)!.push(c)
+        }
+      }
+    })
+
     const map = new Map<string, {
       supplier_id: string
       supplier_nombre: string
       nombre_fantasia?: string
       ruc: string
       telefono?: string
+      plazo_credito_factura_dias: number
+      plazo_credito_cheque_dias: number
+      formas_pago_acordadas: string[]
+      acuerdo_pago_tipo: string
+      acuerdo_pago_notas: string
       invoices: SupplierInvoice[]
       pendingInvoices: SupplierInvoice[]
       deudaConsolidada: number
+      chequesDiferidos: any[]
+      montoChequesDiferidos: number
+      cantidadChequesDiferidos: number
+      chequeDiferidoMasProximo: any | null
+      deudaTotalCompuesta: number
       creditNotes: any[]
       ncConsolidada: number
       devolucionesPendientes: any[]
@@ -617,15 +724,42 @@ export default function FinancialPage() {
     // 1. Sembrar desde allSuppliers para datos limpios
     allSuppliers.forEach((s: any) => {
       if (s.id) {
+        const sId = String(s.id)
+        let supChqs: any[] = []
+        if (chequesBySupplierId.has(sId)) {
+          supChqs = chequesBySupplierId.get(sId)!
+        } else if (s.razon_social) {
+          const norm = String(s.razon_social).trim().toLowerCase()
+          if (chequesByNormalizedName.has(norm)) {
+            supChqs = chequesByNormalizedName.get(norm)!
+          }
+        }
+        supChqs.sort((a, b) => {
+          const da = a.fecha_pago || a.fecha_emision || ""
+          const db = b.fecha_pago || b.fecha_emision || ""
+          return String(da).localeCompare(String(db))
+        })
+        const montoChqs = supChqs.reduce((acc, ch) => acc + Number(ch.monto || 0), 0)
+
         map.set(s.id, {
           supplier_id: s.id,
           supplier_nombre: s.razon_social || s.nombre || "Proveedor",
           nombre_fantasia: s.nombre_fantasia || "",
           ruc: s.ruc || "",
           telefono: s.telefono || "",
+          plazo_credito_factura_dias: Number(s.plazo_credito_factura_dias ?? s.plazo_pago_dias ?? 0),
+          plazo_credito_cheque_dias: Number(s.plazo_credito_cheque_dias ?? 0),
+          formas_pago_acordadas: Array.isArray(s.formas_pago_acordadas) ? s.formas_pago_acordadas : [],
+          acuerdo_pago_tipo: s.acuerdo_pago_tipo || (Number(s.plazo_credito_factura_dias || s.plazo_pago_dias) > 0 ? "credito_factura" : "contado"),
+          acuerdo_pago_notas: s.acuerdo_pago_notas || "",
           invoices: [],
           pendingInvoices: [],
           deudaConsolidada: 0,
+          chequesDiferidos: supChqs,
+          montoChequesDiferidos: montoChqs,
+          cantidadChequesDiferidos: supChqs.length,
+          chequeDiferidoMasProximo: supChqs[0] || null,
+          deudaTotalCompuesta: montoChqs,
           creditNotes: [],
           ncConsolidada: 0,
           devolucionesPendientes: [],
@@ -646,13 +780,29 @@ export default function FinancialPage() {
       const supId = inv.supplier_id || "sin_id"
       let item = map.get(supId)
       if (!item) {
+        const sId = supId !== "sin_id" ? supId : null
+        let supChqs: any[] = []
+        if (sId && chequesBySupplierId.has(sId)) {
+          supChqs = chequesBySupplierId.get(sId)!
+        }
+        const montoChqs = supChqs.reduce((acc, ch) => acc + Number(ch.monto || 0), 0)
         item = {
           supplier_id: supId,
           supplier_nombre: inv.supplier_nombre || "Proveedor Desconocido",
           ruc: (inv as any).supplier_ruc || "",
+          plazo_credito_factura_dias: 0,
+          plazo_credito_cheque_dias: 0,
+          formas_pago_acordadas: [],
+          acuerdo_pago_tipo: "contado",
+          acuerdo_pago_notas: "",
           invoices: [],
           pendingInvoices: [],
           deudaConsolidada: 0,
+          chequesDiferidos: supChqs,
+          montoChequesDiferidos: montoChqs,
+          cantidadChequesDiferidos: supChqs.length,
+          chequeDiferidoMasProximo: supChqs[0] || null,
+          deudaTotalCompuesta: montoChqs,
           creditNotes: [],
           ncConsolidada: 0,
           devolucionesPendientes: [],
@@ -704,9 +854,19 @@ export default function FinancialPage() {
           supplier_id: supId,
           supplier_nombre: cn.supplier_nombre || "Proveedor",
           ruc: "",
+          plazo_credito_factura_dias: 0,
+          plazo_credito_cheque_dias: 0,
+          formas_pago_acordadas: [],
+          acuerdo_pago_tipo: "contado",
+          acuerdo_pago_notas: "",
           invoices: [],
           pendingInvoices: [],
           deudaConsolidada: 0,
+          chequesDiferidos: [],
+          montoChequesDiferidos: 0,
+          cantidadChequesDiferidos: 0,
+          chequeDiferidoMasProximo: null,
+          deudaTotalCompuesta: 0,
           creditNotes: [],
           ncConsolidada: 0,
           devolucionesPendientes: [],
@@ -721,9 +881,6 @@ export default function FinancialPage() {
         }
         map.set(supId, item)
       }
-      // Saldo de la NC: únicamente el saldo_disponible real a favor que aún no haya sido
-      // imputado contra facturas. Si ya fue imputada al 100%, su efecto financiero ya está
-      // descontado de inv.saldo_pendiente y saldo_disponible es 0. Nunca tomar cn.monto si saldo_disponible <= 0.
       const saldoNC = Math.max(0, Number(cn.saldo_disponible || 0))
       item.creditNotes.push(cn)
       if (saldoNC > 0) {
@@ -731,11 +888,7 @@ export default function FinancialPage() {
       }
     })
 
-    // 4. Devoluciones de Mercadería pendientes de formalización fiscal ("Obligación Pendiente de NC")
-    // La devolución (DEV) es el acto administrativo de baja física en depósito.
-    // Solo aquellas devoluciones físicas que aún NO cuentan con NC emitida por el proveedor
-    // representan un crédito estimativo en trámite. Si ya cuentan con NC o están completadas,
-    // el impacto legal y contable reside exclusivamente en la NC (SupplierCreditNote), sin duplicar.
+    // 4. Devoluciones de Mercadería pendientes de formalización fiscal
     const allReturns = [...supplierReturns, ...supermerReturns]
     const seenReturnIds = new Set<string>()
 
@@ -753,9 +906,8 @@ export default function FinancialPage() {
         (Array.isArray(ret.notas_credito) && ret.notas_credito.length > 0)
       )
       const isCompletado = (ret.estado || "").toLowerCase() === "completado"
-      if (hasNC || isCompletado) return // Formalizada vía NC fiscal o completada en compras
+      if (hasNC || isCompletado) return
 
-      // Si las observaciones refieren a una devolución completada o con NCs, excluir
       if (ret.observaciones && /DEV-\d|NCs:/i.test(ret.observaciones)) return
 
       let item = map.get(supId)
@@ -764,9 +916,19 @@ export default function FinancialPage() {
           supplier_id: supId,
           supplier_nombre: ret.supplier_nombre || ret.proveedor_nombre || "Proveedor",
           ruc: "",
+          plazo_credito_factura_dias: 0,
+          plazo_credito_cheque_dias: 0,
+          formas_pago_acordadas: [],
+          acuerdo_pago_tipo: "contado",
+          acuerdo_pago_notas: "",
           invoices: [],
           pendingInvoices: [],
           deudaConsolidada: 0,
+          chequesDiferidos: [],
+          montoChequesDiferidos: 0,
+          cantidadChequesDiferidos: 0,
+          chequeDiferidoMasProximo: null,
+          deudaTotalCompuesta: 0,
           creditNotes: [],
           ncConsolidada: 0,
           devolucionesPendientes: [],
@@ -789,13 +951,25 @@ export default function FinancialPage() {
       }
     })
 
-    // 5. Filtrar proveedores con saldo o movimientos y calcular neto
+    // 5. Consolidar deuda compuesta y neto exigible
     const list = Array.from(map.values())
-      .filter(item => item.deudaConsolidada > 0 || item.ncConsolidada > 0 || item.ncNoRegistrada > 0 || item.pendingInvoices.length > 0)
-      .map(item => ({
-        ...item,
-        netoExigible: Math.max(0, item.deudaConsolidada - item.ncConsolidada - item.ncNoRegistrada)
-      }))
+      .map(item => {
+        const deudaCompuesta = item.deudaConsolidada + item.montoChequesDiferidos
+        const neto = Math.max(0, item.deudaConsolidada - item.ncConsolidada - item.ncNoRegistrada)
+        return {
+          ...item,
+          deudaTotalCompuesta: deudaCompuesta,
+          netoExigible: neto,
+        }
+      })
+      .filter(item => 
+        item.deudaConsolidada > 0 || 
+        item.ncConsolidada > 0 || 
+        item.ncNoRegistrada > 0 || 
+        item.pendingInvoices.length > 0 || 
+        item.montoChequesDiferidos > 0 || 
+        item.cantidadChequesDiferidos > 0
+      )
 
     // Filtros y Búsqueda en los Cards
     return list.filter(item => {
@@ -812,12 +986,15 @@ export default function FinancialPage() {
 
       let matchFilter = true
       if (apSupplierFilter === "con_vencidas") matchFilter = item.tieneVencidas
+      if (apSupplierFilter === "con_cheques_diferidos") matchFilter = item.cantidadChequesDiferidos > 0
       if (apSupplierFilter === "con_nc") matchFilter = item.ncConsolidada > 0
       if (apSupplierFilter === "con_devoluciones") matchFilter = item.ncNoRegistrada > 0
 
       return matchSearch && matchFilter
     }).sort((a, b) => {
-      if (apSupplierSort === "deuda_desc") return b.deudaConsolidada - a.deudaConsolidada
+      if (apSupplierSort === "deuda_desc") return b.deudaTotalCompuesta - a.deudaTotalCompuesta
+      if (apSupplierSort === "facturas_deuda_desc") return b.deudaConsolidada - a.deudaConsolidada
+      if (apSupplierSort === "cheques_desc") return b.montoChequesDiferidos - a.montoChequesDiferidos
       if (apSupplierSort === "nombre_asc") return a.supplier_nombre.localeCompare(b.supplier_nombre)
       if (apSupplierSort === "facturas_desc") return b.cantidadFacturasPendientes - a.cantidadFacturasPendientes
       if (apSupplierSort === "vencimiento_asc") {
@@ -827,7 +1004,7 @@ export default function FinancialPage() {
       }
       return 0
     })
-  }, [allSuppliers, invoices, creditNotes, supplierReturns, supermerReturns, apSupplierSearch, apSupplierFilter, apSupplierSort])
+  }, [allSuppliers, invoices, creditNotes, supplierReturns, supermerReturns, allCheques, apSupplierSearch, apSupplierFilter, apSupplierSort])
 
   // Proveedor actualmente seleccionado para ver detalle y armar lote de pago / OP
   const currentSelectedSupplier = useMemo(() => {
@@ -849,7 +1026,7 @@ export default function FinancialPage() {
     if (!currentSelectedSupplier) return []
     const docs: Array<{
       id: string
-      docType: "factura" | "nota_credito" | "devolucion"
+      docType: "factura" | "nota_credito" | "devolucion" | "cheque"
       numero: string
       timbrado: string | null
       fechaEmision: string | null
@@ -914,11 +1091,30 @@ export default function FinancialPage() {
       })
     })
 
+    // 4. Cheques Diferidos en Tránsito (No Compensados)
+    ;(currentSelectedSupplier.chequesDiferidos || []).forEach(ch => {
+      const monto = Number(ch.monto || 0)
+      docs.push({
+        id: String(ch.id),
+        docType: "cheque",
+        numero: ch.numero ? `Cheque N° ${ch.numero}` : "Cheque S/N",
+        timbrado: ch.banco_emisor || "Banco",
+        fechaEmision: ch.fecha_emision ? String(ch.fecha_emision) : null,
+        fechaVencimiento: ch.fecha_pago ? String(ch.fecha_pago) : null,
+        montoOriginal: monto,
+        saldoEfectivo: monto,
+        estado: ch.estado === "entregado" ? "Entregado (En Tránsito)" : "Emitido (Pendiente Débito)",
+        isSelected: false,
+        raw: ch,
+      })
+    })
+
     // Filtrado por tab activo
     let filtered = docs
     if (detailDocFilter === "facturas") filtered = docs.filter(d => d.docType === "factura")
     else if (detailDocFilter === "notas_credito") filtered = docs.filter(d => d.docType === "nota_credito")
     else if (detailDocFilter === "devoluciones") filtered = docs.filter(d => d.docType === "devolucion")
+    else if (detailDocFilter === "cheques") filtered = docs.filter(d => d.docType === "cheque")
 
     return filtered
   }, [currentSelectedSupplier, selectedOpInvoiceIds, selectedOpCreditNoteIds, selectedOpReturnIds, detailDocFilter])
@@ -1128,24 +1324,36 @@ export default function FinancialPage() {
           monto_retencion: 0,
         }))
 
-      const ncDisbursements = currentSelectedSupplier.creditNotes
-        .filter(n => selectedOpCreditNoteIds.has(n.id))
-        .map(n => {
-          const saldo = Number(n.saldo_disponible !== undefined ? n.saldo_disponible : n.monto || 0)
-          return {
-            forma_pago: "nota_credito" as const,
-            monto: saldo,
-            monto_pyg: saldo,
-            credit_note_id: n.id,
-            observaciones: `Compensación NC N° ${n.numero || "S/N"} (Timbrado: ${n.timbrado || "-"})`,
-          }
+      // Distribuir el saldo de las NCs seleccionadas hasta cubrir como máximo el total de las facturas
+      let restanteACubrir = selectedFacturasTotal
+      const ncDisbursements = []
+      for (const n of currentSelectedSupplier.creditNotes.filter(n => selectedOpCreditNoteIds.has(n.id))) {
+        if (restanteACubrir <= 0) break
+        const saldoNC = Number(n.saldo_disponible !== undefined ? n.saldo_disponible : n.monto || 0)
+        if (saldoNC <= 0) continue
+        const montoAplicar = Math.min(saldoNC, restanteACubrir)
+        ncDisbursements.push({
+          forma_pago: "nota_credito" as const,
+          monto: montoAplicar,
+          monto_pyg: montoAplicar,
+          credit_note_id: n.id,
+          observaciones: `Compensación NC N° ${n.numero || "S/N"} (Timbrado: ${n.timbrado || "-"})`,
         })
+        restanteACubrir -= montoAplicar
+      }
+
+      let obsFinal = opObservaciones ? `[AGUARDANDO PAGO] ${opObservaciones}` : "[AGUARDANDO PAGO] Orden de pago generada desde preparación de liquidación AP"
+      if (selectedOpReturnIds.size > 0) {
+        const rets = currentSelectedSupplier.devolucionesPendientes.filter(r => selectedOpReturnIds.has(r.id))
+        const retsText = rets.map(r => `Devolución N° ${r.numero_devolucion || String(r.id).slice(0, 8)} (₲ ${Number(r.monto || r.total || 0).toLocaleString("es-PY")})`).join(", ")
+        obsFinal += ` | Reclamos físicos vinculados: ${retsText}`
+      }
 
       const res = await api.financial.paymentOrders.create({
         supplier_id: currentSelectedSupplier.supplier_id,
         fecha_emision: getTodayAsuncion(),
         estado: "aguardando_pago",
-        observaciones: opObservaciones ? `[AGUARDANDO PAGO] ${opObservaciones}` : "[AGUARDANDO PAGO] Orden de pago generada desde preparación de liquidación AP",
+        observaciones: obsFinal,
         allocations,
         disbursements: ncDisbursements,
       })
@@ -1477,7 +1685,17 @@ export default function FinancialPage() {
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 self-start md:self-center">
+                      <div className="flex items-center gap-2 self-start md:self-center flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenAgreementsModal(currentSelectedSupplier)}
+                          className="btn-ghost text-xs text-indigo-300 hover:text-white border border-indigo-500/40 py-2 px-3 flex items-center gap-1.5 bg-indigo-950/40 rounded-xl"
+                          title="Definir o modificar acuerdos comerciales de pago"
+                        >
+                          <Handshake className="w-4 h-4 text-indigo-400" />
+                          <span>Acuerdos Comerciales</span>
+                        </button>
+
                         <button
                           type="button"
                           onClick={() => {
@@ -1486,55 +1704,125 @@ export default function FinancialPage() {
                               setSelected360SupplierNombre(currentSelectedSupplier.supplier_nombre)
                             }
                           }}
-                          className="btn-ghost text-xs text-indigo-300 hover:text-white border border-indigo-500/30 py-2 px-3"
+                          className="btn-ghost text-xs text-indigo-300 hover:text-white border border-indigo-500/30 py-2 px-3 flex items-center gap-1.5"
                           title="Abrir Historial y Visión 360°"
                         >
-                          <Eye className="w-4 h-4 mr-1.5" /> Visión 360°
+                          <Eye className="w-4 h-4" />
+                          <span>Visión 360°</span>
                         </button>
                       </div>
                     </div>
 
-                    {/* Resumen Financiero Consolidado del Proveedor */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-5 border-t border-slate-700/60">
+                    {/* Barra Informativa de Acuerdos Comerciales Pactados */}
+                    <div className="mt-4 pt-3 border-t border-slate-700/60 flex flex-wrap items-center justify-between gap-3 text-xs">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-gray-400 font-semibold flex items-center gap-1">
+                          <Handshake className="w-3.5 h-3.5 text-indigo-400" />
+                          Acuerdos Pactados:
+                        </span>
+                        <span className="px-2 py-0.5 rounded-lg bg-slate-800 border border-slate-700 text-gray-200">
+                          Plazo Factura: <strong className="text-white font-mono">{currentSelectedSupplier.plazo_credito_factura_dias > 0 ? `${currentSelectedSupplier.plazo_credito_factura_dias} días` : "Contado"}</strong>
+                        </span>
+                        <span className="px-2 py-0.5 rounded-lg bg-slate-800 border border-slate-700 text-gray-200">
+                          Plazo Cheque: <strong className="text-white font-mono">{currentSelectedSupplier.plazo_credito_cheque_dias > 0 ? `${currentSelectedSupplier.plazo_credito_cheque_dias} días` : "Sin diferido"}</strong>
+                        </span>
+                        {currentSelectedSupplier.formas_pago_acordadas && currentSelectedSupplier.formas_pago_acordadas.length > 0 ? (
+                          currentSelectedSupplier.formas_pago_acordadas.map((fId: string) => {
+                            const opt = FORMAS_PAGO_ACORDADAS_OPCIONES.find(o => o.id === fId)
+                            return (
+                              <span key={fId} className="px-2 py-0.5 rounded-lg bg-indigo-950/60 border border-indigo-800/60 text-indigo-300 font-medium">
+                                {opt?.icon || "•"} {opt?.label || fId}
+                              </span>
+                            )
+                          })
+                        ) : (
+                          <span className="text-gray-400 italic text-[11px]">
+                            Sin formas de pago especificadas
+                          </span>
+                        )}
+                      </div>
+                      {currentSelectedSupplier.acuerdo_pago_notas && (
+                        <div className="text-gray-300 italic text-[11px] bg-slate-900/60 px-2.5 py-1 rounded-lg border border-slate-800">
+                          Nota: “{currentSelectedSupplier.acuerdo_pago_notas}”
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Resumen Financiero Consolidado del Proveedor (5 Métricas) */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3 mt-4 pt-4 border-t border-slate-700/60">
+                      {/* 1. Deuda Total Compuesta */}
+                      <div className="bg-gradient-to-br from-indigo-950/40 to-slate-900/60 p-3.5 rounded-xl border border-indigo-500/30">
+                        <span className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider block">
+                          Deuda Total Compuesta
+                        </span>
+                        <span className="text-lg font-bold font-mono text-white block mt-1">
+                          {formatPYG(currentSelectedSupplier.deudaTotalCompuesta)}
+                        </span>
+                        <span className="text-[11px] text-indigo-300/80 block truncate">
+                          Facturas + Cheques Diferidos
+                        </span>
+                      </div>
+
+                      {/* 2. Facturas Pendientes Exigibles */}
                       <div className="bg-slate-950/50 p-3.5 rounded-xl border border-slate-800">
-                        <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider block">Deuda Consolidada</span>
+                        <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider block">
+                          Facturas Exigibles
+                        </span>
                         <span className="text-lg font-bold font-mono text-white block mt-1">
                           {formatPYG(currentSelectedSupplier.deudaConsolidada)}
                         </span>
                         <span className="text-[11px] text-gray-500">
-                          {currentSelectedSupplier.pendingInvoices.length} comprobantes exigibles
+                          {currentSelectedSupplier.pendingInvoices.length} facturas pendientes
                         </span>
                       </div>
 
+                      {/* 3. Cheques Diferidos en Tránsito */}
+                      <div className="bg-slate-950/50 p-3.5 rounded-xl border border-blue-900/40">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] uppercase font-bold text-blue-400 tracking-wider block">
+                            Cheques Dif. Tránsito
+                          </span>
+                          {currentSelectedSupplier.cantidadChequesDiferidos > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setViewingChequesSupplier(currentSelectedSupplier)}
+                              className="text-[10px] text-blue-400 hover:underline font-bold"
+                            >
+                              Ver
+                            </button>
+                          )}
+                        </div>
+                        <span className="text-lg font-bold font-mono text-blue-300 block mt-1">
+                          {formatPYG(currentSelectedSupplier.montoChequesDiferidos)}
+                        </span>
+                        <span className="text-[11px] text-blue-400/80">
+                          {currentSelectedSupplier.cantidadChequesDiferidos} emitidos no compensados
+                        </span>
+                      </div>
+
+                      {/* 4. NCs y Devoluciones a Favor */}
                       <div className="bg-slate-950/50 p-3.5 rounded-xl border border-purple-900/30">
-                        <span className="text-[10px] uppercase font-bold text-purple-400 tracking-wider block">NC Fiscales Disponibles</span>
+                        <span className="text-[10px] uppercase font-bold text-purple-400 tracking-wider block">
+                          NCs & Créditos a Favor
+                        </span>
                         <span className="text-lg font-bold font-mono text-purple-300 block mt-1">
-                          {formatPYG(currentSelectedSupplier.ncConsolidada)}
+                          {formatPYG(currentSelectedSupplier.ncConsolidada + currentSelectedSupplier.ncNoRegistrada)}
                         </span>
-                        <span className="text-[11px] text-purple-400/80">
-                          {currentSelectedSupplier.creditNotes.length} NCs a favor con saldo
-                        </span>
-                      </div>
-
-                      <div className="bg-slate-950/50 p-3.5 rounded-xl border border-amber-900/30">
-                        <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider block" title="Devoluciones físicas de mercadería sin comprobante fiscal de NC entregado aún">
-                          NC Pendiente de Proveedor
-                        </span>
-                        <span className="text-lg font-bold font-mono text-amber-300 block mt-1">
-                          {formatPYG(currentSelectedSupplier.ncNoRegistrada)}
-                        </span>
-                        <span className="text-[11px] text-amber-400/80">
-                          {currentSelectedSupplier.devolucionesPendientes.length} devolución(es) en reclamo
+                        <span className="text-[11px] text-purple-400/80 truncate block">
+                          {currentSelectedSupplier.creditNotes.length} NCs ({formatPYG(currentSelectedSupplier.ncConsolidada)})
                         </span>
                       </div>
 
+                      {/* 5. Neto Exigible Teórico */}
                       <div className="bg-emerald-950/30 p-3.5 rounded-xl border border-emerald-500/30">
-                        <span className="text-[10px] uppercase font-bold text-emerald-400 tracking-wider block">Neto Exigible Teórico</span>
+                        <span className="text-[10px] uppercase font-bold text-emerald-400 tracking-wider block">
+                          Neto Exigible Estimado
+                        </span>
                         <span className="text-lg font-bold font-mono text-emerald-300 block mt-1">
                           {formatPYG(currentSelectedSupplier.netoExigible)}
                         </span>
                         <span className="text-[11px] text-emerald-400/80">
-                          Deuda neta deduciendo NCs
+                          Facturas netas menos NCs
                         </span>
                       </div>
                     </div>
@@ -1561,7 +1849,7 @@ export default function FinancialPage() {
 
                       <div className="flex items-center gap-2 flex-wrap">
                         {/* Selector de Tabs de Comprobantes */}
-                        <div className="flex items-center gap-1 p-1 bg-gray-200/70 dark:bg-slate-900 rounded-lg text-xs font-semibold">
+                        <div className="flex items-center gap-1 p-1 bg-gray-200/70 dark:bg-slate-900 rounded-lg text-xs font-semibold flex-wrap">
                           <button
                             type="button"
                             onClick={() => setDetailDocFilter("todos")}
@@ -1571,7 +1859,7 @@ export default function FinancialPage() {
                                 : "text-gray-500 hover:text-gray-900 dark:hover:text-white"
                             }`}
                           >
-                            Todos ({currentSelectedSupplier.pendingInvoices.length + currentSelectedSupplier.creditNotes.length + currentSelectedSupplier.devolucionesPendientes.length})
+                            Todos ({currentSelectedSupplier.pendingInvoices.length + currentSelectedSupplier.creditNotes.length + currentSelectedSupplier.devolucionesPendientes.length + (currentSelectedSupplier.chequesDiferidos?.length || 0)})
                           </button>
                           <button
                             type="button"
@@ -1583,6 +1871,17 @@ export default function FinancialPage() {
                             }`}
                           >
                             Facturas ({currentSelectedSupplier.pendingInvoices.length})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDetailDocFilter("cheques")}
+                            className={`px-2.5 py-1 rounded-md transition ${
+                              detailDocFilter === "cheques"
+                                ? "bg-blue-100 dark:bg-blue-600 text-blue-900 dark:text-white shadow-sm"
+                                : "text-gray-500 hover:text-blue-600 dark:hover:text-blue-300"
+                            }`}
+                          >
+                            Cheques Dif. ({currentSelectedSupplier.chequesDiferidos?.length || 0})
                           </button>
                           <button
                             type="button"
@@ -1630,7 +1929,7 @@ export default function FinancialPage() {
                               <span className="sr-only">Selección</span>
                             </th>
                             <th className="p-3.5 w-32">Tipo Documento</th>
-                            <th className="p-3.5 w-28">Timbrado</th>
+                            <th className="p-3.5 w-28">Timbrado / Banco</th>
                             <th className="p-3.5 w-36">N° Documento</th>
                             <th className="p-3.5 w-28">Emisión</th>
                             <th className="p-3.5 w-32">Vencimiento</th>
@@ -1652,10 +1951,11 @@ export default function FinancialPage() {
                               const isFactura = doc.docType === "factura"
                               const isNC = doc.docType === "nota_credito"
                               const isDev = doc.docType === "devolucion"
+                              const isCheque = doc.docType === "cheque"
 
                               const today = getTodayAsuncion()
                               const isVencida = isFactura && doc.fechaVencimiento && doc.fechaVencimiento < today
-                              const vtoText = isFactura ? getDaysDiffText(doc.fechaVencimiento) : null
+                              const vtoText = (isFactura || isCheque) ? getDaysDiffText(doc.fechaVencimiento) : null
 
                               const handleToggle = () => {
                                 if (isFactura) handleToggleOpInvoice(doc.id)
@@ -1673,26 +1973,36 @@ export default function FinancialPage() {
                                         : isNC
                                         ? "bg-purple-50/60 dark:bg-purple-950/30 hover:bg-purple-50 dark:hover:bg-purple-950/40"
                                         : "bg-amber-50/60 dark:bg-amber-950/30 hover:bg-amber-50 dark:hover:bg-amber-950/40"
+                                      : isCheque
+                                      ? "bg-blue-50/30 dark:bg-blue-950/10 hover:bg-blue-50/60 dark:hover:bg-blue-950/30"
                                       : "hover:bg-gray-50 dark:hover:bg-slate-800/40"
                                   }`}
-                                  onClick={handleToggle}
+                                  onClick={isCheque ? () => setViewingChequesSupplier(currentSelectedSupplier) : handleToggle}
                                 >
                                   {/* 1. Checkbox */}
                                   <td className="p-3.5 text-center" onClick={e => e.stopPropagation()}>
-                                    <button
-                                      type="button"
-                                      onClick={handleToggle}
-                                      className="hover:scale-110 transition"
-                                      title={doc.isSelected ? "Deseleccionar de la OP" : "Incluir en la OP"}
-                                    >
-                                      {doc.isSelected ? (
-                                        <CheckSquare className={`w-5 h-5 ${
-                                          isFactura ? "text-indigo-600 dark:text-indigo-400" : isNC ? "text-purple-600 dark:text-purple-400" : "text-amber-600 dark:text-amber-400"
-                                        }`} />
-                                      ) : (
-                                        <Square className="w-5 h-5 text-gray-400" />
-                                      )}
-                                    </button>
+                                    {isCheque ? (
+                                      <div className="flex items-center justify-center" title="Cheque diferido emitido en tránsito (no compensado)">
+                                        <span className="p-1 rounded bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400">
+                                          <Banknote className="w-4 h-4" />
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={handleToggle}
+                                        className="hover:scale-110 transition"
+                                        title={doc.isSelected ? "Deseleccionar de la OP" : "Incluir en la OP"}
+                                      >
+                                        {doc.isSelected ? (
+                                          <CheckSquare className={`w-5 h-5 ${
+                                            isFactura ? "text-indigo-600 dark:text-indigo-400" : isNC ? "text-purple-600 dark:text-purple-400" : "text-amber-600 dark:text-amber-400"
+                                          }`} />
+                                        ) : (
+                                          <Square className="w-5 h-5 text-gray-400" />
+                                        )}
+                                      </button>
+                                    )}
                                   </td>
 
                                   {/* 2. Tipo de Documento */}
@@ -1705,6 +2015,12 @@ export default function FinancialPage() {
                                       }`}>
                                         <Receipt className="w-3.5 h-3.5" />
                                         {doc.raw?.tipo_comprobante === "gasto" || doc.raw?.tipo_comprobante === "insumo_gasto" ? "INSUMO / GASTO" : "MERCADERÍA"}
+                                      </span>
+                                    )}
+                                    {isCheque && (
+                                      <span className="inline-flex items-center gap-1.5 text-[11px] font-extrabold px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60">
+                                        <Banknote className="w-3.5 h-3.5" />
+                                        CHEQUE DIFERIDO
                                       </span>
                                     )}
                                     {isNC && (
@@ -1721,9 +2037,13 @@ export default function FinancialPage() {
                                     )}
                                   </td>
 
-                                  {/* 3. Timbrado */}
+                                  {/* 3. Timbrado / Banco */}
                                   <td className="p-3.5 font-mono text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">
-                                    {doc.timbrado && doc.timbrado !== "—" ? (
+                                    {isCheque ? (
+                                      <span className="px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-900 font-sans font-medium text-[11px]">
+                                        {doc.raw?.banco || "Cheque"}
+                                      </span>
+                                    ) : doc.timbrado && doc.timbrado !== "—" ? (
                                       <span className="px-2 py-0.5 rounded bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-gray-700">
                                         {doc.timbrado}
                                       </span>
@@ -1734,7 +2054,7 @@ export default function FinancialPage() {
 
                                   {/* 4. N° Documento */}
                                   <td className="p-3.5 font-mono font-bold text-gray-900 dark:text-white whitespace-nowrap">
-                                    {doc.numero}
+                                    {isCheque ? `CHQ #${doc.numero}` : doc.numero}
                                   </td>
 
                                   {/* 5. Emisión */}
@@ -1744,15 +2064,17 @@ export default function FinancialPage() {
 
                                   {/* 6. Vencimiento */}
                                   <td className="p-3.5 text-xs font-mono whitespace-nowrap">
-                                    {isFactura ? (
+                                    {isFactura || isCheque ? (
                                       <div className="flex items-center gap-1.5">
-                                        <span className={isVencida ? "text-red-600 dark:text-red-400 font-bold" : "text-gray-600 dark:text-gray-300"}>
+                                        <span className={isVencida ? "text-red-600 dark:text-red-400 font-bold" : isCheque ? "text-blue-700 dark:text-blue-300 font-bold" : "text-gray-600 dark:text-gray-300"}>
                                           {doc.fechaVencimiento ? formatDate(doc.fechaVencimiento) : "—"}
                                         </span>
                                         {vtoText && (
                                           <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
                                             isVencida
                                               ? "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-400 border border-red-200 dark:border-red-900/40"
+                                              : isCheque
+                                              ? "bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200 dark:border-blue-900/40"
                                               : "bg-gray-100 text-gray-600 dark:bg-slate-800 dark:text-gray-400"
                                           }`}>
                                             {vtoText}
@@ -1766,21 +2088,25 @@ export default function FinancialPage() {
 
                                   {/* 7. Monto Original */}
                                   <td className={`p-3.5 font-mono text-right text-xs whitespace-nowrap ${
-                                    isFactura ? "text-gray-600 dark:text-gray-400" : isNC ? "text-purple-600 dark:text-purple-400 font-semibold" : "text-amber-600 dark:text-amber-400 font-semibold"
+                                    isFactura ? "text-gray-600 dark:text-gray-400" : isCheque ? "text-blue-700 dark:text-blue-300 font-semibold" : isNC ? "text-purple-600 dark:text-purple-400 font-semibold" : "text-amber-600 dark:text-amber-400 font-semibold"
                                   }`}>
-                                    {isFactura ? formatPYG(doc.montoOriginal) : `-${formatPYG(Math.abs(doc.montoOriginal))}`}
+                                    {isFactura || isCheque ? formatPYG(doc.montoOriginal) : `-${formatPYG(Math.abs(doc.montoOriginal))}`}
                                   </td>
 
                                   {/* 8. Saldo / Aplicable */}
                                   <td className={`p-3.5 font-mono font-bold text-right whitespace-nowrap ${
-                                    isFactura ? "text-gray-900 dark:text-white" : isNC ? "text-purple-600 dark:text-purple-300" : "text-amber-600 dark:text-amber-300"
+                                    isFactura ? "text-gray-900 dark:text-white" : isCheque ? "text-blue-700 dark:text-blue-300" : isNC ? "text-purple-600 dark:text-purple-300" : "text-amber-600 dark:text-amber-300"
                                   }`}>
-                                    {isFactura ? formatPYG(doc.saldoEfectivo) : `-${formatPYG(Math.abs(doc.saldoEfectivo))}`}
+                                    {isFactura || isCheque ? formatPYG(doc.saldoEfectivo) : `-${formatPYG(Math.abs(doc.saldoEfectivo))}`}
                                   </td>
 
                                   {/* 9. Estado */}
                                   <td className="p-3.5 text-center whitespace-nowrap">
-                                    {isFactura ? (
+                                    {isCheque ? (
+                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200 dark:border-blue-800/50">
+                                        En Tránsito
+                                      </span>
+                                    ) : isFactura ? (
                                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                                         isVencida
                                           ? "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-200"
@@ -1809,6 +2135,16 @@ export default function FinancialPage() {
                                         title="Pagar individualmente esta factura"
                                       >
                                         Pagar
+                                      </button>
+                                    )}
+                                    {isCheque && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setViewingChequesSupplier(currentSelectedSupplier)}
+                                        className="btn-ghost text-xs py-1 px-2.5 text-blue-600 hover:text-blue-800 dark:text-blue-400 font-semibold"
+                                        title="Ver detalles del cheque diferido"
+                                      >
+                                        Ver
                                       </button>
                                     )}
                                     {isNC && (
@@ -2014,20 +2350,23 @@ export default function FinancialPage() {
                           >
                             <option value="todos">Todos los Proveedores</option>
                             <option value="con_vencidas">Con Facturas Vencidas</option>
+                            <option value="con_cheques_diferidos">Con Cheques Diferidos en Tránsito</option>
                             <option value="con_nc">Con NC Fiscal Disponible</option>
                             <option value="con_devoluciones">Con NC Pendiente (Devolución)</option>
                           </select>
                         </div>
 
                         {/* Ordenar por */}
-                        <div className="w-48">
+                        <div className="w-52">
                           <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Ordenar Por</label>
                           <select
                             className="input-field w-full text-xs"
                             value={apSupplierSort}
                             onChange={e => setApSupplierSort(e.target.value as any)}
                           >
-                            <option value="deuda_desc">Mayor Deuda Consolidada</option>
+                            <option value="deuda_desc">Mayor Deuda Total Compuesta</option>
+                            <option value="facturas_deuda_desc">Mayor Deuda en Facturas</option>
+                            <option value="cheques_desc">Mayor Monto en Cheques Diferidos</option>
                             <option value="vencimiento_asc">Vencimiento Más Próximo</option>
                             <option value="nombre_asc">Nombre Proveedor (A - Z)</option>
                             <option value="facturas_desc">Mayor Cantidad de Facturas</option>
@@ -2150,38 +2489,150 @@ export default function FinancialPage() {
                                       <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 dark:bg-slate-800 dark:text-gray-300">
                                         {sup.cantidadFacturasPendientes} facturas
                                       </span>
+                                      {sup.cantidadChequesDiferidos > 0 && (
+                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-950/70 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60">
+                                          {sup.cantidadChequesDiferidos} chq. diferidos
+                                        </span>
+                                      )}
                                     </div>
                                   </div>
 
-                                  {/* Badge de Alerta o Al Día */}
-                                  {sup.tieneVencidas ? (
-                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-400 border border-red-200 dark:border-red-900/40 shrink-0">
-                                      <AlertTriangle className="w-3 h-3" />
-                                      Vencido: {formatPYG(sup.montoVencido)}
+                                  <div className="flex flex-col items-end gap-1.5 shrink-0">
+                                    {/* Botón Editar Acuerdos */}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleOpenAgreementsModal(sup, e)}
+                                      className="btn-ghost text-[11px] py-1 px-2 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800/60 rounded-lg flex items-center gap-1 font-semibold"
+                                      title="Definir o modificar acuerdos comerciales de pago"
+                                    >
+                                      <Handshake className="w-3.5 h-3.5 text-indigo-500" />
+                                      <span>Acuerdos</span>
+                                    </button>
+
+                                    {/* Badge de Alerta o Al Día */}
+                                    {sup.tieneVencidas ? (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-400 border border-red-200 dark:border-red-900/40">
+                                        <AlertTriangle className="w-3 h-3" />
+                                        Vencido: {formatPYG(sup.montoVencido)}
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/40">
+                                        <CheckCircle2 className="w-3 h-3" />
+                                        Al día
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Barra de Acuerdos de Pago Pactados */}
+                                <div
+                                  onClick={(e) => handleOpenAgreementsModal(sup, e)}
+                                  className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-850/80 border border-slate-200/80 dark:border-slate-800 text-[11px] space-y-1.5 cursor-pointer hover:border-indigo-400/50 transition group/agreements"
+                                  title="Hacé clic para editar los acuerdos de pago con este proveedor"
+                                >
+                                  <div className="flex items-center justify-between text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                    <span className="flex items-center gap-1 text-indigo-700 dark:text-indigo-400">
+                                      <Handshake className="w-3.5 h-3.5" />
+                                      Acuerdo de Pago:
                                     </span>
-                                  ) : (
-                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/40 shrink-0">
-                                      <CheckCircle2 className="w-3 h-3" />
-                                      Al día
+                                    <span className="text-indigo-600 dark:text-indigo-400 group-hover/agreements:underline lowercase font-normal">
+                                      editar
                                     </span>
+                                  </div>
+
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    {/* Plazo Factura */}
+                                    <span className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 font-medium">
+                                      Factura: <strong className="text-gray-900 dark:text-white font-mono">{sup.plazo_credito_factura_dias > 0 ? `${sup.plazo_credito_factura_dias}d` : "Contado"}</strong>
+                                    </span>
+
+                                    {/* Plazo Cheque */}
+                                    <span className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 font-medium">
+                                      Cheque: <strong className="text-gray-900 dark:text-white font-mono">{sup.plazo_credito_cheque_dias > 0 ? `${sup.plazo_credito_cheque_dias}d` : "Sin chq"}</strong>
+                                    </span>
+
+                                    {/* Formas de Pago Acordadas */}
+                                    {sup.formas_pago_acordadas && sup.formas_pago_acordadas.length > 0 ? (
+                                      sup.formas_pago_acordadas.map((fId: string) => {
+                                        const opt = FORMAS_PAGO_ACORDADAS_OPCIONES.find(o => o.id === fId)
+                                        return (
+                                          <span
+                                            key={fId}
+                                            className="px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 text-[10px] font-semibold border border-indigo-200/50 dark:border-indigo-800/40"
+                                          >
+                                            {opt?.icon || "•"} {opt?.label || fId}
+                                          </span>
+                                        )
+                                      })
+                                    ) : (
+                                      <span className="text-[10px] text-gray-400 italic">
+                                        + Cargar formas de pago acordadas
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {sup.acuerdo_pago_notas && (
+                                    <p className="text-[10px] text-gray-500 italic truncate pt-0.5" title={sup.acuerdo_pago_notas}>
+                                      “{sup.acuerdo_pago_notas}”
+                                    </p>
                                   )}
                                 </div>
 
                                 {/* Métricas Financieras Principales del Card */}
-                                <div className="space-y-2.5 pt-2">
-                                  {/* Deuda Consolidada */}
-                                  <div className="p-3 rounded-xl bg-gray-50 dark:bg-slate-800/70 border border-gray-100 dark:border-gray-800">
+                                <div className="space-y-2.5 pt-1">
+                                  {/* Deuda Total Compuesta (Facturas + Cheques Diferidos en Tránsito) */}
+                                  <div className="p-3 rounded-xl bg-gradient-to-br from-gray-50 to-indigo-50/40 dark:from-slate-850 dark:to-indigo-950/20 border border-indigo-100 dark:border-indigo-900/40">
                                     <div className="flex items-center justify-between">
-                                      <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                                        Deuda Consolidada
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
+                                        Deuda Total Compuesta
                                       </span>
                                       <span className="text-xs text-gray-400 font-mono">
-                                        Total Facturas
+                                        Facturas + Cheques Dif.
                                       </span>
                                     </div>
-                                    <span className="text-lg font-bold font-mono text-gray-900 dark:text-white block mt-0.5">
-                                      {formatPYG(sup.deudaConsolidada)}
-                                    </span>
+                                    <div className="flex items-baseline justify-between mt-1">
+                                      <span className="text-xl font-black font-mono text-gray-900 dark:text-white">
+                                        {formatPYG(sup.deudaTotalCompuesta)}
+                                      </span>
+                                      {sup.montoChequesDiferidos > 0 && (
+                                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                                          +{formatPYG(sup.montoChequesDiferidos)} en cheques
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {/* Desglose Facturas vs Cheques Diferidos en Tránsito */}
+                                    <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-indigo-100/70 dark:border-slate-800 text-[11px]">
+                                      <div>
+                                        <span className="text-gray-500 block text-[10px]">Facturas Pendientes:</span>
+                                        <span className="font-bold font-mono text-gray-800 dark:text-gray-200">
+                                          {formatPYG(sup.deudaConsolidada)}
+                                        </span>
+                                        <span className="text-[10px] text-gray-400 block">
+                                          {sup.cantidadFacturasPendientes} facturas
+                                        </span>
+                                      </div>
+                                      <div>
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-blue-700 dark:text-blue-400 font-semibold block text-[10px]">Cheques Dif. Tránsito:</span>
+                                          {sup.cantidadChequesDiferidos > 0 && (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => { e.stopPropagation(); setViewingChequesSupplier(sup); }}
+                                              className="text-[10px] text-blue-600 dark:text-blue-400 font-bold hover:underline"
+                                            >
+                                              Ver ({sup.cantidadChequesDiferidos})
+                                            </button>
+                                          )}
+                                        </div>
+                                        <span className={`font-bold font-mono ${sup.montoChequesDiferidos > 0 ? "text-blue-700 dark:text-blue-300" : "text-gray-400"}`}>
+                                          {formatPYG(sup.montoChequesDiferidos)}
+                                        </span>
+                                        <span className="text-[10px] text-gray-400 block">
+                                          {sup.cantidadChequesDiferidos > 0 ? `${sup.cantidadChequesDiferidos} diferidos emitidos` : "Sin cheques en tránsito"}
+                                        </span>
+                                      </div>
+                                    </div>
                                   </div>
 
                                   {/* 2 Columnas: NC Registrada vs NC Pendiente de Proveedor */}
@@ -2226,12 +2677,12 @@ export default function FinancialPage() {
                                     </span>
                                   </div>
 
-                                  {/* Fechas de Vencimiento: Más cercano y Más lejano */}
+                                  {/* Fechas de Vencimiento: Facturas y Cheques */}
                                   <div className="pt-2 border-t border-gray-100 dark:border-gray-800 text-[11px] text-gray-500 space-y-1">
                                     <div className="flex items-center justify-between">
                                       <span className="flex items-center gap-1">
                                         <CalendarClock className="w-3.5 h-3.5 text-gray-400" />
-                                        Vto. más cercano:
+                                        Vto. factura cercano:
                                       </span>
                                       <div className="flex items-center gap-1.5 font-mono">
                                         <span className={sup.tieneVencidas ? "text-red-600 dark:text-red-400 font-bold" : "text-gray-700 dark:text-gray-300"}>
@@ -2245,8 +2696,20 @@ export default function FinancialPage() {
                                       </div>
                                     </div>
 
+                                    {sup.chequeDiferidoMasProximo && (
+                                      <div className="flex items-center justify-between text-blue-700 dark:text-blue-400">
+                                        <span className="flex items-center gap-1">
+                                          <Clock className="w-3.5 h-3.5 text-blue-500" />
+                                          Vto. cheque diferido:
+                                        </span>
+                                        <span className="font-mono font-semibold">
+                                          {formatDate(sup.chequeDiferidoMasProximo.fecha_pago || sup.chequeDiferidoMasProximo.fecha_emision)}
+                                        </span>
+                                      </div>
+                                    )}
+
                                     <div className="flex items-center justify-between">
-                                      <span className="text-gray-400">Vto. más lejano:</span>
+                                      <span className="text-gray-400">Vto. factura lejano:</span>
                                       <span className="font-mono text-gray-600 dark:text-gray-300">
                                         {sup.vencimientoMasLejano ? formatDate(sup.vencimientoMasLejano) : "—"}
                                       </span>
@@ -2257,19 +2720,33 @@ export default function FinancialPage() {
 
                               {/* Footer Acciones Card */}
                               <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (sup.supplier_id) {
-                                      setSelected360SupplierId(sup.supplier_id)
-                                      setSelected360SupplierNombre(sup.supplier_nombre)
-                                    }
-                                  }}
-                                  className="btn-ghost text-xs py-1.5 px-2.5 text-gray-500 hover:text-gray-900 dark:hover:text-white"
-                                  title="Abrir Visión 360°"
-                                >
-                                  360°
-                                </button>
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (sup.supplier_id) {
+                                        setSelected360SupplierId(sup.supplier_id)
+                                        setSelected360SupplierNombre(sup.supplier_nombre)
+                                      }
+                                    }}
+                                    className="btn-ghost text-xs py-1.5 px-2.5 text-gray-500 hover:text-gray-900 dark:hover:text-white"
+                                    title="Abrir Visión 360°"
+                                  >
+                                    360°
+                                  </button>
+
+                                  {sup.cantidadChequesDiferidos > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setViewingChequesSupplier(sup)}
+                                      className="btn-ghost text-xs py-1.5 px-2.5 text-blue-600 hover:text-blue-800 dark:text-blue-400 flex items-center gap-1 border border-blue-200 dark:border-blue-800/50 rounded-lg"
+                                      title="Ver cheques diferidos emitidos a este proveedor que aún no fueron compensados"
+                                    >
+                                      <Banknote className="w-3.5 h-3.5 text-blue-500" />
+                                      <span>Cheques ({sup.cantidadChequesDiferidos})</span>
+                                    </button>
+                                  )}
+                                </div>
 
                                 <button
                                   type="button"
@@ -3524,6 +4001,338 @@ export default function FinancialPage() {
 
             <div className="p-4 border-t flex justify-end">
               <button onClick={() => setShowApplicationsModal(null)} className="btn-primary text-xs">
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🤝 MODAL: ACUERDOS DE PAGO CON EL PROVEEDOR */}
+      {editingAgreementsSupplier && (
+        <div className="modal-overlay" onClick={() => setEditingAgreementsSupplier(null)}>
+          <div className="modal-content max-w-xl" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b border-gray-100 dark:border-gray-700 bg-gradient-to-r from-indigo-50/50 to-slate-50/50 dark:from-slate-800 dark:to-slate-800/80">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 rounded-xl bg-indigo-600 text-white shadow-md">
+                    <Handshake className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-gray-900 dark:text-white">
+                      Acuerdos Comerciales de Pago
+                    </h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {editingAgreementsSupplier.supplier_nombre} {editingAgreementsSupplier.ruc ? `· RUC: ${editingAgreementsSupplier.ruc}` : ""}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditingAgreementsSupplier(null)}
+                  className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-400 hover:text-gray-600"
+                >
+                  <XCircle className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs">
+              {/* Tipo de Acuerdo Base */}
+              <div>
+                <label className="label-field font-bold">Tipo de Acuerdo Comercial *</label>
+                <select
+                  className="input-field text-xs font-semibold"
+                  value={agreementsForm.acuerdo_pago_tipo}
+                  onChange={e => setAgreementsForm({ ...agreementsForm, acuerdo_pago_tipo: e.target.value })}
+                >
+                  {TIPOS_ACUERDO_PAGO.map(t => (
+                    <option key={t.id} value={t.id}>{t.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Plazos de Crédito: Factura y Cheque */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Plazo Crédito contra Factura */}
+                <div className="p-3.5 rounded-xl bg-gray-50 dark:bg-slate-800/70 border border-gray-200 dark:border-gray-700 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-gray-700 dark:text-gray-200 uppercase tracking-wider block">
+                      Crédito contra Factura (Días)
+                    </label>
+                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    className="input-field text-sm font-bold font-mono"
+                    value={agreementsForm.plazo_credito_factura_dias}
+                    onChange={e => setAgreementsForm({ ...agreementsForm, plazo_credito_factura_dias: Math.max(0, parseInt(e.target.value) || 0) })}
+                  />
+                  <div className="flex flex-wrap gap-1 pt-1">
+                    {[0, 15, 30, 45, 60, 90].map(d => (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setAgreementsForm({ ...agreementsForm, plazo_credito_factura_dias: d })}
+                        className={`px-2 py-0.5 rounded text-[10px] font-semibold transition ${
+                          agreementsForm.plazo_credito_factura_dias === d
+                            ? "bg-indigo-600 text-white"
+                            : "bg-white dark:bg-slate-700 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 hover:bg-gray-100"
+                        }`}
+                      >
+                        {d === 0 ? "Contado" : `${d}d`}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="text-[10px] text-gray-400 block">
+                    Días pactados desde la emisión o recepción de la factura fiscal.
+                  </span>
+                </div>
+
+                {/* Plazo Crédito contra Cheque Diferido */}
+                <div className="p-3.5 rounded-xl bg-gray-50 dark:bg-slate-800/70 border border-gray-200 dark:border-gray-700 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-gray-700 dark:text-gray-200 uppercase tracking-wider block">
+                      Crédito contra Cheque (Días)
+                    </label>
+                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    className="input-field text-sm font-bold font-mono text-blue-600 dark:text-blue-400"
+                    value={agreementsForm.plazo_credito_cheque_dias}
+                    onChange={e => setAgreementsForm({ ...agreementsForm, plazo_credito_cheque_dias: Math.max(0, parseInt(e.target.value) || 0) })}
+                  />
+                  <div className="flex flex-wrap gap-1 pt-1">
+                    {[0, 15, 30, 45, 60, 90, 120].map(d => (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setAgreementsForm({ ...agreementsForm, plazo_credito_cheque_dias: d })}
+                        className={`px-2 py-0.5 rounded text-[10px] font-semibold transition ${
+                          agreementsForm.plazo_credito_cheque_dias === d
+                            ? "bg-blue-600 text-white"
+                            : "bg-white dark:bg-slate-700 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 hover:bg-gray-100"
+                        }`}
+                      >
+                        {d === 0 ? "Sin chq" : `${d}d`}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="text-[10px] text-gray-400 block">
+                    Diferimiento pactado de la fecha de cobro de cheques emitidos.
+                  </span>
+                </div>
+              </div>
+
+              {/* Formas de Pago Acordadas */}
+              <div>
+                <label className="label-field font-bold block mb-1.5">
+                  Formas de Pago Acordadas
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {FORMAS_PAGO_ACORDADAS_OPCIONES.map(opt => {
+                    const isSelected = agreementsForm.formas_pago_acordadas.includes(opt.id)
+                    const toggle = () => {
+                      const current = new Set(agreementsForm.formas_pago_acordadas)
+                      if (current.has(opt.id)) current.delete(opt.id)
+                      else current.add(opt.id)
+                      setAgreementsForm({ ...agreementsForm, formas_pago_acordadas: Array.from(current) })
+                    }
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={toggle}
+                        className={`p-2.5 rounded-xl border text-left flex items-center gap-2 transition ${
+                          isSelected
+                            ? "bg-indigo-50/80 dark:bg-indigo-950/50 border-indigo-500 text-indigo-900 dark:text-indigo-200 shadow-sm"
+                            : "bg-white dark:bg-slate-800/80 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-gray-300"
+                        }`}
+                      >
+                        <span className="text-base">{opt.icon}</span>
+                        <div className="min-w-0 flex-1">
+                          <span className="font-bold text-[11px] block truncate">{opt.label}</span>
+                          <span className="text-[10px] text-gray-400 block">
+                            {isSelected ? "Acordado" : "No pactado"}
+                          </span>
+                        </div>
+                        {isSelected && <Check className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Notas y Observaciones */}
+              <div>
+                <label className="label-field font-bold">Observaciones o Reglas Particulares</label>
+                <textarea
+                  rows={2}
+                  className="input-field text-xs"
+                  placeholder="Ej: Entrega los martes, pago solo los jueves; cheques diferidos a 30 y 60 días..."
+                  value={agreementsForm.acuerdo_pago_notas}
+                  onChange={e => setAgreementsForm({ ...agreementsForm, acuerdo_pago_notas: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-gray-100 dark:border-gray-700 flex justify-end gap-3 bg-gray-50 dark:bg-slate-850">
+              <button
+                type="button"
+                onClick={() => setEditingAgreementsSupplier(null)}
+                className="btn-ghost text-xs"
+                disabled={savingAgreements}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveAgreements}
+                disabled={savingAgreements}
+                className="btn-primary text-xs py-2 px-4 flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold shadow-md disabled:opacity-50"
+              >
+                {savingAgreements ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                <span>Guardar Acuerdos</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🧾 MODAL: CHEQUES DIFERIDOS EMITIDOS EN TRÁNSITO */}
+      {viewingChequesSupplier && (
+        <div className="modal-overlay" onClick={() => setViewingChequesSupplier(null)}>
+          <div className="modal-content max-w-2xl" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b border-gray-100 dark:border-gray-700 bg-gradient-to-r from-blue-50/50 to-indigo-50/50 dark:from-slate-800 dark:to-slate-800/80">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 rounded-xl bg-blue-600 text-white shadow-md">
+                    <Banknote className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-gray-900 dark:text-white">
+                      Cheques Diferidos en Tránsito
+                    </h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Proveedor: <strong className="text-gray-900 dark:text-white">{viewingChequesSupplier.supplier_nombre}</strong> {viewingChequesSupplier.ruc ? `(RUC: ${viewingChequesSupplier.ruc})` : ""}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setViewingChequesSupplier(null)}
+                  className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-400 hover:text-gray-600"
+                >
+                  <XCircle className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs">
+              {/* Banner informativo de composición de deuda */}
+              <div className="p-3.5 rounded-xl bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <span className="text-[10px] font-bold text-blue-800 dark:text-blue-300 uppercase tracking-wider block">
+                    Impacto en Deuda Total Compuesta
+                  </span>
+                  <p className="text-gray-600 dark:text-gray-300 text-[11px]">
+                    Estos cheques diferidos ya fueron entregados/emitidos para cancelar facturas, pero aún están en tránsito bancario pendiente de cobro.
+                  </p>
+                </div>
+                <div className="sm:text-right shrink-0">
+                  <span className="text-[10px] text-gray-500 block">Total en Tránsito</span>
+                  <span className="text-base font-black font-mono text-blue-700 dark:text-blue-300">
+                    {formatPYG(viewingChequesSupplier.montoChequesDiferidos)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Listado de Cheques */}
+              {(!viewingChequesSupplier.chequesDiferidos || viewingChequesSupplier.chequesDiferidos.length === 0) ? (
+                <div className="p-8 text-center text-gray-400">
+                  No hay cheques diferidos pendientes de compensación para este proveedor.
+                </div>
+              ) : (
+                <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="bg-gray-50 dark:bg-slate-800 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-200 dark:border-gray-700">
+                        <th className="p-3">N° Cheque</th>
+                        <th className="p-3">Banco / Cuenta</th>
+                        <th className="p-3">Emisión</th>
+                        <th className="p-3">Fecha Cobro (Vto)</th>
+                        <th className="p-3 text-center">Estado</th>
+                        <th className="p-3 text-right">Monto (₲)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                      {viewingChequesSupplier.chequesDiferidos.map((ch: any) => {
+                        const vtoDate = ch.fecha_pago || ch.fecha_emision
+                        const diffText = getDaysDiffText(vtoDate)
+                        const today = getTodayAsuncion()
+                        const isVencido = vtoDate && String(vtoDate).slice(0, 10) < today
+
+                        return (
+                          <tr key={ch.id} className="hover:bg-gray-50 dark:hover:bg-slate-800/40">
+                            <td className="p-3 font-mono font-bold text-gray-900 dark:text-white whitespace-nowrap">
+                              CHQ #{ch.numero}
+                            </td>
+                            <td className="p-3 whitespace-nowrap text-gray-700 dark:text-gray-300">
+                              <span className="font-semibold">{ch.banco || "Cheque Banco"}</span>
+                              {ch.cuenta_bancaria && (
+                                <span className="block text-[10px] text-gray-400 font-mono">
+                                  Cta: {ch.cuenta_bancaria}
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-3 font-mono text-gray-500 whitespace-nowrap">
+                              {ch.fecha_emision ? formatDate(ch.fecha_emision) : "—"}
+                            </td>
+                            <td className="p-3 whitespace-nowrap">
+                              <div className="flex items-center gap-1.5 font-mono">
+                                <span className={isVencido ? "text-red-600 dark:text-red-400 font-bold" : "text-blue-700 dark:text-blue-300 font-bold"}>
+                                  {vtoDate ? formatDate(vtoDate) : "—"}
+                                </span>
+                                {diffText && (
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                                    isVencido
+                                      ? "bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-400"
+                                      : "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300"
+                                  }`}>
+                                    {diffText}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="p-3 text-center whitespace-nowrap">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200">
+                                {ch.estado === "entregado" ? "Entregado" : "En Tránsito"}
+                              </span>
+                            </td>
+                            <td className="p-3 text-right font-mono font-bold text-sm text-gray-900 dark:text-white whitespace-nowrap">
+                              {formatPYG(ch.monto)}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between bg-gray-50 dark:bg-slate-850">
+              <span className="text-xs text-gray-500 font-mono">
+                {viewingChequesSupplier.chequesDiferidos?.length || 0} cheque(s) en curso
+              </span>
+              <button
+                type="button"
+                onClick={() => setViewingChequesSupplier(null)}
+                className="btn-primary text-xs py-2 px-4"
+              >
                 Cerrar
               </button>
             </div>
