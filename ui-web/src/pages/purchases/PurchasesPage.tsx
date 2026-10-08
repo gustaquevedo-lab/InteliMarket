@@ -5710,6 +5710,24 @@ export default function PurchasesPage() {
                           <Eye className="w-3.5 h-3.5" />
                           <span>Ficha 360°</span>
                         </button>
+
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              toast.info("Generando extracto...", "Preparando PDF oficial para punteo")
+                              await api.purchases.downloadSupplierAccountStatementPdf(s.id, s.razon_social)
+                              toast.success("Extracto descargado exitosamente")
+                            } catch (err: any) {
+                              toast.error("Error al generar extracto", err.message)
+                            }
+                          }}
+                          className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/40 transition flex items-center gap-1"
+                          title="Descargar Extracto Cta. Cte. y Punteo Físico (PDF)"
+                        >
+                          <FileCheck className="w-3.5 h-3.5" />
+                          <span>Extracto</span>
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -5812,6 +5830,22 @@ export default function PurchasesPage() {
                                 title="Ver Ficha 360°"
                               >
                                 <Eye className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    toast.info("Generando extracto...", "Preparando PDF oficial para punteo")
+                                    await api.purchases.downloadSupplierAccountStatementPdf(s.id, s.razon_social)
+                                    toast.success("Extracto descargado exitosamente")
+                                  } catch (err: any) {
+                                    toast.error("Error al generar extracto", err.message)
+                                  }
+                                }}
+                                className="p-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 transition"
+                                title="Descargar Extracto Cta. Cte. y Punteo Físico (PDF)"
+                              >
+                                <FileCheck className="w-3.5 h-3.5" />
                               </button>
                             </div>
                           </td>

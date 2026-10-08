@@ -12,7 +12,7 @@ import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell
 } from "recharts"
-import { api, type Supplier360Response } from "../../api"
+import { api, type Supplier360Response, type SupplierAccountStatementResponse, type SupplierStatementMovement } from "../../api"
 import { formatPYG, formatDate } from "../../utils/format"
 import { useToast } from "../../context/ToastContext"
 
@@ -61,6 +61,17 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
   const [filterVencimiento, setFilterVencimiento] = useState("all")
   const [filterNcFactura, setFilterNcFactura] = useState("all")
   const [filterFaseFactura, setFilterFaseFactura] = useState("all")
+
+  // Sub-vista de Deudas: Facturas estándar vs Extracto Cta. Cte. para Punteo
+  const [subVistaDeudas, setSubVistaDeudas] = useState<"facturas" | "extracto">("facturas")
+  const [statementData, setStatementData] = useState<SupplierAccountStatementResponse | null>(null)
+  const [loadingStatement, setLoadingStatement] = useState(false)
+  const [downloadingStatementPdf, setDownloadingStatementPdf] = useState(false)
+  const [statementFechaDesde, setStatementFechaDesde] = useState("")
+  const [statementFechaHasta, setStatementFechaHasta] = useState("")
+  const [statementSoloPendientes, setStatementSoloPendientes] = useState(false)
+  const [punteadosLocal, setPunteadosLocal] = useState<Record<string, boolean>>({})
+  const [searchMovimiento, setSearchMovimiento] = useState("")
 
   // Filtros internos de Monedero / NC
   const [subTabNc, setSubTabNc] = useState<SubTabNc>("monedero")
@@ -124,6 +135,53 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
   const handlePrint = () => {
     window.print()
   }
+
+  // Carga del Extracto de Cuenta Corriente para Punteo
+  const loadStatement = async () => {
+    setLoadingStatement(true)
+    try {
+      const res = await api.purchases.getSupplierAccountStatement(supplierId, {
+        fecha_desde: statementFechaDesde || undefined,
+        fecha_hasta: statementFechaHasta || undefined,
+        solo_pendientes: statementSoloPendientes,
+      })
+      setStatementData(res)
+    } catch (err: any) {
+      toast.error("Error al cargar Extracto Cta. Cte.", err.message)
+    } finally {
+      setLoadingStatement(false)
+    }
+  }
+
+  const handleDownloadStatementPdf = async () => {
+    setDownloadingStatementPdf(true)
+    try {
+      await api.purchases.downloadSupplierAccountStatementPdf(
+        supplierId,
+        data?.supplier?.razon_social || supplierNombre || "proveedor",
+        {
+          fecha_desde: statementFechaDesde || undefined,
+          fecha_hasta: statementFechaHasta || undefined,
+          solo_pendientes: statementSoloPendientes,
+        }
+      )
+      toast.success(
+        "Extracto Descargado Exitosamente",
+        "Se descargó el Extracto de Cuenta Corriente A4 para punteo físico de deudas."
+      )
+    } catch (err: any) {
+      toast.error("Error al generar Extracto PDF", err.message)
+    } finally {
+      setDownloadingStatementPdf(false)
+    }
+  }
+
+  // Carga automática al cambiar a vista extracto
+  useEffect(() => {
+    if (subVistaDeudas === "extracto" && !statementData && !loadingStatement) {
+      loadStatement()
+    }
+  }, [subVistaDeudas])
 
   // Filtrado de Facturas
   const facturasFiltradas = useMemo(() => {
@@ -318,6 +376,16 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
 
             {/* Acciones Superiores */}
             <div className="flex items-center gap-2 print:hidden">
+              <button
+                onClick={() => handleDownloadStatementPdf()}
+                disabled={downloadingStatementPdf}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 font-bold text-xs flex items-center gap-2 shadow-sm transition disabled:opacity-50"
+                title="Descargar Extracto de Cuenta Corriente y Punteo Físico (PDF A4 Landscape)"
+              >
+                <FileCheck className={`w-4 h-4 text-emerald-400 ${downloadingStatementPdf ? "animate-spin" : ""}`} />
+                <span>{downloadingStatementPdf ? "Generando..." : "Extracto Cta. Cte. / Punteo (PDF)"}</span>
+              </button>
+
               <button
                 onClick={() => handleDownloadPdf()}
                 disabled={downloadingPdfTab !== null}
@@ -625,39 +693,102 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                   ───────────────────────────────────────────────────────────── */}
               {tab === "deudas" && (
                 <div className="space-y-4">
-                  {/* Toolbar */}
+                  {/* Toolbar & Selector de Sub-Vista */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-800">
                     <div>
-                      <h3 className="text-sm font-black text-slate-800 dark:text-white flex items-center gap-2">
-                        <DollarSign className="w-4 h-4 text-rose-500" />
-                        Cuentas por Pagar (AP), NCs Vinculadas y Fases de Pago
-                      </h3>
-                      <p className="text-xs text-slate-500">
-                        Total Facturas: {data.facturas.length} · Deuda Bruta: <span className="font-bold text-rose-600">{formatPYG(kpis?.deuda_total_facturas || 0)}</span> · Deuda Neta tras Monedero: <span className="font-bold text-purple-600">{formatPYG(kpis?.deuda_neta_efectiva || 0)}</span>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-black text-slate-800 dark:text-white flex items-center gap-2">
+                          <DollarSign className="w-4 h-4 text-rose-500" />
+                          Cuentas por Pagar (AP) & Conciliación
+                        </h3>
+                        {/* Selector de Sub-Vista */}
+                        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl border border-slate-200 dark:border-slate-700 ml-2">
+                          <button
+                            type="button"
+                            onClick={() => setSubVistaDeudas("facturas")}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                              subVistaDeudas === "facturas"
+                                ? "bg-white dark:bg-slate-900 text-rose-600 shadow-sm"
+                                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                            }`}
+                          >
+                            <DollarSign className="w-3.5 h-3.5" />
+                            <span>Facturas AP</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSubVistaDeudas("extracto")
+                              if (!statementData) loadStatement()
+                            }}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                              subVistaDeudas === "extracto"
+                                ? "bg-white dark:bg-slate-900 text-emerald-600 shadow-sm"
+                                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                            }`}
+                          >
+                            <FileCheck className="w-3.5 h-3.5" />
+                            <span>Extracto Cta. Cte. / Punteo</span>
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1">
+                        {subVistaDeudas === "facturas" ? (
+                          <>Total Facturas: {data.facturas.length} · Deuda Bruta: <span className="font-bold text-rose-600">{formatPYG(kpis?.deuda_total_facturas || 0)}</span> · Deuda Neta tras Monedero: <span className="font-bold text-purple-600">{formatPYG(kpis?.deuda_neta_efectiva || 0)}</span></>
+                        ) : (
+                          <>Libro Mayor Cronológico Continuo con Saldo Progresivo acumulado movimiento a movimiento para cotejo físico de saldos.</>
+                        )}
                       </p>
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleDownloadPdf("deudas")}
-                        disabled={downloadingPdfTab !== null}
-                        className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1.5 transition"
-                      >
-                        <Download className="w-3.5 h-3.5 text-rose-500" />
-                        <span>Exportar PDF (Deudas)</span>
-                      </button>
-                      <button
-                        onClick={handlePrint}
-                        className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1.5 transition"
-                      >
-                        <Printer className="w-3.5 h-3.5" />
-                        <span>Imprimir</span>
-                      </button>
+                      {subVistaDeudas === "extracto" ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={handleDownloadStatementPdf}
+                            disabled={downloadingStatementPdf}
+                            className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition disabled:opacity-50"
+                            title="Descargar Extracto A4 Landscape para punteo físico con bolígrafo"
+                          >
+                            <FileCheck className={`w-3.5 h-3.5 ${downloadingStatementPdf ? "animate-spin" : ""}`} />
+                            <span>{downloadingStatementPdf ? "Generando..." : "Descargar PDF para Punteo"}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handlePrint}
+                            className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1.5 transition"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                            <span>Imprimir</span>
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => handleDownloadPdf("deudas")}
+                            disabled={downloadingPdfTab !== null}
+                            className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1.5 transition"
+                          >
+                            <Download className="w-3.5 h-3.5 text-rose-500" />
+                            <span>Exportar PDF (Deudas)</span>
+                          </button>
+                          <button
+                            onClick={handlePrint}
+                            className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1.5 transition"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                            <span>Imprimir</span>
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
 
-                  {/* Filtros de Facturas */}
-                  <div className="flex flex-wrap items-center gap-2 bg-slate-50 dark:bg-slate-800/40 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs">
+                  {subVistaDeudas === "facturas" ? (
+                    <div className="space-y-4">
+                      {/* Filtros de Facturas */}
+                      <div className="flex flex-wrap items-center gap-2 bg-slate-50 dark:bg-slate-800/40 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs">
                     <div className="relative min-w-[200px] flex-1">
                       <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
                       <input
@@ -811,6 +942,330 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                       </table>
                     </div>
                   </div>
+                </div>
+              ) : (
+                    /* ═══════════════════════════════════════════════════════════
+                        SUB-VISTA 2: EXTRACTO DE CUENTA CORRIENTE & PUNTEO FÍSICO
+                        ═══════════════════════════════════════════════════════════ */
+                    <div className="space-y-4 animate-fade-in">
+                      {/* Filtros de Período y Búsqueda para Punteo */}
+                      <div className="bg-slate-50 dark:bg-slate-800/40 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs flex flex-wrap items-center gap-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-slate-500 font-bold">Desde:</span>
+                          <input
+                            type="date"
+                            value={statementFechaDesde}
+                            onChange={e => setStatementFechaDesde(e.target.value)}
+                            className="px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs focus:ring-2 focus:ring-emerald-500 font-mono"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-slate-500 font-bold">Hasta:</span>
+                          <input
+                            type="date"
+                            value={statementFechaHasta}
+                            onChange={e => setStatementFechaHasta(e.target.value)}
+                            className="px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs focus:ring-2 focus:ring-emerald-500 font-mono"
+                          />
+                        </div>
+
+                        <label className="flex items-center gap-1.5 cursor-pointer bg-white dark:bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 font-bold text-slate-700 dark:text-slate-300">
+                          <input
+                            type="checkbox"
+                            checked={statementSoloPendientes}
+                            onChange={e => setStatementSoloPendientes(e.target.checked)}
+                            className="w-3.5 h-3.5 rounded text-emerald-600 focus:ring-emerald-500"
+                          />
+                          <span>Solo Pendientes / Con Saldo</span>
+                        </label>
+
+                        <button
+                          type="button"
+                          onClick={() => loadStatement()}
+                          disabled={loadingStatement}
+                          className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 transition disabled:opacity-50"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${loadingStatement ? "animate-spin" : ""}`} />
+                          <span>Actualizar Extracto</span>
+                        </button>
+
+                        <div className="relative min-w-[200px] flex-1">
+                          <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                          <input
+                            type="text"
+                            placeholder="Buscar en extracto (N° Comprobante, Factura, Concepto)..."
+                            value={searchMovimiento}
+                            onChange={e => setSearchMovimiento(e.target.value)}
+                            className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                        </div>
+                      </div>
+
+                      {/* KPI CARDS DEL EXTRACTO */}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+                        <div className="bg-slate-50 dark:bg-slate-800/60 p-3 rounded-2xl border border-slate-200 dark:border-slate-700">
+                          <div className="text-[10px] font-black uppercase text-slate-500">1. Facturas (Débitos)</div>
+                          <div className="text-sm font-black text-slate-900 dark:text-white mt-1">
+                            {formatPYG(statementData?.totales.total_facturas_debito || 0)}
+                          </div>
+                          <div className="text-[10px] text-slate-400 mt-0.5">{statementData?.resumen_items.total_facturas || 0} facturas</div>
+                        </div>
+
+                        <div className="bg-emerald-50/50 dark:bg-emerald-950/20 p-3 rounded-2xl border border-emerald-200 dark:border-emerald-800/40">
+                          <div className="text-[10px] font-black uppercase text-emerald-700 dark:text-emerald-400">2. Notas de Crédito</div>
+                          <div className="text-sm font-black text-emerald-600 dark:text-emerald-400 mt-1">
+                            -{formatPYG(statementData?.totales.total_nc_credito || 0)}
+                          </div>
+                          <div className="text-[10px] text-emerald-600/70 mt-0.5">{statementData?.resumen_items.total_ncs || 0} NCs deducidas</div>
+                        </div>
+
+                        <div className="bg-blue-50/50 dark:bg-blue-950/20 p-3 rounded-2xl border border-blue-200 dark:border-blue-800/40">
+                          <div className="text-[10px] font-black uppercase text-blue-700 dark:text-blue-400">3. Pagos Realizados</div>
+                          <div className="text-sm font-black text-blue-600 dark:text-blue-400 mt-1">
+                            -{formatPYG(statementData?.totales.total_pagos_credito || 0)}
+                          </div>
+                          <div className="text-[10px] text-blue-600/70 mt-0.5">{statementData?.resumen_items.total_pagos || 0} pagos / abonos</div>
+                        </div>
+
+                        <div className="bg-rose-50/60 dark:bg-rose-950/30 p-3 rounded-2xl border border-rose-300 dark:border-rose-800/60">
+                          <div className="text-[10px] font-black uppercase text-rose-700 dark:text-rose-400">4. Saldo Exigible (1-2-3)</div>
+                          <div className="text-sm font-black text-rose-600 dark:text-rose-400 mt-1">
+                            {formatPYG(statementData?.totales.saldo_deudor_final || 0)}
+                          </div>
+                          <div className="text-[10px] text-rose-600/70 mt-0.5">Deuda neta actual</div>
+                        </div>
+
+                        <div className="bg-amber-50/50 dark:bg-amber-950/20 p-3 rounded-2xl border border-amber-200 dark:border-amber-800/40">
+                          <div className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-400">5. Cheques en Tránsito</div>
+                          <div className="text-sm font-black text-amber-600 dark:text-amber-400 mt-1">
+                            {formatPYG(statementData?.totales.cheques_diferidos_transito_monto || 0)}
+                          </div>
+                          <div className="text-[10px] text-amber-600/70 mt-0.5">{statementData?.totales.cheques_diferidos_count || 0} cheques diferidos</div>
+                        </div>
+
+                        <div className="bg-purple-50/50 dark:bg-purple-950/20 p-3 rounded-2xl border border-purple-200 dark:border-purple-800/40">
+                          <div className="text-[10px] font-black uppercase text-purple-700 dark:text-purple-400">6. Saldo Neto Proyectado</div>
+                          <div className="text-sm font-black text-purple-600 dark:text-purple-400 mt-1">
+                            {formatPYG(statementData?.totales.saldo_neto_con_cheques || 0)}
+                          </div>
+                          <div className="text-[10px] text-purple-600/70 mt-0.5">Tras débito de cheques</div>
+                        </div>
+                      </div>
+
+                      {/* BANNER DE CONTROL DE PUNTEO INTERACTIVO */}
+                      <div className="bg-slate-900 text-white px-4 py-2.5 rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          <span className="font-bold">Modo Punteo Interactivo:</span>
+                          <span className="text-slate-300">
+                            {Object.values(punteadosLocal).filter(Boolean).length} de {statementData?.movimientos.length || 0} movimientos cotejados
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const all: Record<string, boolean> = {}
+                              statementData?.movimientos.forEach(m => { all[m.id] = true })
+                              setPunteadosLocal(all)
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-bold transition"
+                          >
+                            Cotejar Todo
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPunteadosLocal({})}
+                            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-[11px] font-bold transition"
+                          >
+                            Limpiar Marcas
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* TABLA PRINCIPAL DEL EXTRACTO (LIBRO MAYOR DE PUNTEO) */}
+                      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
+                        <div className="overflow-x-auto max-h-[520px]">
+                          <table className="w-full text-xs text-left">
+                            <thead className="bg-slate-900 text-white uppercase text-[10px] font-black sticky top-0 z-10 border-b border-slate-800">
+                              <tr>
+                                <th className="py-2.5 px-3 text-center w-12">Punteo</th>
+                                <th className="py-2.5 px-3">Fecha</th>
+                                <th className="py-2.5 px-3">Venc.</th>
+                                <th className="py-2.5 px-3 text-center">Tipo</th>
+                                <th className="py-2.5 px-3">N° Comprobante</th>
+                                <th className="py-2.5 px-3">Concepto / Imputación Comercial</th>
+                                <th className="py-2.5 px-3 text-right">Débito (+)</th>
+                                <th className="py-2.5 px-3 text-right">Crédito (-)</th>
+                                <th className="py-2.5 px-3 text-right font-black">Saldo Prog. Gs.</th>
+                                <th className="py-2.5 px-3 text-center">Estado</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-mono">
+                              {loadingStatement ? (
+                                <tr>
+                                  <td colSpan={10} className="py-12 text-center text-slate-400 font-sans">
+                                    <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-emerald-500" />
+                                    Cargando extracto de cuenta corriente y conciliando saldos...
+                                  </td>
+                                </tr>
+                              ) : !statementData || statementData.movimientos.length === 0 ? (
+                                <tr>
+                                  <td colSpan={10} className="py-10 text-center text-slate-400 font-sans">
+                                    No se encontraron movimientos registrados en el período seleccionado.
+                                  </td>
+                                </tr>
+                              ) : (
+                                statementData.movimientos
+                                  .filter(m => {
+                                    if (!searchMovimiento) return true
+                                    const q = searchMovimiento.toLowerCase()
+                                    return (
+                                      m.comprobante.toLowerCase().includes(q) ||
+                                      m.concepto.toLowerCase().includes(q) ||
+                                      (m.factura_relacionada && m.factura_relacionada.toLowerCase().includes(q))
+                                    )
+                                  })
+                                  .map((m: SupplierStatementMovement) => {
+                                    const isPunteado = !!punteadosLocal[m.id]
+                                    return (
+                                      <tr
+                                        key={m.id}
+                                        className={`transition cursor-pointer ${
+                                          isPunteado
+                                            ? "bg-emerald-50/70 dark:bg-emerald-950/20"
+                                            : "hover:bg-slate-50 dark:hover:bg-slate-800/40"
+                                        }`}
+                                        onClick={() => setPunteadosLocal(prev => ({ ...prev, [m.id]: !prev[m.id] }))}
+                                      >
+                                        <td className="py-2 px-3 text-center">
+                                          <input
+                                            type="checkbox"
+                                            checked={isPunteado}
+                                            onChange={e => {
+                                              e.stopPropagation()
+                                              setPunteadosLocal(prev => ({ ...prev, [m.id]: e.target.checked }))
+                                            }}
+                                            className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                          />
+                                        </td>
+                                        <td className="py-2 px-3 text-slate-600 dark:text-slate-300">
+                                          {formatDate(m.fecha_str)}
+                                        </td>
+                                        <td className="py-2 px-3 text-slate-500">
+                                          {m.fecha_vencimiento_str ? formatDate(m.fecha_vencimiento_str) : "—"}
+                                        </td>
+                                        <td className="py-2 px-3 text-center font-sans">
+                                          <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase ${
+                                            m.tipo_badge === "FAC"
+                                              ? "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200"
+                                              : m.tipo_badge === "NC"
+                                              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200"
+                                              : "bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200"
+                                          }`}>
+                                            {m.tipo_badge}
+                                          </span>
+                                        </td>
+                                        <td className="py-2 px-3 font-bold text-slate-900 dark:text-white">
+                                          {m.comprobante}
+                                        </td>
+                                        <td className="py-2 px-3 font-sans text-slate-600 dark:text-slate-300 max-w-[280px] truncate" title={m.concepto}>
+                                          {m.concepto}
+                                        </td>
+                                        <td className="py-2 px-3 text-right font-bold text-slate-900 dark:text-white">
+                                          {m.debito > 0 ? formatPYG(m.debito) : "—"}
+                                        </td>
+                                        <td className="py-2 px-3 text-right font-bold text-emerald-600 dark:text-emerald-400">
+                                          {m.credito > 0 ? `-${formatPYG(m.credito)}` : "—"}
+                                        </td>
+                                        <td className="py-2 px-3 text-right font-black">
+                                          <span className={m.saldo_progresivo > 0 ? "text-rose-600 dark:text-rose-400 font-bold" : "text-emerald-600 dark:text-emerald-400 font-bold"}>
+                                            {formatPYG(m.saldo_progresivo)}
+                                          </span>
+                                        </td>
+                                        <td className="py-2 px-3 text-center font-sans text-[11px] text-slate-500">
+                                          {m.estado}
+                                        </td>
+                                      </tr>
+                                    )
+                                  })
+                              )}
+                            </tbody>
+                            {statementData && statementData.movimientos.length > 0 && (
+                              <tfoot className="bg-slate-100 dark:bg-slate-800 font-black text-xs border-t-2 border-slate-300 dark:border-slate-700">
+                                <tr>
+                                  <td colSpan={6} className="py-3 px-4 font-sans uppercase tracking-wider text-slate-700 dark:text-slate-200">
+                                    TOTALES CONSOLIDADOS DEL EXTRACTO ({statementData.movimientos.length} MOVIMIENTOS)
+                                  </td>
+                                  <td className="py-3 px-3 text-right font-mono text-slate-900 dark:text-white">
+                                    {formatPYG(statementData.totales.total_facturas_debito)}
+                                  </td>
+                                  <td className="py-3 px-3 text-right font-mono text-emerald-600 dark:text-emerald-400">
+                                    -{formatPYG(statementData.totales.total_creditos)}
+                                  </td>
+                                  <td className="py-3 px-3 text-right font-mono text-rose-600 dark:text-rose-400 text-sm">
+                                    {formatPYG(statementData.totales.saldo_deudor_final)}
+                                  </td>
+                                  <td className="py-3 px-3 text-center text-slate-500 font-sans">
+                                    SALDO FINAL
+                                  </td>
+                                </tr>
+                              </tfoot>
+                            )}
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* SECCIÓN DE CHEQUES DIFERIDOS EN TRÁNSITO */}
+                      {statementData && statementData.cheques_diferidos.length > 0 && (
+                        <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
+                          <h4 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-white flex items-center gap-2">
+                            <CreditCard className="w-4 h-4 text-amber-500" />
+                            Cheques Diferidos Emitidos en Tránsito (Valores entregados pendientes de acreditación bancaria)
+                          </h4>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs text-left">
+                              <thead className="bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 uppercase text-[10px] font-black">
+                                <tr>
+                                  <th className="py-2 px-3">N° Cheque</th>
+                                  <th className="py-2 px-3">Banco</th>
+                                  <th className="py-2 px-3">Emisión</th>
+                                  <th className="py-2 px-3">Fecha de Cobro</th>
+                                  <th className="py-2 px-3 text-center">Días Rest.</th>
+                                  <th className="py-2 px-3 text-right">Monto Gs.</th>
+                                  <th className="py-2 px-3">Concepto</th>
+                                  <th className="py-2 px-3 text-center">Estado</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-200 dark:divide-slate-700 font-mono">
+                                {statementData.cheques_diferidos.map(ch => (
+                                  <tr key={ch.id} className="hover:bg-slate-100 dark:hover:bg-slate-700/50">
+                                    <td className="py-2 px-3 font-bold">{ch.numero}</td>
+                                    <td className="py-2 px-3">{ch.banco_emisor}</td>
+                                    <td className="py-2 px-3">{formatDate(ch.fecha_emision)}</td>
+                                    <td className="py-2 px-3 font-bold">{formatDate(ch.fecha_pago)}</td>
+                                    <td className="py-2 px-3 text-center font-sans font-bold">
+                                      <span className={ch.dias_restantes < 0 ? "text-red-500" : ch.dias_restantes <= 7 ? "text-amber-500" : "text-slate-600"}>
+                                        {ch.dias_restantes >= 0 ? `${ch.dias_restantes}d` : `Venc. (${-ch.dias_restantes}d)`}
+                                      </span>
+                                    </td>
+                                    <td className="py-2 px-3 text-right font-bold text-amber-600 dark:text-amber-400">
+                                      {formatPYG(ch.monto)}
+                                    </td>
+                                    <td className="py-2 px-3 font-sans truncate max-w-[200px]">{ch.concepto}</td>
+                                    <td className="py-2 px-3 text-center font-sans font-bold uppercase text-[10px]">
+                                      {ch.estado}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
