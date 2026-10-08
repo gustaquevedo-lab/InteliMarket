@@ -29,6 +29,11 @@ class SupplierCreate(BaseModel):
     telefono: Optional[str] = None
     email: Optional[str] = None
     plazo_pago_dias: int = 0
+    plazo_credito_factura_dias: Optional[int] = 0
+    plazo_credito_cheque_dias: Optional[int] = 0
+    formas_pago_acordadas: Optional[list[str]] = None
+    acuerdo_pago_tipo: Optional[str] = "contado"
+    acuerdo_pago_notas: Optional[str] = None
     tipo_proveedor: str = "nacional"
     grupo: Optional[str] = None
     categoria_ids: Optional[list[UUID]] = None
@@ -69,6 +74,11 @@ class SupplierUpdate(BaseModel):
     telefono: Optional[str] = None
     email: Optional[str] = None
     plazo_pago_dias: Optional[int] = None
+    plazo_credito_factura_dias: Optional[int] = None
+    plazo_credito_cheque_dias: Optional[int] = None
+    formas_pago_acordadas: Optional[list[str]] = None
+    acuerdo_pago_tipo: Optional[str] = None
+    acuerdo_pago_notas: Optional[str] = None
     activo: Optional[bool] = None
     tipo_proveedor: Optional[str] = None
     grupo: Optional[str] = None
@@ -112,6 +122,11 @@ class SupplierResponse(BaseModel):
     telefono: Optional[str] = None
     email: Optional[str] = None
     plazo_pago_dias: int = 0
+    plazo_credito_factura_dias: Optional[int] = 0
+    plazo_credito_cheque_dias: Optional[int] = 0
+    formas_pago_acordadas: Optional[list[str]] = None
+    acuerdo_pago_tipo: Optional[str] = "contado"
+    acuerdo_pago_notas: Optional[str] = None
     activo: bool = True
     tipo_proveedor: str = "nacional"
     grupo: Optional[str] = None

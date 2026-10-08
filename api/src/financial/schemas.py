@@ -855,3 +855,11 @@ class SupplierPaymentOrderDetailResponse(SupplierPaymentOrderResponse):
     credit_notes_applied: Optional[list[dict]] = None
 
 
+class SupplierPaymentAgreementUpdate(BaseModel):
+    plazo_credito_factura_dias: Optional[int] = 0
+    plazo_credito_cheque_dias: Optional[int] = 0
+    formas_pago_acordadas: Optional[list[str]] = Field(default_factory=list)
+    acuerdo_pago_tipo: Optional[str] = "contado"
+    acuerdo_pago_notas: Optional[str] = None
+
+

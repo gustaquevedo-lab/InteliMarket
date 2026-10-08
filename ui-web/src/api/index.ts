@@ -562,6 +562,11 @@ export interface Supplier {
   contacto_telefono?: string
   contacto_email?: string
   plazo_pago_dias?: number
+  plazo_credito_factura_dias?: number
+  plazo_credito_cheque_dias?: number
+  formas_pago_acordadas?: string[]
+  acuerdo_pago_tipo?: string
+  acuerdo_pago_notas?: string
   plazo_entrega_promedio?: number
   rating?: number
   tipo?: string
@@ -3643,6 +3648,7 @@ export const api = {
       numero_cheque?: string
       banco_cheque?: string
       fecha_pago?: string
+      sueldok_run_id?: string
     }) => client.post<SupplierPaymentOrder>(`/v1/sueldok/payroll-payment-order?company_id=${COMPANY_ID}`, {
       ...data,
       total_neto: data.total_neto ?? data.monto_neto,
@@ -4175,11 +4181,18 @@ export const api = {
     },
     payableInvoices: (params?: { supplier_id?: string; hasta?: string }) =>
       client.get<any[]>("/v1/financial/ap/payable-invoices", { company_id: COMPANY_ID, ...params } as any),
+    updateSupplierPaymentAgreement: (supplierId: string, data: {
+      plazo_credito_factura_dias?: number
+      plazo_credito_cheque_dias?: number
+      formas_pago_acordadas?: string[]
+      acuerdo_pago_tipo?: string
+      acuerdo_pago_notas?: string
+    }) => client.patch<any>(`/v1/financial/suppliers/${supplierId}/acuerdos-pago`, data),
     dashboard: () => client.get<FinancialDashboard>("/v1/financial/financial-dashboard", { company_id: COMPANY_ID } as any),
     ratios: () => client.get<FinancialRatios>("/v1/financial/ratios", { company_id: COMPANY_ID } as any),
   },
   cheques: {
-    list: (params?: { estado?: string; supplier_id?: string; vencidos?: boolean; fecha_desde?: string; fecha_hasta?: string }) => client.get<any[]>("/v1/cheques", params as any),
+    list: (params?: { estado?: string; supplier_id?: string; vencidos?: boolean; fecha_desde?: string; fecha_hasta?: string; limit?: number }) => client.get<any[]>("/v1/cheques", params as any),
     dashboard: () => client.get<any>("/v1/cheques/dashboard"),
     create: (data: any) => client.post<any>("/v1/cheques", data),
     updateEstado: (id: string, data: { estado: string; notas?: string }) => client.patch<any>(`/v1/cheques/${id}/estado`, data),

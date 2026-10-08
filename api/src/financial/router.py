@@ -32,6 +32,7 @@ from api.src.financial.schemas import (
     PaymentProposalPdfRequest,
     MultiSupplierPaymentBatchCreate,
     SettleValesAndPayRequest,
+    SupplierPaymentAgreementUpdate,
 )
 from api.src.financial import service
 
@@ -1071,4 +1072,18 @@ async def get_payment_order_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f"inline; filename={filename}", "Content-Length": str(len(pdf_bytes))}
     )
+
+
+@router.patch("/suppliers/{supplier_id}/acuerdos-pago")
+async def update_supplier_payment_agreement(
+    supplier_id: str,
+    body: SupplierPaymentAgreementUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_auth),
+):
+    """Actualiza acuerdos de pago con el proveedor (plazo factura, plazo cheque, formas acordadas)."""
+    result = await service.update_supplier_payment_agreement(db, supplier_id, body)
+    if not result:
+        raise HTTPException(status_code=404, detail="Proveedor no encontrado")
+    return result
 
