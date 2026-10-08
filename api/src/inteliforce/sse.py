@@ -36,10 +36,10 @@ def broadcast(company_id: str, event: dict) -> None:
 
 async def event_stream(company_id: str, q: asyncio.Queue) -> AsyncGenerator[str, None]:
     """Generador async que el EventSourceResponse consume directamente."""
-    try:
-        while True:
+    import json
+    while True:
+        try:
             event = await asyncio.wait_for(q.get(), timeout=25)
-            import json
             yield f"data: {json.dumps(event)}\n\n"
-    except asyncio.TimeoutError:
-        yield ": keepalive\n\n"
+        except asyncio.TimeoutError:
+            yield ": keepalive\n\n"

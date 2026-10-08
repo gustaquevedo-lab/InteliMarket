@@ -690,8 +690,8 @@ async def get_attendance_today(db: AsyncSession, rep: SalesRep) -> dict:
         "nombre": rep.nombre,
         "cedula": rep.cedula,
         "cargo": colaborador_sueldok.get("cargo") if colaborador_sueldok else (rep.rol.upper() if rep.rol else "VENDEDOR"),
-        "departamento": colaborador_sueldok.get("depto") if colaborador_sueldok else (rep.rama.upper() if rep.rama else "AMAMBAY"),
-        "empresa": "Casa Gonzalito S.R.L.",
+        "departamento": colaborador_sueldok.get("depto") if colaborador_sueldok else (rep.rama.upper() if rep.rama else ""),
+        "empresa": colaborador_sueldok.get("empresa") if colaborador_sueldok else "",
         "salario": colaborador_sueldok.get("salario") if colaborador_sueldok else 0,
         "sueldok_sync": True,
         "horario": "08:00 - 17:00 hs",
@@ -987,11 +987,16 @@ async def upsert_lot_expiry(
     rep: SalesRep, product_id: str, lote: str | None,
     fecha_vencimiento: date, cantidad_unidades: int | None,
 ) -> InteliforceLotExpiry:
+    lote_val = lote if lote else None
+    lote_filter = (
+        InteliforceLotExpiry.lote.is_(None) if lote_val is None
+        else InteliforceLotExpiry.lote == lote_val
+    )
     r = await db.execute(
         select(InteliforceLotExpiry).where(
             InteliforceLotExpiry.customer_id == uuid.UUID(customer_id),
             InteliforceLotExpiry.product_id == uuid.UUID(product_id),
-            InteliforceLotExpiry.lote == (lote or ""),
+            lote_filter,
         )
     )
     existing = r.scalar_one_or_none()
@@ -1012,7 +1017,7 @@ async def upsert_lot_expiry(
         product_id=uuid.UUID(product_id),
         visit_id=uuid.UUID(visit_id),
         sales_rep_id=rep.id,
-        lote=lote or "",
+        lote=lote if lote else None,
         fecha_vencimiento=fecha_vencimiento,
         cantidad_unidades=cantidad_unidades,
     )

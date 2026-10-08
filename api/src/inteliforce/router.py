@@ -295,7 +295,12 @@ async def upload_media(
     from api.src.inteliforce.models import InteliforceVisit
     from sqlalchemy import select
 
-    r = await db.execute(select(InteliforceVisit).where(InteliforceVisit.id == uuid_lib.UUID(visit_id)))
+    r = await db.execute(
+        select(InteliforceVisit).where(
+            InteliforceVisit.id == uuid_lib.UUID(visit_id),
+            InteliforceVisit.sales_rep_id == rep.id,
+        )
+    )
     visit = r.scalar_one_or_none()
     if not visit:
         raise HTTPException(status_code=404, detail="Visita no encontrada")

@@ -28,6 +28,8 @@ dependencies = [
     "redis>=5.0",
     # HTTP client
     "httpx>=0.27",
+    # SSE (Server-Sent Events para tracking en tiempo real)
+    "sse-starlette>=1.6",
     # XML (SIFEN e-Kuatia)
     "lxml>=5.2",
     "xmltodict>=0.13",
