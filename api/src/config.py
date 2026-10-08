@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     app_debug: bool = True
     app_secret_key: str = "dev-secret-key-change-in-production"
+    public_app_url: str = "http://localhost:5173"
 
     # Database
     database_url: str = "postgresql+asyncpg://intelimarket:password@localhost:5432/intelimarket"
