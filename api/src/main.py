@@ -96,11 +96,9 @@ from api.src.whatsapp.router import router as whatsapp_router
 from api.src.whatsapp.public_router import router as whatsapp_public_router
 from api.src.whatsapp.campaign_router import router as intellizapp_router
 from api.src.notifications.router import router as notifications_router
-from api.src.farmacia.router import router as farmacia_router
+from api.src.sales_targets.router import router as sales_targets_router
 from api.src.intelientregas.router import router as intelientregas_router
 from api.src.intelientregas.driver_router import router as intelientregas_driver_router
-from api.src.boutique.router import router as boutique_router
-from api.src.supermer.router import router as supermer_router
 from api.src.promotions.router import router as promotions_router
 from api.src.petty_cash.router import router as expenses_router, funds_router as petty_cash_funds_router
 from api.src.gerencial.router import router as gerencial_router
@@ -133,7 +131,6 @@ from api.src.cold_chain.router import router as cold_chain_router
 from api.src.asistente_virtual.router import router as asistente_virtual_router
 from api.src.clientes.router import router as clientes_router
 from api.src.fixed_assets.router import router as fixed_assets_router
-from api.src.scanandgo.router import router as scanandgo_router
 from api.src.customer360.router import router as customer360_router
 from api.src.schedule.router import router as schedule_router
 from api.src.productividad.router import router as productividad_router
@@ -146,8 +143,6 @@ from api.src.ecommerce_sm.router import router as ecommerce_sm_router
 from api.src.delivery_integrations.router import router as delivery_integrations_router
 from api.src.suscripciones.router import router as suscripciones_router
 from api.src.servicios.router import router as servicios_router
-from api.src.cupones.router import router as cupones_router
-from api.src.donaciones.router import router as donaciones_router
 from api.src.vouchers.router import router as vouchers_router
 from api.src.inteliforce.router import router as inteliforce_router
 
@@ -429,11 +424,9 @@ app.include_router(whatsapp_router)
 app.include_router(whatsapp_public_router)
 app.include_router(intellizapp_router)
 app.include_router(notifications_router)
-app.include_router(farmacia_router)
+app.include_router(sales_targets_router)
 app.include_router(intelientregas_router)
 app.include_router(intelientregas_driver_router)
-app.include_router(boutique_router)
-app.include_router(supermer_router)
 app.include_router(promotions_router)
 app.include_router(expenses_router)
 app.include_router(petty_cash_funds_router)
@@ -452,7 +445,6 @@ app.include_router(cold_chain_router)
 app.include_router(asistente_virtual_router)
 app.include_router(clientes_router)
 app.include_router(fixed_assets_router)
-app.include_router(scanandgo_router)
 app.include_router(customer360_router)
 app.include_router(schedule_router)
 app.include_router(productividad_router)
@@ -480,8 +472,6 @@ app.include_router(client_app_router)
 app.include_router(supplier_portal_router)
 app.include_router(retail_router)
 app.include_router(servicios_router)
-app.include_router(cupones_router)
-app.include_router(donaciones_router)
 app.include_router(vouchers_router)
 app.include_router(vouchers_router, prefix="/api")
 app.include_router(inteliforce_router)
