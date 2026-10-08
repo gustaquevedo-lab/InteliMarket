@@ -2838,7 +2838,7 @@ export default function FinancialPage() {
         </>
       )}
 
-      {/* MODAL: Pago Directo de Factura */}
+      {/* MODAL: Pago Directo de Factura / Cuota Parcial */}
       {showPayModal && (
         <div className="modal-overlay" onClick={() => setShowPayModal(null)}>
           <div className="modal-content max-w-md" onClick={e => e.stopPropagation()}>
@@ -2847,19 +2847,39 @@ export default function FinancialPage() {
               <p className="text-xs text-gray-500 mt-0.5">
                 {showPayModal.supplier_nombre} — Factura N° {showPayModal.numero_factura}
               </p>
+              <div className="mt-3 p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs">
+                <div>
+                  <span className="text-gray-400 block text-[10px] uppercase font-bold">Total Factura</span>
+                  <span className="font-bold font-mono text-slate-800 dark:text-slate-200">{formatPYG(showPayModal.total)}</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-gray-400 block text-[10px] uppercase font-bold">Saldo Pendiente</span>
+                  <span className="font-bold font-mono text-amber-600 dark:text-amber-400">{formatPYG(showPayModal.saldo_pendiente)}</span>
+                </div>
+              </div>
             </div>
             <div className="p-6 space-y-3 text-xs">
               <div>
-                <label className="label-field">Monto a Transferir (₲) *</label>
-                <input
-                  className="input-field font-mono text-sm font-bold"
-                  type="number"
+                <div className="flex items-center justify-between mb-1">
+                  <label className="label-field font-bold text-gray-700 dark:text-gray-300">Monto a Abonar (₲) *</label>
+                  {Number(payForm.monto) < (showPayModal.saldo_pendiente ?? showPayModal.total ?? 0) && Number(payForm.monto) > 0 && (
+                    <span className="text-[10px] text-amber-600 font-bold">Pago parcial / cuota</span>
+                  )}
+                </div>
+                <CurrencyInput
+                  className="input-field font-mono text-sm font-bold text-right"
                   value={payForm.monto}
-                  onChange={e => setPayForm({ ...payForm, monto: e.target.value })}
+                  onChangeValue={(num, formatted) => setPayForm({ ...payForm, monto: String(num) })}
+                  max={showPayModal.saldo_pendiente ?? showPayModal.total}
                 />
+                {Number(payForm.monto) < (showPayModal.saldo_pendiente ?? showPayModal.total ?? 0) && Number(payForm.monto) > 0 && (
+                  <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 font-medium">
+                    ℹ️ Quedará un saldo pendiente de {formatPYG((showPayModal.saldo_pendiente ?? showPayModal.total ?? 0) - Number(payForm.monto))} para futuras cuotas.
+                  </p>
+                )}
               </div>
               <div>
-                <label className="label-field">Medio de Pago</label>
+                <label className="label-field font-bold text-gray-700 dark:text-gray-300">Medio de Pago</label>
                 <select
                   className="input-field"
                   value={payForm.payment_method}
@@ -2895,13 +2915,16 @@ export default function FinancialPage() {
                 </div>
               )}
               <div>
-                <label className="label-field">N° Referencia / Comprobante</label>
+                <label className="label-field font-bold text-gray-700 dark:text-gray-300">N° Recibo Oficial del Proveedor / Referencia</label>
                 <input
                   className="input-field"
-                  placeholder="Ej: Transf. SIPAP 981244"
+                  placeholder="Ej: Recibo N° 001-001-004523 (Cuota 1 de 12)"
                   value={payForm.referencia}
                   onChange={e => setPayForm({ ...payForm, referencia: e.target.value })}
                 />
+                <span className="text-[10px] text-gray-400 mt-0.5 block">
+                  Para seguros u obligaciones a cuotas, ingrese aquí el número de recibo de dinero recibido de la aseguradora.
+                </span>
               </div>
             </div>
             <div className="p-6 border-t flex justify-end gap-3">
