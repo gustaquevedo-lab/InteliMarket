@@ -42,6 +42,7 @@ export default function ExpensesPage() {
   const [filterRendicion, setFilterRendicion] = useState("")
   const [filterEstado, setFilterEstado] = useState("")
   const [filterFund, setFilterFund] = useState("")
+  const [userFundInitialized, setUserFundInitialized] = useState(false)
   const [filterCategory, setFilterCategory] = useState("")
   const [filterSector, setFilterSector] = useState("")
 
@@ -659,6 +660,14 @@ export default function ExpensesPage() {
       setCategories(c)
       setCostCenters(cc)
       setFunds(f)
+      if (Array.isArray(f) && f.length > 0 && !userFundInitialized && user?.id) {
+        const myCustodyFund = f.find((fund: any) => fund.custodio_id === user.id && fund.activo)
+        if (myCustodyFund) {
+          setFilterFund(myCustodyFund.id)
+          setFilterRendicionFund(myCustodyFund.id)
+        }
+        setUserFundInitialized(true)
+      }
       if (Array.isArray(uList)) {
         setSystemUsers(uList.filter((u: any) => u.activo !== false))
       }
@@ -813,10 +822,13 @@ export default function ExpensesPage() {
 
   const handleOpenCreate = () => {
     setEditingExpenseId(null)
+    const activeFundDefault = (filterFund && filterFund !== "sin_fondo")
+      ? filterFund
+      : (funds.find(f => f.custodio_id === user?.id && f.activo)?.id || "")
     setForm({
       monto: "",
       descripcion: "",
-      fund_id: "",
+      fund_id: activeFundDefault,
       category_id: "",
       cost_center_id: "",
       proveedor: "",
@@ -1722,7 +1734,12 @@ export default function ExpensesPage() {
     }
 
     // 2. Filtro por Fondo y Sector
-    const matchFund = !filterFund || e.fund_id === filterFund
+    let matchFund = true
+    if (filterFund === "sin_fondo") {
+      matchFund = !e.fund_id
+    } else if (filterFund) {
+      matchFund = e.fund_id === filterFund
+    }
     const matchSector = !filterSector || e.cost_center_id === filterSector
     if (!matchFund || !matchSector) return false
 
@@ -2540,6 +2557,67 @@ export default function ExpensesPage() {
           {/* TAB 3: PLANILLA DE COMPROBANTES DE GASTO */}
           {tab === "list" && (
             <div className="space-y-4">
+              {/* Chips de Segmentación por Fondo Fijo / Custodio */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1">
+                  <PiggyBank className="w-3.5 h-3.5 text-indigo-500" /> Segmento:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setFilterFund("")}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1.5 shrink-0 ${
+                    filterFund === ""
+                      ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm"
+                      : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700"
+                  }`}
+                >
+                  Todos los Comprobantes
+                  <span className="text-[10px] opacity-70">({expenses.length})</span>
+                </button>
+
+                {funds.map(f => {
+                  const count = expenses.filter(e => e.fund_id === f.id).length
+                  const isMine = f.custodio_id === user?.id
+                  return (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setFilterFund(f.id)}
+                      className={`px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1.5 shrink-0 ${
+                        filterFund === f.id
+                          ? "bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-400/50"
+                          : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700"
+                      }`}
+                    >
+                      <UserCircle2 className="w-3.5 h-3.5 text-indigo-400" />
+                      {f.nombre}
+                      {isMine && (
+                        <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 font-extrabold uppercase">
+                          Tu Fondo
+                        </span>
+                      )}
+                      <span className="text-[10px] opacity-70">({count})</span>
+                    </button>
+                  )
+                })}
+
+                <button
+                  type="button"
+                  onClick={() => setFilterFund("sin_fondo")}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1.5 shrink-0 ${
+                    filterFund === "sin_fondo"
+                      ? "bg-amber-600 text-white shadow-sm ring-2 ring-amber-400/50"
+                      : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700"
+                  }`}
+                >
+                  <Building2 className="w-3.5 h-3.5 text-amber-500" />
+                  Gastos Generales / Banco (Sin Fondo Fijo)
+                  <span className="text-[10px] opacity-70">
+                    ({expenses.filter(e => !e.fund_id).length})
+                  </span>
+                </button>
+              </div>
+
               {/* Barra de Filtros */}
               <div className="card p-4 bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700/60 space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 items-center">
@@ -2632,8 +2710,11 @@ export default function ExpensesPage() {
                     >
                       <option value="">Todas las Cajas Chicas</option>
                       {funds.map(f => (
-                        <option key={f.id} value={f.id}>{f.nombre}</option>
+                        <option key={f.id} value={f.id}>
+                          {f.nombre} {f.custodio_nombre ? `(${f.custodio_nombre})` : ""}
+                        </option>
                       ))}
+                      <option value="sin_fondo">🏛️ Gastos Generales / Banco (Sin Caja Chica)</option>
                     </select>
                   </div>
                 </div>
@@ -2954,13 +3035,23 @@ export default function ExpensesPage() {
                               <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
                                 e.estado === "pagado"
                                   ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-200"
+                                  : e.estado === "parcial"
+                                  ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 border border-indigo-200"
                                   : e.estado === "aprobado"
                                   ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200"
                                   : e.estado === "rechazado"
                                   ? "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-200"
                                   : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200"
                               }`}>
-                                {e.estado === "pagado" ? "Pagado" : e.estado === "aprobado" ? "Aprobado" : e.estado === "rechazado" ? "Rechazado" : "Pendiente"}
+                                {e.estado === "pagado"
+                                  ? "Pagado"
+                                  : e.estado === "parcial"
+                                  ? "Pago Parcial"
+                                  : e.estado === "aprobado"
+                                  ? "Aprobado"
+                                  : e.estado === "rechazado"
+                                  ? "Rechazado"
+                                  : "Pendiente"}
                               </span>
                               {e.forma_pago_resumen && (
                                 <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-0.5 truncate max-w-[130px]" title={e.forma_pago_resumen}>
@@ -3006,15 +3097,15 @@ export default function ExpensesPage() {
                                   </>
                                 )}
 
-                                {/* 2. Si está aprobado: Botón destacado Pagar / Liquidar */}
-                                {e.estado === "aprobado" && (
+                                {/* 2. Si está aprobado o con pago parcial: Botón destacado Pagar / Abonar Cuota */}
+                                {(e.estado === "aprobado" || e.estado === "parcial") && (
                                   <button
                                     onClick={() => setPaymentModalExpense(e)}
-                                    title="Liquidar gasto y asignar medios de pago"
+                                    title={e.estado === "parcial" ? "Abonar cuota / saldo restante del gasto" : "Liquidar gasto y asignar medios de pago"}
                                     className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-all"
                                   >
                                     <Wallet className="w-3.5 h-3.5" />
-                                    Pagar
+                                    {e.estado === "parcial" ? "Abonar Cuota" : "Pagar"}
                                   </button>
                                 )}
 
@@ -4873,6 +4964,29 @@ export default function ExpensesPage() {
                     ))}
                   </select>
                 </div>
+              </div>
+
+              {/* Asignación de Fondo Fijo / Caja Chica */}
+              <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-1">
+                <label className="font-bold text-gray-700 dark:text-gray-300 block text-xs flex items-center gap-1.5">
+                  <PiggyBank className="w-4 h-4 text-indigo-600" />
+                  Asignación a Caja Chica / Fondo Fijo (Opcional)
+                </label>
+                <select
+                  className="input-field w-full text-xs"
+                  value={form.fund_id || ""}
+                  onChange={e => setForm({ ...form, fund_id: e.target.value })}
+                >
+                  <option value="">Ninguno — Gasto Corporativo / Institucional (Banco, Cheque o Bóveda)</option>
+                  {funds.filter(f => f.activo).map(f => (
+                    <option key={f.id} value={f.id}>
+                      {f.nombre} — Custodio: {f.custodio_nombre || "Sin custodio"} (Saldo: {formatPYG(f.saldo_actual)})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-gray-500">
+                  Seleccione únicamente si este comprobante fue pagado en efectivo de la gaveta del custodio para solicitar su reposición en rendición de cuentas.
+                </p>
               </div>
 
               {/* DATOS FISCALES DEL COMPROBANTE */}

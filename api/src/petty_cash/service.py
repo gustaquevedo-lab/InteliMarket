@@ -488,19 +488,6 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
         fund = await get_fund(db, data.fund_id)
         if not fund or str(fund.company_id) != company_id:
             raise ValueError("Fondo de caja chica no encontrado")
-    else:
-        # Si el usuario que registra es custodio de un fondo activo, usar su fondo por defecto
-        if user_id:
-            user_fund_res = await db.execute(
-                select(PettyCashFund).where(
-                    PettyCashFund.company_id == cid,
-                    PettyCashFund.custodio_id == uuid.UUID(user_id),
-                    PettyCashFund.activo == True
-                ).order_by(PettyCashFund.created_at.asc()).limit(1)
-            )
-            fund = user_fund_res.scalar_one_or_none()
-        if not fund:
-            fund = await _resolve_fund_for_branch(db, company_id, data.branch_id)
 
     monto = Decimal(str(data.monto))
     # Nota: NO se verifica saldo del fondo aquí. El gasto se crea en estado 'pendiente'.
@@ -748,19 +735,29 @@ async def disburse_expense(
     if exp.anulado:
         raise HTTPException(status_code=400, detail="El comprobante de gasto está anulado.")
     if exp.estado == "pagado":
-        raise HTTPException(status_code=400, detail="El comprobante de gasto ya se encuentra pagado.")
-    if exp.estado not in ("aprobado", "pendiente"):
+        raise HTTPException(status_code=400, detail="El comprobante de gasto ya se encuentra totalmente pagado.")
+    if exp.estado not in ("aprobado", "pendiente", "parcial"):
         raise HTTPException(status_code=400, detail=f"No se puede pagar un gasto en estado '{exp.estado}'.")
 
     if not data.disbursements:
         raise HTTPException(status_code=400, detail="Debe especificar al menos una forma de pago para liquidar el gasto.")
 
     monto_exp = Decimal(str(exp.monto))
+
+    # Calcular desembolsos previos acumulados para admitir pagos parciales / escalonados
+    q_prev = select(sa_func.coalesce(sa_func.sum(ExpenseDisbursement.monto), Decimal("0"))).where(
+        ExpenseDisbursement.expense_id == exp.id
+    )
+    total_prev_disb = (await db.execute(q_prev)).scalar() or Decimal("0")
+    saldo_pendiente_exp = max(Decimal("0"), monto_exp - total_prev_disb)
+
     total_disb = sum(Decimal(str(d.monto)) for d in data.disbursements)
-    if total_disb != monto_exp:
+    if total_disb <= Decimal("0"):
+        raise HTTPException(status_code=400, detail="El monto a desembolsar debe ser mayor a cero.")
+    if total_disb > saldo_pendiente_exp:
         raise HTTPException(
             status_code=400,
-            detail=f"La suma de los medios de pago (₲ {total_disb:,.0f}) no coincide exactamente con el monto del gasto (₲ {monto_exp:,.0f})."
+            detail=f"La suma de los medios de pago (₲ {total_disb:,.0f}) excede el saldo pendiente del comprobante (₲ {saldo_pendiente_exp:,.0f})."
         )
 
     resumen_medios = []
@@ -1143,30 +1140,51 @@ async def disburse_expense(
             ))
             resumen_medios.append((fp or "OTRO").upper())
 
-    # Marcar Gasto como Pagado
-    exp.estado = "pagado"
+    # Marcar Gasto como Pagado o Pago Parcial
+    total_acumulado = total_prev_disb + total_disb
+    if total_acumulado >= monto_exp:
+        exp.estado = "pagado"
+    else:
+        exp.estado = "parcial"
+
     exp.fecha_pago = fecha_efectiva_pago
     exp.pagado_por = uuid.UUID(user_id) if user_id else None
     exp.pagado_at = datetime.now(timezone.utc)
-    exp.forma_pago_resumen = ", ".join(resumen_medios) if resumen_medios else "PAGADO"
+    nuevo_resumen = ", ".join(resumen_medios) if resumen_medios else "DESEMBOLSO"
+    if exp.forma_pago_resumen and exp.estado == "parcial":
+        exp.forma_pago_resumen = f"{exp.forma_pago_resumen}, {nuevo_resumen}"
+    else:
+        exp.forma_pago_resumen = nuevo_resumen
+
     if data.notas:
         exp.notas = (exp.notas or "") + ("\n" if exp.notas else "") + data.notas
 
-    # Si tenía cuenta por pagar vinculada, liquidarla en el acto
+    # Si tenía cuenta por pagar vinculada, amortizarla proporcionalmente
     if exp.supplier_invoice_id:
         from api.src.financial.models import SupplierInvoice, SupplierInvoicePayment
         inv_res = await db.execute(select(SupplierInvoice).where(SupplierInvoice.id == exp.supplier_invoice_id))
         inv = inv_res.scalar_one_or_none()
         if inv and inv.saldo_pendiente > Decimal("0"):
-            inv.saldo_pendiente = Decimal("0")
-            inv.estado = "pagada"
+            nuevo_saldo = max(Decimal("0"), inv.saldo_pendiente - total_disb)
+            inv.saldo_pendiente = nuevo_saldo
+            if nuevo_saldo == Decimal("0"):
+                inv.estado = "pagada"
+            else:
+                inv.estado = "parcial"
+
+            primer_medio = data.disbursements[0].medio_pago if data.disbursements else "gasto_caja_chica"
+            primer_comprobante = data.disbursements[0].numero_comprobante if data.disbursements else None
+            ref_txt = f"Cuota Gasto {exp.numero_factura or exp.id}"
+            if primer_comprobante:
+                ref_txt += f" - Recibo/Ref: {primer_comprobante}"
+
             db.add(SupplierInvoicePayment(
                 invoice_id=inv.id,
-                payment_method="gasto_caja_chica",
-                monto=inv.total,
+                payment_method=primer_medio,
+                monto=total_disb,
                 moneda=inv.moneda or "PYG",
                 fecha_pago=fecha_efectiva_pago,
-                referencia=f"Gasto {exp.numero_factura or exp.id}",
+                referencia=ref_txt,
                 estado="conciliado",
             ))
 

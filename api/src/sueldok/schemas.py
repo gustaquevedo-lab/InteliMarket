@@ -54,6 +54,7 @@ class PayrollPaymentOrderCreate(BaseModel):
     numero_cheque: Optional[str] = None
     banco_cheque: Optional[str] = None
     fecha_pago: Optional[str] = None
+    sueldok_run_id: Optional[str] = None
 
 
 class SettlementCreate(BaseModel):

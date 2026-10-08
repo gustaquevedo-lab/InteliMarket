@@ -52,6 +52,7 @@ export function ExpensePaymentModal({ isOpen, onClose, onSuccess, expense }: Pro
   const [fechaPago, setFechaPago] = useState(getTodayAsuncion())
   const [notas, setNotas] = useState("")
   const [disbursements, setDisbursements] = useState<DisbursementRow[]>([])
+  const [prevDisbursements, setPrevDisbursements] = useState<any[]>([])
 
   useEffect(() => {
     if (isOpen && expense) {
@@ -65,10 +66,11 @@ export function ExpensePaymentModal({ isOpen, onClose, onSuccess, expense }: Pro
     if (!expense) return
     setLoading(true)
     try {
-      const [banksRes, fundsRes, vaultRes] = await Promise.all([
+      const [banksRes, fundsRes, vaultRes, disbRes] = await Promise.all([
         api.financial.banks.list().catch(() => []),
         api.expenses.funds.list({ activo: true }).catch(() => []),
         api.vault.dashboard().catch(() => ({ saldo_en_boveda_pyg: 0, saldo_en_boveda_brl: 0 } as any)),
+        api.expenses.getDisbursements(expense.id).catch(() => []),
       ])
 
       const activeBanks = (banksRes || []).filter((b: any) => b.activo)
@@ -77,8 +79,13 @@ export function ExpensePaymentModal({ isOpen, onClose, onSuccess, expense }: Pro
       setFunds(activeFunds)
       setVaultBalance(Number((vaultRes as any)?.saldo_en_boveda_pyg || (vaultRes as any)?.saldo_boveda || 0))
       setVaultBalanceBRL(Number((vaultRes as any)?.saldo_en_boveda_brl || 0))
+      const prevList = disbRes || []
+      setPrevDisbursements(prevList)
 
-      // Pre-cargar una fila inicial con el monto total del gasto
+      const prevPagado = prevList.reduce((acc: number, d: any) => acc + (Number(d.monto) || 0), 0)
+      const saldoRestante = Math.max(0, Number(expense.monto || 0) - prevPagado)
+
+      // Pre-cargar una fila inicial con el saldo pendiente del gasto
       const defaultFund = expense.fund_id ? activeFunds.find((f: any) => f.id === expense.fund_id) : activeFunds[0]
       const defaultBank = activeBanks[0]
 
@@ -98,7 +105,7 @@ export function ExpensePaymentModal({ isOpen, onClose, onSuccess, expense }: Pro
         {
           id: Math.random().toString(),
           medio_pago: initialMedio,
-          monto: String(expense.monto || 0),
+          monto: String(saldoRestante > 0 ? saldoRestante : expense.monto || 0),
           moneda: hasBrl ? "BRL" : "PYG",
           monto_brl: hasBrl ? String(expense.monto_brl) : "",
           bank_account_id: defaultBank?.id || "",
@@ -123,12 +130,18 @@ export function ExpensePaymentModal({ isOpen, onClose, onSuccess, expense }: Pro
   if (!isOpen || !expense) return null
 
   const montoTotalGasto = Number(expense.monto || 0)
+  const totalPrevPagado = (prevDisbursements || []).reduce((acc: number, d: any) => acc + (Number(d.monto) || 0), 0)
+  const saldoPendiente = Math.max(0, montoTotalGasto - totalPrevPagado)
   const totalAsignado = disbursements.reduce((acc, row) => acc + (Number(row.monto) || 0), 0)
-  const diferencia = montoTotalGasto - totalAsignado
-  const isBalanced = Math.abs(diferencia) < 1
+  const diferenciaPendiente = saldoPendiente - totalAsignado
+
+  const esPagoCompleto = totalAsignado > 0 && Math.abs(diferenciaPendiente) < 1
+  const esPagoParcial = totalAsignado > 0 && totalAsignado < saldoPendiente
+  const esExceso = totalAsignado > saldoPendiente
+  const isValid = (esPagoCompleto || esPagoParcial) && !esExceso
 
   const addDisbursementRow = () => {
-    const restante = Math.max(0, diferencia)
+    const restante = Math.max(0, diferenciaPendiente)
     const defaultBank = bankAccounts[0]
     const defaultFund = funds[0]
 
@@ -166,8 +179,12 @@ export function ExpensePaymentModal({ isOpen, onClose, onSuccess, expense }: Pro
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!isBalanced) {
-      toast.error("Descuadre en medios de pago", `Debe asignar exactamente ${formatPYG(montoTotalGasto)}. Diferencia: ${formatPYG(diferencia)}`)
+    if (!isValid) {
+      if (esExceso) {
+        toast.error("Monto excedido", `El total asignado supera el saldo pendiente de ${formatPYG(saldoPendiente)}.`)
+      } else {
+        toast.error("Monto requerido", "Debe asignar un monto mayor a cero.")
+      }
       return
     }
 
@@ -243,7 +260,17 @@ export function ExpensePaymentModal({ isOpen, onClose, onSuccess, expense }: Pro
       }
 
       await api.expenses.disburse(expense.id, payload)
-      toast.success("Gasto Liquidado con Éxito", `Se desembolsaron ${formatPYG(montoTotalGasto)} y se afectaron los saldos correspondientes.`)
+      if (esPagoParcial) {
+        toast.success(
+          "Cuota Registrada con Éxito",
+          `Se desembolsaron ${formatPYG(totalAsignado)}. Saldo restante pendiente: ${formatPYG(diferenciaPendiente)}.`
+        )
+      } else {
+        toast.success(
+          "Gasto Liquidado con Éxito",
+          `Se desembolsaron ${formatPYG(totalAsignado)} y se canceló la totalidad del comprobante.`
+        )
+      }
       onSuccess()
       onClose()
     } catch (err: any) {
@@ -311,6 +338,14 @@ export function ExpensePaymentModal({ isOpen, onClose, onSuccess, expense }: Pro
             <span className="text-base font-extrabold text-slate-900 dark:text-emerald-400 block">
               {formatPYG(montoTotalGasto)}
             </span>
+            {totalPrevPagado > 0 && (
+              <div className="mt-1 flex items-center justify-end gap-2 text-[10px]">
+                <span className="text-slate-500">Ya Pagado: <b className="text-slate-700 dark:text-slate-300">{formatPYG(totalPrevPagado)}</b></span>
+                <span className="text-amber-600 font-bold bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200">
+                  Saldo: {formatPYG(saldoPendiente)}
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -677,39 +712,68 @@ export function ExpensePaymentModal({ isOpen, onClose, onSuccess, expense }: Pro
 
               {/* Barra de Cuadre en Vivo (Live Balancing) */}
               <div className={`p-4 rounded-xl border flex flex-col md:flex-row items-center justify-between gap-4 ${
-                isBalanced
+                esPagoCompleto
                   ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/50"
+                  : esPagoParcial
+                  ? "bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800/50"
+                  : esExceso
+                  ? "bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800/50"
                   : "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/50"
               }`}>
                 <div className="flex items-center gap-3">
-                  {isBalanced ? (
-                    <div className="w-9 h-9 rounded-xl bg-emerald-500 text-white flex items-center justify-center">
+                  {esPagoCompleto ? (
+                    <div className="w-9 h-9 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0">
                       <CheckCircle2 className="w-5 h-5" />
                     </div>
+                  ) : esPagoParcial ? (
+                    <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0">
+                      <Clock className="w-5 h-5" />
+                    </div>
+                  ) : esExceso ? (
+                    <div className="w-9 h-9 rounded-xl bg-rose-500 text-white flex items-center justify-center shrink-0">
+                      <AlertCircle className="w-5 h-5" />
+                    </div>
                   ) : (
-                    <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center">
+                    <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0">
                       <AlertCircle className="w-5 h-5" />
                     </div>
                   )}
                   <div>
                     <h4 className="text-xs font-bold text-slate-900 dark:text-white">
-                      {isBalanced ? "Cuadre Exacto de Medios de Pago" : "Diferencia Pendiente de Asignación"}
+                      {esPagoCompleto
+                        ? "Liquidación Completa de Saldo (100%)"
+                        : esPagoParcial
+                        ? "Pago Parcial / Cuota Escalonada Habilitado"
+                        : esExceso
+                        ? "Monto Asignado Supera el Saldo Pendiente"
+                        : "Ingrese Monto a Desembolsar"}
                     </h4>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Total Gasto: <b className="text-slate-800 dark:text-slate-200">{formatPYG(montoTotalGasto)}</b> &nbsp;|&nbsp; 
+                      Saldo Pendiente: <b className="text-slate-800 dark:text-slate-200">{formatPYG(saldoPendiente)}</b> &nbsp;|&nbsp; 
                       Asignado: <b className="text-slate-800 dark:text-slate-200">{formatPYG(totalAsignado)}</b>
+                      {esPagoParcial && (
+                        <span> &nbsp;|&nbsp; Saldo Restante: <b className="text-blue-700 dark:text-blue-300">{formatPYG(diferenciaPendiente)}</b></span>
+                      )}
                     </p>
                   </div>
                 </div>
 
                 <div className="text-right">
-                  {isBalanced ? (
+                  {esPagoCompleto ? (
                     <span className="text-xs font-bold px-3 py-1 bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 rounded-full border border-emerald-300 dark:border-emerald-700">
-                      Balance 100% Correcto
+                      Liquidación Total
+                    </span>
+                  ) : esPagoParcial ? (
+                    <span className="text-xs font-bold px-3 py-1 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full border border-blue-300 dark:border-blue-700">
+                      Pago Parcial: {formatPYG(totalAsignado)}
+                    </span>
+                  ) : esExceso ? (
+                    <span className="text-xs font-bold px-3 py-1 bg-rose-100 dark:bg-rose-900/50 text-rose-700 dark:text-rose-300 rounded-full border border-rose-300 dark:border-rose-700">
+                      Exceso: {formatPYG(totalAsignado - saldoPendiente)}
                     </span>
                   ) : (
                     <span className="text-xs font-bold px-3 py-1 bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 rounded-full border border-amber-300 dark:border-amber-700">
-                      Diferencia: {formatPYG(diferencia)}
+                      Pendiente: {formatPYG(saldoPendiente)}
                     </span>
                   )}
                 </div>
@@ -729,7 +793,7 @@ export function ExpensePaymentModal({ isOpen, onClose, onSuccess, expense }: Pro
             </button>
             <button
               type="submit"
-              disabled={!isBalanced || submitting || loading}
+              disabled={!isValid || submitting || loading}
               className="inline-flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-600/20 transition-all"
             >
               {submitting ? (
@@ -737,10 +801,15 @@ export function ExpensePaymentModal({ isOpen, onClose, onSuccess, expense }: Pro
                   <Loader2 className="w-4 h-4 animate-spin" />
                   Liquidando Fondos...
                 </>
+              ) : esPagoParcial ? (
+                <>
+                  <ShieldCheck className="w-4 h-4" />
+                  Confirmar Cuota ({formatPYG(totalAsignado)})
+                </>
               ) : (
                 <>
                   <ShieldCheck className="w-4 h-4" />
-                  Confirmar y Ejecutar Pago
+                  Confirmar y Ejecutar Pago Total
                 </>
               )}
             </button>

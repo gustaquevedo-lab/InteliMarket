@@ -272,7 +272,7 @@ export default function SueldokPage() {
     async (showRefresh = false) => {
       if (showRefresh) setRefreshing(true)
       try {
-        const res = await fetch(`${SUELDOK_OVERVIEW_URL}?apiKey=${selectedCompany.apiKey}`, {
+        const res = await fetch(`${SUELDOK_OVERVIEW_URL}?apiKey=${selectedCompany.apiKey}&periodo=${periodoNomina}`, {
           method: "GET",
           headers: { Accept: "application/json" },
         })
@@ -290,7 +290,7 @@ export default function SueldokPage() {
         setRefreshing(false)
       }
     },
-    [selectedCompany]
+    [selectedCompany, periodoNomina]
   )
 
   useEffect(() => {
@@ -307,6 +307,35 @@ export default function SueldokPage() {
       })
       .catch((err) => console.error("Error cargando bancos:", err))
   }, [])
+
+  // Finiquitos consolidados (SueldOK + Intelimarket local)
+  const allSettlements = useMemo(() => {
+    const remoteList: any[] = (data?.liquidations || []).map((l: any) => ({
+      id: l.id,
+      company_id: selectedCompany.id,
+      employee_id: l.employeeId,
+      employee_nombre: l.nombre,
+      employee_ci: l.ci,
+      employee_cargo: l.cargo,
+      fecha_ingreso: l.fechaIngreso,
+      fecha_egreso: l.fechaSalida,
+      motivo_egreso: l.motivo === "Despido Injustificado" ? "despido_sin_causa" : (l.motivo === "Renuncia Voluntaria" ? "renuncia" : l.motivo),
+      salario_mes_monto: l.proporcionalSalario || l.baseSalary,
+      vacaciones_causadas_monto: l.vacaciones,
+      aguinaldo_proporcional_monto: l.aguinaldo,
+      preaviso_monto: l.preaviso,
+      indemnizacion_legal_monto: l.indemnizacion,
+      descuentos_salariales_monto: l.descuentoComercial,
+      total_liquidacion_neta: l.montoNeto,
+      payment_order_id: l.payoutReference,
+      payment_order_num: l.payoutReference,
+      estado_pago: l.estado === "paid" || l.payoutConfirmed ? "pagado" : "pendiente",
+      origen: "sueldok",
+    }))
+    const remoteIds = new Set(remoteList.map((r: any) => r.id))
+    const localFiltered = settlements.filter((s: any) => !remoteIds.has(s.id))
+    return [...remoteList, ...localFiltered]
+  }, [data?.liquidations, settlements, selectedCompany.id])
 
   // Cargar finiquitos registrados
   const fetchSettlements = useCallback(async () => {
@@ -367,8 +396,26 @@ export default function SueldokPage() {
     return [...localDeductions, ...remote.filter((r: any) => !localDeductions.some((l) => l.id === r.id))]
   }, [data?.deductions, localDeductions])
 
-  // Cálculo estratégico de nómina por funcionario
+  // Cálculo estratégico de nómina por funcionario (vinculado a SueldOK)
   const payrollItems: PayrollItem[] = useMemo(() => {
+    if (data?.approvedPayroll?.items && data.approvedPayroll.items.length > 0) {
+      return data.approvedPayroll.items.map((item: any): PayrollItem => ({
+        id: item.id || item.employeeId,
+        nombre: item.nombre,
+        ci: item.ci,
+        cargo: item.cargo,
+        depto: item.depto,
+        baseSalary: item.baseSalary,
+        bonus: item.bonus || 0,
+        totalGross: item.totalGross,
+        ipsWorker: item.ipsWorker,
+        ipsEmployer: item.ipsEmployer,
+        advances: item.advances || 0,
+        deductions: item.deductions || 0,
+        totalNet: item.totalNet,
+      }))
+    }
+
     return employees.map((emp: any): PayrollItem => {
       const baseSalary = emp.salario || 0
       const ipsWorker = Math.round(baseSalary * 0.09)
@@ -531,6 +578,7 @@ export default function SueldokPage() {
         bank_account_id: nominaOPDesembolsoInmediato && nominaOPBankAccountId ? nominaOPBankAccountId : undefined,
         referencia: nominaOPReferencia || undefined,
         observaciones: nominaOPObservaciones || undefined,
+        sueldok_run_id: data?.approvedPayroll?.id || undefined,
       })
 
       toast.success(
@@ -1739,7 +1787,7 @@ export default function SueldokPage() {
                 <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-2 opacity-50" />
                 <span>Cargando finiquitos laborales...</span>
               </div>
-            ) : settlements.length === 0 ? (
+            ) : allSettlements.length === 0 ? (
               <div className="p-12 text-center text-slate-400 text-xs">
                 <Briefcase className="w-12 h-12 mx-auto mb-3 opacity-30 text-amber-500" />
                 <p className="font-bold text-sm text-slate-700 dark:text-slate-300">No hay finiquitos laborales registrados</p>
@@ -1762,7 +1810,7 @@ export default function SueldokPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-                    {settlements.map((s) => (
+                    {allSettlements.map((s) => (
                       <tr key={s.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
                         <td className="px-5 py-3.5 font-mono text-slate-600 dark:text-slate-300">
                           {formatDate(s.fecha_egreso)}

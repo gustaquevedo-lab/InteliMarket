@@ -13,8 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.sueldok.schemas import SYNC_EVENTS
 
-SUELDOK_BASE_URL = os.environ.get("SUELDOK_URL", "https://sueldok.com")
-SUELDOK_SYSTEM_KEY = os.environ.get("SUELDOK_SYSTEM_KEY", "sueldok_sec_supermer_2026")
+SUELDOK_BASE_URL = os.environ.get("SUELDOK_URL", "https://sueldok.intellihouse.lat")
+SUELDOK_SYSTEM_KEY = os.environ.get("SUELDOK_SYSTEM_KEY", "ifk_santateresa_live_api_key_2026")
 SUELDOK_COMPANY_ID = os.environ.get("SUELDOK_COMPANY_ID", "extra_supermercado_py")
 
 
@@ -381,6 +381,7 @@ async def generate_payroll_payment_order(
         subtipo="nomina_salarios",
         beneficiario_nombre=f"Planilla Nómina General {data.periodo}",
         periodo_nomina=data.periodo,
+        sueldok_sync_id=data.sueldok_run_id,
         monto_neto=Decimal(str(data.total_neto)),
         observaciones=data.observaciones or f"Nómina salarial período {data.periodo} ({data.colaboradores_count} colaboradores liquidados vía SueldOK).",
         disbursements=disbursements,
@@ -431,6 +432,7 @@ async def create_labor_settlement(
             subtipo="finiquito",
             beneficiario_nombre=data.employee_nombre,
             beneficiario_documento=data.employee_ci,
+            sueldok_sync_id=data.sueldok_liquidation_id,
             monto_neto=Decimal(str(data.total_liquidacion_neta)),
             observaciones=f"Finiquito Laboral - {data.employee_nombre} (CI: {data.employee_ci or '-'}). Motivo: {data.motivo}. {data.observaciones or ''}",
             disbursements=disbursements,
