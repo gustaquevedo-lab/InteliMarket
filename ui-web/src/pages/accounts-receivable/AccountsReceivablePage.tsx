@@ -210,18 +210,21 @@ export default function AccountsReceivablePage() {
   const [quickCustomerApiResults, setQuickCustomerApiResults] = useState<any[]>([])
   const [quickCustomerLoading, setQuickCustomerLoading] = useState(false)
 
-  // Clientes con saldo pendiente provenientes del aging
+  // Clientes con saldo pendiente provenientes del aging (ordenados alfabéticamente)
   const debtorCustomers = useMemo(() => {
     if (!aging?.por_clientes) return []
-    return aging.por_clientes.map(c => ({
-      id: c.customer_id,
-      razon_social: c.customer_name || "Cliente sin nombre",
-      ruc: c.customer_ruc,
-      empresa_vinculada_nombre: c.empresa_vinculada_nombre,
-      saldo_total: Number(c.saldo_total || 0),
-      total_documentos: c.total_documentos || 0,
-      has_debt: true,
-    }))
+    return aging.por_clientes
+      .slice()
+      .sort((a, b) => (a.customer_name || "").localeCompare(b.customer_name || ""))
+      .map(c => ({
+        id: c.customer_id,
+        razon_social: c.customer_name || "Cliente sin nombre",
+        ruc: c.customer_ruc,
+        empresa_vinculada_nombre: c.empresa_vinculada_nombre,
+        saldo_total: Number(c.saldo_total || 0),
+        total_documentos: c.total_documentos || 0,
+        has_debt: true,
+      }))
   }, [aging?.por_clientes])
 
   // Mapa de deudas para lookup rápido
@@ -623,9 +626,14 @@ export default function AccountsReceivablePage() {
 
   const filteredFuncionarios = useMemo(() => {
     if (!empresaPending?.funcionarios) return []
-    if (!remitSearchFilter.trim()) return empresaPending.funcionarios
+    const list = [...empresaPending.funcionarios].sort((a: any, b: any) => {
+      const nameA = (a.customer_name || a.customer_nombre || "").toLowerCase()
+      const nameB = (b.customer_name || b.customer_nombre || "").toLowerCase()
+      return nameA.localeCompare(nameB)
+    })
+    if (!remitSearchFilter.trim()) return list
     const q = remitSearchFilter.toLowerCase().trim()
-    return empresaPending.funcionarios.filter((f: any) => {
+    return list.filter((f: any) => {
       const name = (f.customer_name || f.customer_nombre || "").toLowerCase()
       const ci = (f.ci_numero || f.customer_ruc || "").toLowerCase()
       return name.includes(q) || ci.includes(q)
@@ -657,8 +665,11 @@ export default function AccountsReceivablePage() {
       })
       toast.success(
         "Corte y Remisión ejecutada con éxito",
-        `Lote ${res.numero_remision} emitido. Se procesaron ${res.cantidad_documentos} comprobantes de ${res.cantidad_funcionarios} funcionarios.`
+        `Lote ${res.numero_remision} emitido. Se procesaron ${res.cantidad_documentos} comprobantes de ${res.cantidad_funcionarios} funcionarios. Descargando Resumen Consolidado A4...`
       )
+      if (res.id) {
+        api.accountsReceivable.downloadRemisionPdf(res.id, res.numero_remision)
+      }
       setShowRemitModal(false)
       setRemitNotas("")
       setSelectedRemitDocIds(new Set())
@@ -1782,7 +1793,9 @@ export default function AccountsReceivablePage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100 dark:divide-gray-700 text-sm">
-                      {aging?.por_clientes.map(c => {
+                      {[...(aging?.por_clientes || [])]
+                        .sort((a, b) => (a.customer_name || "").localeCompare(b.customer_name || ""))
+                        .map(c => {
                         const isExpanded = expandedCustomer === c.customer_id
                         return (
                           <>
@@ -2315,7 +2328,9 @@ export default function AccountsReceivablePage() {
                       </div>
 
                       <div className="divide-y divide-gray-100 dark:divide-gray-800 border rounded-xl overflow-hidden">
-                        {empresaPending.funcionarios.map((f: any, i: number) => (
+                        {[...empresaPending.funcionarios]
+                          .sort((a: any, b: any) => (a.customer_name || a.customer_nombre || "").localeCompare(b.customer_name || b.customer_nombre || ""))
+                          .map((f: any, i: number) => (
                           <div key={i} className="p-3.5 hover:bg-gray-50 dark:hover:bg-slate-800/40 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
                             <div>
                               <div className="flex items-center gap-2 flex-wrap">
@@ -2334,7 +2349,9 @@ export default function AccountsReceivablePage() {
                                 )}
                               </div>
                               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                                {f.documentos?.map((d: any, di: number) => (
+                                {f.documentos?.slice()
+                                  .sort((a: any, b: any) => String(a.fecha_emision || "").localeCompare(String(b.fecha_emision || "")))
+                                  .map((d: any, di: number) => (
                                   <span key={di} className="px-2 py-0.5 rounded bg-gray-100 dark:bg-slate-800 font-mono text-[10px] text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-slate-700">
                                     📄 {d.numero_documento}: {formatPYG(d.saldo_pendiente)}
                                   </span>
@@ -2440,11 +2457,20 @@ export default function AccountsReceivablePage() {
                               <td className="p-3.5 text-right space-x-1.5 whitespace-nowrap">
                                 <button
                                   onClick={() => api.accountsReceivable.downloadRemisionPdf(r.id, r.numero_remision)}
-                                  className="btn-outline py-1 px-2.5 text-xs inline-flex items-center gap-1"
-                                  title="Descargar Acta de Remisión Consolidada con firma de recepción conforme"
+                                  className="btn-outline py-1 px-2.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 inline-flex items-center gap-1.5 shadow-sm"
+                                  title="Reimprimir Resumen Consolidado Nómina A4 con Acta de Recepción y Firmas"
                                 >
-                                  <Printer className="w-3.5 h-3.5 text-indigo-500" />
-                                  <span>Acta (PDF)</span>
+                                  <Printer className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                                  <span>Resumen Consolidado A4 (PDF)</span>
+                                </button>
+
+                                <button
+                                  onClick={() => api.accountsReceivable.downloadRemisionExtractosPdf(r.id, r.numero_remision)}
+                                  className="btn-outline py-1 px-2.5 text-xs font-semibold text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 inline-flex items-center gap-1"
+                                  title="Descargar Extractos Masivos por Funcionario (PDF) de este lote emitido"
+                                >
+                                  <FileDown className="w-3.5 h-3.5 text-slate-500" />
+                                  <span>Extractos Personal (PDF)</span>
                                 </button>
 
                                 {r.estado !== "PAGADO" && r.estado !== "ANULADO" && (
@@ -2822,7 +2848,7 @@ export default function AccountsReceivablePage() {
                   </div>
                 </div>
 
-                {/* TARJETA 4: Acta de Remisión Consolidada */}
+                {/* TARJETA 4: Resumen Consolidado de Remisión Corporativa */}
                 <div className="card p-5 flex flex-col justify-between border-t-4 border-t-blue-500 shadow-md hover:shadow-lg transition">
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
@@ -2833,10 +2859,10 @@ export default function AccountsReceivablePage() {
                     </div>
                     <div>
                       <h4 className="text-base font-extrabold text-gray-900 dark:text-white">
-                        Acta de Remisión Consolidada (PDF)
+                        Resumen Consolidado Nómina A4 (con Acta y Firmas)
                       </h4>
                       <p className="text-xs text-gray-500 mt-1">
-                        Nota de entrega formal para la gerencia de la empresa vinculada con 4 KPIs ejecutivos, planilla de retenciones y acta de recepción conforme con firma y sello.
+                        Reporte ejecutivo enviado a la empresa con el resumen consolidado de la deuda de sus personales, KPIs, cuadro de nómina y Acta de Recepción Conforme.
                       </p>
                     </div>
 
@@ -2859,11 +2885,11 @@ export default function AccountsReceivablePage() {
                     </div>
                   </div>
 
-                  <div className="pt-4 border-t border-gray-100 dark:border-gray-800 mt-4">
+                  <div className="pt-4 border-t border-gray-100 dark:border-gray-800 mt-4 space-y-2">
                     <button
                       onClick={() => {
                         if (!repSelectedRemissionId) {
-                          toast.warning("Lote requerido", "Seleccioná un lote de remisión para descargar el acta")
+                          toast.warning("Lote requerido", "Seleccioná un lote de remisión para descargar el resumen consolidado")
                           return
                         }
                         const found = remissions.find(r => r.id === repSelectedRemissionId)
@@ -2873,7 +2899,22 @@ export default function AccountsReceivablePage() {
                       className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-extrabold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-sm"
                     >
                       <Printer className="w-4 h-4" />
-                      <span>Descargar Acta Consolidada (PDF)</span>
+                      <span>Descargar Resumen Consolidado A4 (PDF)</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (!repSelectedRemissionId) {
+                          toast.warning("Lote requerido", "Seleccioná un lote de remisión para descargar los extractos masivos")
+                          return
+                        }
+                        const found = remissions.find(r => r.id === repSelectedRemissionId)
+                        api.accountsReceivable.downloadRemisionExtractosPdf(repSelectedRemissionId, found?.numero_remision)
+                      }}
+                      disabled={!repSelectedRemissionId}
+                      className="w-full py-2 px-3 btn-outline border-blue-200 dark:border-blue-900/60 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/40 disabled:opacity-50 font-bold rounded-xl text-xs transition flex items-center justify-center gap-2"
+                    >
+                      <FileDown className="w-4 h-4 text-blue-500" />
+                      <span>Descargar Extractos Masivos del Lote (PDF)</span>
                     </button>
                   </div>
                 </div>

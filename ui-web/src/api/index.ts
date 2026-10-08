@@ -3422,6 +3422,7 @@ export const api = {
     listCorporateRemissions: (empresa?: string) => client.get<any[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions`, empresa ? { empresa_nombre: empresa } : undefined),
     getCorporateRemissionDetail: (id: string) => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}`),
     downloadRemisionPdf: (id: string, numero?: string) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}/pdf`, undefined, `remision_${numero || id.slice(0, 8)}.pdf`),
+    downloadRemisionExtractosPdf: (id: string, numero?: string) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}/extractos.pdf`, undefined, `extractos_remision_${numero || id.slice(0, 8)}.pdf`),
     payCorporateRemission: (id: string, data: {
       monto: number;
       forma_pago?: string;

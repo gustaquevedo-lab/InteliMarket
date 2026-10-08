@@ -547,6 +547,43 @@ async def export_corporate_remission_pdf(
     )
 
 
+@router.get("/companies/{company_id}/accounts-receivable/corporate-remissions/{remission_id}/extractos.pdf")
+async def export_corporate_remission_extractos_pdf(
+    company_id: str,
+    remission_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Genera el cuadernillo masivo de extractos individuales por funcionario
+    para una remisión histórica ya emitida a la empresa vinculada."""
+    rem = await service.get_corporate_remission_detail(db, remission_id)
+    if not rem:
+        raise HTTPException(status_code=404, detail="Remisión corporativa no encontrada")
+
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    empresa_nombre = rem.get("empresa_vinculada_nombre") or "Empresa"
+    periodo = rem.get("periodo_mes") or "Corte"
+
+    pdf_bytes = ar_pdf_reports.generate_extractos_empresa_pdf(
+        company=company,
+        empresa_nombre=empresa_nombre,
+        periodo=periodo,
+        funcionarios_data=rem.get("funcionarios", []),
+        generated_by=generated_by,
+    )
+    safe_name = empresa_nombre.replace(" ", "_").lower()
+    safe_num = (rem.get("numero_remision") or remission_id[:8]).replace("/", "_")
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=extractos_{safe_name}_{safe_num}.pdf",
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )
+
+
 @router.post("/companies/{company_id}/accounts-receivable/corporate-remissions/{remission_id}/pay")
 async def pay_corporate_remission_endpoint(
     company_id: str,

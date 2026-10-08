@@ -134,7 +134,7 @@ async def get_aging_report(db: AsyncSession, company_id: str) -> dict:
         "total_pendiente": total_pendiente,
         "cantidad_documentos": cantidad_total,
         "buckets": buckets,
-        "por_clientes": sorted(customer_aging.values(), key=lambda x: x["saldo_total"], reverse=True),
+        "por_clientes": sorted(customer_aging.values(), key=lambda x: (x.get("customer_name") or "").upper().strip()),
         "fecha": today,
     }
 
@@ -971,7 +971,7 @@ async def get_aging_for_report(
         "total_pendiente": total_pendiente, "cantidad_documentos": len(rows),
         "current": current, "days_1_30": days_1_30, "days_31_60": days_31_60,
         "days_61_90": days_61_90, "days_91_plus": days_91_plus,
-        "por_clientes": sorted(customer_aging.values(), key=lambda x: x["saldo_total"], reverse=True),
+        "por_clientes": sorted(customer_aging.values(), key=lambda x: (x.get("customer_name") or "").upper().strip()),
         "documentos": [dict(row._mapping) for row in rows],
     }
 
@@ -1378,7 +1378,10 @@ async def get_deuda_detallada_data(
             "estado": r.estado,
         })
 
-    clientes_list = sorted(clientes_dict.values(), key=lambda c: c["saldo_total"], reverse=True)
+    for cl in clientes_dict.values():
+        cl["facturas"].sort(key=lambda f: (str(f.get("fecha_emision") or ""), str(f.get("numero_documento") or "")))
+
+    clientes_list = sorted(clientes_dict.values(), key=lambda c: (c.get("customer_name") or "").upper().strip())
 
     return {
         "total_saldo_general": total_general_saldo,
@@ -1757,7 +1760,10 @@ async def get_corporate_agreement_pending_docs(
             "tipo": r.tipo,
         })
 
-    funcionarios_list = sorted(funcionarios_dict.values(), key=lambda f: f["saldo_total"], reverse=True)
+    for fn in funcionarios_dict.values():
+        fn["documentos"].sort(key=lambda d: (str(d.get("fecha_emision") or ""), str(d.get("numero_documento") or "")))
+
+    funcionarios_list = sorted(funcionarios_dict.values(), key=lambda f: (f.get("customer_name") or f.get("customer_nombre") or "").upper().strip())
     return {
         "empresa_vinculada_nombre": empresa_nombre,
         "fecha_corte": fecha_corte.isoformat() if fecha_corte else None,
@@ -2008,7 +2014,13 @@ async def get_corporate_remission_detail(db: AsyncSession, remission_id: str) ->
             "tipo": d.tipo,
         })
 
-    rem_dict["funcionarios"] = list(funcionarios_dict.values())
+    for fn in funcionarios_dict.values():
+        fn["documentos"].sort(key=lambda d: (str(d.get("fecha_emision") or ""), str(d.get("numero_documento") or "")))
+
+    rem_dict["funcionarios"] = sorted(
+        funcionarios_dict.values(),
+        key=lambda fn: (fn.get("customer_name") or "").upper().strip(),
+    )
     return rem_dict
 
 

@@ -126,7 +126,11 @@ def generate_aging_report_pdf(company: dict, aging: dict, fecha_desde: Optional[
     elements.append(Spacer(1, 2))
     header = ["Cliente", "Docs", "Al día", "1-30", "31-60", "61-90", "+90", "Saldo Total"]
     data = [header]
-    for c in aging.get("por_clientes", []):
+    sorted_clientes = sorted(
+        aging.get("por_clientes", []),
+        key=lambda c: (c.get("customer_name") or "").upper().strip(),
+    )
+    for c in sorted_clientes:
         data.append([
             _cell(c["customer_name"]), _num(c["total_documentos"]),
             _num(_fmt_gs(c["current"])), _num(_fmt_gs(c["days_1_30"])), _num(_fmt_gs(c["days_31_60"])),
@@ -371,7 +375,10 @@ def generate_deuda_detallada_pdf(
     elements.append(Spacer(1, 8))
 
     # Detalle por Cliente
-    clientes = data.get("clientes", [])
+    clientes = sorted(
+        data.get("clientes", []),
+        key=lambda c: (c.get("customer_name") or "").upper().strip(),
+    )
     if not clientes:
         elements.append(Paragraph("Sin cuentas ni facturas pendientes para el criterio de búsqueda seleccionado.", styles["Small"]))
         _build(doc, elements)
@@ -406,7 +413,11 @@ def generate_deuda_detallada_pdf(
 
         inv_head = ["N° Documento", "Emisión", "Vencimiento", "Mora", "Monto Original", "Saldo Pendiente"]
         inv_rows = [inv_head]
-        for f in c.get("facturas", []):
+        facturas = sorted(
+            c.get("facturas", []),
+            key=lambda f: (str(f.get("fecha_emision") or ""), str(f.get("numero_documento") or "")),
+        )
+        for f in facturas:
             emision = f["fecha_emision"].strftime("%d/%m/%Y") if hasattr(f["fecha_emision"], "strftime") else str(f["fecha_emision"] or "—")
             vto = f["fecha_vencimiento"].strftime("%d/%m/%Y") if hasattr(f["fecha_vencimiento"], "strftime") else str(f["fecha_vencimiento"] or "—")
             dias = f["dias_mora"] or 0
@@ -816,7 +827,12 @@ def generate_extractos_empresa_pdf(
     direccion = company.get("direccion") or "Alejo Garcia esq. Carlos Antonio López"
     ciudad = company.get("ciudad") or "Pedro Juan Caballero"
 
-    for idx, func in enumerate(funcionarios_data):
+    sorted_funcs = sorted(
+        funcionarios_data,
+        key=lambda fn: (fn.get("customer_name") or fn.get("customer_nombre") or "").upper().strip(),
+    )
+
+    for idx, func in enumerate(sorted_funcs):
         if idx > 0:
             elements.append(PageBreak())
 
@@ -882,7 +898,10 @@ def generate_extractos_empresa_pdf(
         elements.append(Spacer(1, 10))
 
         # 3. TABLA DE FACTURAS Y VALES DEL PERÍODO
-        docs = func.get("documentos", [])
+        docs = sorted(
+            func.get("documentos", []),
+            key=lambda d: (str(d.get("fecha_emision") or ""), str(d.get("numero_documento") or "")),
+        )
         t_rows = [[
             Paragraph("<font size=7.5 color='white'><b>FECHA</b></font>", styles["Normal"]),
             Paragraph("<font size=7.5 color='white'><b>COMPROBANTE / TICKET</b></font>", styles["Normal"]),
@@ -1108,7 +1127,10 @@ def generate_remision_consolidada_pdf(
     elements.append(Spacer(1, 10))
 
     # 4. TABLA DETALLADA DE NÓMINA (FUNCIONARIOS Y MONTOS)
-    funcionarios = remission.get("funcionarios", [])
+    funcionarios = sorted(
+        remission.get("funcionarios", []),
+        key=lambda fn: (fn.get("customer_name") or "").upper().strip(),
+    )
     nom_rows = [[
         Paragraph("<font size=7.5 color='white'><b>#</b></font>", styles["Normal"]),
         Paragraph("<font size=7.5 color='white'><b>C.I. / RUC</b></font>", styles["Normal"]),
