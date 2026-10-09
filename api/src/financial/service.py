@@ -4398,6 +4398,92 @@ async def disburse_supplier_payment_order(
         if not supplier and (order.subtipo or "proveedor") == "proveedor":
             raise HTTPException(status_code=404, detail="Proveedor de la orden no encontrado.")
 
+    # Si se proporcionaron nuevas allocations para una orden de proveedor en estado registrado
+    if data.allocations and len(data.allocations) > 0 and (order.subtipo or "proveedor") == "proveedor":
+        inv_ids = [a.invoice_id for a in data.allocations]
+        invoices_res = await db.execute(
+            select(SupplierInvoice).where(
+                SupplierInvoice.id.in_(inv_ids),
+                SupplierInvoice.company_id == cid,
+                SupplierInvoice.supplier_id == order.supplier_id
+            )
+        )
+        invoices_by_id = {inv.id: inv for inv in invoices_res.scalars().all()}
+        if len(invoices_by_id) != len(inv_ids):
+            raise HTTPException(
+                status_code=400,
+                detail="Una o más facturas seleccionadas no pertenecen a este proveedor o no existen."
+            )
+
+        # Eliminar allocations anteriores para reasignar las seleccionadas
+        await db.execute(
+            delete(SupplierPaymentOrderAllocation)
+            .where(SupplierPaymentOrderAllocation.payment_order_id == order.id)
+        )
+
+        nuevo_monto_total = Decimal("0")
+        nuevo_monto_retenido = Decimal("0")
+        auto_redondeo_exceso = Decimal("0")
+
+        for alloc_in in data.allocations:
+            inv = invoices_by_id[alloc_in.invoice_id]
+            aplicado = alloc_in.monto_aplicado
+            retencion = alloc_in.monto_retencion or Decimal("0")
+
+            if aplicado <= Decimal("0"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"El monto a amortizar de la factura {inv.numero_factura} debe ser mayor a 0."
+                )
+            if retencion < Decimal("0"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"La retención de la factura {inv.numero_factura} no puede ser negativa."
+                )
+            if retencion > aplicado:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"La retención no puede superar el monto amortizado de la factura {inv.numero_factura}."
+                )
+
+            total_amortizar = aplicado
+            if total_amortizar > inv.saldo_pendiente:
+                diff_exceso = total_amortizar - inv.saldo_pendiente
+                if diff_exceso <= Decimal("5000") and Decimal(str(getattr(data, "diferencia_redondeo", 0) or 0)) == Decimal("0"):
+                    auto_redondeo_exceso += diff_exceso
+                    total_amortizar = inv.saldo_pendiente
+                    aplicado = inv.saldo_pendiente
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"El monto a amortizar supera el saldo pendiente de la factura {inv.numero_factura}."
+                    )
+
+            saldo_anterior = inv.saldo_pendiente
+            saldo_restante = saldo_anterior - total_amortizar
+
+            nuevo_monto_total += aplicado
+            nuevo_monto_retenido += retencion
+
+            db.add(SupplierPaymentOrderAllocation(
+                payment_order_id=order.id,
+                invoice_id=inv.id,
+                monto_aplicado=aplicado,
+                monto_retencion=retencion,
+                saldo_anterior=saldo_anterior,
+                saldo_restante=saldo_restante,
+            ))
+
+        monto_neto = nuevo_monto_total - nuevo_monto_retenido
+        diff_redondeo = Decimal(str(getattr(data, "diferencia_redondeo", 0) or 0)) + auto_redondeo_exceso
+        monto_neto_efectivo = monto_neto + diff_redondeo
+
+        order.monto_total = nuevo_monto_total
+        order.monto_retenido = nuevo_monto_retenido
+        order.monto_neto = monto_neto_efectivo
+        order.diferencia_cambio = diff_redondeo
+        await db.flush()
+
     await _execute_disbursements_internal(
         db=db,
         order=order,

@@ -2743,6 +2743,21 @@ export default function PurchasesPage() {
     setCompletingReturnId(item.id)
     setCompletingReturnItem(raw)
 
+    const provId = raw.proveedor_id || raw.supplier_id
+    if (provId) {
+      api.financial.invoices.list({ supplier_id: provId, limit: 100 })
+        .then(res => {
+          if (res && Array.isArray(res) && res.length > 0) {
+            setAllSupplierInvoices(prev => {
+              const existingIds = new Set(prev.map(i => i.id))
+              const newInvs = res.filter(i => !existingIds.has(i.id))
+              return [...newInvs, ...prev]
+            })
+          }
+        })
+        .catch(() => {})
+    }
+
     const itemInvoices: { factura_id?: string; factura_numero?: string }[] = []
     const seen = new Set<string>()
     for (const it of (raw.items || [])) {
@@ -2863,6 +2878,21 @@ export default function PurchasesPage() {
   const handleOpenManageNcs = (rawItem: any) => {
     const raw = rawItem.raw || rawItem
     setManagingNcsReturn(raw)
+
+    const provId = raw.proveedor_id || raw.supplier_id
+    if (provId) {
+      api.financial.invoices.list({ supplier_id: provId, limit: 100 })
+        .then(res => {
+          if (res && Array.isArray(res) && res.length > 0) {
+            setAllSupplierInvoices(prev => {
+              const existingIds = new Set(prev.map(i => i.id))
+              const newInvs = res.filter(i => !existingIds.has(i.id))
+              return [...newInvs, ...prev]
+            })
+          }
+        })
+        .catch(() => {})
+    }
 
     const itemInvoices: { factura_id?: string; factura_numero?: string }[] = []
     const seen = new Set<string>()
@@ -9872,13 +9902,37 @@ export default function PurchasesPage() {
                 ) : (
                   <div className="space-y-3">
                     {completingReturnNcs.map((nc, idx) => {
-                      const returnInvoices = Array.from(
-                        new Map(
-                          (completingReturnItem?.items || [])
-                            .filter((it: any) => it.factura_numero)
-                            .map((it: any) => [it.factura_numero, { factura_id: it.factura_id, factura_numero: it.factura_numero }])
-                        ).values()
-                      ) as { factura_id?: string; factura_numero: string }[]
+                      const provId = completingReturnItem?.proveedor_id || completingReturnItem?.supplier_id
+                      const mapInvs = new Map<string, { factura_id?: string; factura_numero: string; saldo?: number }>()
+
+                      for (const it of (completingReturnItem?.items || [])) {
+                        if (it.factura_numero) {
+                          mapInvs.set(it.factura_numero, { factura_id: it.factura_id, factura_numero: it.factura_numero })
+                        }
+                      }
+
+                      if (provId) {
+                        const provInvs = allSupplierInvoices.filter((inv: any) => String(inv.supplier_id) === String(provId))
+                        const sorted = [...provInvs].sort((a: any, b: any) => {
+                          const saldoA = Number(a.saldo_pendiente || 0)
+                          const saldoB = Number(b.saldo_pendiente || 0)
+                          if (saldoA > 0 && saldoB <= 0) return -1
+                          if (saldoB > 0 && saldoA <= 0) return 1
+                          return new Date(b.fecha_emision || 0).getTime() - new Date(a.fecha_emision || 0).getTime()
+                        })
+                        for (const inv of sorted) {
+                          const num = inv.numero_factura || (inv as any).numero
+                          if (num && !mapInvs.has(num)) {
+                            mapInvs.set(num, {
+                              factura_id: inv.id,
+                              factura_numero: num,
+                              saldo: Number(inv.saldo_pendiente || 0),
+                            })
+                          }
+                        }
+                      }
+
+                      const returnInvoices = Array.from(mapInvs.values())
 
                       return (
                         <div
@@ -9970,7 +10024,7 @@ export default function PurchasesPage() {
                                 <option value="">Sin factura específica / Saldo General</option>
                                 {returnInvoices.map((inv, invIdx) => (
                                   <option key={invIdx} value={inv.factura_numero}>
-                                    Factura {inv.factura_numero}
+                                    Factura {inv.factura_numero} {inv.saldo !== undefined && inv.saldo > 0 ? `(Saldo: ${formatPYG(inv.saldo)})` : ""}
                                   </option>
                                 ))}
                               </select>
@@ -10179,13 +10233,37 @@ export default function PurchasesPage() {
 
                 <div className="space-y-3">
                   {managingNcsList.map((nc, idx) => {
-                    const managingInvoices = Array.from(
-                      new Map(
-                        (managingNcsReturn?.items || [])
-                          .filter((it: any) => it.factura_numero)
-                          .map((it: any) => [it.factura_numero, { factura_id: it.factura_id, factura_numero: it.factura_numero }])
-                      ).values()
-                    ) as { factura_id?: string; factura_numero: string }[]
+                    const provId = managingNcsReturn?.proveedor_id || managingNcsReturn?.supplier_id
+                    const mapInvs = new Map<string, { factura_id?: string; factura_numero: string; saldo?: number }>()
+
+                    for (const it of (managingNcsReturn?.items || [])) {
+                      if (it.factura_numero) {
+                        mapInvs.set(it.factura_numero, { factura_id: it.factura_id, factura_numero: it.factura_numero })
+                      }
+                    }
+
+                    if (provId) {
+                      const provInvs = allSupplierInvoices.filter((inv: any) => String(inv.supplier_id) === String(provId))
+                      const sorted = [...provInvs].sort((a: any, b: any) => {
+                        const saldoA = Number(a.saldo_pendiente || 0)
+                        const saldoB = Number(b.saldo_pendiente || 0)
+                        if (saldoA > 0 && saldoB <= 0) return -1
+                        if (saldoB > 0 && saldoA <= 0) return 1
+                        return new Date(b.fecha_emision || 0).getTime() - new Date(a.fecha_emision || 0).getTime()
+                      })
+                      for (const inv of sorted) {
+                        const num = inv.numero_factura || (inv as any).numero
+                        if (num && !mapInvs.has(num)) {
+                          mapInvs.set(num, {
+                            factura_id: inv.id,
+                            factura_numero: num,
+                            saldo: Number(inv.saldo_pendiente || 0),
+                          })
+                        }
+                      }
+                    }
+
+                    const managingInvoices = Array.from(mapInvs.values())
 
                     return (
                       <div
@@ -10279,7 +10357,7 @@ export default function PurchasesPage() {
                               <option value="">Sin factura específica / Saldo General</option>
                               {managingInvoices.map((inv, invIdx) => (
                                 <option key={invIdx} value={inv.factura_numero}>
-                                  Factura {inv.factura_numero}
+                                  Factura {inv.factura_numero} {inv.saldo !== undefined && inv.saldo > 0 ? `(Saldo: ${formatPYG(inv.saldo)})` : ""}
                                 </option>
                               ))}
                             </select>

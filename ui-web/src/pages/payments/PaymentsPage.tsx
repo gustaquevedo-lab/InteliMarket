@@ -465,10 +465,11 @@ export default function PaymentsPage() {
         razon_social: detail.supplier_nombre,
         ruc: detail.supplier_ruc,
       }
+      const supInvs = invoices.filter((i: any) => i.supplier_id === detail.supplier_id || i.supplier_nombre === detail.supplier_nombre)
       setOrderModalData({
         supplier: sup,
         initialInvoices: [],
-        availableInvoices: [],
+        availableInvoices: supInvs,
         existingOrder: detail,
       })
     } catch (err: any) {

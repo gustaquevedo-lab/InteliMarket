@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo } from "react"
 import {
   X, Check, AlertTriangle, Plus, Trash2, CreditCard,
   Building2, Wallet, FileText, Calendar, CheckCircle2,
-  DollarSign, ShieldAlert, ArrowRight, Loader2, ReceiptText, Sparkles
+  DollarSign, ShieldAlert, ArrowRight, Loader2, ReceiptText, Sparkles,
+  Search, CheckSquare, Square, RefreshCw
 } from "lucide-react"
 import { api, SupplierPaymentOrder } from "../../api"
 import { formatPYG, formatDate } from "../../utils/format"
@@ -89,6 +90,14 @@ export default function SupplierPaymentOrderModal({
   const [reciboProveedor, setReciboProveedor] = useState(existingOrder?.recibo_proveedor || "")
   const [observaciones, setObservaciones] = useState(existingOrder?.observaciones || "")
 
+  // Facturas disponibles en el sistema para este proveedor
+  const [supplierInvoices, setSupplierInvoices] = useState<InvoiceToPay[]>(availableInvoices || [])
+  const [loadingInvoices, setLoadingInvoices] = useState(false)
+  const [searchInvoice, setSearchInvoice] = useState("")
+
+  // Notas de Crédito seleccionadas para compensar (estiradas automáticamente a Step 2)
+  const [selectedCreditNoteIds, setSelectedCreditNoteIds] = useState<string[]>([])
+
   // Auxiliares de tesorería y bancos
   const [bankAccounts, setBankAccounts] = useState<any[]>([])
   const [pettyCashFunds, setPettyCashFunds] = useState<any[]>([])
@@ -111,6 +120,13 @@ export default function SupplierPaymentOrderModal({
   const ajusteRedondeo = useMemo(() => {
     return (ajusteSigno === "+" ? 1 : -1) * (Number(ajusteMonto) || 0)
   }, [ajusteSigno, ajusteMonto])
+
+  // Sincronizar availableInvoices cuando cambie la prop
+  useEffect(() => {
+    if (availableInvoices && availableInvoices.length > 0) {
+      setSupplierInvoices(availableInvoices)
+    }
+  }, [availableInvoices])
 
   // Inicializar facturas
   useEffect(() => {
@@ -179,13 +195,27 @@ export default function SupplierPaymentOrderModal({
     let mounted = true
     async function loadAuxData() {
       try {
-        const [banksRes, fundsRes, cnRes, vaultRes, chequesRes] = await Promise.allSettled([
+        const promises: Promise<any>[] = [
           api.financial.banks.list(),
           api.expenses.funds.list({ activo: true }),
           api.financial.creditNotes.list({ supplier_id: supplier.id }),
           api.vault.dashboard(),
           api.financial.paymentOrders.getChequesDisponibles(),
-        ])
+        ]
+
+        const shouldFetchInvoices = (!availableInvoices || availableInvoices.length === 0) && !!supplier.id
+        if (shouldFetchInvoices) {
+          setLoadingInvoices(true)
+          promises.push(api.financial.invoices.list({ supplier_id: supplier.id, estado: "pendiente" }))
+        }
+
+        const results = await Promise.allSettled(promises)
+        const banksRes = results[0]
+        const fundsRes = results[1]
+        const cnRes = results[2]
+        const vaultRes = results[3]
+        const chequesRes = results[4]
+        const invsRes = shouldFetchInvoices ? results[5] : null
 
         if (!mounted) return
         if (banksRes.status === "fulfilled" && Array.isArray(banksRes.value)) {
@@ -195,7 +225,17 @@ export default function SupplierPaymentOrderModal({
           setPettyCashFunds(fundsRes.value)
         }
         if (cnRes.status === "fulfilled" && Array.isArray(cnRes.value)) {
-          setCreditNotes(cnRes.value.filter((n: any) => (n.saldo_disponible ?? n.monto) > 0))
+          const validNCs = cnRes.value.filter((n: any) => (n.saldo_disponible ?? n.monto) > 0)
+          setCreditNotes(validNCs)
+          // Preseleccionar NCs: si existingOrder ya tenía, seleccionar esas; sino todas las disponibles
+          const existingNcIds = (existingOrder?.disbursements || [])
+            .map((d: any) => d.credit_note_id)
+            .filter(Boolean)
+          if (existingNcIds.length > 0) {
+            setSelectedCreditNoteIds(existingNcIds)
+          } else {
+            setSelectedCreditNoteIds(validNCs.map((n: any) => n.id))
+          }
         }
         if (vaultRes.status === "fulfilled" && vaultRes.value) {
           setVaultBalance(Number(vaultRes.value.saldo_en_boveda_pyg || 0))
@@ -204,15 +244,33 @@ export default function SupplierPaymentOrderModal({
         if (chequesRes.status === "fulfilled" && Array.isArray(chequesRes.value)) {
           setAvailableCheques(chequesRes.value)
         }
+        if (invsRes && invsRes.status === "fulfilled" && Array.isArray(invsRes.value)) {
+          const mappedInvs: InvoiceToPay[] = invsRes.value.map((inv: any) => ({
+            id: inv.id,
+            numero_factura: inv.numero_factura || "Factura",
+            timbrado: inv.timbrado,
+            fecha_emision: inv.fecha_emision,
+            fecha_vencimiento: inv.fecha_vencimiento,
+            total: Number(inv.total || inv.total_pyg || 0),
+            saldo_pendiente: Number(inv.saldo_pendiente ?? inv.saldo ?? inv.total ?? 0),
+            supplier_id: inv.supplier_id || supplier.id,
+            supplier_nombre: inv.supplier_nombre || supplier.razon_social,
+            tipo_comprobante: inv.tipo_comprobante || "factura",
+          }))
+          setSupplierInvoices(mappedInvs)
+        }
       } catch (err) {
         console.error("Error al cargar datos auxiliares de tesorería", err)
       } finally {
-        if (mounted) setLoadingAux(false)
+        if (mounted) {
+          setLoadingAux(false)
+          setLoadingInvoices(false)
+        }
       }
     }
     loadAuxData()
     return () => { mounted = false }
-  }, [supplier.id])
+  }, [supplier.id, availableInvoices, existingOrder])
 
   // Totales calculados de facturas
   const summaryFacturas = useMemo(() => {
@@ -429,38 +487,88 @@ export default function SupplierPaymentOrderModal({
       return
     }
 
-    if (disbursements.length === 0) {
-      if (isSupplierBR) {
-        const tc = defaultExchangeRateBRL
-        const montoReales = Math.round((summaryFacturas.neto / tc) * 100) / 100
-        setDisbursements([
-          {
-            forma_pago: "boveda",
-            moneda: "BRL",
-            monto: montoReales,
-            tipo_cambio: tc,
-            titular_cheque: supplier.razon_social,
-            fecha_cheque_emision: fechaPago,
-            fecha_cheque_vencimiento: fechaPago,
-            es_cheque_diferido: false,
-          }
-        ])
-      } else {
-        const defaultBank = bankAccounts[0]?.id
-        setDisbursements([
-          {
-            forma_pago: defaultBank ? "transferencia" : "boveda",
-            moneda: "PYG",
-            monto: summaryFacturas.neto,
-            bank_account_id: defaultBank || undefined,
-            titular_cheque: supplier.razon_social,
-            fecha_cheque_emision: fechaPago,
-            fecha_cheque_vencimiento: fechaPago,
-            es_cheque_diferido: false,
-          }
-        ])
+    // Armar desembolsos considerando las Notas de Crédito seleccionadas en Step 1
+    const ncsToApply = creditNotes.filter(nc => selectedCreditNoteIds.includes(nc.id))
+    let totalNcApplied = 0
+    const ncRows: DisbursementRow[] = []
+    let remNeto = finalNeto
+
+    for (const nc of ncsToApply) {
+      const saldoDisp = Number(nc.saldo_disponible ?? nc.monto ?? 0)
+      if (saldoDisp <= 0) continue
+      const montoAAplicar = remNeto > 0 ? Math.min(saldoDisp, remNeto) : saldoDisp
+      ncRows.push({
+        forma_pago: "nota_credito",
+        moneda: "PYG",
+        monto: montoAAplicar,
+        credit_note_id: nc.id,
+        observaciones: `Compensación NC ${nc.numero}`,
+      })
+      totalNcApplied += montoAAplicar
+      if (remNeto > 0) {
+        remNeto = Math.max(0, remNeto - montoAAplicar)
       }
     }
+
+    // Filtrar los medios de pago actuales que NO son NC
+    const nonNcDisbursements = disbursements.filter(d => d.forma_pago !== "nota_credito")
+
+    if (remNeto > 0) {
+      if (nonNcDisbursements.length > 0) {
+        // Ajustar el primer medio de pago existente para que la suma cuadre exactamente con el saldo remanente
+        const currentSumNonNc = nonNcDisbursements.reduce((acc, d) => acc + (d.moneda === "BRL" ? Number(d.monto || 0) * Number(d.tipo_cambio || 1) : Number(d.monto || 0)), 0)
+        if (nonNcDisbursements.length === 1 || Math.abs(currentSumNonNc - remNeto) > 0) {
+          const first = nonNcDisbursements[0]
+          let adjustedMonto = remNeto
+          if (first.moneda === "BRL") {
+            const tc = Number(first.tipo_cambio || defaultExchangeRateBRL || 1)
+            adjustedMonto = Math.round((remNeto / tc) * 100) / 100
+          }
+          const updatedFirst = { ...first, monto: adjustedMonto }
+          setDisbursements([...ncRows, updatedFirst, ...nonNcDisbursements.slice(1)])
+        } else {
+          setDisbursements([...ncRows, ...nonNcDisbursements])
+        }
+      } else {
+        // Crear el medio de pago estándar por el saldo remanente
+        if (isSupplierBR) {
+          const tc = defaultExchangeRateBRL
+          const montoReales = Math.round((remNeto / tc) * 100) / 100
+          setDisbursements([
+            ...ncRows,
+            {
+              forma_pago: "boveda",
+              moneda: "BRL",
+              monto: montoReales,
+              tipo_cambio: tc,
+              titular_cheque: supplier.razon_social,
+              fecha_cheque_emision: fechaPago,
+              fecha_cheque_vencimiento: fechaPago,
+              es_cheque_diferido: false,
+            }
+          ])
+        } else {
+          const defaultBank = bankAccounts[0]?.id
+          setDisbursements([
+            ...ncRows,
+            {
+              forma_pago: defaultBank ? "transferencia" : "boveda",
+              moneda: "PYG",
+              monto: remNeto,
+              bank_account_id: defaultBank || undefined,
+              titular_cheque: supplier.razon_social,
+              fecha_cheque_emision: fechaPago,
+              fecha_cheque_vencimiento: fechaPago,
+              es_cheque_diferido: false,
+            }
+          ])
+        }
+      }
+    } else {
+      // Las NCs seleccionadas cubren todo el monto
+      setDisbursements(ncRows)
+    }
+
     setStep("step2_desembolso")
   }
 
@@ -627,11 +735,18 @@ export default function SupplierPaymentOrderModal({
       }))
 
       if (existingOrder) {
-        // Liquidar orden existente
+        // Liquidar orden existente (incluyendo posibles ajustes de facturas seleccionadas en Paso 1)
+        const allocations = Object.values(selectedInvoicesMap).map(item => ({
+          invoice_id: item.inv.id,
+          monto_aplicado: item.monto_aplicado,
+          monto_retencion: item.monto_retencion,
+        }))
+
         const res = await api.financial.paymentOrders.disburse(existingOrder.id, {
           fecha_pago: fechaPago,
           recibo_proveedor: reciboProveedor || undefined,
           observaciones: observaciones || undefined,
+          allocations,
           disbursements: sanitizedDisbursements,
           legal_invoices: validLegalInvoices.length > 0 ? validLegalInvoices : undefined,
           diferencia_redondeo: ajusteRedondeo || 0,
@@ -704,9 +819,8 @@ export default function SupplierPaymentOrderModal({
         <div className="px-5 py-2.5 bg-slate-100 dark:bg-slate-850/80 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
           <div className="flex items-center gap-4">
             <button
-              onClick={() => !existingOrder && setStep("step1_facturas")}
-              disabled={!!existingOrder}
-              className={`flex items-center gap-1.5 font-bold transition ${
+              onClick={() => setStep("step1_facturas")}
+              className={`flex items-center gap-1.5 font-bold transition cursor-pointer ${
                 step === "step1_facturas"
                   ? "text-rose-600 dark:text-rose-400"
                   : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
@@ -957,16 +1071,175 @@ export default function SupplierPaymentOrderModal({
                 </div>
               </div>
 
-              {/* AGREGAR FACTURAS ADICIONALES DEL PROVEEDOR */}
-              {availableInvoices.length > 0 && (
-                <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-850/50 border border-dashed border-slate-300 dark:border-slate-700 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
-                  <div>
-                    <span className="font-bold text-slate-700 dark:text-slate-300 block">Facturas Pendientes Disponibles del Proveedor:</span>
-                    <span className="text-[11px] text-slate-500">Podés incluir tanto facturas de mercaderías como de insumos/gastos en esta misma orden.</span>
+              {/* NOTAS DE CRÉDITO A FAVOR DEL PROVEEDOR (SELECCIÓN PARA COMPENSACIÓN) */}
+              {creditNotes.length > 0 && (
+                <div className="p-4 rounded-2xl border border-purple-200 dark:border-purple-900/60 bg-gradient-to-br from-purple-50/80 via-white to-purple-50/40 dark:from-purple-950/30 dark:via-slate-900 dark:to-purple-950/20 space-y-3 shadow-sm">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+                        <ReceiptText className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-xs font-black text-slate-800 dark:text-slate-100 uppercase tracking-wider">
+                            Notas de Crédito a Favor del Proveedor ({creditNotes.length})
+                          </h4>
+                          <span className="text-[10px] bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-300 px-2 py-0.5 rounded-full font-mono font-bold">
+                            Total Disp: {formatPYG(creditNotes.reduce((acc: number, n: any) => acc + Number(n.saldo_disponible ?? n.monto ?? 0), 0))}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Seleccioná las Notas de Crédito que querés estirar automáticamente a medios de pago para compensar la deuda.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 self-start sm:self-auto">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCreditNoteIds(creditNotes.map((n: any) => n.id))}
+                        className="px-2.5 py-1 rounded-lg bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 hover:bg-purple-200 text-xs font-bold transition cursor-pointer"
+                      >
+                        Marcar Todas
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCreditNoteIds([])}
+                        className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 text-xs font-bold transition cursor-pointer"
+                      >
+                        Desmarcar
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex gap-2 flex-wrap">
-                    {availableInvoices
-                      .filter(i => !selectedInvoicesMap[i.id] && i.supplier_id === supplier.id)
+
+                  {/* LISTA DE NOTAS DE CRÉDITO */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-1 max-h-48 overflow-y-auto">
+                    {creditNotes.map((nc: any) => {
+                      const isSelected = selectedCreditNoteIds.includes(nc.id)
+                      const saldoDisp = Number(nc.saldo_disponible ?? nc.monto ?? 0)
+                      return (
+                        <div
+                          key={nc.id}
+                          onClick={() => {
+                            setSelectedCreditNoteIds(prev =>
+                              prev.includes(nc.id)
+                                ? prev.filter(id => id !== nc.id)
+                                : [...prev, nc.id]
+                            )
+                          }}
+                          className={`p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2 cursor-pointer transition select-none ${
+                            isSelected
+                              ? "bg-purple-50 dark:bg-purple-950/40 border-purple-400 dark:border-purple-600 shadow-sm shadow-purple-500/10"
+                              : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 opacity-70"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => {}} // controlado por onClick del contenedor
+                              className="rounded border-purple-400 text-purple-600 focus:ring-purple-500 w-4 h-4 cursor-pointer"
+                            />
+                            <div className="min-w-0">
+                              <span className="font-bold text-slate-800 dark:text-slate-200 block truncate">
+                                NC {nc.numero}
+                              </span>
+                              <span className="text-[10px] font-mono text-purple-600 dark:text-purple-400 font-bold block">
+                                Disp: {formatPYG(saldoDisp)}
+                              </span>
+                            </div>
+                          </div>
+                          {isSelected && (
+                            <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-purple-500 text-white shrink-0">
+                              Compensa
+                            </span>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {selectedCreditNoteIds.length > 0 && (
+                    <div className="bg-purple-100/70 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 px-3 py-1.5 rounded-xl text-xs flex items-center justify-between font-bold">
+                      <span className="flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                        {selectedCreditNoteIds.length} Nota(s) de Crédito seleccionada(s) para compensar
+                      </span>
+                      <span className="font-mono">
+                        {formatPYG(creditNotes.filter(n => selectedCreditNoteIds.includes(n.id)).reduce((acc, n) => acc + Number(n.saldo_disponible ?? n.monto ?? 0), 0))}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* FACTURAS PENDIENTES DISPONIBLES DEL PROVEEDOR */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-850/60 border border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-xs font-black text-slate-800 dark:text-slate-100 uppercase tracking-wider">
+                      Facturas Pendientes Disponibles del Proveedor ({supplierInvoices.filter(i => !selectedInvoicesMap[i.id]).length})
+                    </h4>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Podés incluir facturas comerciales pendientes o buscar por número de factura o timbrado.
+                    </p>
+                  </div>
+
+                  {/* Buscador de facturas */}
+                  <div className="flex items-center gap-2">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        value={searchInvoice}
+                        onChange={e => setSearchInvoice(e.target.value)}
+                        placeholder="Buscar factura o timbrado..."
+                        className="pl-8 pr-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:ring-1 focus:ring-rose-500 w-48 sm:w-60 font-mono"
+                      />
+                      {searchInvoice && (
+                        <button
+                          type="button"
+                          onClick={() => setSearchInvoice("")}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+
+                    {supplierInvoices.filter(i => !selectedInvoicesMap[i.id] && (!searchInvoice || (i.numero_factura || "").toLowerCase().includes(searchInvoice.toLowerCase()) || (i.timbrado || "").includes(searchInvoice))).length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const toAdd = supplierInvoices.filter(i => !selectedInvoicesMap[i.id] && (!searchInvoice || (i.numero_factura || "").toLowerCase().includes(searchInvoice.toLowerCase()) || (i.timbrado || "").includes(searchInvoice)))
+                          setSelectedInvoicesMap(prev => {
+                            const next = { ...prev }
+                            toAdd.forEach(inv => {
+                              next[inv.id] = {
+                                inv,
+                                monto_aplicado: inv.saldo_pendiente,
+                                monto_retencion: 0,
+                              }
+                            })
+                            return next
+                          })
+                        }}
+                        className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer border border-rose-200 dark:border-rose-900"
+                      >
+                        + Agregar Todas
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {loadingInvoices ? (
+                  <div className="py-6 text-center text-slate-400 flex items-center justify-center gap-2 text-xs">
+                    <Loader2 className="w-4 h-4 animate-spin text-rose-500" />
+                    <span>Cargando facturas pendientes...</span>
+                  </div>
+                ) : (
+                  <div className="flex gap-2 flex-wrap max-h-52 overflow-y-auto p-1">
+                    {supplierInvoices
+                      .filter(i => !selectedInvoicesMap[i.id] && (!searchInvoice || (i.numero_factura || "").toLowerCase().includes(searchInvoice.toLowerCase()) || (i.timbrado || "").includes(searchInvoice)))
                       .map(inv => {
                         const isGasto = inv.tipo_comprobante === "gasto" || inv.tipo_comprobante === "insumo_gasto"
                         return (
@@ -983,17 +1256,17 @@ export default function SupplierPaymentOrderModal({
                                 }
                               }))
                             }}
-                            className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-mono flex items-center gap-1.5 transition ${
+                            className={`px-3 py-2 rounded-xl border text-xs font-mono flex items-center gap-2 transition cursor-pointer ${
                               isGasto
                                 ? "bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 hover:border-amber-500 shadow-sm"
                                 : "bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 hover:border-rose-500 shadow-sm"
                             }`}
-                            title={`Agregar comprobante de ${isGasto ? "Insumo/Gasto" : "Mercadería"} a esta Orden`}
+                            title={`Agregar comprobante a esta Orden`}
                           >
                             <Plus className="w-3.5 h-3.5 text-rose-500" />
                             <span className="font-bold">{inv.numero_factura}</span>
-                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold">({formatPYG(inv.saldo_pendiente)})</span>
-                            <span className={`text-[8px] font-extrabold px-1 py-0.2 rounded ${
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold">({formatPYG(inv.saldo_pendiente)})</span>
+                            <span className={`text-[8px] font-extrabold px-1.5 py-0.5 rounded ${
                               isGasto
                                 ? "bg-amber-200 dark:bg-amber-900 text-amber-800 dark:text-amber-200"
                                 : "bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200"
@@ -1003,9 +1276,16 @@ export default function SupplierPaymentOrderModal({
                           </button>
                         )
                       })}
+                    {supplierInvoices.filter(i => !selectedInvoicesMap[i.id] && (!searchInvoice || (i.numero_factura || "").toLowerCase().includes(searchInvoice.toLowerCase()) || (i.timbrado || "").includes(searchInvoice))).length === 0 && (
+                      <p className="text-xs text-slate-400 py-2 italic">
+                        {searchInvoice
+                          ? `No se encontraron facturas pendientes que coincidan con "${searchInvoice}".`
+                          : "Todas las facturas pendientes de este proveedor ya están agregadas a la orden."}
+                      </p>
+                    )}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
 
               {/* FACTURAS LEGALES DE RESPALDO (VINCULACIÓN DE TICKETS PROVISORIOS) */}
               <div className={`p-4 rounded-2xl border transition-all ${
@@ -1836,8 +2116,7 @@ export default function SupplierPaymentOrderModal({
               <button
                 type="button"
                 onClick={() => setStep("step1_facturas")}
-                disabled={!!existingOrder}
-                className="text-slate-600 dark:text-slate-400 hover:text-rose-500 font-bold transition flex items-center gap-1"
+                className="text-slate-600 dark:text-slate-400 hover:text-rose-500 font-bold transition flex items-center gap-1 cursor-pointer"
               >
                 ← Volver a Facturas
               </button>
@@ -1871,7 +2150,7 @@ export default function SupplierPaymentOrderModal({
                 <button
                   type="button"
                   onClick={handleGoToStep2}
-                  className="px-5 py-2 rounded-xl text-xs font-extrabold bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 text-white shadow-md shadow-rose-500/20 transition flex items-center gap-1.5"
+                  className="px-5 py-2 rounded-xl text-xs font-extrabold bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 text-white shadow-md shadow-rose-500/20 transition flex items-center gap-1.5 cursor-pointer"
                 >
                   <span>Continuar a Medios de Pago</span>
                   <ArrowRight className="w-4 h-4" />
@@ -1886,7 +2165,7 @@ export default function SupplierPaymentOrderModal({
                 disabled={submitting || !summaryDesembolsos.cuadra}
                 className={`px-6 py-2.5 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 shadow-lg ${
                   summaryDesembolsos.cuadra && !submitting
-                    ? "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-500/25"
+                    ? "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-500/25 cursor-pointer"
                     : "bg-slate-300 dark:bg-slate-800 text-slate-400 cursor-not-allowed"
                 }`}
               >
@@ -1895,7 +2174,7 @@ export default function SupplierPaymentOrderModal({
                 ) : (
                   <Check className="w-4 h-4" />
                 )}
-                <span>Liquidar Pago (₲ {formatPYG(summaryFacturas.neto)})</span>
+                <span>Liquidar Pago ({formatPYG(summaryFacturas.neto)})</span>
               </button>
             )}
           </div>

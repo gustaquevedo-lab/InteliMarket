@@ -4127,7 +4127,7 @@ export const api = {
         client.get<SupplierPaymentOrder>(`/v1/financial/payment-orders/${orderId}`, { company_id: COMPANY_ID } as any),
       create: (data: { supplier_id?: string | null; subtipo?: string; beneficiario_nombre?: string; beneficiario_documento?: string; periodo_nomina?: string; sueldok_sync_id?: string; monto_neto?: number; fecha_emision?: string; observaciones?: string; recibo_proveedor?: string; estado?: string; allocations?: any[]; disbursements?: any[]; legal_invoices?: any[]; diferencia_redondeo?: number }) =>
         client.post<SupplierPaymentOrder>(`/v1/financial/payment-orders?company_id=${COMPANY_ID}`, data),
-      disburse: (orderId: string, data: { fecha_pago?: string; recibo_proveedor?: string; observaciones?: string; disbursements: any[]; legal_invoices?: any[]; diferencia_redondeo?: number }) =>
+      disburse: (orderId: string, data: { fecha_pago?: string; recibo_proveedor?: string; observaciones?: string; disbursements: any[]; legal_invoices?: any[]; diferencia_redondeo?: number; allocations?: any[] }) =>
         client.post<SupplierPaymentOrder>(`/v1/financial/payment-orders/${orderId}/disburse?company_id=${COMPANY_ID}`, data),
       update: (orderId: string, data: { recibo_proveedor?: string; observaciones?: string; fecha_emision?: string; fecha_pago?: string }) =>
         client.patch<SupplierPaymentOrder>(`/v1/financial/payment-orders/${orderId}?company_id=${COMPANY_ID}`, data),

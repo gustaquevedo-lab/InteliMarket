@@ -676,6 +676,8 @@ class SupplierPaymentOrderDisburse(BaseModel):
     disbursements: list[PaymentOrderDisbursementCreate]
     legal_invoices: Optional[list[SupplierLegalInvoiceInput]] = None
     diferencia_redondeo: Optional[Decimal] = Decimal("0")
+    allocations: Optional[list[PaymentOrderAllocationCreate]] = None
+
 
 
 class SupplierPaymentOrderUpdate(BaseModel):
