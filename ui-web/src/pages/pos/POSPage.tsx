@@ -26,6 +26,7 @@ import { syncPendingSales, syncPendingCupones, syncFullCatalog } from "../../uti
 import { verifySupervisorPinLocal, syncSupervisorPins } from "../../utils/localAuth"
 import QRCode from "qrcode"
 import { imDinelco, imBancard } from "../../monitor/integrations"
+import { captureMessage } from "../../monitor"
 
 
 // ── BANDERAS VECTORIALES SVG PARA COMPATIBILIDAD TOTAL EN WINDOWS / ELECTRON ─
@@ -131,18 +132,15 @@ const ESCPOS_ALIGN_CENTER = ESC + 'a' + '\x01'
 const ESCPOS_DOUBLE_ON = GS + '!' + '\x11'
 const ESCPOS_HEIGHT_ON = GS + '!' + '\x10'
 const ESCPOS_DOUBLE_OFF = GS + '!' + '\x00'
-// Video inverso (texto blanco sobre fondo negro) -- lo que en la impresora
-// térmica hace de "fondo llamativo" para distinguir de un vistazo con qué
-// integración se cobró (PlugPay vs Bancard QR), sin agrandar el ticket.
-const ESCPOS_REVERSE_ON = GS + 'B' + '\x01'
-const ESCPOS_REVERSE_OFF = GS + 'B' + '\x00'
 const ESCPOS_LINE_WIDTH = 48
 
-// Etiqueta del proveedor: negrita + fondo invertido, bien chica (una sola
-// línea) para que el comprobante siga siendo mínimo pero quede clarísimo
-// con cuál de las dos integraciones "en pantalla" se cobró.
+// Etiqueta del proveedor: negrita y doble alto, entre asteriscos, una sola
+// línea -- clarísimo con cuál integración "en pantalla" se cobró sin agrandar
+// el ticket. Solo usa comandos que esta impresora ya imprime en el resto de
+// los tickets (ESC E y GS !): el video inverso (GS B) no se usa porque no hay
+// forma de probarlo en la ZKP8008 desde acá y no vale arriesgar un voucher.
 function escposProviderBadge(label: string): string {
-  return ESCPOS_BOLD_ON + ESCPOS_REVERSE_ON + ` ${label} ` + ESCPOS_REVERSE_OFF + ESCPOS_BOLD_OFF + '\n'
+  return ESCPOS_BOLD_ON + ESCPOS_HEIGHT_ON + `*** ${label} ***` + ESCPOS_DOUBLE_OFF + ESCPOS_BOLD_OFF + '\n'
 }
 
 function escposFormatDateTime(val?: string | number | Date | null): string {
@@ -1547,6 +1545,7 @@ export default function POSPage() {
                 logId: String(statusRes.data.IdTransacao || Date.now()),
               })
               toast.success("Pago Aprobado", "La transacción PIX fue aprobada con éxito.")
+              printPlugpayPixVoucher(pixRes.data, montoPyg, cleanCpf)
             } else if (status === 6) {
               clearInterval(extraLegPollRefs.current.get(leg.id)); extraLegPollRefs.current.delete(leg.id)
               updateExtraLeg(leg.id, { txnState: "error_rechazo", txnError: "La transacción fue cancelada o expiró en PlugPay." })
@@ -1606,6 +1605,7 @@ export default function POSPage() {
               clearInterval(extraLegPollRefs.current.get(leg.id)); extraLegPollRefs.current.delete(leg.id)
               updateExtraLeg(leg.id, { txnState: "aprobada", logId: String(txn.id || Date.now()) })
               toast.success("Crédito Aprobado", "La transacción con tarjeta de Brasil fue aprobada con éxito.")
+              printPlugpayParceladoVoucher(txn, montoPyg, cleanCpf, leg.cardCuotas)
             } else if (txn.status === 6 || txn.status === "rejected" || txn.status === "cancelled") {
               clearInterval(extraLegPollRefs.current.get(leg.id)); extraLegPollRefs.current.delete(leg.id)
               updateExtraLeg(leg.id, { txnState: "error_rechazo", txnError: "El pago con tarjeta fue rechazado." })
@@ -1852,7 +1852,7 @@ export default function POSPage() {
     setBancardTxnState("confirmando")
     const body2 = { bin, nsu, monto: montoBancard }
     console.log(`[BANCARD-TRACE] paso2 -> ip=${ip} path=/pos/descuento body=${JSON.stringify(body2)}`)
-    const res2 = await imBancard(electronAPI, ip, "/pos/descuento", body2, 30000)
+    const res2 = await imBancard(electronAPI, ip, "/pos/descuento", body2, 90000)
     console.log(`[BANCARD-TRACE] paso2 <- ${JSON.stringify(res2)}`)
 
     if (!res2.ok) {
@@ -1935,7 +1935,7 @@ export default function POSPage() {
     const { bin, nsu } = res1.body || {}
     updateExtraLeg(leg.id, { txnState: "confirmando" })
     const body2 = { bin, nsu, monto: montoBancard }
-    const res2 = await imBancard(electronAPI, ip, "/pos/descuento", body2, 30000)
+    const res2 = await imBancard(electronAPI, ip, "/pos/descuento", body2, 90000)
 
     if (!res2.ok) {
       if (res2.status === 400 || res2.status === 500) {
@@ -6115,6 +6115,21 @@ export default function POSPage() {
     }
   }
 
+  // Manda un voucher a la térmica y NO se lo traga si falla: antes un error de
+  // impresión (impresora apagada, sin papel, puente colgado) pasaba en silencio
+  // y la cajera recién se enteraba cuando el cliente pedía el comprobante.
+  const sendVoucherToPrinter = async (t: string, etiqueta: string) => {
+    const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
+    try {
+      const res = await (window as any).electronAPI.printEscPos(escposToBase64(t), tpl.nombre_impresora_windows || "ZKP8008")
+      if (res && res.success === false) throw new Error(res.error || "la impresora no respondió")
+    } catch (e: any) {
+      const msg = e?.message || String(e)
+      toast.warning(`No salió el comprobante ${etiqueta}`, `${msg}. El pago está aprobado igual -- reimprimí o anotá el comprobante a mano.`)
+      captureMessage(`No se pudo imprimir el comprobante ${etiqueta}: ${msg}`, "error", { etiqueta }, "PrintError")
+    }
+  }
+
   // Comprobante ESC/POS del pago PIX (PlugPay) -- a diferencia de Bancard/Dinelco,
   // que tienen su propia impresora física en el pinpad, PlugPay es 100% cloud y
   // no entrega ningún voucher físico, así que lo generamos nosotros al aprobarse.
@@ -6154,9 +6169,7 @@ export default function POSPage() {
     t += '\n\n'
     t += GS + 'V' + '\x01'
 
-    try {
-      await (window as any).electronAPI.printEscPos(escposToBase64(t), tpl.nombre_impresora_windows || "ZKP8008")
-    } catch (e) {}
+    await sendVoucherToPrinter(t, "PlugPay PIX")
   }
 
   // Mismo comprobante minimo que PIX, para Crédito Parcelado Brasil (tambien
@@ -6192,9 +6205,7 @@ export default function POSPage() {
     t += '\n\n'
     t += GS + 'V' + '\x01'
 
-    try {
-      await (window as any).electronAPI.printEscPos(escposToBase64(t), tpl.nombre_impresora_windows || "ZKP8008")
-    } catch (e) {}
+    await sendVoucherToPrinter(t, "PlugPay Crédito")
   }
 
   // Mismo mecanismo que PlugPay: Bancard QR "en pantalla" (cloud, no el
@@ -6234,9 +6245,7 @@ export default function POSPage() {
     t += '\n\n'
     t += GS + 'V' + '\x01'
 
-    try {
-      await (window as any).electronAPI.printEscPos(escposToBase64(t), tpl.nombre_impresora_windows || "ZKP8008")
-    } catch (e) {}
+    await sendVoucherToPrinter(t, "Bancard QR")
   }
 
   // Ticket ESC/POS real de la Nota de Crédito -- mismo mecanismo crudo que
