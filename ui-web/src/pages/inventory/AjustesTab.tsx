@@ -4,7 +4,8 @@ import {
   ShieldAlert, ShieldCheck, AlertCircle, CheckCircle2, Clock, X,
   Plus, Search, Filter, RefreshCw, FileText, UploadCloud, Trash2,
   ExternalLink, Eye, ChevronRight, Check, AlertTriangle, ArrowRight,
-  TrendingDown, TrendingUp, Layers, HelpCircle, UserCheck, Shield
+  TrendingDown, TrendingUp, Layers, HelpCircle, UserCheck, Shield,
+  Barcode
 } from "lucide-react"
 import {
   api,
@@ -119,6 +120,124 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
   // Buscador de productos dentro del modal de creación
   const [productSearch, setProductSearch] = useState("")
   const [productSearchResults, setProductSearchResults] = useState<Product[]>([])
+
+  // Sesiones de conteo físico para importar discrepancias
+  const [countSessions, setCountSessions] = useState<any[]>([])
+  const [loadingCountSessions, setLoadingCountSessions] = useState(false)
+  const [selectedCountSessionId, setSelectedCountSessionId] = useState("")
+  const [loadingSessionItems, setLoadingSessionItems] = useState(false)
+  const [soloDesdeConteo, setSoloDesdeConteo] = useState(true)
+
+  const loadCountSessions = useCallback(async () => {
+    setLoadingCountSessions(true)
+    try {
+      const res = await api.inventory.sessions.list()
+      setCountSessions(Array.isArray(res) ? res : [])
+    } catch {
+      // fallback silencioso
+    } finally {
+      setLoadingCountSessions(false)
+    }
+  }, [])
+
+  const handleImportFromSession = async (sessionId: string) => {
+    if (!sessionId) return
+    setLoadingSessionItems(true)
+    try {
+      const s = countSessions.find((x) => x.id === sessionId)
+      const list = await api.inventory.sessions.items.list(sessionId)
+      if (!list || !Array.isArray(list) || list.length === 0) {
+        toast.warning("Sin registros", "Esta sesión no tiene productos contados registrados.")
+        return
+      }
+
+      // Filtrar ítems que tienen discrepancia o requieren ajuste
+      const itemsConDiferencia = list.filter((it: any) => {
+        if (it.requiere_ajuste) return true
+        if (it.diferencia !== null && it.diferencia !== undefined && Number(it.diferencia) !== 0) return true
+        if (it.cantidad_contada !== null && it.cantidad_contada !== undefined && Number(it.cantidad_contada) !== Number(it.cantidad_sistema)) return true
+        return false
+      })
+
+      if (itemsConDiferencia.length === 0) {
+        toast.info(
+          "Sin discrepancias",
+          `Todos los productos de la sesión ${s?.codigo || ""} cuadraron al 100% con el stock del sistema (diferencia 0). No requiere ajuste.`
+        )
+        return
+      }
+
+      const mappedItems: Array<{
+        product: Product
+        cantidad_sistema: number
+        cantidad_fisica: number
+        costo_unitario: number
+        diferencia: number
+        impacto_gs: number
+      }> = []
+
+      const fotosToAdd: string[] = []
+
+      for (const it of itemsConDiferencia) {
+        let p = products.find((prod) => prod.id === it.producto_id)
+        if (!p) {
+          try {
+            p = await api.products.get(it.producto_id)
+          } catch {
+            p = {
+              id: it.producto_id,
+              nombre: it.producto_nombre || "Producto sin nombre",
+              sku: it.codigo_barra || "",
+              codigo_barra: it.codigo_barra || "",
+              costo_promedio: Number(it.costo_promedio || 0),
+              stock: Number(it.cantidad_sistema || 0),
+            } as any
+          }
+        }
+
+        const cantSis = Number(it.cantidad_sistema ?? p?.stock ?? 0)
+        const cantFis = Number(it.cantidad_contada ?? it.cantidad_verificada ?? cantSis)
+        const diff = cantFis - cantSis
+        const costo = Number(it.costo_promedio || p?.costo_promedio || p?.ultimo_costo || 0)
+        const impacto = Math.round(diff * costo)
+
+        mappedItems.push({
+          product: p!,
+          cantidad_sistema: cantSis,
+          cantidad_fisica: cantFis,
+          costo_unitario: costo,
+          diferencia: diff,
+          impacto_gs: impacto,
+        })
+
+        if (it.foto_evidencia_url && !fotosToAdd.includes(it.foto_evidencia_url)) {
+          fotosToAdd.push(it.foto_evidencia_url)
+        }
+      }
+
+      setCreateItems(mappedItems)
+      if (fotosToAdd.length > 0) {
+        setCreateEvidenciaUrls((prev) => Array.from(new Set([...prev, ...fotosToAdd])))
+      }
+
+      setCreateMotivoCodigo("conteo_fisico")
+
+      const codSession = s?.codigo || sessionId.slice(0, 8)
+      const areaSession = s?.area || "Salón"
+      setCreateMotivoDetalle(
+        `Ajuste generado a partir del Conteo Físico ${codSession} (${areaSession}). Se auditaron ${mappedItems.length} producto(s) con discrepancia física verificada en salón.`
+      )
+
+      toast.success(
+        "Discrepancias importadas",
+        `Se estiraron ${mappedItems.length} producto(s) con diferencia desde la sesión ${codSession}.`
+      )
+    } catch (err: any) {
+      toast.error("Error al importar sesión", err.message)
+    } finally {
+      setLoadingSessionItems(false)
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // CARGA INICIAL
@@ -792,6 +911,64 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
               </div>
 
               <form onSubmit={handleCreateSubmit} className="p-6 space-y-5">
+                {/* ── SECCIÓN: VINCULACIÓN CON SESIÓN DE CONTEO FÍSICO ── */}
+                <div className="p-4 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-black">
+                        <Barcode className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-black uppercase text-indigo-900 dark:text-indigo-200 tracking-wide">
+                          Estirar Productos desde Conteo Físico
+                        </h4>
+                        <p className="text-[11px] text-indigo-700 dark:text-indigo-300">
+                          Estira automáticamente las discrepancias verificadas en la App de Conteo.
+                        </p>
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-1.5 cursor-pointer text-xs font-bold text-indigo-800 dark:text-indigo-300">
+                      <input
+                        type="checkbox"
+                        checked={soloDesdeConteo}
+                        onChange={(e) => setSoloDesdeConteo(e.target.checked)}
+                        className="rounded text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <span>Exigir Conteo Previo</span>
+                    </label>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+                    <select
+                      value={selectedCountSessionId}
+                      onChange={(e) => {
+                        const sId = e.target.value
+                        setSelectedCountSessionId(sId)
+                        if (sId) handleImportFromSession(sId)
+                      }}
+                      className="input-field text-xs py-2 flex-1 font-mono"
+                    >
+                      <option value="">
+                        {loadingCountSessions ? "Cargando sesiones de conteo..." : "Seleccione una sesión de conteo para estirar discrepancias..."}
+                      </option>
+                      {countSessions.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.codigo} — {s.area} ({s.total_discrepancias ?? s.items?.filter((i: any) => i.diferencia !== 0)?.length ?? 0} discrepancias) [{s.estado}]
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      disabled={!selectedCountSessionId || loadingSessionItems}
+                      onClick={() => handleImportFromSession(selectedCountSessionId)}
+                      className="btn-primary flex items-center justify-center gap-1.5 text-xs px-3.5 py-2 rounded-xl font-bold whitespace-nowrap cursor-pointer"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${loadingSessionItems ? "animate-spin" : ""}`} />
+                      <span>{loadingSessionItems ? "Estirando..." : "Estirar Discrepancias"}</span>
+                    </button>
+                  </div>
+                </div>
+
                 {/* Depósito & Motivo */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
@@ -881,59 +1058,91 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                 </div>
 
                 {/* Buscador de Productos para Agregar */}
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                    Agregar Productos a Ajustar
-                  </label>
-                  <div className="relative">
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      value={productSearch}
-                      onChange={(e) => setProductSearch(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault()
-                          if (productSearchResults.length > 0) {
-                            const exact = productSearchResults.find(
-                              (p) =>
-                                (p.codigo_barra && p.codigo_barra.toLowerCase() === productSearch.trim().toLowerCase()) ||
-                                (p.sku && p.sku.toLowerCase() === productSearch.trim().toLowerCase())
-                            )
-                            addItemToCreate(exact || productSearchResults[0])
-                          }
-                        }
-                      }}
-                      placeholder="Buscar producto por nombre, SKU o código de barra (Enter para agregar)..."
-                      className="input-field pl-9 text-xs py-2 w-full"
-                    />
-
-                    {/* Resultados desplegables */}
-                    {productSearchResults.length > 0 && (
-                      <div className="absolute top-full left-0 right-0 z-20 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl max-h-56 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700">
-                        {productSearchResults.map((p) => (
-                          <div
-                            key={p.id}
-                            onClick={() => addItemToCreate(p)}
-                            className="p-3 hover:bg-blue-50 dark:hover:bg-slate-700/60 cursor-pointer flex items-center justify-between text-xs transition"
-                          >
-                            <div>
-                              <p className="font-extrabold text-slate-900 dark:text-white">
-                                {p.nombre}
-                              </p>
-                              <p className="text-[10px] font-mono text-slate-400">
-                                SKU: {p.sku || "—"} | CB: {p.codigo_barra || "—"}
-                              </p>
-                            </div>
-                            <span className="btn-primary text-[10px] px-2 py-1 rounded-lg">
-                              + Agregar
-                            </span>
-                          </div>
-                        ))}
+                {soloDesdeConteo ? (
+                  <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/70 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
+                      <div>
+                        <span className="font-bold text-slate-800 dark:text-slate-200">
+                          Modo Auditoría Activo:
+                        </span>{" "}
+                        <span className="text-slate-500 dark:text-slate-400">
+                          Los productos deben provenir de una sesión de conteo físico para garantizar control interno.
+                        </span>
                       </div>
-                    )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSoloDesdeConteo(false)}
+                      className="text-xs text-indigo-600 dark:text-indigo-400 font-bold hover:underline shrink-0"
+                    >
+                      Habilitar agregado manual libre
+                    </button>
                   </div>
-                </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                        Agregar Productos a Ajustar (Búsqueda Manual)
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setSoloDesdeConteo(true)}
+                        className="text-xs text-slate-400 hover:text-slate-600 font-bold"
+                      >
+                        ← Volver a modo solo conteo
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={productSearch}
+                        onChange={(e) => setProductSearch(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault()
+                            if (productSearchResults.length > 0) {
+                              const exact = productSearchResults.find(
+                                (p) =>
+                                  (p.codigo_barra && p.codigo_barra.toLowerCase() === productSearch.trim().toLowerCase()) ||
+                                  (p.sku && p.sku.toLowerCase() === productSearch.trim().toLowerCase())
+                              )
+                              addItemToCreate(exact || productSearchResults[0])
+                            }
+                          }
+                        }}
+                        placeholder="Buscar producto por nombre, SKU o código de barra (Enter para agregar)..."
+                        className="input-field pl-9 text-xs py-2 w-full"
+                      />
+
+                      {/* Resultados desplegables */}
+                      {productSearchResults.length > 0 && (
+                        <div className="absolute top-full left-0 right-0 z-20 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl max-h-56 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700">
+                          {productSearchResults.map((p) => (
+                            <div
+                              key={p.id}
+                              onClick={() => addItemToCreate(p)}
+                              className="p-3 hover:bg-blue-50 dark:hover:bg-slate-700/60 cursor-pointer flex items-center justify-between text-xs transition"
+                            >
+                              <div>
+                                <p className="font-extrabold text-slate-900 dark:text-white">
+                                  {p.nombre}
+                                </p>
+                                <p className="text-[10px] font-mono text-slate-400">
+                                  SKU: {p.sku || "—"} | CB: {p.codigo_barra || "—"}
+                                </p>
+                              </div>
+                              <span className="btn-primary text-[10px] px-2 py-1 rounded-lg">
+                                + Agregar
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* Planilla de Productos Agregados */}
                 <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">

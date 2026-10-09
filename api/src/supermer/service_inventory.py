@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from fastapi import HTTPException
 
 from .models import PhysicalCountSession, PhysicalCountItem, CountAdjustment
+from api.src.products.models import Product
 from api.src.inteliaudit.service import record_audit_event
 
 
@@ -78,13 +79,16 @@ async def complete_count_session(session_id: UUID, db: AsyncSession, user: Optio
 
     result = await db.execute(select(PhysicalCountItem).where(PhysicalCountItem.session_id == session_id))
     items = result.scalars().all()
+    for i in items:
+        if i.cantidad_contada is not None and i.cantidad_sistema is not None and i.diferencia is None:
+            i.diferencia = i.cantidad_contada - i.cantidad_sistema
+        if i.diferencia and abs(i.diferencia) > 0:
+            i.requiere_ajuste = True
+
     discrepancias = [i for i in items if i.diferencia and abs(i.diferencia) > 0]
     s.total_items_contados = len(items)
     s.total_discrepancias = len(discrepancias)
     s.valor_discrepancia_total = sum(abs(i.valor_diferencia or 0) for i in discrepancias)
-
-    for i in discrepancias:
-        i.requiere_ajuste = True
 
     if user:
         await record_audit_event(db, {
@@ -108,12 +112,23 @@ async def complete_count_session(session_id: UUID, db: AsyncSession, user: Optio
 # ---------------------------------------------------------------------------
 
 async def list_count_items(session_id: UUID, db: AsyncSession, requiere_ajuste: Optional[bool] = None):
-    q = select(PhysicalCountItem).where(PhysicalCountItem.session_id == session_id)
+    q = (
+        select(PhysicalCountItem, Product.nombre, Product.costo_promedio)
+        .outerjoin(Product, Product.id == PhysicalCountItem.producto_id)
+        .where(PhysicalCountItem.session_id == session_id)
+    )
     if requiere_ajuste is not None:
         q = q.where(PhysicalCountItem.requiere_ajuste == requiere_ajuste)
     q = q.order_by(PhysicalCountItem.created_at)
     result = await db.execute(q)
-    return result.scalars().all()
+    items = []
+    for row in result.all():
+        it = row[0]
+        it.producto_nombre = row[1]
+        if not it.costo_promedio and row[2]:
+            it.costo_promedio = row[2]
+        items.append(it)
+    return items
 
 
 async def create_count_item(session_id: UUID, data, db: AsyncSession, user: Optional[dict] = None):

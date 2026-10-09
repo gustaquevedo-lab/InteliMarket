@@ -359,11 +359,17 @@ export default function ConteoVencimientosPage() {
       const payload: any = {
         codigo,
         area: areaLabel,
-        ubicacion: ubicacion.trim() || undefined,
+        ubicacion: ubicacion.trim() || (conteoScope === "proveedor" && selectedSupplierId ? `sup:${selectedSupplierId}` : undefined),
         tipo: "salon",
       }
       if (isUuid(activeUserId)) {
         payload.contador_principal = activeUserId
+      }
+      if (conteoScope === "proveedor" && selectedSupplierId) {
+        payload.notas = JSON.stringify({
+          supplier_id: selectedSupplierId,
+          supplier_name: selectedSupObj?.razon_social || selectedSupObj?.nombre,
+        })
       }
 
       const created = await api.inventory.sessions.create(payload)
@@ -440,11 +446,10 @@ export default function ConteoVencimientosPage() {
       setSearching(true)
       try {
         const res = await api.products.list({ search: code, limit: 10 })
-        const found =
-          (res || []).find((p) => p.codigo_barra === code || p.sku === code) ||
-          (res || [])[0]
+        const exact = (res || []).find((p) => p.codigo_barra === code || p.sku === code)
+        const found = exact || ((res || []).length === 1 ? res[0] : null)
         if (!found) {
-          toast.warning("Producto no encontrado", `Código '${code}' no está en el catálogo.`)
+          toast.warning("Producto no encontrado", `Código '${code}' no coincide con el catálogo.`)
           return
         }
         await selectProductForCount(found)
@@ -505,7 +510,7 @@ export default function ConteoVencimientosPage() {
     const timer = setTimeout(async () => {
       setSearchingQuick(true)
       try {
-        const res = await api.products.list({ search: q, limit: 8 })
+        const res = await api.products.list({ search: q, limit: 15 })
         setQuickSearchResults(Array.isArray(res) ? res : [])
       } catch (err) {
         console.warn("Error en búsqueda rápida:", err)
@@ -527,15 +532,26 @@ export default function ConteoVencimientosPage() {
 
     const fetchScope = async () => {
       try {
-        const params: any = { limit: 250, activo: true }
+        const params: any = { limit: 5000, activo: true }
+        let supId = selectedSupplierId
+        if (!supId && (session as any)?.notas) {
+          try {
+            const parsed = JSON.parse((session as any).notas)
+            if (parsed.supplier_id) supId = parsed.supplier_id
+          } catch {}
+        }
+        if (!supId && session?.ubicacion && session.ubicacion.startsWith("sup:")) {
+          supId = session.ubicacion.replace("sup:", "")
+        }
+
         if (session.area.startsWith("Proveedor:")) {
           const supName = session.area.replace("Proveedor:", "").trim().toLowerCase()
-          const matchedSup = suppliers.find(
-            (s) =>
-              (s.razon_social && s.razon_social.toLowerCase().includes(supName)) ||
-              (s.nombre && s.nombre.toLowerCase().includes(supName)) ||
-              s.id === selectedSupplierId
-          )
+          const matchedSup = (supId && suppliers.find((s) => s.id === supId)) ||
+            suppliers.find(
+              (s) =>
+                (s.razon_social && s.razon_social.toLowerCase().includes(supName)) ||
+                (s.nombre && s.nombre.toLowerCase().includes(supName))
+            )
           if (matchedSup) {
             params.supplier_id = matchedSup.id
           } else {
