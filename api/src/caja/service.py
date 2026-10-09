@@ -1505,6 +1505,17 @@ async def close_session(
 
     # Obtener reconciliación completa para el ticket de cierre inmediato
     recon = await get_session_reconciliation_data(db, session_obj.id)
+    if recon and count:
+        count.diferencia = Decimal(str(recon.get("diferencia_consolidada_gs", diferencia_consolidada)))
+        count.diferencia_brl = Decimal(str(recon.get("diferencia_brl", 0)))
+        count.diferencia_usd = Decimal(str(recon.get("diferencia_usd", 0)))
+        count.requiere_revision = bool(
+            register and register.diferencia_maxima_tolerada is not None
+            and abs(count.diferencia) > register.diferencia_maxima_tolerada
+        )
+        if not is_sin_movimiento and handoff:
+            handoff.requiere_revision = count.requiere_revision
+        await db.flush()
 
     return {
         "session": session_obj,
@@ -1514,10 +1525,10 @@ async def close_session(
         "monto_cierre_esperado": monto_cierre_esperado_total_gs,
         "monto_cierre_esperado_usd": Decimal(str(recon["esp_usd"])) if recon else Decimal("0"),
         "monto_cierre_esperado_brl": Decimal(str(recon["esp_brl"])) if recon else Decimal("0"),
-        "diferencia": diferencia_consolidada,
-        "diferencia_usd": diferencia_usd,
-        "diferencia_brl": diferencia_brl,
-        "requiere_revision": requiere_revision,
+        "diferencia": count.diferencia,
+        "diferencia_usd": count.diferencia_usd,
+        "diferencia_brl": count.diferencia_brl,
+        "requiere_revision": count.requiere_revision,
         "handoff_id": handoff.id,
         "reconciliation": recon,
         "ticket_text": recon.get("ticket_text") if recon else None,
@@ -5089,6 +5100,26 @@ async def save_session_punteo_audit(
             + (count_obj.monto_cheque or Decimal("0"))
             + (count_obj.monto_otro or Decimal("0"))
         )
+        await db.flush()
+        # Recalcular conciliación tras comprobantes físicos y actualizar diferencias y dictamen
+        recon = await get_session_reconciliation_data(db, sid)
+        if recon:
+            dif_cons = Decimal(str(recon.get("diferencia_consolidada_gs", 0)))
+            count_obj.diferencia = dif_cons
+            count_obj.diferencia_brl = Decimal(str(recon.get("diferencia_brl", 0)))
+            count_obj.diferencia_usd = Decimal(str(recon.get("diferencia_usd", 0)))
+
+            reg_res = await db.execute(select(CashRegister).where(CashRegister.id == session_obj.register_id))
+            reg_obj = reg_res.scalar_one_or_none()
+            tol = (reg_obj.diferencia_maxima_tolerada if reg_obj and reg_obj.diferencia_maxima_tolerada is not None else Decimal("30000"))
+            count_obj.requiere_revision = bool(abs(dif_cons) > tol)
+
+            h_res = await db.execute(
+                select(CashHandoff).where(CashHandoff.session_id == sid).order_by(CashHandoff.created_at.desc()).limit(1)
+            )
+            h_obj = h_res.scalar_one_or_none()
+            if h_obj:
+                h_obj.requiere_revision = count_obj.requiere_revision
 
     await db.commit()
     await db.refresh(session_obj)
