@@ -367,7 +367,8 @@ export default function PurchasesPage() {
   const supplierComboboxRef = useRef<HTMLDivElement>(null)
   const [searchProductIA, setSearchProductIA] = useState("")
   const [soloQuiebreIA, setSoloQuiebreIA] = useState(false)
-  const [filterEstadoIA, setFilterEstadoIA] = useState<"todos" | "quiebres" | "bajos" | "sugeridos" | "inactivos">("todos")
+  const [filterActivoIA, setFilterActivoIA] = useState<"activos" | "inactivos" | "todos">("activos")
+  const [filterEstadoIA, setFilterEstadoIA] = useState<"todos" | "quiebres" | "bajos" | "sugeridos">("todos")
 
   // Ordenamiento interactivo de la Matriz de Sugerencia IA
   type IASortColumn =
@@ -1986,6 +1987,16 @@ export default function PurchasesPage() {
     )
   }, [suppliers, filterSupplierSearchIA])
 
+  const countActivosIA = useMemo(() => {
+    return replenishmentData?.items?.filter((it: any) => it.activo !== false)?.length || 0
+  }, [replenishmentData?.items])
+
+  const countInactivosIA = useMemo(() => {
+    return replenishmentData?.items?.filter((it: any) => it.activo === false)?.length || 0
+  }, [replenishmentData?.items])
+
+  const countTotalIA = replenishmentData?.items?.length || 0
+
   // Filtrado y Ordenamiento reactivo de la Matriz de Sugerencia IA (sin recargar API)
   const displayedReplenishmentItems = useMemo(() => {
     if (!replenishmentData?.items) return []
@@ -2005,13 +2016,17 @@ export default function PurchasesPage() {
 
       if (!matchSearch) return false
 
+      // 1. Filtro por Estado de Catálogo (Activos / Inactivos / Todos)
+      if (filterActivoIA === "activos" && it.activo === false) return false
+      if (filterActivoIA === "inactivos" && it.activo !== false) return false
+
+      // 2. Filtro por Nivel de Urgencia / Autonomía
       if (filterEstadoIA === "quiebres") return it.autonomia_estado === "critico"
       if (filterEstadoIA === "bajos") return it.autonomia_estado === "bajo"
       if (filterEstadoIA === "sugeridos") {
         const qty = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida
         return Number(qty) > 0 || Number(it.cantidad_sugerida) > 0
       }
-      if (filterEstadoIA === "inactivos") return it.activo === false
       return true
     })
 
@@ -2135,7 +2150,7 @@ export default function PurchasesPage() {
 
       return sortDirectionIA === "asc" ? valA - valB : valB - valA
     })
-  }, [replenishmentData, searchProductIA, filterEstadoIA, editedQuantities, editedCosts, sortColumnIA, sortDirectionIA, selectedSupplierIA])
+  }, [replenishmentData, searchProductIA, filterActivoIA, filterEstadoIA, editedQuantities, editedCosts, sortColumnIA, sortDirectionIA, selectedSupplierIA])
 
   // Conteo reactivo de ítems seleccionados en la Matriz
   const selectedCountIA = useMemo(() => {
@@ -3853,21 +3868,80 @@ export default function PurchasesPage() {
                   Matriz de Sugerencia ({displayedReplenishmentItems.length} de {replenishmentData?.items?.length || 0} Productos Evaluados)
                 </h4>
                 
-                {/* FILTROS DE ESTADO CLICKEABLES CON INDICADORES EN VIVO */}
+                {/* FILTROS REACTIVOS DE ESTADO (ACTIVO/INACTIVO/TODOS) Y URGENCIA */}
                 <div className="flex items-center gap-2 flex-wrap">
+                  {/* SEGMENTED CONTROL: ESTADO DE PRODUCTO (ACTIVOS / INACTIVOS / TODOS) */}
+                  <div className="inline-flex items-center p-1 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xs gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setFilterActivoIA("activos")}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer select-none ${
+                        filterActivoIA === "activos"
+                          ? "bg-emerald-600 text-white shadow-xs"
+                          : "text-slate-600 dark:text-slate-400 hover:text-emerald-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      }`}
+                      title="Mostrar únicamente productos activos en catálogo"
+                    >
+                      <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                      <span>Activos</span>
+                      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-black ${
+                        filterActivoIA === "activos" ? "bg-emerald-800 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-500"
+                      }`}>
+                        {countActivosIA}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFilterActivoIA("inactivos")}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer select-none ${
+                        filterActivoIA === "inactivos"
+                          ? "bg-rose-600 text-white shadow-xs"
+                          : "text-slate-600 dark:text-slate-400 hover:text-rose-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      }`}
+                      title="Mostrar únicamente productos inactivos en catálogo"
+                    >
+                      <span className="w-2 h-2 rounded-full bg-rose-400"></span>
+                      <span>Inactivos</span>
+                      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-black ${
+                        filterActivoIA === "inactivos" ? "bg-rose-800 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-500"
+                      }`}>
+                        {countInactivosIA}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFilterActivoIA("todos")}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer select-none ${
+                        filterActivoIA === "todos"
+                          ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xs"
+                          : "text-slate-600 dark:text-slate-400 hover:text-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      }`}
+                      title="Mostrar todos los productos sin filtrar por estado"
+                    >
+                      <span>Todos</span>
+                      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-black ${
+                        filterActivoIA === "todos" ? "bg-slate-700 text-white dark:bg-slate-300 dark:text-slate-900" : "bg-slate-100 dark:bg-slate-800 text-slate-500"
+                      }`}>
+                        {countTotalIA}
+                      </span>
+                    </button>
+                  </div>
+
+                  <div className="h-6 w-px bg-slate-300 dark:bg-slate-700 hidden sm:block mx-1"></div>
+
+                  {/* FILTROS DE AUTONOMÍA / URGENCIA DE REPOSICIÓN */}
                   <button
                     type="button"
                     onClick={() => setFilterEstadoIA("todos")}
-                    className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer select-none ${
+                    className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer select-none ${
                       filterEstadoIA === "todos"
-                        ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-md ring-2 ring-slate-400 scale-[1.02]"
+                        ? "bg-indigo-600 text-white shadow-xs"
                         : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 border border-slate-200 dark:border-slate-700"
                     }`}
                   >
-                    <span>Todos</span>
-                    <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-200 dark:bg-slate-700 font-mono font-black">
-                      {replenishmentData?.items?.length || 0}
-                    </span>
+                    <span>Todos Niveles</span>
                   </button>
 
                   <button
@@ -3880,7 +3954,7 @@ export default function PurchasesPage() {
                     }`}
                   >
                     <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
-                    <span>Quiebres Inminentes</span>
+                    <span>Quiebres</span>
                     <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-red-200 dark:bg-red-900/60 font-mono font-black">
                       {replenishmentData?.total_quiebres || 0}
                     </span>
@@ -3896,7 +3970,7 @@ export default function PurchasesPage() {
                     }`}
                   >
                     <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                    <span>Stock Bajo (ROP)</span>
+                    <span>Stock Bajo</span>
                     <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-amber-200 dark:bg-amber-900/60 font-mono font-black">
                       {replenishmentData?.total_bajos || 0}
                     </span>
@@ -3912,25 +3986,9 @@ export default function PurchasesPage() {
                     }`}
                   >
                     <Sparkles className="w-3.5 h-3.5" />
-                    <span>Con Sugerencia IA</span>
+                    <span>Con Sugerencia</span>
                     <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-indigo-200 dark:bg-indigo-900/60 font-mono font-black">
                       {replenishmentData?.total_sugeridos || 0}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setFilterEstadoIA("inactivos")}
-                    className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer select-none ${
-                      filterEstadoIA === "inactivos"
-                        ? "bg-rose-600 text-white shadow-md ring-2 ring-rose-300 scale-[1.02]"
-                        : "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 hover:bg-rose-100"
-                    }`}
-                  >
-                    <span className="w-2 h-2 rounded-full bg-rose-500"></span>
-                    <span>Inactivos</span>
-                    <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-rose-200 dark:bg-rose-900/60 font-mono font-black">
-                      {replenishmentData?.items?.filter((it: any) => it.activo === false)?.length || 0}
                     </span>
                   </button>
                 </div>
