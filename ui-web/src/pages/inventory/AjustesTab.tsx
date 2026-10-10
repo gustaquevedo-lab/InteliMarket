@@ -131,41 +131,110 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
   const loadCountSessions = useCallback(async () => {
     setLoadingCountSessions(true)
     try {
-      const res = await api.inventory.sessions.list()
-      setCountSessions(Array.isArray(res) ? res : [])
-    } catch {
-      // fallback silencioso
+      // 1. Cargar sesiones de la App Móvil Extra Conteo (supermer_count_sessions)
+      let mobileSessions: any[] = []
+      try {
+        const resMobile = await api.inventory.sessions.list()
+        if (Array.isArray(resMobile)) {
+          mobileSessions = resMobile.map((s: any) => {
+            const isActive = s.estado === "abierta" || s.estado === "en_conteo"
+            const totalDisc = s.total_discrepancias ?? s.items?.filter((i: any) => Number(i.diferencia || 0) !== 0)?.length ?? 0
+            const totalCounted = s.total_items_contados ?? s.items?.length ?? 0
+            return {
+              ...s,
+              _source: "mobile",
+              _is_active: isActive,
+              _label: `${isActive ? "🟢 [ACTIVO] " : ""}${s.codigo} — ${s.area || "Salón"} [App Conteo] (${totalDisc} discr., ${totalCounted} contados) [${(s.estado || "").toUpperCase()}]`,
+            }
+          })
+        }
+      } catch (err: any) {
+        console.warn("Error cargando sesiones de app de conteo:", err)
+      }
+
+      // 2. Cargar sesiones de Toma Física de Salón/Depósito
+      let physicalSessions: any[] = []
+      try {
+        const resPhysical = await api.inventory.physicalSessions.list()
+        if (Array.isArray(resPhysical)) {
+          physicalSessions = resPhysical.map((s: any) => {
+            const isActive = s.estado === "abierta" || s.estado === "en_conteo"
+            return {
+              ...s,
+              _source: "physical",
+              _is_active: isActive,
+              _label: `${isActive ? "🟢 [ACTIVO] " : ""}${s.codigo} — ${s.descripcion_alcance || s.categoria_nombre || s.supplier_nombre || s.pasillo || "General"} [Toma Física] [${(s.estado || "").toUpperCase()}]`,
+            }
+          })
+        }
+      } catch (err: any) {
+        console.warn("Error cargando sesiones de toma física:", err)
+      }
+
+      // 3. Combinar y priorizar las activas
+      const combined = [...mobileSessions, ...physicalSessions].sort((a, b) => {
+        if (a._is_active && !b._is_active) return -1
+        if (!a._is_active && b._is_active) return 1
+        return new Date(b.created_at || b.fecha_inicio || 0).getTime() - new Date(a.created_at || a.fecha_inicio || 0).getTime()
+      })
+
+      setCountSessions(combined)
+
+      // Si hay una activa y no se ha seleccionado nada, pre-seleccionarla
+      if (combined.length > 0 && combined[0]._is_active && !selectedCountSessionId) {
+        setSelectedCountSessionId(combined[0].id)
+      }
+    } catch (err: any) {
+      toast.error("Error al cargar sesiones de conteo", err?.message || "Reintente.")
     } finally {
       setLoadingCountSessions(false)
     }
-  }, [])
+  }, [selectedCountSessionId, toast])
 
   const handleImportFromSession = async (sessionId: string) => {
     if (!sessionId) return
     setLoadingSessionItems(true)
     try {
       const s = countSessions.find((x) => x.id === sessionId)
-      const list = await api.inventory.sessions.items.list(sessionId)
-      if (!list || !Array.isArray(list) || list.length === 0) {
-        toast.warning("Sin registros", "Esta sesión no tiene productos contados registrados.")
+      let rawItems: any[] = []
+
+      if (s?._source === "physical") {
+        const full = await api.inventory.physicalSessions.get(sessionId)
+        rawItems = (full?.items || []).map((it: any) => ({
+          producto_id: it.producto_id,
+          producto_nombre: it.producto_nombre,
+          codigo_barra: it.codigo_barra,
+          cantidad_sistema: Number(it.cantidad_sistema || 0),
+          cantidad_contada: Number(it.cantidad_reconciliada ?? it.cantidad_conteo_2 ?? it.cantidad_conteo_1 ?? it.cantidad_sistema ?? 0),
+          diferencia: it.diferencia !== null && it.diferencia !== undefined ? Number(it.diferencia) : (Number(it.cantidad_reconciliada ?? it.cantidad_conteo_2 ?? it.cantidad_conteo_1 ?? 0) - Number(it.cantidad_sistema || 0)),
+          costo_promedio: Number(it.costo_unitario || 0),
+          foto_evidencia_url: it.foto_evidencia_url,
+          requiere_ajuste: it.requiere_ajuste || Math.abs(Number(it.diferencia || 0)) > 0.001,
+        }))
+      } else {
+        // App móvil Extra Conteo (supermer_count_items)
+        const list = await api.inventory.sessions.items.list(sessionId)
+        rawItems = Array.isArray(list) ? list : []
+      }
+
+      if (!rawItems || rawItems.length === 0) {
+        toast.warning(
+          "Sin registros en el conteo",
+          `La sesión ${s?.codigo || ""} aún no tiene productos contados registrados.`
+        )
         return
       }
 
       // Filtrar ítems que tienen discrepancia o requieren ajuste
-      const itemsConDiferencia = list.filter((it: any) => {
+      const itemsConDiferencia = rawItems.filter((it: any) => {
         if (it.requiere_ajuste) return true
         if (it.diferencia !== null && it.diferencia !== undefined && Number(it.diferencia) !== 0) return true
         if (it.cantidad_contada !== null && it.cantidad_contada !== undefined && Number(it.cantidad_contada) !== Number(it.cantidad_sistema)) return true
         return false
       })
 
-      if (itemsConDiferencia.length === 0) {
-        toast.info(
-          "Sin discrepancias",
-          `Todos los productos de la sesión ${s?.codigo || ""} cuadraron al 100% con el stock del sistema (diferencia 0). No requiere ajuste.`
-        )
-        return
-      }
+      // Si no hay diferencias numéricas estrictas pero sí hay productos contados, estiramos todos para revisión
+      const targetItems = itemsConDiferencia.length > 0 ? itemsConDiferencia : rawItems
 
       const mappedItems: Array<{
         product: Product
@@ -178,7 +247,7 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
 
       const fotosToAdd: string[] = []
 
-      for (const it of itemsConDiferencia) {
+      for (const it of targetItems) {
         let p = products.find((prod) => prod.id === it.producto_id)
         if (!p) {
           try {
@@ -197,7 +266,7 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
 
         const cantSis = Number(it.cantidad_sistema ?? p?.stock ?? 0)
         const cantFis = Number(it.cantidad_contada ?? it.cantidad_verificada ?? cantSis)
-        const diff = cantFis - cantSis
+        const diff = Number(it.diferencia ?? (cantFis - cantSis))
         const costo = Number(it.costo_promedio || p?.costo_promedio || p?.ultimo_costo || 0)
         const impacto = Math.round(diff * costo)
 
@@ -222,16 +291,33 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
 
       setCreateMotivoCodigo("conteo_fisico")
 
+      // Si no hay depósito seleccionado, seleccionar por defecto el de la sesión o el primero
+      if (!createWarehouseId) {
+        if (s?.warehouse_id) {
+          setCreateWarehouseId(s.warehouse_id)
+        } else if (warehouses.length > 0) {
+          setCreateWarehouseId(warehouses[0].id)
+        }
+      }
+
       const codSession = s?.codigo || sessionId.slice(0, 8)
-      const areaSession = s?.area || "Salón"
+      const areaSession = s?.area || s?.descripcion_alcance || "Salón"
+      const statusNote = s?._is_active ? " (Conteo activo en curso)" : ""
       setCreateMotivoDetalle(
-        `Ajuste generado a partir del Conteo Físico ${codSession} (${areaSession}). Se auditaron ${mappedItems.length} producto(s) con discrepancia física verificada en salón.`
+        `Ajuste generado a partir del Conteo Físico ${codSession} (${areaSession})${statusNote}. Se auditaron ${mappedItems.length} producto(s) verificados.`
       )
 
-      toast.success(
-        "Discrepancias importadas",
-        `Se estiraron ${mappedItems.length} producto(s) con diferencia desde la sesión ${codSession}.`
-      )
+      if (itemsConDiferencia.length > 0) {
+        toast.success(
+          "Discrepancias importadas",
+          `Se estiraron ${mappedItems.length} producto(s) con desvío desde la sesión ${codSession}.`
+        )
+      } else {
+        toast.info(
+          "Productos de conteo estirados",
+          `Se estiraron ${mappedItems.length} producto(s) contados desde ${codSession} para validación y ajuste manual.`
+        )
+      }
     } catch (err: any) {
       toast.error("Error al importar sesión", err.message)
     } finally {
@@ -275,6 +361,16 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
   useEffect(() => {
     loadMotivos()
   }, [loadMotivos])
+
+  useEffect(() => {
+    loadCountSessions()
+  }, [loadCountSessions])
+
+  useEffect(() => {
+    if (showCreateModal) {
+      loadCountSessions()
+    }
+  }, [showCreateModal, loadCountSessions])
 
   // Motivo seleccionado actual en el form de creación
   const selectedMotivoInfo = useMemo(() => {
@@ -938,6 +1034,15 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                     </label>
                   </div>
 
+                  {countSessions.some((s) => s._is_active) && (
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-[11px] text-emerald-800 dark:text-emerald-300 font-semibold">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                      <span>
+                        Se detectó un <strong>conteo activo en curso</strong> ({countSessions.find((s) => s._is_active)?.codigo}). Podés seleccionarlo y estirar los productos contados en tiempo real.
+                      </span>
+                    </div>
+                  )}
+
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
                     <select
                       value={selectedCountSessionId}
@@ -953,15 +1058,24 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                       </option>
                       {countSessions.map((s) => (
                         <option key={s.id} value={s.id}>
-                          {s.codigo} — {s.area} ({s.total_discrepancias ?? s.items?.filter((i: any) => i.diferencia !== 0)?.length ?? 0} discrepancias) [{s.estado}]
+                          {s._label || `${s.codigo} — ${s.area || "Salón"} [${s.estado}]`}
                         </option>
                       ))}
                     </select>
                     <button
                       type="button"
+                      disabled={loadingCountSessions}
+                      onClick={() => loadCountSessions()}
+                      title="Refrescar lista de sesiones de conteo"
+                      className="p-2 text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl hover:bg-indigo-50 transition cursor-pointer shrink-0"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${loadingCountSessions ? "animate-spin text-indigo-600" : ""}`} />
+                    </button>
+                    <button
+                      type="button"
                       disabled={!selectedCountSessionId || loadingSessionItems}
                       onClick={() => handleImportFromSession(selectedCountSessionId)}
-                      className="btn-primary flex items-center justify-center gap-1.5 text-xs px-3.5 py-2 rounded-xl font-bold whitespace-nowrap cursor-pointer"
+                      className="btn-primary flex items-center justify-center gap-1.5 text-xs px-3.5 py-2 rounded-xl font-bold whitespace-nowrap cursor-pointer shrink-0"
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${loadingSessionItems ? "animate-spin" : ""}`} />
                       <span>{loadingSessionItems ? "Estirando..." : "Estirar Discrepancias"}</span>

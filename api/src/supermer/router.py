@@ -1604,7 +1604,7 @@ async def inventory_list_sessions(
     area: Optional[str] = Query(None),
     estado: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission("inventory:cycle_count")),
+    user=Depends(require_auth),
 ):
     return await service_inventory.list_count_sessions(user["company_id"], db, area, estado)
 
@@ -1651,7 +1651,7 @@ async def inventory_list_items(
     session_id: UUID,
     requiere_ajuste: Optional[bool] = Query(None),
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission("inventory:cycle_count")),
+    user=Depends(require_auth),
 ):
     return await service_inventory.list_count_items(session_id, db, requiere_ajuste)
 
