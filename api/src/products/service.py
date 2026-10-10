@@ -87,6 +87,10 @@ async def create_product(db: AsyncSession, data: ProductCreate) -> Product:
     if not dump.get("sku") or str(dump.get("sku")).strip().upper() in ("", "AUTO"):
         dump["sku"] = await get_next_sku(db, str(data.company_id))
 
+    for f in ("precio_venta", "costo_promedio", "ultimo_costo"):
+        if dump.get(f) is not None:
+            dump[f] = round(Decimal(str(dump[f])))
+
     product = Product(**dump)
     db.add(product)
     await db.flush()
@@ -139,6 +143,10 @@ async def update_product(db: AsyncSession, product_id: str, data: ProductUpdate)
     if "codigo_barra" in update_dict:
         cb = update_dict["codigo_barra"]
         update_dict["codigo_barra"] = cb.strip() if isinstance(cb, str) and cb.strip() else None
+
+    for f in ("precio_venta", "costo_promedio", "ultimo_costo"):
+        if f in update_dict and update_dict[f] is not None:
+            update_dict[f] = round(Decimal(str(update_dict[f])))
 
     for field, value in update_dict.items():
         if hasattr(product, field):

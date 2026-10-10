@@ -449,7 +449,7 @@ export default function PromocionesPage() {
   ): number => {
     let precio = precioRegular
     if (tipo === "precio_fijo_oferta" && precioFijo !== "") {
-      precio = Number(precioFijo)
+      precio = Math.round(Number(precioFijo))
     } else if (tipo === "porcentaje" && valorPct !== "") {
       const pct = Number(valorPct) / 100
       precio = baseCalculo === "costo" && costo > 0
@@ -1005,12 +1005,12 @@ export default function PromocionesPage() {
       }
 
       if (newTipo === "precio_fijo_oferta") {
-        payload.precio_fijo_promocional = newBulkPrecioFijo !== "" ? Number(newBulkPrecioFijo) : undefined
+        payload.precio_fijo_promocional = newBulkPrecioFijo !== "" ? Math.round(Number(newBulkPrecioFijo)) : undefined
       } else if (newTipo === "porcentaje") {
         payload.valor = Number(newBulkValorPct)
         payload.base_calculo_pct = selectionMode === "category" ? "venta" : newBaseCalculoPct
       } else if (newTipo === "monto_fijo") {
-        payload.valor = Number(newBulkMontoFijo)
+        payload.valor = Math.round(Number(newBulkMontoFijo))
       } else if (newTipo === "dos_por_uno") {
         payload.valor = 1
         payload.cantidad_minima = 2
@@ -1021,7 +1021,7 @@ export default function PromocionesPage() {
         payload.valor = newSegundaUnidadPct !== "" ? Number(newSegundaUnidadPct) : 50
         payload.cantidad_minima = 2
       } else if (newTipo === "combo_pack" || newTipo === "combo_precio") {
-        payload.precio_fijo_promocional = newBulkPrecioFijo !== "" ? Number(newBulkPrecioFijo) : avgPromoPrice
+        payload.precio_fijo_promocional = newBulkPrecioFijo !== "" ? Math.round(Number(newBulkPrecioFijo)) : Math.round(avgPromoPrice)
       }
 
       if (newTerminacionPsicologica !== "") {
@@ -1054,7 +1054,7 @@ export default function PromocionesPage() {
       // Guardar mapa de precios por producto para soportar reglas individuales y en lote
       const preciosPorProducto: Record<string, number> = {}
       itemsList.forEach(it => {
-        preciosPorProducto[it.product.id] = it.precio_promocional
+        preciosPorProducto[it.product.id] = Math.round(it.precio_promocional)
       })
       payload.precios_por_producto = preciosPorProducto
 

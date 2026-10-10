@@ -2169,7 +2169,7 @@ export default function PurchasesPage() {
         const unitCost = editedCosts[it.product_id] !== undefined
           ? (Number(editedCosts[it.product_id]) || 0)
           : (Number(it.costo_unitario_estimado) || 0)
-        const subtotal = qty * unitCost
+        const subtotal = Math.round(qty * unitCost)
 
         const stockActual = Number(it.stock_actual) || 0
         const pvpMin = Number(it.precio_venta) || 0
@@ -4116,7 +4116,7 @@ export default function PurchasesPage() {
                           const isEven = idx % 2 === 0
                           const qty = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : Math.max(0, Math.round(Number(it.cantidad_sugerida) || 0))
                           const unitCost = editedCosts[it.product_id] !== undefined ? editedCosts[it.product_id] : (Number(it.costo_unitario_estimado) || 0)
-                          const subtotal = Number(qty) * unitCost
+                          const subtotal = Math.round(Number(qty) * unitCost)
 
                           const stockActual = Number(it.stock_actual) || 0
                           const demandaD = Number(it.demanda_diaria_ajustada) || 0
@@ -4406,17 +4406,15 @@ export default function PurchasesPage() {
 
                               {/* Costo Unitario EDITABLE */}
                               <td className="px-1.5 py-1 text-right whitespace-nowrap">
-                                <input
-                                  type="number"
-                                  min={0}
-                                  step={50}
-                                  value={unitCost}
-                                  onChange={(e) => {
-                                    const val = Math.max(0, Number(e.target.value))
-                                    setEditedCosts(prev => ({ ...prev, [it.product_id]: val }))
+                                <CurrencyInput
+                                  currency="PYG"
+                                  value={Math.round(unitCost)}
+                                  onChangeValue={(val) => {
+                                    const v = Math.max(0, Math.round(val || 0))
+                                    setEditedCosts(prev => ({ ...prev, [it.product_id]: v }))
                                     if (Number(qty) > 0) setSelectedItemsIA(prev => ({ ...prev, [it.product_id]: true }))
                                   }}
-                                  className="w-20 p-0.5 text-right font-mono font-bold text-xs input-field bg-white dark:bg-slate-900 border-indigo-300 dark:border-indigo-700 text-indigo-900 dark:text-indigo-200 focus:ring-1 focus:ring-indigo-500"
+                                  className="w-24 p-0.5 text-right font-mono font-bold text-xs input-field bg-white dark:bg-slate-900 border-indigo-300 dark:border-indigo-700 text-indigo-900 dark:text-indigo-200 focus:ring-1 focus:ring-indigo-500"
                                   title="Precio de compra negociado para la orden de compra"
                                 />
                               </td>

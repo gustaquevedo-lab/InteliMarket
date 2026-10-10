@@ -91,7 +91,8 @@ export default function PromotionsPage() {
     if (!form.nombre) { toast.error("Ingresá el nombre de la promoción", ""); return }
     setSaving(true)
     try {
-      await api.promotions.create(form)
+      const payload = { ...form, valor: form.tipo === 'porcentaje' ? form.valor : Math.round(form.valor) }
+      await api.promotions.create(payload)
       toast.success("Promoción Creada", `La promoción ${form.nombre} fue registrada y está activa en el POS.`)
       setShowModal(false)
       loadData()

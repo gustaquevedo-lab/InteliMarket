@@ -773,7 +773,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
     await db.flush()
 
     for item_data in data.items:
-        cost = item_data.costo_unitario
+        cost = round(item_data.costo_unitario)
         qty = round(float(item_data.cantidad_recibida))
 
         po_price = po_price_map.get(str(item_data.product_id))
@@ -3244,10 +3244,10 @@ async def calculate_smart_replenishment_preview(
             "ventas_mes_2": vm2,
             "ventas_mes_3": vm3,
             "ventas_mes_4": vm4,
-            "costo_promedio": float(costo_prom),
-            "ultimo_costo": float(costo_ult),
-            "precio_venta": precio_venta,
-            "precio_mayorista": precio_mayorista,
+            "costo_promedio": int(round(float(costo_prom))),
+            "ultimo_costo": int(round(float(costo_ult))),
+            "precio_venta": int(round(float(precio_venta))),
+            "precio_mayorista": int(round(float(precio_mayorista))) if precio_mayorista is not None else None,
             "precio_mayorista_min_qty": precio_mayorista_min_qty,
             "variacion_costo_pct": var_costo_pct,
             "pulso_tendencia": pulso_tendencia,
@@ -3266,8 +3266,8 @@ async def calculate_smart_replenishment_preview(
             "punto_reorden": float(punto_reorden),
             "target_stock": float(target_stock),
             "cantidad_sugerida": float(cantidad_sugerida),
-            "costo_unitario_estimado": float(costo_unit),
-            "subtotal_estimado": float(subtotal_item),
+            "costo_unitario_estimado": int(round(float(costo_unit))),
+            "subtotal_estimado": int(round(float(subtotal_item))),
             "iva_tasa": float(iva_tasa or 10),
             "explicacion_ia": explicacion_texto,
             "generada_automaticamente": True,
@@ -3279,7 +3279,7 @@ async def calculate_smart_replenishment_preview(
         "total_quiebres": total_quiebres,
         "total_bajos": total_bajos,
         "total_sugeridos": total_sugeridos,
-        "monto_total_estimado": float(monto_total_estimado),
+        "monto_total_estimado": int(round(float(monto_total_estimado))),
         "meses_labels": meses_labels,
         "mes_actual_label": mes_actual_label,
         "items": items,

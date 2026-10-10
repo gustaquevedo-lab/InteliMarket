@@ -173,7 +173,7 @@ def calcular_precio_promocional(
     precio_promo = _aplicar_terminacion_psicologica(
         precio_promo, terminacion_psicologica, base_calculo_pct, costo_unitario_referencia
     )
-    return precio_promo
+    return round(precio_promo)
 
 
 async def create_promotion(db: AsyncSession, company_id: str, data: PromotionCreate, usuario_registro: Optional[str] = None) -> Promotion:
@@ -205,17 +205,24 @@ async def create_promotion(db: AsyncSession, company_id: str, data: PromotionCre
 
     fecha_venc_lote = data.fecha_vencimiento_lote or data.valido_hasta
 
+    precio_fijo_promo = round(data.precio_fijo_promocional) if data.precio_fijo_promocional is not None else None
+    valor_promo = round(data.valor) if (data.tipo == "monto_fijo" and data.valor is not None) else data.valor
+    val_max = round(data.valor_maximo) if data.valor_maximo is not None else None
+    precios_por_prod = None
+    if data.precios_por_producto and isinstance(data.precios_por_producto, dict):
+        precios_por_prod = {str(k): int(round(Decimal(str(v)))) for k, v in data.precios_por_producto.items() if v is not None}
+
     promo = Promotion(
         company_id=cid,
         nombre=data.nombre,
         descripcion=data.descripcion,
         tipo=data.tipo,
-        valor=data.valor,
-        precio_fijo_promocional=data.precio_fijo_promocional,
-        valor_maximo=data.valor_maximo,
+        valor=valor_promo,
+        precio_fijo_promocional=precio_fijo_promo,
+        valor_maximo=val_max,
         base_calculo_pct=data.base_calculo_pct or "venta",
         terminacion_psicologica=data.terminacion_psicologica,
-        precios_por_producto=data.precios_por_producto,
+        precios_por_producto=precios_por_prod,
         aplica_a=data.aplica_a,
         producto_ids=[uuid.UUID(p) for p in (data.producto_ids or [])] if data.producto_ids else None,
         categoria_ids=[uuid.UUID(c) for c in (data.categoria_ids or [])] if data.categoria_ids else None,
@@ -407,6 +414,17 @@ async def update_promotion(db: AsyncSession, promo_id: str, data: PromotionUpdat
         update_data["estado"] = "activa" if update_data["activo"] else "pausada"
 
     # Recalcular vende_bajo_costo si cambian precio o costo de referencia
+    if "precio_fijo_promocional" in update_data and update_data["precio_fijo_promocional"] is not None:
+        update_data["precio_fijo_promocional"] = round(Decimal(str(update_data["precio_fijo_promocional"])))
+    if "valor" in update_data and update_data.get("tipo", promo.tipo) == "monto_fijo" and update_data["valor"] is not None:
+        update_data["valor"] = round(Decimal(str(update_data["valor"])))
+    if "valor_maximo" in update_data and update_data["valor_maximo"] is not None:
+        update_data["valor_maximo"] = round(Decimal(str(update_data["valor_maximo"])))
+    if "precios_por_producto" in update_data and isinstance(update_data["precios_por_producto"], dict):
+        update_data["precios_por_producto"] = {
+            str(k): int(round(Decimal(str(v)))) for k, v in update_data["precios_por_producto"].items() if v is not None
+        }
+
     new_precio = update_data.get("precio_fijo_promocional", promo.precio_fijo_promocional)
     new_costo = update_data.get("costo_unitario_referencia", promo.costo_unitario_referencia)
     if "precio_fijo_promocional" in update_data or "costo_unitario_referencia" in update_data:
@@ -723,10 +741,10 @@ async def generate_sell_out_claim(db: AsyncSession, company_id: str, promo_id: s
     if promo.financiamiento == "co_financiado":
         total_pct = prov_pct + tienda_pct
         if total_pct > 0:
-            total_rebate = total_descuento_general * (prov_pct / total_pct)
-            total_aporte_tienda = total_descuento_general * (tienda_pct / total_pct)
+            total_rebate = round(total_descuento_general * (prov_pct / total_pct))
+            total_aporte_tienda = total_descuento_general - total_rebate
         elif prov_pct > 0:
-            total_rebate = total_descuento_general * (prov_pct / Decimal("100"))
+            total_rebate = round(total_descuento_general * (prov_pct / Decimal("100")))
             total_aporte_tienda = total_descuento_general - total_rebate
     elif promo.financiamiento == "propio_supermercado":
         total_rebate = Decimal("0")
@@ -1082,11 +1100,14 @@ async def calculate_applicable(
                     descuento_item = (it.precio_unitario - precio_promo_unitario) * qty_promo
 
             if descuento_item > 0:
+                descuento_item = round(descuento_item)
                 descuento_p += descuento_item
                 items_con_descuento.append(it)
 
         if p.valor_maximo and descuento_p > p.valor_maximo:
-            descuento_p = p.valor_maximo
+            descuento_p = round(p.valor_maximo)
+        else:
+            descuento_p = round(descuento_p)
 
         if descuento_p > 0:
             applicable.append(ValidatedPromotion(

@@ -2265,12 +2265,10 @@ export default function ProductsPage() {
                   </div>
                   <div>
                     <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Precio Venta Kit (Gs.) *</label>
-                    <input
-                      type="number"
-                      min="0"
-                      required
+                    <CurrencyInput
+                      currency="PYG"
                       value={kitForm.precio_venta}
-                      onChange={(e) => setKitForm({ ...kitForm, precio_venta: Number(e.target.value) })}
+                      onChangeValue={(val) => setKitForm({ ...kitForm, precio_venta: Math.max(0, Math.round(val || 0)) })}
                       className="input-field w-full text-xs font-mono font-black text-purple-600"
                     />
                   </div>
