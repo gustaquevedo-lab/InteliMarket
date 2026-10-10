@@ -3110,7 +3110,7 @@ def save_credit_note_attachment(content: bytes, filename: str) -> str:
     return f"/uploads/credit_notes/{unique_name}"
 
 
-async def list_supplier_credit_notes(db: AsyncSession, company_id: str, supplier_id: str | None = None, solo_pendientes: bool = False, limit: int = 500) -> list[dict]:
+async def list_supplier_credit_notes(db: AsyncSession, company_id: str, supplier_id: str | None = None, solo_pendientes: bool = False, limit: int | None = None) -> list[dict]:
     cid = company_id if isinstance(company_id, uuid.UUID) else uuid.UUID(str(company_id))
     query = select(SupplierCreditNote, Supplier.razon_social).join(
         Supplier, Supplier.id == SupplierCreditNote.supplier_id, isouter=True
@@ -3120,7 +3120,9 @@ async def list_supplier_credit_notes(db: AsyncSession, company_id: str, supplier
     if supplier_id:
         sid = supplier_id if isinstance(supplier_id, uuid.UUID) else uuid.UUID(str(supplier_id))
         query = query.where(SupplierCreditNote.supplier_id == sid)
-    query = query.order_by(SupplierCreditNote.fecha.desc()).limit(limit)
+    query = query.order_by(SupplierCreditNote.fecha.desc())
+    if limit is not None:
+        query = query.limit(limit)
     result = await db.execute(query)
     return [
         {

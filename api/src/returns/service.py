@@ -2,7 +2,7 @@ from decimal import Decimal
 from datetime import datetime, timezone
 import uuid
 
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import re
@@ -228,7 +228,12 @@ async def get_return_with_items(db: AsyncSession, return_id: str) -> dict | None
 
 
 async def list_returns(
-    db: AsyncSession, company_id: str, estado: str | None = None, limit: int = 200, offset: int = 0,
+    db: AsyncSession,
+    company_id: str,
+    estado: str | None = None,
+    q: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[dict]:
     query = (
         select(Return, Customer.razon_social, Customer.ruc, Sale.numero, NotaCreditoDebito.numero)
@@ -248,7 +253,23 @@ async def list_returns(
         else:
             query = query.where(Return.estado == estado)
 
-    query = query.order_by(Return.fecha.desc()).limit(limit).offset(offset)
+    if q and q.strip():
+        term = f"%{q.strip()}%"
+        query = query.where(
+            or_(
+                Return.numero.ilike(term),
+                Return.motivo.ilike(term),
+                Return.motivo_detalle.ilike(term),
+                Customer.razon_social.ilike(term),
+                Customer.ruc.ilike(term),
+                Sale.numero.ilike(term),
+                NotaCreditoDebito.numero.ilike(term),
+            )
+        )
+
+    query = query.order_by(Return.fecha.desc()).offset(offset)
+    if limit is not None:
+        query = query.limit(limit)
     result = await db.execute(query)
 
     records = []

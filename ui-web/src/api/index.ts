@@ -2883,7 +2883,7 @@ export const api = {
         saldo_pendiente_factura: number
       }[]>(`/v1/purchases/suppliers/${supplierId}/products/${productId}/invoices`),
     returns: {
-      list: (params?: { estado?: string; supplier_id?: string }) =>
+      list: (params?: { estado?: string; supplier_id?: string; limit?: number; offset?: number }) =>
         client.get<any[]>("/v1/purchases/returns", params as any),
       create: (data: {
         proveedor_id: string
@@ -3341,7 +3341,7 @@ export const api = {
     expire: () => client.post<{expiradas: number}>("/v1/quotes/expire"),
   },
   returns: {
-    list: (params?: { estado?: string }) => client.get<Return[]>(`/v1/companies/${COMPANY_ID}/returns`, params as any),
+    list: (params?: { estado?: string; q?: string; limit?: number; offset?: number }) => client.get<Return[]>(`/v1/companies/${COMPANY_ID}/returns`, params as any),
     get: (id: string) => client.get<Return>(`/v1/returns/${id}`),
     create: (data: Partial<Return>) => client.post<Return>("/v1/returns", data),
     update: (id: string, data: Partial<Return>) => client.patch<Return>(`/v1/returns/${id}`, data),
@@ -4176,9 +4176,9 @@ export const api = {
       reject: (id: string, motivo?: string) => client.post<{ success: boolean }>(`/v1/financial/ap/approvals/${id}/reject`, { motivo }),
     },
     creditNotes: Object.assign(
-      (params?: { supplier_id?: string }) => client.get<any[]>("/v1/financial/supplier-credit-notes", { company_id: COMPANY_ID, ...params } as any),
+      (params?: { supplier_id?: string; solo_pendientes?: boolean; limit?: number }) => client.get<any[]>("/v1/financial/supplier-credit-notes", { company_id: COMPANY_ID, ...params } as any),
       {
-        list: (params?: { supplier_id?: string }) => client.get<any[]>("/v1/financial/supplier-credit-notes", { company_id: COMPANY_ID, ...params } as any),
+        list: (params?: { supplier_id?: string; solo_pendientes?: boolean; limit?: number }) => client.get<any[]>("/v1/financial/supplier-credit-notes", { company_id: COMPANY_ID, ...params } as any),
         create: (data: {
           supplier_id: string;
           numero: string;

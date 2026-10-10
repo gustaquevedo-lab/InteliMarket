@@ -41,11 +41,12 @@ async def create_return(body: ReturnCreate, db: AsyncSession = Depends(get_db)):
 async def list_returns(
     company_id: str,
     estado: str | None = Query(None),
-    limit: int = Query(50, le=500),
+    q: str | None = Query(None),
+    limit: int | None = Query(None),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_returns(db, company_id, estado, limit=limit, offset=offset)
+    return await service.list_returns(db, company_id, estado, q=q, limit=limit, offset=offset)
 
 
 @router.get("/returns/motivos")

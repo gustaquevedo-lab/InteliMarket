@@ -131,8 +131,8 @@ export default function ReturnsPage() {
     setLoadingReturns(true)
     try {
       const [returnsData, salesData, warehousesData, motivosData] = await Promise.allSettled([
-        api.returns.list({ estado: filterStatus !== "todos" ? filterStatus : undefined }),
-        api.sales.list({ estado: "confirmado" }),
+        api.returns.list({ estado: filterStatus !== "todos" ? filterStatus : undefined, limit: 10000 }),
+        api.sales.list({ estado: "confirmado", limit: 200 }),
         api.warehouses.list(),
         api.returns.motivos(),
       ])
@@ -150,7 +150,7 @@ export default function ReturnsPage() {
   const fetchSupplierCreditNotes = async () => {
     setLoadingNc(true)
     try {
-      const data = await api.financial.creditNotes()
+      const data = await api.financial.creditNotes({ solo_pendientes: false, limit: 10000 })
       setCreditNotes(Array.isArray(data) ? data : [])
     } catch {
       setCreditNotes([])
@@ -164,7 +164,7 @@ export default function ReturnsPage() {
     try {
       const [finData, managedData] = await Promise.allSettled([
         api.financial.supplierReturns().catch(() => []),
-        api.purchases.returns.list().catch(() => []),
+        api.purchases.returns.list({ limit: 10000 }).catch(() => []),
       ])
       const finList: any[] = finData.status === "fulfilled" && Array.isArray(finData.value) ? finData.value : []
       const managedList: any[] = managedData.status === "fulfilled" && Array.isArray(managedData.value) ? managedData.value : []
@@ -315,13 +315,16 @@ export default function ReturnsPage() {
 
   /* ── FILTRADO Y KPIS: DEVOLUCIONES CLIENTES ──────────────────────────── */
   const filteredReturns = useMemo(() => {
+    const q = search.trim().toLowerCase()
     return returns.filter(r => {
-      const matchSearch = !search.trim() ||
-        (r.numero || "").toLowerCase().includes(search.toLowerCase()) ||
-        ((r as any).sale?.numero || "").toLowerCase().includes(search.toLowerCase()) ||
-        ((r as any).customer?.razon_social || "").toLowerCase().includes(search.toLowerCase()) ||
-        ((r as any).customer?.ruc || "").toLowerCase().includes(search.toLowerCase()) ||
-        (r.motivo || "").toLowerCase().includes(search.toLowerCase())
+      const matchSearch = !q ||
+        (r.numero || "").toLowerCase().includes(q) ||
+        ((r as any).sale_numero || (r as any).sale?.numero || "").toLowerCase().includes(q) ||
+        ((r as any).nota_credito_numero || "").toLowerCase().includes(q) ||
+        ((r as any).customer_name || (r as any).customer?.razon_social || (r as any).customer?.nombre || "").toLowerCase().includes(q) ||
+        ((r as any).customer_ruc || (r as any).customer?.ruc || "").toLowerCase().includes(q) ||
+        (r.motivo || "").toLowerCase().includes(q) ||
+        ((r as any).motivo_detalle || "").toLowerCase().includes(q)
       const matchStatus = filterStatus === "todos" || r.estado === filterStatus
       return matchSearch && matchStatus
     })

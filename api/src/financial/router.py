@@ -763,8 +763,8 @@ async def get_financial_ratios(company_id: str = Query(), db: AsyncSession = Dep
 async def list_supplier_credit_notes(
     company_id: str = Query(),
     supplier_id: str | None = Query(None),
-    solo_pendientes: bool = Query(True),
-    limit: int = Query(500),
+    solo_pendientes: bool = Query(False),
+    limit: int | None = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
     return await service.list_supplier_credit_notes(db, company_id, supplier_id, solo_pendientes=solo_pendientes, limit=limit)
