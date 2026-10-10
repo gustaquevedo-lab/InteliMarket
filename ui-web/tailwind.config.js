@@ -13,6 +13,9 @@ export default {
         posMono: ['IBM Plex Mono', 'ui-monospace', 'monospace'],
       },
       colors: {
+        slate: {
+          850: '#172033',
+        },
         brand: {
           orange: '#FF7019',
           orangeInk: '#C64E00',

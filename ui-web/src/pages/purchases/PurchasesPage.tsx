@@ -3431,8 +3431,8 @@ export default function PurchasesPage() {
                 }}
                 className={`group relative text-left p-3.5 sm:p-4 rounded-2xl transition-all duration-200 border ${
                   isMacroActive
-                    ? "bg-white dark:bg-slate-850 shadow-md ring-2 ring-indigo-500/80 border-transparent dark:ring-indigo-400"
-                    : "bg-slate-100/80 dark:bg-slate-800/60 hover:bg-white/80 dark:hover:bg-slate-800 border-slate-200/80 dark:border-slate-700/60 hover:shadow-sm"
+                    ? "bg-white dark:bg-slate-800 shadow-md ring-2 ring-indigo-500/80 border-transparent dark:ring-indigo-400"
+                    : "bg-slate-100/80 dark:bg-slate-900/60 hover:bg-white/80 dark:hover:bg-slate-800/80 border-slate-200/80 dark:border-slate-700/60 hover:shadow-sm"
                 }`}
               >
                 <div className="flex items-center justify-between mb-2">
@@ -3476,7 +3476,9 @@ export default function PurchasesPage() {
                   >
                     {macro.label}
                   </h4>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5 font-medium">
+                  <p className={`text-[11px] truncate mt-0.5 font-medium ${
+                    isMacroActive ? "text-slate-600 dark:text-slate-300" : "text-slate-500 dark:text-slate-400"
+                  }`}>
                     {macro.subtitle}
                   </p>
                 </div>
