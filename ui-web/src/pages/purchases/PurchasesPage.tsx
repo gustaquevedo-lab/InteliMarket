@@ -1944,7 +1944,10 @@ export default function PurchasesPage() {
     if (!replenishmentData) return 0
     return replenishmentData.items
       .filter((it: any) => {
-        if (selectedSupplierIA && String(it.ultimo_proveedor_id || "").toLowerCase() !== String(selectedSupplierIA).toLowerCase()) return false
+        if (selectedSupplierIA) {
+          const itemSupId = String(it.proveedor_oficial_id || it.ultimo_proveedor_id || "").toLowerCase()
+          if (itemSupId !== String(selectedSupplierIA).toLowerCase()) return false
+        }
         return selectedItemsIA[it.product_id]
       })
       .reduce((acc: number, it: any) => {
@@ -1959,7 +1962,10 @@ export default function PurchasesPage() {
     if (!replenishmentData) return 0
     return replenishmentData.items
       .filter((it: any) => {
-        if (selectedSupplierIA && String(it.ultimo_proveedor_id || "").toLowerCase() !== String(selectedSupplierIA).toLowerCase()) return false
+        if (selectedSupplierIA) {
+          const itemSupId = String(it.proveedor_oficial_id || it.ultimo_proveedor_id || "").toLowerCase()
+          if (itemSupId !== String(selectedSupplierIA).toLowerCase()) return false
+        }
         return selectedItemsIA[it.product_id]
       })
       .reduce((acc: number, it: any) => {
@@ -2124,6 +2130,114 @@ export default function PurchasesPage() {
       return sortDirectionIA === "asc" ? valA - valB : valB - valA
     })
   }, [replenishmentData, searchProductIA, filterEstadoIA, editedQuantities, editedCosts, sortColumnIA, sortDirectionIA, selectedSupplierIA])
+
+  // Conteo reactivo de ítems seleccionados en la Matriz
+  const selectedCountIA = useMemo(() => {
+    return displayedReplenishmentItems.filter((it: any) => selectedItemsIA[it.product_id]).length
+  }, [displayedReplenishmentItems, selectedItemsIA])
+
+  // Exportar Matriz de Sugerencia a Excel (.xlsx) con valores numéricos puros (sin enriquecimiento restrictivo)
+  const handleExportMatrizToExcel = () => {
+    try {
+      if (!displayedReplenishmentItems || displayedReplenishmentItems.length === 0) {
+        toast.info("Sin datos", "No hay productos en la matriz de sugerencia para exportar.")
+        return
+      }
+
+      // Si el usuario marcó checkboxes individuales, exportar solo los seleccionados; si no, exportar todos los mostrados
+      const hasSpecificSelection = displayedReplenishmentItems.some((it: any) => selectedItemsIA[it.product_id])
+      const itemsToExport = hasSpecificSelection
+        ? displayedReplenishmentItems.filter((it: any) => selectedItemsIA[it.product_id])
+        : displayedReplenishmentItems
+
+      const m4Label = `Venta ${replenishmentData?.meses_labels?.[0] || "M-4"}`
+      const m3Label = `Venta ${replenishmentData?.meses_labels?.[1] || "M-3"}`
+      const m2Label = `Venta ${replenishmentData?.meses_labels?.[2] || "M-2"}`
+      const m1Label = `Venta ${replenishmentData?.meses_labels?.[3] || "M-1"}`
+      const mesActualLabel = `Venta ${replenishmentData?.mes_actual_label || "Mes Actual"} (En Curso)`
+
+      const dataToExport = itemsToExport.map((it: any) => {
+        const qty = editedQuantities[it.product_id] !== undefined
+          ? (Number(editedQuantities[it.product_id]) || 0)
+          : Math.max(0, Math.round(Number(it.cantidad_sugerida) || 0))
+        const unitCost = editedCosts[it.product_id] !== undefined
+          ? (Number(editedCosts[it.product_id]) || 0)
+          : (Number(it.costo_unitario_estimado) || 0)
+        const subtotal = qty * unitCost
+
+        const stockActual = Number(it.stock_actual) || 0
+        const pvpMin = Number(it.precio_venta) || 0
+        const pvMay = Number(it.precio_mayorista) || 0
+        const effectiveCost = unitCost > 0 ? unitCost : (Number(it.ultimo_costo) || Number(it.costo_promedio) || 0)
+        const margenMinPct = pvpMin > 0 && effectiveCost > 0
+          ? Number((((pvpMin - effectiveCost) / pvpMin) * 100).toFixed(2))
+          : (pvpMin > 0 && effectiveCost === 0 ? 100 : null)
+        const margenMayPct = pvMay > 0 && effectiveCost > 0
+          ? Number((((pvMay - effectiveCost) / pvMay) * 100).toFixed(2))
+          : (pvMay > 0 && effectiveCost === 0 ? 100 : null)
+
+        const diasStock = Number(it.dias_stock_restantes) || 0
+
+        return {
+          "SKU": String(it.sku || ""),
+          "Código de Barras": String(it.codigo_barra || ""),
+          "Producto": it.nombre || "",
+          "Unidad": it.unidad_medida || "UN",
+          "Proveedor Oficial": it.proveedor_oficial_nombre || "",
+          "Último Proveedor": it.ultimo_proveedor_nombre || "",
+          "Stock Físico": stockActual,
+          "ROP (Punto Reorden)": it.punto_reorden !== undefined ? Math.round(Number(it.punto_reorden)) : null,
+          [m4Label]: Number(it.ventas_mes_4) || 0,
+          [m3Label]: Number(it.ventas_mes_3) || 0,
+          [m2Label]: Number(it.ventas_mes_2) || 0,
+          [m1Label]: Number(it.ventas_mes_1) || 0,
+          [mesActualLabel]: Number(it.ventas_mes_actual) || 0,
+          "Pulso Tendencia": it.pulso_tendencia === "acelerando" ? "Acelera" : it.pulso_tendencia === "desacelerando" ? "Baja" : "Estable",
+          "Costo PPP": Number(it.costo_promedio) || 0,
+          "Último Costo Compra": Number(it.ultimo_costo || it.costo_promedio) || 0,
+          "PVP Minorista": pvpMin,
+          "Margen PVP %": margenMinPct !== null ? margenMinPct : "",
+          "PV Mayorista": pvMay,
+          "Margen May %": margenMayPct !== null ? margenMayPct : "",
+          "Escala Mayorista Mín (Un.)": it.precio_mayorista_min_qty ? Number(it.precio_mayorista_min_qty) : null,
+          "Días Autonomía": diasStock > 900 ? 999 : Number(diasStock.toFixed(1)),
+          "Estado Autonomía": it.autonomia_estado || "normal",
+          "Sugerencia IA (Un.)": Math.max(0, Math.round(Number(it.cantidad_sugerida) || 0)),
+          "Pedido Propuesto (Un.)": qty,
+          "Costo Unit. Acordado": unitCost,
+          "Subtotal Estimado": subtotal,
+          "Alertas / Justificación": it.justificacion_ia || it.alerta_oferta || "",
+        }
+      })
+
+      const ws = XLSX.utils.json_to_sheet(dataToExport)
+
+      // Ajuste de ancho de columnas
+      const colWidths = Object.keys(dataToExport[0] || {}).map(key => {
+        let maxLen = key.length
+        dataToExport.slice(0, 50).forEach((row: any) => {
+          const val = String(row[key] ?? "")
+          if (val.length > maxLen) maxLen = val.length
+        })
+        return { wch: Math.min(Math.max(maxLen + 2, 10), 45) }
+      })
+      ws["!cols"] = colWidths
+
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, "MatrizSugerencia")
+
+      const supplierName = selectedSupplierIA
+        ? suppliers.find(s => String(s.id).toLowerCase() === String(selectedSupplierIA).toLowerCase())?.razon_social?.replace(/[^a-zA-Z0-9_-]/g, "_")
+        : "Todos"
+      const dateStr = new Date().toISOString().split("T")[0]
+      const fileName = `Matriz_Sugerencia_${supplierName || "General"}_${dateStr}.xlsx`
+
+      XLSX.writeFile(wb, fileName)
+      toast.success("Excel Exportado", `Se descargó la matriz con ${itemsToExport.length} productos en formato .xlsx (datos puros sin formato restrictivo).`)
+    } catch (e: any) {
+      toast.error("Error al exportar a Excel", e.message)
+    }
+  }
 
   // Filtrado y Paginación de Órdenes
   const filteredOrders = useMemo(() => {
@@ -3799,19 +3913,41 @@ export default function PurchasesPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 bg-white dark:bg-slate-800 px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 shadow-xs shrink-0">
-                <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
-                  <ShoppingCart className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Total Seleccionado</div>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-base font-black font-mono text-indigo-600 dark:text-indigo-400">
-                      {formatPYG(totalOrdenIASugerida)}
+              <div className="flex items-center gap-2.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleExportMatrizToExcel}
+                  disabled={loadingReplenishment || displayedReplenishmentItems.length === 0}
+                  className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-extrabold text-xs shadow-xs transition-all cursor-pointer border border-emerald-500 hover:scale-[1.02] active:scale-[0.98]"
+                  title="Exportar matriz completa con valores numéricos puros (sin enriquecimiento restrictivo) para tratar libremente en Excel"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>Exportar Excel</span>
+                  {selectedCountIA > 0 ? (
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-800 text-white font-mono font-black">
+                      {selectedCountIA} sel.
                     </span>
-                    <span className="text-xs font-mono font-bold text-gray-500">
-                      ({Math.round(totalUnidadesIASugerida).toLocaleString()} un.)
+                  ) : (
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-700/80 text-emerald-100 font-mono font-bold">
+                      {displayedReplenishmentItems.length}
                     </span>
+                  )}
+                </button>
+
+                <div className="flex items-center gap-3 bg-white dark:bg-slate-800 px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 shadow-xs">
+                  <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
+                    <ShoppingCart className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Total Seleccionado</div>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-base font-black font-mono text-indigo-600 dark:text-indigo-400">
+                        {formatPYG(totalOrdenIASugerida)}
+                      </span>
+                      <span className="text-xs font-mono font-bold text-gray-500">
+                        ({Math.round(totalUnidadesIASugerida).toLocaleString()} un.)
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
