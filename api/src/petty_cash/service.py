@@ -1469,7 +1469,7 @@ async def list_expenses(
     monto: float | None = None,
     monto_min: float | None = None,
     monto_max: float | None = None,
-    limit: int = 100, offset: int = 0, incluir_anulados: bool = False,
+    limit: int | None = None, offset: int = 0, incluir_anulados: bool = False,
 ) -> list[Expense]:
     query = select(Expense).where(Expense.company_id == uuid.UUID(company_id))
     if not incluir_anulados:
@@ -1514,7 +1514,9 @@ async def list_expenses(
                 pass
         query = query.where(or_(*conditions))
 
-    query = query.order_by(Expense.fecha_gasto.desc(), Expense.created_at.desc()).limit(limit).offset(offset)
+    query = query.order_by(Expense.fecha_gasto.desc(), Expense.created_at.desc()).offset(offset)
+    if limit is not None:
+        query = query.limit(limit)
     result = await db.execute(query)
     expenses = list(result.scalars().all())
     if expenses:

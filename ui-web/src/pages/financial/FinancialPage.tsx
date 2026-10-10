@@ -232,7 +232,7 @@ export default function FinancialPage() {
         chqsData,
       ] = await Promise.allSettled([
         api.financial.apDashboard(),
-        api.financial.invoices.list({ limit: 2500 }),
+        api.financial.invoices.list(),
         api.financial.aging().catch(() => ({ por_supplier: [] })),
         api.financial.paymentRuns.list(),
         api.financial.cashFlow.list(),

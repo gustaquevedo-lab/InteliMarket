@@ -708,7 +708,7 @@ export default function PurchasesPage() {
         api.purchases.listReceipts(),
         api.purchases.listSuppliers(),
         api.purchases.reports.kpis(),
-        api.financial.invoices.list({ limit: 500, order_by: "newest" }),
+        api.financial.invoices.list({ order_by: "newest" }),
         api.purchases.requisitions.list(),
         api.purchases.rfqs.list(),
         api.purchases.budgets.list(),
@@ -3025,7 +3025,7 @@ export default function PurchasesPage() {
       setNcNumberInput("")
       const [updatedReturns, updatedInvoices, updatedCreditNotes] = await Promise.all([
         api.purchases.returns.list(),
-        api.financial.invoices.list({ limit: 500, order_by: "newest" }),
+        api.financial.invoices.list({ order_by: "newest" }),
         api.financial.creditNotes().catch(() => []),
       ])
       setManagedReturns(updatedReturns || [])
@@ -3159,7 +3159,7 @@ export default function PurchasesPage() {
       setManagingNcsList([])
       const [updatedReturns, updatedInvoices, updatedCreditNotes] = await Promise.all([
         api.purchases.returns.list(),
-        api.financial.invoices.list({ limit: 500, order_by: "newest" }),
+        api.financial.invoices.list({ order_by: "newest" }),
         api.financial.creditNotes().catch(() => []),
       ])
       setManagedReturns(updatedReturns || [])
@@ -5042,7 +5042,7 @@ export default function PurchasesPage() {
                   setPageInvoices(1)
                   if (val === "pagada") {
                     try {
-                      const res = await api.financial.invoices.list({ estado: "pagada", limit: 500 })
+                      const res = await api.financial.invoices.list({ estado: "pagada" })
                       if (res && res.length > 0) {
                         setAllSupplierInvoices(prev => {
                           const existingIds = new Set(prev.map(i => i.id))

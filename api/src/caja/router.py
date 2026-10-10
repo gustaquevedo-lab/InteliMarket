@@ -120,7 +120,7 @@ async def list_sessions(
     register_id: str | None = Query(None),
     user_id: str | None = Query(None),
     estado: str | None = Query(None),
-    limit: int = Query(50, le=500),
+    limit: int | None = Query(None),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
@@ -157,7 +157,7 @@ async def resume_session(session_id: str, body: CashSessionResume, db: AsyncSess
 async def list_emitted_notas_credito(
     search: str | None = Query(None),
     session_id: str | None = Query(None),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int | None = Query(None),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
@@ -266,7 +266,7 @@ async def list_sessions_summary(
     cajero_nombre: str | None = Query(None),
     search: str | None = Query(None),
     incluir_sin_movimiento: bool = Query(False),
-    limit: int = Query(50, le=5000),
+    limit: int | None = Query(None),
     offset: int = Query(0, ge=0),
     fecha_desde: str | None = Query(None),
     fecha_hasta: str | None = Query(None),

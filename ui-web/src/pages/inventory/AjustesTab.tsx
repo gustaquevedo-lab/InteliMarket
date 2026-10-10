@@ -335,7 +335,6 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
         warehouse_id: filterWarehouse === "all" ? undefined : filterWarehouse,
         estado: filterEstado === "all" ? undefined : filterEstado,
         riesgo: filterRiesgo === "all" ? undefined : filterRiesgo,
-        limit: 100,
       })
       setAdjustments(res || [])
     } catch (e: any) {

@@ -50,7 +50,7 @@ async def list_receivables(
     customer_id: str | None = Query(None),
     estado: str | None = Query(None),
     search: str | None = Query(None),
-    limit: int = Query(50, le=500),
+    limit: int | None = Query(None),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):

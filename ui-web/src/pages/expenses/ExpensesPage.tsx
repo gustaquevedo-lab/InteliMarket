@@ -667,7 +667,7 @@ export default function ExpensesPage() {
         api.financial.banks.list().catch(() => []),
         api.caja.registers.list().catch(() => []),
         api.expenses.rendiciones.list().catch(() => []),
-        api.financial.invoices.list({ estado: "pendiente,parcial,aprobada", limit: 2000 }).catch(() => []),
+        api.financial.invoices.list({ estado: "pendiente,parcial,aprobada" }).catch(() => []),
         api.purchases.listSuppliers().catch(() => []),
         api.expenses.staffCandidates().catch(() => []),
         api.expenses.sueldokAdvances().catch(() => []),
@@ -721,7 +721,6 @@ export default function ExpensesPage() {
           api.expenses.list({
             estado: filterEstado || undefined,
             category_id: filterCategory || undefined,
-            limit: 500,
           }).catch(() => []),
           api.expenses.rendiciones.list().catch(() => []),
         ])

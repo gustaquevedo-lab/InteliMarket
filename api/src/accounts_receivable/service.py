@@ -144,7 +144,7 @@ async def get_aging_report(db: AsyncSession, company_id: str) -> dict:
 async def get_accounts_receivable(
     db: AsyncSession, company_id: str, customer_id: str | None = None,
     estado: str | None = None, search: str | None = None,
-    limit: int = 50, offset: int = 0,
+    limit: int | None = None, offset: int = 0,
 ) -> list[dict]:
     today = date.today()
     query = text("""
@@ -166,7 +166,7 @@ async def get_accounts_receivable(
         LEFT JOIN customers c ON c.id = ar.customer_id
         WHERE ar.company_id = :company_id
     """)
-    params = {"company_id": company_id, "today": today}
+    params = {"company_id": company_id, "today": today, "offset": offset}
     if customer_id:
         query = text(query.text + " AND ar.customer_id = :customer_id")
         params["customer_id"] = customer_id
@@ -182,12 +182,15 @@ async def get_accounts_receivable(
     # de estado, las primeras filas de la pagina sean puro historico ya
     # saldado en vez de la deuda real vigente. Pendientes primero, mas viejos
     # primero dentro de cada grupo (para priorizar la mora mas antigua).
-    query = text(query.text + """
+    limit_clause = ""
+    if limit is not None:
+        params["limit"] = limit
+        limit_clause = "LIMIT :limit"
+
+    query = text(query.text + f"""
         ORDER BY CASE WHEN ar.estado = 'pendiente' THEN 0 ELSE 1 END, ar.fecha_vencimiento ASC NULLS LAST
-        LIMIT :limit OFFSET :offset
+        {limit_clause} OFFSET :offset
     """)
-    params["limit"] = limit
-    params["offset"] = offset
 
     result = await db.execute(query, params)
     rows = result.fetchall()

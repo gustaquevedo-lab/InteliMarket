@@ -883,14 +883,18 @@ async def list_adjustments(
     warehouse_id: str | None = None,
     estado: str | None = None,
     riesgo: str | None = None,
-    limit: int = 50,
+    limit: int | None = None,
     offset: int = 0,
 ) -> list[dict]:
     from sqlalchemy import text
 
     comp_uuid = uuid.UUID(company_id) if isinstance(company_id, str) else company_id
     where = "a.company_id = :comp_id"
-    params: dict = {"comp_id": comp_uuid, "limit": limit, "offset": offset}
+    params: dict = {"comp_id": comp_uuid, "offset": offset}
+    limit_clause = ""
+    if limit is not None:
+        params["limit"] = limit
+        limit_clause = "LIMIT :limit"
 
     if warehouse_id:
         where += " AND a.warehouse_id = :wh_id"
@@ -923,7 +927,7 @@ async def list_adjustments(
         WHERE {where}
         GROUP BY a.id, w.nombre, w.codigo
         ORDER BY a.created_at DESC
-        LIMIT :limit OFFSET :offset
+        {limit_clause} OFFSET :offset
     """
     result = await db.execute(text(query), params)
     return [dict(r._mapping) for r in result]
@@ -1463,14 +1467,18 @@ async def list_physical_sessions(
     estado: str | None = None,
     supplier_id: str | None = None,
     categoria_id: str | None = None,
-    limit: int = 50,
+    limit: int | None = None,
     offset: int = 0,
 ) -> list[dict]:
     from sqlalchemy import text as sqtext
 
     comp_uuid = uuid.UUID(company_id) if isinstance(company_id, str) else company_id
     where = "s.company_id = :comp_id"
-    params: dict = {"comp_id": comp_uuid, "limit": limit, "offset": offset}
+    params: dict = {"comp_id": comp_uuid, "offset": offset}
+    limit_clause = ""
+    if limit is not None:
+        params["limit"] = limit
+        limit_clause = "LIMIT :limit"
 
     if warehouse_id:
         where += " AND s.warehouse_id = :wh_id"
@@ -1500,7 +1508,7 @@ async def list_physical_sessions(
         LEFT JOIN warehouses w ON w.id = s.warehouse_id
         WHERE {where}
         ORDER BY s.created_at DESC
-        LIMIT :limit OFFSET :offset
+        {limit_clause} OFFSET :offset
     """
     result = await db.execute(sqtext(query), params)
     return [dict(r._mapping) for r in result]

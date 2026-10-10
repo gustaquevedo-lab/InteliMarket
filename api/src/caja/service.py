@@ -321,7 +321,7 @@ async def list_sessions(
     estado: str | None = None,
     fecha_desde: datetime | None = None,
     fecha_hasta: datetime | None = None,
-    limit: int = 50,
+    limit: int | None = None,
     offset: int = 0,
     incluir_sin_movimiento: bool = False,
 ) -> list[CashSession]:
@@ -345,7 +345,9 @@ async def list_sessions(
         query = query.where(CashSession.fecha_apertura >= fecha_desde)
     if fecha_hasta:
         query = query.where(CashSession.fecha_apertura <= end_of_day(fecha_hasta))
-    query = query.order_by(CashSession.fecha_apertura.desc()).limit(limit).offset(offset)
+    query = query.order_by(CashSession.fecha_apertura.desc()).offset(offset)
+    if limit is not None:
+        query = query.limit(limit)
     result = await db.execute(query)
     return list(result.scalars().all())
 
@@ -1564,7 +1566,7 @@ async def list_sessions_with_totals(
     company_id: str,
     register_id: str | None = None,
     estado: str | None = None,
-    limit: int = 50,
+    limit: int | None = None,
     offset: int = 0,
     fecha_desde=None,
     fecha_hasta=None,
@@ -1625,7 +1627,9 @@ async def list_sessions_with_totals(
             )
         )
 
-    query = query.order_by(CashSession.fecha_apertura.desc()).limit(limit).offset(offset)
+    query = query.order_by(CashSession.fecha_apertura.desc()).offset(offset)
+    if limit is not None:
+        query = query.limit(limit)
     result = await db.execute(query)
     sessions = list(result.scalars().all())
 

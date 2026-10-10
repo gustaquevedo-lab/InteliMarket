@@ -378,7 +378,7 @@ async def list_expenses(
     monto: Optional[float] = Query(None),
     monto_min: Optional[float] = Query(None),
     monto_max: Optional[float] = Query(None),
-    limit: int = Query(100, le=500),
+    limit: int | None = Query(None),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),

@@ -248,7 +248,7 @@ async def list_adjustments(
     warehouse_id: str | None = Query(None),
     estado: str | None = Query(None),
     riesgo: str | None = Query(None),
-    limit: int = Query(50, le=500),
+    limit: int | None = Query(None),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
@@ -469,7 +469,7 @@ async def list_physical_sessions(
     estado: str | None = Query(None),
     supplier_id: str | None = Query(None),
     categoria_id: str | None = Query(None),
-    limit: int = Query(50, le=500),
+    limit: int | None = Query(None),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):

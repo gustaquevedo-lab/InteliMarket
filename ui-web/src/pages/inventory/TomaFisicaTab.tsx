@@ -137,7 +137,6 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
         estado: filterEstado === "all" ? undefined : filterEstado,
         supplier_id: filterSupplier === "all" ? undefined : filterSupplier,
         categoria_id: filterCategory === "all" ? undefined : filterCategory,
-        limit: 50,
       })
       setSessions(res || [])
     } catch (err: any) {
