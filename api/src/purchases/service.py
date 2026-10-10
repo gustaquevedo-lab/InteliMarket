@@ -2904,7 +2904,7 @@ async def calculate_smart_replenishment_preview(
     
     if supplier_id:
         params["supplier_id"] = supplier_id
-        where_clauses.append("COALESCE(last_sup.last_sup_id, p.supplier_id) = :supplier_id")
+        where_clauses.append("COALESCE(p.supplier_id, last_sup.last_sup_id) = :supplier_id")
         
     if categoria_id:
         params["cat_id"] = categoria_id
@@ -2981,11 +2981,13 @@ async def calculate_smart_replenishment_preview(
             COALESCE(sales_4m.v_m4, 0) as v_m4,
             COALESCE(sales_4m.v_promo_qty, 0) as v_promo_qty,
             COALESCE(promo_flag.en_promo_activa, false) as en_promo_flag,
-            COALESCE(last_sup.last_sup_id, p.supplier_id) as last_sup_id,
-            COALESCE(last_sup.last_sup_name, p_sup.razon_social, 'Sin Proveedor') as last_sup_name,
+            COALESCE(p.supplier_id, last_sup.last_sup_id) as proveedor_oficial_id,
+            COALESCE(p_sup.razon_social, last_sup.last_sup_name, 'Sin Proveedor') as proveedor_oficial_nombre,
             COALESCE(p.precio_venta, 0) as precio_venta,
             sp_may.may_precio as precio_mayorista,
-            sp_may.may_min_qty as precio_mayorista_min_qty
+            sp_may.may_min_qty as precio_mayorista_min_qty,
+            last_sup.last_sup_id as ultimo_proveedor_id,
+            last_sup.last_sup_name as ultimo_proveedor_nombre
         FROM products p
         LEFT JOIN suppliers p_sup ON p_sup.id = p.supplier_id
         LEFT JOIN last_sup_cte last_sup ON last_sup.product_id = p.id
@@ -3082,11 +3084,13 @@ async def calculate_smart_replenishment_preview(
         vm4 = float(r[17])
         v_promo_qty = float(r[18])
         en_promo_flag = bool(r[19])
-        ultimo_proveedor_id = str(r[20]) if r[20] else None
-        ultimo_proveedor_nombre = str(r[21]) if r[21] else None
+        proveedor_oficial_id = str(r[20]) if r[20] else None
+        proveedor_oficial_nombre = str(r[21]) if r[21] else None
         precio_venta = float(r[22]) if len(r) > 22 and r[22] is not None else 0.0
         precio_mayorista = float(r[23]) if len(r) > 23 and r[23] is not None else None
         precio_mayorista_min_qty = int(r[24]) if len(r) > 24 and r[24] is not None else None
+        ultimo_proveedor_id = str(r[25]) if len(r) > 25 and r[25] else None
+        ultimo_proveedor_nombre = str(r[26]) if len(r) > 26 and r[26] else None
         
         # Variación porcentual de costo (Último costo vs Costo promedio)
         if costo_prom > Decimal("0") and costo_ult > Decimal("0"):
@@ -3247,8 +3251,10 @@ async def calculate_smart_replenishment_preview(
             "pulso_tendencia": pulso_tendencia,
             "tiene_promocion_detectada": tiene_promo,
             "promocion_info": promo_info,
-            "ultimo_proveedor_id": ultimo_proveedor_id,
-            "ultimo_proveedor_nombre": ultimo_proveedor_nombre,
+            "proveedor_oficial_id": proveedor_oficial_id,
+            "proveedor_oficial_nombre": proveedor_oficial_nombre,
+            "ultimo_proveedor_id": ultimo_proveedor_id or proveedor_oficial_id,
+            "ultimo_proveedor_nombre": ultimo_proveedor_nombre or proveedor_oficial_nombre,
             "demanda_diaria_base": float(demanda_diaria_base),
             "multiplicador_estacional": float(mult),
             "demanda_diaria_ajustada": float(demanda_ajustada),

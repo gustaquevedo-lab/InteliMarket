@@ -1063,8 +1063,8 @@ export default function PurchasesPage() {
     const initialSettings: Record<string, any> = {}
 
     itemsToOrder.forEach((it: any) => {
-      // Si se filtró por un proveedor específico, usar ese; de lo contrario su último proveedor, o el primero
-      const assigned = selectedSupplierIA || it.ultimo_proveedor_id || suppliers[0]?.id || ""
+      // Priorizar Proveedor Oficial asignado al producto; fallback al último proveedor o el seleccionado
+      const assigned = selectedSupplierIA || it.proveedor_oficial_id || it.ultimo_proveedor_id || suppliers[0]?.id || ""
       initialMap[it.product_id] = assigned
       if (assigned) {
         initialIncluded[assigned] = true
@@ -1983,9 +1983,12 @@ export default function PurchasesPage() {
   const displayedReplenishmentItems = useMemo(() => {
     if (!replenishmentData?.items) return []
     const filtered = replenishmentData.items.filter((it: any) => {
-      // Blindaje estricto: si se seleccionó un proveedor, descartar todo ítem que no pertenezca a ese proveedor
-      if (selectedSupplierIA && String(it.ultimo_proveedor_id || "").toLowerCase() !== String(selectedSupplierIA).toLowerCase()) {
-        return false
+      // Blindaje estricto: si se seleccionó un proveedor, filtrar por Proveedor Oficial
+      if (selectedSupplierIA) {
+        const itemSupId = String(it.proveedor_oficial_id || it.ultimo_proveedor_id || "").toLowerCase()
+        if (itemSupId !== String(selectedSupplierIA).toLowerCase()) {
+          return false
+        }
       }
 
       const matchSearch = !searchProductIA ||
@@ -2016,8 +2019,8 @@ export default function PurchasesPage() {
           valB = (b.nombre || "").toLowerCase()
           break
         case "proveedor":
-          valA = (a.ultimo_proveedor_nombre || "").toLowerCase()
-          valB = (b.ultimo_proveedor_nombre || "").toLowerCase()
+          valA = (a.proveedor_oficial_nombre || a.ultimo_proveedor_nombre || "").toLowerCase()
+          valB = (b.proveedor_oficial_nombre || b.ultimo_proveedor_nombre || "").toLowerCase()
           break
         case "stock":
           valA = Number(a.stock_actual) || 0
@@ -3924,7 +3927,7 @@ export default function PurchasesPage() {
                             />
                           </th>
                           {renderSortHeader("producto", "Producto & SKU", "left", undefined, "min-w-[160px] max-w-[210px]")}
-                          {renderSortHeader("proveedor", "Proveedor", "left", "Último proveedor registrado para este producto", "min-w-[95px] max-w-[125px]")}
+                          {renderSortHeader("proveedor", "Proveedor Oficial", "left", "Proveedor oficial asignado al producto (Canal principal)", "min-w-[100px] max-w-[135px]")}
                           {renderSortHeader("stock", "Stock", "right", "Stock actual físico registrado en góndola/depósito", "w-13 font-mono")}
                           {renderSortHeader("m4", labels4m[0], "right", `Ventas en ${labels4m[0]}`, "font-mono w-11")}
                           {renderSortHeader("m3", labels4m[1], "right", `Ventas en ${labels4m[1]}`, "font-mono w-11")}
@@ -4007,11 +4010,25 @@ export default function PurchasesPage() {
                                 </div>
                               </td>
 
-                              {/* Último Proveedor Habitual */}
-                              <td className="px-1.5 py-1 min-w-[95px] max-w-[125px]">
-                                {it.ultimo_proveedor_nombre ? (
+                              {/* Proveedor Oficial con indicador si difiere del último de compra */}
+                              <td className="px-1.5 py-1 min-w-[100px] max-w-[135px]">
+                                {it.proveedor_oficial_nombre ? (
+                                  <div title={`Proveedor Oficial: ${it.proveedor_oficial_nombre}${it.ultimo_proveedor_nombre && it.ultimo_proveedor_nombre !== it.proveedor_oficial_nombre ? `\n(Última compra a: ${it.ultimo_proveedor_nombre})` : ''}`}>
+                                    <div className="flex items-center gap-1 text-slate-800 dark:text-slate-100 font-semibold">
+                                      <Building2 className="w-3 h-3 text-indigo-500 shrink-0" />
+                                      <span className="text-[10px] leading-tight truncate">
+                                        {it.proveedor_oficial_nombre}
+                                      </span>
+                                    </div>
+                                    {it.ultimo_proveedor_nombre && it.ultimo_proveedor_nombre !== it.proveedor_oficial_nombre && (
+                                      <span className="text-[8.5px] text-amber-700 dark:text-amber-300 font-medium block truncate" title={`Última compra a: ${it.ultimo_proveedor_nombre}`}>
+                                        ↳ Últ: {it.ultimo_proveedor_nombre}
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : it.ultimo_proveedor_nombre ? (
                                   <div className="flex items-center gap-1 text-slate-700 dark:text-slate-200" title={`Último Proveedor: ${it.ultimo_proveedor_nombre}`}>
-                                    <Building2 className="w-3 h-3 text-indigo-500 shrink-0" />
+                                    <Building2 className="w-3 h-3 text-slate-400 shrink-0" />
                                     <span className="text-[10px] font-medium leading-tight truncate">
                                       {it.ultimo_proveedor_nombre}
                                     </span>

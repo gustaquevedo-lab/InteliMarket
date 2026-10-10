@@ -464,23 +464,38 @@ async def list_products(
             """),
             {"c_uuid": c_uuid, "p_ids": p_ids}
         )
-        last_sup_by_pid = {r.product_id: (r.supplier_id, r.supplier_nombre) for r in last_sup_rows}
-
-        direct_supp_ids = [p.supplier_id for p in products if getattr(p, "supplier_id", None) and p.id not in last_sup_by_pid]
+        all_official_supp_ids = [p.supplier_id for p in products if getattr(p, "supplier_id", None)]
         suppliers_by_id = {}
-        if direct_supp_ids:
+        if all_official_supp_ids:
             supp_rows = await db.execute(
                 text("SELECT id, razon_social FROM suppliers WHERE id = ANY(:s_ids)"),
-                {"s_ids": list(set(direct_supp_ids))}
+                {"s_ids": list(set(all_official_supp_ids))}
             )
             suppliers_by_id = {r.id: r.razon_social for r in supp_rows}
 
+        last_sup_map = {
+            r.product_id: (r.supplier_id, r.supplier_nombre, r.last_purchase_date)
+            for r in last_sup_rows
+        }
+
         for p in products:
-            if p.id in last_sup_by_pid:
-                p.__dict__["supplier_id"] = last_sup_by_pid[p.id][0]
-                p.__dict__["supplier_nombre"] = last_sup_by_pid[p.id][1]
-            elif getattr(p, "supplier_id", None) and p.supplier_id in suppliers_by_id:
-                p.__dict__["supplier_nombre"] = suppliers_by_id[p.supplier_id]
+            oficial_id = getattr(p, "supplier_id", None)
+            oficial_nombre = suppliers_by_id.get(oficial_id) if oficial_id else None
+
+            ultimo_id = last_sup_map[p.id][0] if p.id in last_sup_map else oficial_id
+            ultimo_nombre = last_sup_map[p.id][1] if p.id in last_sup_map else oficial_nombre
+            fecha_ult = last_sup_map[p.id][2] if p.id in last_sup_map else None
+
+            p.__dict__["proveedor_oficial_id"] = oficial_id
+            p.__dict__["proveedor_oficial_nombre"] = oficial_nombre
+            p.__dict__["ultimo_proveedor_id"] = ultimo_id
+            p.__dict__["ultimo_proveedor_nombre"] = ultimo_nombre
+            p.__dict__["fecha_ultima_compra"] = fecha_ult
+
+            # En la lista del catálogo se muestra el último proveedor de compra (o el oficial si no hubo compra)
+            p.__dict__["supplier_nombre"] = ultimo_nombre or oficial_nombre
+            # Conservamos p.supplier_id como el OFICIAL (para edición en formularios)
+            p.__dict__["supplier_id"] = oficial_id
 
         # 3. Asociar Escala Mayorista preferencial (sp_tiered_prices)
         tier_res = await db.execute(

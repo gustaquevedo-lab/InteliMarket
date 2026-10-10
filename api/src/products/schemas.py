@@ -91,6 +91,11 @@ class ProductResponse(BaseModel):
     categoria_id: Optional[UUID] = None
     supplier_id: Optional[UUID] = None
     supplier_nombre: Optional[str] = None
+    proveedor_oficial_id: Optional[UUID] = None
+    proveedor_oficial_nombre: Optional[str] = None
+    ultimo_proveedor_id: Optional[UUID] = None
+    ultimo_proveedor_nombre: Optional[str] = None
+    fecha_ultima_compra: Optional[datetime] = None
     sku: str
     codigo_barra: Optional[str] = None
     nombre: str

@@ -842,7 +842,7 @@ export default function ProductsPage() {
       nombre: p.nombre || "",
       codigo_barra: p.codigo_barra || "",
       categoria_id: p.categoria_id || "",
-      supplier_id: p.supplier_id || "",
+      supplier_id: p.proveedor_oficial_id || p.supplier_id || "",
       tipo: p.tipo || "producto",
       tipo_producto: (p.tipo_producto || "producto") as any,
       activo: p.activo !== false,
@@ -1530,7 +1530,7 @@ export default function ProductsPage() {
                       <th className="py-2.5 px-1.5 text-center whitespace-nowrap">Tipo</th>
                       <th className="py-2.5 px-1.5 text-center whitespace-nowrap">Estado</th>
                       <th className="py-2.5 px-1.5 max-w-[85px]">Categoría</th>
-                      <th className="py-2.5 px-1.5 max-w-[85px]">Proveedor</th>
+                      <th className="py-2.5 px-1.5 max-w-[95px]" title="Último proveedor al que se compró el producto en caja/factura">Últ. Proveedor</th>
                       <th className="py-2.5 px-1.5 whitespace-nowrap">Código / PLU</th>
                       <th className="py-2.5 px-1.5 text-center whitespace-nowrap">Stock</th>
                       <th className="py-2.5 px-1.5 text-right whitespace-nowrap">Costo Prom.</th>
@@ -1665,12 +1665,19 @@ export default function ProductsPage() {
                             </span>
                           </td>
 
-                          {/* Proveedor */}
-                          <td className="py-2 px-1.5 max-w-[85px]">
-                            {p.supplier_nombre ? (
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 block truncate" title={p.supplier_nombre}>
-                                {p.supplier_nombre}
-                              </span>
+                          {/* Último Proveedor de Compra */}
+                          <td className="py-2 px-1.5 max-w-[95px]">
+                            {p.ultimo_proveedor_nombre || p.supplier_nombre ? (
+                              <div title={`Último proveedor de compra: ${p.ultimo_proveedor_nombre || p.supplier_nombre}${p.proveedor_oficial_nombre && p.proveedor_oficial_nombre !== (p.ultimo_proveedor_nombre || p.supplier_nombre) ? `\n(Proveedor Oficial: ${p.proveedor_oficial_nombre})` : ''}`}>
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 block truncate">
+                                  {p.ultimo_proveedor_nombre || p.supplier_nombre}
+                                </span>
+                                {p.proveedor_oficial_nombre && p.proveedor_oficial_nombre !== (p.ultimo_proveedor_nombre || p.supplier_nombre) && (
+                                  <span className="text-[8px] text-indigo-600 dark:text-indigo-400 block truncate leading-tight font-medium" title={`Proveedor Oficial asignado: ${p.proveedor_oficial_nombre}`}>
+                                    Oficial: {p.proveedor_oficial_nombre}
+                                  </span>
+                                )}
+                              </div>
                             ) : (
                               <span className="text-slate-300 dark:text-slate-600 text-[9px] italic">Sin asignar</span>
                             )}
@@ -3117,20 +3124,26 @@ export default function ProductsPage() {
 
                   <div>
                     <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
-                      Proveedor Habitual
+                      Proveedor Oficial (Canal Principal)
                     </label>
                     <select
                       value={form.supplier_id}
                       onChange={(e) => setForm({ ...form, supplier_id: e.target.value })}
                       className="input-field w-full text-xs"
                     >
-                      <option value="">Sin proveedor habitual asignado...</option>
+                      <option value="">Sin proveedor oficial asignado...</option>
                       {suppliers.map((s) => (
                         <option key={s.id} value={s.id}>
                           {s.razon_social || s.nombre_fantasia || "Proveedor"} {s.ruc ? `(${s.ruc})` : ""}
                         </option>
                       ))}
                     </select>
+                    {editingProduct?.ultimo_proveedor_nombre && editingProduct.ultimo_proveedor_nombre !== editingProduct.proveedor_oficial_nombre && (
+                      <p className="text-[10px] text-amber-700 dark:text-amber-400 mt-1 flex items-center gap-1 font-medium">
+                        <span>ℹ️ Última compra registrada a:</span>
+                        <span className="font-bold underline">{editingProduct.ultimo_proveedor_nombre}</span>
+                      </p>
+                    )}
                   </div>
                 </div>
 

@@ -1008,6 +1008,8 @@ class SmartReplenishmentItem(BaseModel):
     pulso_tendencia: Optional[str] = "estable"  # "acelerando", "estable", "desacelerando"
     tiene_promocion_detectada: bool = False
     promocion_info: Optional[str] = None
+    proveedor_oficial_id: Optional[UUID] = None
+    proveedor_oficial_nombre: Optional[str] = None
     ultimo_proveedor_id: Optional[UUID] = None
     ultimo_proveedor_nombre: Optional[str] = None
     demanda_diaria_base: float
