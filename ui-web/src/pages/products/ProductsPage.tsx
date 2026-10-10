@@ -1703,28 +1703,50 @@ export default function ProductsPage() {
 
                       const esPesable = ["KG", "Kg", "kg", "LT", "Lt"].includes(p.unidad_medida || "") || p.tipo_venta === "peso"
                       const isEven = idx % 2 === 0
+                      const promoInfo = activePromosMap.get(p.id)
 
                       return (
                         <tr
                           key={p.id}
                           className={`transition-colors duration-150 border-b border-slate-100 dark:border-slate-800/60 ${
-                            p.activo === false
+                            promoInfo
+                              ? "bg-rose-50/40 dark:bg-rose-950/25 border-l-4 border-l-rose-500 shadow-sm"
+                              : p.activo === false
                               ? "bg-rose-50/20 dark:bg-rose-950/10 opacity-75"
                               : isEven
                               ? "bg-white dark:bg-slate-900"
                               : "bg-slate-50/70 dark:bg-slate-800/40"
-                          } hover:!bg-indigo-50/60 dark:hover:!bg-indigo-950/30 cursor-pointer group`}
+                          } hover:!bg-rose-100/40 dark:hover:!bg-rose-950/30 cursor-pointer group`}
                           onClick={() => openProduct360(p.id)}
                         >
                           {/* Producto & SKU */}
                           <td className="py-2 px-2.5 max-w-[210px]">
                             <div className="flex items-center gap-2">
-                              <div className="w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center font-bold text-xs shrink-0 group-hover:bg-indigo-100 dark:group-hover:bg-indigo-950/50 group-hover:text-indigo-600 transition-colors">
-                                {esPesable ? <Scale className="w-3.5 h-3.5 text-amber-500" /> : <Box className="w-3.5 h-3.5 text-indigo-500" />}
+                              <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 transition-colors ${
+                                promoInfo
+                                  ? "bg-rose-100 dark:bg-rose-950/60 text-rose-600 ring-2 ring-rose-400/50"
+                                  : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 group-hover:bg-indigo-100 dark:group-hover:bg-indigo-950/50 group-hover:text-indigo-600"
+                              }`}>
+                                {promoInfo ? (
+                                  <Flame className="w-4 h-4 text-rose-600 fill-rose-500 animate-bounce" />
+                                ) : esPesable ? (
+                                  <Scale className="w-3.5 h-3.5 text-amber-500" />
+                                ) : (
+                                  <Box className="w-3.5 h-3.5 text-indigo-500" />
+                                )}
                               </div>
                               <div className="min-w-0 flex-1">
-                                <div className="font-bold text-slate-900 dark:text-white truncate text-xs flex items-center gap-1">
+                                <div className="font-bold text-slate-900 dark:text-white truncate text-xs flex items-center gap-1.5">
                                   <span className="truncate" title={p.nombre}>{p.nombre}</span>
+                                  {promoInfo && (
+                                    <span
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-gradient-to-r from-rose-600 via-red-600 to-amber-600 text-white shadow-sm shadow-rose-500/40 animate-pulse shrink-0 ring-1 ring-rose-300"
+                                      title={`En Promoción Activa: ${promoInfo.nombre} (${promoInfo.badge})`}
+                                    >
+                                      <Flame className="w-2.5 h-2.5 fill-amber-300 text-amber-300" />
+                                      <span>{promoInfo.badge}</span>
+                                    </span>
+                                  )}
                                   {(p as any).es_perecedero && (
                                     <span className="px-1 py-0.1 rounded text-[8px] font-bold bg-amber-100 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 shrink-0">
                                       Per.
@@ -1858,8 +1880,32 @@ export default function ProductsPage() {
                           </td>
 
                           {/* 2. PVP (Minorista) */}
-                          <td className="py-2 px-1.5 text-right font-mono font-bold text-[11px] text-slate-900 dark:text-white whitespace-nowrap">
-                            {precio > 0 ? formatPYG(precio) : <span className="text-amber-500 font-normal text-[10px]">Sin Precio</span>}
+                          <td className="py-2 px-1.5 text-right font-mono whitespace-nowrap">
+                            {promoInfo ? (
+                              <div className="flex flex-col items-end leading-tight">
+                                <span className="line-through text-[10px] text-slate-400 font-semibold" title="Precio Regular">
+                                  {formatPYG(precio > 0 ? precio : promoInfo.precioRegular)}
+                                </span>
+                                <span
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md font-black text-xs bg-rose-600 text-white shadow-md shadow-rose-500/40 animate-pulse ring-1 ring-rose-300"
+                                  title={`Precio Oferta: ${promoInfo.nombre}`}
+                                >
+                                  <Flame className="w-3 h-3 text-amber-300 fill-amber-300" />
+                                  {formatPYG(promoInfo.precioPromo)}
+                                </span>
+                                {promoInfo.descuentoPct > 0 && (
+                                  <span className="text-[8px] font-extrabold text-rose-600 dark:text-rose-400">
+                                    -{promoInfo.descuentoPct}% OFF
+                                  </span>
+                                )}
+                              </div>
+                            ) : precio > 0 ? (
+                              <span className="font-bold text-[11px] text-slate-900 dark:text-white">
+                                {formatPYG(precio)}
+                              </span>
+                            ) : (
+                              <span className="text-amber-500 font-normal text-[10px]">Sin Precio</span>
+                            )}
                           </td>
 
                           {/* 3. Margen Esperado (Entre Costo Promedio y PVP Minorista) */}
