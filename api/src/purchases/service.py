@@ -3069,6 +3069,7 @@ async def calculate_smart_replenishment_preview(
         sku = r[2]
         cod_barra = r[3]
         unidad = r[4] or "UN"
+        is_unitario = (unidad or "UN").upper() == "UN"
         costo_prom = Decimal(str(r[5]))
         costo_ult = Decimal(str(r[6]))
         costo_est = Decimal(str(r[7]))
@@ -3078,12 +3079,12 @@ async def calculate_smart_replenishment_preview(
         ventas_periodo = Decimal(str(r[11]))
         stock_en_transito = Decimal(str(r[12]))
         
-        vm_actual = float(r[13])
-        vm1 = float(r[14])
-        vm2 = float(r[15])
-        vm3 = float(r[16])
-        vm4 = float(r[17])
-        v_promo_qty = float(r[18])
+        vm_actual = float(round(Decimal(str(r[13] or 0)), 0 if is_unitario else 2)) if r[13] else 0.0
+        vm1 = float(round(Decimal(str(r[14] or 0)), 0 if is_unitario else 2)) if r[14] else 0.0
+        vm2 = float(round(Decimal(str(r[15] or 0)), 0 if is_unitario else 2)) if r[15] else 0.0
+        vm3 = float(round(Decimal(str(r[16] or 0)), 0 if is_unitario else 2)) if r[16] else 0.0
+        vm4 = float(round(Decimal(str(r[17] or 0)), 0 if is_unitario else 2)) if r[17] else 0.0
+        v_promo_qty = float(round(Decimal(str(r[18] or 0)), 0 if is_unitario else 2)) if r[18] else 0.0
         en_promo_flag = bool(r[19])
         proveedor_oficial_id = str(r[20]) if r[20] else None
         proveedor_oficial_nombre = str(r[21]) if r[21] else None
@@ -3220,7 +3221,7 @@ async def calculate_smart_replenishment_preview(
             
         # Cantidad sugerida: basada puramente en stock físico en góndola/depósito
         deficit = max(Decimal("0"), target_stock - stock_actual)
-        cantidad_sugerida = deficit
+        cantidad_sugerida = deficit.quantize(Decimal("1"), rounding=ROUND_HALF_UP) if is_unitario else deficit
         
         if cantidad_sugerida > Decimal("0"):
             total_sugeridos += 1
@@ -3236,9 +3237,9 @@ async def calculate_smart_replenishment_preview(
             "sku": sku,
             "codigo_barra": cod_barra,
             "unidad_medida": unidad,
-            "stock_actual": float(stock_actual),
-            "stock_en_transito": float(stock_en_transito),
-            "ventas_periodo": float(ventas_periodo),
+            "stock_actual": float(stock_actual.quantize(Decimal("1"), rounding=ROUND_HALF_UP)) if is_unitario else float(stock_actual),
+            "stock_en_transito": float(stock_en_transito.quantize(Decimal("1"), rounding=ROUND_HALF_UP)) if is_unitario else float(stock_en_transito),
+            "ventas_periodo": float(ventas_periodo.quantize(Decimal("1"), rounding=ROUND_HALF_UP)) if is_unitario else float(ventas_periodo),
             "ventas_mes_actual": vm_actual,
             "ventas_mes_1": vm1,
             "ventas_mes_2": vm2,

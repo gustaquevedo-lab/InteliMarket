@@ -2198,6 +2198,7 @@ export default function PurchasesPage() {
           : (pvMay > 0 && effectiveCost === 0 ? 100 : null)
 
         const diasStock = Number(it.dias_stock_restantes) || 0
+        const isUnitario = (it.unidad_medida || "UN").toUpperCase() === "UN"
 
         return {
           "SKU": String(it.sku || ""),
@@ -2207,13 +2208,13 @@ export default function PurchasesPage() {
           "Unidad": it.unidad_medida || "UN",
           "Proveedor Oficial": it.proveedor_oficial_nombre || "",
           "Último Proveedor": it.ultimo_proveedor_nombre || "",
-          "Stock Físico": stockActual,
+          "Stock Físico": isUnitario ? Math.round(stockActual) : stockActual,
           "ROP (Punto Reorden)": it.punto_reorden !== undefined ? Math.round(Number(it.punto_reorden)) : null,
-          [m4Label]: Number(it.ventas_mes_4) || 0,
-          [m3Label]: Number(it.ventas_mes_3) || 0,
-          [m2Label]: Number(it.ventas_mes_2) || 0,
-          [m1Label]: Number(it.ventas_mes_1) || 0,
-          [mesActualLabel]: Number(it.ventas_mes_actual) || 0,
+          [m4Label]: isUnitario ? Math.round(Number(it.ventas_mes_4) || 0) : (Number(it.ventas_mes_4) || 0),
+          [m3Label]: isUnitario ? Math.round(Number(it.ventas_mes_3) || 0) : (Number(it.ventas_mes_3) || 0),
+          [m2Label]: isUnitario ? Math.round(Number(it.ventas_mes_2) || 0) : (Number(it.ventas_mes_2) || 0),
+          [m1Label]: isUnitario ? Math.round(Number(it.ventas_mes_1) || 0) : (Number(it.ventas_mes_1) || 0),
+          [mesActualLabel]: isUnitario ? Math.round(Number(it.ventas_mes_actual) || 0) : (Number(it.ventas_mes_actual) || 0),
           "Pulso Tendencia": it.pulso_tendencia === "acelerando" ? "Acelera" : it.pulso_tendencia === "desacelerando" ? "Baja" : "Estable",
           "Costo PPP": Number(it.costo_promedio) || 0,
           "Último Costo Compra": Number(it.ultimo_costo || it.costo_promedio) || 0,
@@ -4172,11 +4173,17 @@ export default function PurchasesPage() {
                         {displayedReplenishmentItems.map((it: any, idx: number) => {
                           const isSelected = !!selectedItemsIA[it.product_id]
                           const isEven = idx % 2 === 0
-                          const qty = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : Math.max(0, Math.round(Number(it.cantidad_sugerida) || 0))
+                          const isUnitario = (it.unidad_medida || "UN").toUpperCase() === "UN"
+                          const qty = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : Math.max(0, isUnitario ? Math.round(Number(it.cantidad_sugerida) || 0) : (Number(it.cantidad_sugerida) || 0))
                           const unitCost = editedCosts[it.product_id] !== undefined ? editedCosts[it.product_id] : (Number(it.costo_unitario_estimado) || 0)
                           const subtotal = Math.round(Number(qty) * unitCost)
 
                           const stockActual = Number(it.stock_actual) || 0
+                          const formatQty = (val: number | undefined | null) => {
+                            const n = Number(val || 0)
+                            if (isUnitario) return Math.round(n).toLocaleString()
+                            return n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 3 })
+                          }
                           const demandaD = Number(it.demanda_diaria_ajustada) || 0
                           const pvpMin = Number(it.precio_venta) || 0
                           const pvMay = Number(it.precio_mayorista) || 0
@@ -4273,29 +4280,29 @@ export default function PurchasesPage() {
                               </td>
 
                               {/* Stock Físico */}
-                              <td className="px-1.5 py-1 text-right font-mono font-bold text-[11px] text-gray-800 dark:text-gray-200 whitespace-nowrap" title={`Stock físico actual: ${stockActual.toLocaleString()}`}>
-                                {stockActual.toLocaleString()}
+                              <td className="px-1.5 py-1 text-right font-mono font-bold text-[11px] text-gray-800 dark:text-gray-200 whitespace-nowrap" title={`Stock físico actual: ${formatQty(stockActual)}`}>
+                                {formatQty(stockActual)}
                               </td>
 
                               {/* Columnas de Ventas Históricas */}
                               <td className="px-1 py-1 text-right font-mono text-[10px] text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                                {Number(it.ventas_mes_4 || 0).toLocaleString()}
+                                {formatQty(it.ventas_mes_4)}
                               </td>
                               <td className="px-1 py-1 text-right font-mono text-[10px] text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                                {Number(it.ventas_mes_3 || 0).toLocaleString()}
+                                {formatQty(it.ventas_mes_3)}
                               </td>
                               <td className="px-1 py-1 text-right font-mono text-[10px] text-gray-600 dark:text-gray-300 font-semibold whitespace-nowrap">
-                                {Number(it.ventas_mes_2 || 0).toLocaleString()}
+                                {formatQty(it.ventas_mes_2)}
                               </td>
                               <td className="px-1 py-1 text-right font-mono text-[10px] text-slate-700 dark:text-slate-200 font-bold whitespace-nowrap">
-                                {Number(it.ventas_mes_1 || 0).toLocaleString()}
+                                {formatQty(it.ventas_mes_1)}
                               </td>
                               {/* Columna destacada: Ventas del Mes en Curso */}
                               <td
                                 className="px-1.5 py-1 text-right font-mono font-black text-[11px] text-amber-800 dark:text-amber-200 bg-amber-50/90 dark:bg-amber-950/40 border-x border-amber-300/80 dark:border-amber-700/60 shadow-xs whitespace-nowrap"
                                 title={`Ventas acumuladas en ${mesActualLabel} (mes en curso)`}
                               >
-                                {Number(it.ventas_mes_actual || 0).toLocaleString()}
+                                {formatQty(it.ventas_mes_actual)}
                               </td>
 
                               {/* Pulso de Venta */}
@@ -4437,11 +4444,12 @@ export default function PurchasesPage() {
                                   </button>
                                   <input
                                     type="number"
-                                    step="any"
+                                    step={isUnitario ? "1" : "any"}
                                     min={0}
                                     value={qty}
                                     onChange={(e) => {
-                                      const val = Math.max(0, Number(e.target.value))
+                                      const raw = Number(e.target.value)
+                                      const val = Math.max(0, isUnitario ? Math.round(raw) : raw)
                                       setEditedQuantities(prev => ({ ...prev, [it.product_id]: val }))
                                       if (val > 0) setSelectedItemsIA(prev => ({ ...prev, [it.product_id]: true }))
                                     }}

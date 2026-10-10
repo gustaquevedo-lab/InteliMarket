@@ -526,21 +526,25 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             await db.flush()
             effective_session_id = auto_sess.id
 
-    # ── Validación de cordura previa para productos pesables (> 300 KG requiere autorización) ──
+    # ── Blindaje de unidades enteras para productos unitarios y validación de productos pesables ──
     for item_data in data.items:
-        if item_data.product_id and item_data.cantidad > Decimal("300"):
+        if item_data.product_id:
             prod_stmt = select(Product).where(Product.id == item_data.product_id)
             prod_res = await db.execute(prod_stmt)
             prod_row = prod_res.scalar_one_or_none()
-            if prod_row and (
-                (prod_row.unidad_medida or "").upper() in ("KG", "KILO", "KILOS")
-                or (prod_row.tipo_venta or "").lower() == "peso"
-            ):
-                if not getattr(data, "override_gran_volumen", False):
-                    raise ValueError(
-                        f"Cantidad inusualmente alta ({item_data.cantidad} KG) para '{prod_row.nombre}'. "
-                        "Pesajes superiores a 300 KG requieren confirmación explícita de supervisor/gerente."
-                    )
+            if prod_row:
+                um_u = (prod_row.unidad_medida or "UN").upper()
+                tv_l = (prod_row.tipo_venta or "unidad").lower()
+                is_unit = (um_u == "UN" or tv_l == "unidad") and um_u not in ("KG", "KILO", "KILOS", "L", "LT", "LITRO", "M", "MT", "METRO") and tv_l != "peso"
+                if is_unit:
+                    if item_data.cantidad != item_data.cantidad.to_integral_value():
+                        item_data.cantidad = max(Decimal("1"), Decimal(str(int(round(float(item_data.cantidad))))))
+                elif item_data.cantidad > Decimal("300") and (um_u in ("KG", "KILO", "KILOS") or tv_l == "peso"):
+                    if not getattr(data, "override_gran_volumen", False):
+                        raise ValueError(
+                            f"Cantidad inusualmente alta ({item_data.cantidad} KG) para '{prod_row.nombre}'. "
+                            "Pesajes superiores a 300 KG requieren confirmación explícita de supervisor/gerente."
+                        )
 
     is_credito = (
         (data.condicion or "").lower() == "credito"
