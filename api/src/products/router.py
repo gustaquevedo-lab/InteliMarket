@@ -125,7 +125,7 @@ async def list_products_direct(
     tipo_producto: str | None = Query(None),
     include_inactive: bool = Query(False),
     updated_since: datetime | None = Query(None),
-    limit: int = Query(100, le=20000),
+    limit: int | None = Query(None, ge=1),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
@@ -148,7 +148,7 @@ async def list_products(
     tipo_producto: str | None = Query(None),
     include_inactive: bool = Query(False),
     updated_since: datetime | None = Query(None),
-    limit: int = Query(100, le=20000),
+    limit: int | None = Query(None, ge=1),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):

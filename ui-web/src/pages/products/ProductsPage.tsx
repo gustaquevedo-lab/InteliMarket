@@ -363,6 +363,16 @@ export default function ProductsPage() {
 
   // Filtros y Búsqueda
   const [search, setSearch] = useState("")
+  const [debouncedSearch, setDebouncedSearch] = useState("")
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search.trim())
+      setPage(1)
+    }, 280)
+    return () => clearTimeout(timer)
+  }, [search])
+
   const [selectedCategory, setSelectedCategory] = useState("")
   const [filterStockTag, setFilterStockTag] = useState<"todos" | "con_stock" | "quiebre" | "bajo_stock" | "pesables" | "perecederos" | "en_promo">("todos")
   const [filterTipoProducto, setFilterTipoProducto] = useState<"todos" | "producto" | "materia_prima" | "insumo" | "servicio">("todos")
@@ -559,7 +569,7 @@ export default function ProductsPage() {
     setLoading(true)
     try {
       const [prodsRes, catsRes, suppsRes, promosRes] = await Promise.allSettled([
-        api.products.list({ search: search || undefined, categoria_id: selectedCategory || undefined, include_inactive: true, limit: 1000 }),
+        api.products.list({ search: debouncedSearch || undefined, categoria_id: selectedCategory || undefined, include_inactive: true }),
         api.categories.list(),
         api.purchases.suppliers(),
         api.promotions.list({ estado: "activa" }).catch(() => []),
@@ -597,7 +607,7 @@ export default function ProductsPage() {
     } finally {
       setLoading(false)
     }
-  }, [search, selectedCategory, selectedParentProductId])
+  }, [debouncedSearch, selectedCategory, selectedParentProductId])
 
   const loadVariants = useCallback(async () => {
     setLoadingVariants(true)

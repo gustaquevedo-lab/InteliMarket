@@ -277,7 +277,7 @@ async def list_products(
     categoria_id: Optional[str] = None,
     search: Optional[str] = None,
     activo: Optional[bool] = None,
-    limit: int = 100,
+    limit: Optional[int] = None,
     offset: int = 0,
     supplier_id: Optional[str] = None,
     tipo_producto: Optional[str] = None,
@@ -409,10 +409,18 @@ async def list_products(
 
     if updated_since is not None:
         query = query.where(Product.updated_at >= updated_since)
-        query = query.order_by(Product.updated_at.asc()).limit(limit).offset(offset)
+        query = query.order_by(Product.updated_at.asc())
+        if limit is not None and limit > 0:
+            query = query.limit(limit).offset(offset)
+        elif offset > 0:
+            query = query.offset(offset)
     else:
         # Filtrar productos con nombres válidos primero y activos con máxima prioridad
-        query = query.order_by(Product.activo.desc(), Product.nombre.asc()).limit(limit).offset(offset)
+        query = query.order_by(Product.activo.desc(), Product.nombre.asc())
+        if limit is not None and limit > 0:
+            query = query.limit(limit).offset(offset)
+        elif offset > 0:
+            query = query.offset(offset)
     result = await db.execute(query)
     products = list(result.scalars().all())
 
