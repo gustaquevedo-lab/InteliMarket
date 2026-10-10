@@ -829,14 +829,13 @@ export default function PurchasesPage() {
       setReplenishmentData(res)
 
       const initialQty: Record<string, number> = {}
-      const initialSel: Record<string, boolean> = {}
       res.items.forEach((it: any) => {
         const numQty = Math.max(0, Math.round(Number(it.cantidad_sugerida) || 0))
         initialQty[it.product_id] = numQty
-        initialSel[it.product_id] = numQty > 0
       })
       setEditedQuantities(initialQty)
-      setSelectedItemsIA(initialSel)
+      // No forzamos pre-selección automática para no sesgar la exportación ni la vista
+      setSelectedItemsIA({})
     } catch (e: any) {
       toast.error("Error en motor de sugerencia", e.message)
     } finally {
@@ -2206,18 +2205,22 @@ export default function PurchasesPage() {
   }, [displayedReplenishmentItems, selectedItemsIA])
 
   // Exportar Matriz de Sugerencia a Excel (.xlsx) con valores numéricos puros (sin enriquecimiento restrictivo)
-  const handleExportMatrizToExcel = () => {
+  const handleExportMatrizToExcel = (mode: "all" | "selected" = "all") => {
     try {
       if (!displayedReplenishmentItems || displayedReplenishmentItems.length === 0) {
         toast.info("Sin datos", "No hay productos en la matriz de sugerencia para exportar.")
         return
       }
 
-      // Si el usuario marcó checkboxes individuales, exportar solo los seleccionados; si no, exportar todos los mostrados
-      const hasSpecificSelection = displayedReplenishmentItems.some((it: any) => selectedItemsIA[it.product_id])
-      const itemsToExport = hasSpecificSelection
-        ? displayedReplenishmentItems.filter((it: any) => selectedItemsIA[it.product_id])
-        : displayedReplenishmentItems
+      let itemsToExport = displayedReplenishmentItems
+      if (mode === "selected") {
+        const selectedList = displayedReplenishmentItems.filter((it: any) => selectedItemsIA[it.product_id])
+        if (selectedList.length === 0) {
+          toast.warning("Sin selección", "No hay ningún producto seleccionado actualmente para exportar.")
+          return
+        }
+        itemsToExport = selectedList
+      }
 
       const m4Label = `Venta ${replenishmentData?.meses_labels?.[0] || "M-4"}`
       const m3Label = `Venta ${replenishmentData?.meses_labels?.[1] || "M-3"}`
@@ -2301,10 +2304,11 @@ export default function PurchasesPage() {
         ? suppliers.find(s => String(s.id).toLowerCase() === String(selectedSupplierIA).toLowerCase())?.razon_social?.replace(/[^a-zA-Z0-9_-]/g, "_")
         : "Todos"
       const dateStr = new Date().toISOString().split("T")[0]
-      const fileName = `Matriz_Sugerencia_${supplierName || "General"}_${dateStr}.xlsx`
+      const tagModo = mode === "selected" ? "Seleccionados" : "Completo"
+      const fileName = `Matriz_Sugerencia_${supplierName || "General"}_${tagModo}_${itemsToExport.length}prod_${dateStr}.xlsx`
 
       XLSX.writeFile(wb, fileName)
-      toast.success("Excel Exportado", `Se descargó la matriz con ${itemsToExport.length} productos en formato .xlsx (datos puros sin formato restrictivo).`)
+      toast.success("Excel Exportado", `Se descargó la matriz con ${itemsToExport.length.toLocaleString()} productos (${tagModo}) en formato .xlsx.`)
     } catch (e: any) {
       toast.error("Error al exportar a Excel", e.message)
     }
@@ -3949,13 +3953,30 @@ export default function PurchasesPage() {
                       }
                     })
                     setSelectedItemsIA(newSel)
-                    toast.success("Sugeridos Seleccionados", `Se marcaron ${count} productos con sugerencia activa.`)
+                    toast.success("Sugeridos Seleccionados", `Se marcaron ${count} productos con sugerencia de compra activa.`)
                   }}
                   className="px-3 py-2 rounded-xl text-xs font-bold bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 flex items-center gap-1.5 transition-colors border border-indigo-200 dark:border-indigo-800"
-                  title="Marcar todos los productos que tengan sugerencia de compra mayor a cero"
+                  title="Marcar únicamente los productos que la IA sugiere comprar"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>Marcar Sugeridos ({displayedReplenishmentItems.filter((it: any) => (editedQuantities[it.product_id] ?? it.cantidad_sugerida) > 0 || it.cantidad_sugerida > 0).length})</span>
+                  <span>Marcar Sugeridos ({displayedReplenishmentItems.filter((it: any) => (editedQuantities[it.product_id] ?? it.cantidad_sugerida) > 0 || it.cantidad_sugerida > 0).length.toLocaleString()})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newSel = { ...selectedItemsIA }
+                    displayedReplenishmentItems.forEach((it: any) => {
+                      newSel[it.product_id] = true
+                    })
+                    setSelectedItemsIA(newSel)
+                    toast.success("Todos Marcados", `Se marcaron los ${displayedReplenishmentItems.length.toLocaleString()} productos mostrados.`)
+                  }}
+                  className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 flex items-center gap-1.5 transition-colors border border-slate-200 dark:border-slate-700"
+                  title="Marcar el 100% de los productos mostrados en la matriz"
+                >
+                  <CheckSquare className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400" />
+                  <span>Marcar Todos ({displayedReplenishmentItems.length.toLocaleString()})</span>
                 </button>
 
                 {selectedCountIA > 0 && (
@@ -3965,10 +3986,10 @@ export default function PurchasesPage() {
                       setSelectedItemsIA({})
                       toast.info("Selección limpiada", "Se desmarcaron todos los productos.")
                     }}
-                    className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 flex items-center gap-1.5 transition-colors border border-slate-200 dark:border-slate-700"
+                    className="px-3 py-2 rounded-xl text-xs font-bold bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 hover:bg-rose-100 flex items-center gap-1.5 transition-colors border border-rose-200 dark:border-rose-800"
                   >
                     <X className="w-3.5 h-3.5" />
-                    <span>Desmarcar ({selectedCountIA})</span>
+                    <span>Desmarcar ({selectedCountIA.toLocaleString()})</span>
                   </button>
                 )}
 
@@ -4119,26 +4140,38 @@ export default function PurchasesPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2.5 shrink-0">
+              <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                {/* BOTÓN PRINCIPAL: EXPORTAR TODOS LOS FILTRADOS (100% TRANSPARENTE) */}
                 <button
                   type="button"
-                  onClick={handleExportMatrizToExcel}
+                  onClick={() => handleExportMatrizToExcel("all")}
                   disabled={loadingReplenishment || displayedReplenishmentItems.length === 0}
-                  className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-extrabold text-xs shadow-xs transition-all cursor-pointer border border-emerald-500 hover:scale-[1.02] active:scale-[0.98]"
-                  title="Exportar matriz completa con valores numéricos puros (sin enriquecimiento restrictivo) para tratar libremente en Excel"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-extrabold text-xs shadow-xs transition-all cursor-pointer border border-emerald-500 hover:scale-[1.02] active:scale-[0.98]"
+                  title="Exportar la matriz completa filtrada (sin importar qué productos estén tildados) a Excel con valores numéricos puros"
                 >
                   <FileSpreadsheet className="w-4 h-4" />
-                  <span>Exportar Excel</span>
-                  {selectedCountIA > 0 ? (
-                    <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-800 text-white font-mono font-black">
-                      {selectedCountIA} sel.
-                    </span>
-                  ) : (
-                    <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-700/80 text-emerald-100 font-mono font-bold">
-                      {displayedReplenishmentItems.length}
-                    </span>
-                  )}
+                  <span>Exportar Todos</span>
+                  <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-800 text-white font-mono font-bold">
+                    {displayedReplenishmentItems.length.toLocaleString()}
+                  </span>
                 </button>
+
+                {/* BOTÓN SECUNDARIO: EXPORTAR SOLO SELECCIONADOS (SI HAY MARCADOS) */}
+                {selectedCountIA > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => handleExportMatrizToExcel("selected")}
+                    disabled={loadingReplenishment}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-extrabold text-xs shadow-xs transition-all cursor-pointer border border-indigo-500 hover:scale-[1.02] active:scale-[0.98]"
+                    title="Exportar únicamente los productos que tienen el checkbox marcado a Excel"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Exportar Seleccionados</span>
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-indigo-800 text-white font-mono font-black">
+                      {selectedCountIA.toLocaleString()}
+                    </span>
+                  </button>
+                )}
 
                 <div className="flex items-center gap-3 bg-white dark:bg-slate-800 px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 shadow-xs">
                   <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
