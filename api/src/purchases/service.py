@@ -2982,10 +2982,22 @@ async def calculate_smart_replenishment_preview(
             COALESCE(sales_4m.v_promo_qty, 0) as v_promo_qty,
             COALESCE(promo_flag.en_promo_activa, false) as en_promo_flag,
             COALESCE(last_sup.last_sup_id, p.supplier_id) as last_sup_id,
-            COALESCE(last_sup.last_sup_name, p_sup.razon_social, 'Sin Proveedor') as last_sup_name
+            COALESCE(last_sup.last_sup_name, p_sup.razon_social, 'Sin Proveedor') as last_sup_name,
+            COALESCE(p.precio_venta, 0) as precio_venta,
+            sp_may.may_precio as precio_mayorista,
+            sp_may.may_min_qty as precio_mayorista_min_qty
         FROM products p
         LEFT JOIN suppliers p_sup ON p_sup.id = p.supplier_id
         LEFT JOIN last_sup_cte last_sup ON last_sup.product_id = p.id
+        LEFT JOIN (
+            SELECT DISTINCT ON (product_id)
+                product_id,
+                min_qty as may_min_qty,
+                precio_unitario as may_precio
+            FROM sp_tiered_prices
+            WHERE activo = true
+            ORDER BY product_id, min_qty ASC
+        ) sp_may ON sp_may.product_id = p.id
         LEFT JOIN (
             SELECT product_id, SUM(cantidad) as total_stock
             FROM stock
@@ -3072,6 +3084,9 @@ async def calculate_smart_replenishment_preview(
         en_promo_flag = bool(r[19])
         ultimo_proveedor_id = str(r[20]) if r[20] else None
         ultimo_proveedor_nombre = str(r[21]) if r[21] else None
+        precio_venta = float(r[22]) if len(r) > 22 and r[22] is not None else 0.0
+        precio_mayorista = float(r[23]) if len(r) > 23 and r[23] is not None else None
+        precio_mayorista_min_qty = int(r[24]) if len(r) > 24 and r[24] is not None else None
         
         # Variación porcentual de costo (Último costo vs Costo promedio)
         if costo_prom > Decimal("0") and costo_ult > Decimal("0"):
@@ -3225,6 +3240,9 @@ async def calculate_smart_replenishment_preview(
             "ventas_mes_4": vm4,
             "costo_promedio": float(costo_prom),
             "ultimo_costo": float(costo_ult),
+            "precio_venta": precio_venta,
+            "precio_mayorista": precio_mayorista,
+            "precio_mayorista_min_qty": precio_mayorista_min_qty,
             "variacion_costo_pct": var_costo_pct,
             "pulso_tendencia": pulso_tendencia,
             "tiene_promocion_detectada": tiene_promo,

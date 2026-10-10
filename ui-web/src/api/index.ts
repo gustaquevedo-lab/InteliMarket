@@ -331,6 +331,9 @@ export interface SmartReplenishmentItem {
   ventas_mes_4?: number
   costo_promedio?: number
   ultimo_costo?: number
+  precio_venta?: number
+  precio_mayorista?: number | null
+  precio_mayorista_min_qty?: number | null
   variacion_costo_pct?: number
   pulso_tendencia?: "acelerando" | "estable" | "desacelerando"
   tiene_promocion_detectada?: boolean

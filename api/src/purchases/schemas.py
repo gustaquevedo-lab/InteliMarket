@@ -1001,6 +1001,9 @@ class SmartReplenishmentItem(BaseModel):
     ventas_mes_4: float = 0.0
     costo_promedio: float = 0.0
     ultimo_costo: float = 0.0
+    precio_venta: Optional[float] = 0.0
+    precio_mayorista: Optional[float] = None
+    precio_mayorista_min_qty: Optional[int] = None
     variacion_costo_pct: Optional[float] = 0.0
     pulso_tendencia: Optional[str] = "estable"  # "acelerando", "estable", "desacelerando"
     tiene_promocion_detectada: bool = False

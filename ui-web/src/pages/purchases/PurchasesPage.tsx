@@ -382,6 +382,10 @@ export default function PurchasesPage() {
     | "pulso"
     | "costo_ppp"
     | "ultimo_costo"
+    | "pvp_min"
+    | "margen_pvp"
+    | "pv_may"
+    | "margen_may"
     | "autonomia"
     | "sugerencia"
     | "pedido"
@@ -401,7 +405,7 @@ export default function PurchasesPage() {
       }
     } else {
       setSortColumnIA(col)
-      const defaultDesc = ["stock", "m4", "m3", "m2", "m1", "sugerencia", "pedido", "costo_ppp", "ultimo_costo", "costo_unit", "subtotal"].includes(col)
+      const defaultDesc = ["stock", "m4", "m3", "m2", "m1", "sugerencia", "pedido", "costo_ppp", "ultimo_costo", "pvp_min", "margen_pvp", "pv_may", "margen_may", "costo_unit", "subtotal"].includes(col)
       setSortDirectionIA(defaultDesc ? "desc" : "asc")
     }
   }
@@ -2053,6 +2057,32 @@ export default function PurchasesPage() {
           valA = Number(a.ultimo_costo || a.costo_promedio) || 0
           valB = Number(b.ultimo_costo || b.costo_promedio) || 0
           break
+        case "pvp_min":
+          valA = Number(a.precio_venta) || 0
+          valB = Number(b.precio_venta) || 0
+          break
+        case "margen_pvp": {
+          const costA = editedCosts[a.product_id] !== undefined ? editedCosts[a.product_id] : (Number(a.costo_unitario_estimado) || Number(a.ultimo_costo) || Number(a.costo_promedio) || 0)
+          const pvpA = Number(a.precio_venta) || 0
+          valA = pvpA > 0 ? ((pvpA - costA) / pvpA) * 100 : -999
+          const costB = editedCosts[b.product_id] !== undefined ? editedCosts[b.product_id] : (Number(b.costo_unitario_estimado) || Number(b.ultimo_costo) || Number(b.costo_promedio) || 0)
+          const pvpB = Number(b.precio_venta) || 0
+          valB = pvpB > 0 ? ((pvpB - costB) / pvpB) * 100 : -999
+          break
+        }
+        case "pv_may":
+          valA = Number(a.precio_mayorista) || 0
+          valB = Number(b.precio_mayorista) || 0
+          break
+        case "margen_may": {
+          const costA = editedCosts[a.product_id] !== undefined ? editedCosts[a.product_id] : (Number(a.costo_unitario_estimado) || Number(a.ultimo_costo) || Number(a.costo_promedio) || 0)
+          const mayA = Number(a.precio_mayorista) || 0
+          valA = mayA > 0 ? ((mayA - costA) / mayA) * 100 : -999
+          const costB = editedCosts[b.product_id] !== undefined ? editedCosts[b.product_id] : (Number(b.costo_unitario_estimado) || Number(b.ultimo_costo) || Number(b.costo_promedio) || 0)
+          const mayB = Number(b.precio_mayorista) || 0
+          valB = mayB > 0 ? ((mayB - costB) / mayB) * 100 : -999
+          break
+        }
         case "autonomia":
           valA = Number(a.dias_stock_restantes) || 0
           valB = Number(b.dias_stock_restantes) || 0
@@ -3850,25 +3880,25 @@ export default function PurchasesPage() {
                       <th
                         onClick={() => handleSortIA(col)}
                         title={title || `Ordenar por ${label} (clic para alternar)`}
-                        className={`p-2.5 select-none cursor-pointer group transition-colors sticky top-0 z-30 bg-slate-100 dark:bg-slate-900 hover:bg-slate-200/90 dark:hover:bg-slate-800/90 ${
+                        className={`px-1.5 py-1.5 select-none cursor-pointer group transition-colors sticky top-0 z-30 bg-slate-100 dark:bg-slate-900 hover:bg-slate-200/90 dark:hover:bg-slate-800/90 ${
                           isSorted ? "bg-indigo-100/90 dark:bg-indigo-950/90 text-indigo-700 dark:text-indigo-300" : ""
                         } ${align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left"} ${extraClass}`}
                       >
-                        <div className={`inline-flex items-center gap-1.5 ${
+                        <div className={`inline-flex items-center gap-1 ${
                           align === "right" ? "justify-end w-full" : align === "center" ? "justify-center w-full" : "justify-start"
                         }`}>
-                          <span>{label}</span>
-                          <span className={`inline-flex items-center transition-all ${
+                          <span className="truncate">{label}</span>
+                          <span className={`inline-flex items-center transition-all shrink-0 ${
                             isSorted ? "opacity-100 text-indigo-600 dark:text-indigo-400 scale-110" : "opacity-30 group-hover:opacity-80"
                           }`}>
                             {isSorted ? (
                               sortDirectionIA === "asc" ? (
-                                <ArrowUp className="w-3.5 h-3.5 stroke-[2.5]" />
+                                <ArrowUp className="w-3 h-3 stroke-[2.5]" />
                               ) : (
-                                <ArrowDown className="w-3.5 h-3.5 stroke-[2.5]" />
+                                <ArrowDown className="w-3 h-3 stroke-[2.5]" />
                               )
                             ) : (
-                              <ArrowUpDown className="w-3 h-3" />
+                              <ArrowUpDown className="w-2.5 h-2.5" />
                             )}
                           </span>
                         </div>
@@ -3877,10 +3907,10 @@ export default function PurchasesPage() {
                   }
 
                   return (
-                    <table className="w-full text-left text-xs min-w-[1450px]">
+                    <table className="w-full text-left text-xs min-w-[1260px]">
                       <thead className="bg-slate-100 dark:bg-slate-900 text-gray-600 dark:text-gray-300 font-bold uppercase text-[10px] tracking-wider border-b-2 border-slate-200 dark:border-slate-700 sticky top-0 z-30 shadow-xs">
                         <tr>
-                          <th className="p-3 w-10 text-center sticky top-0 z-30 bg-slate-100 dark:bg-slate-900">
+                          <th className="px-1.5 py-1.5 w-7 text-center sticky top-0 z-30 bg-slate-100 dark:bg-slate-900">
                             <input
                               type="checkbox"
                               checked={displayedReplenishmentItems.length > 0 && displayedReplenishmentItems.every((it: any) => selectedItemsIA[it.product_id])}
@@ -3893,23 +3923,27 @@ export default function PurchasesPage() {
                               className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                             />
                           </th>
-                          {renderSortHeader("producto", "Producto & SKU", "left", undefined, "min-w-[200px]")}
-                          {renderSortHeader("proveedor", "Último Proveedor", "left", "Último proveedor registrado para este producto", "min-w-[150px] max-w-[210px]")}
-                          {renderSortHeader("stock", "Stock Físico", "right", "Stock actual físico registrado en góndola/depósito")}
-                          {renderSortHeader("m4", labels4m[0], "right", `Ventas mensuales registradas en ${labels4m[0]}`, "font-mono")}
-                          {renderSortHeader("m3", labels4m[1], "right", `Ventas mensuales registradas en ${labels4m[1]}`, "font-mono")}
-                          {renderSortHeader("m2", labels4m[2], "right", `Ventas mensuales registradas en ${labels4m[2]}`, "font-mono")}
-                          {renderSortHeader("m1", labels4m[3], "right", `Ventas mensuales registradas en ${labels4m[3]}`, "font-mono font-bold text-indigo-700 dark:text-indigo-300")}
-                          {renderSortHeader("mes_actual", `${mesActualLabel} (En Curso)`, "right", `Ventas acumuladas en ${mesActualLabel} (mes en curso)`, "font-mono !bg-amber-100 dark:!bg-amber-950/80 text-amber-900 dark:text-amber-200 border-x-2 border-amber-300 dark:border-amber-700/80 font-black shadow-xs")}
-                          {renderSortHeader("pulso", "Pulso Venta", "center", "Tendencia / Pulso de Venta reciente", "min-w-[95px]")}
-                          {renderSortHeader("costo_ppp", "Costo PPP", "right", "Costo Promedio Ponderado de Inventario (PPP)", "min-w-[100px]")}
-                          {renderSortHeader("ultimo_costo", "Última Compra", "right", "Último Costo de Compra facturado por el proveedor", "min-w-[110px]")}
-                          {renderSortHeader("autonomia", "Autonomía", "center", "Días de stock restantes con stock físico real = Stock / Demanda Diaria")}
-                          {renderSortHeader("sugerencia", "Sugerencia IA", "center", "Cantidad óptima sugerida por la IA")}
-                          {renderSortHeader("pedido", "Tu Pedido (Un.)", "center", "Modificá esta cantidad libremente.", "min-w-[140px]")}
-                          {renderSortHeader("costo_unit", "Costo Unit. (Gs.)", "right", "Modificá el precio de compra acordado con el proveedor", "min-w-[125px]")}
-                          {renderSortHeader("subtotal", "Subtotal (Gs.)", "right", undefined, "min-w-[115px]")}
-                          <th className="p-3 min-w-[210px] sticky top-0 z-30 bg-slate-100 dark:bg-slate-900">Justificación & Alertas</th>
+                          {renderSortHeader("producto", "Producto & SKU", "left", undefined, "min-w-[160px] max-w-[210px]")}
+                          {renderSortHeader("proveedor", "Proveedor", "left", "Último proveedor registrado para este producto", "min-w-[95px] max-w-[125px]")}
+                          {renderSortHeader("stock", "Stock", "right", "Stock actual físico registrado en góndola/depósito", "w-13 font-mono")}
+                          {renderSortHeader("m4", labels4m[0], "right", `Ventas en ${labels4m[0]}`, "font-mono w-11")}
+                          {renderSortHeader("m3", labels4m[1], "right", `Ventas en ${labels4m[1]}`, "font-mono w-11")}
+                          {renderSortHeader("m2", labels4m[2], "right", `Ventas en ${labels4m[2]}`, "font-mono w-11")}
+                          {renderSortHeader("m1", labels4m[3], "right", `Ventas en ${labels4m[3]}`, "font-mono font-bold text-indigo-700 dark:text-indigo-300 w-11")}
+                          {renderSortHeader("mes_actual", `${mesActualLabel}*`, "right", `Ventas acumuladas en ${mesActualLabel} (mes en curso)`, "font-mono !bg-amber-100 dark:!bg-amber-950/80 text-amber-900 dark:text-amber-200 border-x border-amber-300 dark:border-amber-700/80 font-black shadow-xs w-13")}
+                          {renderSortHeader("pulso", "Pulso", "center", "Tendencia / Pulso de Venta reciente", "w-16")}
+                          {renderSortHeader("costo_ppp", "PPP", "right", "Costo Promedio Ponderado de Inventario (PPP)", "w-18 font-mono")}
+                          {renderSortHeader("ultimo_costo", "Últ. Compra", "right", "Último Costo de Compra facturado por el proveedor", "w-18 font-mono")}
+                          {renderSortHeader("pvp_min", "PVP Min.", "right", "Precio de Venta al Público (Minorista)", "w-18 font-mono")}
+                          {renderSortHeader("margen_pvp", "Mg. Esp.", "center", "Margen esperado sobre PVP Minorista vs Costo acordado", "w-14")}
+                          {renderSortHeader("pv_may", "PV May.", "right", "Precio de Venta Mayorista (Escalas activas)", "w-18 font-mono")}
+                          {renderSortHeader("margen_may", "Mg. May.", "center", "Margen esperado sobre Precio Mayorista vs Costo acordado", "w-14")}
+                          {renderSortHeader("autonomia", "Autonomía", "center", "Días de stock restantes con stock físico real", "w-16 font-mono")}
+                          {renderSortHeader("sugerencia", "Sugerencia", "center", "Cantidad óptima sugerida por la IA", "w-16")}
+                          {renderSortHeader("pedido", "Pedido (Un.)", "center", "Modificá esta cantidad libremente", "w-22")}
+                          {renderSortHeader("costo_unit", "Costo Unit.", "right", "Modificá el precio de compra acordado con el proveedor", "w-20")}
+                          {renderSortHeader("subtotal", "Subtotal", "right", "Subtotal estimado de compra (Pedido x Costo)", "w-20 font-mono")}
+                          <th className="px-1.5 py-1.5 max-w-[100px] truncate sticky top-0 z-30 bg-slate-100 dark:bg-slate-900" title="Justificación de la IA y alertas de promociones">Alertas / IA</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
@@ -3922,7 +3956,11 @@ export default function PurchasesPage() {
 
                           const stockActual = Number(it.stock_actual) || 0
                           const demandaD = Number(it.demanda_diaria_ajustada) || 0
-                          const nuevaAutonomia = demandaD > 0 ? ((stockActual + Number(qty)) / demandaD) : 999
+                          const pvpMin = Number(it.precio_venta) || 0
+                          const pvMay = Number(it.precio_mayorista) || 0
+                          const effectiveCost = unitCost > 0 ? unitCost : (Number(it.ultimo_costo) || Number(it.costo_promedio) || 0)
+                          const margenMinPct = pvpMin > 0 && effectiveCost > 0 ? ((pvpMin - effectiveCost) / pvpMin) * 100 : (pvpMin > 0 && effectiveCost === 0 ? 100 : null)
+                          const margenMayPct = pvMay > 0 && effectiveCost > 0 ? ((pvMay - effectiveCost) / pvMay) * 100 : (pvMay > 0 && effectiveCost === 0 ? 100 : null)
 
                           return (
                             <tr
@@ -3939,7 +3977,7 @@ export default function PurchasesPage() {
                                   : "bg-slate-100/60 dark:bg-slate-800/40"
                               } hover:!bg-slate-200 dark:hover:!bg-slate-700 hover:shadow-md cursor-pointer`}
                             >
-                              <td className="p-3 text-center">
+                              <td className="px-1.5 py-1 text-center">
                                 <input
                                   type="checkbox"
                                   checked={isSelected}
@@ -3949,106 +3987,163 @@ export default function PurchasesPage() {
                                   className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                                 />
                               </td>
-                              <td className="p-3 min-w-[220px] max-w-[340px]">
-                                <div className="font-black text-sm text-slate-900 dark:text-white line-clamp-2 leading-snug tracking-tight" title={it.nombre}>
+                              <td className="px-2 py-1 min-w-[160px] max-w-[210px]">
+                                <div className="font-bold text-xs text-slate-900 dark:text-white truncate leading-tight" title={it.nombre}>
                                   {it.nombre}
                                 </div>
-                                <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono flex items-center gap-1.5 mt-1 flex-wrap">
-                                  <span className="inline-flex items-center gap-1 font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 shadow-2xs" title={`Código de barras: ${it.codigo_barra || it.sku || "Sin código"}`}>
-                                    <Barcode className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                                    <span>{it.codigo_barra || it.sku || "—"}</span>
+                                <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono flex items-center gap-1 mt-0.5 truncate">
+                                  <span className="inline-flex items-center gap-0.5 font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-1 py-0.2 rounded border border-slate-200 dark:border-slate-700 text-[9px]" title={`Código de barras: ${it.codigo_barra || it.sku || "Sin código"}`}>
+                                    <Barcode className="w-3 h-3 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                                    <span className="truncate max-w-[80px]">{it.codigo_barra || it.sku || "—"}</span>
                                   </span>
-                                  <span className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded text-[10px] font-bold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                                  <span className="px-1 py-0.2 bg-slate-100 dark:bg-slate-800 rounded text-[9px] font-bold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 shrink-0">
                                     {it.unidad_medida}
                                   </span>
                                   {it.punto_reorden !== undefined && (
-                                    <span className="px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-[10px] text-amber-700 dark:text-amber-300 font-bold border border-amber-200 dark:border-amber-800/50" title="Punto de Reorden (ROP)">
-                                      ROP: {Math.round(it.punto_reorden).toLocaleString()}
+                                    <span className="px-1 py-0.2 rounded bg-amber-50 dark:bg-amber-950/40 text-[9px] text-amber-700 dark:text-amber-300 font-bold border border-amber-200 dark:border-amber-800/50 shrink-0" title="Punto de Reorden (ROP)">
+                                      ROP:{Math.round(it.punto_reorden)}
                                     </span>
                                   )}
                                 </div>
                               </td>
 
                               {/* Último Proveedor Habitual */}
-                              <td className="p-2.5 min-w-[150px] max-w-[210px]">
+                              <td className="px-1.5 py-1 min-w-[95px] max-w-[125px]">
                                 {it.ultimo_proveedor_nombre ? (
-                                  <div className="flex items-start gap-1.5 text-slate-700 dark:text-slate-200" title={`Último Proveedor: ${it.ultimo_proveedor_nombre}`}>
-                                    <Building2 className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" />
-                                    <span className="text-[11px] font-semibold leading-snug line-clamp-2 break-words">
+                                  <div className="flex items-center gap-1 text-slate-700 dark:text-slate-200" title={`Último Proveedor: ${it.ultimo_proveedor_nombre}`}>
+                                    <Building2 className="w-3 h-3 text-indigo-500 shrink-0" />
+                                    <span className="text-[10px] font-medium leading-tight truncate">
                                       {it.ultimo_proveedor_nombre}
                                     </span>
                                   </div>
                                 ) : (
-                                  <span className="text-[10px] text-gray-400 italic">Sin asignar</span>
+                                  <span className="text-[9px] text-gray-400 italic">Sin asignar</span>
                                 )}
                               </td>
 
                               {/* Stock Físico */}
-                              <td className="p-3 text-right font-mono font-bold text-gray-800 dark:text-gray-200">
+                              <td className="px-1.5 py-1 text-right font-mono font-bold text-[11px] text-gray-800 dark:text-gray-200 whitespace-nowrap" title={`Stock físico actual: ${stockActual.toLocaleString()}`}>
                                 {stockActual.toLocaleString()}
                               </td>
 
                               {/* Columnas de Ventas Históricas */}
-                              <td className="p-2.5 text-right font-mono text-gray-500 dark:text-gray-400">
+                              <td className="px-1 py-1 text-right font-mono text-[10px] text-gray-500 dark:text-gray-400 whitespace-nowrap">
                                 {Number(it.ventas_mes_4 || 0).toLocaleString()}
                               </td>
-                              <td className="p-2.5 text-right font-mono text-gray-500 dark:text-gray-400">
+                              <td className="px-1 py-1 text-right font-mono text-[10px] text-gray-500 dark:text-gray-400 whitespace-nowrap">
                                 {Number(it.ventas_mes_3 || 0).toLocaleString()}
                               </td>
-                              <td className="p-2.5 text-right font-mono text-gray-600 dark:text-gray-300 font-semibold">
+                              <td className="px-1 py-1 text-right font-mono text-[10px] text-gray-600 dark:text-gray-300 font-semibold whitespace-nowrap">
                                 {Number(it.ventas_mes_2 || 0).toLocaleString()}
                               </td>
-                              <td className="p-2.5 text-right font-mono text-slate-700 dark:text-slate-200 font-bold">
+                              <td className="px-1 py-1 text-right font-mono text-[10px] text-slate-700 dark:text-slate-200 font-bold whitespace-nowrap">
                                 {Number(it.ventas_mes_1 || 0).toLocaleString()}
                               </td>
                               {/* Columna destacada: Ventas del Mes en Curso */}
                               <td
-                                className="p-2.5 text-right font-mono font-black text-amber-800 dark:text-amber-200 bg-amber-50/90 dark:bg-amber-950/40 border-x-2 border-amber-300/80 dark:border-amber-700/60 shadow-xs"
+                                className="px-1.5 py-1 text-right font-mono font-black text-[11px] text-amber-800 dark:text-amber-200 bg-amber-50/90 dark:bg-amber-950/40 border-x border-amber-300/80 dark:border-amber-700/60 shadow-xs whitespace-nowrap"
                                 title={`Ventas acumuladas en ${mesActualLabel} (mes en curso)`}
                               >
                                 {Number(it.ventas_mes_actual || 0).toLocaleString()}
                               </td>
 
                               {/* Pulso de Venta */}
-                              <td className="p-2.5 text-center">
+                              <td className="px-1 py-1 text-center whitespace-nowrap">
                                 {it.pulso_tendencia === "acelerando" ? (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800" title="Rotación acelerando (+25% vs meses previos)">
-                                    <TrendingUp className="w-3 h-3 text-emerald-600" /> Acelera
+                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-extrabold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800" title="Rotación acelerando (+25% vs meses previos)">
+                                    <TrendingUp className="w-2.5 h-2.5 text-emerald-600" /> Acelera
                                   </span>
                                 ) : it.pulso_tendencia === "desacelerando" ? (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800" title="Demanda cayendo (-25% vs meses previos)">
-                                    <TrendingDown className="w-3 h-3 text-red-600" /> En baja
+                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-extrabold bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800" title="Demanda cayendo (-25% vs meses previos)">
+                                    <TrendingDown className="w-2.5 h-2.5 text-red-600" /> Baja
                                   </span>
                                 ) : (
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
                                     Estable
                                   </span>
                                 )}
                               </td>
 
                               {/* Costo Promedio (PPP) */}
-                              <td className="p-2.5 text-right font-mono text-gray-600 dark:text-gray-300">
+                              <td className="px-1.5 py-1 text-right font-mono text-[10px] text-gray-600 dark:text-gray-300 whitespace-nowrap">
                                 {formatPYG(it.costo_promedio || 0)}
                               </td>
 
                               {/* Último Costo con indicador de variación */}
-                              <td className="p-2.5 text-right font-mono">
+                              <td className="px-1.5 py-1 text-right font-mono text-[10px] whitespace-nowrap">
                                 <div className="font-bold text-gray-900 dark:text-white">
                                   {formatPYG(it.ultimo_costo || it.costo_promedio || 0)}
                                 </div>
                                 {it.variacion_costo_pct !== undefined && Math.abs(it.variacion_costo_pct) > 0.5 && (
-                                  <span className={`text-[10px] font-extrabold inline-flex items-center gap-0.5 justify-end ${
+                                  <span className={`text-[9px] font-extrabold inline-flex items-center gap-0.5 justify-end ${
                                     it.variacion_costo_pct > 0 ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"
                                   }`} title={`Variación vs Costo PPP: ${it.variacion_costo_pct > 0 ? '+' : ''}${it.variacion_costo_pct}%`}>
-                                    {it.variacion_costo_pct > 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                                    {it.variacion_costo_pct > 0 ? <ArrowUp className="w-2.5 h-2.5" /> : <ArrowDown className="w-2.5 h-2.5" />}
                                     {Math.abs(it.variacion_costo_pct)}%
                                   </span>
                                 )}
                               </td>
 
+                              {/* PVP Minorista */}
+                              <td className="px-1.5 py-1 text-right font-mono text-[11px] font-bold text-slate-900 dark:text-white whitespace-nowrap" title={`PVP Minorista: ${formatPYG(pvpMin)}`}>
+                                {formatPYG(pvpMin)}
+                              </td>
+
+                              {/* Margen Esperado sobre PVP */}
+                              <td className="px-1 py-1 text-center whitespace-nowrap">
+                                {margenMinPct !== null ? (
+                                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-black font-mono inline-block border ${
+                                    margenMinPct >= 20
+                                      ? "bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+                                      : margenMinPct >= 10
+                                      ? "bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800"
+                                      : "bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800"
+                                  }`} title={`Margen Esperado s/ PVP: ${margenMinPct.toFixed(1)}% (Costo: ${formatPYG(effectiveCost)}, PVP: ${formatPYG(pvpMin)})`}>
+                                    {margenMinPct.toFixed(1)}%
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 text-[10px]">—</span>
+                                )}
+                              </td>
+
+                              {/* PV Mayorista */}
+                              <td className="px-1.5 py-1 text-right font-mono text-[10px] whitespace-nowrap">
+                                {pvMay > 0 ? (
+                                  <div>
+                                    <div className="font-bold text-indigo-900 dark:text-indigo-200" title={`PV Mayorista: ${formatPYG(pvMay)}`}>
+                                      {formatPYG(pvMay)}
+                                    </div>
+                                    {it.precio_mayorista_min_qty && (
+                                      <span className="text-[9px] text-slate-500 dark:text-slate-400 font-semibold block leading-tight">
+                                        ≥{it.precio_mayorista_min_qty} un.
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-400 text-[9px] italic">Sin escala</span>
+                                )}
+                              </td>
+
+                              {/* Margen S/ Mayorista */}
+                              <td className="px-1 py-1 text-center whitespace-nowrap">
+                                {margenMayPct !== null ? (
+                                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-black font-mono inline-block border ${
+                                    margenMayPct >= 15
+                                      ? "bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+                                      : margenMayPct >= 8
+                                      ? "bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800"
+                                      : "bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800"
+                                  }`} title={`Margen s/ PV Mayorista: ${margenMayPct.toFixed(1)}% (Costo: ${formatPYG(effectiveCost)}, PV May: ${formatPYG(pvMay)})`}>
+                                    {margenMayPct.toFixed(1)}%
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 text-[10px]">—</span>
+                                )}
+                              </td>
+
                               {/* Autonomía Actual */}
-                              <td className="p-3 text-center">
-                                <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[11px] font-bold font-mono border whitespace-nowrap ${
+                              <td className="px-1 py-1 text-center whitespace-nowrap">
+                                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold font-mono border ${
                                   it.autonomia_estado === "critico"
                                     ? "bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800/80"
                                     : it.autonomia_estado === "bajo"
@@ -4062,21 +4157,21 @@ export default function PurchasesPage() {
                                     it.autonomia_estado === "bajo" ? "bg-amber-500" :
                                     it.autonomia_estado === "optimo" ? "bg-emerald-500" : "bg-slate-400"
                                   }`} />
-                                  <span>{Number(it.dias_stock_restantes) > 900 ? "Sin Venta" : `${Number(it.dias_stock_restantes).toFixed(1)}d`}</span>
+                                  <span>{Number(it.dias_stock_restantes) > 900 ? "Sin Vta" : `${Number(it.dias_stock_restantes).toFixed(1)}d`}</span>
                                 </span>
                               </td>
 
                               {/* Sugerencia IA */}
-                              <td className="p-3 text-center">
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-                                  <Sparkles className="w-3 h-3 text-indigo-500" />
-                                  {Math.round(Number(it.cantidad_sugerida) || 0).toLocaleString()} un.
+                              <td className="px-1.5 py-1 text-center whitespace-nowrap">
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                                  <Sparkles className="w-2.5 h-2.5 text-indigo-500" />
+                                  {Math.round(Number(it.cantidad_sugerida) || 0).toLocaleString()}
                                 </span>
                               </td>
 
                               {/* Tu Pedido (Un.) */}
-                              <td className="p-3 text-center">
-                                <div className="flex items-center justify-center gap-1">
+                              <td className="px-1 py-1 text-center whitespace-nowrap">
+                                <div className="flex items-center justify-center gap-0.5">
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -4085,7 +4180,7 @@ export default function PurchasesPage() {
                                       setEditedQuantities(prev => ({ ...prev, [it.product_id]: nxt }))
                                       if (nxt > 0) setSelectedItemsIA(prev => ({ ...prev, [it.product_id]: true }))
                                     }}
-                                    className="w-6 h-6 rounded bg-slate-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-slate-200 flex items-center justify-center font-bold text-xs"
+                                    className="w-5 h-5 rounded bg-slate-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-slate-200 flex items-center justify-center font-bold text-xs"
                                   >
                                     -
                                   </button>
@@ -4099,7 +4194,7 @@ export default function PurchasesPage() {
                                       setEditedQuantities(prev => ({ ...prev, [it.product_id]: val }))
                                       if (val > 0) setSelectedItemsIA(prev => ({ ...prev, [it.product_id]: true }))
                                     }}
-                                    className="w-20 p-1 text-center font-mono font-black text-xs input-field bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-700"
+                                    className="w-14 p-0.5 text-center font-mono font-black text-xs input-field bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-700"
                                   />
                                   <button
                                     type="button"
@@ -4109,7 +4204,7 @@ export default function PurchasesPage() {
                                       setEditedQuantities(prev => ({ ...prev, [it.product_id]: nxt }))
                                       setSelectedItemsIA(prev => ({ ...prev, [it.product_id]: true }))
                                     }}
-                                    className="w-6 h-6 rounded bg-slate-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-slate-200 flex items-center justify-center font-bold text-xs"
+                                    className="w-5 h-5 rounded bg-slate-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-slate-200 flex items-center justify-center font-bold text-xs"
                                   >
                                     +
                                   </button>
@@ -4117,7 +4212,7 @@ export default function PurchasesPage() {
                               </td>
 
                               {/* Costo Unitario EDITABLE */}
-                              <td className="p-3 text-right">
+                              <td className="px-1.5 py-1 text-right whitespace-nowrap">
                                 <input
                                   type="number"
                                   min={0}
@@ -4128,26 +4223,27 @@ export default function PurchasesPage() {
                                     setEditedCosts(prev => ({ ...prev, [it.product_id]: val }))
                                     if (Number(qty) > 0) setSelectedItemsIA(prev => ({ ...prev, [it.product_id]: true }))
                                   }}
-                                  className="w-28 p-1 text-right font-mono font-bold text-xs input-field bg-white dark:bg-slate-900 border-indigo-300 dark:border-indigo-700 text-indigo-900 dark:text-indigo-200 focus:ring-1 focus:ring-indigo-500"
+                                  className="w-20 p-0.5 text-right font-mono font-bold text-xs input-field bg-white dark:bg-slate-900 border-indigo-300 dark:border-indigo-700 text-indigo-900 dark:text-indigo-200 focus:ring-1 focus:ring-indigo-500"
                                   title="Precio de compra negociado para la orden de compra"
                                 />
                               </td>
 
                               {/* Subtotal */}
-                              <td className="p-3 text-right font-mono font-extrabold text-gray-900 dark:text-white">
+                              <td className="px-1.5 py-1 text-right font-mono font-black text-[11px] text-gray-900 dark:text-white whitespace-nowrap">
                                 {formatPYG(subtotal)}
                               </td>
 
                               {/* Justificación IA y Alertas de Promos */}
-                              <td className="p-3 text-[11px] text-gray-500 dark:text-gray-400">
-                                {it.tiene_promocion_detectada && (
-                                  <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-[10px] font-bold text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 mb-1" title={it.promocion_info || "Promoción detectada"}>
-                                    <Flame className="w-3 h-3 text-amber-500 shrink-0" />
-                                    <span>Promo Pasada Detectada</span>
-                                  </div>
-                                )}
-                                <div className="line-clamp-2" title={it.explicacion_ia}>
-                                  {it.explicacion_ia}
+                              <td className="px-1.5 py-1 max-w-[100px] text-[10px] text-gray-500 dark:text-gray-400">
+                                <div className="flex items-center gap-1">
+                                  {it.tiene_promocion_detectada && (
+                                    <span className="inline-flex items-center p-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 shrink-0" title={it.promocion_info || "Promoción detectada en meses pasados"}>
+                                      <Flame className="w-3 h-3 text-amber-500" />
+                                    </span>
+                                  )}
+                                  <span className="truncate leading-tight block" title={it.explicacion_ia}>
+                                    {it.explicacion_ia}
+                                  </span>
                                 </div>
                               </td>
                             </tr>
