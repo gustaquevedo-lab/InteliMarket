@@ -1070,6 +1070,9 @@ async def apply_global_payment(
     tasa_usd = Decimal(str(getattr(data, "tasa_usd", 1) or 1))
     monto_cheque = Decimal(str(getattr(data, "monto_cheque", 0) or 0))
     monto_transf = Decimal(str(getattr(data, "monto_transferencia", 0) or 0))
+    monto_facturas = Decimal(
+        str(getattr(data, "monto_facturas_canceladas", None) or data.monto_total)
+    ).quantize(Decimal("1"))
 
     is_compensacion = getattr(data, "forma_pago", None) == "compensacion_interna"
     categoria_nombre = None
