@@ -98,6 +98,10 @@ class SaleResponse(BaseModel):
     customer_extra_club: Optional[str] = None
     cajero_nombre: Optional[str] = None
     caja_nombre: Optional[str] = None
+    timbrado_numero: Optional[str] = None
+    factura_modificada: Optional[str] = None
+    return_id: Optional[str] = None
+    return_numero: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

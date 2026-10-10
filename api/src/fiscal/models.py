@@ -6,6 +6,7 @@ from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 
 from api.src.db import Base
+from api.src.sales.models import Sale  # noqa: F401
 
 
 class FiscalConfig(Base):

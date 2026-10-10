@@ -1042,7 +1042,80 @@ async def get_sale(db: AsyncSession, sale_id: str) -> Sale | None:
     )
     row = result.first()
     if not row:
-        return None
+        # Si no se encontró en sales, verificar si el ID corresponde a una Nota de Crédito fiscal emitida
+        try:
+            sid_uuid = uuid.UUID(sale_id)
+        except Exception:
+            return None
+
+        from api.src.fiscal.models import NotaCreditoDebito
+        from api.src.returns.models import Return
+
+        nc_res = await db.execute(
+            select(NotaCreditoDebito, Sale, Customer, CashSession, CashRegister, User, Return)
+            .outerjoin(Sale, Sale.id == NotaCreditoDebito.sale_id)
+            .outerjoin(Customer, Customer.id == Sale.customer_id)
+            .outerjoin(CashSession, CashSession.id == Sale.session_id)
+            .outerjoin(CashRegister, CashRegister.id == CashSession.register_id)
+            .outerjoin(User, User.id == NotaCreditoDebito.user_id)
+            .outerjoin(Return, Return.nota_credito_id == NotaCreditoDebito.id)
+            .where(NotaCreditoDebito.id == sid_uuid)
+        )
+        nc_row = nc_res.first()
+        if not nc_row:
+            return None
+
+        nc, orig_sale, cust, cs, cr, u, ret = nc_row
+        c_name = cust.razon_social or cust.nombre_fantasia if cust else "Consumidor Final"
+        c_doc = cust.ruc or cust.ci or cust.telefono if cust else "44444401-7"
+        c_ec = cust.extra_club_numero if cust else None
+        c_cajero = cs.cajero_nombre if cs and cs.cajero_nombre else (u.nombre if u else "Cajero POS")
+        c_caja = cr.nombre if cr else "Caja POS"
+
+        mock_sale = Sale(
+            id=nc.id,
+            company_id=nc.company_id,
+            branch_id=getattr(orig_sale, "branch_id", None) if orig_sale else None,
+            customer_id=getattr(orig_sale, "customer_id", None) if orig_sale else None,
+            user_id=nc.user_id,
+            session_id=getattr(orig_sale, "session_id", None) if orig_sale else None,
+            emission_point_id=getattr(orig_sale, "emission_point_id", None) if orig_sale else None,
+            numero=nc.numero,
+            numero_interno=getattr(orig_sale, "numero_interno", None) if orig_sale else None,
+            fecha=nc.created_at,
+            tipo_comprobante="nota_credito",
+            condicion=getattr(orig_sale, "condicion", "contado") if orig_sale else "contado",
+            moneda="PYG",
+            tipo_cambio=Decimal("1"),
+            estado=nc.estado or "emitido",
+            subtotal=nc.subtotal or Decimal("0"),
+            descuento_total=nc.descuento_total or Decimal("0"),
+            base_gravada_10=nc.base_gravada_10 or Decimal("0"),
+            base_gravada_5=nc.base_gravada_5 or Decimal("0"),
+            base_exenta=nc.base_exenta or Decimal("0"),
+            iva_10=nc.iva_10 or Decimal("0"),
+            iva_5=nc.iva_5 or Decimal("0"),
+            total=nc.total or Decimal("0"),
+            total_pagado=nc.total or Decimal("0"),
+            saldo=Decimal("0"),
+            monto_donacion=Decimal("0"),
+            cdc=nc.cdc,
+            sifen_estado=nc.sifen_estado,
+            observaciones=nc.motivo,
+            created_at=nc.created_at,
+            updated_at=nc.updated_at or nc.created_at,
+        )
+        setattr(mock_sale, "forma_pago", "NOTA_CREDITO")
+        setattr(mock_sale, "customer_nombre", c_name)
+        setattr(mock_sale, "customer_doc", c_doc)
+        setattr(mock_sale, "customer_extra_club", c_ec)
+        setattr(mock_sale, "cajero_nombre", c_cajero)
+        setattr(mock_sale, "caja_nombre", c_caja)
+        setattr(mock_sale, "timbrado_numero", nc.timbrado_numero or "18545636")
+        setattr(mock_sale, "factura_modificada", orig_sale.numero if orig_sale else None)
+        setattr(mock_sale, "return_id", str(ret.id) if ret else None)
+        setattr(mock_sale, "return_numero", ret.numero if ret else None)
+        return mock_sale
     sale, cust, payment, cs, cr, u = row
     fp = payment.forma_pago if payment else ("EXTRA_CLUB" if sale.condicion == "credito" else "EFECTIVO")
     c_name = cust.razon_social or cust.nombre_fantasia if cust else "Consumidor Final"
@@ -1627,6 +1700,148 @@ async def list_sales(
     from zoneinfo import ZoneInfo
     asuncion_tz = ZoneInfo("America/Asuncion")
 
+    # ── RAMA ESPECIALIZADA: NOTAS DE CRÉDITO FISCALES ────────────────────────
+    # En el modelo fiscal paraguayo las Notas de Crédito emitidas residen en
+    # `notas_credito_debito`. Si se filtra específicamente por 'nota_credito',
+    # consultamos dicha tabla unificada para mostrar la lista real de NC emitidas.
+    if tipo_comprobante == "nota_credito":
+        from api.src.fiscal.models import NotaCreditoDebito
+        from api.src.returns.models import Return
+
+        try:
+            cid = company_id if isinstance(company_id, uuid.UUID) else uuid.UUID(str(company_id))
+        except Exception:
+            return []
+
+        nc_query = (
+            select(NotaCreditoDebito, Sale, Customer, CashSession, CashRegister, User, Return)
+            .outerjoin(Sale, Sale.id == NotaCreditoDebito.sale_id)
+            .outerjoin(Customer, Customer.id == Sale.customer_id)
+            .outerjoin(CashSession, CashSession.id == Sale.session_id)
+            .outerjoin(CashRegister, CashRegister.id == CashSession.register_id)
+            .outerjoin(User, User.id == NotaCreditoDebito.user_id)
+            .outerjoin(Return, Return.nota_credito_id == NotaCreditoDebito.id)
+            .where(
+                NotaCreditoDebito.company_id == cid,
+                NotaCreditoDebito.tipo.ilike("%credito%"),
+            )
+        )
+        if customer_id:
+            try:
+                c_uuid = customer_id if isinstance(customer_id, uuid.UUID) else uuid.UUID(str(customer_id))
+                nc_query = nc_query.where(Sale.customer_id == c_uuid)
+            except Exception:
+                pass
+        if punto_emision and punto_emision != "todos":
+            nc_query = nc_query.where(NotaCreditoDebito.numero.like(f"{punto_emision}%"))
+
+        if search and search.strip():
+            s_raw = search.strip()
+            s_term = f"%{s_raw}%"
+            s_digits = re.sub(r"\D", "", s_raw)
+            nc_search_clauses = [
+                NotaCreditoDebito.numero.ilike(s_term),
+                NotaCreditoDebito.motivo.ilike(s_term),
+                NotaCreditoDebito.cdc.ilike(s_term),
+                Sale.numero.ilike(s_term),
+                Customer.razon_social.ilike(s_term),
+                Customer.nombre_fantasia.ilike(s_term),
+                Customer.ruc.ilike(s_term),
+                Customer.ci.ilike(s_term),
+                CashSession.cajero_nombre.ilike(s_term),
+                User.nombre.ilike(s_term),
+            ]
+            if len(s_digits) >= 3:
+                s_digits_term = f"%{s_digits}%"
+                nc_search_clauses.extend([
+                    NotaCreditoDebito.numero.ilike(s_digits_term),
+                    Sale.numero.ilike(s_digits_term),
+                    Customer.ruc.ilike(s_digits_term),
+                    Customer.ci.ilike(s_digits_term),
+                ])
+            nc_query = nc_query.where(or_(*nc_search_clauses))
+
+        if not all_dates:
+            if fecha_desde:
+                try:
+                    if isinstance(fecha_desde, str):
+                        fd_dt = datetime.strptime(fecha_desde[:10], "%Y-%m-%d").replace(tzinfo=asuncion_tz)
+                    else:
+                        fd_dt = fecha_desde
+                    nc_query = nc_query.where(NotaCreditoDebito.created_at >= fd_dt)
+                except Exception:
+                    pass
+            if fecha_hasta:
+                try:
+                    if isinstance(fecha_hasta, str):
+                        fh_dt = datetime.strptime(fecha_hasta[:10], "%Y-%m-%d").replace(
+                            hour=23, minute=59, second=59, microsecond=999999, tzinfo=asuncion_tz
+                        )
+                    else:
+                        fh_dt = fecha_hasta
+                    nc_query = nc_query.where(NotaCreditoDebito.created_at <= fh_dt)
+                except Exception:
+                    pass
+
+        nc_query = nc_query.order_by(NotaCreditoDebito.created_at.desc()).limit(limit).offset(offset)
+        nc_result = await db.execute(nc_query)
+        nc_rows = nc_result.all()
+
+        nc_sales_list = []
+        for nc, orig_sale, cust, cs, cr, u, ret in nc_rows:
+            c_name = cust.razon_social or cust.nombre_fantasia if cust else "Consumidor Final"
+            c_doc = cust.ruc or cust.ci or cust.telefono if cust else "44444401-7"
+            c_ec = cust.extra_club_numero if cust else None
+            c_cajero = cs.cajero_nombre if cs and cs.cajero_nombre else (u.nombre if u else "Cajero POS")
+            c_caja = cr.nombre if cr else "Caja POS"
+
+            mock_sale = Sale(
+                id=nc.id,
+                company_id=nc.company_id,
+                branch_id=getattr(orig_sale, "branch_id", None) if orig_sale else None,
+                customer_id=getattr(orig_sale, "customer_id", None) if orig_sale else None,
+                user_id=nc.user_id,
+                session_id=getattr(orig_sale, "session_id", None) if orig_sale else None,
+                emission_point_id=getattr(orig_sale, "emission_point_id", None) if orig_sale else None,
+                numero=nc.numero,
+                numero_interno=getattr(orig_sale, "numero_interno", None) if orig_sale else None,
+                fecha=nc.created_at,
+                tipo_comprobante="nota_credito",
+                condicion=getattr(orig_sale, "condicion", "contado") if orig_sale else "contado",
+                moneda="PYG",
+                tipo_cambio=Decimal("1"),
+                estado=nc.estado or "emitido",
+                subtotal=nc.subtotal or Decimal("0"),
+                descuento_total=nc.descuento_total or Decimal("0"),
+                base_gravada_10=nc.base_gravada_10 or Decimal("0"),
+                base_gravada_5=nc.base_gravada_5 or Decimal("0"),
+                base_exenta=nc.base_exenta or Decimal("0"),
+                iva_10=nc.iva_10 or Decimal("0"),
+                iva_5=nc.iva_5 or Decimal("0"),
+                total=nc.total or Decimal("0"),
+                total_pagado=nc.total or Decimal("0"),
+                saldo=Decimal("0"),
+                monto_donacion=Decimal("0"),
+                cdc=nc.cdc,
+                sifen_estado=nc.sifen_estado,
+                observaciones=nc.motivo,
+                created_at=nc.created_at,
+                updated_at=nc.updated_at or nc.created_at,
+            )
+            setattr(mock_sale, "forma_pago", "NOTA_CREDITO")
+            setattr(mock_sale, "customer_nombre", c_name)
+            setattr(mock_sale, "customer_doc", c_doc)
+            setattr(mock_sale, "customer_extra_club", c_ec)
+            setattr(mock_sale, "cajero_nombre", c_cajero)
+            setattr(mock_sale, "caja_nombre", c_caja)
+            setattr(mock_sale, "timbrado_numero", nc.timbrado_numero or "18545636")
+            setattr(mock_sale, "factura_modificada", orig_sale.numero if orig_sale else None)
+            setattr(mock_sale, "return_id", str(ret.id) if ret else None)
+            setattr(mock_sale, "return_numero", ret.numero if ret else None)
+            nc_sales_list.append(mock_sale)
+
+        return nc_sales_list
+
     query = (
         select(Sale, Customer, CashSession, CashRegister, User)
         .outerjoin(Customer, Customer.id == Sale.customer_id)
@@ -1894,6 +2109,60 @@ async def get_sale_items(db: AsyncSession, sale_id: str) -> list[dict]:
         .order_by(SaleItem.created_at.asc())
     )
     rows = result.all()
+    if not rows:
+        # Si no tiene ítems de venta, verificar si el ID corresponde a una Nota de Crédito fiscal
+        try:
+            sid_uuid = uuid.UUID(sale_id)
+        except Exception:
+            return []
+
+        from api.src.fiscal.models import NotaCreditoDebito
+        from api.src.returns.models import Return, ReturnItem
+
+        nc_res = await db.execute(select(NotaCreditoDebito).where(NotaCreditoDebito.id == sid_uuid))
+        nc_obj = nc_res.scalar_one_or_none()
+        if nc_obj:
+            ret_res = await db.execute(select(Return).where(Return.nota_credito_id == nc_obj.id))
+            ret_obj = ret_res.scalar_one_or_none()
+            if ret_obj:
+                ri_res = await db.execute(
+                    select(ReturnItem, Product)
+                    .outerjoin(Product, ReturnItem.product_id == Product.id)
+                    .where(ReturnItem.return_id == ret_obj.id)
+                    .order_by(ReturnItem.created_at.asc())
+                )
+                nc_items = []
+                for ri, p in ri_res.all():
+                    qty_f = float(ri.cantidad or 0)
+                    price_f = float(ri.precio_unitario or 0)
+                    sub_f = float(ri.subtotal or (price_f * qty_f))
+                    tot_f = float(ri.total or sub_f)
+                    iva_t = float(ri.iva_tasa or 10)
+                    iva_m = float(ri.iva_monto or 0)
+                    desc = ri.descripcion or (p.nombre if p else "Producto")
+                    bc = (p.codigo_barra if p else "") or ""
+                    nc_items.append({
+                        "id": str(ri.id),
+                        "sale_id": str(nc_obj.id),
+                        "product_id": str(ri.product_id) if ri.product_id else None,
+                        "descripcion": desc,
+                        "product_name": p.nombre if p else desc,
+                        "product_sku": (p.sku if p else "") or bc,
+                        "codigo_barra": bc,
+                        "cantidad": qty_f,
+                        "cantidad_devuelta": 0.0,
+                        "cantidad_disponible": 0.0,
+                        "precio_unitario": int(price_f),
+                        "descuento_pct": 0.0,
+                        "descuento_monto": 0,
+                        "iva_tasa": iva_t,
+                        "iva_monto": int(iva_m),
+                        "total": int(tot_f),
+                        "costo_unitario": None,
+                        "created_at": ri.created_at,
+                    })
+                return nc_items
+        return []
 
     # Cuanto de cada item ya tiene una devolucion pendiente o aprobada --
     # sin esto la pantalla de devolucion en caja no tiene forma de saber

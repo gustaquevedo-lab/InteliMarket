@@ -406,10 +406,10 @@ export default function SalesPage() {
       {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
       <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
         {[
-          { id: "comprobantes", label: "Comprobantes Emitidos", icon: Receipt, count: sales.length },
+          { id: "comprobantes", label: "Comprobantes Emitidos", icon: Receipt, count: activeTab === "comprobantes" ? filteredSales.length : undefined },
           { id: "cierres_caja", label: "Cierres de Caja (X / Z)", icon: Clock },
           { id: "extra_club_credito", label: "Crédito Extra Club", icon: Award },
-          { id: "notas_credito", label: "Notas de Crédito & Anulaciones", icon: RotateCcw },
+          { id: "notas_credito", label: "Notas de Crédito & Anulaciones", icon: RotateCcw, count: activeTab === "notas_credito" ? filteredSales.length : undefined },
         ].map((t) => {
           const Icon = t.icon
           const active = activeTab === t.id
@@ -593,8 +593,8 @@ export default function SalesPage() {
               ) : (
                 filteredSales.map((s: any) => {
                   const cust = customersMap.get(s.customer_id)
-                  const custName = cust?.razon_social || s.customer_name || "Consumidor Final"
-                  const custRuc = cust?.ruc || cust?.ci || s.customer_ruc || "44444401-7"
+                  const custName = s.customer_nombre || cust?.razon_social || s.customer_name || "Consumidor Final"
+                  const custRuc = s.customer_doc || cust?.ruc || cust?.ci || s.customer_ruc || "44444401-7"
                   const isCancelada = s.estado === "cancelado"
                   const isExtraClub = s.condicion === "credito_extra_club"
                   const isNC = s.tipo_comprobante === "nota_credito"
@@ -602,13 +602,20 @@ export default function SalesPage() {
                   return (
                     <tr key={s.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
                       <td className="p-4 font-mono font-bold text-slate-900 dark:text-white">
-                        <div className="flex items-center gap-2">
-                          {isNC ? (
-                            <RotateCcw className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-                          ) : (
-                            <Receipt className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                        <div className="flex flex-col">
+                          <div className="flex items-center gap-2">
+                            {isNC ? (
+                              <RotateCcw className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                            ) : (
+                              <Receipt className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                            )}
+                            <span>{s.numero || `Sin numero (ID ${s.id.slice(-8)})`}</span>
+                          </div>
+                          {isNC && s.factura_modificada && (
+                            <span className="text-[10px] text-slate-400 font-mono mt-0.5 font-normal">
+                              Modifica: <strong className="text-slate-600 dark:text-slate-300 font-semibold">{s.factura_modificada}</strong>
+                            </span>
                           )}
-                          <span>{s.numero || `Sin numero (ID ${s.id.slice(-8)})`}</span>
                         </div>
                       </td>
                       <td className="p-4 text-slate-500 font-mono text-[11px]">
