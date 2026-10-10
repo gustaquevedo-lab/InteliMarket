@@ -2135,8 +2135,8 @@ async def get_sale_items(db: AsyncSession, sale_id: str) -> list[dict]:
                 for ri, p in ri_res.all():
                     qty_f = float(ri.cantidad or 0)
                     price_f = float(ri.precio_unitario or 0)
-                    sub_f = float(ri.subtotal or (price_f * qty_f))
-                    tot_f = float(ri.total or sub_f)
+                    tot_f = float(ri.total or (price_f * qty_f))
+                    sub_f = tot_f
                     iva_t = float(ri.iva_tasa or 10)
                     iva_m = float(ri.iva_monto or 0)
                     desc = ri.descripcion or (p.nombre if p else "Producto")
