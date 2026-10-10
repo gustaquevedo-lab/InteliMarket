@@ -7,7 +7,7 @@ import {
   Filter, Calendar, Clock, RefreshCw, Box, ExternalLink, ArrowRight,
   HelpCircle, Info, BookOpen, Gift, Check, Palette, Cpu, Zap, Copy,
   Lock, Unlock, Calculator, Boxes, Truck, FileText, Image as ImageIcon,
-  Wheat, Wrench, Ban, Power, ToggleLeft, ToggleRight
+  Wheat, Wrench, Ban, Power, ToggleLeft, ToggleRight, Flame
 } from "lucide-react"
 import {
   api,
@@ -17,6 +17,7 @@ import {
   type ProductVariant,
   type PackBarcode,
   type Supplier,
+  type Promotion,
   type ProductsStatsResponse,
   type Product360Response,
 } from "../../api"
@@ -353,6 +354,7 @@ export default function ProductsPage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [variantsList, setVariantsList] = useState<ProductVariant[]>([])
   const [packBarcodesList, setPackBarcodesList] = useState<PackBarcode[]>([])
+  const [activePromotions, setActivePromotions] = useState<Promotion[]>([])
   const [stats, setStats] = useState<ProductsStatsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadingVariants, setLoadingVariants] = useState(false)
@@ -362,7 +364,7 @@ export default function ProductsPage() {
   // Filtros y Búsqueda
   const [search, setSearch] = useState("")
   const [selectedCategory, setSelectedCategory] = useState("")
-  const [filterStockTag, setFilterStockTag] = useState<"todos" | "con_stock" | "quiebre" | "bajo_stock" | "pesables" | "perecederos">("todos")
+  const [filterStockTag, setFilterStockTag] = useState<"todos" | "con_stock" | "quiebre" | "bajo_stock" | "pesables" | "perecederos" | "en_promo">("todos")
   const [filterTipoProducto, setFilterTipoProducto] = useState<"todos" | "producto" | "materia_prima" | "insumo" | "servicio">("todos")
   const [filterEstado, setFilterEstado] = useState<"todos" | "activos" | "inactivos">("activos")
   const [sortBy, setSortBy] = useState<"nombre" | "precio_desc" | "precio_asc" | "margen_desc">("nombre")
@@ -556,11 +558,18 @@ export default function ProductsPage() {
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const [prodsRes, catsRes, suppsRes] = await Promise.allSettled([
+      const [prodsRes, catsRes, suppsRes, promosRes] = await Promise.allSettled([
         api.products.list({ search: search || undefined, categoria_id: selectedCategory || undefined, include_inactive: true, limit: 1000 }),
         api.categories.list(),
         api.purchases.suppliers(),
+        api.promotions.list({ estado: "activa" }).catch(() => []),
       ])
+
+      if (promosRes.status === "fulfilled" && Array.isArray(promosRes.value)) {
+        setActivePromotions(promosRes.value)
+      } else {
+        setActivePromotions([])
+      }
 
       if (prodsRes.status === "fulfilled" && Array.isArray(prodsRes.value)) {
         // Filtrar nombres válidos y dar prioridad a productos con precio/stock
@@ -647,12 +656,130 @@ export default function ProductsPage() {
     }
   }
 
+  interface ActivePromoInfo {
+    promoId: string
+    nombre: string
+    tipo: string
+    precioPromo: number
+    precioRegular: number
+    descuentoPct: number
+    badge: string
+  }
+
+  // Mapa de Productos en Promoción Activa (resolución de vigencia en tiempo real en Asunción)
+  const activePromosMap = useMemo(() => {
+    const map = new Map<string, ActivePromoInfo>()
+    if (!activePromotions || activePromotions.length === 0) return map
+
+    // Fecha actual en Paraguay (America/Asuncion)
+    const todayDate = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Asuncion" }).format(new Date())
+
+    for (const promo of activePromotions) {
+      if (promo.estado !== "activa") continue
+      const desde = String(promo.valido_desde || "").slice(0, 10)
+      const hasta = String(promo.valido_hasta || "").slice(0, 10)
+      if (desde && desde > todayDate) continue
+      if (hasta && hasta < todayDate) continue
+
+      let badgeText = "OFERTA"
+      if (promo.tipo === "dos_por_uno") badgeText = "2x1"
+      else if (promo.tipo === "tres_por_dos") badgeText = "3x2"
+      else if (promo.origen === "corto_vencimiento") badgeText = "LIQUIDACIÓN"
+      else if (promo.tipo === "porcentaje" && promo.valor) badgeText = `-${Math.round(Number(promo.valor))}%`
+
+      // 1. Productos directos vinculados
+      const pids: string[] = []
+      if (promo.producto_ids && Array.isArray(promo.producto_ids)) {
+        pids.push(...promo.producto_ids.map(id => String(id)))
+      }
+      if (promo.precios_por_producto && typeof promo.precios_por_producto === "object") {
+        pids.push(...Object.keys(promo.precios_por_producto))
+      }
+
+      for (const pid of Array.from(new Set(pids))) {
+        const prod = products.find(p => p.id === pid)
+        const precioRegular = prod ? Number(prod.precio_venta || 0) : 0
+
+        let precioPromo: number | null = null
+        if (promo.precios_por_producto && promo.precios_por_producto[pid] != null) {
+          precioPromo = Math.round(Number(promo.precios_por_producto[pid]))
+        } else if (promo.precio_fijo_promocional != null && Number(promo.precio_fijo_promocional) > 0) {
+          precioPromo = Math.round(Number(promo.precio_fijo_promocional))
+        } else if (precioRegular > 0) {
+          if (promo.tipo === "porcentaje" && promo.valor) {
+            precioPromo = Math.round(precioRegular * (1 - Number(promo.valor) / 100))
+          } else if (promo.tipo === "monto_fijo" && promo.valor) {
+            precioPromo = Math.max(0, Math.round(precioRegular - Number(promo.valor)))
+          } else if (promo.tipo === "dos_por_uno") {
+            precioPromo = Math.round(precioRegular / 2)
+          } else if (promo.tipo === "tres_por_dos") {
+            precioPromo = Math.round((precioRegular * 2) / 3)
+          }
+        }
+
+        if (precioPromo != null && precioPromo > 0 && (precioRegular === 0 || precioPromo < precioRegular)) {
+          const descPct = precioRegular > 0 ? Math.round(((precioRegular - precioPromo) / precioRegular) * 100) : 0
+          const existing = map.get(pid)
+          if (!existing || precioPromo < existing.precioPromo) {
+            map.set(pid, {
+              promoId: promo.id,
+              nombre: promo.nombre,
+              tipo: promo.tipo,
+              precioPromo,
+              precioRegular,
+              descuentoPct: descPct,
+              badge: badgeText,
+            })
+          }
+        }
+      }
+
+      // 2. Promociones por categoría
+      if (promo.aplica_a === "categoria" && promo.categoria_ids && Array.isArray(promo.categoria_ids)) {
+        const catSet = new Set(promo.categoria_ids.map(c => String(c)))
+        for (const prod of products) {
+          if (prod.categoria_id && catSet.has(String(prod.categoria_id))) {
+            const precioRegular = Number(prod.precio_venta || 0)
+            if (precioRegular <= 0) continue
+
+            let precioPromo: number | null = null
+            if (promo.tipo === "porcentaje" && promo.valor) {
+              precioPromo = Math.round(precioRegular * (1 - Number(promo.valor) / 100))
+            } else if (promo.tipo === "monto_fijo" && promo.valor) {
+              precioPromo = Math.max(0, Math.round(precioRegular - Number(promo.valor)))
+            }
+
+            if (precioPromo != null && precioPromo > 0 && precioPromo < precioRegular) {
+              const descPct = Math.round(((precioRegular - precioPromo) / precioRegular) * 100)
+              const existing = map.get(prod.id)
+              if (!existing || precioPromo < existing.precioPromo) {
+                map.set(prod.id, {
+                  promoId: promo.id,
+                  nombre: promo.nombre,
+                  tipo: promo.tipo,
+                  precioPromo,
+                  precioRegular,
+                  descuentoPct: descPct,
+                  badge: badgeText,
+                })
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return map
+  }, [activePromotions, products])
+
   // Filtrado y Ordenación en Memoria
   const filteredAndSortedProducts = useMemo(() => {
     let list = [...products]
 
     // Filtro por Tags de Estado de Stock
-    if (filterStockTag === "con_stock") {
+    if (filterStockTag === "en_promo") {
+      list = list.filter(p => activePromosMap.has(p.id))
+    } else if (filterStockTag === "con_stock") {
       list = list.filter(p => (Number((p as any).stock_actual) || 0) > 0)
     } else if (filterStockTag === "quiebre") {
       list = list.filter(p => (Number((p as any).stock_actual) || 0) <= 0)
@@ -694,7 +821,7 @@ export default function ProductsPage() {
     })
 
     return list
-  }, [products, filterStockTag, filterTipoProducto, filterEstado, sortBy])
+  }, [products, filterStockTag, filterTipoProducto, filterEstado, sortBy, activePromosMap])
 
   // Paginación
   const totalPages = Math.ceil(filteredAndSortedProducts.length / pageSize) || 1
@@ -1459,20 +1586,29 @@ export default function ProductsPage() {
 
               {[
                 { key: "todos", label: `Todos (${products.length})` },
+                { key: "en_promo", label: `🔥 En Promo (${activePromosMap.size})`, isPromo: true },
                 { key: "con_stock", label: "Con Stock Físico" },
                 { key: "quiebre", label: `Quiebres / Stock 0 (${stats?.total_quiebres || 0})` },
                 { key: "pesables", label: `Pesables / Balanza (${stats?.total_pesables || 0})` },
                 { key: "perecederos", label: "Perecederos" },
               ].map((tag) => {
                 const isSelected = filterStockTag === tag.key
+                const isPromoTag = tag.key === "en_promo"
                 return (
                   <button
                     key={tag.key}
                     type="button"
-                    onClick={() => setFilterStockTag(tag.key as any)}
+                    onClick={() => {
+                      setFilterStockTag(tag.key as any)
+                      setPage(1)
+                    }}
                     className={`px-3 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
                       isSelected
-                        ? "bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-300 dark:ring-indigo-900"
+                        ? isPromoTag
+                          ? "bg-gradient-to-r from-rose-600 to-amber-600 text-white shadow-md shadow-rose-500/25 ring-2 ring-rose-400"
+                          : "bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-300 dark:ring-indigo-900"
+                        : isPromoTag && activePromosMap.size > 0
+                        ? "bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 animate-pulse font-extrabold"
                         : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
                     }`}
                   >

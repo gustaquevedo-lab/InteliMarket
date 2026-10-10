@@ -3114,6 +3114,14 @@ export default function POSPage() {
       ])
       setSearch("")
       searchInputRef.current?.focus()
+      // Si no tiene promo fija activa, recalcular escala por peso/cantidad acumulada
+      if (promoPrice === null) {
+        const existingPesableQty = cart
+          .filter((it) => it.product_id === product.id)
+          .reduce((acc, it) => acc + (it.quantity || 0), 0)
+        const totalPesableQty = parseFloat((existingPesableQty + finalQty).toFixed(3))
+        applyTieredPrice(product.id, totalPesableQty, customer.id)
+      }
       return
     }
 
@@ -3163,7 +3171,7 @@ export default function POSPage() {
   }, [currentScaleWeight, cart, customer.id, cajaAbierta, cashSessionId])
 
   // ── ESCALA DE PRECIOS POR CANTIDAD (sp_tiered_prices) ──────────────────────
-  // Recalcula el precio unitario de la línea no pesable de `productId` contra
+  // Recalcula el precio unitario de `productId` (pesable o unitario) contra
   // los escalones cargados en Smart Pricing. Si no hay escalón para la
   // cantidad actual (ya sea por debajo del mínimo, o la API no encuentra
   // nada), vuelve al precio base del producto -- nunca se queda con un precio
@@ -3181,7 +3189,7 @@ export default function POSPage() {
       // las escalas quedan ON HOLD (se preserva el precio promocional).
       let isPromoActive = false
       setCart((prev) => {
-        const existing = prev.find((i) => i.product_id === productId && !i.es_pesable)
+        const existing = prev.find((i) => i.product_id === productId)
         if (existing && (existing as any).en_promocion) {
           isPromoActive = true
         }
@@ -3190,27 +3198,27 @@ export default function POSPage() {
       if (isPromoActive) return
 
       if (customerId && customerId !== DEFAULT_CUSTOMER.id) {
-        const resolved = await api.priceLists.resolvePrice(customerId, productId, Math.floor(quantity)).catch(() => null)
+        const resolved = await api.priceLists.resolvePrice(customerId, productId, quantity).catch(() => null)
         const resolvedPrice = resolved && typeof resolved.precio !== "undefined" ? Number(resolved.precio) : null
         if (resolvedPrice !== null && !isNaN(resolvedPrice)) {
           setCart((prev) => prev.map((item) =>
-            item.product_id === productId && !item.es_pesable && !(item as any).en_promocion
+            item.product_id === productId && !(item as any).en_promocion
               ? { ...item, precio: resolvedPrice }
               : item
           ))
           return
         }
       }
-      const tier = await api.smartPricing.calculateTieredPrice(productId, Math.floor(quantity))
+      const tier = await api.smartPricing.calculateTieredPrice(productId, quantity)
       const tierPrice = tier && typeof tier.precio_unitario !== "undefined" ? Number(tier.precio_unitario) : null
       setCart((prev) => prev.map((item) =>
-        item.product_id === productId && !item.es_pesable && !(item as any).en_promocion
+        item.product_id === productId && !(item as any).en_promocion
           ? { ...item, precio: tierPrice !== null && !isNaN(tierPrice) ? tierPrice : item.precio_base }
           : item
       ))
     } catch (e) {
       setCart((prev) => prev.map((item) =>
-        item.product_id === productId && !item.es_pesable && !(item as any).en_promocion
+        item.product_id === productId && !(item as any).en_promocion
           ? { ...item, precio: item.precio_base }
           : item
       ))
@@ -3218,11 +3226,15 @@ export default function POSPage() {
   }, [])
 
   // Cuando cambia el cliente de la venta (F9, o volver a Consumidor Final),
-  // recalcular el precio de las lineas no pesables ya en el carrito contra
-  // la lista/asignacion del nuevo cliente y cargar ofertas 1-a-1 activas.
+  // recalcular el precio de todas las lineas del carrito contra la lista/asignacion
+  // del nuevo cliente y cargar ofertas 1-a-1 activas.
   useEffect(() => {
-    cart.forEach((item) => {
-      if (!item.es_pesable) applyTieredPrice(item.product_id, item.quantity, customer.id)
+    const productIds = Array.from(new Set(cart.map((i) => i.product_id)))
+    productIds.forEach((pid) => {
+      const totalQty = cart
+        .filter((item) => item.product_id === pid)
+        .reduce((sum, item) => sum + (item.quantity || 0), 0)
+      applyTieredPrice(pid, totalQty, customer.id)
     })
 
     if (customer && customer.id && customer.id !== DEFAULT_CUSTOMER.id) {
@@ -5793,6 +5805,12 @@ export default function POSPage() {
       const itemToDelete = cart.find(i => i.id === action.itemId)
       setCart((prev) => prev.filter((i) => i.id !== action.itemId))
       toast.info("Ítem Anulado", `${itemToDelete?.nombre || 'Producto'} eliminado de la venta.`)
+      if (itemToDelete) {
+        const remainingQty = cart
+          .filter((i) => i.product_id === itemToDelete.product_id && i.id !== action.itemId)
+          .reduce((sum, i) => sum + (i.quantity || 0), 0)
+        applyTieredPrice(itemToDelete.product_id, remainingQty, customer.id)
+      }
     } else if (action.type === "clear_cart") {
       setCart([])
       setCustomer(DEFAULT_CUSTOMER)
@@ -5813,9 +5831,14 @@ export default function POSPage() {
           })
           .filter(Boolean) as CartItem[]
       )
-      if (itemBefore && !itemBefore.es_pesable) {
-        const nextQty = itemBefore.quantity + (action.delta || 0)
-        if (nextQty > 0) applyTieredPrice(itemBefore.product_id, nextQty, customer.id)
+      if (itemBefore) {
+        const remainingQty = cart
+          .filter((i) => i.product_id === itemBefore.product_id)
+          .reduce((sum, i) => {
+            const q = i.id === action.itemId ? Math.max(0, i.quantity + (action.delta || 0)) : (i.quantity || 0)
+            return sum + q
+          }, 0)
+        applyTieredPrice(itemBefore.product_id, remainingQty, customer.id)
       }
     } else if (action.type === "open_pos_config") {
       setShowPosConfigModal(true)
@@ -6375,8 +6398,11 @@ export default function POSPage() {
         })
       )
       const item = cart.find((i) => i.id === id)
-      if (item && !item.es_pesable) {
-        applyTieredPrice(item.product_id, item.quantity + delta, customer.id)
+      if (item) {
+        const totalQty = cart
+          .filter((i) => i.product_id === item.product_id)
+          .reduce((sum, i) => sum + (i.id === id ? i.quantity + delta : (i.quantity || 0)), 0)
+        applyTieredPrice(item.product_id, parseFloat(totalQty.toFixed(3)), customer.id)
       }
     }
   }

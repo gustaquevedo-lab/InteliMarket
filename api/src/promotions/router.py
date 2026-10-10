@@ -26,7 +26,7 @@ async def list_promotions(
     tipo: Optional[str] = Query(None),
     estado: Optional[str] = Query(None),
     origen_fuente: Optional[str] = Query(None),
-    limit: int = Query(100, le=5000),
+    limit: Optional[int] = Query(None),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),

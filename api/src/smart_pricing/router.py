@@ -79,7 +79,7 @@ async def list_tiered_prices(
 @router.get("/tiered-prices/calculate")
 async def calculate_tiered_price(
     product_id: str = Query(...),
-    quantity: int = Query(...),
+    quantity: float = Query(...),
     price_list_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),

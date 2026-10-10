@@ -96,7 +96,7 @@ async def delete_item(db: AsyncSession, item_id: str) -> bool:
 
 
 async def resolve_customer_price(
-    db: AsyncSession, company_id: str, customer_id: str, product_id: str, quantity: int = 1,
+    db: AsyncSession, company_id: str, customer_id: str, product_id: str, quantity: float = 1,
 ) -> Optional[dict]:
     """Precio real a cobrarle a un cliente por un producto, respetando (en orden):
     1) la lista de precios asignada al cliente via PriceListAssignment (tipo=cliente),

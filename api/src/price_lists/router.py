@@ -37,7 +37,7 @@ async def products_with_tiers(
 
 @router.get("/lookup")
 async def lookup_price(
-    customer_id: str, product_id: str, quantity: int = 1,
+    customer_id: str, product_id: str, quantity: float = 1,
     db: AsyncSession = Depends(get_db), user=Depends(require_auth),
 ):
     return await service.resolve_customer_price(db, user["company_id"], customer_id, product_id, quantity)

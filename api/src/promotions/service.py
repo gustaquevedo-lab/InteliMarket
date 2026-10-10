@@ -317,7 +317,7 @@ async def list_promotions(
     tipo: str | None = None,
     estado: str | None = None,
     origen_fuente: str | None = None,
-    limit: int = 50,
+    limit: int | None = None,
     offset: int = 0,
 ) -> list[Promotion]:
     try:
@@ -335,7 +335,9 @@ async def list_promotions(
     if origen_fuente:
         query = query.where(Promotion.origen_fuente == origen_fuente)
 
-    query = query.order_by(Promotion.valido_desde.desc(), Promotion.created_at.desc()).limit(limit).offset(offset)
+    query = query.order_by(Promotion.valido_desde.desc(), Promotion.created_at.desc()).offset(offset)
+    if limit is not None:
+        query = query.limit(limit)
     result = await db.execute(query)
     promos = list(result.scalars().all())
     if not promos:

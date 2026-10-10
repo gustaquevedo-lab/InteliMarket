@@ -137,7 +137,7 @@ async def list_tiered_prices(
 
 
 async def get_applicable_tier_price(
-    db: AsyncSession, company_id: str, product_id: str, quantity: int,
+    db: AsyncSession, company_id: str, product_id: str, quantity: float,
     price_list_id: Optional[str] = None
 ) -> Optional[dict]:
     active_promo_price: Optional[Decimal] = None
