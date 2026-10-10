@@ -367,11 +367,12 @@ export default function PurchasesPage() {
   const supplierComboboxRef = useRef<HTMLDivElement>(null)
   const [searchProductIA, setSearchProductIA] = useState("")
   const [soloQuiebreIA, setSoloQuiebreIA] = useState(false)
-  const [filterEstadoIA, setFilterEstadoIA] = useState<"todos" | "quiebres" | "bajos" | "sugeridos">("todos")
+  const [filterEstadoIA, setFilterEstadoIA] = useState<"todos" | "quiebres" | "bajos" | "sugeridos" | "inactivos">("todos")
 
   // Ordenamiento interactivo de la Matriz de Sugerencia IA
   type IASortColumn =
     | "producto"
+    | "estado_producto"
     | "proveedor"
     | "stock"
     | "m4"
@@ -2010,6 +2011,7 @@ export default function PurchasesPage() {
         const qty = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida
         return Number(qty) > 0 || Number(it.cantidad_sugerida) > 0
       }
+      if (filterEstadoIA === "inactivos") return it.activo === false
       return true
     })
 
@@ -2023,6 +2025,10 @@ export default function PurchasesPage() {
         case "producto":
           valA = (a.nombre || "").toLowerCase()
           valB = (b.nombre || "").toLowerCase()
+          break
+        case "estado_producto":
+          valA = a.activo !== false ? 1 : 0
+          valB = b.activo !== false ? 1 : 0
           break
         case "proveedor":
           valA = (a.proveedor_oficial_nombre || a.ultimo_proveedor_nombre || "").toLowerCase()
@@ -2182,6 +2188,7 @@ export default function PurchasesPage() {
           "SKU": String(it.sku || ""),
           "Código de Barras": String(it.codigo_barra || ""),
           "Producto": it.nombre || "",
+          "Estado": it.activo !== false ? "Activo" : "Inactivo",
           "Unidad": it.unidad_medida || "UN",
           "Proveedor Oficial": it.proveedor_oficial_nombre || "",
           "Último Proveedor": it.ultimo_proveedor_nombre || "",
@@ -3910,6 +3917,22 @@ export default function PurchasesPage() {
                       {replenishmentData?.total_sugeridos || 0}
                     </span>
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setFilterEstadoIA("inactivos")}
+                    className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer select-none ${
+                      filterEstadoIA === "inactivos"
+                        ? "bg-rose-600 text-white shadow-md ring-2 ring-rose-300 scale-[1.02]"
+                        : "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 hover:bg-rose-100"
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                    <span>Inactivos</span>
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-rose-200 dark:bg-rose-900/60 font-mono font-black">
+                      {replenishmentData?.items?.filter((it: any) => it.activo === false)?.length || 0}
+                    </span>
+                  </button>
                 </div>
               </div>
 
@@ -3961,6 +3984,7 @@ export default function PurchasesPage() {
                   <span>
                     Ordenado por: <strong className="font-extrabold">{
                       sortColumnIA === "producto" ? "Producto & SKU" :
+                      sortColumnIA === "estado_producto" ? "Estado (Activo/Inactivo)" :
                       sortColumnIA === "proveedor" ? "Último Proveedor" :
                       sortColumnIA === "stock" ? "Stock Físico" :
                       sortColumnIA === "m4" ? (replenishmentData?.meses_labels?.[0] || "M-4") :
@@ -4062,7 +4086,8 @@ export default function PurchasesPage() {
                               className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                             />
                           </th>
-                          {renderSortHeader("producto", "Producto & SKU", "left", undefined, "min-w-[160px] max-w-[210px]")}
+                          {renderSortHeader("producto", "Producto & SKU", "left", undefined, "min-w-[150px] max-w-[200px]")}
+                          {renderSortHeader("estado_producto", "Estado", "center", "Estado del producto en catálogo (Activo / Inactivo)", "w-14")}
                           {renderSortHeader("proveedor", "Proveedor Oficial", "left", "Proveedor oficial asignado al producto (Canal principal)", "min-w-[100px] max-w-[135px]")}
                           {renderSortHeader("stock", "Stock", "right", "Stock actual físico registrado en góndola/depósito", "w-13 font-mono")}
                           {renderSortHeader("m4", labels4m[0], "right", `Ventas en ${labels4m[0]}`, "font-mono w-11")}
@@ -4144,6 +4169,21 @@ export default function PurchasesPage() {
                                     </span>
                                   )}
                                 </div>
+                              </td>
+
+                              {/* Estado Activo / Inactivo */}
+                              <td className="px-1 py-1 text-center whitespace-nowrap">
+                                {it.activo !== false ? (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-extrabold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800" title="Producto Activo en catálogo">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                    Activo
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-extrabold bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800" title="Producto Inactivo en catálogo">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                                    Inactivo
+                                  </span>
+                                )}
                               </td>
 
                               {/* Proveedor Oficial con indicador si difiere del último de compra */}

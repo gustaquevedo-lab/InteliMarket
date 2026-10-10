@@ -356,6 +356,7 @@ export interface SmartReplenishmentItem {
   iva_tasa: number
   explicacion_ia: string
   generada_automaticamente?: boolean
+  activo?: boolean
 }
 
 export interface SmartReplenishmentResponse {

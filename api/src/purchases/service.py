@@ -2899,7 +2899,7 @@ async def calculate_smart_replenishment_preview(
             y -= 1
         meses_labels.append(month_names_es[m - 1])
     
-    where_clauses = ["p.company_id = :cid", "p.activo = true", "p.nombre NOT LIKE 'Producto legacy #%'"]
+    where_clauses = ["p.company_id = :cid", "p.nombre NOT LIKE 'Producto legacy #%'"]
     params: dict = {"cid": cid, "days": dias_hist, "limit": limit}
     
     if supplier_id:
@@ -2987,7 +2987,8 @@ async def calculate_smart_replenishment_preview(
             sp_may.may_precio as precio_mayorista,
             sp_may.may_min_qty as precio_mayorista_min_qty,
             last_sup.last_sup_id as ultimo_proveedor_id,
-            last_sup.last_sup_name as ultimo_proveedor_nombre
+            last_sup.last_sup_name as ultimo_proveedor_nombre,
+            COALESCE(p.activo, true) as activo
         FROM products p
         LEFT JOIN suppliers p_sup ON p_sup.id = p.supplier_id
         LEFT JOIN last_sup_cte last_sup ON last_sup.product_id = p.id
@@ -3091,6 +3092,7 @@ async def calculate_smart_replenishment_preview(
         precio_mayorista_min_qty = int(r[24]) if len(r) > 24 and r[24] is not None else None
         ultimo_proveedor_id = str(r[25]) if len(r) > 25 and r[25] else None
         ultimo_proveedor_nombre = str(r[26]) if len(r) > 26 and r[26] else None
+        activo = bool(r[27]) if len(r) > 27 and r[27] is not None else True
         
         # Variación porcentual de costo (Último costo vs Costo promedio)
         if costo_prom > Decimal("0") and costo_ult > Decimal("0"):
@@ -3269,6 +3271,7 @@ async def calculate_smart_replenishment_preview(
             "iva_tasa": float(iva_tasa or 10),
             "explicacion_ia": explicacion_texto,
             "generada_automaticamente": True,
+            "activo": activo,
         })
         
     return {

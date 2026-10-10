@@ -1026,6 +1026,7 @@ class SmartReplenishmentItem(BaseModel):
     iva_tasa: float
     explicacion_ia: str
     generada_automaticamente: Optional[bool] = True
+    activo: bool = True
 
 
 class SmartReplenishmentResponse(BaseModel):
