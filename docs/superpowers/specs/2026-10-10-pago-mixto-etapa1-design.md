@@ -29,7 +29,8 @@ El POS modela el pago como un `Set` de métodos activos (`activeMethods`), un mo
 | 6 | El listado de ventas toma la forma de pago de la primera línea hallada, sin orden (`sales/service.py` ~1935). | Código |
 | 7 | Cada línea llama al terminal por separado, sin candado. Si falla el paso 2 (`/pos/descuento`) por red tras autorizar en el paso 1, no se registra nada. | Código |
 | 8 | Vaciar o cancelar una venta con líneas aprobadas, o cambiar el carrito después de cobrar, deja cobros huérfanos sin aviso. | Código |
-| 9 | El monto de PlugPay cae a `mixedQrPyg` si su campo está vacío (posible doble conteo). "Resto" (`getSaldoRestanteParaMetodo`) ignora el efectivo en Gs si no se tocó "Exacto". Las líneas extra de `plugpay` se envían siempre como `PIX`, aun si el sub-método es Parcelado. | Código |
+| 9 | Los cobros QR/PIX leen su monto de `mixedQrPyg` (`handleBancardQR`, `handleGenerateBancardCloudQr`, `handleDinelcoQR`), pero el total y el payload del método leen `mixedCardPyg` (Bancard) o `mixedDinelcoPyg` (Dinelco). En un pago mixto con QR dentro de Bancard o Dinelco, el QR puede generarse por un monto y registrarse por otro, o por 0, y entonces el efectivo (que se calcula como "resto") absorbe todo. Los paneles muestran además dos campos de monto para esa línea. | Código; a reproducir en sandbox antes y después |
+| 10 | Las líneas extra de `plugpay` se envían siempre como `PIX`, aun si el sub-método es Parcelado. | Código |
 
 ## 3. Alcance
 
@@ -38,7 +39,7 @@ El POS modela el pago como un `Set` de métodos activos (`activeMethods`), un mo
 **Fuera (Etapa 2 o posterior):**
 - Lista unificada de líneas y combinaciones de métodos dentro de Bancard (tarjeta + QR).
 - Anulación o reversa automática de un cobro aprobado (depende de la API de reversa de Bancard).
-- Etiquetar correctamente las líneas extra de `plugpay` Parcelado (hallazgo 9, tercera parte).
+- Etiquetar correctamente las líneas extra de `plugpay` Parcelado (hallazgo 10).
 - "Otros" y Extra Club con más de una línea.
 
 ## 4. Diseño
@@ -54,7 +55,7 @@ El POS modela el pago como un `Set` de métodos activos (`activeMethods`), un mo
 - Reglas: cada línea no-efectivo confirmada (aprobada por el terminal o con cupón manual); monto > 0; saldo Extra Club; comprobante de transferencia, cheque o vale; suma de montos **confirmados** = total con tolerancia `TOLERANCIA_PAGOS_PYG = 50`.
 - Regla extra (hallazgo 2): se rechaza cualquier línea extra de método `qr` o `plugpay_credito` mientras ese método no sea una línea activa contada.
 - "Recibido" y "Falta cobrar" cuentan solo líneas confirmadas; las líneas en curso se muestran como "pendiente de confirmar" y no suman.
-- Arreglos aritméticos (hallazgo 9): PlugPay deja de caer a `mixedQrPyg`; `getSaldoRestanteParaMetodo` cuenta el efectivo en Gs tipeado.
+- Un solo campo de monto por línea (hallazgo 9): los handlers de cobro QR/PIX de Bancard y Dinelco leen `mixedCardPyg` / `mixedDinelcoPyg` (el mismo estado que usan el total y el payload), y los campos "Monto QR en esta línea" de esos paneles escriben ese mismo estado en vez de `mixedQrPyg`. PlugPay no se toca: su campo escribe los tres estados a propósito.
 
 ### 4.2 Líneas de pago enriquecidas y enlace atómico
 
@@ -94,7 +95,7 @@ El listado de ventas devuelve `forma_pago = 'MIXTO'` cuando hay 2 o más líneas
 
 ### 4.5 Protecciones del POS
 
-1. **Candado por terminal** (`ui-web/src/pages/pos/terminalLock.ts`): un mutex por IP de terminal (Bancard o Dinelco). Mientras un cobro está en curso, los demás botones "Cobrar" quedan deshabilitados con "Terminal ocupado". Se libera al terminar, al fallar o por el timeout de 90 s existente. Cubre línea principal y extras.
+1. **Candado por terminal** (`ui-web/src/pages/pos/terminalLock.ts`): un mutex por IP de terminal (Bancard o Dinelco). Mientras un cobro está en curso, los demás botones "Cobrar" quedan deshabilitados con "Terminal ocupado". Se libera al terminar, al fallar o por un timeout de 190 s (un cobro Bancard son dos llamadas de hasta 90 s). Cubre línea principal y extras.
 2. **Paso 2 de Bancard cortado:** si `/pos/descuento` falla por red tras autorizar en `/pos/venta-ux`, se registra el cobro en `pos_terminal_transactions` con `bin`, `nsu`, `exitosa = false` y `requiere_conciliacion = true`. Aparece en `huerfanos`. No se revierte automáticamente.
 3. **Cancelar con cobros aprobados:** vaciar o cancelar una venta con líneas aprobadas pide confirmación listando monto, proveedor y voucher de cada una, y avisa que el terminal no devuelve nada solo. Se registra `audit_logs` (`accion = 'cobro_aprobado_cancelado'`, ids en `datos_nuevos`). Pausar una venta no cuenta como cancelar. Si el total del carrito cambia después de cobrar, se muestra un aviso.
 4. **QR y Parcelado extra (hallazgo 2, provisorio):** se ocultan los botones "+ Agregar otro QR" (paneles `qr_zimple` y `qr_cloud` de Bancard) y "+ Agregar otro crédito parcelado", con una nota para repartir el cobro en otra línea de tarjeta. Se cierra del todo en la Etapa 2.
@@ -107,7 +108,7 @@ Todas las columnas nuevas son opcionales y el servidor acepta payloads viejos. L
 
 - **Servidor** (`api/tests/test_pagos_mixtos.py`, pytest en el `.venv`): suma exacta; de más; de menos; sin líneas; línea en R$ sin `monto_pyg` (`no_verificable`); enlace atómico con id válido; id inexistente, de otra empresa o ya enlazado (`enlace_invalido`, venta guardada); payload viejo sin campos nuevos; `forma_pago = MIXTO` en el listado; permisos del panel (403 sin `caja:revision_cobros`).
 - **POS:** `validarCierre.ts` se prueba como función pura con una tabla de casos ejecutable con Node (no hay runner en `ui-web`): doble-Enter con cobro sin aprobar, línea extra `qr` sin método activo, suma de confirmadas distinta del total, línea en curso, tolerancia de ₲50, Extra Club sin saldo. Más `tsc --noEmit`.
-- **Sandbox:** todo se prueba primero en el sandbox (esquema paralelo, API en el puerto 8001), con cobros simulados y sin tocar el terminal real.
+- **Sandbox:** todo se prueba primero en el sandbox (esquema paralelo, API en el puerto 8001), con cobros simulados y sin tocar el terminal real. El caso efectivo + QR de Bancard se reproduce antes del arreglo (para confirmar el hallazgo 9) y se repite después.
 - **Prueba real:** una venta chica con cobro real en una caja, fuera de horario, al final.
 
 ## 6. Despliegue y reversión
