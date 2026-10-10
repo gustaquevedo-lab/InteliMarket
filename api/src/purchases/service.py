@@ -2996,7 +2996,7 @@ async def calculate_smart_replenishment_preview(
             cat.nombre as categoria_nombre
         FROM products p
         LEFT JOIN suppliers p_sup ON p_sup.id = p.supplier_id
-        LEFT JOIN categories cat ON cat.id = p.categoria_id
+        LEFT JOIN product_categories cat ON cat.id = p.categoria_id
         LEFT JOIN last_sup_cte last_sup ON last_sup.product_id = p.id
         LEFT JOIN (
             SELECT DISTINCT ON (product_id)
