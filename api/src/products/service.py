@@ -435,7 +435,8 @@ async def list_products(
                 SELECT DISTINCT ON (ap.product_id)
                     ap.product_id,
                     ap.supplier_id,
-                    s.razon_social as supplier_nombre
+                    s.razon_social as supplier_nombre,
+                    ap.fecha as last_purchase_date
                 FROM (
                     SELECT pri.product_id, pr.supplier_id, pr.fecha
                     FROM purchase_receipt_items pri
