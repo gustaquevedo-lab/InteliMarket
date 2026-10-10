@@ -2878,7 +2878,7 @@ async def calculate_smart_replenishment_preview(
     factor_evento: str = "normal",
     solo_quiebre_o_bajo: bool = False,
     search: str | None = None,
-    limit: int = 500,
+    limit: int | None = 20000,
 ) -> dict:
     cid = company_id
     dias_hist = max(dias_historial_ventas, 7)
@@ -2900,7 +2900,11 @@ async def calculate_smart_replenishment_preview(
         meses_labels.append(month_names_es[m - 1])
     
     where_clauses = ["p.company_id = :cid", "p.nombre NOT LIKE 'Producto legacy #%'"]
-    params: dict = {"cid": cid, "days": dias_hist, "limit": limit}
+    params: dict = {"cid": cid, "days": dias_hist}
+    limit_clause = ""
+    if limit and limit > 0:
+        params["limit"] = limit
+        limit_clause = "LIMIT :limit"
     
     if supplier_id:
         params["supplier_id"] = supplier_id
@@ -2988,9 +2992,11 @@ async def calculate_smart_replenishment_preview(
             sp_may.may_min_qty as precio_mayorista_min_qty,
             last_sup.last_sup_id as ultimo_proveedor_id,
             last_sup.last_sup_name as ultimo_proveedor_nombre,
-            COALESCE(p.activo, true) as activo
+            COALESCE(p.activo, true) as activo,
+            cat.nombre as categoria_nombre
         FROM products p
         LEFT JOIN suppliers p_sup ON p_sup.id = p.supplier_id
+        LEFT JOIN categories cat ON cat.id = p.categoria_id
         LEFT JOIN last_sup_cte last_sup ON last_sup.product_id = p.id
         LEFT JOIN (
             SELECT DISTINCT ON (product_id)
@@ -3051,7 +3057,7 @@ async def calculate_smart_replenishment_preview(
         ) po_transit ON po_transit.product_id = p.id
         WHERE {" AND ".join(where_clauses)}
         ORDER BY COALESCE(sales.total_vendido, 0) DESC
-        LIMIT :limit
+        {limit_clause}
     """
     
     result = await db.execute(text(sql), params)
@@ -3094,6 +3100,7 @@ async def calculate_smart_replenishment_preview(
         ultimo_proveedor_id = str(r[25]) if len(r) > 25 and r[25] else None
         ultimo_proveedor_nombre = str(r[26]) if len(r) > 26 and r[26] else None
         activo = bool(r[27]) if len(r) > 27 and r[27] is not None else True
+        categoria_nombre = str(r[28]) if len(r) > 28 and r[28] else None
         
         # Variación porcentual de costo (Último costo vs Costo promedio)
         if costo_prom > Decimal("0") and costo_ult > Decimal("0"):
@@ -3237,6 +3244,8 @@ async def calculate_smart_replenishment_preview(
             "sku": sku,
             "codigo_barra": cod_barra,
             "unidad_medida": unidad,
+            "categoria_id": str(r[9]) if r[9] else None,
+            "categoria_nombre": categoria_nombre,
             "stock_actual": float(stock_actual.quantize(Decimal("1"), rounding=ROUND_HALF_UP)) if is_unitario else float(stock_actual),
             "stock_en_transito": float(stock_en_transito.quantize(Decimal("1"), rounding=ROUND_HALF_UP)) if is_unitario else float(stock_en_transito),
             "ventas_periodo": float(ventas_periodo.quantize(Decimal("1"), rounding=ROUND_HALF_UP)) if is_unitario else float(ventas_periodo),

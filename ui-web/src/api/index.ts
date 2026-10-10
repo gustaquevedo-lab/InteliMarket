@@ -321,6 +321,8 @@ export interface SmartReplenishmentItem {
   sku?: string | null
   codigo_barra?: string | null
   unidad_medida: string
+  categoria_id?: string | null
+  categoria_nombre?: string | null
   stock_actual: number
   stock_en_transito: number
   ventas_periodo: number

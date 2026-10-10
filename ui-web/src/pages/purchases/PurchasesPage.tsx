@@ -367,12 +367,16 @@ export default function PurchasesPage() {
   const supplierComboboxRef = useRef<HTMLDivElement>(null)
   const [searchProductIA, setSearchProductIA] = useState("")
   const [soloQuiebreIA, setSoloQuiebreIA] = useState(false)
+  const [selectedCategoryIA, setSelectedCategoryIA] = useState<string>("")
   const [filterActivoIA, setFilterActivoIA] = useState<"activos" | "inactivos" | "todos">("activos")
   const [filterEstadoIA, setFilterEstadoIA] = useState<"todos" | "quiebres" | "bajos" | "sugeridos">("todos")
+  const [pageIA, setPageIA] = useState<number>(1)
+  const [pageSizeIA, setPageSizeIA] = useState<number>(50)
 
   // Ordenamiento interactivo de la Matriz de Sugerencia IA
   type IASortColumn =
     | "producto"
+    | "categoria"
     | "estado_producto"
     | "proveedor"
     | "stock"
@@ -810,6 +814,7 @@ export default function PurchasesPage() {
     try {
       const res = await api.purchases.smartReplenishmentPreview({
         supplier_id: selectedSupplierIA || undefined,
+        categoria_id: selectedCategoryIA || undefined,
         dias_cobertura: Number(diasCobertura),
         lead_time_dias: Number(leadTimeDias),
         dias_historial_ventas: Number(diasHistorialVentas),
@@ -819,7 +824,7 @@ export default function PurchasesPage() {
         factor_evento: factorEvento,
         solo_quiebre_o_bajo: soloQuiebreIA,
         search: searchProductIA || undefined,
-        limit: selectedSupplierIA ? 5000 : 500,
+        limit: 20000,
       })
       setReplenishmentData(res)
 
@@ -839,6 +844,7 @@ export default function PurchasesPage() {
     }
   }, [
     selectedSupplierIA,
+    selectedCategoryIA,
     diasCobertura,
     leadTimeDias,
     diasHistorialVentas,
@@ -857,6 +863,7 @@ export default function PurchasesPage() {
   }, [
     tab,
     selectedSupplierIA,
+    selectedCategoryIA,
     diasCobertura,
     leadTimeDias,
     diasHistorialVentas,
@@ -1997,6 +2004,19 @@ export default function PurchasesPage() {
 
   const countTotalIA = replenishmentData?.items?.length || 0
 
+  // Categorías únicas disponibles en los productos evaluados
+  const availableCategoriesIA = useMemo(() => {
+    const map = new Map<string, string>()
+    replenishmentData?.items?.forEach((it: any) => {
+      if (it.categoria_id && it.categoria_nombre) {
+        map.set(String(it.categoria_id), String(it.categoria_nombre))
+      }
+    })
+    return Array.from(map.entries())
+      .map(([id, nombre]) => ({ id, nombre }))
+      .sort((a, b) => a.nombre.localeCompare(b.nombre))
+  }, [replenishmentData?.items])
+
   // Filtrado y Ordenamiento reactivo de la Matriz de Sugerencia IA (sin recargar API)
   const displayedReplenishmentItems = useMemo(() => {
     if (!replenishmentData?.items) return []
@@ -2009,10 +2029,20 @@ export default function PurchasesPage() {
         }
       }
 
+      // Filtro por Categoría
+      if (selectedCategoryIA) {
+        if (String(it.categoria_id) !== String(selectedCategoryIA)) {
+          return false
+        }
+      }
+
       const matchSearch = !searchProductIA ||
         it.nombre?.toLowerCase().includes(searchProductIA.toLowerCase()) ||
         it.sku?.toLowerCase().includes(searchProductIA.toLowerCase()) ||
-        it.codigo_barra?.toLowerCase().includes(searchProductIA.toLowerCase())
+        it.codigo_barra?.toLowerCase().includes(searchProductIA.toLowerCase()) ||
+        it.categoria_nombre?.toLowerCase().includes(searchProductIA.toLowerCase()) ||
+        it.proveedor_oficial_nombre?.toLowerCase().includes(searchProductIA.toLowerCase()) ||
+        it.ultimo_proveedor_nombre?.toLowerCase().includes(searchProductIA.toLowerCase())
 
       if (!matchSearch) return false
 
@@ -2040,6 +2070,10 @@ export default function PurchasesPage() {
         case "producto":
           valA = (a.nombre || "").toLowerCase()
           valB = (b.nombre || "").toLowerCase()
+          break
+        case "categoria":
+          valA = (a.categoria_nombre || "").toLowerCase()
+          valB = (b.categoria_nombre || "").toLowerCase()
           break
         case "estado_producto":
           valA = a.activo !== false ? 1 : 0
@@ -2073,31 +2107,30 @@ export default function PurchasesPage() {
           valA = Number(a.ventas_mes_actual) || 0
           valB = Number(b.ventas_mes_actual) || 0
           break
-        case "pulso": {
-          const rank = (p: string) => (p === "acelerando" ? 3 : p === "estable" ? 2 : 1)
-          valA = rank(a.pulso_tendencia)
-          valB = rank(b.pulso_tendencia)
+        case "pulso":
+          valA = a.pulso_tendencia === "acelerando" ? 2 : a.pulso_tendencia === "desacelerando" ? 0 : 1
+          valB = b.pulso_tendencia === "acelerando" ? 2 : b.pulso_tendencia === "desacelerando" ? 0 : 1
           break
-        }
         case "costo_ppp":
           valA = Number(a.costo_promedio) || 0
           valB = Number(b.costo_promedio) || 0
           break
         case "ultimo_costo":
-          valA = Number(a.ultimo_costo || a.costo_promedio) || 0
-          valB = Number(b.ultimo_costo || b.costo_promedio) || 0
+          valA = Number(a.ultimo_costo) || 0
+          valB = Number(b.ultimo_costo) || 0
           break
         case "pvp_min":
           valA = Number(a.precio_venta) || 0
           valB = Number(b.precio_venta) || 0
           break
         case "margen_pvp": {
-          const costA = editedCosts[a.product_id] !== undefined ? editedCosts[a.product_id] : (Number(a.costo_unitario_estimado) || Number(a.ultimo_costo) || Number(a.costo_promedio) || 0)
+          const costA = editedCosts[a.product_id] !== undefined ? editedCosts[a.product_id] : (Number(a.costo_unitario_estimado) || 0)
           const pvpA = Number(a.precio_venta) || 0
-          valA = pvpA > 0 ? ((pvpA - costA) / pvpA) * 100 : -999
-          const costB = editedCosts[b.product_id] !== undefined ? editedCosts[b.product_id] : (Number(b.costo_unitario_estimado) || Number(b.ultimo_costo) || Number(b.costo_promedio) || 0)
+          valA = pvpA > 0 && costA > 0 ? ((pvpA - costA) / pvpA) * 100 : -999
+
+          const costB = editedCosts[b.product_id] !== undefined ? editedCosts[b.product_id] : (Number(b.costo_unitario_estimado) || 0)
           const pvpB = Number(b.precio_venta) || 0
-          valB = pvpB > 0 ? ((pvpB - costB) / pvpB) * 100 : -999
+          valB = pvpB > 0 && costB > 0 ? ((pvpB - costB) / pvpB) * 100 : -999
           break
         }
         case "pv_may":
@@ -2105,12 +2138,13 @@ export default function PurchasesPage() {
           valB = Number(b.precio_mayorista) || 0
           break
         case "margen_may": {
-          const costA = editedCosts[a.product_id] !== undefined ? editedCosts[a.product_id] : (Number(a.costo_unitario_estimado) || Number(a.ultimo_costo) || Number(a.costo_promedio) || 0)
-          const mayA = Number(a.precio_mayorista) || 0
-          valA = mayA > 0 ? ((mayA - costA) / mayA) * 100 : -999
-          const costB = editedCosts[b.product_id] !== undefined ? editedCosts[b.product_id] : (Number(b.costo_unitario_estimado) || Number(b.ultimo_costo) || Number(b.costo_promedio) || 0)
-          const mayB = Number(b.precio_mayorista) || 0
-          valB = mayB > 0 ? ((mayB - costB) / mayB) * 100 : -999
+          const costA = editedCosts[a.product_id] !== undefined ? editedCosts[a.product_id] : (Number(a.costo_unitario_estimado) || 0)
+          const pvMayA = Number(a.precio_mayorista) || 0
+          valA = pvMayA > 0 && costA > 0 ? ((pvMayA - costA) / pvMayA) * 100 : -999
+
+          const costB = editedCosts[b.product_id] !== undefined ? editedCosts[b.product_id] : (Number(b.costo_unitario_estimado) || 0)
+          const pvMayB = Number(b.precio_mayorista) || 0
+          valB = pvMayB > 0 && costB > 0 ? ((pvMayB - costB) / pvMayB) * 100 : -999
           break
         }
         case "autonomia":
@@ -2150,7 +2184,21 @@ export default function PurchasesPage() {
 
       return sortDirectionIA === "asc" ? valA - valB : valB - valA
     })
-  }, [replenishmentData, searchProductIA, filterActivoIA, filterEstadoIA, editedQuantities, editedCosts, sortColumnIA, sortDirectionIA, selectedSupplierIA])
+  }, [replenishmentData, searchProductIA, selectedCategoryIA, filterActivoIA, filterEstadoIA, editedQuantities, editedCosts, sortColumnIA, sortDirectionIA, selectedSupplierIA])
+
+  // Al cambiar filtros reactivos, volver a la primera página
+  useEffect(() => {
+    setPageIA(1)
+  }, [searchProductIA, selectedSupplierIA, selectedCategoryIA, filterActivoIA, filterEstadoIA, pageSizeIA])
+
+  // Paginación de la Matriz de Sugerencia
+  const totalItemsIA = displayedReplenishmentItems.length
+  const totalPagesIA = Math.ceil(totalItemsIA / (pageSizeIA === -1 ? totalItemsIA || 1 : pageSizeIA)) || 1
+  const paginatedReplenishmentItems = useMemo(() => {
+    if (pageSizeIA === -1) return displayedReplenishmentItems
+    const start = (pageIA - 1) * pageSizeIA
+    return displayedReplenishmentItems.slice(start, start + pageSizeIA)
+  }, [displayedReplenishmentItems, pageIA, pageSizeIA])
 
   // Conteo reactivo de ítems seleccionados en la Matriz
   const selectedCountIA = useMemo(() => {
@@ -3537,7 +3585,7 @@ export default function PurchasesPage() {
             </div>
 
             {/* SECCIÓN 1: CONTROLES PRINCIPALES */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <div ref={supplierComboboxRef} className="relative">
                 <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1.5 flex items-center justify-between">
                   <span>Proveedor a Comprar</span>
@@ -3685,7 +3733,37 @@ export default function PurchasesPage() {
                 )}
               </div>
 
+                            {/* SELECTOR DE CATEGORÍA / RUBRO */}
               <div>
+                <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1.5 flex items-center justify-between">
+                  <span>Categoría / Rubro</span>
+                  {selectedCategoryIA && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCategoryIA("")}
+                      className="text-[10px] text-red-500 hover:text-red-700 font-bold flex items-center gap-1"
+                    >
+                      <X className="w-3 h-3" /> Limpiar
+                    </button>
+                  )}
+                </label>
+                <div className="relative">
+                  <select
+                    value={selectedCategoryIA}
+                    onChange={(e) => setSelectedCategoryIA(e.target.value)}
+                    className="input-field w-full text-xs font-semibold py-2 bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 transition-all cursor-pointer truncate"
+                  >
+                    <option value="">Todas las Categorías ({availableCategoriesIA.length})</option>
+                    {availableCategoriesIA.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+<div>
                 <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1.5 flex items-center justify-between">
                   <span>Días de Cobertura Deseados</span>
                   <span className="font-bold text-indigo-600 font-mono">{diasCobertura} Días</span>
@@ -3836,22 +3914,68 @@ export default function PurchasesPage() {
 
             {/* SECCIÓN 3: BÚSQUEDA Y RECALCULAR */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-              <div className="relative flex-1 max-w-md">
+              <div className="relative flex-1 max-w-lg">
                 <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Buscar producto por nombre o SKU en la matriz..."
+                  placeholder="Buscar por nombre, código de barra, SKU, categoría o proveedor en más de 11.000 productos..."
                   value={searchProductIA}
                   onChange={(e) => setSearchProductIA(e.target.value)}
-                  className="input-field pl-9 w-full text-xs"
+                  className="input-field pl-9 pr-8 w-full text-xs"
                 />
+                {searchProductIA && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchProductIA("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-red-500 rounded-full"
+                    title="Limpiar búsqueda"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newSel = { ...selectedItemsIA }
+                    let count = 0
+                    displayedReplenishmentItems.forEach((it: any) => {
+                      const numQty = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida
+                      if (Number(numQty) > 0 || Number(it.cantidad_sugerida) > 0) {
+                        newSel[it.product_id] = true
+                        count++
+                      }
+                    })
+                    setSelectedItemsIA(newSel)
+                    toast.success("Sugeridos Seleccionados", `Se marcaron ${count} productos con sugerencia activa.`)
+                  }}
+                  className="px-3 py-2 rounded-xl text-xs font-bold bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 flex items-center gap-1.5 transition-colors border border-indigo-200 dark:border-indigo-800"
+                  title="Marcar todos los productos que tengan sugerencia de compra mayor a cero"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Marcar Sugeridos ({displayedReplenishmentItems.filter((it: any) => (editedQuantities[it.product_id] ?? it.cantidad_sugerida) > 0 || it.cantidad_sugerida > 0).length})</span>
+                </button>
+
+                {selectedCountIA > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedItemsIA({})
+                      toast.info("Selección limpiada", "Se desmarcaron todos los productos.")
+                    }}
+                    className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 flex items-center gap-1.5 transition-colors border border-slate-200 dark:border-slate-700"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>Desmarcar ({selectedCountIA})</span>
+                  </button>
+                )}
+
                 <button
                   onClick={runReplenishmentPreview}
                   disabled={loadingReplenishment}
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 flex items-center gap-1.5 transition-colors shadow-xs"
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 transition-colors shadow-xs"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${loadingReplenishment ? "animate-spin" : ""}`} />
                   Recalcular IA
@@ -4135,13 +4259,14 @@ export default function PurchasesPage() {
                           <th className="px-1.5 py-1.5 w-7 text-center sticky top-0 z-30 bg-slate-100 dark:bg-slate-900">
                             <input
                               type="checkbox"
-                              checked={displayedReplenishmentItems.length > 0 && displayedReplenishmentItems.every((it: any) => selectedItemsIA[it.product_id])}
+                              checked={paginatedReplenishmentItems.length > 0 && paginatedReplenishmentItems.every((it: any) => selectedItemsIA[it.product_id])}
                               onChange={(e) => {
                                 const checked = e.target.checked
                                 const newSel = { ...selectedItemsIA }
-                                displayedReplenishmentItems.forEach((it: any) => { newSel[it.product_id] = checked })
+                                paginatedReplenishmentItems.forEach((it: any) => { newSel[it.product_id] = checked })
                                 setSelectedItemsIA(newSel)
                               }}
+                              title="Seleccionar o deseleccionar todos en esta página" 
                               className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                             />
                           </th>
@@ -4170,7 +4295,7 @@ export default function PurchasesPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                        {displayedReplenishmentItems.map((it: any, idx: number) => {
+                        {paginatedReplenishmentItems.map((it: any, idx: number) => {
                           const isSelected = !!selectedItemsIA[it.product_id]
                           const isEven = idx % 2 === 0
                           const isUnitario = (it.unidad_medida || "UN").toUpperCase() === "UN"
@@ -4512,6 +4637,107 @@ export default function PurchasesPage() {
                 })()}
               </div>
             )}
+
+            {/* FOOTER DE PAGINACIÓN */}
+            {!loadingReplenishment && displayedReplenishmentItems.length > 0 && (
+                <div className="p-3 bg-slate-50/90 dark:bg-slate-900/60 border-t border-slate-200 dark:border-slate-700/60 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
+                    <span>
+                      Mostrando{" "}
+                      <strong className="font-mono text-slate-700 dark:text-slate-200">
+                        {pageSizeIA === -1
+                          ? 1
+                          : (pageIA - 1) * pageSizeIA + 1}
+                      </strong>{" "}
+                      a{" "}
+                      <strong className="font-mono text-slate-700 dark:text-slate-200">
+                        {pageSizeIA === -1
+                          ? totalItemsIA
+                          : Math.min(pageIA * pageSizeIA, totalItemsIA)}
+                      </strong>{" "}
+                      de{" "}
+                      <strong className="font-mono text-indigo-600 dark:text-indigo-400 font-extrabold">
+                        {totalItemsIA.toLocaleString()}
+                      </strong>{" "}
+                      productos
+                    </span>
+                    {selectedCategoryIA && (
+                      <span className="px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 font-semibold text-[10px]">
+                        Filtrado por Categoría
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    {/* SELECTOR DE TAMAÑO DE PÁGINA */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] text-slate-400 font-bold uppercase">Filas:</span>
+                      <select
+                        value={pageSizeIA}
+                        onChange={(e) => {
+                          setPageSizeIA(Number(e.target.value))
+                          setPageIA(1)
+                        }}
+                        className="px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 cursor-pointer focus:ring-1 focus:ring-indigo-500"
+                      >
+                        <option value={25}>25</option>
+                        <option value={50}>50</option>
+                        <option value={100}>100</option>
+                        <option value={250}>250</option>
+                        <option value={500}>500</option>
+                        <option value={-1}>Todos ({totalItemsIA})</option>
+                      </select>
+                    </div>
+
+                    {/* CONTROLES DE PÁGINA */}
+                    {pageSizeIA !== -1 && totalPagesIA > 1 && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setPageIA(1)}
+                          disabled={pageIA <= 1}
+                          className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                          title="Primera página"
+                        >
+                          «
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPageIA(p => Math.max(1, p - 1))}
+                          disabled={pageIA <= 1}
+                          className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                          title="Página anterior"
+                        >
+                          ‹
+                        </button>
+
+                        <span className="px-3 py-1 font-mono text-xs font-bold text-slate-700 dark:text-slate-200">
+                          {pageIA} / {totalPagesIA}
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() => setPageIA(p => Math.min(totalPagesIA, p + 1))}
+                          disabled={pageIA >= totalPagesIA}
+                          className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                          title="Página siguiente"
+                        >
+                          ›
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPageIA(totalPagesIA)}
+                          disabled={pageIA >= totalPagesIA}
+                          className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                          title="Última página"
+                        >
+                          »
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
           </div>
         </div>
       )}

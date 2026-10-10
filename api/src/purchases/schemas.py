@@ -981,7 +981,7 @@ class SmartReplenishmentRequest(BaseModel):
     factor_evento: str = "normal"  # normal, feriado, semana_santa, fin_de_ano
     solo_quiebre_o_bajo: bool = False
     search: Optional[str] = None
-    limit: int = 500
+    limit: Optional[int] = 20000
 
 
 
@@ -991,6 +991,8 @@ class SmartReplenishmentItem(BaseModel):
     sku: Optional[str] = None
     codigo_barra: Optional[str] = None
     unidad_medida: str = "UN"
+    categoria_id: Optional[UUID] = None
+    categoria_nombre: Optional[str] = None
     stock_actual: float
     stock_en_transito: float = 0.0
     ventas_periodo: float
