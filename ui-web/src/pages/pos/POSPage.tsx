@@ -1261,6 +1261,8 @@ export default function POSPage() {
   const [dinelcoTxnResult, setDinelcoTxnResult] = useState<any>(null)
   const [dinelcoTxnError, setDinelcoTxnError] = useState<string>("")
   const [dinelcoTxnLogId, setDinelcoTxnLogId] = useState<string | null>(null)
+  // id de pos_terminal_transactions del QR/PIX Dinelco aprobado (linea principal)
+  const [dinelcoQrLogId, setDinelcoQrLogId] = useState<string | null>(null)
   const [dinelcoSessionId, setDinelcoSessionId] = useState<string | null>(null)
   const [dinelcoCuotas, setDinelcoCuotas] = useState(1)
   const [showDinelcoManualFallback, setShowDinelcoManualFallback] = useState(false)
@@ -1641,7 +1643,7 @@ export default function POSPage() {
       (window as any).electronAPI?.dinelcoCancel?.(dinelcoSessionId).catch(() => {})
     }
     setDinelcoTxnState("idle"); setDinelcoTxnResult(null); setDinelcoTxnError(""); setDinelcoTxnLogId(null); setDinelcoSessionId(null); setDinelcoCuotas(1); setShowDinelcoManualFallback(false)
-    setDinelcoQrState("idle"); setDinelcoQrError(""); setDinelcoQrMode("qr"); setDinelcoPixCpf("")
+    setDinelcoQrState("idle"); setDinelcoQrError(""); setDinelcoQrMode("qr"); setDinelcoPixCpf(""); setDinelcoQrLogId(null)
     if (bancardCloudPollRef.current) { clearInterval(bancardCloudPollRef.current); bancardCloudPollRef.current = null }
     // Mismo caso que Dinelco: si se abandona el flujo con un QR de Bancard
     // todavia sin confirmar (por el cierre generico del panel, no el boton
@@ -2109,10 +2111,11 @@ export default function POSPage() {
     }
 
     setDinelcoQrState("aprobada")
-    await logDinelcoTxn({
+    const logged = await logDinelcoTxn({
       tipo_operacion: tipoOperacion, exitosa: true, verificado_automaticamente: true,
       monto: montoQrDinelco, terminal_ip: ip, mensaje_display: "APROBADA", raw_response: res,
     })
+    setDinelcoQrLogId((logged as any)?.id || null)
   }
 
   // Version leg-scoped de handleDinelcoCharge, para el 2do/3er cobro con
@@ -2225,10 +2228,11 @@ export default function POSPage() {
     }
 
     updateExtraLeg(leg.id, { txnState: "aprobada" })
-    await logDinelcoTxn({
+    const logged = await logDinelcoTxn({
       tipo_operacion: tipoOperacion, exitosa: true, verificado_automaticamente: true,
       monto: montoQrDinelco, terminal_ip: ip, mensaje_display: "APROBADA", raw_response: res,
     })
+    updateExtraLeg(leg.id, { logId: (logged as any)?.id || null })
   }
 
   const handleBancardQR = async () => {
@@ -7494,7 +7498,7 @@ export default function POSPage() {
             out.push({
               forma_pago: fp, monto: cardMonto, moneda: "PYG", monto_pyg: cardMonto,
               proveedor: "bancard",
-              terminal_transaction_id: idCobro(bancardTxnLogId || bancardQrLogId),
+              terminal_transaction_id: idCobro(fp === "QR" ? bancardQrLogId : bancardTxnLogId),
               referencia: fp === "QR" ? ref(posQrCupon, posQrAuth) : ref(posCardCupon),
               cuotas: fp === "TARJETA CREDITO" ? posCardCuotas : undefined,
             })
@@ -7518,7 +7522,7 @@ export default function POSPage() {
             out.push({
               forma_pago: fp, monto: dinelcoMonto, moneda: "PYG", monto_pyg: dinelcoMonto,
               proveedor: "dinelco",
-              terminal_transaction_id: idCobro(dinelcoTxnLogId),
+              terminal_transaction_id: idCobro(fp === "QR" || fp === "PIX" ? dinelcoQrLogId : dinelcoTxnLogId),
               referencia: ref(dinelcoCupon),
               cuotas: fp === "TARJETA CREDITO" ? dinelcoCuotas : undefined,
             })
