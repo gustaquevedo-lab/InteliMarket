@@ -1863,13 +1863,16 @@ export default function POSPage() {
     return msg
   }
 
+  // Registro del cobro en el servidor: nunca bloquea la caja. Sin servidor
+  // (offline) o si tarda, devuelve null a los 8 s y el cobro sigue igual
+  // (queda sin enlace y lo levanta Revision de cobros).
   const logBancardTxn = async (data: Record<string, any>) => {
     try {
-      return await api.posTerminalTransactions.create({
+      return await withTimeout(api.posTerminalTransactions.create({
         ...data,
         punto_emision: puntoEmision,
         customer_id: customer && customer.id !== DEFAULT_CUSTOMER.id ? customer.id : null,
-      } as any)
+      } as any) as Promise<any>, 8000, null)
     } catch (e) {
       console.error("No se pudo registrar la transacción del terminal Bancard:", e)
       return null
@@ -1881,7 +1884,13 @@ export default function POSPage() {
   // envuelve la parte que habla con el terminal: las validaciones previas
   // (sin IP, monto invalido, fuera de la app de caja) siguen igual. El
   // candado se libera en finally aunque fn lance.
-  const conTerminal = async (ip: string, fn: () => Promise<void>): Promise<void> => {
+  //
+  // Si la llamada al terminal LANZA (excepcion del IPC de Electron, respuesta
+  // undefined, etc.) en vez de devolver {ok:false}, onFalla deja la linea en
+  // su estado de error (con Reintentar y carga manual) en vez de colgada en
+  // "esperando"/"confirmando" para siempre. Nada de esto toca el servidor de
+  // forma bloqueante: el registro para conciliar es fire-and-forget.
+  const conTerminal = async (ip: string, fn: () => Promise<void>, onFalla?: (e: any) => void): Promise<void> => {
     const token = terminalLock.tryAcquire(ip)
     if (token === null) {
       toast.warning("Terminal ocupado", "Esperá a que termine el cobro en curso.")
@@ -1889,9 +1898,21 @@ export default function POSPage() {
     }
     try {
       await fn()
+    } catch (e) {
+      console.error("[TERMINAL] excepcion durante el cobro:", e)
+      if (!onFalla) throw e
+      try { onFalla(e) } catch (e2) { console.error("[TERMINAL] error manejando la excepcion:", e2) }
     } finally {
       terminalLock.release(ip, token)
     }
+  }
+  // Mensaje para una excepcion del terminal. "ambiguo": paso cuando el
+  // terminal ya pudo haber cobrado (despues del paso 1, o durante un QR).
+  const mensajeFallaTerminal = (e: any, ambiguo: boolean): string => {
+    const detalle = String(e?.message || e || "error desconocido")
+    return ambiguo
+      ? `Se perdió la comunicación con el terminal en medio del cobro (${detalle}) -- revisá el terminal: si cobró, cargá el cupón manualmente; si no, tocá Reintentar.`
+      : `No se pudo comunicar con el terminal (${detalle}) -- verificá la red y tocá Reintentar, o cargá el cupón manualmente si ya cobraste en el terminal.`
   }
   const bancardBusy = useTerminalBusy(activePosConfig.bancardIp || undefined)
   const dinelcoBusy = useTerminalBusy(activePosConfig.dinelcoIp || undefined)
@@ -1915,8 +1936,11 @@ export default function POSPage() {
       setShowBancardManualFallback(true)
       return
     }
+    const fase = { ambiguo: false, extra: {} as Record<string, any> }
+    const tipoOperacionCard = posCardType === "debito" ? "venta_debito" : (posCardCuotas > 1 ? `venta_credito_${posCardCuotas}cuotas` : "venta_credito")
     await conTerminal(ip, async () => {
       const facturaNro = Date.now()
+      fase.extra.factura_nro_provisional = String(facturaNro)
       // El monto cobrado queda en el campo de la linea: si despues se pasa a
       // pago mixto, la linea aprobada no puede quedar en 0 con el campo fijo.
       setMixedCardPyg(montoBancard.toLocaleString("es-PY"))
@@ -1955,6 +1979,7 @@ export default function POSPage() {
       }
 
       const { bin, nsu } = res1.body || {}
+      Object.assign(fase, { ambiguo: true, extra: { ...fase.extra, bin, nsu } })
       setBancardTxnState("confirmando")
       const body2 = { bin, nsu, monto: montoBancard }
       console.log(`[BANCARD-TRACE] paso2 -> ip=${ip} path=/pos/descuento body=${JSON.stringify(body2)}`)
@@ -2000,6 +2025,17 @@ export default function POSPage() {
       })
       setBancardTxnLogId((logged as any)?.id || null)
       setPosCardCupon(result.nroBoleta || "")
+    }, (e) => {
+      setBancardTxnState("error_conexion")
+      setBancardTxnError(mensajeFallaTerminal(e, fase.ambiguo))
+      setShowBancardManualFallback(true)
+      if (fase.ambiguo) {
+        void logBancardTxn({
+          tipo_operacion: tipoOperacionCard, exitosa: false, requiere_conciliacion: true,
+          monto: montoBancard, terminal_ip: ip, ...fase.extra,
+          error_message: `Excepcion del terminal despues del paso 1: ${String((e as any)?.message || e)}`,
+        })
+      }
     })
   }
 
@@ -2022,8 +2058,10 @@ export default function POSPage() {
       updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: "Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá.", showManualFallback: true })
       return
     }
+    const fase = { ambiguo: false, extra: {} as Record<string, any> }
     await conTerminal(ip, async () => {
       const facturaNro = Date.now()
+      fase.extra.factura_nro_provisional = String(facturaNro)
       updateExtraLeg(leg.id, { txnState: "esperando", txnError: "", txnResult: null, showManualFallback: false })
 
       const tipoOperacion = leg.cardType === "debito" ? "venta_debito" : (leg.cardCuotas > 1 ? `venta_credito_${leg.cardCuotas}cuotas` : "venta_credito")
@@ -2049,6 +2087,7 @@ export default function POSPage() {
       }
 
       const { bin, nsu } = res1.body || {}
+      Object.assign(fase, { ambiguo: true, extra: { ...fase.extra, bin, nsu } })
       updateExtraLeg(leg.id, { txnState: "confirmando" })
       const body2 = { bin, nsu, monto: montoBancard }
       const res2 = await imBancard(electronAPI, ip, "/pos/descuento", body2, 90000)
@@ -2074,6 +2113,8 @@ export default function POSPage() {
       }
 
       const result = res2.body || {}
+      // Aprobada ya: el registro en el servidor (que puede no estar) va despues.
+      updateExtraLeg(leg.id, { txnState: "aprobada", txnResult: result, manualCupon: result.nroBoleta || "" })
       const logged = await logBancardTxn({
         tipo_operacion: tipoOperacion, exitosa: true, verificado_automaticamente: true,
         bin, nsu, monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro),
@@ -2082,17 +2123,26 @@ export default function POSPage() {
         mensaje_display: result.mensajeDisplay, nombre_cliente: result.nombreCliente,
         monto_vuelto: result.montoVuelto, saldo: result.saldo, raw_response: result,
       })
-      updateExtraLeg(leg.id, { txnState: "aprobada", txnResult: result, logId: (logged as any)?.id || null, manualCupon: result.nroBoleta || "" })
+      updateExtraLeg(leg.id, { logId: (logged as any)?.id || null })
+    }, (e) => {
+      updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: mensajeFallaTerminal(e, fase.ambiguo), showManualFallback: true })
+      if (fase.ambiguo) {
+        void logBancardTxn({
+          tipo_operacion: leg.cardType === "debito" ? "venta_debito" : (leg.cardCuotas > 1 ? `venta_credito_${leg.cardCuotas}cuotas` : "venta_credito"),
+          exitosa: false, requiere_conciliacion: true, monto: montoBancard, terminal_ip: ip, ...fase.extra,
+          error_message: `Excepcion del terminal despues del paso 1: ${String((e as any)?.message || e)}`,
+        })
+      }
     })
   }
 
   const logDinelcoTxn = async (data: Record<string, any>) => {
     try {
-      return await api.posTerminalTransactions.create({
+      return await withTimeout(api.posTerminalTransactions.create({
         ...data,
         punto_emision: puntoEmision,
         customer_id: customer && customer.id !== DEFAULT_CUSTOMER.id ? customer.id : null,
-      } as any)
+      } as any) as Promise<any>, 8000, null)
     } catch (e) {
       console.error("No se pudo registrar la transacción del terminal Dinelco:", e)
       return null
@@ -2123,6 +2173,7 @@ export default function POSPage() {
       setShowDinelcoManualFallback(true)
       return
     }
+    const fase = { ambiguo: false, sessionId: null as any }
     await conTerminal(ip, async () => {
       // El monto cobrado queda en el campo de la linea (ver handleBancardCharge).
       setMixedDinelcoPyg(montoDinelco.toLocaleString("es-PY"))
@@ -2146,6 +2197,7 @@ export default function POSPage() {
       }
 
       setDinelcoSessionId(res1.sessionId)
+      Object.assign(fase, { ambiguo: true, sessionId: res1.sessionId })
       setDinelcoTxnState("confirmando")
       const cuotasParam = dinelcoCardType === "credito" && dinelcoCuotas > 1 ? dinelcoCuotas : 0
       // ENDOP dispara la autorizacion real via ISO8583 contra el adquirente
@@ -2192,6 +2244,21 @@ export default function POSPage() {
       setDinelcoTxnLogId((logged as any)?.id || null)
       setDinelcoSessionId(null)
       setDinelcoCupon(result.nroBoleta || "")
+    }, (e) => {
+      setDinelcoTxnState("error_conexion")
+      setDinelcoTxnError(mensajeFallaTerminal(e, fase.ambiguo))
+      setShowDinelcoManualFallback(true)
+      if (fase.sessionId) {
+        try { electronAPI.dinelcoCancel?.(fase.sessionId)?.catch?.(() => {}) } catch { /* sin terminal */ }
+      }
+      setDinelcoSessionId(null)
+      if (fase.ambiguo) {
+        void logDinelcoTxn({
+          tipo_operacion: dinelcoCardType === "credito" && dinelcoCuotas > 1 ? `dinelco_venta_credito_${dinelcoCuotas}cuotas` : `dinelco_venta_${dinelcoCardType}`,
+          exitosa: false, requiere_conciliacion: true, monto: montoDinelco, terminal_ip: ip,
+          error_message: `Excepcion del terminal despues de venta_inicio: ${String((e as any)?.message || e)}`,
+        })
+      }
     })
   }
 
@@ -2216,6 +2283,7 @@ export default function POSPage() {
       setDinelcoQrError("Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá.")
       return
     }
+    const tipoOperacionQr = dinelcoQrMode === "pix" ? "dinelco_pix" : "dinelco_qr"
     await conTerminal(ip, async () => {
       // El monto cobrado queda en el campo de la linea (ver handleBancardCharge).
       setMixedDinelcoPyg(montoQrDinelco.toLocaleString("es-PY"))
@@ -2244,6 +2312,13 @@ export default function POSPage() {
         monto: montoQrDinelco, terminal_ip: ip, mensaje_display: "APROBADA", raw_response: res,
       })
       setDinelcoQrLogId((logged as any)?.id || null)
+    }, (e) => {
+      setDinelcoQrState("error_conexion")
+      setDinelcoQrError(mensajeFallaTerminal(e, true))
+      void logDinelcoTxn({
+        tipo_operacion: tipoOperacionQr, exitosa: false, requiere_conciliacion: true, monto: montoQrDinelco, terminal_ip: ip,
+        error_message: `Excepcion del terminal durante el QR/PIX: ${String((e as any)?.message || e)}`,
+      })
     })
   }
 
@@ -2265,6 +2340,7 @@ export default function POSPage() {
       updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: "Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá.", showManualFallback: true })
       return
     }
+    const fase = { ambiguo: false, sessionId: null as any }
     await conTerminal(ip, async () => {
       updateExtraLeg(leg.id, { txnState: "esperando", txnError: "", txnResult: null, showManualFallback: false })
 
@@ -2284,6 +2360,7 @@ export default function POSPage() {
         return
       }
 
+      Object.assign(fase, { ambiguo: true, sessionId: res1.sessionId })
       updateExtraLeg(leg.id, { txnState: "confirmando" })
       const cuotasParam = leg.cardType === "credito" && leg.cardCuotas > 1 ? leg.cardCuotas : 0
       const res2 = await imDinelco(electronAPI, ip, "venta_confirmar", { cuotas: cuotasParam, monto: montoDinelco }, res1.sessionId, 90000)
@@ -2307,13 +2384,26 @@ export default function POSPage() {
         codigoAutorizacion: c[0] || "", authorizer: c[1] || "", opType: c[2] || "",
         nroBoleta: c[3] || "", terminal: c[4] || "", comercio: c[5] || "", ultimos4: c[6] || "", puntos: c[7] || "",
       }
+      updateExtraLeg(leg.id, { txnState: "aprobada", txnResult: result, manualCupon: result.nroBoleta || "" })
       const logged = await logDinelcoTxn({
         tipo_operacion: tipoOperacion, exitosa: true, verificado_automaticamente: true,
         monto: montoDinelco, terminal_ip: ip,
         codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.comercio,
         mensaje_display: "APROBADA", raw_response: result,
       })
-      updateExtraLeg(leg.id, { txnState: "aprobada", txnResult: result, logId: (logged as any)?.id || null, manualCupon: result.nroBoleta || "" })
+      updateExtraLeg(leg.id, { logId: (logged as any)?.id || null })
+    }, (e) => {
+      updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: mensajeFallaTerminal(e, fase.ambiguo), showManualFallback: true })
+      if (fase.sessionId) {
+        try { electronAPI.dinelcoCancel?.(fase.sessionId)?.catch?.(() => {}) } catch { /* sin terminal */ }
+      }
+      if (fase.ambiguo) {
+        void logDinelcoTxn({
+          tipo_operacion: leg.cardType === "credito" && leg.cardCuotas > 1 ? `dinelco_venta_credito_${leg.cardCuotas}cuotas` : `dinelco_venta_${leg.cardType}`,
+          exitosa: false, requiere_conciliacion: true, monto: montoDinelco, terminal_ip: ip,
+          error_message: `Excepcion del terminal despues de venta_inicio: ${String((e as any)?.message || e)}`,
+        })
+      }
     })
   }
 
@@ -2365,6 +2455,13 @@ export default function POSPage() {
         monto: montoQrDinelco, terminal_ip: ip, mensaje_display: "APROBADA", raw_response: res,
       })
       updateExtraLeg(leg.id, { logId: (logged as any)?.id || null })
+    }, (e) => {
+      updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: mensajeFallaTerminal(e, true) })
+      void logDinelcoTxn({
+        tipo_operacion: leg.dinelcoQrMode === "pix" ? "dinelco_pix" : "dinelco_qr", exitosa: false, requiere_conciliacion: true,
+        monto: montoQrDinelco, terminal_ip: ip,
+        error_message: `Excepcion del terminal durante el QR/PIX: ${String((e as any)?.message || e)}`,
+      })
     })
   }
 
@@ -2386,8 +2483,10 @@ export default function POSPage() {
       setBancardQrError("Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá.")
       return
     }
+    const fase = { extra: {} as Record<string, any> }
     await conTerminal(ip, async () => {
       const facturaNro = Date.now()
+      fase.extra.factura_nro_provisional = String(facturaNro)
       // El monto cobrado queda en el campo de la linea (ver handleBancardCharge).
       setMixedCardPyg(montoQr.toLocaleString("es-PY"))
       setBancardQrState("esperando")
@@ -2427,6 +2526,13 @@ export default function POSPage() {
         monto_vuelto: result.montoVuelto, saldo: result.saldo, raw_response: result,
       })
       setBancardQrLogId((logged as any)?.id || null)
+    }, (e) => {
+      setBancardQrState("error_conexion")
+      setBancardQrError(mensajeFallaTerminal(e, true))
+      void logBancardTxn({
+        tipo_operacion: "venta_qr", exitosa: false, requiere_conciliacion: true, monto: montoQr, terminal_ip: ip, ...fase.extra,
+        error_message: `Excepcion del terminal durante el QR: ${String((e as any)?.message || e)}`,
+      })
     })
   }
 
@@ -2448,8 +2554,10 @@ export default function POSPage() {
       updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: "Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá." })
       return
     }
+    const fase = { extra: {} as Record<string, any> }
     await conTerminal(ip, async () => {
       const facturaNro = Date.now()
+      fase.extra.factura_nro_provisional = String(facturaNro)
       updateExtraLeg(leg.id, { txnState: "esperando", txnError: "", txnResult: null })
 
       const bodyQr = { facturaNro, monto: montoQr, montoVuelto: 0 }
@@ -2469,6 +2577,7 @@ export default function POSPage() {
       }
 
       const result = res.body || {}
+      updateExtraLeg(leg.id, { txnState: "aprobada", txnResult: result })
       const logged = await logBancardTxn({
         tipo_operacion: "venta_qr", exitosa: true, verificado_automaticamente: true,
         monto: montoQr, terminal_ip: ip, factura_nro_provisional: String(facturaNro),
@@ -2477,7 +2586,13 @@ export default function POSPage() {
         mensaje_display: result.mensajeDisplay, nombre_cliente: result.nombreCliente,
         monto_vuelto: result.montoVuelto, saldo: result.saldo, raw_response: result,
       })
-      updateExtraLeg(leg.id, { txnState: "aprobada", txnResult: result, logId: (logged as any)?.id || null })
+      updateExtraLeg(leg.id, { logId: (logged as any)?.id || null })
+    }, (e) => {
+      updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: mensajeFallaTerminal(e, true) })
+      void logBancardTxn({
+        tipo_operacion: "venta_qr", exitosa: false, requiere_conciliacion: true, monto: montoQr, terminal_ip: ip, ...fase.extra,
+        error_message: `Excepcion del terminal durante el QR: ${String((e as any)?.message || e)}`,
+      })
     })
   }
 
@@ -12123,6 +12238,7 @@ export default function POSPage() {
                                   <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1">
                                     <div className="font-black">⚠ {leg.txnError}</div>
                                     <button type="button" onClick={() => handleBancardChargeForLeg(leg)} disabled={bancardBusy} className="text-[10px] font-bold underline cursor-pointer disabled:opacity-50">Reintentar conexión</button>
+                                    <button type="button" onClick={() => updateExtraLeg(leg.id, { txnState: "idle", txnError: "" })} className="ml-3 text-[10px] font-bold underline cursor-pointer">Cancelar</button>
                                   </div>
                                 )}
 
@@ -12334,6 +12450,7 @@ export default function POSPage() {
                                       <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1">
                                         <div className="font-black">⚠ {leg.txnError}</div>
                                         <button type="button" onClick={() => handleBancardQRForLeg(leg)} disabled={bancardBusy} className="text-[10px] font-bold underline cursor-pointer disabled:opacity-50">Reintentar conexión</button>
+                                        <button type="button" onClick={() => updateExtraLeg(leg.id, { txnState: "idle", txnError: "" })} className="ml-3 text-[10px] font-bold underline cursor-pointer">Cancelar</button>
                                       </div>
                                     )}
 
@@ -12811,6 +12928,7 @@ export default function POSPage() {
                                       <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1">
                                         <div className="font-black">⚠ {leg.txnError}</div>
                                         <button type="button" onClick={() => handleDinelcoChargeForLeg(leg)} disabled={dinelcoBusy} className="text-[10px] font-bold underline cursor-pointer disabled:opacity-50">Reintentar conexión</button>
+                                        <button type="button" onClick={() => updateExtraLeg(leg.id, { txnState: "idle", txnError: "" })} className="ml-3 text-[10px] font-bold underline cursor-pointer">Cancelar</button>
                                       </div>
                                     )}
 
@@ -12986,6 +13104,7 @@ export default function POSPage() {
                                       <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1">
                                         <div className="font-black">⚠ {leg.txnError}</div>
                                         <button type="button" onClick={() => handleDinelcoQRForLeg(leg)} disabled={dinelcoBusy} className="text-[10px] font-bold underline cursor-pointer disabled:opacity-50">Reintentar conexión</button>
+                                        <button type="button" onClick={() => updateExtraLeg(leg.id, { txnState: "idle", txnError: "" })} className="ml-3 text-[10px] font-bold underline cursor-pointer">Cancelar</button>
                                       </div>
                                     )}
                                   </div>
