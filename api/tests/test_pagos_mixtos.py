@@ -99,6 +99,7 @@ class TestEvaluarPagos:
         assert forma_pago_resumen(["QR"], "contado") == "QR"
         assert forma_pago_resumen(["EFECTIVO", "QR"], "contado") == "MIXTO"
         assert forma_pago_resumen(["QR", "QR"], "contado") == "QR"
+        assert forma_pago_resumen(["efectivo", "EFECTIVO"], "contado") == "EFECTIVO"
 
 
 # ---------------------------------------------------------------------------
@@ -223,3 +224,10 @@ class TestRegistrarPagos:
         await registrar_pagos_de_venta(sqlite_db, company_id=uuid4(), sale=sale, pagos=pagos, ahora=AHORA)
         (f,) = await _lineas(sqlite_db, sale)
         assert len(f.referencia) == 60 and len(f.proveedor) == 20 and f.cuotas is None
+
+    async def test_sanea_moneda_y_forma_pago_largas(self, sqlite_db):
+        sale = _sale(1000)
+        pagos = [SalePaymentInput(forma_pago="F" * 80, monto=Decimal("1000"), moneda=" pygxyz ")]
+        await registrar_pagos_de_venta(sqlite_db, company_id=uuid4(), sale=sale, pagos=pagos, ahora=AHORA)
+        (f,) = await _lineas(sqlite_db, sale)
+        assert len(f.forma_pago) == 30 and f.moneda == "PYG"

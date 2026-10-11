@@ -73,7 +73,7 @@ def forma_pago_resumen(formas_pago: Sequence[str], condicion: str) -> str:
     """
     if not formas_pago:
         return "EXTRA_CLUB" if condicion == "credito" else "EFECTIVO"
-    distintas = set(formas_pago)
+    distintas = {f.strip().upper() for f in formas_pago}
     if len(distintas) == 1:
         return next(iter(distintas))
     return "MIXTO"
@@ -127,7 +127,8 @@ async def registrar_pagos_de_venta(
 
     lineas: list[LineaPago] = []
     for p in pagos:
-        moneda = (p.moneda or "PYG").upper()
+        moneda = (p.moneda or "PYG").strip().upper()[:3] or "PYG"
+        forma_pago = (p.forma_pago or "")[:30]
         cuotas = p.cuotas if p.cuotas is not None and 1 <= p.cuotas <= 32767 else None
         referencia = p.referencia[:60] if p.referencia else p.referencia
         proveedor = p.proveedor[:20] if p.proveedor else p.proveedor
@@ -135,7 +136,7 @@ async def registrar_pagos_de_venta(
             id=uuid4(),
             company_id=company_id,
             sale_id=sale.id,
-            forma_pago=p.forma_pago,
+            forma_pago=forma_pago,
             monto=p.monto,
             moneda=moneda,
             fecha=ahora,
@@ -145,7 +146,7 @@ async def registrar_pagos_de_venta(
             cuotas=cuotas,
             monto_pyg=p.monto_pyg,
         ))
-        lineas.append(LineaPago(p.forma_pago, p.monto, moneda, p.monto_pyg))
+        lineas.append(LineaPago(forma_pago, p.monto, moneda, p.monto_pyg))
 
     marca, diferencia = evaluar_pagos(sale.total, lineas)
     terminal_ids = [p.terminal_transaction_id for p in pagos if p.terminal_transaction_id]
