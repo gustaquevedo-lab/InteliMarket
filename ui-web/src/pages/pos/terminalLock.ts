@@ -1,6 +1,8 @@
 export interface TerminalLock {
-  tryAcquire(ip: string): boolean
-  release(ip: string): void
+  /** Devuelve un token (monotonico) si consiguio el candado, o null si la IP esta ocupada. */
+  tryAcquire(ip: string): number | null
+  /** Libera solo si `token` es el del titular actual (un release tardio tras el timeout no pisa al nuevo). */
+  release(ip: string, token: number): void
   isBusy(ip: string): boolean
   subscribe(fn: () => void): () => void
 }
@@ -16,8 +18,9 @@ const TIMEOUT_POR_DEFECTO_MS = 190_000
 export function createTerminalLock(opts: TerminalLockOptions = {}): TerminalLock {
   const timeoutMs = opts.timeoutMs ?? TIMEOUT_POR_DEFECTO_MS
   const now = opts.now ?? (() => Date.now())
-  // IP -> instante (ms) en que el candado vence por timeout
-  const vencimientos = new Map<string, number>()
+  // IP -> titular actual: token e instante (ms) en que el candado vence por timeout
+  const vencimientos = new Map<string, { token: number; vence: number }>()
+  let ultimoToken = 0
   const suscriptores = new Set<() => void>()
 
   const notificar = () => {
@@ -25,9 +28,9 @@ export function createTerminalLock(opts: TerminalLockOptions = {}): TerminalLock
   }
 
   const estaOcupada = (ip: string): boolean => {
-    const vence = vencimientos.get(ip)
-    if (vence === undefined) return false
-    if (now() >= vence) {
+    const titular = vencimientos.get(ip)
+    if (titular === undefined) return false
+    if (now() >= titular.vence) {
       vencimientos.delete(ip)
       return false
     }
@@ -35,14 +38,17 @@ export function createTerminalLock(opts: TerminalLockOptions = {}): TerminalLock
   }
 
   return {
-    tryAcquire(ip: string): boolean {
-      if (estaOcupada(ip)) return false
-      vencimientos.set(ip, now() + timeoutMs)
+    tryAcquire(ip: string): number | null {
+      if (estaOcupada(ip)) return null
+      const token = ++ultimoToken
+      vencimientos.set(ip, { token, vence: now() + timeoutMs })
       notificar()
-      return true
+      return token
     },
-    release(ip: string): void {
-      if (!vencimientos.delete(ip)) return
+    release(ip: string, token: number): void {
+      const titular = vencimientos.get(ip)
+      if (titular === undefined || titular.token !== token) return
+      vencimientos.delete(ip)
       notificar()
     },
     isBusy(ip: string): boolean {

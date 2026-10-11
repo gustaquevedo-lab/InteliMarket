@@ -1061,6 +1061,19 @@ export default function POSPage() {
     // "aprobada" ya en pantalla) y despues prendia otro medio para
     // completar el mix, ese resultado recien obtenido se borraba solo,
     // obligando a cargar el voucher a mano como si nunca se hubiera leido.
+    //
+    // Re-tocar el unico metodo activo (modo no-mixto) no hace nada: antes
+    // reseteaba el cobro y borraba un QR/tarjeta ya aprobado.
+    if (!allowMixedPayment && activeMethods.size === 1 && activeMethods.has(m)) return
+    // Un cambio que resetearia el cobro (reemplazo en modo no-mixto o sacar
+    // un metodo del mix) no se permite con un cobro aprobado, con voucher o
+    // en curso: borraria el estado aprobado y su enlace y la cajera cobraria
+    // de nuevo (doble cobro).
+    const reseteaCobro = !allowMixedPayment || (activeMethods.has(m) && activeMethods.size > 1)
+    if (reseteaCobro && hayCobroEnCursoOAprobado()) {
+      avisarCobroEnCursoOAprobado()
+      return
+    }
     let shouldReset = false
     setActiveMethods(prev => {
       if (!allowMixedPayment) {
@@ -1245,7 +1258,44 @@ export default function POSPage() {
       plugpayCpf: "", plugpayPhone: "", plugpayQrImageUrl: "", plugpayBrlValue: null,
     }])
   }
+  // Cobro adicional ya cobrado: aprobado por el terminal o con voucher manual.
+  const legCobrada = (l: ExtraPaymentLeg): boolean => l.txnState === "aprobada" || Boolean((l.manualCupon || "").trim())
+  // Mismo formato que lineasAprobadasSinVenta (auditoria cobro_aprobado_cancelado).
+  const cobroDeLeg = (l: ExtraPaymentLeg): CobroAprobadoSinVenta => {
+    const voucher = [l.manualCupon, l.manualAuth, l.txnResult?.nroBoleta, l.txnResult?.codigoAutorizacion]
+      .map((v) => String(v ?? "").trim()).find((v) => v) || ""
+    const proveedor = l.method === "dinelco" ? "dinelco" : (l.method === "plugpay" || l.method === "plugpay_credito") ? "plugpay" : "bancard"
+    return { id: l.id, metodo: l.method, proveedor, montoPyg: parseInt(String(l.montoStr || "").replace(/\D/g, "") || "0", 10), voucher }
+  }
+  // Traza de cobros aprobados que se descartan sin venta (mismos campos que
+  // el camino de cancelar la venta; aca no hay supervisor).
+  const registrarCobrosAprobadosCancelados = (cobros: CobroAprobadoSinVenta[], totalVentaPyg: number) => {
+    api.inteliaudit.recordEvent({
+      company_id: COMPANY_ID,
+      user_id: user?.id,
+      accion: "cobro_aprobado_cancelado",
+      entidad: "cobro_terminal",
+      datos_nuevos: {
+        cobros,
+        total_venta_pyg: totalVentaPyg,
+        caja: puntoEmision,
+        cajero_nombre: user?.nombre,
+        autorizado_por_id: null,
+        autorizado_por_nombre: null,
+      },
+    } as any).catch((err) => console.warn("Error grabando auditoria de cobro aprobado cancelado:", err))
+  }
   const removeExtraLeg = (id: string) => {
+    const leg = extraPaymentLegs.find((l) => l.id === id)
+    if (leg && legCobrada(leg)) {
+      const cobro = cobroDeLeg(leg)
+      const confirmado = window.confirm(
+        `Este cobro ya fue aprobado por el terminal (${cobro.proveedor.toUpperCase()} ${formatPYG(cobro.montoPyg)}). ` +
+        `Si lo quitás, el dinero queda cobrado sin venta. ¿Quitar igual?`
+      )
+      if (!confirmado) return
+      registrarCobrosAprobadosCancelados([cobro], totalPyg)
+    }
     const interval = extraLegPollRefs.current.get(id)
     if (interval) { clearInterval(interval); extraLegPollRefs.current.delete(id) }
     setExtraPaymentLegs((prev) => prev.filter((l) => l.id !== id))
@@ -1832,14 +1882,15 @@ export default function POSPage() {
   // (sin IP, monto invalido, fuera de la app de caja) siguen igual. El
   // candado se libera en finally aunque fn lance.
   const conTerminal = async (ip: string, fn: () => Promise<void>): Promise<void> => {
-    if (!terminalLock.tryAcquire(ip)) {
+    const token = terminalLock.tryAcquire(ip)
+    if (token === null) {
       toast.warning("Terminal ocupado", "Esperá a que termine el cobro en curso.")
       return
     }
     try {
       await fn()
     } finally {
-      terminalLock.release(ip)
+      terminalLock.release(ip, token)
     }
   }
   const bancardBusy = useTerminalBusy(activePosConfig.bancardIp || undefined)
@@ -6545,6 +6596,12 @@ export default function POSPage() {
 
   const pauseCurrentSale = () => {
     if (cart.length === 0) return
+    // Con un cobro hablando con el terminal/pasarela no se pausa: limpiar el
+    // estado lo dejaria cobrado sin venta.
+    if (cobroTerminalEnVuelo()) {
+      toast.warning("Hay un cobro en curso", "Esperá a que termine el cobro antes de poner la venta en espera.")
+      return
+    }
     const newPaused: PausedSale = {
       id: `p-${Date.now()}`,
       timestamp: new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" }),
@@ -6577,16 +6634,40 @@ export default function POSPage() {
   }
 
   const resumePausedSale = (paused: PausedSale) => {
+    // Recuperar otra venta pisaria los cobros de la actual.
+    if (cart.length > 0 && hayCobroEnCursoOAprobado()) {
+      toast.warning("Hay un cobro en curso o aprobado", "Terminá o cancelá la venta actual antes de recuperar otra.")
+      return
+    }
+    const legsRestaurados: ExtraPaymentLeg[] = paused.extraPaymentLegs || []
     setCart(paused.items)
     setCustomer(paused.customer)
     setAppliedDiscount(paused.appliedDiscount || null)
-    setExtraPaymentLegs(paused.extraPaymentLegs || [])
+    setExtraPaymentLegs(legsRestaurados)
+    // Los cobros adicionales necesitan su metodo activo para cerrar la venta
+    // (validarCierre). Los legs "qr" (QR Bancard viejos) y "plugpay_credito"
+    // se dejan con su metodo: remapearlos cambiaria la forma de pago grabada
+    // (QR -> tarjeta, credito -> PIX).
+    if (legsRestaurados.length > 0) {
+      setActiveMethods(new Set<PosPaymentMethodType>(["cash", ...legsRestaurados.map((l) => l.method as PosPaymentMethodType)]))
+      setAllowMixedPayment(true)
+    }
     setPausedSales((prev) => prev.filter((p) => p.id !== paused.id))
     setShowPausedModal(false)
     toast.success("Venta Recuperada", `Restaurados ${paused.items.length} ítems.`)
   }
 
   const discardPausedSale = (id: string) => {
+    const paused = pausedSales.find((p) => p.id === id)
+    const cobrados = ((paused?.extraPaymentLegs || []) as ExtraPaymentLeg[]).filter(legCobrada).map(cobroDeLeg)
+    if (paused && cobrados.length > 0) {
+      const detalle = cobrados.map((c) => `${c.proveedor.toUpperCase()} ${formatPYG(c.montoPyg)}`).join(", ")
+      const confirmado = window.confirm(
+        `Este cobro ya fue aprobado por el terminal (${detalle}). Si lo quitás, el dinero queda cobrado sin venta. ¿Quitar igual?`
+      )
+      if (!confirmado) return
+      registrarCobrosAprobadosCancelados(cobrados, paused.total)
+    }
     setPausedSales((prev) => prev.filter((p) => p.id !== id))
     setPausedHighlight((i) => Math.max(0, i - 1))
     toast.info("Venta Descartada", "Se eliminó de la lista de ventas en espera.")
@@ -6952,8 +7033,18 @@ export default function POSPage() {
   // del mismo metodo es el total de la venta.
   const montoLineaPrincipalPyg = (metodo: "bancard" | "dinelco"): number => {
     const montoStr = metodo === "bancard" ? mixedCardPyg : mixedDinelcoPyg
-    return (isMultiPayment || extraPaymentLegs.some((l) => l.method === metodo)) ? parseInt(montoStr.replace(/\D/g, "") || "0", 10) : totalPyg
+    // Linea ya cobrada (aprobada o con voucher): vale el monto que se cobro
+    // (queda escrito en el campo al iniciar el cobro), no el total actual.
+    const tomada = metodo === "bancard"
+      ? bancardTxnState === "aprobada" || bancardQrState === "aprobada" || bancardCloudQrState === "aprobada" || bancardQrManualConfirm || Boolean(posCardCupon.trim())
+      : dinelcoTxnState === "aprobada" || dinelcoQrState === "aprobada" || Boolean(dinelcoCupon.trim())
+    const usarCampo = isMultiPayment || extraPaymentLegs.some((l) => l.method === metodo) || (tomada && montoStr.trim() !== "")
+    return usarCampo ? parseInt(montoStr.replace(/\D/g, "") || "0", 10) : totalPyg
   }
+  // Mismo criterio para PlugPay: cobrada (aprobada o con comprobante) vale
+  // el monto escrito en su campo al cobrar, no el total actual.
+  const plugpayMontoFijado = (campo: string): boolean =>
+    (plugpayState === "aprobada" || Boolean(plugpayManualComprobante.trim())) && campo.trim() !== ""
 
   // ── Lineas de cobro para el guardian validarCierre ──
   // Una linea por metodo activo con monto > 0 y una por cada cobro
@@ -6988,11 +7079,11 @@ export default function POSPage() {
     }
     const estadoPlugpay: LineaCobro["estado"] = (plugpayState === "aprobada" || plugpayManualComprobante.trim()) ? "confirmada" : plugpayState === "esperando" ? "en_curso" : "sin_cobrar"
     if (activeMethods.has("plugpay") || activeMethods.has("plugpay_credito")) {
-      const montoPlugpay = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay" || l.method === "plugpay_credito")) ? aPyg(mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg) : totalPyg
+      const montoPlugpay = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay" || l.method === "plugpay_credito") || plugpayMontoFijado(mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg)) ? aPyg(mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg) : totalPyg
       agregar("plugpay", activeMethods.has("plugpay") ? "plugpay" : "plugpay_credito", montoPlugpay, estadoPlugpay)
     }
     if (activeMethods.has("qr")) {
-      const montoQr = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) ? aPyg(mixedQrPyg) : totalPyg
+      const montoQr = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr") || plugpayMontoFijado(mixedQrPyg)) ? aPyg(mixedQrPyg) : totalPyg
       agregar("qr", "qr", montoQr, estadoPlugpay)
     }
     if (activeMethods.has("extra_club")) {
@@ -7040,6 +7131,30 @@ export default function POSPage() {
     }
     return out
   }
+
+  // ── Guardas del cobro en curso/aprobado (C1) ──
+  // Miran el estado crudo de cada terminal/pasarela (no solo los metodos
+  // activos) y los cobros adicionales.
+  const cobroTerminalEnVuelo = (): boolean =>
+    bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando" ||
+    bancardQrState === "esperando" ||
+    bancardCloudQrState === "generando" || bancardCloudQrState === "esperando" ||
+    dinelcoTxnState === "esperando_tarjeta" || dinelcoTxnState === "confirmando" ||
+    dinelcoQrState === "esperando" ||
+    plugpayState === "esperando" ||
+    extraPaymentLegs.some((l) => l.txnState === "esperando" || l.txnState === "generando" || l.txnState === "confirmando")
+  // Linea principal aprobada o respaldada con voucher manual.
+  const cobroPrincipalTomado = (): boolean =>
+    bancardTxnState === "aprobada" || bancardQrState === "aprobada" || bancardCloudQrState === "aprobada" ||
+    bancardQrManualConfirm || Boolean(posCardCupon.trim()) ||
+    dinelcoTxnState === "aprobada" || dinelcoQrState === "aprobada" || Boolean(dinelcoCupon.trim()) ||
+    plugpayState === "aprobada" || Boolean(plugpayManualComprobante.trim())
+  const hayCobroEnCursoOAprobado = (): boolean =>
+    cobroTerminalEnVuelo() || cobroPrincipalTomado() || extraPaymentLegs.some(legCobrada)
+  const avisarCobroEnCursoOAprobado = () => {
+    toast.warning("Hay un cobro en curso o aprobado", "Terminá o cancelá la venta antes de cambiar el método de pago.")
+  }
+  const hayCobroTerminalEnVuelo = cobroTerminalEnVuelo()
 
   // Aviso si el total de la venta cambia despues de aprobar un cobro: se
   // guarda el total al aprobarse la primera linea y se avisa una sola vez
@@ -7372,6 +7487,19 @@ export default function POSPage() {
       setShowAperturaModal(true)
       return
     }
+    // Reabrir el cobro con un cobro aprobado, con voucher o en curso (Esc y
+    // F12, o cerrar y volver a abrir) NO puede borrar nada: ni el estado
+    // aprobado y su enlace, ni los metodos activos, ni los montos cobrados.
+    // Si el monto cobrado ya no es el total, queda el pago mixto prendido
+    // para completar la diferencia con otro medio.
+    if (hayCobroEnCursoOAprobado()) {
+      const aPyg = (v: string) => parseInt(v.replace(/\D/g, "") || "0", 10) || 0
+      const cobradoDistintoDelTotal = [mixedCardPyg, mixedDinelcoPyg, mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg]
+        .some((v) => v.trim() !== "" && aPyg(v) !== totalPyg)
+      if (cobradoDistintoDelTotal || extraPaymentLegs.length > 0) setAllowMixedPayment(true)
+      setShowPaymentModal(true)
+      return
+    }
     setActiveMethods(new Set(["cash"]))
     setAllowMixedPayment(false)
     setPayCashPyg(totalPyg.toLocaleString("es-PY"))
@@ -7690,10 +7818,19 @@ export default function POSPage() {
         if (activeMethods.has("bancard")) {
           cardMonto = montoLineaPrincipalPyg("bancard")
           if (cardMonto > 0) {
+            // La forma de pago sale de lo que de verdad se cobro (tarjeta o
+            // QR), no del sub-metodo elegido ahora: cambiar de Tarjeta a QR
+            // (o al reves) despues de aprobar no puede grabar una tarjeta
+            // como QR ni perder su enlace. Sin cobro de ninguno, manda el
+            // sub-metodo.
+            const tarjetaCobrada = bancardTxnState === "aprobada" || Boolean(posCardCupon.trim())
+            const qrCobrado = bancardQrState === "aprobada" || bancardCloudQrState === "aprobada" || bancardQrManualConfirm
+            const subEsQr = bancardSubMethod === "qr_zimple" || bancardSubMethod === "qr_cloud"
+            const esQr = tarjetaCobrada !== qrCobrado ? qrCobrado : subEsQr
             let fp = "TARJETA_BANCARD"
-            if (bancardSubMethod === "debito") fp = "TARJETA DEBITO"
-            else if (bancardSubMethod === "credito") fp = "TARJETA CREDITO"
-            else if (bancardSubMethod === "qr_zimple" || bancardSubMethod === "qr_cloud") fp = "QR"
+            if (esQr) fp = "QR"
+            else if (!subEsQr) fp = bancardSubMethod === "credito" ? "TARJETA CREDITO" : "TARJETA DEBITO"
+            else fp = posCardType === "credito" ? "TARJETA CREDITO" : "TARJETA DEBITO"
             out.push({
               forma_pago: fp, monto: cardMonto, moneda: "PYG", monto_pyg: cardMonto,
               proveedor: "bancard",
@@ -7713,11 +7850,16 @@ export default function POSPage() {
         if (activeMethods.has("dinelco")) {
           dinelcoMonto = montoLineaPrincipalPyg("dinelco")
           if (dinelcoMonto > 0) {
+            // Igual que Bancard: manda lo cobrado (tarjeta vs QR/PIX), no el sub-metodo actual.
+            const tarjetaCobrada = dinelcoTxnState === "aprobada"
+            const qrCobrado = dinelcoQrState === "aprobada"
+            const subEsQr = dinelcoSubMethod === "qr" || dinelcoSubMethod === "pix"
+            const esQr = tarjetaCobrada !== qrCobrado ? qrCobrado : subEsQr
+            const tipoTarjeta = subEsQr ? dinelcoCardType : dinelcoSubMethod
             let fp = "TARJETA_DINELCO"
-            if (dinelcoSubMethod === "debito") fp = "TARJETA DEBITO"
-            else if (dinelcoSubMethod === "credito") fp = "TARJETA CREDITO"
-            else if (dinelcoSubMethod === "qr") fp = "QR"
-            else if (dinelcoSubMethod === "pix") fp = "PIX"
+            if (esQr) fp = (subEsQr ? dinelcoSubMethod === "pix" : dinelcoQrMode === "pix") ? "PIX" : "QR"
+            else if (tipoTarjeta === "debito") fp = "TARJETA DEBITO"
+            else if (tipoTarjeta === "credito") fp = "TARJETA CREDITO"
             out.push({
               forma_pago: fp, monto: dinelcoMonto, moneda: "PYG", monto_pyg: dinelcoMonto,
               proveedor: "dinelco",
@@ -7737,7 +7879,7 @@ export default function POSPage() {
           }
         }
         if (activeMethods.has("plugpay")) {
-          plugpayMonto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay")) ? parseInt((mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg).replace(/\D/g, "") || "0", 10) : totalPyg
+          plugpayMonto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay") || plugpayMontoFijado(mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg)) ? parseInt((mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg).replace(/\D/g, "") || "0", 10) : totalPyg
           if (plugpayMonto > 0) {
             let fp = plugpaySubMethod === "pix" ? "PIX" : "TARJETA CREDITO"
             out.push({
@@ -7754,7 +7896,7 @@ export default function POSPage() {
           }
         }
         if (activeMethods.has("qr")) {
-          qrMonto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          qrMonto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr") || plugpayMontoFijado(mixedQrPyg)) ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
           if (qrMonto > 0) out.push({ forma_pago: "QR", monto: qrMonto, moneda: "PYG", monto_pyg: qrMonto, proveedor: "plugpay", referencia: ref(plugpayManualComprobante, plugpayManualAutorizacion) })
           for (const leg of extraPaymentLegs.filter((l) => l.method === "qr")) {
             const legMonto = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
@@ -7764,7 +7906,7 @@ export default function POSPage() {
           }
         }
         if (activeMethods.has("plugpay_credito")) {
-          parceladoMonto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay_credito")) ? parseInt(mixedParceladoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          parceladoMonto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay_credito") || plugpayMontoFijado(mixedParceladoPyg)) ? parseInt(mixedParceladoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
           if (parceladoMonto > 0) out.push({ forma_pago: "TARJETA CREDITO", monto: parceladoMonto, moneda: "PYG", monto_pyg: parceladoMonto, proveedor: "plugpay", referencia: ref(plugpayManualComprobante, plugpayManualAutorizacion), cuotas: plugpayCuotas })
           for (const leg of extraPaymentLegs.filter((l) => l.method === "plugpay_credito")) {
             const legMonto = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
@@ -8903,6 +9045,12 @@ export default function POSPage() {
           toast.warning("Cobro en proceso", "Esperá a que termine: una venta que ya se está registrando no se cancela con Escape.")
           return
         }
+        // Con el terminal/pasarela cobrando, Escape no cierra la ventana: el
+        // cobro sigue y al volver hay que ver su resultado.
+        if (showPaymentModal && hayCobroTerminalEnVuelo) {
+          toast.warning("Cobro en curso", "Esperá a que termine el cobro del terminal antes de salir.")
+          return
+        }
         setShowPaymentModal(false)
         setShowCustomerModal(false)
         setShowScaleModal(false)
@@ -8913,7 +9061,7 @@ export default function POSPage() {
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [cart, totalPyg, totalRecibidoPyg, totalCargadoPyg, submitting, listoParaCerrar, activeMethods, hasClickedQuickCash, pausedSales.length, showAperturaModal, showCierreTurnoModal, showManualWeightModal, showScaleModal, showSupervisorModal, showPosConfigModal, showPaymentModal, showCuponModal, cuponModalStep, pendingCuponData, manualWeightInput, targetWeighProduct, toggleActiveMethod])
+  }, [cart, totalPyg, totalRecibidoPyg, totalCargadoPyg, submitting, hayCobroTerminalEnVuelo, listoParaCerrar, activeMethods, hasClickedQuickCash, pausedSales.length, showAperturaModal, showCierreTurnoModal, showManualWeightModal, showScaleModal, showSupervisorModal, showPosConfigModal, showPaymentModal, showCuponModal, cuponModalStep, pendingCuponData, manualWeightInput, targetWeighProduct, toggleActiveMethod])
 
   // ── PALETA DE COLORES Y CONTRASTE DINÁMICO ────────────────────────────────
   const bgMain = dark ? "bg-slate-950 text-slate-100" : "bg-slate-100 text-slate-900"
@@ -11466,6 +11614,12 @@ export default function POSPage() {
                         checked={allowMixedPayment}
                         onChange={(e) => {
                           const on = e.target.checked
+                          // Apagarlo deja un solo metodo: con un cobro aprobado/en curso
+                          // podria sacar justo el metodo cobrado.
+                          if (!on && activeMethods.size > 1 && hayCobroEnCursoOAprobado()) {
+                            avisarCobroEnCursoOAprobado()
+                            return
+                          }
                           setAllowMixedPayment(on)
                           if (!on) {
                             setActiveMethods(prev => new Set([prev.values().next().value || "cash"]))
