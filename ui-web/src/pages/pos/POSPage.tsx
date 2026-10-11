@@ -1327,6 +1327,11 @@ export default function POSPage() {
       toast.warning("Monto inválido", "Ingrese un monto mayor a 0.")
       return
     }
+    // El monto cobrado queda en el campo de la linea, igual que lo escribe
+    // el input "Monto Plug Pay" (los tres estados a la vez).
+    setMixedPlugPayPyg(montoPyg.toLocaleString("es-PY"))
+    setMixedParceladoPyg(montoPyg.toLocaleString("es-PY"))
+    setMixedQrPyg(montoPyg.toLocaleString("es-PY"))
     setPlugpayState("esperando")
     setPlugpayError("")
     setPlugpayResult(null)
@@ -1424,6 +1429,11 @@ export default function POSPage() {
       toast.warning("Monto inválido", "Ingrese un monto mayor a 0.")
       return
     }
+    // El monto cobrado queda en el campo de la linea, igual que lo escribe
+    // el input "Monto Plug Pay" (los tres estados a la vez).
+    setMixedPlugPayPyg(montoPyg.toLocaleString("es-PY"))
+    setMixedParceladoPyg(montoPyg.toLocaleString("es-PY"))
+    setMixedQrPyg(montoPyg.toLocaleString("es-PY"))
     setPlugpayState("esperando")
     setPlugpayError("")
     setPlugpayResult(null)
@@ -1657,12 +1667,29 @@ export default function POSPage() {
     setBancardCloudQrState("idle"); setBancardCloudQrError(""); setBancardCloudQrData(null)
   }
 
+  // Estado de cobro limpio para empezar la venta siguiente: estados de
+  // terminal/pasarela, cupones/comprobantes manuales y medio de pago. Sin
+  // esto el cobro de una venta seguia contando como "confirmado" en la
+  // proxima (avisos falsos y una linea Bancard/Dinelco sin cobrar dada por
+  // confirmada). No va dentro de resetBancardFlow: ese corre en cada toggle
+  // de medio y borraria un voucher tipeado en la venta actual.
+  const limpiarCobroParaNuevaVenta = () => {
+    resetBancardFlow()
+    setPosCardCupon("")
+    setDinelcoCupon("")
+    setPlugpayManualComprobante("")
+    setPlugpayManualAutorizacion("")
+    setActiveMethods(new Set(["cash"]))
+  }
+
   const handleGenerateBancardCloudQr = async () => {
     const monto = montoLineaPrincipalPyg("bancard")
     if (monto <= 0) {
       toast.warning("Monto inválido", "Cargá el monto a cobrar por QR antes de continuar.")
       return
     }
+    // El monto cobrado queda en el campo de la linea (ver handleBancardCharge).
+    setMixedCardPyg(monto.toLocaleString("es-PY"))
     setBancardCloudQrState("generando")
     setBancardCloudQrError("")
     setBancardCloudQrData(null)
@@ -1839,6 +1866,9 @@ export default function POSPage() {
     }
     await conTerminal(ip, async () => {
       const facturaNro = Date.now()
+      // El monto cobrado queda en el campo de la linea: si despues se pasa a
+      // pago mixto, la linea aprobada no puede quedar en 0 con el campo fijo.
+      setMixedCardPyg(montoBancard.toLocaleString("es-PY"))
       setBancardTxnState("esperando_tarjeta")
       setBancardTxnError("")
       setBancardTxnResult(null)
@@ -2043,6 +2073,8 @@ export default function POSPage() {
       return
     }
     await conTerminal(ip, async () => {
+      // El monto cobrado queda en el campo de la linea (ver handleBancardCharge).
+      setMixedDinelcoPyg(montoDinelco.toLocaleString("es-PY"))
       setDinelcoTxnState("esperando_tarjeta")
       setDinelcoTxnError("")
       setDinelcoTxnResult(null)
@@ -2134,6 +2166,8 @@ export default function POSPage() {
       return
     }
     await conTerminal(ip, async () => {
+      // El monto cobrado queda en el campo de la linea (ver handleBancardCharge).
+      setMixedDinelcoPyg(montoQrDinelco.toLocaleString("es-PY"))
       setDinelcoQrState("esperando")
       setDinelcoQrError("")
 
@@ -2303,6 +2337,8 @@ export default function POSPage() {
     }
     await conTerminal(ip, async () => {
       const facturaNro = Date.now()
+      // El monto cobrado queda en el campo de la linea (ver handleBancardCharge).
+      setMixedCardPyg(montoQr.toLocaleString("es-PY"))
       setBancardQrState("esperando")
       setBancardQrError("")
       setBancardQrResult(null)
@@ -5905,15 +5941,9 @@ export default function POSPage() {
       setAppliedDiscount(null)
       setExtraClubAdminOverride(false)
       clearAllExtraLegs()
-      if (aprobados.length > 0) {
-        // Que los cobros cancelados no sigan contando como aprobados en la
-        // proxima venta (ni disparen de nuevo estos avisos).
-        resetBancardFlow()
-        setPosCardCupon("")
-        setDinelcoCupon("")
-        setPlugpayManualComprobante("")
-        setPlugpayManualAutorizacion("")
-      }
+      // Que los cobros cancelados no sigan contando como aprobados en la
+      // proxima venta (ni disparen de nuevo estos avisos).
+      limpiarCobroParaNuevaVenta()
       toast.warning("Venta Cancelada", "Se anularon todos los productos del ticket.")
     } else if (action.type === "decrease_qty" && action.itemId && action.delta) {
       const itemBefore = cart.find((i) => i.id === action.itemId)
@@ -6524,12 +6554,20 @@ export default function POSPage() {
       appliedDiscount,
       extraPaymentLegs,
     }
+    const principalAprobado = lineasAprobadasSinVenta().filter((c) => !extraPaymentLegs.some((l) => l.id === c.id))
     setPausedSales((prev) => [newPaused, ...prev])
     setCart([])
     setCustomer(DEFAULT_CUSTOMER)
     setAppliedDiscount(null)
     setExtraClubAdminOverride(false)
     clearAllExtraLegs()
+    // Los cobros adicionales viajan con la venta pausada; el estado de la
+    // linea principal no se guarda, y no puede quedar colgado en la venta
+    // siguiente.
+    limpiarCobroParaNuevaVenta()
+    if (principalAprobado.length > 0) {
+      toast.warning("Cobro principal no guardado", `La venta pausada no conserva el cobro aprobado de ${principalAprobado.map((c) => `${c.proveedor.toUpperCase()} ${formatPYG(c.montoPyg)}${c.voucher ? ` (voucher ${c.voucher})` : ""}`).join(", ")}: al retomarla cargá el voucher a mano.`)
+    }
     toast.info("Venta en Espera", "La venta fue pausada exitosamente.")
   }
 
@@ -8734,6 +8772,7 @@ export default function POSPage() {
       setAppliedDiscount(null)
       setExtraClubAdminOverride(false)
       clearAllExtraLegs()
+      limpiarCobroParaNuevaVenta()
       toast.success(
         "¡Cobro Exitoso!",
         `Comprobante ${numeroComprobante} emitido. Vuelto: ${formatPYG(vueltoFinalPyg)}` +
