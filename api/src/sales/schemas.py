@@ -1,6 +1,6 @@
 """Sales schemas"""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from datetime import datetime
 from uuid import UUID
@@ -27,6 +27,48 @@ class SalePaymentInput(BaseModel):
     referencia: Optional[str] = None
     cuotas: Optional[int] = None
     monto_pyg: Optional[Decimal] = None
+
+    # Campos del pago mixto: tolerantes. Un valor invalido se descarta (None)
+    # en vez de responder 422: las ventas offline se reenvian tal cual y un
+    # rechazo por estos campos las dejaria trabadas en la cola.
+    @field_validator("terminal_transaction_id", mode="before")
+    @classmethod
+    def _tid_tolerante(cls, v):
+        if v is None or isinstance(v, UUID):
+            return v
+        try:
+            return UUID(str(v).strip())
+        except (ValueError, TypeError, AttributeError):
+            return None
+
+    @field_validator("cuotas", mode="before")
+    @classmethod
+    def _cuotas_tolerante(cls, v):
+        if v is None or isinstance(v, bool):
+            return None
+        try:
+            return int(str(v).strip())
+        except (ValueError, TypeError):
+            return None
+
+    @field_validator("monto_pyg", mode="before")
+    @classmethod
+    def _monto_pyg_tolerante(cls, v):
+        if v is None or isinstance(v, bool):
+            return None
+        try:
+            d = Decimal(str(v).strip())
+        except (ArithmeticError, ValueError, TypeError):
+            return None
+        return d if d.is_finite() else None
+
+    @field_validator("proveedor", "referencia", mode="before")
+    @classmethod
+    def _texto_tolerante(cls, v):
+        if isinstance(v, (str, int, float)) and not isinstance(v, bool):
+            s = str(v).strip()
+            return s or None
+        return None
 
 
 class SaleCreate(BaseModel):

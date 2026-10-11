@@ -36,6 +36,8 @@ class TestEsquemas:
         )
         assert (p.terminal_transaction_id, p.cuotas, p.monto_pyg) == (None, None, None)
         assert p.proveedor == "123" and p.referencia is None
+        for raro in ("NaN", "Infinity", float("nan")):
+            assert SalePaymentInput(forma_pago="QR", monto=Decimal("1"), monto_pyg=raro).monto_pyg is None
 
     def test_campos_nuevos_validos_y_vacios(self):
         tid = uuid4()

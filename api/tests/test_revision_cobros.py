@@ -148,7 +148,27 @@ async def test_huerfanos_ignora_cobros_anteriores_al_despliegue(db, monkeypatch)
 
 
 def test_huerfanos_desde_es_la_fecha_de_despliegue():
-    assert HUERFANOS_DESDE_REAL == datetime(2026, 10, 12, 0, 0, tzinfo=timezone.utc)
+    # 00:00 de Asuncion (UTC-3) del dia de despliegue
+    assert HUERFANOS_DESDE_REAL == datetime(2026, 10, 12, 3, 0, tzinfo=timezone.utc)
+
+
+async def test_desde_sin_zona_se_toma_como_hora_de_asuncion(db, monkeypatch):
+    monkeypatch.setattr(rc, "HUERFANOS_DESDE", AHORA - timedelta(days=5))
+    # AHORA = 12:00 UTC = 09:00 Asuncion
+    antes = await _cobro(db, 60 + 20)   # 07:40 Asuncion
+    despues = await _cobro(db, 20)      # 08:40 Asuncion
+    desde_naive = datetime(2026, 10, 10, 8, 0)  # 08:00 Asuncion = 11:00 UTC
+    items = await rc.listar_revision(db, CO, "huerfanos", desde=desde_naive, ahora=AHORA)
+    assert [i["id"] for i in items] == [despues]
+    assert antes not in [i["id"] for i in items]
+    # naive anterior al corte: no se compara naive vs aware (no lanza) y manda el corte
+    monkeypatch.setattr(rc, "HUERFANOS_DESDE", AHORA - timedelta(minutes=30))
+    items = await rc.listar_revision(db, CO, "huerfanos", desde=datetime(2026, 10, 1), ahora=AHORA)
+    assert [i["id"] for i in items] == [despues]
+    # hasta naive tambien se normaliza (08:30 Asuncion = 11:30 UTC)
+    items = await rc.listar_revision(db, CO, "huerfanos", desde=datetime(2026, 10, 1),
+                                     hasta=datetime(2026, 10, 10, 8, 30), ahora=AHORA)
+    assert items == []
 
 
 async def test_tipo_invalido(db):

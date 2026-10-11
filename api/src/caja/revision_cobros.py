@@ -20,9 +20,21 @@ from api.src.sales.models import Sale, SalePayment
 TIPOS_REVISION = ("no_cuadran", "huerfanos", "multi_proveedor")
 MINUTOS_HUERFANO = 15
 DIAS_VENTANA_DEFECTO = 7
-# Fecha de despliegue del pago mixto: los cobros anteriores nunca se enlazaron a
-# su venta, asi que no se listan como huerfanos (inundarian el panel).
-HUERFANOS_DESDE = datetime(2026, 10, 12, 0, 0, tzinfo=timezone.utc)
+# Fecha de despliegue del pago mixto (00:00 de Asuncion en UTC): los cobros
+# anteriores nunca se enlazaron a su venta, asi que no se listan como huerfanos
+# (inundarian el panel). MOVER al dia real del despliegue.
+HUERFANOS_DESDE = datetime(2026, 10, 12, 3, 0, tzinfo=timezone.utc)
+# Fechas sin zona que llegan por query se toman como hora de Asuncion (UTC-3).
+ZONA_LOCAL = timezone(timedelta(hours=-3))
+
+
+def _con_zona(valor: datetime | None) -> datetime | None:
+    """Fecha con zona, expresada en UTC (sin zona = hora de Asuncion)."""
+    if valor is None:
+        return None
+    if valor.tzinfo is None:
+        valor = valor.replace(tzinfo=ZONA_LOCAL)
+    return valor.astimezone(timezone.utc)
 
 
 def _validar_tipo(tipo: str) -> None:
@@ -39,7 +51,8 @@ async def listar_revision(
     ahora: datetime | None = None,
 ) -> list[dict]:
     _validar_tipo(tipo)
-    ahora = ahora or datetime.now(timezone.utc)
+    ahora = _con_zona(ahora) or datetime.now(timezone.utc)
+    desde, hasta = _con_zona(desde), _con_zona(hasta)
     if desde is None and hasta is None:
         desde = ahora - timedelta(days=DIAS_VENTANA_DEFECTO)
 
