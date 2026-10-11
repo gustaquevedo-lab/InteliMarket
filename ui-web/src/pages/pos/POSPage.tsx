@@ -7446,8 +7446,35 @@ export default function POSPage() {
       // sales/service.py). Los codigos EFECTIVO/QR/etc en mayuscula
       // coinciden con lo que ya usa caja/service.py para calcular el
       // efectivo acumulado de la alerta de retiro.
-      const salePaymentsForCreate: { forma_pago: string; monto: number; moneda?: string }[] = (() => {
-        const out: { forma_pago: string; monto: number; moneda?: string }[] = []
+      // Pago mixto Etapa 1: cada linea lleva proveedor, voucher/autorizacion,
+      // cuotas, su equivalente en Gs (monto_pyg) y el id del cobro registrado
+      // en pos_terminal_transactions -- el servidor enlaza ese cobro con la
+      // venta dentro de la misma transaccion (antes lo hacia el cliente,
+      // best-effort, solo para Bancard).
+      type LineaPagoVenta = {
+        forma_pago: string; monto: number; moneda?: string
+        proveedor?: "bancard" | "dinelco" | "plugpay"; terminal_transaction_id?: string
+        referencia?: string; cuotas?: number; monto_pyg: number
+      }
+      const salePaymentsForCreate: LineaPagoVenta[] = (() => {
+        const out: LineaPagoVenta[] = []
+        // Solo ids UUID reales de pos_terminal_transactions: el schema del
+        // servidor valida UUID y un id de proveedor (ej. IdTransacao de
+        // PlugPay) haria rechazar la venta entera.
+        const idCobro = (v: string | null | undefined): string | undefined =>
+          v && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) ? v : undefined
+        const ref = (...vals: (string | null | undefined)[]): string | undefined => {
+          for (const v of vals) { const t = (v || "").trim(); if (t) return t.slice(0, 60) }
+          return undefined
+        }
+        const legProveedor = (m: ExtraLegMethod): "bancard" | "dinelco" | "plugpay" =>
+          m === "dinelco" ? "dinelco" : (m === "plugpay" || m === "plugpay_credito") ? "plugpay" : "bancard"
+        const legExtra = (leg: ExtraPaymentLeg, fp: string) => ({
+          proveedor: legProveedor(leg.method),
+          terminal_transaction_id: idCobro(leg.logId),
+          referencia: ref(leg.manualCupon, leg.manualAuth),
+          cuotas: fp === "TARJETA CREDITO" ? leg.cardCuotas : undefined,
+        })
         
         let cardMonto = 0
         let dinelcoMonto = 0
@@ -7464,12 +7491,19 @@ export default function POSPage() {
             if (bancardSubMethod === "debito") fp = "TARJETA DEBITO"
             else if (bancardSubMethod === "credito") fp = "TARJETA CREDITO"
             else if (bancardSubMethod === "qr_zimple" || bancardSubMethod === "qr_cloud") fp = "QR"
-            out.push({ forma_pago: fp, monto: cardMonto, moneda: "PYG" })
+            out.push({
+              forma_pago: fp, monto: cardMonto, moneda: "PYG", monto_pyg: cardMonto,
+              proveedor: "bancard",
+              terminal_transaction_id: idCobro(bancardTxnLogId || bancardQrLogId),
+              referencia: fp === "QR" ? ref(posQrCupon, posQrAuth) : ref(posCardCupon),
+              cuotas: fp === "TARJETA CREDITO" ? posCardCuotas : undefined,
+            })
           }
           for (const leg of extraPaymentLegs.filter((l) => l.method === "bancard")) {
             const legMonto = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
             if (legMonto > 0 && (leg.txnState === "aprobada" || leg.manualCupon.trim())) {
-              out.push({ forma_pago: leg.cardType === "debito" ? "TARJETA DEBITO" : "TARJETA CREDITO", monto: legMonto, moneda: "PYG" })
+              const legFp = leg.cardType === "debito" ? "TARJETA DEBITO" : "TARJETA CREDITO"
+              out.push({ forma_pago: legFp, monto: legMonto, moneda: "PYG", monto_pyg: legMonto, ...legExtra(leg, legFp) })
             }
           }
         }
@@ -7481,7 +7515,13 @@ export default function POSPage() {
             else if (dinelcoSubMethod === "credito") fp = "TARJETA CREDITO"
             else if (dinelcoSubMethod === "qr") fp = "QR"
             else if (dinelcoSubMethod === "pix") fp = "PIX"
-            out.push({ forma_pago: fp, monto: dinelcoMonto, moneda: "PYG" })
+            out.push({
+              forma_pago: fp, monto: dinelcoMonto, moneda: "PYG", monto_pyg: dinelcoMonto,
+              proveedor: "dinelco",
+              terminal_transaction_id: idCobro(dinelcoTxnLogId),
+              referencia: ref(dinelcoCupon),
+              cuotas: fp === "TARJETA CREDITO" ? dinelcoCuotas : undefined,
+            })
           }
           for (const leg of extraPaymentLegs.filter((l) => l.method === "dinelco")) {
             const legMonto = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
@@ -7489,7 +7529,7 @@ export default function POSPage() {
               let legFp = "TARJETA DEBITO"
               if (leg.dinelcoOpType === "qr") legFp = leg.dinelcoQrMode === "pix" ? "PIX" : "QR"
               else if (leg.cardType === "credito") legFp = "TARJETA CREDITO"
-              out.push({ forma_pago: legFp, monto: legMonto, moneda: "PYG" })
+              out.push({ forma_pago: legFp, monto: legMonto, moneda: "PYG", monto_pyg: legMonto, ...legExtra(leg, legFp) })
             }
           }
         }
@@ -7497,44 +7537,48 @@ export default function POSPage() {
           plugpayMonto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay")) ? parseInt((mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg).replace(/\D/g, "") || "0", 10) : totalPyg
           if (plugpayMonto > 0) {
             let fp = plugpaySubMethod === "pix" ? "PIX" : "TARJETA CREDITO"
-            out.push({ forma_pago: fp, monto: plugpayMonto, moneda: "PYG" })
+            out.push({
+              forma_pago: fp, monto: plugpayMonto, moneda: "PYG", monto_pyg: plugpayMonto,
+              proveedor: "plugpay", referencia: ref(plugpayManualComprobante, plugpayManualAutorizacion),
+              cuotas: fp === "TARJETA CREDITO" ? plugpayCuotas : undefined,
+            })
           }
           for (const leg of extraPaymentLegs.filter((l) => l.method === "plugpay")) {
             const legMonto = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
             if (legMonto > 0 && (leg.txnState === "aprobada" || leg.manualCupon.trim())) {
-              out.push({ forma_pago: "PIX", monto: legMonto, moneda: "PYG" })
+              out.push({ forma_pago: "PIX", monto: legMonto, moneda: "PYG", monto_pyg: legMonto, ...legExtra(leg, "PIX") })
             }
           }
         }
         if (activeMethods.has("qr")) {
           qrMonto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-          if (qrMonto > 0) out.push({ forma_pago: "QR", monto: qrMonto, moneda: "PYG" })
+          if (qrMonto > 0) out.push({ forma_pago: "QR", monto: qrMonto, moneda: "PYG", monto_pyg: qrMonto, proveedor: "plugpay", referencia: ref(plugpayManualComprobante, plugpayManualAutorizacion) })
           for (const leg of extraPaymentLegs.filter((l) => l.method === "qr")) {
             const legMonto = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
             if (legMonto > 0 && (leg.txnState === "aprobada" || leg.manualCupon.trim())) {
-              out.push({ forma_pago: "QR", monto: legMonto, moneda: "PYG" })
+              out.push({ forma_pago: "QR", monto: legMonto, moneda: "PYG", monto_pyg: legMonto, ...legExtra(leg, "QR") })
             }
           }
         }
         if (activeMethods.has("plugpay_credito")) {
           parceladoMonto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay_credito")) ? parseInt(mixedParceladoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-          if (parceladoMonto > 0) out.push({ forma_pago: "TARJETA CREDITO", monto: parceladoMonto, moneda: "PYG" })
+          if (parceladoMonto > 0) out.push({ forma_pago: "TARJETA CREDITO", monto: parceladoMonto, moneda: "PYG", monto_pyg: parceladoMonto, proveedor: "plugpay", referencia: ref(plugpayManualComprobante, plugpayManualAutorizacion), cuotas: plugpayCuotas })
           for (const leg of extraPaymentLegs.filter((l) => l.method === "plugpay_credito")) {
             const legMonto = parseInt(leg.montoStr.replace(/\D/g, "") || "0", 10)
             if (legMonto > 0 && (leg.txnState === "aprobada" || leg.manualCupon.trim())) {
-              out.push({ forma_pago: "TARJETA CREDITO", monto: legMonto, moneda: "PYG" })
+              out.push({ forma_pago: "TARJETA CREDITO", monto: legMonto, moneda: "PYG", monto_pyg: legMonto, ...legExtra(leg, "TARJETA CREDITO") })
             }
           }
         }
         if (activeMethods.has("extra_club")) {
           extraClubMonto = isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-          if (extraClubMonto > 0) out.push({ forma_pago: "EXTRA_CLUB", monto: extraClubMonto, moneda: "PYG" })
+          if (extraClubMonto > 0) out.push({ forma_pago: "EXTRA_CLUB", monto: extraClubMonto, moneda: "PYG", monto_pyg: extraClubMonto })
         }
         if (activeMethods.has("otros")) {
           otrosMonto = isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg
           if (otrosMonto > 0) {
             let fp = otrosSubMethod === "transferencia" ? "TRANF. BANCARIA" : (otrosSubMethod === "vale" ? "VALE_CONVENIO" : "CHEQUES")
-            out.push({ forma_pago: fp, monto: otrosMonto, moneda: "PYG" })
+            out.push({ forma_pago: fp, monto: otrosMonto, moneda: "PYG", monto_pyg: otrosMonto })
           }
         }
         if (activeMethods.has("cash")) {
@@ -7551,7 +7595,7 @@ export default function POSPage() {
             const netPygCoveredByBrl = Math.min(brlValueInPyg, remainingPyg)
             const netBrl = Math.round((netPygCoveredByBrl / brlRate) * 100) / 100
             if (netBrl > 0) {
-              out.push({ forma_pago: "EFECTIVO", monto: netBrl, moneda: "BRL" })
+              out.push({ forma_pago: "EFECTIVO", monto: netBrl, moneda: "BRL", monto_pyg: netPygCoveredByBrl })
               remainingPyg = Math.max(0, remainingPyg - netPygCoveredByBrl)
             }
           }
@@ -7562,17 +7606,17 @@ export default function POSPage() {
             const netPygCoveredByUsd = Math.min(usdValueInPyg, remainingPyg)
             const netUsd = Math.round((netPygCoveredByUsd / usdRate) * 100) / 100
             if (netUsd > 0) {
-              out.push({ forma_pago: "EFECTIVO", monto: netUsd, moneda: "USD" })
+              out.push({ forma_pago: "EFECTIVO", monto: netUsd, moneda: "USD", monto_pyg: netPygCoveredByUsd })
               remainingPyg = Math.max(0, remainingPyg - netPygCoveredByUsd)
             }
           }
 
           if (remainingPyg > 0) {
-            out.push({ forma_pago: "EFECTIVO", monto: remainingPyg, moneda: "PYG" })
+            out.push({ forma_pago: "EFECTIVO", monto: remainingPyg, moneda: "PYG", monto_pyg: remainingPyg })
           }
         }
 
-        if (out.length === 0) out.push({ forma_pago: "EFECTIVO", monto: totalPyg, moneda: "PYG" })
+        if (out.length === 0) out.push({ forma_pago: "EFECTIVO", monto: totalPyg, moneda: "PYG", monto_pyg: totalPyg })
         return out
       })()
 
@@ -8139,21 +8183,9 @@ export default function POSPage() {
         }
       }
 
-      // Igual que arriba, pero para el registro de pos_terminal_transactions
-      // del flujo automatico nuevo (Bancard real via API) -- linkea el
-      // sale_id una vez que la venta ya existe, best-effort.
-      const bancardLogId = bancardTxnLogId || bancardQrLogId
-      if (bancardLogId) {
-        const doLinkSale = (saleIdForLink?: string) => {
-          if (!saleIdForLink) return
-          api.posTerminalTransactions.update(bancardLogId, { sale_id: saleIdForLink } as any).catch(() => {})
-        }
-        if (createdSaleId) {
-          doLinkSale(createdSaleId)
-        } else if (saleCreatePromise) {
-          saleCreatePromise.then((s: any) => doLinkSale(s?.id))
-        }
-      }
+      // El enlace pos_terminal_transactions -> venta ya no se hace aca: cada
+      // linea de payments lleva terminal_transaction_id y el servidor lo
+      // enlaza dentro de la transaccion de la venta (pago mixto Etapa 1).
 
       // Ticket físico real: ESC/POS crudo (ver comentario del generador más
       // arriba). receiptHtml sigue existiendo para guardarse en recibo_html
