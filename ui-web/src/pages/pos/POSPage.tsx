@@ -27,6 +27,7 @@ import { verifySupervisorPinLocal, syncSupervisorPins } from "../../utils/localA
 import QRCode from "qrcode"
 import { imDinelco, imBancard } from "../../monitor/integrations"
 import { captureMessage } from "../../monitor"
+import { validarCierre, totalConfirmadoPyg, type LineaCobro, type ContextoCierre } from "./validarCierre"
 
 
 // ── BANDERAS VECTORIALES SVG PARA COMPATIBILIDAD TOTAL EN WINDOWS / ELECTRON ─
@@ -6815,48 +6816,100 @@ export default function POSPage() {
     return (isMultiPayment || extraPaymentLegs.some((l) => l.method === metodo)) ? parseInt(montoStr.replace(/\D/g, "") || "0", 10) : totalPyg
   }
 
-  // Cálculos dinámicos de vuelto multimoneda en el modal de cobro (SIN CÉNTIMOS EN PYG)
-  const { totalRecibidoPyg, saldoRestantePyg, vueltoPyg } = useMemo(() => {
-    let recibido = 0
-
-    // Con un solo metodo activo, ese metodo implica el total de la venta
-    // (nunca se pide un monto -- la tarjeta/QR/Extra Club se cobran enteros
-    // de una). Con 2+ metodos activos, cada uno no-efectivo aporta lo que
-    // el cajero cargo en su propio campo -- eso reemplaza a la vieja
-    // pestana "Pago Mixto".
+  // ── Lineas de cobro para el guardian validarCierre ──
+  // Una linea por metodo activo con monto > 0 y una por cada cobro
+  // adicional (extraPaymentLegs) con monto > 0; una linea en 0 se omite (no
+  // es un error). Los montos son los MISMOS que se guardan en el payload de
+  // la venta. "confirmada" = aprobada por el terminal o respaldada con
+  // cupon/comprobante manual. El efectivo, Extra Club y Otros van siempre
+  // confirmados (sus chequeos propios estan en contextoCierre).
+  const construirLineasCobro = (): LineaCobro[] => {
+    const lineas: LineaCobro[] = []
+    const aPyg = (v: string) => parseInt(v.replace(/\D/g, "") || "0", 10) || 0
+    const agregar = (id: string, metodo: LineaCobro["metodo"], montoPyg: number, estado: LineaCobro["estado"], esExtra = false) => {
+      if (montoPyg > 0 || !Number.isFinite(montoPyg)) lineas.push({ id, metodo, montoPyg, estado, esExtra })
+    }
     if (activeMethods.has("cash")) {
-      // Un monto mal tipeado (ej. una "," suelta en el campo de R$/US$)
-      // hace que parseFloat devuelva NaN, que se propaga a totalRecibidoPyg
-      // y de ahi a saldoRestantePyg -- y "NaN > 0" es false en JS, asi que
-      // el chequeo de "falta cobrar" en handleProcessCheckout se saltaba
-      // por completo, dejando pasar un cobro sin plata real detras.
-      const pyg = parseInt(payCashPyg.replace(/\D/g, "") || "0", 10) || 0
-      const brl = (parseFloat(payCashBrl.replace(/,/g, ".") || "0") || 0) * rates.BRL
-      const usd = (parseFloat(payCashUsd.replace(/,/g, ".") || "0") || 0) * rates.USD
-      recibido += pyg + brl + usd
+      // Una cotizacion invalida con R$/US$ cargado da NaN: la linea entra
+      // igual y validarCierre la rechaza como monto invalido.
+      const brlIn = parseFloat(payCashBrl.replace(/,/g, ".") || "0") || 0
+      const usdIn = parseFloat(payCashUsd.replace(/,/g, ".") || "0") || 0
+      const montoCash = aPyg(payCashPyg) + (brlIn !== 0 ? brlIn * rates.BRL : 0) + (usdIn !== 0 ? usdIn * rates.USD : 0)
+      agregar("cash", "cash", montoCash, "confirmada")
     }
     if (activeMethods.has("bancard")) {
-      recibido += montoLineaPrincipalPyg("bancard")
-      recibido += extraLegsMontoEntered("bancard")
+      const confirmada = bancardTxnState === "aprobada" || Boolean(posCardCupon.trim()) || bancardQrManualConfirm || bancardCloudQrState === "aprobada" || bancardQrState === "aprobada"
+      const enCurso = bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando" || bancardCloudQrState === "generando" || bancardCloudQrState === "esperando" || bancardQrState === "esperando"
+      agregar("bancard", "bancard", montoLineaPrincipalPyg("bancard"), confirmada ? "confirmada" : enCurso ? "en_curso" : "sin_cobrar")
     }
     if (activeMethods.has("dinelco")) {
-      recibido += montoLineaPrincipalPyg("dinelco")
-      recibido += extraLegsMontoEntered("dinelco")
+      const confirmada = dinelcoTxnState === "aprobada" || Boolean(dinelcoCupon.trim()) || dinelcoQrState === "aprobada"
+      const enCurso = dinelcoTxnState === "esperando_tarjeta" || dinelcoTxnState === "confirmando" || dinelcoQrState === "esperando"
+      agregar("dinelco", "dinelco", montoLineaPrincipalPyg("dinelco"), confirmada ? "confirmada" : enCurso ? "en_curso" : "sin_cobrar")
+    }
+    const estadoPlugpay: LineaCobro["estado"] = (plugpayState === "aprobada" || plugpayManualComprobante.trim()) ? "confirmada" : plugpayState === "esperando" ? "en_curso" : "sin_cobrar"
+    if (activeMethods.has("plugpay") || activeMethods.has("plugpay_credito")) {
+      const montoPlugpay = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay" || l.method === "plugpay_credito")) ? aPyg(mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg) : totalPyg
+      agregar("plugpay", activeMethods.has("plugpay") ? "plugpay" : "plugpay_credito", montoPlugpay, estadoPlugpay)
     }
     if (activeMethods.has("qr")) {
-      recibido += (isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-      recibido += extraLegsMontoEntered("qr")
-    }
-    if (activeMethods.has("plugpay") || activeMethods.has("plugpay_credito")) {
-      recibido += (isMultiPayment || extraPaymentLegs.some((l) => l.method === "plugpay" || l.method === "plugpay_credito")) ? parseInt((mixedPlugPayPyg || mixedParceladoPyg || mixedQrPyg).replace(/\D/g, "") || "0", 10) : totalPyg
-      recibido += extraLegsMontoEntered("plugpay") + extraLegsMontoEntered("plugpay_credito")
+      const montoQr = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) ? aPyg(mixedQrPyg) : totalPyg
+      agregar("qr", "qr", montoQr, estadoPlugpay)
     }
     if (activeMethods.has("extra_club")) {
-      recibido += isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+      agregar("extra_club", "extra_club", isMultiPayment ? aPyg(mixedExtraClubPyg) : totalPyg, "confirmada")
     }
     if (activeMethods.has("otros")) {
-      recibido += isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+      agregar("otros", "otros", isMultiPayment ? aPyg(mixedOtrosPyg) : totalPyg, "confirmada")
     }
+    for (const leg of extraPaymentLegs) {
+      const estado: LineaCobro["estado"] = (leg.txnState === "aprobada" || leg.manualCupon.trim())
+        ? "confirmada"
+        : (leg.txnState === "esperando" || leg.txnState === "generando" || leg.txnState === "confirmando") ? "en_curso" : "sin_cobrar"
+      agregar(leg.id, leg.method, aPyg(leg.montoStr), estado, true)
+    }
+    return lineas
+  }
+
+  const contextoCierre = (): ContextoCierre => {
+    const credito = extraClubCredit && extraClubCredit !== "loading" ? extraClubCredit : null
+    let otrosCompleto: boolean | undefined
+    if (activeMethods.has("otros")) {
+      if (otrosSubMethod === "transferencia") otrosCompleto = Boolean(transfComprobante.trim())
+      else if (otrosSubMethod === "cheque") otrosCompleto = Boolean(chequeBanco.trim()) && Boolean(chequeNumero.trim())
+      else if (otrosSubMethod === "vale") otrosCompleto = Boolean(valeCodigo.trim()) && Boolean(valeData)
+      else otrosCompleto = true
+    }
+    return {
+      totalPyg,
+      metodosActivos: [...activeMethods],
+      extraClub: activeMethods.has("extra_club")
+        ? { tieneLinea: Boolean(credito?.activo), saldoDisponible: Number(credito?.saldo_disponible || 0) }
+        : undefined,
+      otrosCompleto,
+    }
+  }
+
+  // Cálculos dinámicos de vuelto multimoneda en el modal de cobro (SIN CÉNTIMOS EN PYG)
+  const { totalRecibidoPyg, saldoRestantePyg, vueltoPyg, totalCargadoPyg, pendienteConfirmarPyg } = useMemo(() => {
+    // "Recibido" cuenta solo plata real: el efectivo tal como se tipeo
+    // (siempre confirmado) y, de los demas metodos, solo las lineas ya
+    // confirmadas. Antes un monto tipeado en Bancard/Dinelco ya contaba como
+    // cobrado aunque la tarjeta nunca se hubiera pasado. Lo cargado sin
+    // confirmar se muestra aparte como "pendiente de confirmar" y no suma.
+    // totalCargadoPyg es lo tipeado en todas las lineas (lo que antes era
+    // "recibido"): lo usan los atajos de teclado (Enter/F12) para decidir si
+    // avanzar al cierre o autocompletar el faltante, sin cambiar su
+    // comportamiento -- el cierre real lo decide validarCierre en
+    // handleProcessCheckout. Los cobros adicionales de un metodo no activo
+    // se ignoran aca igual que en el payload (validarCierre los rechaza).
+    const lineas = construirLineasCobro().filter((l) => Number.isFinite(l.montoPyg))
+    const efectivo = lineas.filter((l) => l.metodo === "cash").reduce((a, l) => a + l.montoPyg, 0)
+    const noEfectivo = lineas.filter((l) => l.metodo !== "cash" && (!l.esExtra || activeMethods.has(l.metodo)))
+    const confirmadoNoEfectivo = totalConfirmadoPyg(noEfectivo)
+    const cargadoNoEfectivo = noEfectivo.reduce((a, l) => a + l.montoPyg, 0)
+    const recibido = efectivo + confirmadoNoEfectivo
+    const cargado = efectivo + cargadoNoEfectivo
 
     // El guaraní no circula en billetes/monedas por debajo de ₲500 -- al
     // combinar monedas (ej. algo de R$ convertido a Gs) la cotización casi
@@ -6873,9 +6926,11 @@ export default function POSPage() {
     return {
       totalRecibidoPyg: Math.round(recibido),
       saldoRestantePyg: Math.round(saldo),
-      vueltoPyg: Math.round(vuelto)
+      vueltoPyg: Math.round(vuelto),
+      totalCargadoPyg: Math.round(cargado),
+      pendienteConfirmarPyg: Math.round(cargadoNoEfectivo - confirmadoNoEfectivo),
     }
-  }, [activeMethods, isMultiPayment, payCashPyg, payCashBrl, payCashUsd, mixedCardPyg, mixedDinelcoPyg, mixedQrPyg, mixedParceladoPyg, mixedPlugPayPyg, mixedExtraClubPyg, mixedOtrosPyg, totalPyg, rates, extraPaymentLegs])
+  }, [activeMethods, isMultiPayment, payCashPyg, payCashBrl, payCashUsd, mixedCardPyg, mixedDinelcoPyg, mixedQrPyg, mixedParceladoPyg, mixedPlugPayPyg, mixedExtraClubPyg, mixedOtrosPyg, totalPyg, rates, extraPaymentLegs, bancardTxnState, posCardCupon, bancardQrManualConfirm, bancardCloudQrState, bancardQrState, dinelcoTxnState, dinelcoCupon, dinelcoQrState, plugpayState, plugpayManualComprobante])
 
   const getSaldoRestanteParaMetodo = (excluirMetodo: PosPaymentMethodType | "bancard_leg" | "dinelco_leg" | "qr_leg" | "plugpay_leg", legIdExcluir?: string) => {
     let otros = 0
@@ -6999,7 +7054,7 @@ export default function POSPage() {
   ) => {
     if (e.key === "Enter") {
       e.preventDefault()
-      if (totalRecibidoPyg >= totalPyg && totalPyg > 0 && !submitting) {
+      if (totalCargadoPyg >= totalPyg && totalPyg > 0 && !submitting) {
         // Doble-Enter: primer Enter "marca listo", segundo Enter cierra.
         // Sin esta guardia un Enter accidental en cualquier campo no-efectivo
         // disparaba el checkout si el efectivo precargado ya cubria el total.
@@ -7009,7 +7064,7 @@ export default function POSPage() {
           setListoParaCerrar(true)
         }
       } else {
-        const faltante = Math.max(0, totalPyg - totalRecibidoPyg)
+        const faltante = Math.max(0, totalPyg - totalCargadoPyg)
         if (faltante > 0) setValue(Math.ceil(faltante).toLocaleString("es-PY"))
       }
     }
@@ -7041,14 +7096,14 @@ export default function POSPage() {
         toast.warning("Confirmá el monto primero", "Tocá \"Exacto\" o cargá el monto recibido antes de cerrar la venta.")
         return
       }
-      if (totalRecibidoPyg >= totalPyg && totalPyg > 0 && !submitting) {
+      if (totalCargadoPyg >= totalPyg && totalPyg > 0 && !submitting) {
         if (listoParaCerrar) {
           handleProcessCheckout()
         } else {
           setListoParaCerrar(true)
         }
       } else {
-        const faltante = Math.max(0, totalPyg - totalRecibidoPyg)
+        const faltante = Math.max(0, totalPyg - totalCargadoPyg)
         if (faltante > 0) {
           if (nextCurrency === "PYG") setPayCashPyg(Math.ceil(faltante).toLocaleString("es-PY"))
           else if (nextCurrency === "BRL") setPayCashBrl((faltante / rates.BRL).toFixed(2))
@@ -7197,23 +7252,14 @@ export default function POSPage() {
       setShowAperturaModal(true)
       return
     }
-    if (saldoRestantePyg > 0 && !(activeMethods.size === 1 && activeMethods.has("qr"))) {
-      toast.warning("Saldo Pendiente", `Falta saldar ${formatPYG(saldoRestantePyg)} para completar el cobro.`)
+    // Guardian unico del cierre: todos los caminos (boton, F12, doble-Enter,
+    // aprobacion de supervisor) pasan por aca. Reemplaza el viejo chequeo de
+    // saldo pendiente (que contaba montos tipeados sin confirmar) y el
+    // bloqueo de Extra Club sin saldo, que ahora vive en validarCierre.
+    const v = validarCierre(construirLineasCobro(), contextoCierre())
+    if (!v.ok) {
+      toast.warning("No se puede cobrar todavía", v.mensaje)
       return
-    }
-
-    // ── REGLA GENERAL INELUDIBLE: BLOQUEO RADICAL DE EXTRA CLUB SIN DISPONIBLE ──
-    const montoExtraClubCheck = activeMethods.has("extra_club") ? (isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg) : 0
-    if (montoExtraClubCheck > 0) {
-      const tieneLinea = extraClubCredit && extraClubCredit !== "loading" && extraClubCredit.activo
-      const disponible = Number(extraClubCredit && extraClubCredit !== "loading" ? extraClubCredit.saldo_disponible : 0)
-      if (!tieneLinea || disponible < montoExtraClubCheck) {
-        toast.error(
-          "Venta bloqueada: Crédito insuficiente",
-          `El cliente dispone de ${formatPYG(disponible)} y la compra es de ${formatPYG(montoExtraClubCheck)}. Regla general ineludible: no se puede facturar con Extra Club sin saldo disponible. Debe cobrar con otro medio de pago.`
-        )
-        return
-      }
     }
 
     setSubmitting(true)
@@ -8572,7 +8618,7 @@ export default function POSPage() {
           const cashSinTocar = activeMethods.size === 1 && activeMethods.has("cash") && !hasClickedQuickCash
           if (cashSinTocar) {
             toast.warning("Confirmá el monto primero", "Tocá \"Exacto\" o cargá el monto recibido antes de cerrar la venta.")
-          } else if (totalRecibidoPyg >= totalPyg && totalPyg > 0 && !submitting) {
+          } else if (totalCargadoPyg >= totalPyg && totalPyg > 0 && !submitting) {
             if (listoParaCerrar) {
               confirmCheckoutBtnRef.current?.click()
             } else {
@@ -8631,7 +8677,7 @@ export default function POSPage() {
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [cart, totalPyg, totalRecibidoPyg, submitting, listoParaCerrar, activeMethods, hasClickedQuickCash, pausedSales.length, showAperturaModal, showCierreTurnoModal, showManualWeightModal, showScaleModal, showSupervisorModal, showPosConfigModal, showPaymentModal, showCuponModal, cuponModalStep, pendingCuponData, manualWeightInput, targetWeighProduct, toggleActiveMethod])
+  }, [cart, totalPyg, totalRecibidoPyg, totalCargadoPyg, submitting, listoParaCerrar, activeMethods, hasClickedQuickCash, pausedSales.length, showAperturaModal, showCierreTurnoModal, showManualWeightModal, showScaleModal, showSupervisorModal, showPosConfigModal, showPaymentModal, showCuponModal, cuponModalStep, pendingCuponData, manualWeightInput, targetWeighProduct, toggleActiveMethod])
 
   // ── PALETA DE COLORES Y CONTRASTE DINÁMICO ────────────────────────────────
   const bgMain = dark ? "bg-slate-950 text-slate-100" : "bg-slate-100 text-slate-900"
@@ -10867,6 +10913,11 @@ export default function POSPage() {
                         ≈ US$ {(saldoRestantePyg / rates.USD).toFixed(2)}
                       </span>
                     </div>
+                    {pendienteConfirmarPyg > 0 && (
+                      <div className="pt-1 text-xs font-bold text-amber-700 dark:text-amber-300">
+                        Pendiente de confirmar {formatPYG(pendienteConfirmarPyg)} -- no suma hasta que se apruebe
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="p-3.5 rounded-2xl border-2 border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/40 text-center shadow-sm space-y-2">
@@ -13650,70 +13701,30 @@ export default function POSPage() {
                 <button
                   ref={confirmCheckoutBtnRef}
                   onClick={() => {
-                    if (activeMethods.has("bancard") && bancardTxnState !== "aprobada" && !posCardCupon.trim() && !bancardQrManualConfirm && bancardCloudQrState !== "aprobada" && bancardQrState !== "aprobada") {
-                      toast.warning("Bancard sin confirmar", "Cobrá con el terminal o cargá el cupón/voucher manualmente antes de continuar.")
-                      return
-                    }
-                    const legPendiente = extraPaymentLegs.find((l) => l.txnState !== "aprobada" && !l.manualCupon.trim())
-                    if (legPendiente) {
-                      toast.warning("Cobro adicional sin confirmar", "Hay una tarjeta/QR adicional cargada pero sin cobrar -- completala o quitala antes de continuar.")
-                      return
-                    }
-                    if (activeMethods.has("dinelco") && dinelcoTxnState !== "aprobada" && !dinelcoCupon.trim() && dinelcoQrState !== "aprobada") {
-                      toast.warning("Dinelco sin confirmar", "Cobrá con el terminal o cargá el cupón manualmente antes de continuar.")
-                      return
-                    }
-                    if (activeMethods.has("plugpay") && plugpayState !== "aprobada" && !plugpayManualComprobante.trim()) {
-                      toast.warning("Plug Pay sin confirmar", "Generá el cobro o cargá el comprobante manual de respaldo antes de continuar.")
-                      return
-                    }
-                    if (activeMethods.has("otros")) {
-                      if (otrosSubMethod === "transferencia") {
-                        if (!transfComprobante.trim()) {
-                          toast.warning("Falta Nº de Comprobante", "Ingrese el número de comprobante o transacción de la transferencia.")
-                          return
-                        }
-                      } else if (otrosSubMethod === "cheque") {
-                        if (!chequeBanco.trim() || !chequeNumero.trim()) {
-                          toast.warning("Faltan Datos del Cheque", "Ingrese el banco emisor y número de cheque.")
-                          return
-                        }
-                      } else if (otrosSubMethod === "vale") {
-                        if (!valeCodigo.trim() || !valeData) {
-                          toast.warning("Vale no validado", "Escanee y valide el código de barras del vale antes de continuar.")
-                          return
-                        }
-                      }
-                      if (otrosSubMethod !== "vale" && !otrosSupervisorApproved) {
-                        requestSupervisorAuthorization({
-                          type: "otros_payment",
-                          otrosSubtipo: otrosSubMethod === "transferencia" ? "Transferencia Bancaria" : "Cheque",
-                          otrosComprobante: otrosSubMethod === "transferencia" ? transfComprobante : `${chequeBanco} #${chequeNumero}`,
-                          otrosMonto: isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg,
-                          motivo: `Cobro con ${otrosSubMethod === "transferencia" ? "Transferencia Bancaria" : "Cheque"}: ${formatPYG(isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg)}`
-                        })
-                        return
-                      }
-                    }
+                    // Mismo guardian que handleProcessCheckout (validarCierre):
+                    // se valida antes de pedir autorizacion de supervisor para
+                    // no pedirla sobre un cobro que igual no podria cerrarse.
                     const montoExtraClub = activeMethods.has("extra_club") ? (isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg) : 0
+                    if (montoExtraClub > 0 && (!customer || customer.id === DEFAULT_CUSTOMER.id)) {
+                      toast.warning("Elija un socio Extra Club", "Busque al cliente por número de socio, RUC, cédula o nombre.")
+                      return
+                    }
+                    const v = validarCierre(construirLineasCobro(), contextoCierre())
+                    if (!v.ok) {
+                      toast.warning("No se puede cobrar todavía", v.mensaje)
+                      return
+                    }
+                    if (activeMethods.has("otros") && otrosSubMethod !== "vale" && !otrosSupervisorApproved) {
+                      requestSupervisorAuthorization({
+                        type: "otros_payment",
+                        otrosSubtipo: otrosSubMethod === "transferencia" ? "Transferencia Bancaria" : "Cheque",
+                        otrosComprobante: otrosSubMethod === "transferencia" ? transfComprobante : `${chequeBanco} #${chequeNumero}`,
+                        otrosMonto: isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg,
+                        motivo: `Cobro con ${otrosSubMethod === "transferencia" ? "Transferencia Bancaria" : "Cheque"}: ${formatPYG(isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg)}`
+                      })
+                      return
+                    }
                     if (montoExtraClub > 0) {
-                      if (!customer || customer.id === DEFAULT_CUSTOMER.id) {
-                        toast.warning("Elija un socio Extra Club", "Busque al cliente por número de socio, RUC, cédula o nombre.")
-                        return
-                      }
-                      const tieneLinea = extraClubCredit && extraClubCredit !== "loading" && extraClubCredit.activo
-                      if (!tieneLinea) {
-                        toast.error("Sin cuenta de crédito activa", "Este cliente no tiene cuenta de crédito activa. No se puede cobrar con Extra Club.")
-                        return
-                      }
-                      const disponible = Number(extraClubCredit.saldo_disponible || 0)
-                      if (disponible < montoExtraClub) {
-                        toast.error(
-                          "Crédito insuficiente",
-                          `El cliente dispone de ${formatPYG(disponible)} y la compra es de ${formatPYG(montoExtraClub)}. Regla ineludible: no se puede facturar a crédito sin saldo disponible bajo ninguna autorización. Cobre con otro medio de pago.`
-                        )
-                        return
-                      }
                       requestSupervisorAuthorization({ type: "extra_club_payment" })
                       return
                     }
