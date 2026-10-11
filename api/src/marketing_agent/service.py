@@ -297,14 +297,29 @@ async def get_promotions_with_ai_pulse(db: AsyncSession, company_id: str) -> Lis
         # Obtener nombres de productos afectados
         prod_names = []
         if isinstance(p_ids, list) and p_ids:
-            clean_ids = [str(x) for x in p_ids[:6]]
-            q_pnames = text("SELECT nombre FROM products WHERE id = ANY(:ids)")
-            pn_rows = (await db.execute(q_pnames, {"ids": clean_ids})).fetchall()
-            prod_names = [str(pn[0]) for pn in pn_rows]
+            try:
+                import uuid as _uuid
+                valid_uuids = []
+                for x in p_ids[:6]:
+                    try:
+                        valid_uuids.append(str(_uuid.UUID(str(x))))
+                    except Exception:
+                        pass
+                if valid_uuids:
+                    q_pnames = text("SELECT nombre FROM products WHERE id::text = ANY(:ids)")
+                    pn_rows = (await db.execute(q_pnames, {"ids": valid_uuids})).fetchall()
+                    prod_names = [str(pn[0]) for pn in pn_rows]
+            except Exception:
+                pass
             
         dias_restantes = None
         if v_hasta:
-            dias_restantes = max(0, (v_hasta.date() - now.date()).days)
+            try:
+                v_hasta_date = v_hasta.date() if hasattr(v_hasta, "date") else v_hasta
+                now_date = now.date() if hasattr(now, "date") else now
+                dias_restantes = max(0, (v_hasta_date - now_date).days)
+            except Exception:
+                pass
             
         # Calcular pulso comercial y diagnóstico del CMO
         if usos >= 20:
