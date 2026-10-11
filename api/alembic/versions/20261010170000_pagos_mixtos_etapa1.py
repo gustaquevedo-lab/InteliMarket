@@ -8,6 +8,13 @@ Pago mixto Etapa 1: lineas de pago enlazadas a cobros del terminal y marcas
 de revision en la venta. Todas las columnas son nullable salvo
 pos_terminal_transactions.requiere_conciliacion (NOT NULL DEFAULT false).
 Una sentencia por op.execute (asyncpg no acepta varias).
+
+Seguridad en produccion: lock_timeout de 5s (SET LOCAL, el env corre las
+migraciones dentro de una transaccion) para que un ALTER que no consigue el
+lock falle rapido en vez de encolar las ventas detras; el indice se crea
+CONCURRENTLY fuera de la transaccion (autocommit_block) para no bloquear
+inserts en sale_payments. Si el CONCURRENTLY falla deja un indice INVALID:
+DROP INDEX CONCURRENTLY ix_sale_payments_terminal_tx y reintentar.
 """
 from typing import Sequence, Union
 from alembic import op
@@ -35,12 +42,16 @@ _COLUMNAS = [
 
 
 def upgrade() -> None:
+    op.execute("SET LOCAL lock_timeout = '5s'")
     for tabla, definicion in _COLUMNAS:
         op.execute(f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS {definicion}")
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_sale_payments_terminal_tx "
-        "ON sale_payments (terminal_transaction_id)"
-    )
+    # CONCURRENTLY no puede ir dentro de una transaccion: va despues de los ALTER
+    # (autocommit_block confirma lo anterior y vuelve a abrir transaccion al salir).
+    with op.get_context().autocommit_block():
+        op.execute(
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_sale_payments_terminal_tx "
+            "ON sale_payments (terminal_transaction_id)"
+        )
 
 
 def downgrade() -> None:
