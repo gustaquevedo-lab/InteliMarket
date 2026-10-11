@@ -7527,7 +7527,7 @@ export default function POSPage() {
         // Sin esta guardia un Enter accidental en cualquier campo no-efectivo
         // disparaba el checkout si el efectivo precargado ya cubria el total.
         if (listoParaCerrar) {
-          handleProcessCheckout()
+          intentarCerrarVenta()
         } else {
           setListoParaCerrar(true)
         }
@@ -7566,7 +7566,7 @@ export default function POSPage() {
       }
       if (totalCargadoPyg >= totalPyg && totalPyg > 0 && !submitting) {
         if (listoParaCerrar) {
-          handleProcessCheckout()
+          intentarCerrarVenta()
         } else {
           setListoParaCerrar(true)
         }
@@ -7736,6 +7736,47 @@ export default function POSPage() {
     setPosVerifyCandidates([])
     if (metodo === "bancard") setPosCardCupon(c.voucher)
     else setDinelcoCupon(c.voucher)
+  }
+
+  // Unica entrada para CERRAR la venta desde la caja (boton Cobrar, F12 que
+  // hace click en el boton, y el doble-Enter de los campos de monto). Antes
+  // el doble-Enter llamaba a handleProcessCheckout directo y se salteaba el
+  // socio Extra Club y la autorizacion de supervisor (Cheque/Transferencia
+  // y Extra Club). Sin red en este camino: requestSupervisorAuthorization ya
+  // resuelve offline con PIN local. Las continuaciones despues de la
+  // autorizacion del supervisor siguen llamando a handleProcessCheckout
+  // directo (ya autorizadas); handleProcessCheckout vuelve a correr
+  // validarCierre igual.
+  const intentarCerrarVenta = () => {
+    if (submitting) return
+    // Mismo guardian que handleProcessCheckout (validarCierre):
+    // se valida antes de pedir autorizacion de supervisor para
+    // no pedirla sobre un cobro que igual no podria cerrarse.
+    const montoExtraClub = activeMethods.has("extra_club") ? (isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg) : 0
+    if (montoExtraClub > 0 && (!customer || customer.id === DEFAULT_CUSTOMER.id)) {
+      toast.warning("Elija un socio Extra Club", "Busque al cliente por número de socio, RUC, cédula o nombre.")
+      return
+    }
+    const v = validarCierre(construirLineasCobro(), contextoCierre())
+    if (!v.ok) {
+      toast.warning("No se puede cobrar todavía", v.mensaje)
+      return
+    }
+    if (activeMethods.has("otros") && otrosSubMethod !== "vale" && !otrosSupervisorApproved) {
+      requestSupervisorAuthorization({
+        type: "otros_payment",
+        otrosSubtipo: otrosSubMethod === "transferencia" ? "Transferencia Bancaria" : "Cheque",
+        otrosComprobante: otrosSubMethod === "transferencia" ? transfComprobante : `${chequeBanco} #${chequeNumero}`,
+        otrosMonto: isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg,
+        motivo: `Cobro con ${otrosSubMethod === "transferencia" ? "Transferencia Bancaria" : "Cheque"}: ${formatPYG(isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg)}`
+      })
+      return
+    }
+    if (montoExtraClub > 0) {
+      requestSupervisorAuthorization({ type: "extra_club_payment" })
+      return
+    }
+    handleProcessCheckout()
   }
 
   const handleProcessCheckout = async () => {
@@ -14295,36 +14336,7 @@ export default function POSPage() {
 
                 <button
                   ref={confirmCheckoutBtnRef}
-                  onClick={() => {
-                    // Mismo guardian que handleProcessCheckout (validarCierre):
-                    // se valida antes de pedir autorizacion de supervisor para
-                    // no pedirla sobre un cobro que igual no podria cerrarse.
-                    const montoExtraClub = activeMethods.has("extra_club") ? (isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg) : 0
-                    if (montoExtraClub > 0 && (!customer || customer.id === DEFAULT_CUSTOMER.id)) {
-                      toast.warning("Elija un socio Extra Club", "Busque al cliente por número de socio, RUC, cédula o nombre.")
-                      return
-                    }
-                    const v = validarCierre(construirLineasCobro(), contextoCierre())
-                    if (!v.ok) {
-                      toast.warning("No se puede cobrar todavía", v.mensaje)
-                      return
-                    }
-                    if (activeMethods.has("otros") && otrosSubMethod !== "vale" && !otrosSupervisorApproved) {
-                      requestSupervisorAuthorization({
-                        type: "otros_payment",
-                        otrosSubtipo: otrosSubMethod === "transferencia" ? "Transferencia Bancaria" : "Cheque",
-                        otrosComprobante: otrosSubMethod === "transferencia" ? transfComprobante : `${chequeBanco} #${chequeNumero}`,
-                        otrosMonto: isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg,
-                        motivo: `Cobro con ${otrosSubMethod === "transferencia" ? "Transferencia Bancaria" : "Cheque"}: ${formatPYG(isMultiPayment ? parseInt(mixedOtrosPyg.replace(/\D/g, "") || "0", 10) : totalPyg)}`
-                      })
-                      return
-                    }
-                    if (montoExtraClub > 0) {
-                      requestSupervisorAuthorization({ type: "extra_club_payment" })
-                      return
-                    }
-                    handleProcessCheckout()
-                  }}
+                  onClick={() => { intentarCerrarVenta() }}
                   disabled={submitting || (activeMethods.has("extra_club") && Boolean(extraClubCredit && extraClubCredit !== "loading" && extraClubCredit.saldo_disponible < (isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg)))}
                   className={`flex-1 max-w-lg py-3 px-6 rounded-xl font-black text-sm shadow-md flex items-center justify-center gap-2 transition cursor-pointer active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed ${
                     activeMethods.has("extra_club") && extraClubCredit && extraClubCredit !== "loading" && extraClubCredit.saldo_disponible < (isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg)
