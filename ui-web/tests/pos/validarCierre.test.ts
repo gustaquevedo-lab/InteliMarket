@@ -36,6 +36,19 @@ test("linea extra qr sin metodo qr activo se rechaza", () => {
   if (!r.ok) assert.equal(r.codigo, "linea_extra_sin_metodo_activo")
 })
 
+test("linea extra sin metodo activo pide ACTIVAR el metodo (no quitarlo) y lo nombra", () => {
+  const r = validarCierre(
+    [linea({ metodo: "dinelco", montoPyg: 100000, esExtra: true })],
+    ctx({ metodosActivos: ["cash"] }),
+  )
+  assert.equal(r.ok, false)
+  if (!r.ok) {
+    assert.match(r.mensaje, /activalo/)
+    assert.doesNotMatch(r.mensaje, /quitalo/)
+    assert.match(r.mensaje, /Dinelco/)
+  }
+})
+
 test("monto cero se rechaza", () => {
   const r = validarCierre([linea({ metodo: "cash", montoPyg: 0 })], ctx())
   assert.equal(r.ok, false)

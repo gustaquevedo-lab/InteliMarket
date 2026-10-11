@@ -47,15 +47,29 @@ export function totalConfirmadoPyg(lineas: LineaCobro[]): number {
   return lineas.filter(estaConfirmada).reduce((acc, l) => acc + l.montoPyg, 0)
 }
 
+const NOMBRE_METODO: Record<MetodoLinea, string> = {
+  cash: "Efectivo",
+  bancard: "Bancard",
+  dinelco: "Dinelco",
+  plugpay: "PlugPay",
+  qr: "QR Bancard",
+  plugpay_credito: "PlugPay crédito",
+  extra_club: "Extra Club",
+  otros: "Otros",
+}
+
 function rechazo(codigo: CodigoRechazo, mensaje: string): ResultadoCierre {
   return { ok: false, codigo, mensaje }
 }
 
 export function validarCierre(lineas: LineaCobro[], ctx: ContextoCierre): ResultadoCierre {
-  if (lineas.some((l) => l.esExtra && !ctx.metodosActivos.includes(l.metodo))) {
+  const extraSinMetodo = lineas.find((l) => l.esExtra && !ctx.metodosActivos.includes(l.metodo))
+  if (extraSinMetodo) {
+    // El cobro adicional puede estar ya aprobado por el terminal: quitarlo
+    // dejaria dinero cobrado sin venta. Se pide activar su metodo.
     return rechazo(
       "linea_extra_sin_metodo_activo",
-      "Hay un cobro con un método que no está habilitado en esta caja: quitalo antes de continuar.",
+      `Hay un cobro adicional de ${NOMBRE_METODO[extraSinMetodo.metodo] ?? extraSinMetodo.metodo} pero ese método no está activo: activalo para poder cerrar la venta.`,
     )
   }
   if (lineas.some((l) => !estaConfirmada(l))) {
