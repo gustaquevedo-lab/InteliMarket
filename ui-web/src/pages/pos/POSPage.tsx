@@ -6554,7 +6554,15 @@ export default function POSPage() {
       appliedDiscount,
       extraPaymentLegs,
     }
+    // El cobro aprobado de la linea principal no viaja con la venta pausada
+    // (los cobros adicionales si): pausar lo perderia sin registro. Se
+    // bloquea la pausa y no se toca nada.
     const principalAprobado = lineasAprobadasSinVenta().filter((c) => !extraPaymentLegs.some((l) => l.id === c.id))
+    if (principalAprobado.length > 0) {
+      const resumen = principalAprobado.map((c) => `${c.proveedor.toUpperCase()} ${formatPYG(c.montoPyg)}${c.voucher ? ` (voucher ${c.voucher})` : ""}`).join(", ")
+      toast.warning("Hay un cobro aprobado", "Terminá la venta o cancelala antes de ponerla en espera: el terminal ya cobró " + resumen)
+      return
+    }
     setPausedSales((prev) => [newPaused, ...prev])
     setCart([])
     setCustomer(DEFAULT_CUSTOMER)
@@ -6562,12 +6570,9 @@ export default function POSPage() {
     setExtraClubAdminOverride(false)
     clearAllExtraLegs()
     // Los cobros adicionales viajan con la venta pausada; el estado de la
-    // linea principal no se guarda, y no puede quedar colgado en la venta
-    // siguiente.
+    // linea principal (sin cobro aprobado, ver arriba) no puede quedar
+    // colgado en la venta siguiente.
     limpiarCobroParaNuevaVenta()
-    if (principalAprobado.length > 0) {
-      toast.warning("Cobro principal no guardado", `La venta pausada no conserva el cobro aprobado de ${principalAprobado.map((c) => `${c.proveedor.toUpperCase()} ${formatPYG(c.montoPyg)}${c.voucher ? ` (voucher ${c.voucher})` : ""}`).join(", ")}: al retomarla cargá el voucher a mano.`)
-    }
     toast.info("Venta en Espera", "La venta fue pausada exitosamente.")
   }
 
