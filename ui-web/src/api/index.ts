@@ -3433,10 +3433,18 @@ export const api = {
     dashboard: (companyId?: string) =>
       client.get<any>("/v1/marketing-agent/dashboard", { company_id: companyId || COMPANY_ID }),
     chat: (data: { message: string; conversation_history?: any[]; company_id?: string }) =>
-      client.post<{ reply: string; suggested_prompts?: string[] }>("/v1/marketing-agent/chat", { company_id: data.company_id || COMPANY_ID, ...data }),
+      client.post<{ reply: string; action_outcome?: any; suggested_prompts?: string[] }>("/v1/marketing-agent/chat", { company_id: data.company_id || COMPANY_ID, ...data }),
+    customersRfm: (params?: { companyId?: string; limit?: number; solo_inactivos?: boolean }) =>
+      client.get<any[]>("/v1/marketing-agent/customers-rfm", { company_id: params?.companyId || COMPANY_ID, limit: params?.limit || 12, solo_inactivos: params?.solo_inactivos || false }),
+    tripartiteSync: (companyId?: string) =>
+      client.get<any>("/v1/marketing-agent/tripartite-sync", { company_id: companyId || COMPANY_ID }),
+    learnedRules: (companyId?: string) =>
+      client.get<any[]>("/v1/marketing-agent/learned-rules", { company_id: companyId || COMPANY_ID }),
+    recordRule: (regla: string, companyId?: string) =>
+      client.post<any>(`/v1/marketing-agent/record-rule?company_id=${companyId || COMPANY_ID}&regla=${encodeURIComponent(regla)}`, {}),
     sendCoupon: (data: { phone: string; message: string; customer_name?: string; cupon?: string }) =>
       client.post<any>("/v1/marketing-agent/send-coupon", data),
-    launchCampaign: (data: { company_id?: string; campaign_id: string; segmento: string; message?: string }) =>
+    launchCampaign: (data: { company_id?: string; campaign_id: string; segmento: string; message?: string; crear_en_pos?: boolean; descuento_pct?: number; producto_ids?: string[] }) =>
       client.post<any>("/v1/marketing-agent/launch-campaign", { company_id: data.company_id || COMPANY_ID, ...data }),
   },
   riskAgent: {
@@ -3449,14 +3457,21 @@ export const api = {
   },
   salesAgent: {
     run: (companyId?: string) => client.post<SalesAgentRun>("/v1/sales-agent/run", { company_id: companyId || COMPANY_ID }),
-    getAnalysis: (companyId?: string) => client.get<any>("/v1/sales-agent/analysis", { company_id: companyId || COMPANY_ID }),
-    chat: (data: { message: string; conversation_history?: any[]; context_tab?: string; company_id?: string }) =>
-      client.post<{ reply: string; action_outcome?: any; suggested_prompts?: string[] }>("/v1/sales-agent/chat", { company_id: data.company_id || COMPANY_ID, ...data }),
-    applyPrice: (data: { product_id: string; nuevo_precio: number; motivo?: string; company_id?: string }) =>
-      client.post<{ success: boolean; mensaje: string }>("/v1/sales-agent/apply-price", { company_id: data.company_id || COMPANY_ID, ...data }),
+    getAnalysis: (companyId?: string, params?: { periodo_tipo?: string; fecha_desde?: string; fecha_hasta?: string }) => client.get<any>("/v1/sales-agent/analysis", { company_id: companyId || COMPANY_ID, ...params }),
+    getPareto: (params?: { company_id?: string; periodo_tipo?: string; metric_type?: string; search?: string; categoria_id?: string; page?: number; page_size?: number }) => client.get<any>("/v1/sales-agent/pareto", { company_id: params?.company_id || COMPANY_ID, ...params }),
+    simulateMargin: (data: { company_id?: string; periodo_tipo?: string; ajustes_categoria?: any[]; ajustes_sku?: any[] }) => client.post<any>("/v1/sales-agent/simulate-margin", { company_id: data.company_id || COMPANY_ID, ...data }),
+    chat: (data: { message: string; conversation_history?: any[]; context_tab?: string; company_id?: string }) => client.post<{ reply: string; action_outcome?: any; suggested_prompts?: string[] }>("/v1/sales-agent/chat", { company_id: data.company_id || COMPANY_ID, ...data }),
+    applyPrice: (data: { product_id: string; nuevo_precio: number; motivo?: string; escalas?: any[]; company_id?: string }) => client.post<{ success: boolean; mensaje: string; product_name?: string }>("/v1/sales-agent/apply-price", { company_id: data.company_id || COMPANY_ID, ...data }),
+    toggleKvi: (data: { product_id: string; es_gancho: boolean; motivo?: string; margen_techo_pct?: number; company_id?: string }) => client.post<any>("/v1/sales-agent/kvi-toggle", { company_id: data.company_id || COMPANY_ID, ...data }),
+    getSettings: (companyId?: string) => client.get<any>("/v1/sales-agent/settings", { company_id: companyId || COMPANY_ID }),
+    updateSettings: (data: { target_margen_minimo_pct: number; target_margen_ideal_pct: number; metas_por_categoria?: any; company_id?: string }) => client.post<any>("/v1/sales-agent/settings", { company_id: data.company_id || COMPANY_ID, ...data }),
+    getBusinessRules: (companyId?: string) => client.get<any[]>("/v1/sales-agent/business-rules", { company_id: companyId || COMPANY_ID }),
+    createBusinessRule: (data: { regla: string; categoria?: string; company_id?: string }) => client.post<any>("/v1/sales-agent/business-rules", { company_id: data.company_id || COMPANY_ID, ...data }),
+    updateTaskStatus: (data: { task_id: string; estado: string; motivo_descarte?: string; company_id?: string }) => client.post<any>("/v1/sales-agent/action-tasks/status", { company_id: data.company_id || COMPANY_ID, ...data }),
+    executeTaskAction: (data: { task_id: string; tipo_accion: string; telefono_whatsapp?: string; company_id?: string }) => client.post<any>("/v1/sales-agent/action-tasks/execute", { company_id: data.company_id || COMPANY_ID, ...data }),
     recommendations: (status?: string, companyId?: string) => client.get<SalesRecommendation[]>("/v1/sales-agent/recommendations", { company_id: companyId || COMPANY_ID, status }),
-    approve: (id: string, approved_by: string, comments?: string) => client.post<any>(`/v1/sales-agent/recommendations/${id}/approve`, { approved_by, comments }),
-    reject: (id: string, approved_by: string, comments?: string) => client.post<any>(`/v1/sales-agent/recommendations/${id}/reject`, { approved_by, comments }),
+    approve: (id: string, approved_by: string, comments?: string) => client.post<any>("/v1/sales-agent/recommendations/" + id + "/approve", { approved_by, comments }),
+    reject: (id: string, approved_by: string, comments?: string) => client.post<any>("/v1/sales-agent/recommendations/" + id + "/reject", { approved_by, comments }),
   },
   generalAgent: {
     chat: (message: string, history: { role: "user" | "assistant"; content: string }[]) =>

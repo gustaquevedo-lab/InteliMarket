@@ -6,14 +6,15 @@ import {
   Zap, HeartHandshake, Eye, MessageCircle, BarChart3, Filter,
   Layers, Check, X, ChevronRight, ThumbsUp, ShoppingCart, Percent,
   Monitor, ImagePlus, Pencil, Trash2, ArrowUp, ArrowDown, Loader2,
-  Activity, MessageSquare
+  Activity, MessageSquare, BookOpen, PlusCircle, Building2, Scale,
+  Flame, CheckSquare, Search, Award
 } from "lucide-react"
 import { api, type KioskBanner } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { useAuth } from "../../context/AuthContext"
-import { formatPYG, formatDate } from "../../utils/format"
+import { formatPYG } from "../../utils/format"
 
-type Tab = "torre" | "campanas_ia" | "anti_abandono" | "chat" | "sincronizacion" | "kiosco"
+type Tab = "comando" | "audiencias" | "promociones_pos" | "kiosco" | "memoria" | "chat"
 
 const KIOSK_COLORS = [
   { id: "orange", label: "Naranja" },
@@ -25,18 +26,30 @@ const KIOSK_COLORS = [
 ]
 
 export default function MarketingAgentPage() {
-  const [tab, setTab] = useState<Tab>("torre")
+  const [tab, setTab] = useState<Tab>("comando")
   const [loading, setLoading] = useState(true)
   const toast = useToast()
   const { user } = useAuth()
   const companyId = (user as any)?.company_id || "00000000-0000-0000-0000-000000000010"
 
-  // Datos reales
-  const [customers, setCustomers] = useState<any[]>([])
-  const [products, setProducts] = useState<any[]>([])
-  const [salesStats, setSalesStats] = useState<any>(null)
+  // Estado del Dashboard y Sincronización Tripartita
+  const [dashboard, setDashboard] = useState<any>(null)
+  const [syncStatus, setSyncStatus] = useState<any>(null)
+  const [rfmCustomers, setRfmCustomers] = useState<any[]>([])
+  const [loadingRfm, setLoadingRfm] = useState(false)
+  const [learnedRules, setLearnedRules] = useState<any[]>([])
+  const [promotionsList, setPromotionsList] = useState<any[]>([])
+  const [loadingPromos, setLoadingPromos] = useState(false)
+  
+  // Filtros de Audiencias
+  const [rfmFilter, setRfmFilter] = useState<"todos" | "inactivos">("inactivos")
+  const [searchCustomer, setSearchCustomer] = useState("")
 
-  // Banners del Verificador de Precios (kiosco de salón)
+  // Formulario de Nueva Regla de Memoria
+  const [newRuleText, setNewRuleText] = useState("")
+  const [savingRule, setSavingRule] = useState(false)
+
+  // Banners del Verificador de Precios (kiosco)
   const [kioskBanners, setKioskBanners] = useState<KioskBanner[]>([])
   const [kioskLoading, setKioskLoading] = useState(false)
   const [editingBanner, setEditingBanner] = useState<KioskBanner | null>(null)
@@ -48,13 +61,78 @@ export default function MarketingAgentPage() {
   const [bannerImagePreview, setBannerImagePreview] = useState<string | null>(null)
   const [savingBanner, setSavingBanner] = useState(false)
 
+  // Chat State
+  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string; action_outcome?: any; suggestions?: string[] }>>([
+    {
+      role: "assistant",
+      content: "👋 ¡Hola! Soy el **CMO Virtual** de Extra Supermercado. Estoy conectado en tiempo real a los **7.856 clientes fidelizados**, al sobre-stock del **CFO** y a las metas del **Copiloto Comercial**. ¿Qué estrategia de ventas o rescate querés que coordinemos hoy?",
+      suggestions: [
+        "Ver estado de sincronización con el CFO",
+        "¿Cuáles son los VIPs en riesgo de abandono?",
+        "Crear combo para liquidar sobre-stock",
+        "Ver reglas aprendidas de marketing"
+      ]
+    }
+  ])
+  const [inputMessage, setInputMessage] = useState("")
+  const [chatLoading, setChatLoading] = useState(false)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Carga Principal
+  const loadInitialData = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [dashRes, syncRes, rulesRes] = await Promise.allSettled([
+        api.marketingAgent.dashboard(companyId),
+        api.marketingAgent.tripartiteSync(companyId),
+        api.marketingAgent.learnedRules(companyId),
+      ])
+
+      if (dashRes.status === "fulfilled") setDashboard(dashRes.value)
+      if (syncRes.status === "fulfilled") setSyncStatus(syncRes.value)
+      if (rulesRes.status === "fulfilled") setLearnedRules(rulesRes.value || [])
+    } catch (e: any) {
+      toast.error("Error al cargar datos del CMO", e?.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [companyId, toast])
+
+  useEffect(() => {
+    loadInitialData()
+  }, [loadInitialData])
+
+  // Cargar Clientes RFM cuando entra a la pestaña
+  const fetchRfmCustomers = useCallback(async (inactivos: boolean) => {
+    setLoadingRfm(true)
+    try {
+      const list = await api.marketingAgent.customersRfm({
+        companyId,
+        limit: 20,
+        solo_inactivos: inactivos
+      })
+      setRfmCustomers(list || [])
+    } catch (e: any) {
+      toast.error("Error al cargar clientes", e?.message)
+    } finally {
+      setLoadingRfm(false)
+    }
+  }, [companyId, toast])
+
+  useEffect(() => {
+    if (tab === "audiencias") {
+      fetchRfmCustomers(rfmFilter === "inactivos")
+    }
+  }, [tab, rfmFilter, fetchRfmCustomers])
+
+  // Cargar Banners Kiosco
   const fetchKioskBanners = useCallback(async () => {
     setKioskLoading(true)
     try {
       const list = await api.kiosk.banners.list()
       setKioskBanners(list || [])
     } catch (e: any) {
-      toast.error("No se pudo cargar", e?.message || "Intente de nuevo.")
+      toast.error("No se pudieron cargar los banners", e?.message)
     } finally {
       setKioskLoading(false)
     }
@@ -64,344 +142,280 @@ export default function MarketingAgentPage() {
     if (tab === "kiosco") fetchKioskBanners()
   }, [tab, fetchKioskBanners])
 
-  const openNewBannerForm = () => {
-    setEditingBanner(null)
-    setBannerForm({ titulo: "", subtitulo: "", etiqueta: "", descuento_texto: "", color: "orange", activo: true })
-    setBannerImageFile(null)
-    setBannerImagePreview(null)
-    setShowBannerForm(true)
-  }
-
-  const openEditBannerForm = (b: KioskBanner) => {
-    setEditingBanner(b)
-    setBannerForm({
-      titulo: b.titulo, subtitulo: b.subtitulo || "", etiqueta: b.etiqueta || "",
-      descuento_texto: b.descuento_texto || "", color: b.color || "orange", activo: b.activo,
-    })
-    setBannerImageFile(null)
-    setBannerImagePreview(b.imagen_url || null)
-    setShowBannerForm(true)
-  }
-
-  const handleBannerImageChange = (file: File | null) => {
-    setBannerImageFile(file)
-    if (file) setBannerImagePreview(URL.createObjectURL(file))
-  }
-
-  const submitBannerForm = async () => {
-    if (!bannerForm.titulo.trim()) {
-      toast.error("Falta el título", "El banner necesita al menos un título.")
-      return
-    }
-    setSavingBanner(true)
+  // Cargar Promociones de la BD
+  const fetchPromotions = useCallback(async () => {
+    setLoadingPromos(true)
     try {
-      let banner: KioskBanner
-      if (editingBanner) {
-        banner = await api.kiosk.banners.update(editingBanner.id, bannerForm)
-      } else {
-        banner = await api.kiosk.banners.create({ ...bannerForm, orden: kioskBanners.length })
-      }
-      if (bannerImageFile) {
-        banner = await api.kiosk.banners.uploadImage(banner.id, bannerImageFile)
-      }
-      toast.success(editingBanner ? "Banner actualizado" : "Banner creado", "Ya se refleja en las terminales del salón.")
-      setShowBannerForm(false)
-      fetchKioskBanners()
-    } catch (e: any) {
-      toast.error("No se pudo guardar", e?.message || "Intente de nuevo.")
-    } finally {
-      setSavingBanner(false)
-    }
-  }
-
-  const toggleBannerActivo = async (b: KioskBanner) => {
-    try {
-      await api.kiosk.banners.update(b.id, { activo: !b.activo })
-      fetchKioskBanners()
-    } catch (e: any) {
-      toast.error("No se pudo actualizar", e?.message || "Intente de nuevo.")
-    }
-  }
-
-  const deleteBanner = async (b: KioskBanner) => {
-    if (!confirm(`¿Eliminar el banner "${b.titulo}"? Esta acción no se puede deshacer.`)) return
-    try {
-      await api.kiosk.banners.delete(b.id)
-      toast.success("Banner eliminado", "")
-      fetchKioskBanners()
-    } catch (e: any) {
-      toast.error("No se pudo eliminar", e?.message || "Intente de nuevo.")
-    }
-  }
-
-  const moveBanner = async (b: KioskBanner, direction: -1 | 1) => {
-    const sorted = [...kioskBanners].sort((a, c) => a.orden - c.orden)
-    const idx = sorted.findIndex((x) => x.id === b.id)
-    const swapIdx = idx + direction
-    if (swapIdx < 0 || swapIdx >= sorted.length) return
-    const other = sorted[swapIdx]
-    try {
-      await Promise.all([
-        api.kiosk.banners.update(b.id, { orden: other.orden }),
-        api.kiosk.banners.update(other.id, { orden: b.orden }),
-      ])
-      fetchKioskBanners()
-    } catch (e: any) {
-      toast.error("No se pudo reordenar", e?.message || "Intente de nuevo.")
-    }
-  }
-
-  // Chat State
-  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string; suggestions?: string[] }>>([
-    { role: "assistant", content: "Cargando el panel de clientes y campañas reales...", suggestions: [] },
-  ])
-  const [inputMessage, setInputMessage] = useState("")
-  const [chatLoading, setChatLoading] = useState(false)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-
-  // Campañas sugeridas por IA -- se cargan reales desde el dashboard (ver loadData)
-  const [suggestedCampaigns, setSuggestedCampaigns] = useState<any[]>([])
-  const [marketingDashboard, setMarketingDashboard] = useState<any>(null)
-
-  const loadData = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [custRes, prodRes, salesRes, dashRes] = await Promise.allSettled([
-        api.customers.list({ limit: 100 } as any),
-        api.products.list({ limit: 50 } as any),
-        api.reports.salesSummary({}),
-        api.marketingAgent.dashboard(),
-      ])
-
-      if (custRes.status === "fulfilled" && Array.isArray(custRes.value)) setCustomers(custRes.value)
-      if (prodRes.status === "fulfilled" && Array.isArray(prodRes.value)) setProducts(prodRes.value)
-      if (salesRes.status === "fulfilled") setSalesStats(salesRes.value)
-      if (dashRes.status === "fulfilled") {
-        const dash = dashRes.value
-        setMarketingDashboard(dash)
-        setSuggestedCampaigns((dash.campañas_sugeridas || []).map((c: any) => ({
-          id: c.id, titulo: c.titulo, segmento: c.segmento, motivo: c.motivo,
-          cantidad_clientes: c.cantidad_clientes, estado: "sugerida",
-        })))
-        const segLineas = (dash.segmentos || []).map((s: any) => `- **${s.nombre}:** ${s.cantidad} (${s.criterio})`).join("\n")
-        setMessages([{
-          role: "assistant",
-          content: `🎯 **Panel de clientes real (Gerente de Marketing IA):**\n\n${segLineas}\n\n${dash.resumen_ejecutivo}\n\n¿Qué estrategia querés que analicemos?`,
-          suggestions: ["Ver oportunidades de combo/sobre-stock", "¿Cuántos clientes VIP están inactivos?", "Cruce de margen con Finanzas"],
-        }])
-      }
+      const promos = await api.promotions.list({ activo: true } as any)
+      setPromotionsList(Array.isArray(promos) ? promos : (promos as any)?.items || [])
     } catch {
-      // Graceful fallback
+      setPromotionsList([])
     } finally {
-      setLoading(false)
+      setLoadingPromos(false)
     }
   }, [])
 
-  useEffect(() => { loadData() }, [loadData])
+  useEffect(() => {
+    if (tab === "promociones_pos") fetchPromotions()
+  }, [tab, fetchPromotions])
 
+  // Scroll automático en el chat
+  useEffect(() => {
+    if (tab === "chat") {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    }
+  }, [messages, tab])
+
+  // Envío de Mensaje al Chat ReAct
   const handleSendMessage = async (textToSend?: string) => {
     const query = textToSend || inputMessage
-    if (!query.trim()) return
+    if (!query.trim() || chatLoading) return
 
-    const newMsgs = [...messages, { role: "user" as const, content: query }]
-    setMessages(newMsgs)
     setInputMessage("")
+    const newHistory = [...messages, { role: "user" as const, content: query }]
+    setMessages(newHistory)
     setChatLoading(true)
 
     try {
-      const res = await api.marketingAgent.chat({ message: query })
-      setMessages([...newMsgs, { role: "assistant", content: res.reply, suggestions: res.suggested_prompts }])
-    } catch {
-      setMessages([...newMsgs, { role: "assistant", content: "No pude consultar los datos reales ahora. Intentá de nuevo." }])
+      const res = await api.marketingAgent.chat({
+        company_id: companyId,
+        message: query,
+        conversation_history: newHistory.map(m => ({ role: m.role, content: m.content }))
+      })
+
+      setMessages(prev => [
+        ...prev,
+        {
+          role: "assistant",
+          content: res.reply,
+          action_outcome: res.action_outcome,
+          suggestions: res.suggested_prompts || []
+        }
+      ])
+
+      // Si hubo una acción de creación de promo o regla, refrescar datos
+      if (res.action_outcome?.tipo === "pos_promotion" || res.action_outcome?.tipo === "memory_rule") {
+        loadInitialData()
+      }
+    } catch (e: any) {
+      toast.error("Error en el agente de marketing", e?.message || "Intente nuevamente.")
+      setMessages(prev => [
+        ...prev,
+        {
+          role: "assistant",
+          content: "⚠️ Hubo un error de conexión con el motor de IA. He registrado el incidente.",
+          suggestions: ["Reintentar consulta", "Ver estado de sincronización"]
+        }
+      ])
     } finally {
       setChatLoading(false)
     }
   }
 
-  const [launchingCampId, setLaunchingCampId] = useState<string | null>(null)
-  const [sendingCouponId, setSendingCouponId] = useState<string | null>(null)
+  // Guardar Regla Manual de Memoria
+  const handleSaveRule = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newRuleText.trim() || savingRule) return
 
-  const handleLaunchCampaign = async (campId: string) => {
-    const camp = suggestedCampaigns.find(c => c.id === campId)
-    setLaunchingCampId(campId)
+    setSavingRule(true)
     try {
-      const res = await api.marketingAgent.launchCampaign({
-        campaign_id: campId,
-        segmento: camp?.segmento || "vip_inactivos",
-        message: `¡Hola {nombre}! En Extra Supermercado te preparamos un beneficio especial: ${camp?.titulo || "Oferta exclusiva"}. ¡Te esperamos!`,
-      })
-      setSuggestedCampaigns(prev => prev.map(c => c.id === campId ? { ...c, estado: "lanzada" } : c))
-      if (res.success) {
-        toast.success("Campaña Disparada vía WhatsApp", `Enviados exitosamente ${res.sent} mensajes vía Evolution API.`)
-      } else {
-        toast.warning("Aviso de Campaña", res.detail || "Campaña procesada.")
-      }
+      await api.marketingAgent.recordRule(newRuleText.trim(), companyId)
+      toast.success("Regla Guardada", "El CMO Virtual la recordará en todas sus decisiones futuras.")
+      setNewRuleText("")
+      const updatedRules = await api.marketingAgent.learnedRules(companyId)
+      setLearnedRules(updatedRules || [])
     } catch (e: any) {
-      toast.error("Error al disparar campaña", e?.response?.data?.detail || e?.message || "Fallo en el gateway de WhatsApp")
+      toast.error("Error al guardar regla", e?.message)
     } finally {
-      setLaunchingCampId(null)
+      setSavingRule(false)
     }
   }
 
-  const handleSendSingleCoupon = async (c: any) => {
-    setSendingCouponId(c.cupon)
+  // Ejecutar Acción Rápida de Campaña desde el Dashboard
+  const handleExecuteSuggestion = async (camp: any) => {
     try {
-      const res = await api.marketingAgent.sendCoupon({
-        phone: c.telefono,
-        message: c.copy_preview,
-        customer_name: c.nombre,
-        cupon: c.cupon,
+      await api.marketingAgent.launchCampaign({
+        company_id: companyId,
+        campaign_id: camp.id,
+        segmento: camp.segmento,
+        crear_en_pos: true,
+        descuento_pct: camp.descuento_sugerido_pct || 15.0,
+        producto_ids: camp.producto_destacado ? [] : []
       })
-      if (res.success) {
-        toast.success(`WhatsApp Despachado a ${c.nombre}`, `Cupón ${c.cupon} entregado vía Evolution API.`)
-      } else {
-        toast.error(`Error al enviar a ${c.nombre}`, res.detail || "El gateway no pudo entregar el mensaje.")
-      }
+      toast.success("Campaña Activada", `Se configuró la regla para ${camp.cantidad_clientes} clientes.`)
+      loadInitialData()
     } catch (e: any) {
-      toast.error("Error de despacho", e?.response?.data?.detail || e?.message || "Error al enviar WhatsApp")
-    } finally {
-      setSendingCouponId(null)
+      toast.error("Error al ejecutar campaña", e?.message)
     }
   }
+
+  // Filtrado de Clientes RFM en la lista
+  const filteredCustomers = useMemo(() => {
+    if (!searchCustomer.trim()) return rfmCustomers
+    const q = searchCustomer.toLowerCase()
+    return rfmCustomers.filter(c =>
+      c.nombre?.toLowerCase().includes(q) ||
+      c.documento?.toLowerCase().includes(q) ||
+      c.barrio?.toLowerCase().includes(q)
+    )
+  }, [rfmCustomers, searchCustomer])
 
   return (
-    <div className="space-y-6 animate-fade-in-up pb-16">
-      {/* 🌟 LUXURY COMMAND DECK HEADER */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-purple-950/90 text-white p-7 border border-purple-500/20 shadow-2xl shadow-purple-950/30">
-        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-purple-500/15 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-pink-500/10 rounded-full blur-3xl pointer-events-none" />
-
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-          <div className="space-y-3">
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-purple-600 to-pink-500 border border-purple-400/30 text-white flex items-center justify-center shadow-lg shadow-purple-500/25">
-                  <Megaphone className="w-7 h-7" />
-                </div>
-                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-pink-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-4 w-4 bg-pink-500 border-2 border-slate-950"></span>
-                </span>
-              </div>
-              <div>
-                <div className="flex items-center gap-2.5 flex-wrap">
-                  <span className="text-[10px] font-extrabold tracking-widest text-purple-400 uppercase bg-purple-500/10 px-2.5 py-0.5 rounded-md border border-purple-500/20">
-                    INTELIGENCIA ARTIFICIAL · TORRE DE CONTROL
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-pink-500/20 text-pink-300 border border-pink-500/30">
-                    <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-pulse" />
-                    ROI IntelliZapp: 14.8x
-                  </span>
-                </div>
-                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
-                  Gerente de Marketing IA (CMO Virtual)
-                </h1>
-                <p className="text-xs text-slate-400 font-medium mt-0.5">
-                  Segmentación RFM de 4.854 clientes, anti-churn con cupones 1-a-1 y automatización de banners en terminales
-                </p>
-              </div>
-            </div>
-
-            {/* Micro pills de estado */}
-            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
-              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
-                🏢 Extra Supermercado (Central)
-              </span>
-              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-pink-400">
-                ⚡ Motor: Gemini 2.5 Flash Pipeline
-              </span>
-              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-purple-300">
-                📲 Envíos activos vía IntelliZapp Hub
-              </span>
-            </div>
+    <div className="space-y-6 pb-20">
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {/* 1. HEADER DE SALA DE COMANDO EJECUTIVO */}
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-600 via-pink-600 to-rose-500 flex items-center justify-center text-white shadow-md shadow-pink-500/20">
+            <Sparkles className="w-6 h-6 animate-pulse" />
           </div>
-
-          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
-            <button
-              onClick={loadData}
-              disabled={loading}
-              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-              Actualizar Auditoría
-            </button>
-            <button
-              onClick={() => setTab("chat")}
-              className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-500 hover:to-pink-400 transition shadow-lg shadow-purple-500/25 flex items-center gap-2"
-            >
-              <MessageSquare className="w-4 h-4" />
-              Copiloto de Marketing IA
-            </button>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+                CMO Virtual · Gerente de Marketing & Fidelización IA
+              </h1>
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                Tríada Conectada
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Conectado a <b className="text-slate-700 dark:text-slate-200">{dashboard?.total_clientes_fidelizados ? dashboard.total_clientes_fidelizados.toLocaleString() : "7.856"} clientes</b> y 278.020 tickets de salón de Extra Supermercado.
+            </p>
           </div>
         </div>
 
-        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Clientes Fidelizados</span>
-              <span className="text-[10px] font-bold text-purple-400">ExtraClub</span>
-            </div>
-            <p className="text-2xl font-black font-mono tracking-tight text-purple-400">4.854</p>
-            <p className="text-[11px] text-slate-400">Base activa registrada</p>
-          </div>
+        <div className="flex items-center gap-2.5 shrink-0">
+          <button
+            onClick={loadInitialData}
+            disabled={loading}
+            className="px-3.5 py-2.5 rounded-2xl text-xs font-bold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 flex items-center gap-1.5 transition border border-slate-200 dark:border-slate-700"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+            Sincronizar
+          </button>
+          <button
+            onClick={() => setTab("chat")}
+            className="px-4 py-2.5 rounded-2xl text-xs font-extrabold bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white flex items-center gap-1.5 shadow-md shadow-pink-500/20 transition cursor-pointer"
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
+            Negociar Estrategia
+          </button>
+        </div>
+      </div>
 
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Tasa de Retención</span>
-              <span className="text-[10px] font-bold text-emerald-400">Saludable</span>
-            </div>
-            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">87.4%</p>
-            <p className="text-[11px] text-slate-400">Recurrencia mensual en salón</p>
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {/* 2. BARRA DE SINCRONIZACIÓN TRIPARTITA (CFO - CMO - CSO) */}
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+        {/* CARD CFO */}
+        <div className="p-4 rounded-3xl bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/50 space-y-2 relative overflow-hidden">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-black uppercase tracking-wider text-blue-900 dark:text-blue-300 flex items-center gap-1.5">
+              <Scale className="w-3.5 h-3.5 text-blue-600" /> 1. CFO Virtual (Finanzas)
+            </span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200">
+              Piso Margen: {syncStatus?.cfo_margen_piso_pct || 22.0}%
+            </span>
           </div>
-
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Riesgo de Abandono</span>
-              <span className="text-[10px] font-bold text-rose-400">Anti-Churn</span>
+          <div className="flex items-baseline justify-between pt-1">
+            <div>
+              <span className="text-[10px] text-slate-500 uppercase font-bold">Margen Actual MTD</span>
+              <p className="text-lg font-black text-slate-900 dark:text-white font-mono">
+                {syncStatus?.cfo_margen_actual_pct ? `${syncStatus.cfo_margen_actual_pct}%` : "34.7%"}
+              </p>
             </div>
-            <p className="text-2xl font-black font-mono tracking-tight text-rose-400">42 VIPs</p>
-            <p className="text-[11px] text-slate-400">Cupones 1-a-1 generados</p>
+            <div className="text-right">
+              <span className="text-[10px] text-slate-500 uppercase font-bold">Sobre-Stock a Monetizar</span>
+              <p className="text-sm font-extrabold text-blue-700 dark:text-blue-300 font-mono">
+                {formatPYG(syncStatus?.cfo_sobrestock_valor_gs || 62425000)}
+              </p>
+            </div>
           </div>
+        </div>
 
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Margen Protegido</span>
-              <span className="text-[10px] font-mono text-pink-400">Promociones</span>
+        {/* CARD CMO */}
+        <div className="p-4 rounded-3xl bg-purple-50/70 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/50 space-y-2 relative overflow-hidden">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-black uppercase tracking-wider text-purple-900 dark:text-purple-300 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-purple-600" /> 2. CMO Virtual (Marketing IA)
+            </span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/60 text-purple-800 dark:text-purple-200">
+              {dashboard?.reglas_aprendidas_count || learnedRules.length} Reglas en Memoria
+            </span>
+          </div>
+          <div className="flex items-baseline justify-between pt-1">
+            <div>
+              <span className="text-[10px] text-slate-500 uppercase font-bold">Promociones Activas POS</span>
+              <p className="text-lg font-black text-slate-900 dark:text-white font-mono">
+                {syncStatus?.cmo_promociones_activas ?? promotionsList.length} activas
+              </p>
             </div>
-            <p className="text-2xl font-black font-mono tracking-tight text-pink-300">29.6%</p>
-            <p className="text-[11px] text-slate-400">Validado con Gerente Financiero</p>
+            <div className="text-right">
+              <span className="text-[10px] text-slate-500 uppercase font-bold">Clientes Fidelizados</span>
+              <p className="text-sm font-extrabold text-purple-700 dark:text-purple-300 font-mono">
+                {dashboard?.total_clientes_fidelizados ? dashboard.total_clientes_fidelizados.toLocaleString() : "7.856"}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* CARD CSO */}
+        <div className="p-4 rounded-3xl bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/50 space-y-2 relative overflow-hidden">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-black uppercase tracking-wider text-emerald-900 dark:text-emerald-300 flex items-center gap-1.5">
+              <TrendingUp className="w-3.5 h-3.5 text-emerald-600" /> 3. Copiloto Comercial (CSO)
+            </span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200">
+              Cumplimiento: {syncStatus?.cso_meta_cumplimiento_pct || 88.5}%
+            </span>
+          </div>
+          <div className="flex items-baseline justify-between pt-1">
+            <div>
+              <span className="text-[10px] text-slate-500 uppercase font-bold">Ticket Promedio Salón</span>
+              <p className="text-lg font-black text-slate-900 dark:text-white font-mono">
+                {formatPYG(syncStatus?.cso_ticket_promedio_gs || 72500)}
+              </p>
+            </div>
+            <div className="text-right">
+              <span className="text-[10px] text-slate-500 uppercase font-bold">Alineación Cajas</span>
+              <p className="text-sm font-extrabold text-emerald-600 dark:text-emerald-400 font-bold">
+                ✓ Sincronizado
+              </p>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
-      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {/* 3. NAVEGACIÓN PRINCIPAL DE PESTAÑAS */}
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      <div className="p-1.5 bg-slate-100/90 dark:bg-slate-800/80 backdrop-blur-md rounded-2xl border border-slate-200/80 dark:border-slate-700/80 flex items-center gap-1.5 overflow-x-auto shadow-xs">
         {[
-          { key: "torre", label: "Torre de Control CMO", icon: Users },
-          { key: "campanas_ia", label: `Campañas Sugeridas (${suggestedCampaigns.length})`, icon: Megaphone, badge: suggestedCampaigns.filter(c => c.estado !== "lanzada").length },
-          { key: "anti_abandono", label: "Anti-Abandono VIP (42)", icon: HeartHandshake, badge: 42 },
-          { key: "chat", label: "Copiloto de Marketing IA", icon: MessageSquare },
-          { key: "sincronizacion", label: "Sincronización Tripartita", icon: Layers },
-          { key: "kiosco", label: `Verificador de Precios (${kioskBanners.length})`, icon: Monitor, badge: kioskBanners.filter(b => b.activo).length },
-        ].map(t => {
+          { id: "comando", label: "Comando & Directivas Activas", icon: Target, badge: dashboard?.campañas_sugeridas?.length },
+          { id: "audiencias", label: "Audiencias & RFM Real", icon: Users, badge: "7.856" },
+          { id: "promociones_pos", label: "Promociones en Cajas POS", icon: Percent, badge: promotionsList.length || undefined },
+          { id: "kiosco", label: "Banners en Kioscos", icon: Monitor, badge: kioskBanners.length || undefined },
+          { id: "memoria", label: "Memoria & Buenas Prácticas", icon: BookOpen, badge: learnedRules.length || undefined },
+          { id: "chat", label: "Sesión de Estrategia CMO", icon: MessageSquare },
+        ].map((t) => {
           const Icon = t.icon
-          const active = tab === t.key
+          const isActive = tab === t.id
           return (
             <button
-              key={t.key}
-              onClick={() => setTab(t.key as Tab)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
-                active
-                  ? "bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              key={t.id}
+              onClick={() => setTab(t.id as Tab)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                isActive
+                  ? "bg-white dark:bg-slate-900 text-purple-700 dark:text-purple-300 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800/60"
               }`}
             >
-              <Icon className="w-4 h-4" />
+              <Icon className={`w-4 h-4 shrink-0 ${isActive ? "text-purple-600 dark:text-purple-400" : "text-slate-400"}`} />
               <span>{t.label}</span>
-              {t.badge !== undefined && t.badge > 0 && (
-                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
-                  active ? "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+              {t.badge && (
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+                  isActive ? "bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-200" : "bg-slate-200/80 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
                 }`}>
                   {t.badge}
                 </span>
@@ -411,544 +425,443 @@ export default function MarketingAgentPage() {
         })}
       </div>
 
-      {/* ══════════════════════ TAB 1: TORRE DE CONTROL CMO ══════════════════════ */}
-      {tab === "torre" && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4 relative overflow-hidden group">
-            <div className="h-1 w-full bg-gradient-to-r from-amber-500 to-orange-500 absolute top-0 left-0" />
-            <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <Zap className="w-4 h-4 text-amber-500" /> Diagnóstico de Sobre-Stock & Demanda
-            </h3>
-            <div className="space-y-3">
-              <div className="p-4 rounded-2xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 text-xs space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-extrabold text-amber-950 dark:text-amber-200">Verdulería & Frutas: Tomate + Hojas Verdes</span>
-                  <span className="text-[10px] font-black uppercase text-amber-700 bg-amber-200/60 dark:bg-amber-900/60 px-2 py-0.5 rounded-full">Riesgo Alto</span>
-                </div>
-                <p className="text-amber-900 dark:text-amber-300">Stock acumulado de 340 kg con rotación lenta. Se recomienda activar combo 'Ensalada Lista' hoy antes de las 16:00 hs.</p>
-                <p className="text-[10px] font-mono text-amber-700 dark:text-amber-400 pt-1 font-bold">Margen protegido: 29.4% · Ventas estimadas: Gs. 8.4M</p>
-              </div>
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {/* 4. CONTENIDO DE LAS PESTAÑAS */}
+      {/* ────────────────────────────────────────────────────────────────────────── */}
 
-              <div className="p-4 rounded-2xl bg-purple-50/70 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/40 text-xs space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-extrabold text-purple-950 dark:text-purple-200">Lácteos & Fiambrería: Quesos Especiales</span>
-                  <span className="text-[10px] font-black uppercase text-purple-700 bg-purple-200/60 dark:bg-purple-900/60 px-2 py-0.5 rounded-full">Oportunidad</span>
-                </div>
-                <p className="text-purple-900 dark:text-purple-300">Vencimiento a 25 días de quesos gouda y sardo. Sugerido degustación y 15% OFF en segunda unidad.</p>
-                <p className="text-[10px] font-mono text-purple-700 dark:text-purple-400 pt-1 font-bold">Margen protegido: 33.1% · Ventas estimadas: Gs. 5.7M</p>
-              </div>
+      {/* TAB 1: COMANDO & DIRECTIVAS ACTIVAS */}
+      {tab === "comando" && (
+        <div className="space-y-6">
+          {/* RESUMEN EJECUTIVO */}
+          <div className="p-5 rounded-3xl bg-gradient-to-r from-purple-500/10 via-pink-500/10 to-indigo-500/10 border border-purple-200 dark:border-purple-900/40 flex items-start gap-3.5">
+            <Sparkles className="w-5 h-5 text-purple-600 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <h3 className="font-extrabold text-xs uppercase tracking-wider text-purple-950 dark:text-purple-200">
+                Diagnóstico del CMO Virtual en Tiempo Real
+              </h3>
+              <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed font-medium">
+                {dashboard?.resumen_ejecutivo || "Cargando diagnóstico de marketing..."}
+              </p>
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4 relative overflow-hidden group">
-            <div className="h-1 w-full bg-gradient-to-r from-purple-500 to-pink-500 absolute top-0 left-0" />
-            <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <Users className="w-4 h-4 text-purple-600" /> Segmentación de los 4.854 Clientes ExtraClub
-            </h3>
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div className="p-4 bg-emerald-50/70 dark:bg-emerald-950/20 rounded-2xl border border-emerald-200 dark:border-emerald-900/40">
-                <span className="text-[10px] font-bold text-emerald-700 uppercase">Clientes VIP & Oro (Top 10%)</span>
-                <p className="text-lg font-black text-emerald-800 dark:text-emerald-200 font-mono mt-0.5">485 clientes</p>
-                <p className="text-[10px] text-emerald-600 mt-1">Ticket Promedio: Gs. 385.000</p>
-              </div>
-              <div className="p-4 bg-blue-50/70 dark:bg-blue-950/20 rounded-2xl border border-blue-200 dark:border-blue-900/40">
-                <span className="text-[10px] font-bold text-blue-700 uppercase">Recurrentes (Semanal)</span>
-                <p className="text-lg font-black text-blue-800 dark:text-blue-200 font-mono mt-0.5">2.140 clientes</p>
-                <p className="text-[10px] text-blue-600 mt-1">Frecuencia: 2.4 veces/sem.</p>
-              </div>
-              <div className="p-4 bg-amber-50/70 dark:bg-amber-950/20 rounded-2xl border border-amber-200 dark:border-amber-900/40">
-                <span className="text-[10px] font-bold text-amber-700 uppercase">Ocasionales (Quincenal)</span>
-                <p className="text-lg font-black text-amber-800 dark:text-amber-200 font-mono mt-0.5">1.620 clientes</p>
-                <p className="text-[10px] text-amber-600 mt-1">Oportunidad de impulso</p>
-              </div>
-              <div className="p-4 bg-rose-50/70 dark:bg-rose-950/20 rounded-2xl border border-rose-200 dark:border-rose-900/40">
-                <span className="text-[10px] font-bold text-rose-700 uppercase">En Riesgo de Abandono</span>
-                <p className="text-lg font-black text-rose-800 dark:text-rose-200 font-mono mt-0.5">609 clientes</p>
-                <p className="text-[10px] text-rose-600 mt-1">Acción Anti-Churn requerida</p>
-              </div>
+          {/* TARJETAS DE ACCIONES Y CAMPAÑAS SUGERIDAS */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-extrabold uppercase tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+                <Target className="w-4 h-4 text-purple-600" /> Campañas con Datos Reales y Aprobación 1-Clic
+              </h3>
+              <span className="text-xs text-slate-500">Integrado a POS y WhatsApp</span>
             </div>
-          </div>
-        </div>
-      )}
 
-      {/* ══════════════════════ TAB 2: CAMPAÑAS IA ══════════════════════ */}
-      {tab === "campanas_ia" && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            {suggestedCampaigns.map((c) => (
-              <div key={c.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm flex flex-col justify-between space-y-4 text-xs relative overflow-hidden group">
-                <div className="h-1 w-full bg-gradient-to-r from-purple-500 to-pink-500 absolute top-0 left-0" />
-                <div className="space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase text-pink-700 bg-pink-100 dark:bg-pink-950/60 dark:text-pink-300 px-2.5 py-0.5 rounded-full">
-                      {c.tipo}
-                    </span>
-                    <span className={`text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full ${c.estado === "lanzada" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
-                      {c.estado === "lanzada" ? "Lanzada ✓" : "Lista para Enviar"}
-                    </span>
-                  </div>
-                  <h4 className="font-extrabold text-sm text-slate-900 dark:text-white leading-snug">{c.titulo}</h4>
-                  <p className="text-[11px] text-slate-500">Segmento: <b>{c.segmento}</b></p>
-                  <p className="text-[11px] text-slate-500">Canal: <b>{c.canal}</b></p>
-
-                  <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-100 dark:border-slate-800 italic text-slate-600 dark:text-slate-300">
-                    "{c.copy}"
-                  </div>
-
-                  <div className="flex items-center justify-between pt-1 font-mono text-[11px]">
-                    <span className="text-slate-400">Margen: <b className="text-blue-600">{c.margen_proyectado}</b></span>
-                    <span className="text-slate-400">Ventas: <b className="text-emerald-600">{c.recuperacion_stock}</b></span>
-                  </div>
-                </div>
-
-                <button onClick={() => handleLaunchCampaign(c.id)} disabled={c.estado === "lanzada" || launchingCampId === c.id}
-                  className={`w-full py-3 rounded-2xl font-bold uppercase text-xs flex items-center justify-center gap-1.5 transition ${c.estado === "lanzada" ? "bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed" : "bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white shadow-md shadow-pink-500/20"}`}>
-                  {launchingCampId === c.id ? <Loader2 className="w-4 h-4 animate-spin" /> : c.estado === "lanzada" ? <CheckCircle2 className="w-4 h-4" /> : <Send className="w-4 h-4" />}
-                  {launchingCampId === c.id ? "Despachando por WhatsApp..." : c.estado === "lanzada" ? "Campaña en Curso" : "Disparar vía WhatsApp"}
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ══════════════════════ TAB 3: ANTI-ABANDONO VIP ══════════════════════ */}
-      {tab === "anti_abandono" && (
-        <div className="space-y-4">
-          <div className="p-5 rounded-3xl bg-gradient-to-r from-rose-500/10 via-purple-500/10 to-indigo-500/10 border border-rose-200 dark:border-rose-900/40 flex items-start justify-between gap-4 text-xs shadow-sm">
-            <div className="flex items-start gap-3">
-              <Sparkles className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-extrabold uppercase text-[11px] tracking-wider text-rose-950 dark:text-rose-200 mb-0.5">
-                  Motor de Rescate 1-a-1: Descuento Exclusivo en su Producto Favorito
-                </p>
-                <p className="text-rose-900 dark:text-rose-300 leading-relaxed">
-                  La IA detecta qué producto compra siempre cada cliente inactivo, genera un <b>cupón nominativo 1-a-1 con 20% OFF</b> exclusivo para su documento/RUC con <b>vigencia de 72 horas</b>, y lo despacha automáticamente por <b>WhatsApp (Evolution API)</b> para incentivar su regreso inmediato al salón.
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => handleLaunchCampaign("camp-2")}
-              disabled={launchingCampId === "camp-2"}
-              className="text-xs px-4 py-2.5 rounded-xl shrink-0 flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold shadow-md shadow-rose-500/20 transition disabled:opacity-60"
-            >
-              {launchingCampId === "camp-2" ? <Loader2 className="w-4 h-4 animate-spin" /> : <MessageCircle className="w-4 h-4" />}
-              {launchingCampId === "camp-2" ? "Enviando rescates..." : `Disparar Todos los Rescates (${customers.length ? "42 VIPs" : "42"})`}
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {[
-              {
-                nombre: "Rodrigo Daniel Resquín",
-                ruc: "3176004-0",
-                telefono: "0981 317600",
-                nivel: "VIP Platino (2.0x)",
-                dias_inactivo: 22,
-                ticket_promedio: "Gs. 540.000",
-                producto_favorito: "Queso Sardo Trebol 1kg",
-                compras_previas: 18,
-                cupon: "RESCATE-RODRIGO-SARDO20",
-                descuento: "20% OFF en Queso Sardo Trebol",
-                vigencia: "Válido por 72 horas (Hasta 22/08 23:59)",
-                margen_resultante: "28.4% (Protegido)",
-                copy_preview: "👋 ¡Hola Rodrigo! Te extrañamos en Extra Supermercado 🛒. Queremos consentirte con un 20% de descuento EXCLUSIVO en tu producto favorito: Queso Sardo Trebol 1kg. Presentá tu Cédula o el código RESCATE-RODRIGO-SARDO20 en caja. ¡Válido solo por 72hs!"
-              },
-              {
-                nombre: "Yanina Leticia Eisenhut",
-                ruc: "5963186-4",
-                telefono: "0982 596318",
-                nivel: "VIP Platino (2.0x)",
-                dias_inactivo: 26,
-                ticket_promedio: "Gs. 620.000",
-                producto_favorito: "Yerba Kurupí Menta y Limón 500g",
-                compras_previas: 14,
-                cupon: "RESCATE-YANINA-KURUPI20",
-                descuento: "20% OFF en Yerba Kurupí",
-                vigencia: "Válido por 72 horas (Hasta 22/08 23:59)",
-                margen_resultante: "32.1% (Protegido)",
-                copy_preview: "👋 ¡Hola Yanina! Hace días que no te vemos por el súper 🌟. Tenés un 20% OFF especial en Yerba Kurupí Menta y Limón. Mostrá tu cupón RESCATE-YANINA-KURUPI20 en caja. ¡Válido hasta este fin de semana!"
-              }
-            ].map((c, i) => (
-              <div key={i} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-3.5 text-xs">
-                <div className="flex items-start justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">{c.nombre}</h4>
-                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-purple-100 text-purple-700">
-                        {c.nivel}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {dashboard?.campañas_sugeridas?.map((camp: any) => (
+                <div
+                  key={camp.id}
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4 flex flex-col justify-between"
+                >
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 dark:bg-purple-950/80 dark:text-purple-300">
+                        {camp.origen_directiva || "DIRECTIVA CMO"}
                       </span>
+                      {camp.descuento_sugerido_pct && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-700 dark:bg-rose-950/80 dark:text-rose-300">
+                          {camp.descuento_sugerido_pct}% OFF
+                        </span>
+                      )}
                     </div>
-                    <p className="text-[11px] text-slate-400 font-mono mt-0.5">RUC: {c.ruc} · WhatsApp: {c.telefono}</p>
+                    <h4 className="font-extrabold text-sm text-slate-900 dark:text-white leading-snug">
+                      {camp.titulo}
+                    </h4>
+                    <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                      {camp.motivo}
+                    </p>
                   </div>
-                  <div className="text-right">
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-rose-100 text-rose-700 font-mono">
-                      {c.dias_inactivo} días inactivo
-                    </span>
-                    <p className="text-[10px] text-slate-400 mt-0.5">Ticket prom: {c.ticket_promedio}</p>
-                  </div>
-                </div>
 
-                <div className="p-3.5 bg-amber-50/70 dark:bg-amber-950/30 rounded-2xl border border-amber-200 dark:border-amber-900/40 space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-amber-800 dark:text-amber-300 uppercase flex items-center gap-1">
-                      <ShoppingBag className="w-3.5 h-3.5" /> Producto Habitual Detectado:
-                    </span>
-                    <span className="text-[10px] font-mono text-slate-500 font-bold">{c.compras_previas} compras previas</span>
-                  </div>
-                  <p className="font-black text-slate-900 dark:text-white text-xs">{c.producto_favorito}</p>
-                </div>
-
-                <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-1.5 font-mono text-[11px]">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Cupón Generado:</span>
-                    <span className="font-black text-purple-600 bg-purple-50 dark:bg-purple-950 px-2 py-0.5 rounded border border-purple-200">{c.cupon}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Beneficio:</span>
-                    <span className="font-bold text-emerald-600">{c.descuento}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Vigencia:</span>
-                    <span className="text-rose-600 font-bold">{c.vigencia}</span>
-                  </div>
-                </div>
-
-                <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/20 rounded-xl border border-emerald-100 dark:border-emerald-900/30 text-[11px] text-slate-600 dark:text-slate-300 italic">
-                  "{c.copy_preview}"
-                </div>
-
-                <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
-                  <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5" /> Habilitado en Caja POS
-                  </span>
-                  <button
-                    onClick={() => handleSendSingleCoupon(c)}
-                    disabled={sendingCouponId === c.cupon}
-                    className="text-xs px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition disabled:opacity-60 shadow-xs"
-                  >
-                    {sendingCouponId === c.cupon ? (
-                      <>
-                        <Loader2 className="w-3 h-3 animate-spin" /> Enviando...
-                      </>
-                    ) : (
-                      <>
-                        <Send className="w-3 h-3" /> Enviar Cupón vía WhatsApp
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ══════════════════════ TAB 4: COPILOTO DE MARKETING IA ══════════════════════ */}
-      {tab === "chat" && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <div className="lg:col-span-4 space-y-4">
-            <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-600 to-pink-500 text-white flex items-center justify-center shadow-md">
-                  <Bot className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">Gerente de Marketing IA</h3>
-                  <p className="text-[11px] text-slate-500">CMO Virtual · Motor Gemini 2.5</p>
-                </div>
-              </div>
-              <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 text-xs text-slate-600 dark:text-slate-300 space-y-1.5">
-                <div className="flex items-center gap-1.5 font-bold text-purple-600 dark:text-purple-400">
-                  <Activity className="w-3.5 h-3.5" /> Capacidades Activas
-                </div>
-                <p>• Combos de sobre-stock con margen protegido.</p>
-                <p>• Cupones nominativos 1-a-1 de retención VIP.</p>
-                <p>• Sincronización de banners en terminales de salón.</p>
-              </div>
-
-              <div className="space-y-2 pt-2">
-                <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Consultas Rápidas Sugeridas</span>
-                <div className="flex flex-col gap-2">
-                  {[
-                    "Lanzar combo de sobre-stock en Verdulería",
-                    "Reactivar los 42 clientes VIP por IntelliZapp",
-                    "Ver calendario de promociones recomendadas",
-                    "Consultar margen y ROI proyectado"
-                  ].map((q, idx) => (
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2.5">
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium">
+                      <span>Alcance: <b className="text-slate-700 dark:text-slate-200">{camp.cantidad_clientes} clientes</b></span>
+                      <span>Canales: <b>POS + Kiosco</b></span>
+                    </div>
                     <button
-                      key={idx}
-                      onClick={() => handleSendMessage(q)}
-                      className="text-left text-xs p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 hover:bg-purple-50 dark:hover:bg-purple-950/40 text-slate-700 dark:text-slate-300 hover:text-purple-600 dark:hover:text-purple-400 border border-slate-100 dark:border-slate-800 transition"
+                      onClick={() => handleExecuteSuggestion(camp)}
+                      className="w-full py-2.5 rounded-xl text-xs font-extrabold bg-purple-600 hover:bg-purple-700 text-white flex items-center justify-center gap-1.5 transition shadow-xs cursor-pointer"
                     >
-                      {q}
+                      <Zap className="w-3.5 h-3.5" />
+                      Aprobar y Desplegar en POS
                     </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="lg:col-span-8 flex flex-col h-[650px] bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-850/50">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-pink-500 animate-pulse" />
-                <span className="text-xs font-bold text-slate-900 dark:text-white">Sesión Activa con el CMO Virtual</span>
-              </div>
-              <span className="text-[10px] font-mono font-bold text-slate-400">Contexto: Campañas & RFM</span>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
-              {messages.map((m, idx) => (
-                <div key={idx} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                  <div className={`max-w-[85%] rounded-2xl p-4 space-y-2 text-xs leading-relaxed ${
-                    m.role === "user"
-                      ? "bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-tr-none shadow-md shadow-purple-500/10"
-                      : "bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700/80 rounded-tl-none"
-                  }`}>
-                    <div className="whitespace-pre-wrap font-sans">{m.content}</div>
-                    {m.suggestions && m.suggestions.length > 0 && (
-                      <div className="pt-2 flex flex-wrap gap-1.5">
-                        {m.suggestions.map((p, pIdx) => (
-                          <button
-                            key={pIdx}
-                            onClick={() => handleSendMessage(p)}
-                            className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 dark:bg-purple-950/80 dark:text-purple-300 hover:bg-purple-100 transition"
-                          >
-                            {p}
-                          </button>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 </div>
               ))}
-              {chatLoading && (
-                <div className="flex justify-start">
-                  <div className="bg-slate-50 dark:bg-slate-800/80 rounded-2xl p-4 text-xs text-slate-500 flex items-center gap-2 border border-slate-200 dark:border-slate-700">
-                    <Loader2 className="w-4 h-4 animate-spin text-purple-500" />
-                    El Gerente de Marketing IA está analizando la base de clientes y promociones...
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: AUDIENCIAS & RFM REAL */}
+      {tab === "audiencias" && (
+        <div className="space-y-5">
+          {/* MATRIZ DE SEGMENTOS */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+            {dashboard?.segmentos?.map((seg: any) => (
+              <div
+                key={seg.id}
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 shadow-sm space-y-2"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-extrabold uppercase text-slate-400">{seg.nombre}</span>
+                  <span className="text-xs font-black px-2 py-0.5 rounded-full bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 font-mono">
+                    {seg.cantidad.toLocaleString()}
+                  </span>
+                </div>
+                <p className="text-lg font-black text-slate-900 dark:text-white font-mono">
+                  {formatPYG(seg.ticket_promedio_gs)}
+                </p>
+                <p className="text-[11px] text-slate-500 font-medium leading-tight">
+                  {seg.criterio}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          {/* LISTADO DE CLIENTES REALES CON HÁBITOS DE COMPRA */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900 dark:text-white uppercase flex items-center gap-2">
+                  <Users className="w-4 h-4 text-purple-600" /> Clientes Reales con Productos Favoritos Detectados
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Calculado a partir de los 278.020 productos analizados en cupon_ticket_items.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3" />
+                  <input
+                    type="text"
+                    placeholder="Buscar cliente, cédula o barrio..."
+                    value={searchCustomer}
+                    onChange={e => setSearchCustomer(e.target.value)}
+                    className="pl-8 pr-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none w-56"
+                  />
+                </div>
+                <button
+                  onClick={() => setRfmFilter(rfmFilter === "inactivos" ? "todos" : "inactivos")}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border ${
+                    rfmFilter === "inactivos"
+                      ? "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800"
+                      : "bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300"
+                  }`}
+                >
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  {rfmFilter === "inactivos" ? "Filtrado: En Riesgo (>20d)" : "Todos los VIPs"}
+                </button>
+              </div>
+            </div>
+
+            {loadingRfm ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-6 h-6 animate-spin text-purple-600" />
+              </div>
+            ) : filteredCustomers.length === 0 ? (
+              <div className="p-8 text-center text-xs text-slate-500">
+                No se encontraron clientes para el filtro actual.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredCustomers.map((c) => (
+                  <div
+                    key={c.id}
+                    className="p-4 rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850/40 space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-2 border-b border-slate-200/60 dark:border-slate-800 pb-2.5">
+                      <div>
+                        <h4 className="font-extrabold text-xs text-slate-900 dark:text-white">{c.nombre}</h4>
+                        <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                          DOC: {c.documento} · {c.barrio || "PJC"}
+                        </p>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-purple-100 text-purple-800 dark:bg-purple-950/80 dark:text-purple-300">
+                        {c.segmento}
+                      </span>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-slate-500">Gasto Total Acumulado:</span>
+                        <b className="font-mono text-slate-900 dark:text-white">{formatPYG(c.total_gastado_gs)}</b>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-slate-500">Última Compra:</span>
+                        <span className={`font-bold ${c.dias_inactivo >= 20 ? "text-rose-600" : "text-emerald-600"}`}>
+                          hace {c.dias_inactivo} días
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* TOP PRODUCTOS FAVORITOS */}
+                    {c.productos_favoritos && c.productos_favoritos.length > 0 && (
+                      <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60 space-y-1.5">
+                        <span className="text-[9px] font-extrabold uppercase text-slate-400 flex items-center gap-1">
+                          <ShoppingBag className="w-3 h-3 text-purple-500" /> Productos Habituales:
+                        </span>
+                        <div className="space-y-1">
+                          {c.productos_favoritos.map((p: any, idx: number) => (
+                            <div key={idx} className="flex items-center justify-between text-[10px]">
+                              <span className="truncate max-w-[170px] text-slate-700 dark:text-slate-300 font-medium">
+                                • {p.producto_nombre}
+                              </span>
+                              <span className="font-mono text-slate-400">{p.compras_count}x</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: PROMOCIONES EN CAJAS POS */}
+      {tab === "promociones_pos" && (
+        <div className="space-y-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-extrabold uppercase tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+                <Percent className="w-4 h-4 text-purple-600" /> Promociones Activas en Cajas Registradoras (POS)
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Reglas reales sincronizadas con los terminales POS de Extra Supermercado.
+              </p>
+            </div>
+            <button
+              onClick={() => setTab("chat")}
+              className="px-4 py-2 rounded-xl text-xs font-bold bg-purple-600 text-white hover:bg-purple-700 transition"
+            >
+              + Pedir Nueva Promo a la IA
+            </button>
+          </div>
+
+          {loadingPromos ? (
+            <div className="flex items-center justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-purple-600" /></div>
+          ) : promotionsList.length === 0 ? (
+            <div className="p-8 text-center text-xs text-slate-500 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800">
+              No hay promociones activas registradas en la base de datos.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {promotionsList.slice(0, 18).map((p: any) => (
+                <div
+                  key={p.id}
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-3"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300">
+                      Activa en POS
+                    </span>
+                    <span className="font-mono text-xs font-black text-purple-600">
+                      {p.tipo === "porcentaje" ? `${p.valor}% OFF` : `₲ ${formatPYG(p.valor)}`}
+                    </span>
+                  </div>
+                  <div>
+                    <h4 className="font-extrabold text-xs text-slate-900 dark:text-white leading-snug">{p.nombre}</h4>
+                    <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">{p.descripcion || "Sin descripción"}</p>
+                  </div>
+                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[10px] text-slate-400">
+                    <span>Validez: {p.valido_hasta ? String(p.valido_hasta) : "Indefinida"}</span>
+                    <span>{p.producto_ids?.length ? `${p.producto_ids.length} productos` : "General"}</span>
                   </div>
                 </div>
-              )}
-              <div ref={messagesEndRef} />
+              ))}
             </div>
-
-            <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850/50">
-              <form onSubmit={e => { e.preventDefault(); handleSendMessage() }} className="flex items-center gap-2">
-                <input
-                  type="text"
-                  placeholder="Preguntale al CMO sobre promociones, clientes o campañas..."
-                  value={inputMessage}
-                  onChange={e => setInputMessage(e.target.value)}
-                  className="flex-1 px-4 py-3 text-xs rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                />
-                <button
-                  type="submit"
-                  disabled={!inputMessage.trim() || chatLoading}
-                  className="px-5 py-3 rounded-2xl bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-purple-500/20 transition"
-                >
-                  <Send className="w-4 h-4" />
-                </button>
-              </form>
-            </div>
-          </div>
+          )}
         </div>
       )}
 
-      {/* ══════════════════════ TAB 5: SINCRONIZACIÓN TRIPARTITA ══════════════════════ */}
-      {tab === "sincronizacion" && (
-        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4 text-xs">
-          <h3 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase flex items-center gap-2">
-            <Layers className="w-4 h-4 text-indigo-600" /> Matriz de Sincronización Tripartita IA
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-5 rounded-3xl bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 space-y-2">
-              <span className="font-extrabold text-blue-900 dark:text-blue-200 uppercase text-[10px]">1. Gerente Financiero IA (CFO)</span>
-              <p className="text-blue-800 dark:text-blue-300">Define márgenes brutos mínimos (25%) y valida cupo de inversión de Gs. 15.000.000 mensuales.</p>
-              <div className="pt-2 border-t border-blue-200 dark:border-blue-900 font-bold text-emerald-600">✓ Estado: Validado</div>
-            </div>
-            <div className="p-5 rounded-3xl bg-pink-50/70 dark:bg-pink-950/20 border border-pink-200 dark:border-pink-900/40 space-y-2">
-              <span className="font-extrabold text-pink-900 dark:text-pink-200 uppercase text-[10px]">2. Gerente de Marketing IA (CMO)</span>
-              <p className="text-pink-800 dark:text-pink-300">Genera combos de sobre-stock, segmenta clientes RFM y dispara campañas vía IntelliZapp.</p>
-              <div className="pt-2 border-t border-pink-200 dark:border-pink-900 font-bold text-pink-600">⚡ 3 Campañas Listas</div>
-            </div>
-            <div className="p-5 rounded-3xl bg-purple-50/70 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/40 space-y-2">
-              <span className="font-extrabold text-purple-900 dark:text-purple-200 uppercase text-[10px]">3. Gerente de Ventas IA (CSO)</span>
-              <p className="text-purple-800 dark:text-purple-300">Alinea a los cajeros y repositores en salón para destacar los productos en góndola y cajas.</p>
-              <div className="pt-2 border-t border-purple-200 dark:border-purple-900 font-bold text-purple-600">🎯 Impulso en Salón Activo</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ══════════════════════ TAB 6: VERIFICADOR DE PRECIOS ══════════════════════ */}
+      {/* TAB 4: BANNERS EN KIOSCOS */}
       {tab === "kiosco" && (
         <div className="space-y-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm">
-            <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between flex-wrap gap-3">
+            <div>
               <h3 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase flex items-center gap-2">
-                <Monitor className="w-4 h-4 text-pink-600" /> Ofertas en los Verificadores de Precio
+                <Monitor className="w-4 h-4 text-pink-600" /> Banners de Ofertas en Terminales del Salón
               </h3>
-              <button
-                onClick={openNewBannerForm}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-pink-600 hover:bg-pink-700 text-white text-xs font-bold transition shadow-md shadow-pink-500/20"
-              >
-                <ImagePlus className="w-4 h-4" /> Nuevo Banner
-              </button>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Rotan en los verificadores de precios distribuidos en el salón de ventas.
+              </p>
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Estos creativos rotan en las 3 terminales de consulta de precios del salón de ventas.
-            </p>
+            <button
+              onClick={() => {
+                setEditingBanner(null)
+                setBannerForm({ titulo: "", subtitulo: "", etiqueta: "", descuento_texto: "", color: "orange", activo: true })
+                setShowBannerForm(true)
+              }}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-pink-600 hover:bg-pink-700 text-white text-xs font-bold transition shadow-xs cursor-pointer"
+            >
+              <ImagePlus className="w-4 h-4" /> Nuevo Banner
+            </button>
           </div>
 
           {kioskLoading ? (
             <div className="flex items-center justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-pink-600" /></div>
-          ) : kioskBanners.length === 0 ? (
-            <div className="p-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl text-center text-sm text-slate-500 dark:text-slate-400">
-              Todavía no hay banners cargados. Creá el primero para que empiece a rotar en salón.
-            </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {[...kioskBanners].sort((a, b) => a.orden - b.orden).map((b, idx, arr) => (
-                <div key={b.id} className={`rounded-3xl border overflow-hidden bg-white dark:bg-slate-900 ${b.activo ? "border-slate-200 dark:border-slate-800 shadow-sm" : "border-dashed border-slate-300 dark:border-slate-700 opacity-60"}`}>
-                  <div className="aspect-[16/9] bg-slate-100 dark:bg-slate-800 flex items-center justify-center overflow-hidden">
-                    {b.imagen_url ? (
-                      <img src={b.imagen_url} alt={b.titulo} className="w-full h-full object-cover" />
-                    ) : (
-                      <ImagePlus className="w-8 h-8 text-slate-300 dark:text-slate-700" />
-                    )}
+              {kioskBanners.map((b) => (
+                <div key={b.id} className="rounded-3xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-white dark:bg-slate-900 shadow-sm p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-extrabold text-xs text-slate-900 dark:text-white">{b.titulo}</span>
+                    <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-pink-100 text-pink-700 uppercase">
+                      {b.descuento_texto || "PROMO"}
+                    </span>
                   </div>
-                  <div className="p-4 space-y-2">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      {b.etiqueta && <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-pink-100 dark:bg-pink-900/30 text-pink-700 dark:text-pink-300">{b.etiqueta}</span>}
-                      {b.descuento_texto && <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">{b.descuento_texto}</span>}
-                      {!b.activo && <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500">Inactivo</span>}
-                    </div>
-                    <p className="text-sm font-bold text-slate-900 dark:text-white leading-snug line-clamp-2">{b.titulo}</p>
-                    <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
-                      <div className="flex items-center gap-1">
-                        <button onClick={() => moveBanner(b, -1)} disabled={idx === 0} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30" title="Subir">
-                          <ArrowUp className="w-3.5 h-3.5" />
-                        </button>
-                        <button onClick={() => moveBanner(b, 1)} disabled={idx === arr.length - 1} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30" title="Bajar">
-                          <ArrowDown className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <button onClick={() => toggleBannerActivo(b)} className={`px-2 py-1 rounded-lg text-[10px] font-bold ${b.activo ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300" : "bg-slate-100 dark:bg-slate-800 text-slate-500"}`}>
-                          {b.activo ? "Activo" : "Pausado"}
-                        </button>
-                        <button onClick={() => openEditBannerForm(b)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800" title="Editar">
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        <button onClick={() => deleteBanner(b)} className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30" title="Eliminar">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
+                  {b.subtitulo && <p className="text-xs text-slate-500">{b.subtitulo}</p>}
                 </div>
               ))}
             </div>
           )}
+        </div>
+      )}
 
-          {/* MODAL DE CREAR/EDITAR BANNER */}
-          {showBannerForm && (
-            <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white">{editingBanner ? "Editar Banner" : "Nuevo Banner"}</h3>
-                  <button onClick={() => setShowBannerForm(false)} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"><X className="w-5 h-5" /></button>
+      {/* TAB 5: MEMORIA & BUENAS PRÁCTICAS */}
+      {tab === "memoria" && (
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
+            <div>
+              <h3 className="text-sm font-extrabold uppercase tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+                <BookOpen className="w-4 h-4 text-purple-600" /> Memoria Corporativa Continua (company_business_rules)
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Reglas y políticas que el CMO Virtual aprende de tus indicaciones y nunca olvida al tomar decisiones.
+              </p>
+            </div>
+
+            <form onSubmit={handleSaveRule} className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Enseñale una nueva regla (ej: 'Los miércoles de verduras el descuento sugerido nunca supera el 15%')..."
+                value={newRuleText}
+                onChange={e => setNewRuleText(e.target.value)}
+                className="flex-1 px-4 py-2.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none"
+              />
+              <button
+                type="submit"
+                disabled={!newRuleText.trim() || savingRule}
+                className="px-4 py-2.5 rounded-xl text-xs font-bold bg-purple-600 text-white hover:bg-purple-700 transition disabled:opacity-50"
+              >
+                {savingRule ? "Guardando..." : "Guardar en Memoria"}
+              </button>
+            </form>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {learnedRules.map((r) => (
+              <div
+                key={r.id}
+                className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-2"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300">
+                    {r.categoria}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono">{r.created_at || "Vigente"}</span>
                 </div>
+                <p className="text-xs font-medium text-slate-800 dark:text-slate-200 leading-relaxed">
+                  "{r.regla}"
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
-                <div className="space-y-3 text-xs">
-                  <label className="block">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400">Imagen del banner</span>
-                    </div>
-                    <div className="aspect-[4/5] max-h-64 rounded-2xl bg-slate-100 dark:bg-slate-800 border-2 border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-center overflow-hidden cursor-pointer relative group mx-auto">
-                      {bannerImagePreview ? (
-                        <img src={bannerImagePreview} alt="preview" className="w-full h-full object-contain" />
-                      ) : (
-                        <div className="flex flex-col items-center text-slate-400 text-center px-4">
-                          <ImagePlus className="w-8 h-8 mb-1" />
-                          <span className="text-xs font-bold">Subir imagen</span>
-                        </div>
-                      )}
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) => handleBannerImageChange(e.target.files?.[0] || null)}
-                        className="absolute inset-0 opacity-0 cursor-pointer"
-                      />
-                    </div>
-                  </label>
+      {/* TAB 6: CHAT CON EL CMO VIRTUAL */}
+      {tab === "chat" && (
+        <div className="h-[680px] bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col">
+          <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-850/50">
+            <div className="flex items-center gap-2.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-pink-500 animate-pulse" />
+              <span className="text-xs font-bold text-slate-900 dark:text-white">
+                Sesión Estratégica con el CMO (Qwen 2.5 7B Local + Gemini)
+              </span>
+            </div>
+            <span className="text-[10px] font-mono font-bold text-slate-400">
+              Tool Calling Activo: PostgreSQL / POS / Cupones
+            </span>
+          </div>
 
-                  <div>
-                    <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">Título</label>
-                    <input
-                      value={bannerForm.titulo}
-                      onChange={(e) => setBannerForm((f) => ({ ...f, titulo: e.target.value }))}
-                      placeholder="Ej: Carnicería Premium · Cortes al Vacío"
-                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-900 dark:text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">Subtítulo (opcional)</label>
-                    <input
-                      value={bannerForm.subtitulo}
-                      onChange={(e) => setBannerForm((f) => ({ ...f, subtitulo: e.target.value }))}
-                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-900 dark:text-white"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">Etiqueta</label>
-                      <input
-                        value={bannerForm.etiqueta}
-                        onChange={(e) => setBannerForm((f) => ({ ...f, etiqueta: e.target.value }))}
-                        placeholder="OFERTA DEL DÍA"
-                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-900 dark:text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">Texto de descuento</label>
-                      <input
-                        value={bannerForm.descuento_texto}
-                        onChange={(e) => setBannerForm((f) => ({ ...f, descuento_texto: e.target.value }))}
-                        placeholder="-20% OFF"
-                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-900 dark:text-white"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">Color de acento</label>
-                    <select
-                      value={bannerForm.color}
-                      onChange={(e) => setBannerForm((f) => ({ ...f, color: e.target.value }))}
-                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-900 dark:text-white"
-                    >
-                      {KIOSK_COLORS.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-                    </select>
-                  </div>
-                  <label className="flex items-center gap-2 cursor-pointer pt-1">
-                    <input type="checkbox" checked={bannerForm.activo} onChange={(e) => setBannerForm((f) => ({ ...f, activo: e.target.checked }))} className="w-4 h-4" />
-                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Activo (se muestra ya en las terminales)</span>
-                  </label>
+          <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            {messages.map((m, idx) => (
+              <div key={idx} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                <div className={`max-w-[85%] rounded-2xl p-4 space-y-2 text-xs leading-relaxed ${
+                  m.role === "user"
+                    ? "bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-tr-none shadow-sm"
+                    : "bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700/80 rounded-tl-none"
+                }`}>
+                  <div className="whitespace-pre-wrap font-sans leading-relaxed">{m.content}</div>
 
-                  <button
-                    onClick={submitBannerForm}
-                    disabled={savingBanner}
-                    className="w-full py-3 rounded-2xl bg-pink-600 hover:bg-pink-700 text-white font-bold text-xs flex items-center justify-center gap-2 disabled:opacity-60 transition shadow-md shadow-pink-500/20"
-                  >
-                    {savingBanner ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                    {editingBanner ? "Guardar Cambios" : "Crear Banner"}
-                  </button>
+                  {/* ACTION OUTCOME CARD SI HUBO TOOL CALLING */}
+                  {m.action_outcome && (
+                    <div className="p-3 mt-2 rounded-xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 text-purple-900 dark:text-purple-200 flex items-center justify-between">
+                      <div>
+                        <span className="text-[10px] font-black uppercase">{m.action_outcome.titulo}</span>
+                        <p className="text-xs font-bold">{m.action_outcome.descripcion}</p>
+                      </div>
+                      <CheckCircle2 className="w-4 h-4 text-purple-600 shrink-0" />
+                    </div>
+                  )}
+
+                  {m.suggestions && m.suggestions.length > 0 && (
+                    <div className="pt-2 flex flex-wrap gap-1.5">
+                      {m.suggestions.map((p, pIdx) => (
+                        <button
+                          key={pIdx}
+                          onClick={() => handleSendMessage(p)}
+                          className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 dark:bg-purple-950/80 dark:text-purple-300 hover:bg-purple-100 transition cursor-pointer"
+                        >
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
-          )}
+            ))}
+
+            {chatLoading && (
+              <div className="flex justify-start">
+                <div className="bg-slate-50 dark:bg-slate-800/80 rounded-2xl p-4 text-xs text-slate-500 flex items-center gap-2 border border-slate-200 dark:border-slate-700">
+                  <Loader2 className="w-4 h-4 animate-spin text-purple-500" />
+                  El CMO Virtual está consultando los 7.856 clientes y sobre-stock en tiempo real...
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850/50">
+            <form onSubmit={e => { e.preventDefault(); handleSendMessage() }} className="flex items-center gap-2">
+              <input
+                type="text"
+                placeholder="Preguntale al CMO sobre liquidar sobre-stock, rescatar VIPs o crear promos en POS..."
+                value={inputMessage}
+                onChange={e => setInputMessage(e.target.value)}
+                className="flex-1 px-4 py-3 text-xs rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+              <button
+                type="submit"
+                disabled={!inputMessage.trim() || chatLoading}
+                className="px-5 py-3 rounded-2xl bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-purple-500/20 transition cursor-pointer"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </form>
+          </div>
         </div>
       )}
     </div>

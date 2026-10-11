@@ -154,3 +154,83 @@ class FinanceChatResponse(BaseModel):
     response: str
     suggestions: List[str]
     action_proposal: Optional[Dict[str, Any]] = None
+    tools_executed: Optional[List[Dict[str, Any]]] = None
+    provider_used: Optional[str] = None
+
+
+class FinanceAgentSettingResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    colchon_minimo_bancos_gs: float
+    dias_alerta_mora: int
+    limite_pago_diario_sin_autorizacion_gs: float
+    prioridad_pagos: Dict[str, Any]
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class FinanceAgentSettingUpdate(BaseModel):
+    colchon_minimo_bancos_gs: Optional[float] = None
+    dias_alerta_mora: Optional[int] = None
+    limite_pago_diario_sin_autorizacion_gs: Optional[float] = None
+    prioridad_pagos: Optional[Dict[str, Any]] = None
+
+
+class InterAgentDirectiveCreate(BaseModel):
+    receptor: str = "sales_agent"
+    titulo: str
+    mensaje: str
+    accion_sugerida: Optional[str] = None
+    prioridad: str = "alta"
+    payload: Optional[Dict[str, Any]] = None
+    impacto_estimado_gs: Optional[float] = 0.0
+
+
+class InterAgentDirectiveResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    codigo: str
+    emisor: str
+    receptor: str
+    titulo: str
+    mensaje: str
+    accion_sugerida: Optional[str] = None
+    prioridad: str
+    estado: str
+    payload: Dict[str, Any]
+    impacto_estimado_gs: float
+    impacto_real_recaudado_gs: float
+    feedback_receptor: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class InterAgentDirectiveUpdateStatus(BaseModel):
+    estado: str
+    feedback: Optional[str] = None
+    impacto_real_gs: Optional[float] = None
+
+
+class CashFlowSimulationRequest(BaseModel):
+    variacion_ventas_pct: float = 0.0  # Ej: -10.0 a +15.0
+    prorroga_proveedores_dias: int = 0  # Ej: 7 dias de prorroga en pagos
+    recuperacion_mora_pct: float = 0.0  # Ej: 30% cobro de cartera vencida
+    meta_liquidacion_sobrestock_gs: float = 0.0  # Ej: 35.000.000
+
+
+class CashFlowSimulationResponse(BaseModel):
+    saldo_actual_gs: float
+    saldo_proyectado_30d_base_gs: float
+    saldo_proyectado_30d_simulado_gs: float
+    impacto_neto_gs: float
+    dias_en_riesgo_base: int
+    dias_en_riesgo_simulado: int
+    proyeccion_simulada: List[CashFlowDayForecast]
+    conclusion_cfo: str
+

@@ -6,7 +6,8 @@ import {
   HelpCircle, ChevronRight, Layers, PieChart, ShieldCheck, Tag, ShoppingBag,
   ListTodo, Clock, Flame, BarChart3, Bot, ThumbsUp, ArrowUpRight, ArrowDownRight,
   Sliders, Search, Filter, PlayCircle, Award, CheckCircle, Info, Calculator,
-  ChevronDown, ChevronUp, Package, Layers2, Boxes, Edit3, X, Activity, UserCheck
+  ChevronDown, ChevronUp, Package, Layers2, Boxes, Edit3, X, Activity, UserCheck,
+  Star, Brain, Phone, Settings, Calendar
 } from "lucide-react"
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -14,14 +15,19 @@ import { useAuth } from "../../context/AuthContext"
 import { formatPYG, formatDate, formatDateTime } from "../../utils/format"
 
 type AgentTab = "rentabilidad" | "pareto" | "precios" | "simulador" | "chat" | "acciones"
+type PeriodType = "mes_actual" | "mes_anterior" | "ultimos_30_dias" | "personalizado"
 
 export default function SalesAgentPage() {
   const [tab, setTab] = useState<AgentTab>("rentabilidad")
+  const [periodo, setPeriodo] = useState<PeriodType>("mes_actual")
+  const [fechaDesde, setFechaDesde] = useState<string>("")
+  const [fechaHasta, setFechaHasta] = useState<string>("")
+
   const [analysis, setAnalysis] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [applyingPrice, setApplyingPrice] = useState<string | null>(null)
-  const [applyingAll, setApplyingAll] = useState(false)
   const [filterCategory, setFilterCategory] = useState<string>("todas")
+  const [filterStrategy, setFilterStrategy] = useState<string>("todos") // todos, fugas, candidatos, ganchos
   const [searchQuery, setSearchQuery] = useState("")
   const [expandedScales, setExpandedScales] = useState<Record<string, boolean>>({})
 
@@ -31,22 +37,37 @@ export default function SalesAgentPage() {
   const [customMotivo, setCustomMotivo] = useState<string>("")
   const [customScales, setCustomScales] = useState<Array<{min_qty: number; precio_unitario: number; descripcion: string}>>([])
 
-  // Modal de Confirmación en Lote
-  const [batchModalOpen, setBatchModalOpen] = useState(false)
+  // Modal de Configuración de Metas
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false)
+  const [targetMinPct, setTargetMinPct] = useState<number>(20.0)
+  const [targetIdealPct, setTargetIdealPct] = useState<number>(24.0)
 
-  // Simulator State
-  const [simulatedIncreases, setSimulatedIncreases] = useState<Record<string, number>>({})
+  // Estado de Pareto
+  const [paretoData, setParetoData] = useState<any>(null)
+  const [paretoLoading, setParetoLoading] = useState(false)
+  const [paretoMetric, setParetoMetric] = useState<string>("facturacion")
+  const [paretoSearch, setParetoSearch] = useState("")
+  const [paretoClassFilter, setParetoClassFilter] = useState<string>("todas") // todas, A, B, C
 
-  // Chat State
+  // Estado del Simulador
+  const [simulatorCategoryAdjustments, setSimulatorCategoryAdjustments] = useState<Record<string, number>>({})
+  const [simResult, setSimResult] = useState<any>(null)
+  const [simLoading, setSimLoading] = useState(false)
+
+  // Estado de Reglas de Negocio / Memoria
+  const [businessRules, setBusinessRules] = useState<any[]>([])
+  const [newRuleText, setNewRuleText] = useState("")
+
+  // Estado de Chat
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string; outcome?: any; prompts?: string[] }>>([
     {
       role: "assistant",
-      content: "👋 **Buenas tardes. Bienvenido a la Torre de Control Comercial del Gerente de Ventas IA.**\n\nHe auditado los **movimientos del mes en curso (Agosto 2026 MTD)** con **6.301 tickets** y **Gs. 635.839.971 facturados a la fecha**, proyectando un cierre mensual de **Gs. 1.231M**.\n\nNuestro margen actual del mes se ubica en **16.4%**, situándonos a un **Gap de Gs. 48.009.408** de la meta óptima del **24.0%**.\n\nHe sincronizado las **escalas de precios por cantidad de Ñemuha** para más de **35 SKUs de alta rotación** en Carnicería, PARESA, Bebidas, Lácteos y Almacén.\n\n¿En qué sección comercial querés que enfoquemos las remarcaciones y estrategias de hoy?",
+      content: "👋 **Buenas tardes. Bienvenido a la Torre de Control Comercial del Gerente de Ventas IA.**\n\nEstoy conectado en tiempo real a la base de datos de **Extra Supermercado** con inferencia local de IA y capacidad de ejecutar acciones.\n\n¿En qué área comercial o remarcación deseas que nos enfoquemos hoy?",
       prompts: [
-        "¿Cómo cerramos el Gap para llegar al 24%?",
-        "Estrategia de precios en Carnicería",
-        "Diagnóstico de Bebidas y Cervezas (PARESA)",
-        "Ver escalas de precio por bulto / fardo"
+        "¿Cuáles son los productos con peor margen?",
+        "Ver desglose de Pareto Clase A",
+        "Modificar meta general a 22%",
+        "Propuestas de precios en Carnicería"
       ]
     }
   ])
@@ -58,18 +79,23 @@ export default function SalesAgentPage() {
   const { user } = useAuth()
   const companyId = (user as any)?.company_id || "00000000-0000-0000-0000-000000000010"
 
-  const loadData = async () => {
+  // Carga Principal de Análisis
+  const loadData = async (selectedPeriod = periodo) => {
     setLoading(true)
     try {
-      const data = await api.salesAgent.getAnalysis(companyId)
-      setAnalysis(data)
-      if (data?.propuestas_precios) {
-        const initSim: Record<string, number> = {}
-        data.propuestas_precios.forEach((p: any) => {
-          initSim[p.id] = Number(p.precio_sugerido)
-        })
-        setSimulatedIncreases(initSim)
+      const params: any = { periodo_tipo: selectedPeriod }
+      if (selectedPeriod === "personalizado" && fechaDesde && fechaHasta) {
+        params.fecha_desde = fechaDesde
+        params.fecha_hasta = fechaHasta
       }
+      const data = await api.salesAgent.getAnalysis(companyId, params)
+      setAnalysis(data)
+      setTargetMinPct(data.margen_minimo_target_pct || 20.0)
+      setTargetIdealPct(data.margen_ideal_target_pct || 24.0)
+
+      // Cargar reglas de negocio activas
+      const rules = await api.salesAgent.getBusinessRules(companyId)
+      setBusinessRules(rules || [])
     } catch (e: any) {
       console.error("SalesAgent load error:", e)
       toast.error("Error al cargar análisis de ventas")
@@ -78,9 +104,34 @@ export default function SalesAgentPage() {
     }
   }
 
+  // Cargar Pareto
+  const loadPareto = async () => {
+    setParetoLoading(true)
+    try {
+      const res = await api.salesAgent.getPareto({
+        company_id: companyId,
+        periodo_tipo: periodo,
+        metric_type: paretoMetric,
+        search: paretoSearch,
+        page_size: 100
+      })
+      setParetoData(res)
+    } catch (e: any) {
+      toast.error("Error al calcular Pareto")
+    } finally {
+      setParetoLoading(false)
+    }
+  }
+
   useEffect(() => {
-    loadData()
-  }, [])
+    loadData(periodo)
+  }, [periodo])
+
+  useEffect(() => {
+    if (tab === "pareto") {
+      loadPareto()
+    }
+  }, [tab, paretoMetric, periodo])
 
   useEffect(() => {
     if (tab === "chat") {
@@ -88,6 +139,34 @@ export default function SalesAgentPage() {
     }
   }, [messages, tab])
 
+  // Ejecutar Simulación de Margen
+  const runSimulation = async (adjustments: Record<string, number>) => {
+    setSimLoading(true)
+    try {
+      const payloadCats = Object.entries(adjustments).map(([cat, pct]) => ({
+        categoria: cat,
+        variacion_pct: pct
+      }))
+      const res = await api.salesAgent.simulateMargin({
+        company_id: companyId,
+        periodo_tipo: periodo,
+        ajustes_categoria: payloadCats
+      })
+      setSimResult(res)
+    } catch (e: any) {
+      toast.error("Error al simular margen")
+    } finally {
+      setSimLoading(false)
+    }
+  }
+
+  const handleSliderChange = (categoria: string, val: number) => {
+    const updated = { ...simulatorCategoryAdjustments, [categoria]: val }
+    setSimulatorCategoryAdjustments(updated)
+    runSimulation(updated)
+  }
+
+  // Chat con Copiloto IA
   const handleSendMessage = async (textToSend?: string) => {
     const text = textToSend || inputMessage
     if (!text.trim() || chatLoading) return
@@ -102,6 +181,7 @@ export default function SalesAgentPage() {
         company_id: companyId,
         message: text,
         context_tab: tab,
+        conversation_history: messages.slice(-4)
       })
 
       const botMsg = {
@@ -111,24 +191,52 @@ export default function SalesAgentPage() {
         prompts: res.suggested_prompts || []
       }
       setMessages(prev => [...prev, botMsg])
+
+      // Si hubo una accion ejecutada (como cambio de meta o precio), refrescar datos
+      if (res.action_outcome) {
+        toast.success(`Acción IA ejecutada: ${res.action_outcome.titulo}`)
+        loadData()
+      }
     } catch (e: any) {
-      toast.error("Error al comunicarse con el Gerente IA")
+      toast.error("Error al comunicarse con el Copiloto Comercial")
     } finally {
       setChatLoading(false)
     }
   }
 
-  // Abrir Modal de Ajuste y Confirmación
+  // Toggle de Producto Gancho (KVI)
+  const handleToggleKvi = async (proposal: any) => {
+    const nuevoEstado = !proposal.es_gancho
+    try {
+      await api.salesAgent.toggleKvi({
+        company_id: companyId,
+        product_id: proposal.product_id,
+        es_gancho: nuevoEstado,
+        motivo: nuevoEstado ? "Marcado como Producto Gancho KVI" : "Desprotegido de KVI"
+      })
+      toast.success(nuevoEstado ? `Producto protegido como KVI: ${proposal.nombre}` : `KVI removido: ${proposal.nombre}`)
+      // Actualizar localmente la propuesta
+      setAnalysis((prev: any) => ({
+        ...prev,
+        propuestas_precios: prev.propuestas_precios.map((p: any) =>
+          p.product_id === proposal.product_id ? { ...p, es_gancho: nuevoEstado, tipo_estrategia: nuevoEstado ? "kvi_gancho" : "recuperacion_gap" } : p
+        )
+      }))
+    } catch (e: any) {
+      toast.error("Error al actualizar estado KVI")
+    }
+  }
+
+  // Modal de Ajuste de Precios
   const openPriceModal = (proposal: any) => {
     setModalProposal(proposal)
     setCustomPrice(Number(proposal.precio_sugerido))
     setCustomMotivo(proposal.motivo || "Ajuste de margen sugerido por Gerente IA")
-    const scales: Array<{min_qty: number; precio_unitario: number; descripcion: string}> =
-      (proposal.escalas_precio || []).map((e: any) => ({
-        min_qty: Number(e.min_qty),
-        precio_unitario: Number(e.precio_unitario),
-        descripcion: String(e.descripcion),
-      }))
+    const scales = (proposal.escalas_precio || []).map((e: any) => ({
+      min_qty: Number(e.min_qty),
+      precio_unitario: Number(e.precio_unitario),
+      descripcion: String(e.descripcion)
+    }))
     if (scales.length === 0) {
       scales.push({ min_qty: 1, precio_unitario: Number(proposal.precio_sugerido), descripcion: "Minorista (1 un)" })
       scales.push({ min_qty: 3, precio_unitario: Math.round(Number(proposal.precio_sugerido) * 0.96 / 50) * 50, descripcion: "Pack x3 un" })
@@ -144,14 +252,8 @@ export default function SalesAgentPage() {
     setCustomScales([])
   }
 
-  const updateScalePrice = (idx: number, newPrice: number) => {
-    const updated = customScales.map((s, i) => i === idx ? { ...s, precio_unitario: newPrice } : s)
-    if (idx === 0) setCustomPrice(newPrice)
-    setCustomScales(updated)
-  }
-
-  const handleConfirmPrice = async () => {
-    if (!modalProposal || customPrice <= 0) return
+  const handleApplyPrice = async () => {
+    if (!modalProposal) return
     setApplyingPrice(modalProposal.id)
     try {
       const res = await api.salesAgent.applyPrice({
@@ -159,491 +261,491 @@ export default function SalesAgentPage() {
         product_id: modalProposal.product_id,
         nuevo_precio: customPrice,
         motivo: customMotivo,
+        escalas: customScales
       })
-      if (res.success) {
-        toast.success("Precio Aplicado con Éxito", `Se fijó ${formatPYG(customPrice)} en POS y góndola para ${modalProposal.nombre}`)
-        if (analysis?.propuestas_precios) {
-          analysis.propuestas_precios = analysis.propuestas_precios.map((p: any) =>
-            p.id === modalProposal.id ? { ...p, estado: "aplicado", precio_sugerido: customPrice } : p
-          )
-        }
-        closePriceModal()
-      }
+      toast.success(`Precio aplicado en POS a ${res.product_name || modalProposal.nombre}: ${formatPYG(customPrice)}`)
+      closePriceModal()
+      loadData()
     } catch (e: any) {
-      toast.error(e.message || "Error al aplicar precio")
+      toast.error("Error al aplicar precio en el sistema")
     } finally {
       setApplyingPrice(null)
     }
   }
 
-  const handleConfirmBatch = async () => {
-    setApplyingAll(true)
+  // Guardar Metas Comerciales
+  const handleSaveSettings = async () => {
     try {
-      const pending = (analysis?.propuestas_precios || []).filter((p: any) => p.estado !== "aplicado")
-      for (const p of pending) {
-        await api.salesAgent.applyPrice({
-          company_id: companyId,
-          product_id: p.product_id,
-          nuevo_precio: Number(p.precio_sugerido),
-          motivo: "Aplicación en Lote Gerente IA",
-        })
-      }
-      toast.success("Precios Aplicados en Lote", `Se actualizaron ${pending.length} productos en POS y catálogo`)
-      if (analysis?.propuestas_precios) {
-        analysis.propuestas_precios = analysis.propuestas_precios.map((p: any) => ({ ...p, estado: "aplicado" }))
-      }
-      setBatchModalOpen(false)
-    } catch (e: any) {
-      toast.error("Error al aplicar precios en lote")
-    } finally {
-      setApplyingAll(false)
-    }
-  }
-
-  const handleToggleAction = (actionId: string) => {
-    if (analysis?.plan_accion_diario) {
-      const updated = analysis.plan_accion_diario.map((a: any) => {
-        if (a.id === actionId) {
-          const next = a.estado === "completado" ? "pendiente" : "completado"
-          if (next === "completado") toast.success("Acción Completada", a.titulo)
-          return { ...a, estado: next }
-        }
-        return a
+      await api.salesAgent.updateSettings({
+        company_id: companyId,
+        target_margen_minimo_pct: targetMinPct,
+        target_margen_ideal_pct: targetIdealPct
       })
-      setAnalysis({ ...analysis, plan_accion_diario: updated })
+      toast.success("Metas de margen actualizadas exitosamente")
+      setSettingsModalOpen(false)
+      loadData()
+    } catch (e: any) {
+      toast.error("Error al actualizar metas")
     }
   }
 
-  const toggleScaleExpansion = (id: string) => {
-    setExpandedScales(prev => ({ ...prev, [id]: !prev[id] }))
+  // Ejecutar Acción Operativa 1-Click
+  const handleExecuteTask = async (task: any, tipo: string) => {
+    try {
+      await api.salesAgent.executeTaskAction({
+        company_id: companyId,
+        task_id: task.id,
+        tipo_accion: tipo
+      })
+      toast.success(`Acción ejecutada: ${task.titulo}`)
+      loadData()
+    } catch (e: any) {
+      toast.error("Error al ejecutar acción")
+    }
   }
 
-  if (loading && !analysis) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[70vh] space-y-4">
-        <div className="relative">
-          <div className="w-16 h-16 rounded-3xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center animate-pulse shadow-xl shadow-indigo-500/10">
-            <TrendingUp className="w-8 h-8 text-indigo-500 animate-spin" />
-          </div>
-          <div className="absolute -top-1 -right-1 w-4 h-4 bg-indigo-500 rounded-full animate-ping" />
-        </div>
-        <div className="text-center">
-          <h3 className="text-base font-bold text-slate-900 dark:text-white">Conectando con el Motor Comercial IA & Ñemuha</h3>
-          <p className="text-xs text-slate-500 mt-1">Auditando movimientos del mes en curso y escalas de precios...</p>
-        </div>
-      </div>
-    )
+  // Descartar Tarea con Motivo (Aprendizaje)
+  const handleDiscardTask = async (taskId: string) => {
+    const motivo = prompt("Indica el motivo del descarte para que el Gerente IA aprenda esta regla:")
+    if (!motivo) return
+    try {
+      await api.salesAgent.updateTaskStatus({
+        company_id: companyId,
+        task_id: taskId,
+        estado: "descartado",
+        motivo_descarte: motivo
+      })
+      toast.success("Tarea descartada y regla de negocio aprendida por la IA")
+      loadData()
+    } catch (e: any) {
+      toast.error("Error al descartar tarea")
+    }
   }
 
-  const margen = analysis?.margen_actual_pct || 16.4
-  const gap24 = analysis?.gap_para_24_pct_gs || 48009408
-  const facturacion = analysis?.facturacion_mes || 635839971
-  const ganancia = analysis?.ganancia_bruta_mes || 104592185
-  const proyeccion = analysis?.proyeccion_cierre_mes_gs || 1231939944
-  const tickets = analysis?.tickets_mes || 6301
+  // Crear Regla de Negocio Manual
+  const handleCreateRule = async () => {
+    if (!newRuleText.trim()) return
+    try {
+      await api.salesAgent.createBusinessRule({
+        company_id: companyId,
+        regla: newRuleText,
+        categoria: "estrategia_comercial"
+      })
+      toast.success("Regla incorporada a la memoria del Gerente IA")
+      setNewRuleText("")
+      const rules = await api.salesAgent.getBusinessRules(companyId)
+      setBusinessRules(rules || [])
+    } catch (e: any) {
+      toast.error("Error al registrar regla")
+    }
+  }
 
-  const allProposals = analysis?.propuestas_precios || []
-  const uniqueCats = Array.from(new Set(allProposals.map((p: any) => String(p.categoria || "general").toLowerCase()))) as string[]
-  const categoriesList: string[] = ["todas", ...uniqueCats]
+  const margen = analysis?.margen_actual_pct || 0
+  const gap24 = Number(analysis?.gap_para_24_pct_gs || 0)
 
-  const filteredProposals = allProposals.filter((p: any) => {
+  // Filtrado de propuestas
+  const filteredProposals = (analysis?.propuestas_precios || []).filter((p: any) => {
     const matchesCat = filterCategory === "todas" || p.categoria.toLowerCase() === filterCategory.toLowerCase()
-    const matchesSearch = !searchQuery || p.nombre.toLowerCase().includes(searchQuery.toLowerCase()) || p.categoria.toLowerCase().includes(searchQuery.toLowerCase())
-    return matchesCat && matchesSearch
+    const matchesSearch = !searchQuery || p.nombre.toLowerCase().includes(searchQuery.toLowerCase())
+    let matchesStrat = true
+    if (filterStrategy === "fugas") matchesStrat = Number(p.precio_actual) <= Number(p.costo_unitario)
+    if (filterStrategy === "ganchos") matchesStrat = p.tipo_estrategia === "kvi_gancho" || p.es_gancho
+    if (filterStrategy === "candidatos") matchesStrat = Number(p.margen_actual_pct) < 24.0
+    return matchesCat && matchesSearch && matchesStrat
   })
 
-  const simAddedGain = filteredProposals.reduce((acc: number, p: any) => {
-    const simPrice = simulatedIncreases[p.id] ?? Number(p.precio_sugerido)
-    const diff = Math.max(0, simPrice - Number(p.precio_actual))
-    const vol = p.nombre.includes("COSTILLA") ? 750 : p.nombre.includes("BRAHMITA") ? 5200 : p.nombre.includes("MICHELOB") ? 2400 : 1200
-    return acc + (diff * vol)
-  }, 0)
-
-  const simulatedMarginPct = facturacion > 0
-    ? Number((((ganancia + simAddedGain) / (facturacion + simAddedGain)) * 100).toFixed(1))
-    : 18.2
-
-  const simulatedGapReduction = Math.min(100, Math.round((simAddedGain / gap24) * 100))
-  const modalCosto = Number(modalProposal?.costo_unitario || 0)
-
   return (
-    <div className="space-y-6 animate-fade-in-up pb-16">
-      {/* 🌟 LUXURY COMMAND DECK HEADER */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/90 text-white p-7 border border-indigo-500/20 shadow-2xl shadow-indigo-950/30">
-        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-          <div className="space-y-3">
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-blue-500 border border-indigo-400/30 text-white flex items-center justify-center shadow-lg shadow-indigo-500/25">
-                  <TrendingUp className="w-7 h-7" />
-                </div>
-                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500 border-2 border-slate-950"></span>
-                </span>
-              </div>
-              <div>
-                <div className="flex items-center gap-2.5 flex-wrap">
-                  <span className="text-[10px] font-extrabold tracking-widest text-indigo-400 uppercase bg-indigo-500/10 px-2.5 py-0.5 rounded-md border border-indigo-500/20">
-                    INTELIGENCIA ARTIFICIAL · TORRE DE CONTROL
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    Target Margen: 24.0%
-                  </span>
-                </div>
-                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
-                  Gerente de Ventas IA
-                </h1>
-                <p className="text-xs text-slate-400 font-medium mt-0.5">
-                  Optimización de precios, elasticidad comercial y auditoría de márgenes para Extra Supermercado
-                </p>
-              </div>
-            </div>
-
-            {/* Micro pills de estado */}
-            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
-              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
-                🏢 Extra Supermercado (Central)
-              </span>
-              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
-                ⚡ Motor: Gemini 2.5 Flash Pipeline
-              </span>
-              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-indigo-300">
-                📊 {tickets.toLocaleString()} Tickets MTD auditados
-              </span>
-            </div>
+    <div className="p-4 md:p-8 space-y-6 max-w-7xl mx-auto">
+      {/* ══════════════════════ HEADER GLOBAL CON PERÍODO Y METAS ══════════════════════ */}
+      <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-lg shadow-indigo-500/20">
+            <TrendingUp className="w-6 h-6" />
           </div>
-
-          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
-            <button
-              onClick={loadData}
-              disabled={loading}
-              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-              Recalcular MTD
-            </button>
-            <button
-              onClick={() => setTab("chat")}
-              className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-indigo-600 to-blue-500 hover:from-indigo-500 hover:to-blue-400 transition shadow-lg shadow-indigo-500/25 flex items-center gap-2"
-            >
-              <MessageSquare className="w-4 h-4" />
-              Copiloto Comercial IA
-            </button>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">Gerente de Ventas IA</h1>
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-950/80 dark:text-indigo-400">
+                Torre Comercial 2.0
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">Auditoría en tiempo real de márgenes, Pareto 80/20, remarcaciones y copiloto ReAct</p>
           </div>
         </div>
 
-        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Margen Actual MTD</span>
-              <span className="text-[10px] font-mono text-slate-400">Meta: 24.0%</span>
-            </div>
-            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">{margen}%</p>
-            <p className="text-[11px] text-slate-400">Piso mínimo requerido: 20.0%</p>
+        {/* Controles de Período y Botón de Metas */}
+        <div className="flex items-center flex-wrap gap-2.5 w-full lg:w-auto">
+          <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-2xl border border-slate-200 dark:border-slate-700 text-xs">
+            <Calendar className="w-3.5 h-3.5 text-slate-500" />
+            <select
+              value={periodo}
+              onChange={(e) => setPeriodo(e.target.value as PeriodType)}
+              className="bg-transparent border-none text-slate-800 dark:text-slate-200 font-bold focus:ring-0 cursor-pointer text-xs"
+            >
+              <option value="mes_actual">Mes en Curso (MTD)</option>
+              <option value="mes_anterior">Mes Anterior</option>
+              <option value="ultimos_30_dias">Últimos 30 Días</option>
+            </select>
           </div>
 
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Gap MTD al 24%</span>
-              <span className="text-[10px] font-bold text-rose-400">Por recuperar</span>
-            </div>
-            <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
-              {formatPYG(gap24)}
-            </p>
-            <p className="text-[11px] text-slate-400">Objetivo de remarcación en el mes</p>
-          </div>
+          <button
+            onClick={() => setSettingsModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition"
+          >
+            <Settings className="w-3.5 h-3.5 text-indigo-500" />
+            Metas ({analysis?.margen_ideal_target_pct || 24}%)
+          </button>
 
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Facturación MTD</span>
-              <span className="text-[10px] font-bold text-emerald-400 font-mono">Mes en Curso</span>
-            </div>
-            <p className="text-2xl font-black font-mono tracking-tight text-white">
-              {formatPYG(facturacion)}
-            </p>
-            <p className="text-[11px] text-emerald-400 font-mono font-semibold">Proy. Cierre: {formatPYG(proyeccion)}</p>
-          </div>
-
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Ganancia Bruta MTD</span>
-              <span className="text-[10px] font-mono text-teal-400">Margen Comercial</span>
-            </div>
-            <p className="text-2xl font-black font-mono tracking-tight text-teal-300">
-              {formatPYG(ganancia)}
-            </p>
-            <p className="text-[11px] text-slate-400">Costo mercadería: {formatPYG(facturacion - ganancia)}</p>
-          </div>
+          <button
+            onClick={() => loadData(periodo)}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md shadow-indigo-600/20 transition disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+            Auditar
+          </button>
         </div>
       </div>
 
-      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
-      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+      {/* ══════════════════════ TABS DE NAVEGACIÓN ══════════════════════ */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 border-b border-slate-200 dark:border-slate-800">
         {[
-          { key: "rentabilidad", label: "Rentabilidad por Sección", icon: Target },
-          { key: "precios", label: `Propuestas de Precios (${allProposals.length})`, icon: Tag, badge: allProposals.filter((p: any) => p.estado !== "aplicado").length },
-          { key: "pareto", label: "Matriz Pareto & KVIs", icon: Scale },
+          { key: "rentabilidad", label: "Torre de Control", icon: Activity },
+          { key: "pareto", label: "Matriz Pareto 80/20", icon: PieChart },
+          { key: "precios", label: "Propuestas de Precios & KVI", icon: Tag },
           { key: "simulador", label: "Simulador de Margen", icon: Sliders },
-          { key: "chat", label: "Copiloto Comercial IA", icon: MessageSquare },
-          { key: "acciones", label: "Plan de Acción Diario", icon: ListTodo, badge: analysis?.plan_accion_diario?.filter((a: any) => a.estado !== "completado").length },
-        ].map(t => {
+          { key: "chat", label: "Copiloto Comercial IA", icon: Bot },
+          { key: "acciones", label: "Plan de Acción 1-Click", icon: ListTodo }
+        ].map((t) => {
           const Icon = t.icon
-          const active = tab === t.key
+          const isActive = tab === t.key
           return (
             <button
               key={t.key}
               onClick={() => setTab(t.key as AgentTab)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
-                active
-                  ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold whitespace-nowrap transition ${
+                isActive
+                  ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20"
+                  : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
               }`}
             >
-              <Icon className="w-4 h-4" />
-              <span>{t.label}</span>
-              {t.badge !== undefined && t.badge > 0 && (
-                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
-                  active ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
-                }`}>
-                  {t.badge}
-                </span>
-              )}
+              <Icon className="w-3.5 h-3.5" />
+              {t.label}
             </button>
           )
         })}
       </div>
 
-      {/* ══════════════════════ PESTAÑA 1: RENTABILIDAD & SECCIONES ══════════════════════ */}
-      {tab === "rentabilidad" && (
+      {loading && (
+        <div className="p-12 flex flex-col items-center justify-center gap-3 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800">
+          <Loader2 className="w-8 h-8 text-indigo-600 animate-spin" />
+          <p className="text-xs font-bold text-slate-500">Auditando ventas en tiempo real contra PostgreSQL...</p>
+        </div>
+      )}
+
+      {/* ══════════════════════ PESTAÑA 1: TORRE DE CONTROL (RENTABILIDAD) ══════════════════════ */}
+      {!loading && tab === "rentabilidad" && analysis && (
         <div className="space-y-6">
-          <div className="bg-gradient-to-r from-indigo-500/10 via-blue-500/5 to-transparent rounded-2xl p-5 border border-indigo-500/30 flex items-start gap-4 shadow-sm">
-            <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 mt-0.5">
-              <Sparkles className="w-5 h-5" />
+          {/* Tarjetas KPI */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-1">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Facturación del Período</span>
+              <p className="text-2xl font-black font-mono text-slate-900 dark:text-white">{formatPYG(analysis.facturacion_mes)}</p>
+              <span className="text-[11px] text-slate-500">{analysis.tickets_mes?.toLocaleString()} tickets confirmados</span>
             </div>
-            <div className="space-y-1">
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">Dictamen Estratégico MTD (Agosto 2026)</h3>
-              <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-                {analysis?.resumen_ejecutivo}
-              </p>
+
+            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-1">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Margen Ponderado Real</span>
+              <div className="flex items-baseline gap-2">
+                <p className={`text-2xl font-black font-mono ${margen >= 20 ? "text-emerald-600" : "text-rose-600"}`}>
+                  {margen}%
+                </p>
+                <span className="text-xs text-slate-400 font-medium">Meta: {analysis.margen_ideal_target_pct}%</span>
+              </div>
+              <span className="text-[11px] text-slate-500">Ganancia: {formatPYG(analysis.ganancia_bruta_mes)}</span>
+            </div>
+
+            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-1">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Gap para Meta ({analysis.margen_ideal_target_pct}%)</span>
+              <p className="text-2xl font-black font-mono text-amber-600 dark:text-amber-400">{formatPYG(gap24)}</p>
+              <span className="text-[11px] text-slate-500">Ganancia adicional requerida</span>
+            </div>
+
+            <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-1">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Proyección de Cierre</span>
+              <p className="text-2xl font-black font-mono text-indigo-600 dark:text-indigo-400">{formatPYG(analysis.proyeccion_cierre_mes_gs)}</p>
+              <span className="text-[11px] text-slate-500">Run-rate mensual estimado</span>
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">Rentabilidad Real por Sección en el Mes en Curso</h3>
-                <p className="text-xs text-slate-500">Márgenes calculados cruzando los {tickets.toLocaleString()} tickets de venta del mes</p>
-              </div>
-              <span className="text-xs font-mono font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50 px-3 py-1 rounded-full border border-indigo-200 dark:border-indigo-800">
-                Meta Global: 24.0%
-              </span>
+          {/* Resumen Ejecutivo */}
+          <div className="p-6 rounded-3xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-200/80 dark:border-indigo-800/40 space-y-2">
+            <div className="flex items-center gap-2 text-indigo-700 dark:text-indigo-400 font-bold text-xs uppercase tracking-wider">
+              <Sparkles className="w-4 h-4" />
+              Dictamen Ejecutivo del Gerente IA
             </div>
+            <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed font-medium">
+              {analysis.resumen_ejecutivo}
+            </p>
+          </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-400 font-bold uppercase text-[10px]">
-                    <th className="text-left py-3.5 px-4">Departamento</th>
-                    <th className="text-right py-3.5 px-4">Facturación MTD</th>
-                    <th className="text-center py-3.5 px-4">Margen MTD</th>
-                    <th className="text-center py-3.5 px-4">Target Sugerido</th>
-                    <th className="text-left py-3.5 px-4">Directiva Comercial del Gerente IA</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {(analysis?.rentabilidad_por_departamento || []).map((d: any, idx: number) => (
-                    <tr key={idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
-                      <td className="py-3.5 px-4 font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full ${
-                          d.margen_actual_pct >= 20 ? "bg-emerald-500" :
-                          d.margen_actual_pct >= 12 ? "bg-blue-500" : "bg-rose-500"
-                        }`} />
-                        {d.departamento}
-                      </td>
-                      <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
-                        {formatPYG(d.facturacion_gs)}
-                      </td>
-                      <td className="py-3.5 px-4 text-center">
-                        <span className={`px-2.5 py-1 rounded-full font-mono font-bold text-[11px] ${
-                          d.margen_actual_pct >= 20 ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400" :
-                          d.margen_actual_pct >= 12 ? "bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-400" :
-                          "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400"
-                        }`}>
-                          {d.margen_actual_pct}%
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4 text-center font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                        {d.target_sugerido_pct}%
-                      </td>
-                      <td className="py-3.5 px-4 text-slate-600 dark:text-slate-300">
-                        {d.estrategia}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {/* Desglose por Departamento */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">Rendimiento por Departamento</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {analysis.rentabilidad_por_departamento?.map((d: any, idx: number) => (
+                <div key={idx} className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">{d.departamento}</h4>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                      d.margen_actual_pct >= d.target_sugerido_pct ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300" :
+                      d.margen_actual_pct >= 15 ? "bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300" :
+                      "bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300"
+                    }`}>
+                      {d.margen_actual_pct}%
+                    </span>
+                  </div>
+                  <p className="text-[11px] font-mono text-slate-500">Facturación: {formatPYG(d.facturacion_gs)}</p>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">{d.estrategia}</p>
+                </div>
+              ))}
             </div>
           </div>
         </div>
       )}
 
-      {/* ══════════════════════ PESTAÑA 2: PROPUESTAS DE PRECIOS & ESCALAS ══════════════════════ */}
-      {tab === "precios" && (
+      {/* ══════════════════════ PESTAÑA 2: MATRIZ PARETO 80/20 REAL ══════════════════════ */}
+      {!loading && tab === "pareto" && (
         <div className="space-y-6">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                Propuestas de Precios & Escalas de Volumen (Ñemuha)
-              </h3>
-              <p className="text-xs text-slate-500">
-                Mostrando {filteredProposals.length} de {allProposals.length} productos evaluados en el mes
-              </p>
-            </div>
-            <button
-              onClick={() => setBatchModalOpen(true)}
-              disabled={applyingAll}
-              className="px-5 py-2.5 rounded-xl text-xs bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-2 shadow-lg shadow-indigo-500/20 font-bold self-start md:self-auto transition"
-            >
-              <Zap className="w-4 h-4" />
-              Aplicar Propuestas en Lote a POS...
-            </button>
-          </div>
+          {/* Tarjetas Resumen ABC */}
+          {paretoData?.resumen && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-2 relative overflow-hidden">
+                <div className="h-1.5 w-full bg-emerald-500 absolute top-0 left-0" />
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-emerald-600 uppercase tracking-wider">Clase A (Top SKUs)</span>
+                  <span className="text-xs font-mono font-bold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 px-2.5 py-0.5 rounded-full">
+                    80% Facturación
+                  </span>
+                </div>
+                <p className="text-2xl font-black font-mono text-slate-900 dark:text-white">
+                  {paretoData.resumen.clase_a_skus} SKUs ({paretoData.resumen.clase_a_pct}%)
+                </p>
+                <p className="text-xs text-slate-500">Generadores de tráfico y volumen masivo del supermercado.</p>
+              </div>
 
-          {/* Barra de Búsqueda y Filtro de Categoría */}
-          <div className="flex flex-col sm:flex-row items-center gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-            <div className="relative flex-1 w-full">
-              <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
+              <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-2 relative overflow-hidden">
+                <div className="h-1.5 w-full bg-blue-500 absolute top-0 left-0" />
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">Clase B (Margin Drivers)</span>
+                  <span className="text-xs font-mono font-bold bg-blue-50 dark:bg-blue-950/60 text-blue-700 px-2.5 py-0.5 rounded-full">
+                    15% Facturación
+                  </span>
+                </div>
+                <p className="text-2xl font-black font-mono text-slate-900 dark:text-white">
+                  {paretoData.resumen.clase_b_skus} SKUs ({paretoData.resumen.clase_b_pct}%)
+                </p>
+                <p className="text-xs text-slate-500">Motores de ganancia bruta con rotación intermedia.</p>
+              </div>
+
+              <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-2 relative overflow-hidden">
+                <div className="h-1.5 w-full bg-purple-500 absolute top-0 left-0" />
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-purple-600 uppercase tracking-wider">Clase C (Surtido & Nicho)</span>
+                  <span className="text-xs font-mono font-bold bg-purple-50 dark:bg-purple-950/60 text-purple-700 px-2.5 py-0.5 rounded-full">
+                    5% Facturación
+                  </span>
+                </div>
+                <p className="text-2xl font-black font-mono text-slate-900 dark:text-white">
+                  {paretoData.resumen.clase_c_skus} SKUs ({paretoData.resumen.clase_c_pct}%)
+                </p>
+                <p className="text-xs text-slate-500">Variedad de góndola y artículos de baja rotación.</p>
+              </div>
+            </div>
+          )}
+
+          {/* Tabla Interactiva de Pareto */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                Desglose de SKUs en Curva ABC ({paretoData?.total_items || 0} productos)
+              </h3>
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <div className="relative flex-1 sm:w-64">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Buscar producto..."
+                    value={paretoSearch}
+                    onChange={(e) => setParetoSearch(e.target.value)}
+                    className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                  />
+                </div>
+                <select
+                  value={paretoMetric}
+                  onChange={(e) => setParetoMetric(e.target.value)}
+                  className="px-3 py-1.5 text-xs font-bold rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200"
+                >
+                  <option value="facturacion">Ranking por Facturación</option>
+                  <option value="ganancia">Ranking por Ganancia Bruta</option>
+                </select>
+              </div>
+            </div>
+
+            {paretoLoading ? (
+              <div className="p-8 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-indigo-600" /></div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200 dark:border-slate-800 text-[10px] font-bold uppercase text-slate-400">
+                      <th className="py-2.5 px-3">Clase</th>
+                      <th className="py-2.5 px-3">Producto / Código</th>
+                      <th className="py-2.5 px-3">Categoría</th>
+                      <th className="py-2.5 px-3 text-right">Cant. Vendida</th>
+                      <th className="py-2.5 px-3 text-right">Facturación</th>
+                      <th className="py-2.5 px-3 text-right">Margen %</th>
+                      <th className="py-2.5 px-3 text-right">Part. %</th>
+                      <th className="py-2.5 px-3 text-right">Acum. %</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-mono">
+                    {paretoData?.items?.map((it: any, idx: number) => (
+                      <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+                        <td className="py-2.5 px-3">
+                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                            it.clase === "A" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300" :
+                            it.clase === "B" ? "bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300" :
+                            "bg-purple-100 text-purple-800 dark:bg-purple-950/80 dark:text-purple-300"
+                          }`}>
+                            Clase {it.clase}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 font-sans font-bold text-slate-800 dark:text-slate-200">
+                          {it.nombre}
+                          {it.codigo_barra && <span className="block text-[10px] text-slate-400 font-mono">{it.codigo_barra}</span>}
+                        </td>
+                        <td className="py-2.5 px-3 font-sans text-slate-500">{it.categoria}</td>
+                        <td className="py-2.5 px-3 text-right">{Number(it.unidades_vendidas).toLocaleString()}</td>
+                        <td className="py-2.5 px-3 text-right font-bold text-slate-900 dark:text-white">{formatPYG(it.facturacion_total)}</td>
+                        <td className={`py-2.5 px-3 text-right font-bold ${it.margen_bruto_pct < 0 ? "text-rose-600" : "text-emerald-600"}`}>
+                          {it.margen_bruto_pct}%
+                        </td>
+                        <td className="py-2.5 px-3 text-right text-slate-500">{it.participacion_pct}%</td>
+                        <td className="py-2.5 px-3 text-right font-bold text-indigo-600 dark:text-indigo-400">{it.acumulado_pct}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════ PESTAÑA 3: PROPUESTAS DE PRECIOS & GESTIÓN KVI ══════════════════════ */}
+      {!loading && tab === "precios" && (
+        <div className="space-y-6">
+          {/* Barra de Filtros */}
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
+            <div className="flex items-center flex-wrap gap-2">
+              {[
+                { key: "todos", label: "Todas las Propuestas" },
+                { key: "fugas", label: "🚨 Fugas Críticas (Precio ≤ Costo)" },
+                { key: "ganchos", label: "⭐ Productos Gancho (KVI)" },
+                { key: "candidatos", label: "📈 Candidatos a Suba" }
+              ].map((s) => (
+                <button
+                  key={s.key}
+                  onClick={() => setFilterStrategy(s.key)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+                    filterStrategy === s.key
+                      ? "bg-indigo-600 text-white"
+                      : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200"
+                  }`}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="relative w-full md:w-64">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
               <input
                 type="text"
-                placeholder="Buscar por producto, corte de carne, marca o categoría..."
+                placeholder="Filtrar por SKU o nombre..."
                 value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
               />
-            </div>
-            <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto">
-              <Filter className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              <select
-                value={filterCategory}
-                onChange={e => setFilterCategory(e.target.value)}
-                className="text-xs py-2 px-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white capitalize cursor-pointer font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                {categoriesList.map((cat, i) => (
-                  <option key={i} value={cat}>
-                    {cat === "todas" ? "Todas las Secciones" : cat}
-                  </option>
-                ))}
-              </select>
             </div>
           </div>
 
-          {/* Grid de Propuestas */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {/* Grilla de Propuestas */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredProposals.map((p: any) => {
-              const diffPct = Number(p.margen_sugerido_pct) - Number(p.margen_actual_pct)
-              const isExpanded = expandedScales[p.id] || false
+              const diffPct = p.margen_sugerido_pct - p.margen_actual_pct
+              const isKvi = p.tipo_estrategia === "kvi_gancho" || p.es_gancho
+              const isFuga = Number(p.precio_actual) <= Number(p.costo_unitario)
+
               return (
                 <div
                   key={p.id}
-                  className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between space-y-5 hover:border-indigo-400/50 dark:hover:border-indigo-500/50 transition relative overflow-hidden group"
+                  className={`p-5 rounded-3xl bg-white dark:bg-slate-900 border transition shadow-sm space-y-4 flex flex-col justify-between ${
+                    isFuga
+                      ? "border-rose-400 dark:border-rose-800 bg-rose-50/20"
+                      : isKvi
+                      ? "border-amber-300 dark:border-amber-800/50"
+                      : "border-slate-200 dark:border-slate-800"
+                  }`}
                 >
-                  <div className="h-1 w-full bg-gradient-to-r from-indigo-500 to-blue-500 absolute top-0 left-0" />
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${
-                        p.tipo_estrategia === "kvi_gancho" ? "bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300" :
-                        p.tipo_estrategia === "margin_driver" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300" :
-                        "bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300"
-                      }`}>
-                        {p.tipo_estrategia.toUpperCase().replace("_", " ")} • {p.categoria}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-bold uppercase text-indigo-600 dark:text-indigo-400 tracking-wider">
+                        {p.categoria}
                       </span>
-                      <span className="text-xs font-mono font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2.5 py-0.5 rounded-full">
-                        +{formatPYG(p.impacto_mensual_gs)} / mes
-                      </span>
+                      <button
+                        onClick={() => handleToggleKvi(p)}
+                        className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold transition ${
+                          isKvi
+                            ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                            : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                        }`}
+                      >
+                        <Star className={`w-3 h-3 ${isKvi ? "fill-amber-500 text-amber-500" : ""}`} />
+                        {isKvi ? "Gancho / KVI" : "Hacer Gancho"}
+                      </button>
                     </div>
 
-                    <div>
-                      <h4 className="text-base font-bold text-slate-900 dark:text-white leading-snug">{p.nombre}</h4>
-                      <p className="text-xs text-slate-500 mt-1 leading-relaxed">{p.motivo}</p>
-                    </div>
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-white leading-snug">{p.nombre}</h4>
+                    <p className="text-[11px] text-slate-500 leading-relaxed">{p.motivo}</p>
 
-                    {/* Comparador Visual de Precios */}
-                    <div className="grid grid-cols-2 gap-3 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 text-xs">
+                    {/* Comparativa de Precios */}
+                    <div className="grid grid-cols-2 gap-2 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
                       <div>
-                        <span className="text-slate-400 text-[11px] font-medium">Venta Minorista Actual</span>
-                        <p className="font-mono font-bold text-slate-700 dark:text-slate-300 text-base mt-0.5">{formatPYG(p.precio_actual)}</p>
-                        <span className="text-[10px] text-slate-400 font-mono font-semibold">Margen: {p.margen_actual_pct}%</span>
+                        <span className="text-[10px] text-slate-400 font-bold uppercase">Precio Actual</span>
+                        <p className="font-mono font-bold text-slate-800 dark:text-slate-200 text-sm mt-0.5">{formatPYG(p.precio_actual)}</p>
+                        <span className="text-[10px] text-slate-400 font-mono">Margen: {p.margen_actual_pct}%</span>
                       </div>
                       <div>
-                        <span className="text-indigo-600 dark:text-indigo-400 font-bold text-[11px]">Precio Sugerido IA</span>
-                        <p className="font-mono font-black text-indigo-600 dark:text-indigo-400 text-base mt-0.5">{formatPYG(p.precio_sugerido)}</p>
-                        <span className="text-[10px] text-emerald-600 font-extrabold font-mono flex items-center gap-0.5">
-                          Nuevo Margen: {p.margen_sugerido_pct}% (+{diffPct.toFixed(1)}%)
+                        <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold uppercase">Precio Sugerido</span>
+                        <p className="font-mono font-black text-indigo-600 dark:text-indigo-400 text-sm mt-0.5">{formatPYG(p.precio_sugerido)}</p>
+                        <span className="text-[10px] text-emerald-600 font-bold font-mono">
+                          Margen: {p.margen_sugerido_pct}% (+{diffPct.toFixed(1)}%)
                         </span>
                       </div>
                     </div>
-
-                    {/* Desglose de Escalas de Precio por Volumen de Ñemuha */}
-                    {p.escalas_precio && p.escalas_precio.length > 0 && (
-                      <div className="space-y-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={() => toggleScaleExpansion(p.id)}
-                          className="flex items-center justify-between w-full text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-indigo-600 transition"
-                        >
-                          <span className="flex items-center gap-1.5">
-                            <Boxes className="w-3.5 h-3.5 text-indigo-500" />
-                            Escalas de Precio por Cantidad ({p.escalas_precio.length} tramos)
-                          </span>
-                          {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                        </button>
-
-                        {isExpanded && (
-                          <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 space-y-2 text-xs">
-                            {p.escalas_precio.map((esc: any, eIdx: number) => (
-                              <div key={eIdx} className="flex items-center justify-between text-[11px]">
-                                <span className="text-slate-600 dark:text-slate-400 font-medium">
-                                  {esc.descripcion}
-                                </span>
-                                <div className="flex items-center gap-2">
-                                  <span className="font-mono font-bold text-slate-900 dark:text-white">
-                                    {formatPYG(esc.precio_unitario)}
-                                  </span>
-                                  {esc.descuento_pct > 0 && (
-                                    <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/60 px-1.5 py-0.2 rounded">
-                                      -{esc.descuento_pct}%
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
                   </div>
 
-                  <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center">
-                    <span className="text-[11px] text-slate-400 font-mono">Costo Real: {formatPYG(p.costo_unitario)}</span>
-                    {p.estado === "aplicado" ? (
-                      <span className="px-3.5 py-1.5 rounded-xl bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 font-bold text-xs flex items-center gap-1.5">
-                        <Check className="w-3.5 h-3.5" /> Aplicado a POS
-                      </span>
-                    ) : (
-                      <button
-                        onClick={() => openPriceModal(p)}
-                        className="px-4 py-2 rounded-xl text-xs bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 shadow-sm font-bold transition"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                        Revisar y Aplicar a POS...
-                      </button>
-                    )}
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                    <span className="text-[11px] font-mono text-slate-400">Costo: {formatPYG(p.costo_unitario)}</span>
+                    <button
+                      onClick={() => openPriceModal(p)}
+                      className="px-3.5 py-1.5 rounded-xl text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-bold flex items-center gap-1.5 shadow-sm transition"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      Revisar y Aplicar...
+                    </button>
                   </div>
                 </div>
               )
@@ -652,301 +754,89 @@ export default function SalesAgentPage() {
         </div>
       )}
 
-      {/* ══════════════════════ MODAL DE AJUSTE MANUAL Y CONFIRMACIÓN ══════════════════════ */}
-      {modalProposal && createPortal(
-        <div className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-xl w-full p-6 space-y-5 relative max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 flex items-center justify-center">
-                  <Tag className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">Ajustar Escala de Precios</h3>
-                  <p className="text-xs text-slate-500">Editá cada tramo antes de aplicar en POS y góndola</p>
-                </div>
-              </div>
-              <button onClick={closePriceModal} className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 space-y-1 text-xs">
-              <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">{modalProposal.categoria}</span>
-              <h4 className="text-sm font-bold text-slate-900 dark:text-white">{modalProposal.nombre}</h4>
-              <div className="flex items-center gap-4 pt-2 font-mono text-slate-500">
-                <span>Precio Actual: <strong className="text-slate-800 dark:text-slate-200">{formatPYG(modalProposal.precio_actual)}</strong></span>
-                <span>Costo Real: <strong className="text-slate-800 dark:text-slate-200">{formatPYG(modalProposal.costo_unitario)}</strong></span>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h4 className="text-xs font-bold text-slate-700 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
-                  <Boxes className="w-3.5 h-3.5 text-indigo-500" />
-                  Escala de Precios por Cantidad ({customScales.length} tramos)
-                </h4>
-                <span className="text-[10px] text-slate-400 font-medium">Costo Unitario: {formatPYG(modalProposal.costo_unitario)}</span>
-              </div>
-
-              <div className="grid grid-cols-12 gap-2 text-[10px] font-bold uppercase text-slate-400 px-1">
-                <span className="col-span-4">Tramo / Descripción</span>
-                <span className="col-span-2 text-center">Cant. Mín.</span>
-                <span className="col-span-3 text-right">Precio (₲)</span>
-                <span className="col-span-2 text-center">Margen</span>
-                <span className="col-span-1"></span>
-              </div>
-
-              {customScales.map((scale, idx) => {
-                const scaleMargin = scale.precio_unitario > 0
-                  ? Number((((scale.precio_unitario - modalCosto) / scale.precio_unitario) * 100).toFixed(1))
-                  : 0
-                const discountVsBase = idx > 0 && customScales[0].precio_unitario > 0
-                  ? Number((((customScales[0].precio_unitario - scale.precio_unitario) / customScales[0].precio_unitario) * 100).toFixed(1))
-                  : 0
-                return (
-                  <div key={idx} className={`grid grid-cols-12 gap-2 items-center p-3 rounded-2xl border text-xs transition ${
-                    idx === 0
-                      ? "bg-indigo-50/60 dark:bg-indigo-950/20 border-indigo-200/80 dark:border-indigo-800/40"
-                      : "bg-slate-50 dark:bg-slate-800/40 border-slate-100 dark:border-slate-800"
-                  }`}>
-                    <div className="col-span-4">
-                      <p className="font-bold text-slate-800 dark:text-slate-200 text-[11px]">{scale.descripcion}</p>
-                      {idx === 0 && <span className="text-[10px] text-indigo-600 font-semibold">Precio Base</span>}
-                      {idx > 0 && discountVsBase > 0 && (
-                        <span className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold">-{discountVsBase}% vs base</span>
-                      )}
-                    </div>
-                    <div className="col-span-2 text-center">
-                      <span className="font-mono font-bold text-slate-500 text-[11px]">{scale.min_qty} un+</span>
-                    </div>
-                    <div className="col-span-3">
-                      <div className="relative">
-                        <span className="absolute left-2 top-1.5 font-mono text-slate-400 text-[10px]">₲</span>
-                        <input
-                          type="number"
-                          step="50"
-                          min={modalCosto}
-                          value={scale.precio_unitario}
-                          onChange={e => updateScalePrice(idx, Number(e.target.value))}
-                          className="w-full pl-6 pr-2 py-1.5 font-mono font-bold text-xs rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
-                        />
-                      </div>
-                    </div>
-                    <div className="col-span-2 text-center">
-                      <span className={`px-2 py-0.5 rounded-full font-mono font-bold text-[10px] ${
-                        scaleMargin >= 20 ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400" :
-                        scaleMargin >= 12 ? "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-400" :
-                        "bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400"
-                      }`}>
-                        {scaleMargin}%
-                      </span>
-                    </div>
-                    <div className="col-span-1 flex justify-center">
-                      {idx > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => setCustomScales(customScales.filter((_, i) => i !== idx))}
-                          className="p-1 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition"
-                          title="Quitar este tramo"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-
-              <button
-                type="button"
-                onClick={() => {
-                  const lastScale = customScales[customScales.length - 1]
-                  const lastPrice = lastScale?.precio_unitario ?? customPrice
-                  const lastQty = lastScale?.min_qty ?? 1
-                  setCustomScales([...customScales, {
-                    min_qty: lastQty + 6,
-                    precio_unitario: Math.round(lastPrice * 0.92 / 50) * 50,
-                    descripcion: `Mayorista Especial (${lastQty + 6}+ un)`
-                  }])
-                }}
-                className="w-full py-2 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-400 hover:border-indigo-400 hover:text-indigo-600 transition flex items-center justify-center gap-1.5"
-              >
-                + Agregar Tramo de Precio
-              </button>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="block font-bold text-slate-700 dark:text-slate-300 text-[11px] uppercase tracking-wider">
-                Motivo / Justificación de la Remarcación
-              </label>
-              <input
-                type="text"
-                value={customMotivo}
-                onChange={e => setCustomMotivo(e.target.value)}
-                placeholder="Ej. Ajuste de margen carnicería meta 24%"
-                className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-
-            <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center gap-3">
-              <div className="text-[11px] text-slate-400">
-                Tramo Base: <span className="font-mono font-bold text-indigo-600">{formatPYG(customScales[0]?.precio_unitario ?? customPrice)}</span>
-              </div>
-              <div className="flex gap-2">
-                <button type="button" onClick={closePriceModal}
-                  className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
-                  Cancelar
-                </button>
-                <button type="button" onClick={handleConfirmPrice}
-                  disabled={applyingPrice === modalProposal.id || customPrice <= 0}
-                  className="px-5 py-2.5 rounded-xl text-xs bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-2 font-bold shadow-md shadow-indigo-500/20 transition">
-                  {applyingPrice === modalProposal.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                  Confirmar y Aplicar Escala a POS
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      , document.body)}
-
-      {/* ══════════════════════ MODAL EN LOTE ══════════════════════ */}
-      {batchModalOpen && createPortal(
-        <div className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-lg w-full p-6 space-y-5 relative">
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 flex items-center justify-center font-bold">
-                  <Zap className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">Aplicar Todas las Propuestas a POS</h3>
-                  <p className="text-xs text-slate-500">Confirmación de remarcación en lote</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setBatchModalOpen(false)}
-                className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
-                Estás a punto de actualizar los precios de <strong>{allProposals.filter((p: any) => p.estado !== "aplicado").length} productos</strong> en el POS y catálogo de la tienda.
-              </p>
-
-              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 max-h-48 overflow-y-auto space-y-2">
-                {allProposals.filter((p: any) => p.estado !== "aplicado").map((p: any, i: number) => (
-                  <div key={i} className="flex justify-between items-center text-[11px] py-1 border-b border-slate-100 dark:border-slate-800 last:border-0">
-                    <span className="font-bold text-slate-800 dark:text-slate-200 truncate max-w-[240px]">{p.nombre}</span>
-                    <span className="font-mono font-bold text-indigo-600">
-                      {formatPYG(p.precio_actual)} → {formatPYG(p.precio_sugerido)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setBatchModalOpen(false)}
-                className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmBatch}
-                disabled={applyingAll}
-                className="px-5 py-2.5 rounded-xl text-xs bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-2 font-bold shadow-md shadow-indigo-500/20 transition"
-              >
-                {applyingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-                Confirmar y Aplicar Todo
-              </button>
-            </div>
-          </div>
-        </div>
-      , document.body)}
-
-      {/* ══════════════════════ PESTAÑA 3: MATRIZ PARETO 80/20 & KVI ══════════════════════ */}
-      {tab === "pareto" && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-2 relative overflow-hidden">
-              <div className="h-1 w-full bg-emerald-500 absolute top-0 left-0" />
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Clase A (Top SKUs)</span>
-                <span className="text-xs font-mono font-bold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 px-2 py-0.5 rounded-full">79.4% Facturación</span>
-              </div>
-              <p className="text-xl font-black text-slate-900 dark:text-white">Generadores de Tráfico</p>
-              <p className="text-xs text-slate-500 leading-relaxed">Productos de altísima rotación (Coca-Cola, Cervezas, Costilla, Leches). Precios competitivos sin destruir margen.</p>
-            </div>
-
-            <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-2 relative overflow-hidden">
-              <div className="h-1 w-full bg-blue-500 absolute top-0 left-0" />
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">Clase B (Margin Drivers)</span>
-                <span className="text-xs font-mono font-bold bg-blue-50 dark:bg-blue-950/60 text-blue-700 px-2 py-0.5 rounded-full">15.2% Facturación</span>
-              </div>
-              <p className="text-xl font-black text-slate-900 dark:text-white">Motores de Ganancia</p>
-              <p className="text-xs text-slate-500 leading-relaxed">Aquí se captura el margen del supermercado (24% a 38%) mediante cortes especiales, fiambrería y embutidos.</p>
-            </div>
-
-            <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-2 relative overflow-hidden">
-              <div className="h-1 w-full bg-purple-500 absolute top-0 left-0" />
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-purple-600 dark:text-purple-400 uppercase tracking-wider">Clase C (Surtido y Variedad)</span>
-                <span className="text-xs font-mono font-bold bg-purple-50 dark:bg-purple-950/60 text-purple-700 px-2 py-0.5 rounded-full">5.4% Facturación</span>
-              </div>
-              <p className="text-xl font-black text-slate-900 dark:text-white">Variedad de Góndola</p>
-              <p className="text-xs text-slate-500 leading-relaxed">Artículos complementarios. Márgenes altos (30%+) para compensar menor rotación.</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ══════════════════════ PESTAÑA 4: SIMULADOR DE MARGEN ══════════════════════ */}
-      {tab === "simulador" && (
+      {/* ══════════════════════ PESTAÑA 4: SIMULADOR DE MARGEN INTERACTIVO ══════════════════════ */}
+      {!loading && tab === "simulador" && (
         <div className="space-y-6">
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-6">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">Simulador Dinámico de Elasticidad & Margen Comercial</h3>
-                <p className="text-xs text-slate-500">Calculá el impacto en la ganancia bruta mensual ajustando precios sugeridos</p>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">Simulador de Elasticidad & Margen Comercial</h3>
+                <p className="text-xs text-slate-500">Mové los sliders por categoría para proyectar la ganancia bruta y la reducción del gap</p>
               </div>
-              <span className="text-xs font-mono font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50 px-3 py-1 rounded-full border border-indigo-200 dark:border-indigo-800">
-                Reducción del Gap: {simulatedGapReduction}%
-              </span>
+              {simResult && (
+                <span className="text-xs font-mono font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50 px-3 py-1 rounded-full border border-indigo-200 dark:border-indigo-800">
+                  Reducción del Gap: {simResult.reduccion_gap_pct}%
+                </span>
+              )}
             </div>
 
+            {/* Tarjetas de Proyección de Impacto */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800">
                 <span className="text-[11px] text-slate-400 font-bold uppercase">Margen Simulado</span>
-                <p className="text-2xl font-black font-mono text-indigo-600 dark:text-indigo-400 mt-1">{simulatedMarginPct}%</p>
+                <p className="text-2xl font-black font-mono text-indigo-600 dark:text-indigo-400 mt-1">
+                  {simResult?.margen_simulado_pct || margen}%
+                </p>
                 <span className="text-[11px] text-slate-500">Actual: {margen}%</span>
               </div>
+
               <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800">
-                <span className="text-[11px] text-slate-400 font-bold uppercase">Ganancia Adicional</span>
-                <p className="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400 mt-1">+{formatPYG(simAddedGain)}</p>
-                <span className="text-[11px] text-slate-500">En el mes</span>
+                <span className="text-[11px] text-slate-400 font-bold uppercase">Ganancia Adicional Esperada</span>
+                <p className="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400 mt-1">
+                  +{formatPYG(simResult?.ganancia_adicional_gs || 0)}
+                </p>
+                <span className="text-[11px] text-slate-500">En el período</span>
               </div>
+
               <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800">
                 <span className="text-[11px] text-slate-400 font-bold uppercase">Gap Restante</span>
-                <p className="text-2xl font-black font-mono text-rose-500 mt-1">{formatPYG(Math.max(0, gap24 - simAddedGain))}</p>
-                <span className="text-[11px] text-slate-500">Para meta del 24%</span>
+                <p className="text-2xl font-black font-mono text-rose-500 mt-1">
+                  {formatPYG(simResult?.gap_restante_gs || gap24)}
+                </p>
+                <span className="text-[11px] text-slate-500">Para meta del {analysis?.margen_ideal_target_pct}%</span>
+              </div>
+            </div>
+
+            {/* Sliders por Categoría */}
+            <div className="space-y-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+              <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">Ajuste de Precios por Departamento</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {analysis?.rentabilidad_por_departamento?.map((d: any, idx: number) => {
+                  const currentVal = simulatorCategoryAdjustments[d.departamento] || 0
+                  return (
+                    <div key={idx} className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{d.departamento}</span>
+                        <span className={`text-xs font-mono font-bold ${currentVal > 0 ? "text-indigo-600" : currentVal < 0 ? "text-rose-600" : "text-slate-400"}`}>
+                          {currentVal > 0 ? `+${currentVal}%` : `${currentVal}%`}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-10"
+                        max="25"
+                        step="1"
+                        value={currentVal}
+                        onChange={(e) => handleSliderChange(d.departamento, Number(e.target.value))}
+                        className="w-full accent-indigo-600 cursor-pointer"
+                      />
+                      <div className="flex items-center justify-between text-[10px] text-slate-400">
+                        <span>Margen actual: {d.margen_actual_pct}%</span>
+                        <span>Factura: {formatPYG(d.facturacion_gs)}</span>
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* ══════════════════════ PESTAÑA 5: CHAT COMERCIAL COPILOTO IA ══════════════════════ */}
-      {tab === "chat" && (
+      {/* ══════════════════════ PESTAÑA 5: COPILOTO COMERCIAL IA (REACT + MEMORIA) ══════════════════════ */}
+      {!loading && tab === "chat" && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Columna Izquierda: Perfil del Gerente y Atajos */}
+          {/* Columna Izquierda: Perfil y Memoria del Negocio */}
           <div className="lg:col-span-4 space-y-4">
             <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
               <div className="flex items-center gap-3">
@@ -954,71 +844,84 @@ export default function SalesAgentPage() {
                   <Bot className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">Gerente de Ventas IA</h3>
-                  <p className="text-[11px] text-slate-500">Motor Gemini 2.5 Flash Grounded</p>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">Gerente Comercial Autónomo</h3>
+                  <p className="text-[11px] text-slate-500">Inferencia local Qwen 2.5 7B en Ollama</p>
                 </div>
-              </div>
-              <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 text-xs text-slate-600 dark:text-slate-300 space-y-1.5">
-                <div className="flex items-center gap-1.5 font-bold text-indigo-600 dark:text-indigo-400">
-                  <Activity className="w-3.5 h-3.5" /> Capacidades Activas
-                </div>
-                <p>• Análisis de elasticidad de precios por SKU.</p>
-                <p>• Consulta de escalas de volumen en Ñemuha.</p>
-                <p>• Estrategia de margen en Carnicería y PARESA.</p>
               </div>
 
-              <div className="space-y-2 pt-2">
-                <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Consultas Rápidas Sugeridas</span>
-                <div className="flex flex-col gap-2">
-                  {[
-                    "¿Cómo cerramos el Gap para llegar al 24%?",
-                    "Estrategia de precios en Carnicería",
-                    "Diagnóstico de Bebidas y Cervezas (PARESA)",
-                    "Ver escalas de precio por bulto / fardo"
-                  ].map((q, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => handleSendMessage(q)}
-                      className="text-left text-xs p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-100 dark:border-slate-800 transition"
-                    >
-                      {q}
-                    </button>
-                  ))}
+              {/* Memoria de Reglas del Negocio */}
+              <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
+                  <Brain className="w-3.5 h-3.5 text-indigo-500" />
+                  Memoria Activa del Negocio ({businessRules.length})
+                </div>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  {businessRules.length === 0 ? (
+                    <p className="text-[11px] text-slate-400 italic">No hay directivas registradas aún.</p>
+                  ) : (
+                    businessRules.map((r, rIdx) => (
+                      <div key={rIdx} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 text-[11px] text-slate-600 dark:text-slate-300">
+                        {r.regla}
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Agregar regla rápida */}
+                <div className="pt-2 flex gap-1.5">
+                  <input
+                    type="text"
+                    placeholder="Instruir directiva al agente..."
+                    value={newRuleText}
+                    onChange={(e) => setNewRuleText(e.target.value)}
+                    className="flex-1 px-3 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                  />
+                  <button
+                    onClick={handleCreateRule}
+                    className="px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700"
+                  >
+                    Guardar
+                  </button>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Columna Derecha: Terminal de Chat */}
-          <div className="lg:col-span-8 flex flex-col h-[650px] bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-            {/* Header del Chat */}
-            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-850/50">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-xs font-bold text-slate-900 dark:text-white">Sesión Activa con el Gerente Comercial</span>
-              </div>
-              <span className="text-[10px] font-mono font-bold text-slate-400">Contexto: MTD Agosto 2026</span>
-            </div>
-
-            {/* Mensajes */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {/* Columna Derecha: Chat Interactivo */}
+          <div className="lg:col-span-8 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col h-[600px] overflow-hidden">
+            <div className="flex-1 p-6 overflow-y-auto space-y-4">
               {messages.map((m, idx) => (
-                <div key={idx} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                  <div className={`max-w-[85%] rounded-2xl p-4 space-y-2 text-xs leading-relaxed ${
+                <div key={idx} className={`flex gap-3 ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                  {m.role === "assistant" && (
+                    <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+                      <Bot className="w-4 h-4" />
+                    </div>
+                  )}
+                  <div className={`max-w-xl p-4 rounded-2xl text-xs space-y-2 ${
                     m.role === "user"
-                      ? "bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-tr-none shadow-md shadow-indigo-500/10"
-                      : "bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700/80 rounded-tl-none"
+                      ? "bg-indigo-600 text-white rounded-tr-none"
+                      : "bg-slate-50 dark:bg-slate-800/60 text-slate-800 dark:text-slate-200 rounded-tl-none border border-slate-100 dark:border-slate-800"
                   }`}>
-                    <div className="whitespace-pre-wrap font-sans">{m.content}</div>
+                    <div className="whitespace-pre-line leading-relaxed font-sans">{m.content}</div>
+
+                    {/* Outcome de acción */}
+                    {m.outcome && (
+                      <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs space-y-1">
+                        <span className="font-bold text-indigo-600 uppercase text-[10px]">{m.outcome.titulo}</span>
+                        <p className="text-slate-600 dark:text-slate-300">{m.outcome.descripcion}</p>
+                      </div>
+                    )}
+
+                    {/* Prompts Sugeridos */}
                     {m.prompts && m.prompts.length > 0 && (
                       <div className="pt-2 flex flex-wrap gap-1.5">
-                        {m.prompts.map((p, pIdx) => (
+                        {m.prompts.map((pTxt, pIdx) => (
                           <button
                             key={pIdx}
-                            onClick={() => handleSendMessage(p)}
-                            className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 dark:bg-indigo-950/80 dark:text-indigo-300 hover:bg-indigo-100 transition"
+                            onClick={() => handleSendMessage(pTxt)}
+                            className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 transition"
                           >
-                            {p}
+                            {pTxt}
                           </button>
                         ))}
                       </div>
@@ -1027,79 +930,200 @@ export default function SalesAgentPage() {
                 </div>
               ))}
               {chatLoading && (
-                <div className="flex justify-start">
-                  <div className="bg-slate-50 dark:bg-slate-800/80 rounded-2xl p-4 text-xs text-slate-500 flex items-center gap-2 border border-slate-200 dark:border-slate-700">
-                    <Loader2 className="w-4 h-4 animate-spin text-indigo-500" />
-                    El Gerente IA está consultando la base de datos comercial...
-                  </div>
+                <div className="flex items-center gap-2 text-xs text-slate-400 p-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
+                  Qwen 2.5 consultando herramientas y base de datos...
                 </div>
               )}
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input Composer */}
-            <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850/50">
-              <form onSubmit={e => { e.preventDefault(); handleSendMessage() }} className="flex items-center gap-2">
-                <input
-                  type="text"
-                  placeholder="Escribí una consulta o instrucción comercial..."
-                  value={inputMessage}
-                  onChange={e => setInputMessage(e.target.value)}
-                  className="flex-1 px-4 py-3 text-xs rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-                <button
-                  type="submit"
-                  disabled={!inputMessage.trim() || chatLoading}
-                  className="px-5 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-indigo-500/20 transition"
-                >
-                  <Send className="w-4 h-4" />
-                </button>
-              </form>
+            {/* Input de Chat */}
+            <div className="p-4 border-t border-slate-100 dark:border-slate-800 flex gap-2">
+              <input
+                type="text"
+                placeholder="Escribí una consulta comercial, remarcación o directiva..."
+                value={inputMessage}
+                onChange={(e) => setInputMessage(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
+                className="flex-1 px-4 py-2 text-xs rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+              />
+              <button
+                onClick={() => handleSendMessage()}
+                disabled={chatLoading}
+                className="p-2.5 rounded-2xl bg-indigo-600 text-white hover:bg-indigo-700 transition disabled:opacity-50"
+              >
+                <Send className="w-4 h-4" />
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ══════════════════════ PESTAÑA 6: PLAN DE ACCIÓN DIARIO ══════════════════════ */}
-      {tab === "acciones" && (
+      {/* ══════════════════════ PESTAÑA 6: PLAN DE ACCIÓN 1-CLICK ══════════════════════ */}
+      {!loading && tab === "acciones" && (
         <div className="space-y-6">
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Plan de Acción & Tareas Prioritarias del Día</h3>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+              Acciones Estratégicas del Día & Operaciones 1-Click
+            </h3>
             <div className="space-y-3">
-              {(analysis?.plan_accion_diario || []).map((a: any) => {
+              {analysis?.plan_accion_diario?.map((a: any) => {
                 const completed = a.estado === "completado"
                 return (
                   <div
                     key={a.id}
-                    onClick={() => handleToggleAction(a.id)}
-                    className={`p-4 rounded-2xl border transition cursor-pointer flex items-center justify-between ${
+                    className={`p-5 rounded-2xl border transition flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${
                       completed
                         ? "bg-slate-50 dark:bg-slate-800/30 border-slate-200 dark:border-slate-800 opacity-60"
-                        : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-indigo-400"
+                        : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"
                     }`}
                   >
-                    <div className="flex items-center gap-3">
-                      <div className={`w-6 h-6 rounded-lg flex items-center justify-center border ${
-                        completed ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-300 dark:border-slate-600"
-                      }`}>
-                        {completed && <Check className="w-4 h-4" />}
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${
+                          a.prioridad === "critica" ? "bg-rose-100 text-rose-800" :
+                          a.prioridad === "alta" ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-700"
+                        }`}>
+                          {a.prioridad}
+                        </span>
+                        <span className="text-xs font-bold text-slate-500">{a.area}</span>
+                        {a.responsable_sugerido && (
+                          <span className="text-[11px] text-indigo-600 font-medium">· {a.responsable_sugerido}</span>
+                        )}
                       </div>
-                      <div>
-                        <h4 className={`text-xs font-bold ${completed ? "line-through text-slate-400" : "text-slate-900 dark:text-white"}`}>
-                          {a.titulo}
-                        </h4>
-                        <p className="text-[11px] text-slate-500">{a.descripcion}</p>
-                      </div>
+                      <h4 className={`text-sm font-bold ${completed ? "line-through text-slate-400" : "text-slate-900 dark:text-white"}`}>
+                        {a.titulo}
+                      </h4>
+                      <p className="text-xs text-slate-500 leading-relaxed">{a.descripcion}</p>
                     </div>
-                    <span className="text-[10px] font-bold uppercase px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-                      {a.prioridad}
-                    </span>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {!completed && (
+                        <>
+                          <button
+                            onClick={() => handleExecuteTask(a, "alerta_whatsapp")}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-sm"
+                          >
+                            <Phone className="w-3.5 h-3.5" />
+                            WhatsApp
+                          </button>
+                          <button
+                            onClick={() => handleDiscardTask(a.id)}
+                            className="px-2.5 py-1.5 rounded-xl text-slate-400 hover:text-rose-500 hover:bg-rose-50 text-xs font-bold transition"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 )
               })}
             </div>
           </div>
         </div>
+      )}
+
+      {/* ══════════════════════ MODAL DE METAS CONFIGURABLES ══════════════════════ */}
+      {settingsModalOpen && createPortal(
+        <div className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-6 space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">Configurar Metas de Margen</h3>
+              <button onClick={() => setSettingsModalOpen(false)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-4 text-xs">
+              <div>
+                <label className="font-bold text-slate-700 dark:text-slate-300">Margen Mínimo Aceptable (%)</label>
+                <input
+                  type="number"
+                  step="0.5"
+                  value={targetMinPct}
+                  onChange={(e) => setTargetMinPct(Number(e.target.value))}
+                  className="w-full mt-1 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono font-bold"
+                />
+              </div>
+              <div>
+                <label className="font-bold text-slate-700 dark:text-slate-300">Margen Óptimo / Meta Ideal (%)</label>
+                <input
+                  type="number"
+                  step="0.5"
+                  value={targetIdealPct}
+                  onChange={(e) => setTargetIdealPct(Number(e.target.value))}
+                  className="w-full mt-1 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono font-bold"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button onClick={() => setSettingsModalOpen(false)} className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500">Cancelar</button>
+              <button onClick={handleSaveSettings} className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700">Guardar Metas</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ══════════════════════ MODAL DE AJUSTE Y APLICACIÓN DE PRECIO ══════════════════════ */}
+      {modalProposal && createPortal(
+        <div className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-lg w-full p-6 space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">Ajustar & Aplicar a POS</h3>
+                <p className="text-xs text-slate-500">{modalProposal.nombre}</p>
+              </div>
+              <button onClick={closePriceModal} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-4 text-xs">
+              <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 grid grid-cols-2 gap-2 font-mono">
+                <div>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase">Precio Actual</span>
+                  <p className="font-bold text-slate-800 dark:text-slate-200">{formatPYG(modalProposal.precio_actual)}</p>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase">Costo Real</span>
+                  <p className="font-bold text-slate-800 dark:text-slate-200">{formatPYG(modalProposal.costo_unitario)}</p>
+                </div>
+              </div>
+              <div>
+                <label className="font-bold text-slate-700 dark:text-slate-300">Nuevo Precio de Venta (PYG)</label>
+                <input
+                  type="number"
+                  step="50"
+                  value={customPrice}
+                  onChange={(e) => setCustomPrice(Number(e.target.value))}
+                  className="w-full mt-1 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono font-bold text-sm"
+                />
+              </div>
+              <div>
+                <label className="font-bold text-slate-700 dark:text-slate-300">Motivo del Ajuste</label>
+                <input
+                  type="text"
+                  value={customMotivo}
+                  onChange={(e) => setCustomMotivo(e.target.value)}
+                  className="w-full mt-1 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button onClick={closePriceModal} className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500">Cancelar</button>
+              <button
+                onClick={handleApplyPrice}
+                disabled={applyingPrice !== null}
+                className="px-5 py-2 rounded-xl text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1.5 shadow-md shadow-indigo-600/20"
+              >
+                {applyingPrice ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                Confirmar y Aplicar a POS
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   )

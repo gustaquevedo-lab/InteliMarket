@@ -1,20 +1,50 @@
 """Gerente Financiero IA — CFO Virtual Estratégico conectado 100% a la BD de Ñemuha."""
 
 import json
+import uuid
 from datetime import datetime, date, timedelta
 from decimal import Decimal
 import zoneinfo
 from typing import Optional, List, Dict, Any
 
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.src.finance_agent.models import FinanceAgentRun, FinanceRecommendation
+from api.src.finance_agent.models import (
+    FinanceAgentRun, FinanceRecommendation, FinanceAgentSetting,
+    InterAgentDirective, CashFlowScenario
+)
 from api.src.finance_agent.schemas import (
     LiquidityControlTower, BankBalanceItem, OverstockFlashOpportunity,
     CreditRiskAlert, InterAgentSyncResponse, CashFlowDayForecast,
-    CashFlowForecastResponse, FinanceChatResponse
+    CashFlowForecastResponse, FinanceChatResponse,
+    FinanceAgentSettingResponse, FinanceAgentSettingUpdate,
+    InterAgentDirectiveCreate, InterAgentDirectiveResponse,
+    InterAgentDirectiveUpdateStatus, CashFlowSimulationRequest,
+    CashFlowSimulationResponse
 )
+
+
+# ── HELPER: COTIZACIONES OFICIALES DE DIVISAS EN PARAGUAY ───────────────────────
+
+async def get_effective_exchange_rates(db: AsyncSession) -> tuple[float, float]:
+    """Obtiene las cotizaciones de venta vigentes para BRL y USD desde exchange_rates.
+    Si no hay cotización cargada hoy, busca la más reciente o usa un fallback realista para Paraguay."""
+    tasa_brl = 1450.0
+    tasa_usd = 7800.0
+    try:
+        q_brl = text("SELECT tasa_venta FROM exchange_rates WHERE moneda = 'BRL' ORDER BY fecha DESC, created_at DESC LIMIT 1")
+        r_b = (await db.execute(q_brl)).scalar()
+        if r_b:
+            tasa_brl = float(r_b)
+
+        q_usd = text("SELECT tasa_venta FROM exchange_rates WHERE moneda = 'USD' ORDER BY fecha DESC, created_at DESC LIMIT 1")
+        r_u = (await db.execute(q_usd)).scalar()
+        if r_u:
+            tasa_usd = float(r_u)
+    except Exception:
+        pass
+    return tasa_brl, tasa_usd
 
 
 # ── 1. TORRE DE CONTROL DE LIQUIDEZ Y TESORERÍA REAL ──────────────────────────
@@ -25,6 +55,7 @@ async def get_liquidity_control_tower(db: AsyncSession, company_id: str) -> Liqu
     tz = zoneinfo.ZoneInfo("America/Asuncion")
     now = datetime.now(tz)
     today = now.date()
+    tasa_brl, tasa_usd = await get_effective_exchange_rates(db)
 
     # 1. Cuentas Bancarias Reales
     q_bancos = text("""
@@ -38,15 +69,30 @@ async def get_liquidity_control_tower(db: AsyncSession, company_id: str) -> Liqu
         ORDER BY saldo_actual DESC
     """)
     rows_bancos = (await db.execute(q_bancos, {"cid": company_id})).fetchall()
-    desglose_bancos = [
-        BankBalanceItem(
-            banco=str(r[0]),
-            numero_cuenta=str(r[1]),
-            saldo_gs=float(r[2]),
-            moneda=str(r[3])
-        ) for r in rows_bancos
-    ]
-    bancos_total = sum(b.saldo_gs for b in desglose_bancos if b.moneda == "PYG")
+    desglose_bancos: List[BankBalanceItem] = []
+    bancos_total = 0.0
+
+    for r in rows_bancos:
+        banco_nom = str(r[0])
+        cuenta_num = str(r[1])
+        saldo_orig = float(r[2])
+        moneda = str(r[3]).upper()
+
+        # Conversión a PYG para el consolidado si la cuenta está en divisa extranjera
+        if moneda == "BRL":
+            saldo_gs_equiv = saldo_orig * tasa_brl
+        elif moneda == "USD":
+            saldo_gs_equiv = saldo_orig * tasa_usd
+        else:
+            saldo_gs_equiv = saldo_orig
+
+        bancos_total += saldo_gs_equiv
+        desglose_bancos.append(BankBalanceItem(
+            banco=banco_nom,
+            numero_cuenta=cuenta_num,
+            saldo_gs=saldo_gs_equiv,
+            moneda=moneda
+        ))
 
     # 2. Bóveda Central y Efectivo Físico en Custodia / Rendición (cash_handoffs + vault_entries)
     boveda_total = 0.0
@@ -94,7 +140,6 @@ async def get_liquidity_control_tower(db: AsyncSession, company_id: str) -> Liqu
     # 4. Cuentas por Pagar Reales (AP - Proveedores de Ñemuha)
     d7 = today + timedelta(days=7)
     d15 = today + timedelta(days=15)
-    d30 = today + timedelta(days=30)
 
     q_ap = text("""
         SELECT 
@@ -139,10 +184,35 @@ async def get_liquidity_control_tower(db: AsyncSession, company_id: str) -> Liqu
     tot_c = float(r_sm[1]) if r_sm and r_sm[1] else 0.0
     margen_pct = round(((tot_v - tot_c) / tot_v * 100), 1) if tot_v > 0 else 18.0
 
-    gasto_diario_estimado = 2500000.0
+    # 7. Gastos Operativos Reales de la BD (expenses de los últimos 30 días)
+    d30_ago = today - timedelta(days=30)
+    q_gastos = text("""
+        SELECT COALESCE(SUM(monto), 0)
+        FROM expenses
+        WHERE company_id = :cid 
+          AND (es_pago_proveedor IS FALSE OR es_pago_proveedor IS NULL)
+          AND fecha_gasto >= :d30_ago
+    """)
+    r_g = (await db.execute(q_gastos, {"cid": company_id, "d30_ago": d30_ago})).scalar()
+    gastos_reales_30d = float(r_g) if r_g else 0.0
+
+    # Si hay gastos registrados en expenses se usan directamente; si aún no hay gastos cargados en el mes,
+    # se estima un OPEX proporcional a las ventas (8.5% de ventas mensuales de retail de alimentos)
+    if gastos_reales_30d > 5000000.0:
+        gastos_operativos_mes_gs = gastos_reales_30d
+    else:
+        ventas_mes_est = max(tot_v / 12.0, 350000000.0)
+        gastos_operativos_mes_gs = max(ventas_mes_est * 0.085, 30000000.0)
+
+    gasto_diario_estimado = max(gastos_operativos_mes_gs / 30.0, 1000000.0)
     cash_runway = round(liquidez_total / gasto_diario_estimado, 1) if liquidez_total > 0 else 0.0
     cobertura_7d = round(liquidez_total / max(ap_7d, 1.0), 2) if ap_7d > 0 else 99.9
-    estado_liq = "optimo" if liquidez_total >= 100000000.0 else "precaucion" if liquidez_total >= 30000000.0 else "critico"
+
+    # Configuración de colchón mínimo
+    settings = await get_or_create_finance_settings(db, company_id)
+    colchon_min = float(settings.colchon_minimo_bancos_gs) if settings else 50000000.0
+
+    estado_liq = "optimo" if liquidez_total >= (colchon_min * 2) else "precaucion" if liquidez_total >= colchon_min else "critico"
 
     return LiquidityControlTower(
         liquidez_total_gs=liquidez_total,
@@ -161,17 +231,148 @@ async def get_liquidity_control_tower(db: AsyncSession, company_id: str) -> Liqu
         cash_runway_dias=cash_runway,
         cobertura_7d_ratio=cobertura_7d,
         estado_liquidez=estado_liq,
-        gastos_operativos_mes_gs=75000000.0,
+        gastos_operativos_mes_gs=gastos_operativos_mes_gs,
         margen_bruto_mes_pct=margen_pct,
-        ebitda_estimado_mes_gs=tot_v - tot_c,
+        ebitda_estimado_mes_gs=max(tot_v - tot_c - gastos_operativos_mes_gs, 0.0),
     )
 
 
-# ── 2. ENLACE INTER-AGENTE (CFO IA ↔ SALES AGENT IA) REAL ────────────────────
+# ── 2. CONFIGURACIÓN DE TESORERÍA Y POLÍTICAS DEL CFO ─────────────────────────
+
+async def get_or_create_finance_settings(db: AsyncSession, company_id: str) -> FinanceAgentSetting:
+    """Obtiene o crea los parámetros de tesorería y colchón mínimo para la empresa."""
+    try:
+        cid_uuid = uuid.UUID(str(company_id))
+    except Exception:
+        cid_uuid = uuid.UUID("00000000-0000-0000-0000-000000000010")
+
+    q = select(FinanceAgentSetting).where(FinanceAgentSetting.company_id == cid_uuid)
+    res = (await db.execute(q)).scalars().first()
+    if not res:
+        res = FinanceAgentSetting(
+            company_id=cid_uuid,
+            colchon_minimo_bancos_gs=Decimal("50000000.00"),
+            dias_alerta_mora=15,
+            limite_pago_diario_sin_autorizacion_gs=Decimal("20000000.00"),
+            prioridad_pagos={
+                "servicios_basicos": 1,
+                "nomina_empleados": 2,
+                "proveedores_perecederos": 3,
+                "proveedores_generales": 4
+            }
+        )
+        db.add(res)
+        try:
+            await db.commit()
+            await db.refresh(res)
+        except Exception:
+            await db.rollback()
+    return res
+
+
+async def update_finance_settings(db: AsyncSession, company_id: str, payload: FinanceAgentSettingUpdate) -> FinanceAgentSetting:
+    """Actualiza la configuración de tesorería."""
+    setting = await get_or_create_finance_settings(db, company_id)
+    if payload.colchon_minimo_bancos_gs is not None:
+        setting.colchon_minimo_bancos_gs = Decimal(str(payload.colchon_minimo_bancos_gs))
+    if payload.dias_alerta_mora is not None:
+        setting.dias_alerta_mora = payload.dias_alerta_mora
+    if payload.limite_pago_diario_sin_autorizacion_gs is not None:
+        setting.limite_pago_diario_sin_autorizacion_gs = Decimal(str(payload.limite_pago_diario_sin_autorizacion_gs))
+    if payload.prioridad_pagos is not None:
+        setting.prioridad_pagos = payload.prioridad_pagos
+
+    setting.updated_at = datetime.now()
+    await db.commit()
+    await db.refresh(setting)
+    return setting
+
+
+# ── 3. DIRECTIVAS INTER-AGENTE (CFO IA ↔ SALES AGENT IA ↔ MARKETING) ──────────
+
+async def list_inter_agent_directives(
+    db: AsyncSession, company_id: str, emisor: Optional[str] = None,
+    receptor: Optional[str] = None, estado: Optional[str] = None
+) -> List[InterAgentDirective]:
+    """Lista las directivas inter-agente persistidas en la BD."""
+    try:
+        cid_uuid = uuid.UUID(str(company_id))
+    except Exception:
+        cid_uuid = uuid.UUID("00000000-0000-0000-0000-000000000010")
+
+    query = select(InterAgentDirective).where(InterAgentDirective.company_id == cid_uuid)
+    if emisor:
+        query = query.where(InterAgentDirective.emisor == emisor)
+    if receptor:
+        query = query.where(InterAgentDirective.receptor == receptor)
+    if estado:
+        query = query.where(InterAgentDirective.estado == estado)
+    query = query.order_by(InterAgentDirective.created_at.desc())
+    
+    return list((await db.execute(query)).scalars().all())
+
+
+async def create_inter_agent_directive(
+    db: AsyncSession, company_id: str, data: InterAgentDirectiveCreate, emisor: str = "cfo_agent"
+) -> InterAgentDirective:
+    """Crea y persiste una nueva directiva de un agente a otro."""
+    try:
+        cid_uuid = uuid.UUID(str(company_id))
+    except Exception:
+        cid_uuid = uuid.UUID("00000000-0000-0000-0000-000000000010")
+
+    count_q = select(func.count(InterAgentDirective.id)).where(InterAgentDirective.company_id == cid_uuid)
+    count = (await db.execute(count_q)).scalar() or 0
+    codigo = f"DIR-{emisor.upper()[:3]}-{count + 1:03d}"
+
+    dir_obj = InterAgentDirective(
+        company_id=cid_uuid,
+        codigo=codigo,
+        emisor=emisor,
+        receptor=data.receptor,
+        titulo=data.titulo,
+        mensaje=data.mensaje,
+        accion_sugerida=data.accion_sugerida,
+        prioridad=data.prioridad,
+        estado="emitida",
+        payload=data.payload or {},
+        impacto_estimado_gs=Decimal(str(data.impacto_estimado_gs or 0.0)),
+        impacto_real_recaudado_gs=Decimal("0.00")
+    )
+    db.add(dir_obj)
+    await db.commit()
+    await db.refresh(dir_obj)
+    return dir_obj
+
+
+async def update_directive_status(
+    db: AsyncSession, directive_id: str, update_in: InterAgentDirectiveUpdateStatus
+) -> Optional[InterAgentDirective]:
+    """Actualiza el estado, feedback e impacto recaudado de una directiva inter-agente."""
+    try:
+        did_uuid = uuid.UUID(str(directive_id))
+    except Exception:
+        return None
+
+    dir_obj = (await db.execute(select(InterAgentDirective).where(InterAgentDirective.id == did_uuid))).scalars().first()
+    if not dir_obj:
+        return None
+
+    dir_obj.estado = update_in.estado
+    if update_in.feedback:
+        dir_obj.feedback_receptor = update_in.feedback
+    if update_in.impacto_real_gs is not None:
+        dir_obj.impacto_real_recaudado_gs = Decimal(str(update_in.impacto_real_gs))
+    dir_obj.updated_at = datetime.now()
+
+    await db.commit()
+    await db.refresh(dir_obj)
+    return dir_obj
+
 
 async def get_inter_agent_sync(db: AsyncSession, company_id: str) -> InterAgentSyncResponse:
     """Genera la comunicación bidireccional activa entre el Gerente Financiero
-    y el Gerente de Ventas usando los datos 100% reales de inventario y clientes."""
+    y el Gerente de Ventas usando los datos 100% reales de inventario, clientes y directivas persistidas."""
     tower = await get_liquidity_control_tower(db, company_id)
 
     # 1. Top Productos con Mayor Capital Inmovilizado / Sobre-Stock Real de Ñemuha
@@ -242,31 +443,62 @@ async def get_inter_agent_sync(db: AsyncSession, company_id: str) -> InterAgentS
             accion_sugerida=accion
         ))
 
-    # 3. Directivas de Tesorería a Ventas
-    directivas = [
+    # 3. Directivas Reales Persistidas (o sincronizadas en la BD)
+    directivas_db = await list_inter_agent_directives(db, company_id, emisor="cfo_agent", receptor="sales_agent")
+    
+    # Si aún no hay directivas guardadas en la BD para esta empresa, sembrar las 3 directivas estratégicas iniciales
+    if not directivas_db:
+        d1 = await create_inter_agent_directive(
+            db, company_id,
+            InterAgentDirectiveCreate(
+                receptor="sales_agent",
+                titulo=f"Objetivo de Liquidez: Monetizar ₲ {tot_flash_potencial:,.0f} de Sobre-Stock",
+                mensaje=f"Se identificaron {len(oportunidades_flash)} productos de alto valor inmovilizado en stock (Costilla de Primera, Harina Maestra, Aceites, Bebidas). Se solicita al Gerente de Ventas activar campañas por bulto.",
+                accion_sugerida="Activar Escalas de Precio por Bulto",
+                prioridad="alta",
+                impacto_estimado_gs=tot_flash_potencial
+            )
+        )
+        d2 = await create_inter_agent_directive(
+            db, company_id,
+            InterAgentDirectiveCreate(
+                receptor="sales_agent",
+                titulo=f"Piso de Margen Comercial Exigido: {tower.margen_bruto_mes_pct}%",
+                mensaje=f"El margen bruto real de ventas acumulado es de {tower.margen_bruto_mes_pct}%. Mantener las remarcaciones por encima de este umbral para resguardar el EBITDA.",
+                accion_sugerida="Monitorear Margen en POS y Listas de Precios",
+                prioridad="media",
+                impacto_estimado_gs=0.0
+            )
+        )
+        directivas_db = [d1, d2]
+        if alertas_credito:
+            d3 = await create_inter_agent_directive(
+                db, company_id,
+                InterAgentDirectiveCreate(
+                    receptor="sales_agent",
+                    titulo=f"Control Crediticio sobre {len(alertas_credito)} Clientes con Saldo Vencido",
+                    mensaje=f"Clientes como {alertas_credito[0].cliente} acumulan ₲ {alertas_credito[0].deuda_actual:,.0f} pendientes. Suspender despacho a crédito hasta regularización.",
+                    accion_sugerida="Aplicar Bloqueo de Facturación a Plazo",
+                    prioridad="alta",
+                    impacto_estimado_gs=alertas_credito[0].deuda_actual
+                )
+            )
+            directivas_db.append(d3)
+
+    directivas_format = [
         {
-            "codigo": "DIR-CFO-01",
-            "prioridad": "alta",
-            "titulo": f"Objetivo de Liquidez: Monetizar ₲ {tot_flash_potencial:,.0f} de Sobre-Stock",
-            "mensaje": f"Se identificaron {len(oportunidades_flash)} productos de alto valor inmovilizado en stock (Costilla de Primera, Harina Maestra, Aceites, Bebidas). Se solicita al Gerente de Ventas activar campañas por bulto.",
-            "accion": "Activar Escalas de Precio por Bulto"
-        },
-        {
-            "codigo": "DIR-CFO-02",
-            "prioridad": "media",
-            "titulo": f"Piso de Margen Comercial: {tower.margen_bruto_mes_pct}%",
-            "mensaje": f"El margen bruto real de ventas acumulado es de {tower.margen_bruto_mes_pct}%. Mantener las remarcaciones por encima de este umbral.",
-            "accion": "Monitorear Margen en POS y Listas"
-        },
+            "id": str(d.id),
+            "codigo": d.codigo,
+            "prioridad": d.prioridad,
+            "titulo": d.titulo,
+            "mensaje": d.mensaje,
+            "accion": d.accion_sugerida or "Ejecutar Acción",
+            "estado": d.estado,
+            "impacto_estimado_gs": float(d.impacto_estimado_gs or 0.0),
+            "feedback_receptor": d.feedback_receptor
+        }
+        for d in directivas_db
     ]
-    if len(alertas_credito) > 0:
-        directivas.append({
-            "codigo": "DIR-CFO-03",
-            "prioridad": "alta",
-            "titulo": f"Control Crediticio sobre {len(alertas_credito)} Clientes con Saldo Vencido",
-            "mensaje": f"Clientes como {alertas_credito[0].cliente} acumulan ₲ {alertas_credito[0].deuda_actual:,.0f} pendientes. Suspender despacho a crédito.",
-            "accion": "Aplicar Bloqueo de Facturación a Plazo"
-        })
 
     # Proyección real de ventas
     q_v_proj = text("SELECT COALESCE(SUM(total), 0) FROM sales WHERE company_id = :cid")
@@ -276,8 +508,8 @@ async def get_inter_agent_sync(db: AsyncSession, company_id: str) -> InterAgentS
     return InterAgentSyncResponse(
         estado_enlace="activo_sincronizado",
         timestamp=datetime.now(),
-        cfo_summary=f"Enlace financiero activo. Posición consolidada de ₲ {tower.liquidez_total_gs:,.0f} (Bancos: ₲ {tower.bancos_total_gs:,.0f} | Custodia/Bóveda: ₲ {tower.boveda_central_gs:,.0f} | Cajas Salón: ₲ {tower.cajas_pos_gs:,.0f}). Se emitieron {len(directivas)} directivas al Gerente de Ventas.",
-        directivas_a_ventas=directivas,
+        cfo_summary=f"Enlace financiero activo. Posición consolidada de ₲ {tower.liquidez_total_gs:,.0f} (Bancos: ₲ {tower.bancos_total_gs:,.0f} | Custodia/Bóveda: ₲ {tower.boveda_central_gs:,.0f} | Cajas Salón: ₲ {tower.cajas_pos_gs:,.0f}). Se registran {len(directivas_format)} directivas inter-agente vigentes.",
+        directivas_a_ventas=directivas_format,
         oportunidades_flash_stock=oportunidades_flash,
         alertas_riesgo_crediticio=alertas_credito,
         meta_margen_minimo_exigido_pct=tower.margen_bruto_mes_pct,
@@ -286,15 +518,15 @@ async def get_inter_agent_sync(db: AsyncSession, company_id: str) -> InterAgentS
     )
 
 
-# ── 3. SIMULADOR DE FLUJO DE CAJA A 30 DÍAS BASADO EN VENTAS Y COMPROMISOS REALES ──
+# ── 4. PRONÓSTICO Y SIMULADOR PARAMÉTRICO DE FLUJO DE CAJA ─────────────────────
 
 async def get_cash_flow_forecast(db: AsyncSession, company_id: str) -> CashFlowForecastResponse:
     """Genera la curva de flujo de caja proyectada día por día calculada sobre:
     1. Saldo de liquidez inicial consolidada real (Bancos + Custodia/Bóveda + Cajas POS).
-    2. Promedio histórico real de ventas en salón por día de la semana (DOW sobre 125k tickets).
+    2. Promedio histórico real de ventas en salón por día de la semana.
     3. Cobros de cuentas por cobrar (AR) según su fecha exacta de vencimiento.
     4. Pagos de facturas a proveedores (AP) según su fecha exacta de vencimiento.
-    5. Costo de reposición operativa de mercadería (CMV ~75%) y gastos fijos / nómina.
+    5. Costo de reposición operativa de mercadería (CMV ~72%) y gastos fijos / nómina.
     """
     tower = await get_liquidity_control_tower(db, company_id)
     saldo_acumulado = tower.liquidez_total_gs
@@ -303,7 +535,7 @@ async def get_cash_flow_forecast(db: AsyncSession, company_id: str) -> CashFlowF
     start_date = datetime.now(tz).date()
     end_date = start_date + timedelta(days=30)
 
-    # 1. Ventas promedio por día de la semana (PostgreSQL DOW: 0=Domingo, 1=Lunes, ..., 6=Sábado)
+    # 1. Ventas promedio por día de la semana
     q_dow = text("""
         SELECT 
             EXTRACT(DOW FROM s.fecha) as dow,
@@ -313,11 +545,10 @@ async def get_cash_flow_forecast(db: AsyncSession, company_id: str) -> CashFlowF
         GROUP BY EXTRACT(DOW FROM s.fecha)
     """)
     rows_dow = (await db.execute(q_dow, {"cid": company_id})).fetchall()
-    # Fallback si no hay ventas: promedios típicos de supermercado
     default_dow = {0: 30274000.0, 1: 33043000.0, 2: 35958000.0, 3: 34121000.0, 4: 32188000.0, 5: 43180000.0, 6: 60347000.0}
     dow_map = {int(r[0]): float(r[1]) for r in rows_dow} if rows_dow else default_dow
 
-    # 2. Vencimientos exactos de Cuentas por Cobrar (AR) día a día
+    # 2. Vencimientos de Cuentas por Cobrar (AR)
     q_ar_daily = text("""
         SELECT ar.fecha_vencimiento, SUM(ar.saldo_pendiente)
         FROM accounts_receivable ar
@@ -328,7 +559,7 @@ async def get_cash_flow_forecast(db: AsyncSession, company_id: str) -> CashFlowF
     rows_ar = (await db.execute(q_ar_daily, {"cid": company_id, "s": start_date, "e": end_date})).fetchall()
     ar_daily_map = {r[0]: float(r[1]) for r in rows_ar}
 
-    # 3. Vencimientos exactos de Cuentas por Pagar (AP - Proveedores) día a día
+    # 3. Vencimientos de Cuentas por Pagar (AP)
     q_ap_daily = text("""
         SELECT si.fecha_vencimiento, SUM(si.saldo_pendiente)
         FROM supplier_invoices si
@@ -339,29 +570,32 @@ async def get_cash_flow_forecast(db: AsyncSession, company_id: str) -> CashFlowF
     rows_ap = (await db.execute(q_ap_daily, {"cid": company_id, "s": start_date, "e": end_date})).fetchall()
     ap_daily_map = {r[0]: float(r[1]) for r in rows_ap}
 
+    settings = await get_or_create_finance_settings(db, company_id)
+    colchon_min = float(settings.colchon_minimo_bancos_gs) if settings else 50000000.0
+
     dias_semana_es = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
-    proyeccion = []
+    proyeccion: List[CashFlowDayForecast] = []
     dias_en_riesgo = 0
     tot_ingresos = 0.0
     tot_egresos = 0.0
+
+    gasto_fijo_base_diario = tower.gastos_operativos_mes_gs / 30.0
 
     for i in range(30):
         current_d = start_date + timedelta(days=i)
         pg_dow = (current_d.weekday() + 1) % 7
         
-        # A. Ingresos: Ventas estimadas de salón + Cobranzas de créditos que vencen hoy
         ventas_dia = dow_map.get(pg_dow, 35000000.0)
         cobranzas_dia = ar_daily_map.get(current_d, 0.0)
         ingreso_dia = ventas_dia + cobranzas_dia
 
-        # B. Egresos: Facturas de proveedores vencimiento hoy + Reposición de mercadería (CMV 75%) + Gastos operativos
         facturas_ap_dia = ap_daily_map.get(current_d, 0.0)
-        reposicion_mercaderia = ventas_dia * 0.72  # 72% costo mercadería
-        gastos_fijos_dia = 2500000.0               # Servicios, mantenimiento, suministros
+        reposicion_mercaderia = ventas_dia * 0.72
+        gastos_fijos_dia = gasto_fijo_base_diario
         
-        # Picos de nómina / quincena / IPS / alquileres
+        # Picos de quincena y fin de mes
         if current_d.day in (15, 30, 31):
-            gastos_fijos_dia += 25000000.0
+            gastos_fijos_dia += 20000000.0
 
         egreso_dia = facturas_ap_dia + reposicion_mercaderia + gastos_fijos_dia
 
@@ -370,7 +604,7 @@ async def get_cash_flow_forecast(db: AsyncSession, company_id: str) -> CashFlowF
         tot_ingresos += ingreso_dia
         tot_egresos += egreso_dia
 
-        estado = "superavit" if saldo_acumulado >= 100000000.0 else "ajustado" if saldo_acumulado >= 30000000.0 else "deficit"
+        estado = "superavit" if saldo_acumulado >= (colchon_min * 2) else "ajustado" if saldo_acumulado >= colchon_min else "deficit"
         if estado == "deficit":
             dias_en_riesgo += 1
 
@@ -395,7 +629,233 @@ async def get_cash_flow_forecast(db: AsyncSession, company_id: str) -> CashFlowF
     )
 
 
-# ── 4. CHAT CONSULTIVO CON EL CFO IA BASADO EN LA BD REAL ─────────────────────
+async def simulate_cash_flow(
+    db: AsyncSession, company_id: str, sim: CashFlowSimulationRequest
+) -> CashFlowSimulationResponse:
+    """Ejecuta una simulación what-if paramétrica sobre el flujo de caja:
+    - `variacion_ventas_pct`: Ajusta las ventas en salón (-20% a +25%).
+    - `prorroga_proveedores_dias`: Prorroga los vencimientos de facturas de proveedores.
+    - `recuperacion_mora_pct`: Cobra un porcentaje de la cartera morosa.
+    - `meta_liquidacion_sobrestock_gs`: Inyección de efectivo por liquidación rápida de sobrestock.
+    """
+    tower = await get_liquidity_control_tower(db, company_id)
+    base_forecast = await get_cash_flow_forecast(db, company_id)
+
+    saldo_acumulado = tower.liquidez_total_gs
+    tz = zoneinfo.ZoneInfo("America/Asuncion")
+    start_date = datetime.now(tz).date()
+    end_date = start_date + timedelta(days=30)
+
+    # Ventas DOW
+    q_dow = text("""
+        SELECT 
+            EXTRACT(DOW FROM s.fecha) as dow,
+            (SUM(s.total) / NULLIF(COUNT(DISTINCT date(s.fecha)), 0)) as prom_diario
+        FROM sales s
+        WHERE s.company_id = :cid AND s.estado = 'confirmado'
+        GROUP BY EXTRACT(DOW FROM s.fecha)
+    """)
+    rows_dow = (await db.execute(q_dow, {"cid": company_id})).fetchall()
+    default_dow = {0: 30274000.0, 1: 33043000.0, 2: 35958000.0, 3: 34121000.0, 4: 32188000.0, 5: 43180000.0, 6: 60347000.0}
+    dow_map = {int(r[0]): float(r[1]) for r in rows_dow} if rows_dow else default_dow
+
+    # AR & AP
+    q_ar_daily = text("""
+        SELECT ar.fecha_vencimiento, SUM(ar.saldo_pendiente)
+        FROM accounts_receivable ar
+        WHERE ar.company_id = :cid AND ar.estado = 'pendiente'
+              AND ar.fecha_vencimiento BETWEEN :s AND :e
+        GROUP BY ar.fecha_vencimiento
+    """)
+    rows_ar = (await db.execute(q_ar_daily, {"cid": company_id, "s": start_date, "e": end_date})).fetchall()
+    ar_daily_map = {r[0]: float(r[1]) for r in rows_ar}
+
+    # Desplazamiento por prórroga de proveedores
+    d_offset = timedelta(days=sim.prorroga_proveedores_dias)
+    q_ap_daily = text("""
+        SELECT si.fecha_vencimiento, SUM(si.saldo_pendiente)
+        FROM supplier_invoices si
+        WHERE si.company_id = :cid AND si.estado IN ('pendiente', 'parcial')
+              AND si.fecha_vencimiento BETWEEN :s AND :e
+        GROUP BY si.fecha_vencimiento
+    """)
+    rows_ap = (await db.execute(q_ap_daily, {"cid": company_id, "s": start_date - d_offset, "e": end_date})).fetchall()
+    ap_sim_map = {}
+    for r in rows_ap:
+        fecha_orig = r[0]
+        fecha_prorrogada = fecha_orig + d_offset
+        ap_sim_map[fecha_prorrogada] = ap_sim_map.get(fecha_prorrogada, 0.0) + float(r[1])
+
+    # Cuota diaria de recuperación de mora y sobrestock en los primeros 10 días
+    monto_mora_a_recuperar = tower.ar_moroso_gs * (sim.recuperacion_mora_pct / 100.0)
+    inyeccion_mora_diaria = monto_mora_a_recuperar / 10.0 if monto_mora_a_recuperar > 0 else 0.0
+    inyeccion_stock_diaria = sim.meta_liquidacion_sobrestock_gs / 7.0 if sim.meta_liquidacion_sobrestock_gs > 0 else 0.0
+
+    settings = await get_or_create_finance_settings(db, company_id)
+    colchon_min = float(settings.colchon_minimo_bancos_gs) if settings else 50000000.0
+
+    dias_semana_es = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+    proyeccion_sim: List[CashFlowDayForecast] = []
+    dias_en_riesgo_sim = 0
+    gasto_fijo_base_diario = tower.gastos_operativos_mes_gs / 30.0
+
+    for i in range(30):
+        current_d = start_date + timedelta(days=i)
+        pg_dow = (current_d.weekday() + 1) % 7
+        
+        # Ventas modificadas por variación porcentual
+        ventas_base = dow_map.get(pg_dow, 35000000.0)
+        ventas_sim = ventas_base * (1.0 + (sim.variacion_ventas_pct / 100.0))
+        cobranzas_dia = ar_daily_map.get(current_d, 0.0)
+
+        # Inyecciones especiales durante los primeros días
+        extra_ingreso = 0.0
+        if i < 10:
+            extra_ingreso += inyeccion_mora_diaria
+        if i < 7:
+            extra_ingreso += inyeccion_stock_diaria
+
+        ingreso_dia = ventas_sim + cobranzas_dia + extra_ingreso
+
+        facturas_ap_dia = ap_sim_map.get(current_d, 0.0)
+        reposicion_mercaderia = ventas_sim * 0.72
+        gastos_fijos_dia = gasto_fijo_base_diario
+        if current_d.day in (15, 30, 31):
+            gastos_fijos_dia += 20000000.0
+
+        egreso_dia = facturas_ap_dia + reposicion_mercaderia + gastos_fijos_dia
+
+        saldo_ini = saldo_acumulado
+        saldo_acumulado = saldo_acumulado + ingreso_dia - egreso_dia
+
+        estado = "superavit" if saldo_acumulado >= (colchon_min * 2) else "ajustado" if saldo_acumulado >= colchon_min else "deficit"
+        if estado == "deficit":
+            dias_en_riesgo_sim += 1
+
+        dia_nom = dias_semana_es[current_d.weekday()]
+        proyeccion_sim.append(CashFlowDayForecast(
+            fecha=f"{current_d.day:02d}/{current_d.month:02d}",
+            dia_semana=dia_nom,
+            saldo_inicial_estimado=saldo_ini,
+            ingresos_esperados=ingreso_dia,
+            egresos_comprometidos=egreso_dia,
+            saldo_final_estimado=saldo_acumulado,
+            estado=estado
+        ))
+
+    impacto_neto = saldo_acumulado - base_forecast.saldo_proyectado_30d_gs
+
+    # Generar conclusión ejecutiva del CFO
+    if impacto_neto > 0 and dias_en_riesgo_sim < base_forecast.dias_en_riesgo_count:
+        conclusion = (
+            f"El escenario simulado genera un alivio financiero de ₲ {impacto_neto:,.0f} netos, "
+            f"reduciendo los días en déficit de {base_forecast.dias_en_riesgo_count} a {dias_en_riesgo_sim} días. "
+            f"La combinación de monetizar sobrestock y prórroga con proveedores estabiliza la tesorería."
+        )
+    elif impacto_neto < 0:
+        conclusion = (
+            f"El escenario estresado evidencia una merma de ₲ {abs(impacto_neto):,.0f} netos, "
+            f"aumentando los días bajo colchón de seguridad a {dias_en_riesgo_sim} días. "
+            f"Se requeriría restringir egresos o acelerar cobranzas."
+        )
+    else:
+        conclusion = (
+            f"El impacto neto proyectado es de ₲ {impacto_neto:,.0f}. "
+            f"La curva diaria se mantiene controlada dentro de los parámetros habituales de operación."
+        )
+
+    # Persistir escenario en cash_flow_scenarios para trazabilidad
+    try:
+        cid_uuid = uuid.UUID(str(company_id))
+        escenario = CashFlowScenario(
+            company_id=cid_uuid,
+            nombre=f"Simulación What-If ({datetime.now().strftime('%d/%m %H:%M')})",
+            descripcion=conclusion,
+            parametros=sim.dict(),
+            resultado_30d={
+                "saldo_final_simulado": saldo_acumulado,
+                "impacto_neto": impacto_neto,
+                "dias_riesgo": dias_en_riesgo_sim
+            }
+        )
+        db.add(escenario)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+
+    return CashFlowSimulationResponse(
+        saldo_actual_gs=tower.liquidez_total_gs,
+        saldo_proyectado_30d_base_gs=base_forecast.saldo_proyectado_30d_gs,
+        saldo_proyectado_30d_simulado_gs=saldo_acumulado,
+        impacto_neto_gs=impacto_neto,
+        dias_en_riesgo_base=base_forecast.dias_en_riesgo_count,
+        dias_en_riesgo_simulado=dias_en_riesgo_sim,
+        proyeccion_simulada=proyeccion_sim,
+        conclusion_cfo=conclusion
+    )
+
+
+# ── 5. CRONOGRAMAS Y AGING DETALLADO (PROVEEDORES Y CLIENTES) ─────────────────
+
+async def get_supplier_debt_schedule(db: AsyncSession, company_id: str) -> List[Dict[str, Any]]:
+    """Cronograma de pagos a proveedores agrupado por tramos de vencimiento."""
+    q = text("""
+        SELECT 
+            si.id,
+            COALESCE(s.razon_social, s.nombre_fantasia, 'Proveedor') as proveedor,
+            si.numero_factura,
+            si.fecha_vencimiento,
+            si.total,
+            si.saldo_pendiente,
+            si.estado,
+            CURRENT_DATE - si.fecha_vencimiento as dias_vencido
+        FROM supplier_invoices si
+        LEFT JOIN suppliers s ON si.supplier_id = s.id
+        WHERE si.company_id = :cid AND si.estado IN ('pendiente', 'parcial') AND si.saldo_pendiente > 0
+        ORDER BY si.fecha_vencimiento ASC
+        LIMIT 50
+    """)
+    rows = (await db.execute(q, {"cid": company_id})).fetchall()
+    return [
+        {
+            "id": str(r[0]),
+            "proveedor": str(r[1]),
+            "numero_factura": str(r[2]),
+            "fecha_vencimiento": str(r[3]),
+            "total_gs": float(r[4]),
+            "saldo_pendiente_gs": float(r[5]),
+            "estado": str(r[6]),
+            "dias_vencido": int(r[7]) if r[7] else 0
+        }
+        for r in rows
+    ]
+
+
+async def get_customer_aging_analysis(db: AsyncSession, company_id: str) -> Dict[str, Any]:
+    """Análisis de antigüedad de saldos de clientes (Aging de Accounts Receivable)."""
+    q = text("""
+        SELECT 
+            COALESCE(SUM(CASE WHEN fecha_vencimiento >= CURRENT_DATE AND (dias_mora IS NULL OR dias_mora <= 0) THEN saldo_pendiente ELSE 0 END), 0) as al_dia,
+            COALESCE(SUM(CASE WHEN (fecha_vencimiento < CURRENT_DATE OR dias_mora > 0) AND (CURRENT_DATE - fecha_vencimiento) <= 30 THEN saldo_pendiente ELSE 0 END), 0) as mora_1_30,
+            COALESCE(SUM(CASE WHEN (CURRENT_DATE - fecha_vencimiento) BETWEEN 31 AND 60 THEN saldo_pendiente ELSE 0 END), 0) as mora_31_60,
+            COALESCE(SUM(CASE WHEN (CURRENT_DATE - fecha_vencimiento) > 60 THEN saldo_pendiente ELSE 0 END), 0) as mora_mas_60,
+            COALESCE(SUM(saldo_pendiente), 0) as total_cartera,
+            COUNT(DISTINCT customer_id) as total_deudores
+        FROM accounts_receivable
+        WHERE company_id = :cid AND estado = 'pendiente' AND saldo_pendiente > 0
+    """)
+    r = (await db.execute(q, {"cid": company_id})).fetchone()
+    return {
+        "al_dia_gs": float(r[0]) if r and r[0] else 0.0,
+        "mora_1_30_gs": float(r[1]) if r and r[1] else 0.0,
+        "mora_31_60_gs": float(r[2]) if r and r[2] else 0.0,
+        "mora_mas_60_gs": float(r[3]) if r and r[3] else 0.0,
+        "total_cartera_gs": float(r[4]) if r and r[4] else 0.0,
+        "total_deudores_count": int(r[5]) if r and r[5] else 0
+    }
+
+
+# ── 6. CHAT CONSULTIVO CON EL CFO IA BASADO EN LA BD REAL ─────────────────────
 
 async def chat_with_finance_agent(
     db: AsyncSession, company_id: str, message: str, history: Optional[List[Dict[str, str]]] = None
@@ -411,7 +871,7 @@ async def chat_with_finance_agent(
             f"La **Posición Consolidada de Liquidez** es de **₲ {tower.liquidez_total_gs:,.0f}**:\n\n"
             f"1. **Disponibilidad Bancaria:** ₲ {tower.bancos_total_gs:,.0f} ({len(tower.desglose_bancos)} cuentas)\n"
             f"{bancos_txt}\n\n"
-            f"2. **Efectivo Físico en Custodia / Bóveda:** ₲ {tower.boveda_central_gs:,.0f} (Rendiciones de caja pendientes de confirmación en tesorería)\n"
+            f"2. **Efectivo Físico en Custodia / Bóveda:** ₲ {tower.boveda_central_gs:,.0f} (Rendiciones de caja en custodia de tesorería)\n"
             f"3. **Efectivo en Cajas POS Salón Hoy:** ₲ {tower.cajas_pos_gs:,.0f} (Aperturas de turnos + Cobros en efectivo del día)\n\n"
             f"Nuestra cobertura operativa calculada es de **{tower.cash_runway_dias} días**."
         )
@@ -431,7 +891,7 @@ async def chat_with_finance_agent(
             f"- **Egresos Estimados 30d:** ₲ {cff.total_egresos_30d_gs:,.0f} (Facturas de proveedores + Reposición de mercadería CMV + Nómina y fijos)\n"
             f"- **Saldo Proyectado a Cierre de 30d:** ₲ {cff.saldo_proyectado_30d_gs:,.0f}\n"
             f"- **Días en Déficit Crítico:** {cff.dias_en_riesgo_count} días\n\n"
-            f"La curva diaria modela los picos de venta de los fines de semana (Sábados ~₲ 60.3M) y los compromisos de pago a proveedores calendarizados."
+            f"La curva diaria modela los picos de venta de los fines de semana (Sábados ~₲ 60.3M) y los compromisos de pago calendarizados."
         )
         suggestions = [
             "Ver directivas enviadas al Gerente de Ventas",
@@ -475,7 +935,7 @@ async def chat_with_finance_agent(
             resp = (
                 f"📦 **Auditoría de Inventario Inmovilizado (datos reales):**\n\n"
                 f"Los SKUs con mayor capital inmovilizado en depósito son:\n{stock_txt}\n\n"
-                f"Recomendación: campaña de venta flash / escalas de precio por bulto para monetizar este stock."
+                f"Recomendación: activar escalas de precio por bulto o campañas relámpago para monetizar este stock."
             )
         else:
             resp = "No encontré productos con capital significativo inmovilizado en este momento."
@@ -494,6 +954,7 @@ async def chat_with_finance_agent(
             f"- **Efectivo en Custodia/Bóveda:** ₲ {tower.boveda_central_gs:,.0f}\n"
             f"- **Efectivo Cajas Salón:** ₲ {tower.cajas_pos_gs:,.0f}\n"
             f"- **Cuentas por Cobrar:** ₲ {tower.ar_total_gs:,.0f}\n"
+            f"- **Gastos Operativos Mes:** ₲ {tower.gastos_operativos_mes_gs:,.0f}\n"
             f"- **Margen Comercial Real:** {tower.margen_bruto_mes_pct}%\n\n"
             f"El canal de comunicación con el **Gerente de Ventas IA** está activo y sincronizado."
         )
@@ -512,7 +973,7 @@ async def chat_with_finance_agent(
     )
 
 
-# ── 5. RUN DIAGNOSIS (COMPATIBILIDAD CON ENDPOINTS) ───────────────────────────
+# ── 7. COMPATIBILIDAD CON ENDPOINTS PREEXISTENTES ─────────────────────────────
 
 async def run_diagnosis(db: AsyncSession, company_id: str) -> Any:
     tower = await get_liquidity_control_tower(db, company_id)
@@ -525,11 +986,8 @@ async def run_diagnosis(db: AsyncSession, company_id: str) -> Any:
         finished_at=datetime.now()
     )
 
+
 async def list_recommendations(db: AsyncSession, company_id: str, status_filter=None, tipo=None, limit=100, offset=0):
-    """Antes era un stub que siempre devolvia [] -- ahora deriva recomendaciones
-    reales de las mismas oportunidades de stock inmovilizado y alertas de
-    riesgo crediticio que ya calcula get_inter_agent_sync (datos reales de
-    Ñemuha), en vez de tener una tabla de recomendaciones separada sin usar."""
     sync = await get_inter_agent_sync(db, company_id)
     recs: list[dict] = []
     for o in sync.oportunidades_flash_stock:
@@ -556,12 +1014,14 @@ async def list_recommendations(db: AsyncSession, company_id: str, status_filter=
         recs = [r for r in recs if r["status"] == status_filter]
     return recs[offset:offset + limit]
 
+
 async def count_recommendations_by_tipo(db: AsyncSession, company_id: str, status_filter=None):
     recs = await list_recommendations(db, company_id, status_filter=status_filter, limit=10_000)
     counts: dict[str, int] = {}
     for r in recs:
         counts[r["tipo"]] = counts.get(r["tipo"], 0) + 1
     return counts
+
 
 async def bulk_decide_recommendations(db: AsyncSession, ids, approve, approved_by, comments):
     return len(ids)

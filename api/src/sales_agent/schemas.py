@@ -19,6 +19,7 @@ class ApplyPriceRequest(BaseModel):
     product_id: UUID
     nuevo_precio: Decimal
     motivo: Optional[str] = None
+    escalas: Optional[list[dict]] = None
 
 
 class ChatMessageRequest(BaseModel):
@@ -129,3 +130,134 @@ class SalesRentabilidadExecutive(BaseModel):
     pareto_resumen: dict
     propuestas_precios: list[PriceProposal]
     plan_accion_diario: list[DailyActionItem]
+
+class SalesPeriodFilter(BaseModel):
+    periodo_tipo: str = "mes_actual"  # mes_actual, mes_anterior, ultimos_30_dias, personalizado
+    fecha_desde: Optional[datetime] = None
+    fecha_hasta: Optional[datetime] = None
+
+
+class ParetoItem(BaseModel):
+    product_id: UUID
+    codigo_barra: Optional[str] = None
+    nombre: str
+    categoria: str
+    unidades_vendidas: Decimal
+    facturacion_total: Decimal
+    cmv_total: Decimal
+    ganancia_bruta: Decimal
+    margen_bruto_pct: float
+    participacion_pct: float
+    acumulado_pct: float
+    clase: str  # "A", "B", "C"
+
+
+class ParetoSummary(BaseModel):
+    total_skus: int
+    facturacion_total: Decimal
+    ganancia_total: Decimal
+    clase_a_skus: int
+    clase_a_pct: float
+    clase_b_skus: int
+    clase_b_pct: float
+    clase_c_skus: int
+    clase_c_pct: float
+
+
+class ParetoResponse(BaseModel):
+    resumen: ParetoSummary
+    items: list[ParetoItem]
+    total_items: int
+    page: int
+    page_size: int
+
+
+class CategoryAdjustment(BaseModel):
+    categoria: str
+    variacion_pct: float  # ej. 4.0 para +4%
+
+
+class SkuAdjustment(BaseModel):
+    product_id: UUID
+    nuevo_precio: Decimal
+
+
+class MarginSimulationRequest(BaseModel):
+    company_id: UUID
+    periodo_tipo: str = "mes_actual"
+    fecha_desde: Optional[datetime] = None
+    fecha_hasta: Optional[datetime] = None
+    ajustes_categoria: list[CategoryAdjustment] = Field(default_factory=list)
+    ajustes_sku: list[SkuAdjustment] = Field(default_factory=list)
+
+
+class MarginSimulationResponse(BaseModel):
+    margen_actual_pct: float
+    margen_simulado_pct: float
+    facturacion_base: Decimal
+    facturacion_simulada: Decimal
+    ganancia_adicional_gs: Decimal
+    gap_actual_gs: Decimal
+    gap_restante_gs: Decimal
+    reduccion_gap_pct: float
+    desglose_categorias: list[dict] = Field(default_factory=list)
+
+
+class KviToggleRequest(BaseModel):
+    company_id: UUID
+    product_id: UUID
+    es_gancho: bool
+    motivo: Optional[str] = None
+    margen_techo_pct: Optional[float] = 15.0
+
+
+class KviProductResponse(BaseModel):
+    product_id: UUID
+    es_gancho: bool
+    margen_techo_pct: float
+    motivo_gancho: str
+
+
+class SettingsUpdateRequest(BaseModel):
+    company_id: UUID
+    target_margen_minimo_pct: float
+    target_margen_ideal_pct: float
+    metas_por_categoria: Optional[dict[str, float]] = None
+
+
+class SalesAgentSettingsResponse(BaseModel):
+    target_margen_minimo_pct: float
+    target_margen_ideal_pct: float
+    metas_por_categoria: dict[str, float]
+
+
+class BusinessRuleCreateRequest(BaseModel):
+    company_id: UUID
+    regla: str
+    categoria: Optional[str] = "comercial"
+    origen: Optional[str] = "usuario_manual"
+
+
+class BusinessRuleResponse(BaseModel):
+    id: UUID
+    regla: str
+    categoria: Optional[str] = None
+    origen: str
+    activa: bool
+    confianza: float
+    created_at: datetime
+
+
+class ActionTaskUpdateRequest(BaseModel):
+    task_id: UUID
+    estado: str  # "pendiente", "en_progreso", "completado", "descartado"
+    motivo_descarte: Optional[str] = None
+    completado_por: Optional[str] = None
+
+
+class ExecuteActionTaskRequest(BaseModel):
+    task_id: UUID
+    company_id: UUID
+    tipo_accion: str
+    telefono_whatsapp: Optional[str] = None
+
