@@ -20,6 +20,7 @@ from api.src.sales.models import Sale, SaleItem, SalePayment
 from api.src.auth.models import User
 from api.src.caja.models import CashSession, CashRegister
 from api.src.sales.schemas import SaleCreate, SaleUpdate, SaleAddPayment
+from api.src.sales.pagos_revision import registrar_pagos_de_venta, forma_pago_resumen
 from api.src.inventory.models import Stock, StockLot, InventoryMovement
 from api.src.products.models import Product
 from api.src.fiscal import service as fiscal_service
@@ -675,15 +676,9 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
     # esto no hay forma real de saber que medios de pago se usaron en una
     # venta, ni de calcular el efectivo acumulado para la alerta de retiro.
     now = datetime.now(timezone.utc)
-    for p in data.payments:
-        db.add(SalePayment(
-            company_id=data.company_id,
-            sale_id=sale.id,
-            forma_pago=p.forma_pago,
-            monto=p.monto,
-            moneda=p.moneda,
-            fecha=now,
-        ))
+    await registrar_pagos_de_venta(
+        db, company_id=data.company_id, sale=sale, pagos=data.payments, ahora=now,
+    )
 
     # ── Registro de Micro-Donación / Redondeo Solidario (Amor y Esperanza) ──
     if data.monto_donacion and data.monto_donacion > Decimal("0"):
@@ -1932,17 +1927,13 @@ async def list_sales(
     payments_res = await db.execute(
         select(SalePayment).where(SalePayment.sale_id.in_(sale_ids))
     )
-    payments_by_sale: dict[uuid.UUID, str] = {}
+    payments_by_sale: dict[uuid.UUID, list[str]] = {}
     for p in payments_res.scalars().all():
-        if p.sale_id not in payments_by_sale:
-            payments_by_sale[p.sale_id] = p.forma_pago
+        payments_by_sale.setdefault(p.sale_id, []).append(p.forma_pago)
 
     sales_list = []
     for sale, cust, cs, cr, u in rows:
-        fp = payments_by_sale.get(
-            sale.id,
-            "EXTRA_CLUB" if sale.condicion == "credito" else "EFECTIVO"
-        )
+        fp = forma_pago_resumen(payments_by_sale.get(sale.id, []), sale.condicion)
         c_name = cust.razon_social or cust.nombre_fantasia if cust else "Consumidor Final"
         c_doc = cust.ruc or cust.ci or cust.telefono if cust else None
         c_ec = cust.extra_club_numero if cust else None
