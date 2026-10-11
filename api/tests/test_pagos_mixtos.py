@@ -13,6 +13,12 @@ from api.src.pos_terminal_transactions.schemas import (
 )
 from api.src.sales.models import Sale, SalePayment
 from api.src.sales.schemas import SalePaymentInput
+from api.src.sales.pagos_revision import (
+    LineaPago,
+    evaluar_pagos,
+    forma_pago_resumen,
+    marca_prevalente,
+)
 
 
 class TestEsquemas:
@@ -45,3 +51,45 @@ class TestEsquemas:
         assert c.requiere_conciliacion is False
         assert "requiere_conciliacion" in PosTerminalTransactionResponse.model_fields
         assert "sale_id" in PosTerminalTransactionResponse.model_fields
+
+
+D = Decimal
+
+
+def L(forma, monto, moneda="PYG", monto_pyg=None):
+    return LineaPago(forma_pago=forma, monto=D(monto), moneda=moneda, monto_pyg=monto_pyg)
+
+
+class TestEvaluarPagos:
+    def test_suma_exacta_no_marca(self):
+        assert evaluar_pagos(D(100000), [L("EFECTIVO", 60000), L("TARJETA DEBITO", 40000)]) == (None, None)
+
+    def test_diferencia_de_mas(self):
+        assert evaluar_pagos(D(100000), [L("EFECTIVO", 100500)]) == ("no_cuadran", D(500))
+
+    def test_diferencia_de_menos(self):
+        assert evaluar_pagos(D(100000), [L("EFECTIVO", 99000)]) == ("no_cuadran", D(-1000))
+
+    def test_borde_tolerancia(self):
+        assert evaluar_pagos(D(100000), [L("QR", 100050)]) == (None, None)
+        assert evaluar_pagos(D(100000), [L("QR", 100051)]) == ("no_cuadran", D(51))
+
+    def test_sin_lineas_no_valida(self):
+        assert evaluar_pagos(D(100000), []) == (None, None)
+
+    def test_linea_extranjera_sin_monto_pyg(self):
+        assert evaluar_pagos(D(200000), [L("EFECTIVO", D("20.00"), "BRL"), L("EFECTIVO", 50000)]) == ("no_verificable", None)
+
+    def test_linea_extranjera_con_monto_pyg(self):
+        assert evaluar_pagos(D(200000), [L("EFECTIVO", D("20.00"), "BRL", D(148000)), L("EFECTIVO", 52000)]) == (None, None)
+
+    def test_prevalencia_de_marcas(self):
+        assert marca_prevalente(None, "no_verificable", "no_cuadran") == "no_cuadran"
+        assert marca_prevalente("enlace_invalido", "no_cuadran") == "enlace_invalido"
+        assert marca_prevalente(None, None) is None
+
+    def test_forma_pago_resumen(self):
+        assert forma_pago_resumen([], "contado") == "EFECTIVO"
+        assert forma_pago_resumen([], "credito") == "EXTRA_CLUB"
+        assert forma_pago_resumen(["QR"], "contado") == "QR"
+        assert forma_pago_resumen(["EFECTIVO", "QR"], "contado") == "MIXTO"
