@@ -459,3 +459,189 @@ async def get_learned_rules(db: AsyncSession, company_id: str) -> List[LearnedRu
             created_at=r[6].strftime("%d/%m/%Y %H:%M") if r[6] else None
         ))
     return rules
+
+
+async def recalculate_customer_rfm_and_habits(db: AsyncSession, company_id: str) -> Dict[str, Any]:
+    """Motor de Re-Perfilado Dinámico Continuo.
+    Recalcula compras, ticket promedio, recencia, y reasigna etiquetas vivas sobre cupones_clientes."""
+    now = datetime.now(PARAGUAY_TZ)
+
+    # 1. Recalcular métricas de consumo acumuladas desde cupon_tickets
+    q_recalc_metrics = text("""
+        UPDATE cupones_clientes cc
+        SET 
+            total_gastado = sub.tot_gastado,
+            cantidad_compras = sub.cant_compras,
+            ticket_promedio = sub.t_promedio,
+            ultimo_consumo = sub.ult_consumo,
+            updated_at = NOW()
+        FROM (
+            SELECT 
+                cliente_id,
+                COALESCE(SUM(monto_compra), 0) as tot_gastado,
+                COUNT(id) as cant_compras,
+                COALESCE(AVG(monto_compra), 0) as t_promedio,
+                MAX(COALESCE(fecha_compra, fecha_captura)) as ult_consumo
+            FROM cupon_tickets
+            WHERE company_id = :cid
+            GROUP BY cliente_id
+        ) sub
+        WHERE cc.id = sub.cliente_id AND cc.company_id = :cid
+    """)
+    await db.execute(q_recalc_metrics, {"cid": company_id})
+    await db.commit()
+
+    # 2. Asignar etiquetas básicas de valor y riesgo (VIP Platino, Oro, Frecuente, Riesgo Churn)
+    q_all = text("""
+        SELECT id, total_gastado, cantidad_compras, ultimo_consumo, segmentos
+        FROM cupones_clientes
+        WHERE company_id = :cid AND activo = true
+    """)
+    rows = (await db.execute(q_all, {"cid": company_id})).fetchall()
+
+    actualizados = 0
+    rescatados_count = 0
+    en_riesgo_count = 0
+
+    for r in rows:
+        cid_val = r[0]
+        tot = float(r[1] or 0)
+        compras = int(r[2] or 0)
+        ult = r[3]
+        seg_actual = (r[4] or "").split(",") if r[4] else []
+        seg_set = set([s.strip() for s in seg_actual if s.strip()])
+
+        dias_inactivo = (now.date() - ult.date()).days if ult else 60
+
+        # Nivel de valor
+        if tot >= 3_000_000:
+            seg_set.add("VIP Platino")
+            seg_set.discard("VIP Oro")
+            seg_set.discard("Ocasional")
+        elif tot >= 1_500_000:
+            seg_set.add("VIP Oro")
+            seg_set.discard("VIP Platino")
+            seg_set.discard("Ocasional")
+        elif compras >= 4:
+            seg_set.add("Frecuente")
+            seg_set.discard("Ocasional")
+        else:
+            seg_set.add("Ocasional")
+
+        # Dinámica de Churn / Rescate
+        if dias_inactivo >= DIAS_CHURN_RIESGO and (tot >= 1_500_000 or compras >= 3):
+            seg_set.add("Riesgo Churn")
+            en_riesgo_count += 1
+        else:
+            if "Riesgo Churn" in seg_set:
+                seg_set.discard("Riesgo Churn")
+                seg_set.add("Cliente Rescatado")
+                rescatados_count += 1
+
+        # Guardar etiquetas actualizadas
+        new_segs = ",".join(sorted(list(seg_set)))
+        q_upd = text("UPDATE cupones_clientes SET segmentos = :segs WHERE id = :id")
+        await db.execute(q_upd, {"segs": new_segs, "id": cid_val})
+        actualizados += 1
+
+    await db.commit()
+
+    return {
+        "success": True,
+        "total_clientes_recalculados": actualizados,
+        "clientes_en_riesgo": en_riesgo_count,
+        "clientes_rescatados_recientes": rescatados_count,
+        "mensaje": f"Se recalcularon {actualizados:,d} clientes. {en_riesgo_count} en riesgo de abandono y {rescatados_count} clientes que volvieron a comprar tras campañas."
+    }
+
+
+async def create_custom_audience_tag(
+    db: AsyncSession, company_id: str, tag_name: str,
+    producto_keyword: Optional[str] = None, barrio: Optional[str] = None, min_gasto: Optional[float] = None
+) -> Dict[str, Any]:
+    """Crea una etiqueta personalizada y la asigna a los clientes que cumplan los criterios de hábitos reales."""
+    clean_tag = tag_name.strip()
+    if not clean_tag:
+        return {"success": False, "error": "El nombre de la etiqueta no puede estar vacío."}
+
+    # Buscar clientes objetivo
+    cliente_ids_target = set()
+
+    # Si hay palabra clave de producto (ej. 'Costilla', 'Cerveza', 'Pañal', 'Yerba')
+    if producto_keyword:
+        q_prod = text("""
+            SELECT DISTINCT ct.cliente_id
+            FROM cupon_ticket_items cti
+            JOIN cupon_tickets ct ON cti.ticket_id = ct.id
+            WHERE ct.company_id = :cid AND cti.descripcion ILIKE :kw
+        """)
+        p_rows = (await db.execute(q_prod, {"cid": company_id, "kw": f"%{producto_keyword}%"})).fetchall()
+        for pr in p_rows:
+            if pr[0]:
+                cliente_ids_target.add(str(pr[0]))
+
+    # Si hay filtro de barrio o gasto
+    filtros = ["company_id = :cid", "activo = true"]
+    params: Dict[str, Any] = {"cid": company_id}
+    if barrio:
+        filtros.append("barrio ILIKE :barrio")
+        params["barrio"] = f"%{barrio}%"
+    if min_gasto:
+        filtros.append("total_gastado >= :min_gasto")
+        params["min_gasto"] = min_gasto
+
+    q_cli = text(f"SELECT id FROM cupones_clientes WHERE {' AND '.join(filtros)}")
+    c_rows = (await db.execute(q_cli, params)).fetchall()
+
+    if not producto_keyword:
+        for cr in c_rows:
+            cliente_ids_target.add(str(cr[0]))
+    else:
+        # Intersección
+        cli_ids_barrio = set(str(cr[0]) for cr in c_rows)
+        cliente_ids_target = cliente_ids_target.intersection(cli_ids_barrio)
+
+    if not cliente_ids_target:
+        return {"success": True, "etiqueta": clean_tag, "clientes_asignados": 0, "mensaje": "Ningún cliente cumplió con los criterios especificados."}
+
+    # Asignar etiqueta en segmentos
+    for cid_str in cliente_ids_target:
+        q_get = text("SELECT segmentos FROM cupones_clientes WHERE id = :id")
+        curr = (await db.execute(q_get, {"id": cid_str})).scalar() or ""
+        segs = set([s.strip() for s in curr.split(",") if s.strip()])
+        segs.add(clean_tag)
+        await db.execute(text("UPDATE cupones_clientes SET segmentos = :s WHERE id = :id"), {"s": ",".join(sorted(list(segs))), "id": cid_str})
+
+    await db.commit()
+
+    # Guardar la regla de creación de etiqueta en la memoria continua del CMO
+    await record_learned_rule(
+        db, company_id,
+        f"Etiqueta creada: '{clean_tag}' (Criterio: {producto_keyword or ''} {barrio or ''} {f'Gasto >= Gs. {min_gasto:,.0f}' if min_gasto else ''}) asignada a {len(cliente_ids_target)} clientes.",
+        categoria="audiencias",
+        origen="cmo_segmentacion"
+    )
+
+    return {
+        "success": True,
+        "etiqueta": clean_tag,
+        "clientes_asignados": len(cliente_ids_target),
+        "mensaje": f"Etiqueta '{clean_tag}' creada y asignada a {len(cliente_ids_target):,d} clientes reales."
+    }
+
+
+async def get_audience_tags_summary(db: AsyncSession, company_id: str) -> List[Dict[str, Any]]:
+    """Obtiene el listado de todas las etiquetas dinámicas activas con el conteo de clientes."""
+    q = text("SELECT segmentos FROM cupones_clientes WHERE company_id = :cid AND activo = true AND segmentos IS NOT NULL")
+    rows = (await db.execute(q, {"cid": company_id})).fetchall()
+
+    conteo: Dict[str, int] = {}
+    for r in rows:
+        cadena = r[0] or ""
+        tags = [t.strip() for t in cadena.split(",") if t.strip()]
+        for t in tags:
+            conteo[t] = conteo.get(t, 0) + 1
+
+    resultado = [{"etiqueta": k, "cantidad": v} for k, v in sorted(conteo.items(), key=lambda x: x[1], reverse=True)]
+    return resultado
+

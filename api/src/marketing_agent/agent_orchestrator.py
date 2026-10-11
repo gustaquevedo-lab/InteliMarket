@@ -114,6 +114,34 @@ TOOL_DEFINITIONS = [
                 "required": ["regla"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "reprofile_customer_base",
+            "description": "Ejecuta el pipeline de re-perfilado dinámico continuo: recalcula compras, ticket promedio, recencia, detecta rescates y actualiza las etiquetas vivas en la base de datos.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_custom_audience_tag",
+            "description": "Crea una nueva etiqueta dinámica (ej: 'Amantes del Asado', 'Compradores Cerveza', 'Barrio Obrero') y se la asigna a los clientes que cumplan los criterios de hábitos reales en la base de datos.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tag_name": {"type": "string", "description": "Nombre de la etiqueta a crear."},
+                    "producto_keyword": {"type": "string", "description": "Palabra clave de producto en su historial (ej: 'Costilla', 'Cerveza', 'Pañal', 'Yerba')."},
+                    "barrio": {"type": "string", "description": "Filtro de barrio en Pedro Juan Caballero."},
+                    "min_gasto": {"type": "number", "description": "Gasto total acumulado mínimo en Guaraníes."}
+                },
+                "required": ["tag_name"]
+            }
+        }
     }
 ]
 
@@ -162,7 +190,6 @@ async def _execute_tool(db: AsyncSession, company_id: str, tool_name: str, args:
         )
 
     elif tool_name == "publish_kiosk_banner":
-        from api.src.api_models import KioskBannerModel
         # Guardar banner en la BD
         q = text("""
             INSERT INTO kiosk_banners (id, company_id, titulo, subtitulo, descuento_texto, color, activo, orden, created_at, updated_at)
@@ -184,6 +211,20 @@ async def _execute_tool(db: AsyncSession, company_id: str, tool_name: str, args:
         regla = args.get("regla", "")
         cat = args.get("categoria", "marketing")
         return await service.record_learned_rule(db, company_id, regla, cat)
+
+    elif tool_name == "reprofile_customer_base":
+        return await service.recalculate_customer_rfm_and_habits(db, company_id)
+
+    elif tool_name == "create_custom_audience_tag":
+        return await service.create_custom_audience_tag(
+            db, company_id,
+            tag_name=args.get("tag_name", ""),
+            producto_keyword=args.get("producto_keyword"),
+            barrio=args.get("barrio"),
+            min_gasto=float(args.get("min_gasto")) if args.get("min_gasto") else None
+        )
+
+    return {"error": f"Herramienta desconocida: {tool_name}"}
 
     return {"error": f"Herramienta desconocida: {tool_name}"}
 
@@ -280,6 +321,22 @@ DIRECTIVAS INMUTABLES:
                                 tipo="memory_rule",
                                 titulo="Regla Grabada en Memoria",
                                 descripcion=t_args.get("regla", ""),
+                                data=tool_res,
+                                ejecutable=False
+                            )
+                        elif t_name == "reprofile_customer_base":
+                            action_outcome = ActionOutcome(
+                                tipo="reprofile_done",
+                                titulo="Re-Perfilado Dinámico Completado",
+                                descripcion=f"{tool_res.get('total_clientes_recalculados', 0)} clientes recalculados ({tool_res.get('clientes_en_riesgo', 0)} en riesgo, {tool_res.get('clientes_rescatados_recientes', 0)} rescatados)",
+                                data=tool_res,
+                                ejecutable=False
+                            )
+                        elif t_name == "create_custom_audience_tag":
+                            action_outcome = ActionOutcome(
+                                tipo="tag_created",
+                                titulo=f"Etiqueta Dinámica: '{t_args.get('tag_name')}'",
+                                descripcion=f"Asignada a {tool_res.get('clientes_asignados', 0)} clientes reales",
                                 data=tool_res,
                                 ejecutable=False
                             )

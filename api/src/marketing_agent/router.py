@@ -39,6 +39,34 @@ async def get_tripartite_sync(company_id: str = Query(...), db: AsyncSession = D
     return await service.get_tripartite_sync_status(db, company_id)
 
 
+@router.post("/reprofile-customers")
+async def reprofile_customers(company_id: str = Query(...), db: AsyncSession = Depends(get_db)):
+    """Ejecuta el recálculo masivo de RFM, consumo acumulado y hábitos recientes en la base de datos."""
+    return await service.recalculate_customer_rfm_and_habits(db, company_id)
+
+
+@router.get("/audience-tags")
+async def get_audience_tags(company_id: str = Query(...), db: AsyncSession = Depends(get_db)):
+    """Lista las etiquetas dinámicas activas con la cantidad de clientes etiquetados."""
+    return await service.get_audience_tags_summary(db, company_id)
+
+
+@router.post("/create-audience-tag")
+async def create_audience_tag(
+    company_id: str = Query(...),
+    tag_name: str = Query(...),
+    producto_keyword: Optional[str] = Query(None),
+    barrio: Optional[str] = Query(None),
+    min_gasto: Optional[float] = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    """Crea una etiqueta y la asigna a los clientes que cumplan los criterios de hábitos reales."""
+    return await service.create_custom_audience_tag(
+        db, company_id, tag_name=tag_name,
+        producto_keyword=producto_keyword, barrio=barrio, min_gasto=min_gasto
+    )
+
+
 @router.get("/learned-rules", response_model=List[LearnedRuleItem])
 async def get_learned_rules(company_id: str = Query(...), db: AsyncSession = Depends(get_db)):
     """Memoria continua de marketing y mejores prácticas de retail aprendidas."""

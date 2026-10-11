@@ -3454,6 +3454,19 @@ export const api = {
       client.get<any[]>("/v1/marketing-agent/learned-rules", { company_id: companyId || COMPANY_ID }),
     recordRule: (regla: string, companyId?: string) =>
       client.post<any>(`/v1/marketing-agent/record-rule?company_id=${companyId || COMPANY_ID}&regla=${encodeURIComponent(regla)}`, {}),
+    reprofileCustomers: (companyId?: string) =>
+      client.post<any>(`/v1/marketing-agent/reprofile-customers?company_id=${companyId || COMPANY_ID}`, {}),
+    audienceTags: (companyId?: string) =>
+      client.get<any[]>("/v1/marketing-agent/audience-tags", { company_id: companyId || COMPANY_ID }),
+    createAudienceTag: (params: { tag_name: string; producto_keyword?: string; barrio?: string; min_gasto?: number; companyId?: string }) => {
+      const q = new URLSearchParams()
+      q.set("company_id", params.companyId || COMPANY_ID)
+      q.set("tag_name", params.tag_name)
+      if (params.producto_keyword) q.set("producto_keyword", params.producto_keyword)
+      if (params.barrio) q.set("barrio", params.barrio)
+      if (params.min_gasto) q.set("min_gasto", String(params.min_gasto))
+      return client.post<any>(`/v1/marketing-agent/create-audience-tag?${q.toString()}`, {})
+    },
     sendCoupon: (data: { phone: string; message: string; customer_name?: string; cupon?: string }) =>
       client.post<any>("/v1/marketing-agent/send-coupon", data),
     launchCampaign: (data: { company_id?: string; campaign_id: string; segmento: string; message?: string; crear_en_pos?: boolean; descuento_pct?: number; producto_ids?: string[] }) =>

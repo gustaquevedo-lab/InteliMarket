@@ -41,9 +41,15 @@ export default function MarketingAgentPage() {
   const [promotionsList, setPromotionsList] = useState<any[]>([])
   const [loadingPromos, setLoadingPromos] = useState(false)
   
-  // Filtros de Audiencias
+  // Filtros de Audiencias y Etiquetas Dinámicas
   const [rfmFilter, setRfmFilter] = useState<"todos" | "inactivos">("inactivos")
   const [searchCustomer, setSearchCustomer] = useState("")
+  const [audienceTags, setAudienceTags] = useState<any[]>([])
+  const [selectedTag, setSelectedTag] = useState<string>("todos")
+  const [reprofiling, setReprofiling] = useState(false)
+  const [showTagModal, setShowTagModal] = useState(false)
+  const [newTagForm, setNewTagForm] = useState({ tag_name: "", producto_keyword: "", barrio: "", min_gasto: "" })
+  const [savingTag, setSavingTag] = useState(false)
 
   // Formulario de Nueva Regla de Memoria
   const [newRuleText, setNewRuleText] = useState("")
@@ -122,8 +128,62 @@ export default function MarketingAgentPage() {
   useEffect(() => {
     if (tab === "audiencias") {
       fetchRfmCustomers(rfmFilter === "inactivos")
+      fetchAudienceTags()
     }
   }, [tab, rfmFilter, fetchRfmCustomers])
+
+  // Cargar Etiquetas Dinámicas de Audiencia
+  const fetchAudienceTags = useCallback(async () => {
+    try {
+      const tags = await api.marketingAgent.audienceTags(companyId)
+      setAudienceTags(tags || [])
+    } catch {
+      setAudienceTags([])
+    }
+  }, [companyId])
+
+  // Re-Perfilado Dinámico de Clientes en Lote
+  const handleReprofileCustomers = async () => {
+    setReprofiling(true)
+    try {
+      const res = await api.marketingAgent.reprofileCustomers(companyId)
+      toast.success("Re-Perfilado Completado", res?.mensaje || "Se recalcularon las métricas y hábitos.")
+      await Promise.all([
+        loadInitialData(),
+        fetchRfmCustomers(rfmFilter === "inactivos"),
+        fetchAudienceTags(),
+      ])
+    } catch (e: any) {
+      toast.error("Error al re-perfilar clientes", e?.message)
+    } finally {
+      setReprofiling(false)
+    }
+  }
+
+  // Crear Nueva Etiqueta Dinámica
+  const handleCreateTag = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newTagForm.tag_name.trim() || savingTag) return
+    setSavingTag(true)
+    try {
+      const res = await api.marketingAgent.createAudienceTag({
+        companyId,
+        tag_name: newTagForm.tag_name.trim(),
+        producto_keyword: newTagForm.producto_keyword.trim() || undefined,
+        barrio: newTagForm.barrio.trim() || undefined,
+        min_gasto: newTagForm.min_gasto ? parseFloat(newTagForm.min_gasto) : undefined
+      })
+      toast.success("Etiqueta Creada", res?.mensaje || "Asignada exitosamente.")
+      setShowTagModal(false)
+      setNewTagForm({ tag_name: "", producto_keyword: "", barrio: "", min_gasto: "" })
+      await fetchAudienceTags()
+      await fetchRfmCustomers(rfmFilter === "inactivos")
+    } catch (e: any) {
+      toast.error("Error al crear etiqueta", e?.message)
+    } finally {
+      setSavingTag(false)
+    }
+  }
 
   // Cargar Banners Kiosco
   const fetchKioskBanners = useCallback(async () => {
@@ -249,16 +309,24 @@ export default function MarketingAgentPage() {
     }
   }
 
-  // Filtrado de Clientes RFM en la lista
+  // Filtrado de Clientes RFM en la lista por Búsqueda y por Etiqueta Dinámica
   const filteredCustomers = useMemo(() => {
-    if (!searchCustomer.trim()) return rfmCustomers
+    let list = rfmCustomers
+    if (selectedTag !== "todos") {
+      const st = selectedTag.toLowerCase()
+      list = list.filter(c =>
+        (c.segmento && c.segmento.toLowerCase().includes(st)) ||
+        (c.documento && c.documento.toLowerCase().includes(st))
+      )
+    }
+    if (!searchCustomer.trim()) return list
     const q = searchCustomer.toLowerCase()
-    return rfmCustomers.filter(c =>
+    return list.filter(c =>
       c.nombre?.toLowerCase().includes(q) ||
       c.documento?.toLowerCase().includes(q) ||
       c.barrio?.toLowerCase().includes(q)
     )
-  }, [rfmCustomers, searchCustomer])
+  }, [rfmCustomers, searchCustomer, selectedTag])
 
   return (
     <div className="space-y-6 pb-20">
@@ -525,6 +593,72 @@ export default function MarketingAgentPage() {
             ))}
           </div>
 
+          {/* BARRA DE ACCIÓN: RE-PERFILADO CONTINUO Y CREACIÓN DE ETIQUETAS */}
+          <div className="p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div>
+              <h4 className="text-xs font-extrabold text-slate-900 dark:text-white uppercase flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-purple-600" /> Motor de Re-Perfilado Continuo & Etiquetas Dinámicas
+              </h4>
+              <p className="text-[11px] text-slate-500">
+                Recalcula recencia, frecuencia, compras en salón y actualiza productos habituales para los 7.856 clientes.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleReprofileCustomers}
+                disabled={reprofiling}
+                className="px-4 py-2.5 rounded-2xl text-xs font-extrabold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white flex items-center gap-1.5 shadow-sm transition disabled:opacity-50 cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${reprofiling ? "animate-spin" : ""}`} />
+                {reprofiling ? "Recalculando hábitos..." : "Recalcular Hábitos & Re-perfilar"}
+              </button>
+              <button
+                onClick={() => setShowTagModal(true)}
+                className="px-3.5 py-2.5 rounded-2xl text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 flex items-center gap-1.5 transition border border-slate-200 dark:border-slate-700 cursor-pointer"
+              >
+                <PlusCircle className="w-3.5 h-3.5 text-purple-600" />
+                Nueva Etiqueta
+              </button>
+            </div>
+          </div>
+
+          {/* SELECTOR DE ETIQUETAS DINÁMICAS */}
+          {audienceTags.length > 0 && (
+            <div className="p-3 rounded-2xl bg-slate-100/80 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 flex items-center gap-1.5 overflow-x-auto">
+              <span className="text-[10px] font-extrabold uppercase text-slate-400 pl-1 pr-2 whitespace-nowrap">
+                Filtrar por Etiqueta:
+              </span>
+              <button
+                onClick={() => setSelectedTag("todos")}
+                className={`px-3 py-1 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
+                  selectedTag === "todos"
+                    ? "bg-purple-600 text-white shadow-xs"
+                    : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800"
+                }`}
+              >
+                Todas las Audiencias
+              </button>
+              {audienceTags.map(tag => (
+                <button
+                  key={tag.etiqueta}
+                  onClick={() => setSelectedTag(tag.etiqueta)}
+                  className={`px-3 py-1 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                    selectedTag === tag.etiqueta
+                      ? "bg-purple-600 text-white shadow-xs"
+                      : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-purple-50 dark:hover:bg-slate-800"
+                  }`}
+                >
+                  <span>{tag.etiqueta}</span>
+                  <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-mono font-bold ${
+                    selectedTag === tag.etiqueta ? "bg-purple-800 text-white" : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
+                  }`}>
+                    {tag.cantidad}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* LISTADO DE CLIENTES REALES CON HÁBITOS DE COMPRA */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -561,6 +695,71 @@ export default function MarketingAgentPage() {
                 </button>
               </div>
             </div>
+
+            {/* MODAL CREAR NUEVA ETIQUETA */}
+            {showTagModal && (
+              <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+                <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-xl max-w-md w-full space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase flex items-center gap-2">
+                      <PlusCircle className="w-4 h-4 text-purple-600" /> Crear Nueva Etiqueta de Audiencia
+                    </h4>
+                    <button onClick={() => setShowTagModal(false)} className="text-slate-400 hover:text-slate-600">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <form onSubmit={handleCreateTag} className="space-y-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400">Nombre de la Etiqueta *</label>
+                      <input
+                        type="text"
+                        placeholder="Ej: Amantes del Asado, Cerveceros, Compradores Bebés..."
+                        value={newTagForm.tag_name}
+                        onChange={e => setNewTagForm({ ...newTagForm, tag_name: e.target.value })}
+                        required
+                        className="w-full mt-1 px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400">Palabra clave en Productos Comprados</label>
+                      <input
+                        type="text"
+                        placeholder="Ej: Costilla, Brahma, Michelob, Pañal, Yerba..."
+                        value={newTagForm.producto_keyword}
+                        onChange={e => setNewTagForm({ ...newTagForm, producto_keyword: e.target.value })}
+                        className="w-full mt-1 px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400">Filtro de Barrio (Opcional)</label>
+                      <input
+                        type="text"
+                        placeholder="Ej: San Gerardo, Obrero, Centro..."
+                        value={newTagForm.barrio}
+                        onChange={e => setNewTagForm({ ...newTagForm, barrio: e.target.value })}
+                        className="w-full mt-1 px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                      />
+                    </div>
+                    <div className="pt-2 flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowTagModal(false)}
+                        className="px-3 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={savingTag || !newTagForm.tag_name.trim()}
+                        className="px-4 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50"
+                      >
+                        {savingTag ? "Creando y asignando..." : "Crear y Asignar"}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
 
             {loadingRfm ? (
               <div className="flex items-center justify-center py-12">
