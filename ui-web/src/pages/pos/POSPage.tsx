@@ -28,6 +28,8 @@ import QRCode from "qrcode"
 import { imDinelco, imBancard } from "../../monitor/integrations"
 import { captureMessage } from "../../monitor"
 import { validarCierre, totalConfirmadoPyg, type LineaCobro, type ContextoCierre } from "./validarCierre"
+import { terminalLock } from "./terminalLock"
+import { useTerminalBusy } from "./useTerminalBusy"
 
 
 // ── BANDERAS VECTORIALES SVG PARA COMPATIBILIDAD TOTAL EN WINDOWS / ELECTRON ─
@@ -1797,6 +1799,25 @@ export default function POSPage() {
     }
   }
 
+  // Candado por IP del terminal: dos cobros (linea principal y/o cobros
+  // adicionales) no pueden hablar a la vez con el mismo terminal. Solo
+  // envuelve la parte que habla con el terminal: las validaciones previas
+  // (sin IP, monto invalido, fuera de la app de caja) siguen igual. El
+  // candado se libera en finally aunque fn lance.
+  const conTerminal = async (ip: string, fn: () => Promise<void>): Promise<void> => {
+    if (!terminalLock.tryAcquire(ip)) {
+      toast.warning("Terminal ocupado", "Esperá a que termine el cobro en curso.")
+      return
+    }
+    try {
+      await fn()
+    } finally {
+      terminalLock.release(ip)
+    }
+  }
+  const bancardBusy = useTerminalBusy(activePosConfig.bancardIp || undefined)
+  const dinelcoBusy = useTerminalBusy(activePosConfig.dinelcoIp || undefined)
+
   const handleBancardCharge = async () => {
     console.log(`[BANCARD-TRACE] Tarjeta handler invocado, bancardIp=${activePosConfig.bancardIp || "(vacio)"}, tipo=${posCardType}, cuotas=${posCardCuotas}`)
     const ip = activePosConfig.bancardIp
@@ -1816,79 +1837,89 @@ export default function POSPage() {
       setShowBancardManualFallback(true)
       return
     }
-    const facturaNro = Date.now()
-    setBancardTxnState("esperando_tarjeta")
-    setBancardTxnError("")
-    setBancardTxnResult(null)
-    setShowBancardManualFallback(false)
+    await conTerminal(ip, async () => {
+      const facturaNro = Date.now()
+      setBancardTxnState("esperando_tarjeta")
+      setBancardTxnError("")
+      setBancardTxnResult(null)
+      setShowBancardManualFallback(false)
 
-    // Venta Contado universal oficial (soporta débito y crédito sin discriminar con chip/contactless/banda)
-    // Si se seleccionó crédito en cuotas (>=2), envía cuotas y plan 1 según la sección 5.2 de Bancard
-    const path1 = "/pos/venta-ux"
-    const body1: any = { facturaNro, monto: montoBancard }
-    if (posCardType === "credito" && posCardCuotas > 1) {
-      body1.cuotas = posCardCuotas
-      body1.plan = 1
-    }
-    console.log(`[BANCARD-TRACE] paso1 -> ip=${ip} path=${path1} body=${JSON.stringify(body1)}`)
-    const res1 = await imBancard(electronAPI, ip, path1, body1, 90000)
-    console.log(`[BANCARD-TRACE] paso1 <- ${JSON.stringify(res1)}`)
-
-    if (!res1.ok) {
-      if (res1.status === 400 || res1.status === 500) {
-        setBancardTxnState("error_rechazo")
-        setBancardTxnError(bancardErrorMessage(res1.body?.message))
-        await logBancardTxn({
-          tipo_operacion: posCardType === "debito" ? "venta_debito" : (posCardCuotas > 1 ? `venta_credito_${posCardCuotas}cuotas` : "venta_credito"),
-          exitosa: false, verificado_automaticamente: true, error_message: res1.body?.message,
-          monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res1.body,
-        })
-      } else {
-        setBancardTxnState("error_conexion")
-        setBancardTxnError(`No se pudo conectar con el terminal (${res1.message || "error de red"}) -- verificá la red o cargá el cupón manualmente si ya cobraste en el terminal.`)
-        setShowBancardManualFallback(true)
+      // Venta Contado universal oficial (soporta débito y crédito sin discriminar con chip/contactless/banda)
+      // Si se seleccionó crédito en cuotas (>=2), envía cuotas y plan 1 según la sección 5.2 de Bancard
+      const path1 = "/pos/venta-ux"
+      const body1: any = { facturaNro, monto: montoBancard }
+      if (posCardType === "credito" && posCardCuotas > 1) {
+        body1.cuotas = posCardCuotas
+        body1.plan = 1
       }
-      return
-    }
+      console.log(`[BANCARD-TRACE] paso1 -> ip=${ip} path=${path1} body=${JSON.stringify(body1)}`)
+      const res1 = await imBancard(electronAPI, ip, path1, body1, 90000)
+      console.log(`[BANCARD-TRACE] paso1 <- ${JSON.stringify(res1)}`)
 
-    const { bin, nsu } = res1.body || {}
-    setBancardTxnState("confirmando")
-    const body2 = { bin, nsu, monto: montoBancard }
-    console.log(`[BANCARD-TRACE] paso2 -> ip=${ip} path=/pos/descuento body=${JSON.stringify(body2)}`)
-    const res2 = await imBancard(electronAPI, ip, "/pos/descuento", body2, 90000)
-    console.log(`[BANCARD-TRACE] paso2 <- ${JSON.stringify(res2)}`)
-
-    if (!res2.ok) {
-      if (res2.status === 400 || res2.status === 500) {
-        setBancardTxnState("error_rechazo")
-        setBancardTxnError(bancardErrorMessage(res2.body?.message))
-        await logBancardTxn({
-          tipo_operacion: posCardType === "debito" ? "venta_debito" : (posCardCuotas > 1 ? `venta_credito_${posCardCuotas}cuotas` : "venta_credito"),
-          exitosa: false, verificado_automaticamente: true, error_message: res2.body?.message,
-          bin, nsu, monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res2.body,
-        })
-      } else {
-        setBancardTxnState("error_conexion")
-        setBancardTxnError(`Se cobró en el terminal pero no se pudo confirmar la respuesta (${res2.message || "error de red"}) -- revisá el terminal y cargá el cupón manualmente.`)
-        setShowBancardManualFallback(true)
+      if (!res1.ok) {
+        if (res1.status === 400 || res1.status === 500) {
+          setBancardTxnState("error_rechazo")
+          setBancardTxnError(bancardErrorMessage(res1.body?.message))
+          await logBancardTxn({
+            tipo_operacion: posCardType === "debito" ? "venta_debito" : (posCardCuotas > 1 ? `venta_credito_${posCardCuotas}cuotas` : "venta_credito"),
+            exitosa: false, verificado_automaticamente: true, error_message: res1.body?.message,
+            monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res1.body,
+          })
+        } else {
+          setBancardTxnState("error_conexion")
+          setBancardTxnError(`No se pudo conectar con el terminal (${res1.message || "error de red"}) -- verificá la red o cargá el cupón manualmente si ya cobraste en el terminal.`)
+          setShowBancardManualFallback(true)
+        }
+        return
       }
-      return
-    }
 
-    const result = res2.body || {}
-    setBancardTxnResult(result)
-    setBancardTxnState("aprobada")
-    const logged = await logBancardTxn({
-      tipo_operacion: posCardType === "debito" ? "venta_debito" : (posCardCuotas > 1 ? `venta_credito_${posCardCuotas}cuotas` : "venta_credito"),
-      exitosa: true, verificado_automaticamente: true,
-      bin, nsu, monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro),
-      codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.codigoComercio,
-      issuer_id: result.issuerId, nombre_tarjeta: result.nombreTarjeta, pan: result.pan,
-      mensaje_display: result.mensajeDisplay, nombre_cliente: result.nombreCliente,
-      monto_vuelto: result.montoVuelto, saldo: result.saldo, raw_response: result,
+      const { bin, nsu } = res1.body || {}
+      setBancardTxnState("confirmando")
+      const body2 = { bin, nsu, monto: montoBancard }
+      console.log(`[BANCARD-TRACE] paso2 -> ip=${ip} path=/pos/descuento body=${JSON.stringify(body2)}`)
+      const res2 = await imBancard(electronAPI, ip, "/pos/descuento", body2, 90000)
+      console.log(`[BANCARD-TRACE] paso2 <- ${JSON.stringify(res2)}`)
+
+      if (!res2.ok) {
+        if (res2.status === 400 || res2.status === 500) {
+          setBancardTxnState("error_rechazo")
+          setBancardTxnError(bancardErrorMessage(res2.body?.message))
+          await logBancardTxn({
+            tipo_operacion: posCardType === "debito" ? "venta_debito" : (posCardCuotas > 1 ? `venta_credito_${posCardCuotas}cuotas` : "venta_credito"),
+            exitosa: false, verificado_automaticamente: true, error_message: res2.body?.message,
+            bin, nsu, monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res2.body,
+          })
+        } else {
+          setBancardTxnState("error_conexion")
+          setBancardTxnError(`Se cobró en el terminal pero no se pudo confirmar la respuesta (${res2.message || "error de red"}) -- revisá el terminal y cargá el cupón manualmente.`)
+          setShowBancardManualFallback(true)
+          // El paso 1 ya paso la tarjeta: puede haber un cobro real sin
+          // confirmar. Queda registrado para conciliar (Revision de cobros).
+          await logBancardTxn({
+            tipo_operacion: posCardType === "debito" ? "venta_debito" : (posCardCuotas > 1 ? `venta_credito_${posCardCuotas}cuotas` : "venta_credito"),
+            exitosa: false, requiere_conciliacion: true,
+            bin, nsu, monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro),
+            error_message: `Paso 2 (/pos/descuento) sin respuesta: ${res2.message || "error de red"}`,
+          })
+        }
+        return
+      }
+
+      const result = res2.body || {}
+      setBancardTxnResult(result)
+      setBancardTxnState("aprobada")
+      const logged = await logBancardTxn({
+        tipo_operacion: posCardType === "debito" ? "venta_debito" : (posCardCuotas > 1 ? `venta_credito_${posCardCuotas}cuotas` : "venta_credito"),
+        exitosa: true, verificado_automaticamente: true,
+        bin, nsu, monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro),
+        codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.codigoComercio,
+        issuer_id: result.issuerId, nombre_tarjeta: result.nombreTarjeta, pan: result.pan,
+        mensaje_display: result.mensajeDisplay, nombre_cliente: result.nombreCliente,
+        monto_vuelto: result.montoVuelto, saldo: result.saldo, raw_response: result,
+      })
+      setBancardTxnLogId((logged as any)?.id || null)
+      setPosCardCupon(result.nroBoleta || "")
     })
-    setBancardTxnLogId((logged as any)?.id || null)
-    setPosCardCupon(result.nroBoleta || "")
   }
 
   // Version leg-scoped de handleBancardCharge, para el 2do/3er cobro con
@@ -1910,59 +1941,68 @@ export default function POSPage() {
       updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: "Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá.", showManualFallback: true })
       return
     }
-    const facturaNro = Date.now()
-    updateExtraLeg(leg.id, { txnState: "esperando", txnError: "", txnResult: null, showManualFallback: false })
+    await conTerminal(ip, async () => {
+      const facturaNro = Date.now()
+      updateExtraLeg(leg.id, { txnState: "esperando", txnError: "", txnResult: null, showManualFallback: false })
 
-    const tipoOperacion = leg.cardType === "debito" ? "venta_debito" : (leg.cardCuotas > 1 ? `venta_credito_${leg.cardCuotas}cuotas` : "venta_credito")
-    const path1 = "/pos/venta-ux"
-    const body1: any = { facturaNro, monto: montoBancard }
-    if (leg.cardType === "credito" && leg.cardCuotas > 1) {
-      body1.cuotas = leg.cardCuotas
-      body1.plan = 1
-    }
-    const res1 = await imBancard(electronAPI, ip, path1, body1, 90000)
-
-    if (!res1.ok) {
-      if (res1.status === 400 || res1.status === 500) {
-        updateExtraLeg(leg.id, { txnState: "error_rechazo", txnError: bancardErrorMessage(res1.body?.message) })
-        await logBancardTxn({
-          tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true, error_message: res1.body?.message,
-          monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res1.body,
-        })
-      } else {
-        updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: `No se pudo conectar con el terminal (${res1.message || "error de red"}) -- verificá la red o cargá el cupón manualmente si ya cobraste en el terminal.`, showManualFallback: true })
+      const tipoOperacion = leg.cardType === "debito" ? "venta_debito" : (leg.cardCuotas > 1 ? `venta_credito_${leg.cardCuotas}cuotas` : "venta_credito")
+      const path1 = "/pos/venta-ux"
+      const body1: any = { facturaNro, monto: montoBancard }
+      if (leg.cardType === "credito" && leg.cardCuotas > 1) {
+        body1.cuotas = leg.cardCuotas
+        body1.plan = 1
       }
-      return
-    }
+      const res1 = await imBancard(electronAPI, ip, path1, body1, 90000)
 
-    const { bin, nsu } = res1.body || {}
-    updateExtraLeg(leg.id, { txnState: "confirmando" })
-    const body2 = { bin, nsu, monto: montoBancard }
-    const res2 = await imBancard(electronAPI, ip, "/pos/descuento", body2, 90000)
-
-    if (!res2.ok) {
-      if (res2.status === 400 || res2.status === 500) {
-        updateExtraLeg(leg.id, { txnState: "error_rechazo", txnError: bancardErrorMessage(res2.body?.message) })
-        await logBancardTxn({
-          tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true, error_message: res2.body?.message,
-          bin, nsu, monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res2.body,
-        })
-      } else {
-        updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: `Se cobró en el terminal pero no se pudo confirmar la respuesta (${res2.message || "error de red"}) -- revisá el terminal y cargá el cupón manualmente.`, showManualFallback: true })
+      if (!res1.ok) {
+        if (res1.status === 400 || res1.status === 500) {
+          updateExtraLeg(leg.id, { txnState: "error_rechazo", txnError: bancardErrorMessage(res1.body?.message) })
+          await logBancardTxn({
+            tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true, error_message: res1.body?.message,
+            monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res1.body,
+          })
+        } else {
+          updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: `No se pudo conectar con el terminal (${res1.message || "error de red"}) -- verificá la red o cargá el cupón manualmente si ya cobraste en el terminal.`, showManualFallback: true })
+        }
+        return
       }
-      return
-    }
 
-    const result = res2.body || {}
-    const logged = await logBancardTxn({
-      tipo_operacion: tipoOperacion, exitosa: true, verificado_automaticamente: true,
-      bin, nsu, monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro),
-      codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.codigoComercio,
-      issuer_id: result.issuerId, nombre_tarjeta: result.nombreTarjeta, pan: result.pan,
-      mensaje_display: result.mensajeDisplay, nombre_cliente: result.nombreCliente,
-      monto_vuelto: result.montoVuelto, saldo: result.saldo, raw_response: result,
+      const { bin, nsu } = res1.body || {}
+      updateExtraLeg(leg.id, { txnState: "confirmando" })
+      const body2 = { bin, nsu, monto: montoBancard }
+      const res2 = await imBancard(electronAPI, ip, "/pos/descuento", body2, 90000)
+
+      if (!res2.ok) {
+        if (res2.status === 400 || res2.status === 500) {
+          updateExtraLeg(leg.id, { txnState: "error_rechazo", txnError: bancardErrorMessage(res2.body?.message) })
+          await logBancardTxn({
+            tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true, error_message: res2.body?.message,
+            bin, nsu, monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res2.body,
+          })
+        } else {
+          updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: `Se cobró en el terminal pero no se pudo confirmar la respuesta (${res2.message || "error de red"}) -- revisá el terminal y cargá el cupón manualmente.`, showManualFallback: true })
+          // El paso 1 ya paso la tarjeta: puede haber un cobro real sin
+          // confirmar. Queda registrado para conciliar (Revision de cobros).
+          await logBancardTxn({
+            tipo_operacion: tipoOperacion, exitosa: false, requiere_conciliacion: true,
+            bin, nsu, monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro),
+            error_message: `Paso 2 (/pos/descuento) sin respuesta: ${res2.message || "error de red"}`,
+          })
+        }
+        return
+      }
+
+      const result = res2.body || {}
+      const logged = await logBancardTxn({
+        tipo_operacion: tipoOperacion, exitosa: true, verificado_automaticamente: true,
+        bin, nsu, monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro),
+        codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.codigoComercio,
+        issuer_id: result.issuerId, nombre_tarjeta: result.nombreTarjeta, pan: result.pan,
+        mensaje_display: result.mensajeDisplay, nombre_cliente: result.nombreCliente,
+        monto_vuelto: result.montoVuelto, saldo: result.saldo, raw_response: result,
+      })
+      updateExtraLeg(leg.id, { txnState: "aprobada", txnResult: result, logId: (logged as any)?.id || null, manualCupon: result.nroBoleta || "" })
     })
-    updateExtraLeg(leg.id, { txnState: "aprobada", txnResult: result, logId: (logged as any)?.id || null, manualCupon: result.nroBoleta || "" })
   }
 
   const logDinelcoTxn = async (data: Record<string, any>) => {
@@ -2002,72 +2042,74 @@ export default function POSPage() {
       setShowDinelcoManualFallback(true)
       return
     }
-    setDinelcoTxnState("esperando_tarjeta")
-    setDinelcoTxnError("")
-    setDinelcoTxnResult(null)
-    setShowDinelcoManualFallback(false)
+    await conTerminal(ip, async () => {
+      setDinelcoTxnState("esperando_tarjeta")
+      setDinelcoTxnError("")
+      setDinelcoTxnResult(null)
+      setShowDinelcoManualFallback(false)
 
-    const res1 = await imDinelco(electronAPI, ip, "venta_inicio", { op: "01", monto: montoDinelco }, null, 90000)
+      const res1 = await imDinelco(electronAPI, ip, "venta_inicio", { op: "01", monto: montoDinelco }, null, 90000)
 
-    if (!res1.ok) {
-      setDinelcoTxnState(res1.error ? "error_conexion" : "error_rechazo")
-      setDinelcoTxnError(res1.error ? `No se pudo conectar con el terminal (${res1.error}) -- verificá la red o cargá el cupón manualmente si ya cobraste en el terminal.` : (res1.desc || "El terminal rechazó la operación."))
-      if (res1.error) setShowDinelcoManualFallback(true)
-      await logDinelcoTxn({
+      if (!res1.ok) {
+        setDinelcoTxnState(res1.error ? "error_conexion" : "error_rechazo")
+        setDinelcoTxnError(res1.error ? `No se pudo conectar con el terminal (${res1.error}) -- verificá la red o cargá el cupón manualmente si ya cobraste en el terminal.` : (res1.desc || "El terminal rechazó la operación."))
+        if (res1.error) setShowDinelcoManualFallback(true)
+        await logDinelcoTxn({
+          tipo_operacion: dinelcoCardType === "credito" && dinelcoCuotas > 1 ? `dinelco_venta_credito_${dinelcoCuotas}cuotas` : `dinelco_venta_${dinelcoCardType}`,
+          exitosa: false, verificado_automaticamente: true, error_message: res1.desc || res1.error,
+          monto: montoDinelco, terminal_ip: ip, raw_response: res1,
+        })
+        return
+      }
+
+      setDinelcoSessionId(res1.sessionId)
+      setDinelcoTxnState("confirmando")
+      const cuotasParam = dinelcoCardType === "credito" && dinelcoCuotas > 1 ? dinelcoCuotas : 0
+      // ENDOP dispara la autorizacion real via ISO8583 contra el adquirente
+      // (manual Bepsa/Dinelco pag. 10, pasos 3-6) -- una autorizacion real
+      // puede tardar mas que un mensaje local. 30s quedaba corto (mas corto
+      // incluso que el timeout de QR/PIX, que ademas de la autorizacion
+      // esperan que el cliente escanee y apruebe en su banco) y explicaba el
+      // sintoma reportado: el terminal seguia "calculando" la autorizacion
+      // real mientras nuestro cliente ya habia tirado la toalla por timeout.
+      const res2 = await imDinelco(electronAPI, ip, "venta_confirmar", { cuotas: cuotasParam, monto: montoDinelco }, res1.sessionId, 90000)
+
+      if (!res2.ok) {
+        setDinelcoTxnState(res2.error ? "error_conexion" : "error_rechazo")
+        setDinelcoTxnError(res2.error ? `Se inició el cobro en el terminal pero no se pudo confirmar la respuesta (${res2.error}) -- revisá el terminal y cargá el cupón manualmente.` : (res2.desc || "El terminal rechazó la operación."))
+        if (res2.error) setShowDinelcoManualFallback(true)
+        await logDinelcoTxn({
+          tipo_operacion: dinelcoCardType === "credito" && dinelcoCuotas > 1 ? `dinelco_venta_credito_${dinelcoCuotas}cuotas` : `dinelco_venta_${dinelcoCardType}`,
+          exitosa: false, verificado_automaticamente: true, error_message: res2.desc || res2.error,
+          monto: montoDinelco, terminal_ip: ip, raw_response: res2,
+        })
+        // Avisarle al terminal que la sesion abierta por el RBIN anterior queda
+        // cancelada -- sin esto se queda "esperando informacion de caja" y
+        // arruina el proximo intento de cobro en esta caja.
+        electronAPI.dinelcoCancel?.(res1.sessionId).catch(() => {})
+        setDinelcoSessionId(null)
+        return
+      }
+
+      // Orden de CAMPOSOK del manual: AUTHCODE|AUTHORIZER|OPTYPE|BOLETA|TERMINAL|COMERCIO|ULTIMOS4|PUNTOS
+      const c = res2.campos || []
+      const result = {
+        codigoAutorizacion: c[0] || "", authorizer: c[1] || "", opType: c[2] || "",
+        nroBoleta: c[3] || "", terminal: c[4] || "", comercio: c[5] || "", ultimos4: c[6] || "", puntos: c[7] || "",
+      }
+      setDinelcoTxnResult(result)
+      setDinelcoTxnState("aprobada")
+      const logged = await logDinelcoTxn({
         tipo_operacion: dinelcoCardType === "credito" && dinelcoCuotas > 1 ? `dinelco_venta_credito_${dinelcoCuotas}cuotas` : `dinelco_venta_${dinelcoCardType}`,
-        exitosa: false, verificado_automaticamente: true, error_message: res1.desc || res1.error,
-        monto: montoDinelco, terminal_ip: ip, raw_response: res1,
+        exitosa: true, verificado_automaticamente: true,
+        monto: montoDinelco, terminal_ip: ip,
+        codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.comercio,
+        mensaje_display: "APROBADA", raw_response: result,
       })
-      return
-    }
-
-    setDinelcoSessionId(res1.sessionId)
-    setDinelcoTxnState("confirmando")
-    const cuotasParam = dinelcoCardType === "credito" && dinelcoCuotas > 1 ? dinelcoCuotas : 0
-    // ENDOP dispara la autorizacion real via ISO8583 contra el adquirente
-    // (manual Bepsa/Dinelco pag. 10, pasos 3-6) -- una autorizacion real
-    // puede tardar mas que un mensaje local. 30s quedaba corto (mas corto
-    // incluso que el timeout de QR/PIX, que ademas de la autorizacion
-    // esperan que el cliente escanee y apruebe en su banco) y explicaba el
-    // sintoma reportado: el terminal seguia "calculando" la autorizacion
-    // real mientras nuestro cliente ya habia tirado la toalla por timeout.
-    const res2 = await imDinelco(electronAPI, ip, "venta_confirmar", { cuotas: cuotasParam, monto: montoDinelco }, res1.sessionId, 90000)
-
-    if (!res2.ok) {
-      setDinelcoTxnState(res2.error ? "error_conexion" : "error_rechazo")
-      setDinelcoTxnError(res2.error ? `Se inició el cobro en el terminal pero no se pudo confirmar la respuesta (${res2.error}) -- revisá el terminal y cargá el cupón manualmente.` : (res2.desc || "El terminal rechazó la operación."))
-      if (res2.error) setShowDinelcoManualFallback(true)
-      await logDinelcoTxn({
-        tipo_operacion: dinelcoCardType === "credito" && dinelcoCuotas > 1 ? `dinelco_venta_credito_${dinelcoCuotas}cuotas` : `dinelco_venta_${dinelcoCardType}`,
-        exitosa: false, verificado_automaticamente: true, error_message: res2.desc || res2.error,
-        monto: montoDinelco, terminal_ip: ip, raw_response: res2,
-      })
-      // Avisarle al terminal que la sesion abierta por el RBIN anterior queda
-      // cancelada -- sin esto se queda "esperando informacion de caja" y
-      // arruina el proximo intento de cobro en esta caja.
-      electronAPI.dinelcoCancel?.(res1.sessionId).catch(() => {})
+      setDinelcoTxnLogId((logged as any)?.id || null)
       setDinelcoSessionId(null)
-      return
-    }
-
-    // Orden de CAMPOSOK del manual: AUTHCODE|AUTHORIZER|OPTYPE|BOLETA|TERMINAL|COMERCIO|ULTIMOS4|PUNTOS
-    const c = res2.campos || []
-    const result = {
-      codigoAutorizacion: c[0] || "", authorizer: c[1] || "", opType: c[2] || "",
-      nroBoleta: c[3] || "", terminal: c[4] || "", comercio: c[5] || "", ultimos4: c[6] || "", puntos: c[7] || "",
-    }
-    setDinelcoTxnResult(result)
-    setDinelcoTxnState("aprobada")
-    const logged = await logDinelcoTxn({
-      tipo_operacion: dinelcoCardType === "credito" && dinelcoCuotas > 1 ? `dinelco_venta_credito_${dinelcoCuotas}cuotas` : `dinelco_venta_${dinelcoCardType}`,
-      exitosa: true, verificado_automaticamente: true,
-      monto: montoDinelco, terminal_ip: ip,
-      codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.comercio,
-      mensaje_display: "APROBADA", raw_response: result,
+      setDinelcoCupon(result.nroBoleta || "")
     })
-    setDinelcoTxnLogId((logged as any)?.id || null)
-    setDinelcoSessionId(null)
-    setDinelcoCupon(result.nroBoleta || "")
   }
 
   const handleDinelcoQR = async () => {
@@ -2091,31 +2133,33 @@ export default function POSPage() {
       setDinelcoQrError("Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá.")
       return
     }
-    setDinelcoQrState("esperando")
-    setDinelcoQrError("")
+    await conTerminal(ip, async () => {
+      setDinelcoQrState("esperando")
+      setDinelcoQrError("")
 
-    const res = dinelcoQrMode === "pix"
-      ? await imDinelco(electronAPI, ip, "pix", { monto: montoQrDinelco, cpf: dinelcoPixCpf.replace(/\D/g, "") }, null, 90000)
-      : await imDinelco(electronAPI, ip, "qr", { op: "01", monto: montoQrDinelco }, null, 90000)
+      const res = dinelcoQrMode === "pix"
+        ? await imDinelco(electronAPI, ip, "pix", { monto: montoQrDinelco, cpf: dinelcoPixCpf.replace(/\D/g, "") }, null, 90000)
+        : await imDinelco(electronAPI, ip, "qr", { op: "01", monto: montoQrDinelco }, null, 90000)
 
-    const tipoOperacion = dinelcoQrMode === "pix" ? "dinelco_pix" : "dinelco_qr"
+      const tipoOperacion = dinelcoQrMode === "pix" ? "dinelco_pix" : "dinelco_qr"
 
-    if (!res.ok) {
-      setDinelcoQrState(res.error ? "error_conexion" : "error_rechazo")
-      setDinelcoQrError(res.error ? `No se pudo conectar con el terminal (${res.error}).` : (res.desc || "El terminal rechazó la operación."))
-      await logDinelcoTxn({
-        tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true,
-        error_message: res.desc || res.error, monto: montoQrDinelco, terminal_ip: ip, raw_response: res,
+      if (!res.ok) {
+        setDinelcoQrState(res.error ? "error_conexion" : "error_rechazo")
+        setDinelcoQrError(res.error ? `No se pudo conectar con el terminal (${res.error}).` : (res.desc || "El terminal rechazó la operación."))
+        await logDinelcoTxn({
+          tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true,
+          error_message: res.desc || res.error, monto: montoQrDinelco, terminal_ip: ip, raw_response: res,
+        })
+        return
+      }
+
+      setDinelcoQrState("aprobada")
+      const logged = await logDinelcoTxn({
+        tipo_operacion: tipoOperacion, exitosa: true, verificado_automaticamente: true,
+        monto: montoQrDinelco, terminal_ip: ip, mensaje_display: "APROBADA", raw_response: res,
       })
-      return
-    }
-
-    setDinelcoQrState("aprobada")
-    const logged = await logDinelcoTxn({
-      tipo_operacion: tipoOperacion, exitosa: true, verificado_automaticamente: true,
-      monto: montoQrDinelco, terminal_ip: ip, mensaje_display: "APROBADA", raw_response: res,
+      setDinelcoQrLogId((logged as any)?.id || null)
     })
-    setDinelcoQrLogId((logged as any)?.id || null)
   }
 
   // Version leg-scoped de handleDinelcoCharge, para el 2do/3er cobro con
@@ -2136,54 +2180,56 @@ export default function POSPage() {
       updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: "Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá.", showManualFallback: true })
       return
     }
-    updateExtraLeg(leg.id, { txnState: "esperando", txnError: "", txnResult: null, showManualFallback: false })
+    await conTerminal(ip, async () => {
+      updateExtraLeg(leg.id, { txnState: "esperando", txnError: "", txnResult: null, showManualFallback: false })
 
-    const tipoOperacion = leg.cardType === "credito" && leg.cardCuotas > 1 ? `dinelco_venta_credito_${leg.cardCuotas}cuotas` : `dinelco_venta_${leg.cardType}`
-    const res1 = await imDinelco(electronAPI, ip, "venta_inicio", { op: "01", monto: montoDinelco }, null, 90000)
+      const tipoOperacion = leg.cardType === "credito" && leg.cardCuotas > 1 ? `dinelco_venta_credito_${leg.cardCuotas}cuotas` : `dinelco_venta_${leg.cardType}`
+      const res1 = await imDinelco(electronAPI, ip, "venta_inicio", { op: "01", monto: montoDinelco }, null, 90000)
 
-    if (!res1.ok) {
-      updateExtraLeg(leg.id, {
-        txnState: res1.error ? "error_conexion" : "error_rechazo",
-        txnError: res1.error ? `No se pudo conectar con el terminal (${res1.error}) -- verificá la red o cargá el cupón manualmente si ya cobraste en el terminal.` : (res1.desc || "El terminal rechazó la operación."),
-        showManualFallback: !!res1.error,
+      if (!res1.ok) {
+        updateExtraLeg(leg.id, {
+          txnState: res1.error ? "error_conexion" : "error_rechazo",
+          txnError: res1.error ? `No se pudo conectar con el terminal (${res1.error}) -- verificá la red o cargá el cupón manualmente si ya cobraste en el terminal.` : (res1.desc || "El terminal rechazó la operación."),
+          showManualFallback: !!res1.error,
+        })
+        await logDinelcoTxn({
+          tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true, error_message: res1.desc || res1.error,
+          monto: montoDinelco, terminal_ip: ip, raw_response: res1,
+        })
+        return
+      }
+
+      updateExtraLeg(leg.id, { txnState: "confirmando" })
+      const cuotasParam = leg.cardType === "credito" && leg.cardCuotas > 1 ? leg.cardCuotas : 0
+      const res2 = await imDinelco(electronAPI, ip, "venta_confirmar", { cuotas: cuotasParam, monto: montoDinelco }, res1.sessionId, 90000)
+
+      if (!res2.ok) {
+        updateExtraLeg(leg.id, {
+          txnState: res2.error ? "error_conexion" : "error_rechazo",
+          txnError: res2.error ? `Se inició el cobro en el terminal pero no se pudo confirmar la respuesta (${res2.error}) -- revisá el terminal y cargá el cupón manualmente.` : (res2.desc || "El terminal rechazó la operación."),
+          showManualFallback: !!res2.error,
+        })
+        await logDinelcoTxn({
+          tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true, error_message: res2.desc || res2.error,
+          monto: montoDinelco, terminal_ip: ip, raw_response: res2,
+        })
+        electronAPI.dinelcoCancel?.(res1.sessionId).catch(() => {})
+        return
+      }
+
+      const c = res2.campos || []
+      const result = {
+        codigoAutorizacion: c[0] || "", authorizer: c[1] || "", opType: c[2] || "",
+        nroBoleta: c[3] || "", terminal: c[4] || "", comercio: c[5] || "", ultimos4: c[6] || "", puntos: c[7] || "",
+      }
+      const logged = await logDinelcoTxn({
+        tipo_operacion: tipoOperacion, exitosa: true, verificado_automaticamente: true,
+        monto: montoDinelco, terminal_ip: ip,
+        codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.comercio,
+        mensaje_display: "APROBADA", raw_response: result,
       })
-      await logDinelcoTxn({
-        tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true, error_message: res1.desc || res1.error,
-        monto: montoDinelco, terminal_ip: ip, raw_response: res1,
-      })
-      return
-    }
-
-    updateExtraLeg(leg.id, { txnState: "confirmando" })
-    const cuotasParam = leg.cardType === "credito" && leg.cardCuotas > 1 ? leg.cardCuotas : 0
-    const res2 = await imDinelco(electronAPI, ip, "venta_confirmar", { cuotas: cuotasParam, monto: montoDinelco }, res1.sessionId, 90000)
-
-    if (!res2.ok) {
-      updateExtraLeg(leg.id, {
-        txnState: res2.error ? "error_conexion" : "error_rechazo",
-        txnError: res2.error ? `Se inició el cobro en el terminal pero no se pudo confirmar la respuesta (${res2.error}) -- revisá el terminal y cargá el cupón manualmente.` : (res2.desc || "El terminal rechazó la operación."),
-        showManualFallback: !!res2.error,
-      })
-      await logDinelcoTxn({
-        tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true, error_message: res2.desc || res2.error,
-        monto: montoDinelco, terminal_ip: ip, raw_response: res2,
-      })
-      electronAPI.dinelcoCancel?.(res1.sessionId).catch(() => {})
-      return
-    }
-
-    const c = res2.campos || []
-    const result = {
-      codigoAutorizacion: c[0] || "", authorizer: c[1] || "", opType: c[2] || "",
-      nroBoleta: c[3] || "", terminal: c[4] || "", comercio: c[5] || "", ultimos4: c[6] || "", puntos: c[7] || "",
-    }
-    const logged = await logDinelcoTxn({
-      tipo_operacion: tipoOperacion, exitosa: true, verificado_automaticamente: true,
-      monto: montoDinelco, terminal_ip: ip,
-      codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.comercio,
-      mensaje_display: "APROBADA", raw_response: result,
+      updateExtraLeg(leg.id, { txnState: "aprobada", txnResult: result, logId: (logged as any)?.id || null, manualCupon: result.nroBoleta || "" })
     })
-    updateExtraLeg(leg.id, { txnState: "aprobada", txnResult: result, logId: (logged as any)?.id || null, manualCupon: result.nroBoleta || "" })
   }
 
   // Version leg-scoped de handleDinelcoQR (QR Guaraníes / PIX Brasil).
@@ -2207,32 +2253,34 @@ export default function POSPage() {
       updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: "Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá." })
       return
     }
-    updateExtraLeg(leg.id, { txnState: "esperando", txnError: "" })
+    await conTerminal(ip, async () => {
+      updateExtraLeg(leg.id, { txnState: "esperando", txnError: "" })
 
-    const res = leg.dinelcoQrMode === "pix"
-      ? await imDinelco(electronAPI, ip, "pix", { monto: montoQrDinelco, cpf: (leg.pixCpf || "").replace(/\D/g, "") }, null, 90000)
-      : await imDinelco(electronAPI, ip, "qr", { op: "01", monto: montoQrDinelco }, null, 90000)
+      const res = leg.dinelcoQrMode === "pix"
+        ? await imDinelco(electronAPI, ip, "pix", { monto: montoQrDinelco, cpf: (leg.pixCpf || "").replace(/\D/g, "") }, null, 90000)
+        : await imDinelco(electronAPI, ip, "qr", { op: "01", monto: montoQrDinelco }, null, 90000)
 
-    const tipoOperacion = leg.dinelcoQrMode === "pix" ? "dinelco_pix" : "dinelco_qr"
+      const tipoOperacion = leg.dinelcoQrMode === "pix" ? "dinelco_pix" : "dinelco_qr"
 
-    if (!res.ok) {
-      updateExtraLeg(leg.id, {
-        txnState: res.error ? "error_conexion" : "error_rechazo",
-        txnError: res.error ? `No se pudo conectar con el terminal (${res.error}).` : (res.desc || "El terminal rechazó la operación."),
+      if (!res.ok) {
+        updateExtraLeg(leg.id, {
+          txnState: res.error ? "error_conexion" : "error_rechazo",
+          txnError: res.error ? `No se pudo conectar con el terminal (${res.error}).` : (res.desc || "El terminal rechazó la operación."),
+        })
+        await logDinelcoTxn({
+          tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true,
+          error_message: res.desc || res.error, monto: montoQrDinelco, terminal_ip: ip, raw_response: res,
+        })
+        return
+      }
+
+      updateExtraLeg(leg.id, { txnState: "aprobada" })
+      const logged = await logDinelcoTxn({
+        tipo_operacion: tipoOperacion, exitosa: true, verificado_automaticamente: true,
+        monto: montoQrDinelco, terminal_ip: ip, mensaje_display: "APROBADA", raw_response: res,
       })
-      await logDinelcoTxn({
-        tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true,
-        error_message: res.desc || res.error, monto: montoQrDinelco, terminal_ip: ip, raw_response: res,
-      })
-      return
-    }
-
-    updateExtraLeg(leg.id, { txnState: "aprobada" })
-    const logged = await logDinelcoTxn({
-      tipo_operacion: tipoOperacion, exitosa: true, verificado_automaticamente: true,
-      monto: montoQrDinelco, terminal_ip: ip, mensaje_display: "APROBADA", raw_response: res,
+      updateExtraLeg(leg.id, { logId: (logged as any)?.id || null })
     })
-    updateExtraLeg(leg.id, { logId: (logged as any)?.id || null })
   }
 
   const handleBancardQR = async () => {
@@ -2253,44 +2301,46 @@ export default function POSPage() {
       setBancardQrError("Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá.")
       return
     }
-    const facturaNro = Date.now()
-    setBancardQrState("esperando")
-    setBancardQrError("")
-    setBancardQrResult(null)
-    setBancardQrManualConfirm(false)
+    await conTerminal(ip, async () => {
+      const facturaNro = Date.now()
+      setBancardQrState("esperando")
+      setBancardQrError("")
+      setBancardQrResult(null)
+      setBancardQrManualConfirm(false)
 
-    const bodyQr = { facturaNro, monto: montoQr, montoVuelto: 0 }
-    console.log(`[BANCARD-TRACE] QR -> ip=${ip} path=/pos/venta-qr body=${JSON.stringify(bodyQr)}`)
-    const res = await imBancard(electronAPI, ip, "/pos/venta-qr", bodyQr, 180000)
-    console.log(`[BANCARD-TRACE] QR <- ${JSON.stringify(res)}`)
+      const bodyQr = { facturaNro, monto: montoQr, montoVuelto: 0 }
+      console.log(`[BANCARD-TRACE] QR -> ip=${ip} path=/pos/venta-qr body=${JSON.stringify(bodyQr)}`)
+      const res = await imBancard(electronAPI, ip, "/pos/venta-qr", bodyQr, 180000)
+      console.log(`[BANCARD-TRACE] QR <- ${JSON.stringify(res)}`)
 
-    if (!res.ok) {
-      if (res.status === 400 || res.status === 500) {
-        setBancardQrState("error_rechazo")
-        setBancardQrError(bancardErrorMessage(res.body?.message))
-        await logBancardTxn({
-          tipo_operacion: "venta_qr", exitosa: false, verificado_automaticamente: true, error_message: res.body?.message,
-          monto: montoQr, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res.body,
-        })
-      } else {
-        setBancardQrState("error_conexion")
-        setBancardQrError(`No se pudo conectar con el terminal (${res.message || "error de red"}).`)
+      if (!res.ok) {
+        if (res.status === 400 || res.status === 500) {
+          setBancardQrState("error_rechazo")
+          setBancardQrError(bancardErrorMessage(res.body?.message))
+          await logBancardTxn({
+            tipo_operacion: "venta_qr", exitosa: false, verificado_automaticamente: true, error_message: res.body?.message,
+            monto: montoQr, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res.body,
+          })
+        } else {
+          setBancardQrState("error_conexion")
+          setBancardQrError(`No se pudo conectar con el terminal (${res.message || "error de red"}).`)
+        }
+        return
       }
-      return
-    }
 
-    const result = res.body || {}
-    setBancardQrResult(result)
-    setBancardQrState("aprobada")
-    const logged = await logBancardTxn({
-      tipo_operacion: "venta_qr", exitosa: true, verificado_automaticamente: true,
-      monto: montoQr, terminal_ip: ip, factura_nro_provisional: String(facturaNro),
-      codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.codigoComercio,
-      issuer_id: result.issuerId, nombre_tarjeta: result.nombreTarjeta, pan: result.pan,
-      mensaje_display: result.mensajeDisplay, nombre_cliente: result.nombreCliente,
-      monto_vuelto: result.montoVuelto, saldo: result.saldo, raw_response: result,
+      const result = res.body || {}
+      setBancardQrResult(result)
+      setBancardQrState("aprobada")
+      const logged = await logBancardTxn({
+        tipo_operacion: "venta_qr", exitosa: true, verificado_automaticamente: true,
+        monto: montoQr, terminal_ip: ip, factura_nro_provisional: String(facturaNro),
+        codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.codigoComercio,
+        issuer_id: result.issuerId, nombre_tarjeta: result.nombreTarjeta, pan: result.pan,
+        mensaje_display: result.mensajeDisplay, nombre_cliente: result.nombreCliente,
+        monto_vuelto: result.montoVuelto, saldo: result.saldo, raw_response: result,
+      })
+      setBancardQrLogId((logged as any)?.id || null)
     })
-    setBancardQrLogId((logged as any)?.id || null)
   }
 
   // Version leg-scoped de handleBancardQR (QR Zimple), para el 2do/3er
@@ -2311,35 +2361,37 @@ export default function POSPage() {
       updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: "Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá." })
       return
     }
-    const facturaNro = Date.now()
-    updateExtraLeg(leg.id, { txnState: "esperando", txnError: "", txnResult: null })
+    await conTerminal(ip, async () => {
+      const facturaNro = Date.now()
+      updateExtraLeg(leg.id, { txnState: "esperando", txnError: "", txnResult: null })
 
-    const bodyQr = { facturaNro, monto: montoQr, montoVuelto: 0 }
-    const res = await imBancard(electronAPI, ip, "/pos/venta-qr", bodyQr, 180000)
+      const bodyQr = { facturaNro, monto: montoQr, montoVuelto: 0 }
+      const res = await imBancard(electronAPI, ip, "/pos/venta-qr", bodyQr, 180000)
 
-    if (!res.ok) {
-      if (res.status === 400 || res.status === 500) {
-        updateExtraLeg(leg.id, { txnState: "error_rechazo", txnError: bancardErrorMessage(res.body?.message) })
-        await logBancardTxn({
-          tipo_operacion: "venta_qr", exitosa: false, verificado_automaticamente: true, error_message: res.body?.message,
-          monto: montoQr, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res.body,
-        })
-      } else {
-        updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: `No se pudo conectar con el terminal (${res.message || "error de red"}).` })
+      if (!res.ok) {
+        if (res.status === 400 || res.status === 500) {
+          updateExtraLeg(leg.id, { txnState: "error_rechazo", txnError: bancardErrorMessage(res.body?.message) })
+          await logBancardTxn({
+            tipo_operacion: "venta_qr", exitosa: false, verificado_automaticamente: true, error_message: res.body?.message,
+            monto: montoQr, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res.body,
+          })
+        } else {
+          updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: `No se pudo conectar con el terminal (${res.message || "error de red"}).` })
+        }
+        return
       }
-      return
-    }
 
-    const result = res.body || {}
-    const logged = await logBancardTxn({
-      tipo_operacion: "venta_qr", exitosa: true, verificado_automaticamente: true,
-      monto: montoQr, terminal_ip: ip, factura_nro_provisional: String(facturaNro),
-      codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.codigoComercio,
-      issuer_id: result.issuerId, nombre_tarjeta: result.nombreTarjeta, pan: result.pan,
-      mensaje_display: result.mensajeDisplay, nombre_cliente: result.nombreCliente,
-      monto_vuelto: result.montoVuelto, saldo: result.saldo, raw_response: result,
+      const result = res.body || {}
+      const logged = await logBancardTxn({
+        tipo_operacion: "venta_qr", exitosa: true, verificado_automaticamente: true,
+        monto: montoQr, terminal_ip: ip, factura_nro_provisional: String(facturaNro),
+        codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.codigoComercio,
+        issuer_id: result.issuerId, nombre_tarjeta: result.nombreTarjeta, pan: result.pan,
+        mensaje_display: result.mensajeDisplay, nombre_cliente: result.nombreCliente,
+        monto_vuelto: result.montoVuelto, saldo: result.saldo, raw_response: result,
+      })
+      updateExtraLeg(leg.id, { txnState: "aprobada", txnResult: result, logId: (logged as any)?.id || null })
     })
-    updateExtraLeg(leg.id, { txnState: "aprobada", txnResult: result, logId: (logged as any)?.id || null })
   }
 
 
@@ -5817,11 +5869,51 @@ export default function POSPage() {
         applyTieredPrice(itemToDelete.product_id, remainingQty, customer.id)
       }
     } else if (action.type === "clear_cart") {
+      // Cobros ya aprobados que quedarian sin venta: el terminal no los
+      // devuelve solo. Se pide confirmacion explicita y se deja traza.
+      const aprobados = lineasAprobadasSinVenta()
+      if (aprobados.length > 0) {
+        const detalle = aprobados
+          .map((c) => `- ${c.proveedor.toUpperCase()} (${c.metodo}) ${formatPYG(c.montoPyg)}${c.voucher ? ` - voucher ${c.voucher}` : " - sin voucher"}`)
+          .join("\n")
+        const confirmado = window.confirm(
+          `Hay cobros ya aprobados en esta venta:\n\n${detalle}\n\n` +
+          `Si cancelás la venta, el terminal no devuelve nada solo: cada cobro hay que anularlo/devolverlo aparte.\n\n` +
+          `¿Cancelar la venta igual?`
+        )
+        if (!confirmado) {
+          toast.info("Venta no cancelada", "Los cobros aprobados siguen en la venta.")
+          return
+        }
+        api.inteliaudit.recordEvent({
+          company_id: COMPANY_ID,
+          user_id: user?.id,
+          accion: "cobro_aprobado_cancelado",
+          entidad: "cobro_terminal",
+          datos_nuevos: {
+            cobros: aprobados,
+            total_venta_pyg: totalPyg,
+            caja: puntoEmision,
+            cajero_nombre: user?.nombre,
+            autorizado_por_id: resolverId,
+            autorizado_por_nombre: resolverNombre,
+          },
+        } as any).catch((err) => console.warn("Error grabando auditoria de cobro aprobado cancelado:", err))
+      }
       setCart([])
       setCustomer(DEFAULT_CUSTOMER)
       setAppliedDiscount(null)
       setExtraClubAdminOverride(false)
       clearAllExtraLegs()
+      if (aprobados.length > 0) {
+        // Que los cobros cancelados no sigan contando como aprobados en la
+        // proxima venta (ni disparen de nuevo estos avisos).
+        resetBancardFlow()
+        setPosCardCupon("")
+        setDinelcoCupon("")
+        setPlugpayManualComprobante("")
+        setPlugpayManualAutorizacion("")
+      }
       toast.warning("Venta Cancelada", "Se anularon todos los productos del ticket.")
     } else if (action.type === "decrease_qty" && action.itemId && action.delta) {
       const itemBefore = cart.find((i) => i.id === action.itemId)
@@ -6874,6 +6966,70 @@ export default function POSPage() {
     }
     return lineas
   }
+
+  // Cobros ya aprobados (por el terminal/pasarela o respaldados con voucher
+  // manual) que todavia no quedaron en ninguna venta: lineas "confirmada" de
+  // la linea principal y de los cobros adicionales. Se excluyen efectivo,
+  // Extra Club y Otros: van siempre confirmados y no cobran nada antes de
+  // cerrar la venta. Lo usan el aviso al cancelar y el de total cambiado.
+  type CobroAprobadoSinVenta = { id: string; metodo: LineaCobro["metodo"]; proveedor: "bancard" | "dinelco" | "plugpay"; montoPyg: number; voucher: string }
+  const lineasAprobadasSinVenta = (): CobroAprobadoSinVenta[] => {
+    const primero = (...vals: (string | null | undefined)[]): string => {
+      for (const v of vals) { const t = String(v ?? "").trim(); if (t) return t }
+      return ""
+    }
+    const out: CobroAprobadoSinVenta[] = []
+    for (const l of construirLineasCobro()) {
+      if (l.estado !== "confirmada" || !Number.isFinite(l.montoPyg)) continue
+      if (l.metodo === "cash" || l.metodo === "extra_club" || l.metodo === "otros") continue
+      if (l.esExtra) {
+        const leg = extraPaymentLegs.find((x) => x.id === l.id)
+        // mismo mapeo que legProveedor en el payload de la venta
+        const proveedor = l.metodo === "dinelco" ? "dinelco" : (l.metodo === "plugpay" || l.metodo === "plugpay_credito") ? "plugpay" : "bancard"
+        out.push({ id: l.id, metodo: l.metodo, proveedor, montoPyg: l.montoPyg, voucher: primero(leg?.manualCupon, leg?.manualAuth, leg?.txnResult?.nroBoleta, leg?.txnResult?.codigoAutorizacion) })
+      } else if (l.metodo === "bancard") {
+        out.push({ id: l.id, metodo: l.metodo, proveedor: "bancard", montoPyg: l.montoPyg, voucher: primero(posCardCupon, posQrCupon, posQrAuth, (bancardTxnResult as any)?.codigoAutorizacion, (bancardQrResult as any)?.codigoAutorizacion) })
+      } else if (l.metodo === "dinelco") {
+        out.push({ id: l.id, metodo: l.metodo, proveedor: "dinelco", montoPyg: l.montoPyg, voucher: primero(dinelcoCupon, dinelcoTxnResult?.codigoAutorizacion) })
+      } else {
+        out.push({ id: l.id, metodo: l.metodo, proveedor: "plugpay", montoPyg: l.montoPyg, voucher: primero(plugpayManualComprobante, plugpayManualAutorizacion) })
+      }
+    }
+    return out
+  }
+
+  // Aviso si el total de la venta cambia despues de aprobar un cobro: se
+  // guarda el total al aprobarse la primera linea y se avisa una sola vez
+  // por cada total distinto (no en cada render).
+  const totalAlAprobarRef = useRef<number | null>(null)
+  const totalAvisadoRef = useRef<number | null>(null)
+  const hayCobrosAprobadosSinVenta = cart.length > 0 && lineasAprobadasSinVenta().length > 0
+  useEffect(() => {
+    if (!hayCobrosAprobadosSinVenta) {
+      totalAlAprobarRef.current = null
+      totalAvisadoRef.current = null
+      return
+    }
+    if (totalAlAprobarRef.current === null) {
+      totalAlAprobarRef.current = totalPyg
+      return
+    }
+    if (totalPyg !== totalAlAprobarRef.current && totalPyg !== totalAvisadoRef.current) {
+      totalAvisadoRef.current = totalPyg
+      toast.warning("El total cambió", "Ya hay cobros aprobados por otro monto.")
+    }
+  }, [totalPyg, hayCobrosAprobadosSinVenta])
+
+  // Con el cobro de la linea principal aprobado por el terminal/pasarela (o
+  // en curso) su monto queda fijo: lo registrado no puede apartarse de lo
+  // que se cobro. El voucher manual no fija nada. El reset/cancelar del
+  // flujo (resetBancardFlow) vuelve los estados a "idle" y lo libera.
+  const montoBancardFijo = bancardTxnState === "aprobada" || bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando"
+    || bancardQrState === "aprobada" || bancardQrState === "esperando"
+    || bancardCloudQrState === "aprobada" || bancardCloudQrState === "generando" || bancardCloudQrState === "esperando"
+  const montoDinelcoFijo = dinelcoTxnState === "aprobada" || dinelcoTxnState === "esperando_tarjeta" || dinelcoTxnState === "confirmando"
+    || dinelcoQrState === "aprobada" || dinelcoQrState === "esperando"
+  const montoPlugpayFijo = plugpayState === "aprobada" || plugpayState === "esperando"
 
   const contextoCierre = (): ContextoCierre => {
     const credito = extraClubCredit && extraClubCredit !== "loading" ? extraClubCredit : null
@@ -11549,12 +11705,14 @@ export default function POSPage() {
                                 }}
                                 onKeyDown={(e) => handleMixedFieldKeyDown(e, setMixedCardPyg)}
                                 onFocus={(e) => e.target.select()}
+                                disabled={montoBancardFijo}
                                 placeholder="0"
-                                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-blue-600 dark:text-blue-400 outline-none focus:border-blue-500"
+                                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-blue-600 dark:text-blue-400 outline-none focus:border-blue-500 disabled:opacity-60 disabled:cursor-not-allowed"
                               />
                               <button
                                 type="button"
                                 title="Completar con el resto"
+                                disabled={montoBancardFijo}
                                 onClick={() => {
                                   const resto = getSaldoRestanteParaMetodo("bancard")
                                   setMixedCardPyg(resto > 0 ? resto.toLocaleString("es-PY") : "")
@@ -11563,7 +11721,7 @@ export default function POSPage() {
                                     setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
                                   }
                                 }}
-                                className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
+                                className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 Resto
                               </button>
@@ -11585,7 +11743,7 @@ export default function POSPage() {
                               <button
                                 type="button"
                                 onClick={handleBancardCharge}
-                                disabled={!activePosConfig.bancardIp || bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando"}
+                                disabled={!activePosConfig.bancardIp || bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando" || bancardBusy}
                                 className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-black bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 cursor-pointer shadow-md shadow-blue-600/20"
                               >
                                 {(bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando") ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
@@ -11609,14 +11767,14 @@ export default function POSPage() {
                             {bancardTxnState === "error_rechazo" && (
                               <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5">
                                 <div className="font-black">✕ {bancardTxnError}</div>
-                                <button type="button" onClick={handleBancardCharge} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
+                                <button type="button" onClick={handleBancardCharge} disabled={bancardBusy} className="text-xs font-bold underline cursor-pointer disabled:opacity-50">Reintentar</button>
                               </div>
                             )}
 
                             {bancardTxnState === "error_conexion" && (
                               <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5">
                                 <div className="font-black">⚠ {bancardTxnError}</div>
-                                <button type="button" onClick={handleBancardCharge} className="text-xs font-bold underline cursor-pointer">Reintentar conexión</button>
+                                <button type="button" onClick={handleBancardCharge} disabled={bancardBusy} className="text-xs font-bold underline cursor-pointer disabled:opacity-50">Reintentar conexión</button>
                               </div>
                             )}
 
@@ -11738,7 +11896,7 @@ export default function POSPage() {
                                   <button
                                     type="button"
                                     onClick={() => handleBancardChargeForLeg(leg)}
-                                    disabled={!activePosConfig.bancardIp}
+                                    disabled={!activePosConfig.bancardIp || bancardBusy}
                                     className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 cursor-pointer"
                                   >
                                     <CreditCard className="w-3.5 h-3.5" />
@@ -11766,7 +11924,7 @@ export default function POSPage() {
                                 {leg.txnState === "error_conexion" && (
                                   <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1">
                                     <div className="font-black">⚠ {leg.txnError}</div>
-                                    <button type="button" onClick={() => handleBancardChargeForLeg(leg)} className="text-[10px] font-bold underline cursor-pointer">Reintentar conexión</button>
+                                    <button type="button" onClick={() => handleBancardChargeForLeg(leg)} disabled={bancardBusy} className="text-[10px] font-bold underline cursor-pointer disabled:opacity-50">Reintentar conexión</button>
                                   </div>
                                 )}
 
@@ -11822,7 +11980,7 @@ export default function POSPage() {
                               <button
                                 type="button"
                                 onClick={handleBancardQR}
-                                disabled={!activePosConfig.bancardIp || bancardQrState === "esperando"}
+                                disabled={!activePosConfig.bancardIp || bancardQrState === "esperando" || bancardBusy}
                                 className="w-full max-w-sm flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer shadow-sm shadow-purple-600/20"
                               >
                                 {bancardQrState === "esperando" ? <Loader2 className="w-4 h-4 animate-spin" /> : <QrCode className="w-4 h-4" />}
@@ -11833,14 +11991,14 @@ export default function POSPage() {
                             {bancardQrState === "error_rechazo" && (
                               <div className="w-full max-w-sm p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5 text-left">
                                 <div className="font-black">✕ {bancardQrError || "Transacción QR rechazada"}</div>
-                                <button type="button" onClick={handleBancardQR} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
+                                <button type="button" onClick={handleBancardQR} disabled={bancardBusy} className="text-xs font-bold underline cursor-pointer disabled:opacity-50">Reintentar</button>
                               </div>
                             )}
 
                             {bancardQrState === "error_conexion" && (
                               <div className="w-full max-w-sm p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5 text-left">
                                 <div className="font-black">⚠ {bancardQrError || "Error de conexión con el terminal"}</div>
-                                <button type="button" onClick={handleBancardQR} className="text-xs font-bold underline cursor-pointer">Reintentar conexión</button>
+                                <button type="button" onClick={handleBancardQR} disabled={bancardBusy} className="text-xs font-bold underline cursor-pointer disabled:opacity-50">Reintentar conexión</button>
                               </div>
                             )}
 
@@ -11955,7 +12113,7 @@ export default function POSPage() {
                                       <button
                                         type="button"
                                         onClick={() => handleBancardQRForLeg(leg)}
-                                        disabled={!activePosConfig.bancardIp || leg.txnState === "esperando"}
+                                        disabled={!activePosConfig.bancardIp || leg.txnState === "esperando" || bancardBusy}
                                         className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer"
                                       >
                                         {leg.txnState === "esperando" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <QrCode className="w-3.5 h-3.5" />}
@@ -11977,7 +12135,7 @@ export default function POSPage() {
                                     {leg.txnState === "error_conexion" && (
                                       <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1">
                                         <div className="font-black">⚠ {leg.txnError}</div>
-                                        <button type="button" onClick={() => handleBancardQRForLeg(leg)} className="text-[10px] font-bold underline cursor-pointer">Reintentar conexión</button>
+                                        <button type="button" onClick={() => handleBancardQRForLeg(leg)} disabled={bancardBusy} className="text-[10px] font-bold underline cursor-pointer disabled:opacity-50">Reintentar conexión</button>
                                       </div>
                                     )}
 
@@ -12004,13 +12162,7 @@ export default function POSPage() {
                                     )}
                                   </div>
                                 ))}
-                                <button
-                                  type="button"
-                                  onClick={() => addExtraLeg("qr")}
-                                  className="w-full text-[11px] font-bold text-purple-600 dark:text-purple-400 border border-dashed border-purple-400/50 rounded-xl py-2 hover:bg-purple-500/5 cursor-pointer"
-                                >
-                                  + Agregar otro QR (otra cuenta/cliente)
-                                </button>
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 text-center py-1">Para dividir con otro QR o crédito parcelado, repartí el cobro con otra tarjeta u otro método.</p>
                               </div>
                             )}
                           </div>
@@ -12157,13 +12309,7 @@ export default function POSPage() {
                                     )}
                                   </div>
                                 ))}
-                                <button
-                                  type="button"
-                                  onClick={() => addExtraLeg("qr")}
-                                  className="w-full text-[11px] font-bold text-blue-600 dark:text-blue-400 border border-dashed border-blue-400/50 rounded-xl py-2 hover:bg-blue-500/5 cursor-pointer"
-                                >
-                                  + Agregar otro QR (otra cuenta/cliente)
-                                </button>
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 text-center py-1">Para dividir con otro QR o crédito parcelado, repartí el cobro con otra tarjeta u otro método.</p>
                               </div>
                             )}
                           </div>
@@ -12262,12 +12408,14 @@ export default function POSPage() {
                                 }}
                                 onKeyDown={(e) => handleMixedFieldKeyDown(e, setMixedDinelcoPyg)}
                                 onFocus={(e) => e.target.select()}
+                                disabled={montoDinelcoFijo}
                                 placeholder="0"
-                                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
+                                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500 disabled:opacity-60 disabled:cursor-not-allowed"
                               />
                               <button
                                 type="button"
                                 title="Completar con el resto"
+                                disabled={montoDinelcoFijo}
                                 onClick={() => {
                                   const resto = getSaldoRestanteParaMetodo("dinelco")
                                   setMixedDinelcoPyg(resto > 0 ? resto.toLocaleString("es-PY") : "")
@@ -12276,7 +12424,7 @@ export default function POSPage() {
                                     setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
                                   }
                                 }}
-                                className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
+                                className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 Resto
                               </button>
@@ -12298,7 +12446,7 @@ export default function POSPage() {
                               <button
                                 type="button"
                                 onClick={handleDinelcoCharge}
-                                disabled={dinelcoTxnState === "esperando_tarjeta" || dinelcoTxnState === "confirmando"}
+                                disabled={dinelcoTxnState === "esperando_tarjeta" || dinelcoTxnState === "confirmando" || dinelcoBusy}
                                 className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer shadow-md shadow-purple-600/20"
                               >
                                 {(dinelcoTxnState === "esperando_tarjeta" || dinelcoTxnState === "confirmando") ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
@@ -12321,14 +12469,14 @@ export default function POSPage() {
                             {dinelcoTxnState === "error_rechazo" && (
                               <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5">
                                 <div className="font-black">✕ {dinelcoTxnError}</div>
-                                <button type="button" onClick={handleDinelcoCharge} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
+                                <button type="button" onClick={handleDinelcoCharge} disabled={dinelcoBusy} className="text-xs font-bold underline cursor-pointer disabled:opacity-50">Reintentar</button>
                               </div>
                             )}
 
                             {dinelcoTxnState === "error_conexion" && (
                               <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5">
                                 <div className="font-black">⚠ {dinelcoTxnError}</div>
-                                <button type="button" onClick={handleDinelcoCharge} className="text-xs font-bold underline cursor-pointer">Reintentar conexión</button>
+                                <button type="button" onClick={handleDinelcoCharge} disabled={dinelcoBusy} className="text-xs font-bold underline cursor-pointer disabled:opacity-50">Reintentar conexión</button>
                               </div>
                             )}
 
@@ -12436,7 +12584,7 @@ export default function POSPage() {
                                       <button
                                         type="button"
                                         onClick={() => handleDinelcoChargeForLeg(leg)}
-                                        disabled={!activePosConfig.dinelcoIp}
+                                        disabled={!activePosConfig.dinelcoIp || dinelcoBusy}
                                         className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer"
                                       >
                                         <CreditCard className="w-3.5 h-3.5" />
@@ -12464,7 +12612,7 @@ export default function POSPage() {
                                     {leg.txnState === "error_conexion" && (
                                       <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1">
                                         <div className="font-black">⚠ {leg.txnError}</div>
-                                        <button type="button" onClick={() => handleDinelcoChargeForLeg(leg)} className="text-[10px] font-bold underline cursor-pointer">Reintentar conexión</button>
+                                        <button type="button" onClick={() => handleDinelcoChargeForLeg(leg)} disabled={dinelcoBusy} className="text-[10px] font-bold underline cursor-pointer disabled:opacity-50">Reintentar conexión</button>
                                       </div>
                                     )}
 
@@ -12542,7 +12690,7 @@ export default function POSPage() {
                               <button
                                 type="button"
                                 onClick={handleDinelcoQR}
-                                disabled={!activePosConfig.dinelcoIp || dinelcoQrState === "esperando"}
+                                disabled={!activePosConfig.dinelcoIp || dinelcoQrState === "esperando" || dinelcoBusy}
                                 className="w-full max-w-md flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer shadow-sm shadow-purple-600/20"
                               >
                                 {dinelcoQrState === "esperando" ? <Loader2 className="w-4 h-4 animate-spin" /> : <QrCode className="w-4 h-4" />}
@@ -12563,14 +12711,14 @@ export default function POSPage() {
                             {dinelcoQrState === "error_rechazo" && (
                               <div className="w-full max-w-md p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5 text-left">
                                 <div className="font-black">✕ {dinelcoQrError}</div>
-                                <button type="button" onClick={handleDinelcoQR} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
+                                <button type="button" onClick={handleDinelcoQR} disabled={dinelcoBusy} className="text-xs font-bold underline cursor-pointer disabled:opacity-50">Reintentar</button>
                               </div>
                             )}
 
                             {dinelcoQrState === "error_conexion" && (
                               <div className="w-full max-w-md p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5 text-left">
                                 <div className="font-black">⚠ {dinelcoQrError}</div>
-                                <button type="button" onClick={handleDinelcoQR} className="text-xs font-bold underline cursor-pointer">Reintentar conexión</button>
+                                <button type="button" onClick={handleDinelcoQR} disabled={dinelcoBusy} className="text-xs font-bold underline cursor-pointer disabled:opacity-50">Reintentar conexión</button>
                               </div>
                             )}
 
@@ -12612,7 +12760,7 @@ export default function POSPage() {
                                         <button
                                           type="button"
                                           onClick={() => handleDinelcoQRForLeg(leg)}
-                                          disabled={!activePosConfig.dinelcoIp}
+                                          disabled={!activePosConfig.dinelcoIp || dinelcoBusy}
                                           className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[11px] font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer"
                                         >
                                           <QrCode className="w-3.5 h-3.5" />
@@ -12639,7 +12787,7 @@ export default function POSPage() {
                                     {leg.txnState === "error_conexion" && (
                                       <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1">
                                         <div className="font-black">⚠ {leg.txnError}</div>
-                                        <button type="button" onClick={() => handleDinelcoQRForLeg(leg)} className="text-[10px] font-bold underline cursor-pointer">Reintentar conexión</button>
+                                        <button type="button" onClick={() => handleDinelcoQRForLeg(leg)} disabled={dinelcoBusy} className="text-[10px] font-bold underline cursor-pointer disabled:opacity-50">Reintentar conexión</button>
                                       </div>
                                     )}
                                   </div>
@@ -12719,12 +12867,14 @@ export default function POSPage() {
                                 }}
                                 onKeyDown={(e) => handleMixedFieldKeyDown(e, (v) => { setMixedPlugPayPyg(v); setMixedParceladoPyg(v); setMixedQrPyg(v); })}
                                 onFocus={(e) => e.target.select()}
+                                disabled={montoPlugpayFijo}
                                 placeholder="0"
-                                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-orange-600 dark:text-orange-400 outline-none focus:border-orange-500"
+                                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-orange-600 dark:text-orange-400 outline-none focus:border-orange-500 disabled:opacity-60 disabled:cursor-not-allowed"
                               />
                               <button
                                 type="button"
                                 title="Completar con el resto"
+                                disabled={montoPlugpayFijo}
                                 onClick={() => {
                                   const restoNum = getSaldoRestanteParaMetodo("plugpay")
                                   const resto = restoNum > 0 ? restoNum.toLocaleString("es-PY") : ""
@@ -12736,7 +12886,7 @@ export default function POSPage() {
                                     setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
                                   }
                                 }}
-                                className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
+                                className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 Resto
                               </button>
@@ -13138,13 +13288,7 @@ export default function POSPage() {
                                     )}
                                   </div>
                                 ))}
-                                <button
-                                  type="button"
-                                  onClick={() => addExtraLeg("plugpay_credito")}
-                                  className="w-full text-[11px] font-bold text-blue-600 dark:text-blue-400 border border-dashed border-blue-400/50 rounded-xl py-2 hover:bg-blue-500/5 cursor-pointer"
-                                >
-                                  + Agregar otro crédito parcelado (otra cuenta/cliente)
-                                </button>
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 text-center py-1">Para dividir con otro QR o crédito parcelado, repartí el cobro con otra tarjeta u otro método.</p>
                               </div>
                             )}
                           </div>
