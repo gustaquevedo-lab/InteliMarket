@@ -13,6 +13,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 
 from api.src.db import Base
+from api.src.companies.models import Company
 
 
 class FinanceAgentRun(Base):
@@ -53,7 +54,7 @@ class FinanceAgentSetting(Base):
     __tablename__ = "finance_agent_settings"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    company_id = Column(UUID(as_uuid=True), nullable=False, unique=True, index=True)
     colchon_minimo_bancos_gs = Column(Numeric(14, 2), nullable=False, default=50000000.00)
     dias_alerta_mora = Column(Integer, nullable=False, default=15)
     limite_pago_diario_sin_autorizacion_gs = Column(Numeric(14, 2), nullable=False, default=20000000.00)
@@ -66,7 +67,7 @@ class InterAgentDirective(Base):
     __tablename__ = "inter_agent_directives"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     codigo = Column(String(50), nullable=False)
     emisor = Column(String(50), nullable=False, index=True)  # cfo_agent, sales_agent, marketing_agent, etc.
     receptor = Column(String(50), nullable=False, index=True)
@@ -87,7 +88,7 @@ class CashFlowScenario(Base):
     __tablename__ = "cash_flow_scenarios"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     nombre = Column(String(150), nullable=False)
     descripcion = Column(Text)
     parametros = Column(JSON, nullable=False, default=dict)

@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 
 from api.src.db import Base
+from api.src.companies.models import Company
 
 
 class SalesAgentRun(Base):
@@ -51,7 +52,7 @@ class SalesAgentSetting(Base):
     __tablename__ = "sales_agent_settings"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    company_id = Column(UUID(as_uuid=True), nullable=False, unique=True, index=True)
     target_margen_minimo_pct = Column(Numeric(5, 2), nullable=False, default=20.00)
     target_margen_ideal_pct = Column(Numeric(5, 2), nullable=False, default=24.00)
     metas_por_categoria = Column(JSON, default=dict)
@@ -63,7 +64,7 @@ class CompanyBusinessRule(Base):
     __tablename__ = "company_business_rules"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     regla = Column(Text, nullable=False)
     categoria = Column(String(100))
     origen = Column(String(50), default="usuario_decision")
@@ -76,8 +77,8 @@ class CompanyKviProduct(Base):
     __tablename__ = "company_kvi_products"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
-    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True)
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    product_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     es_gancho = Column(Boolean, default=True)
     margen_techo_pct = Column(Numeric(5, 2), default=15.00)
     motivo_gancho = Column(Text, default="Producto ancla de atraccion de clientes")
@@ -89,7 +90,7 @@ class SalesActionTask(Base):
     __tablename__ = "sales_action_tasks"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     titulo = Column(String(255), nullable=False)
     descripcion = Column(Text, nullable=False)
     area = Column(String(100), nullable=False)
