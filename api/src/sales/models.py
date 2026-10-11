@@ -1,6 +1,6 @@
 """Sales models"""
 
-from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Integer, Text, ForeignKey, text
+from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Integer, SmallInteger, Text, ForeignKey, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -59,6 +59,11 @@ class Sale(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    pagos_revision = Column(String(20), nullable=True)
+    pagos_diferencia = Column(Numeric(15, 0), nullable=True)
+    pagos_revisado_por = Column(UUID(as_uuid=True), nullable=True)
+    pagos_revisado_at = Column(DateTime(timezone=True), nullable=True)
+
     items = relationship("SaleItem", back_populates="sale", cascade="all, delete-orphan")
 
 
@@ -94,6 +99,11 @@ class SalePayment(Base):
     monto = Column(Numeric(15, 2), nullable=False)
     moneda = Column(String(3), nullable=False, default="PYG", server_default=text("'PYG'"))
     fecha = Column(DateTime(timezone=True), nullable=False)
+    proveedor = Column(String(20), nullable=True)
+    terminal_transaction_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    referencia = Column(String(60), nullable=True)
+    cuotas = Column(SmallInteger, nullable=True)
+    monto_pyg = Column(Numeric(15, 0), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     sale = relationship("Sale")

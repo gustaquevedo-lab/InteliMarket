@@ -31,6 +31,7 @@ class PosTerminalTransactionCreate(BaseModel):
     verificado_automaticamente: bool = True
     error_message: Optional[str] = None
     raw_response: Optional[Any] = None
+    requiere_conciliacion: bool = False
 
 
 class PosTerminalTransactionUpdate(BaseModel):
@@ -66,6 +67,7 @@ class PosTerminalTransactionResponse(BaseModel):
     verificado_automaticamente: bool
     error_message: Optional[str] = None
     raw_response: Optional[Any] = None
+    requiere_conciliacion: bool = False
     created_at: datetime
 
     class Config:

@@ -22,6 +22,11 @@ class SalePaymentInput(BaseModel):
     forma_pago: str
     monto: Decimal = Field(gt=0)
     moneda: str = "PYG"
+    proveedor: Optional[str] = None
+    terminal_transaction_id: Optional[UUID] = None
+    referencia: Optional[str] = None
+    cuotas: Optional[int] = None
+    monto_pyg: Optional[Decimal] = None
 
 
 class SaleCreate(BaseModel):

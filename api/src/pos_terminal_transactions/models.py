@@ -2,7 +2,7 @@
 terminal Bancard (aprobada, rechazada, o cargada manualmente por falla de
 conexion), pensado para segmentacion de clientes ademas de auditoria de caja."""
 
-from sqlalchemy import Column, String, Boolean, DateTime, Numeric, JSON, Text
+from sqlalchemy import Column, String, Boolean, DateTime, Numeric, JSON, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 
@@ -43,5 +43,9 @@ class PosTerminalTransaction(Base):
     verificado_automaticamente = Column(Boolean, nullable=False, default=True)
     error_message = Column(Text, nullable=True)
     raw_response = Column(JSON, nullable=True)
+
+    requiere_conciliacion = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    revisado_por = Column(UUID(as_uuid=True), nullable=True)
+    revisado_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
