@@ -269,7 +269,7 @@ REGLAS CRÍTICAS DE EJECUCIÓN:
     # 2. Llamada a Ollama con Tool Calling
     base_u = settings.ollama_base_url.replace("/v1", "").rstrip("/")
     ollama_url = f"{base_u}/api/chat"
-    model_name = getattr(settings, "ollama_model", "qwen2.5:7b")
+    model_name = getattr(settings, "ollama_model", "qwen2.5:3b")
 
     action_outcome = None
     final_reply = ""
@@ -335,7 +335,8 @@ REGLAS CRÍTICAS DE EJECUCIÓN:
                     }
                     resp_2 = await client.post(ollama_url, json=payload_2)
                     if resp_2.status_code == 200:
-                        final_reply = resp_2.json()["choices"][0]["message"]["content"]
+                        r2_json = resp_2.json()
+                        final_reply = r2_json.get("message", {}).get("content", "") if "message" in r2_json else r2_json.get("choices", [{}])[0].get("message", {}).get("content", "")
                     else:
                         final_reply = "He ejecutado las consultas requeridas en la base de datos."
                 else:

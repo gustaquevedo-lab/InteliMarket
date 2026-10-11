@@ -498,27 +498,28 @@ async def apply_price_proposal(
     """), {"np": nuevo_precio_dec, "pid": product_id, "cid": company_id})
 
     # 3. Sincronizar escalas en sp_tiered_prices
+    await db.execute(text("""
+        DELETE FROM sp_tiered_prices
+        WHERE product_id = :pid AND company_id = :cid;
+    """), {"pid": product_id, "cid": company_id})
+
     if escalas and len(escalas) > 0:
         for esc in escalas:
             min_q = int(esc.get("min_qty", 1))
             p_unit = _to_dec(esc.get("precio_unitario", nuevo_precio_dec)).quantize(Decimal("1"))
             await db.execute(text("""
-                INSERT INTO sp_tiered_prices (id, product_id, min_qty, precio_unitario, activo, created_at, updated_at)
-                VALUES (gen_random_uuid(), :pid, :mq, :pu, true, NOW(), NOW())
-                ON CONFLICT (product_id, min_qty) DO UPDATE
-                SET precio_unitario = EXCLUDED.precio_unitario, activo = true, updated_at = NOW();
-            """), {"pid": product_id, "mq": min_q, "pu": p_unit})
+                INSERT INTO sp_tiered_prices (id, company_id, product_id, min_qty, precio_unitario, activo, created_at, updated_at)
+                VALUES (gen_random_uuid(), :cid, :pid, :mq, :pu, true, NOW(), NOW());
+            """), {"cid": company_id, "pid": product_id, "mq": min_q, "pu": p_unit})
     else:
         p_pack = round_retail_price(float(nuevo_precio_dec) * 0.96)
         p_may = round_retail_price(float(nuevo_precio_dec) * 0.90)
         default_tiers = [(1, nuevo_precio_dec), (3, p_pack), (6, p_may)]
         for mq, pu in default_tiers:
             await db.execute(text("""
-                INSERT INTO sp_tiered_prices (id, product_id, min_qty, precio_unitario, activo, created_at, updated_at)
-                VALUES (gen_random_uuid(), :pid, :mq, :pu, true, NOW(), NOW())
-                ON CONFLICT (product_id, min_qty) DO UPDATE
-                SET precio_unitario = EXCLUDED.precio_unitario, activo = true, updated_at = NOW();
-            """), {"pid": product_id, "mq": mq, "pu": pu})
+                INSERT INTO sp_tiered_prices (id, company_id, product_id, min_qty, precio_unitario, activo, created_at, updated_at)
+                VALUES (gen_random_uuid(), :cid, :pid, :mq, :pu, true, NOW(), NOW());
+            """), {"cid": company_id, "pid": product_id, "mq": mq, "pu": pu})
 
     # 4. Registrar auditoría en price_audit_log
     await db.execute(text("""
