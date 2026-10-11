@@ -1,6 +1,6 @@
 """Sales models"""
 
-from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Integer, SmallInteger, Text, ForeignKey, text
+from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Integer, SmallInteger, Text, ForeignKey, Index, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -91,6 +91,8 @@ class SaleItem(Base):
 class SalePayment(Base):
     """Desglose de medios de pago por venta (efectivo, tarjeta, QR, PIX, etc.)"""
     __tablename__ = "sale_payments"
+    # Mismo nombre que la migracion 20261010170000 (sin drift en autogenerate).
+    __table_args__ = (Index("ix_sale_payments_terminal_tx", "terminal_transaction_id"),)
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
@@ -100,7 +102,7 @@ class SalePayment(Base):
     moneda = Column(String(3), nullable=False, default="PYG", server_default=text("'PYG'"))
     fecha = Column(DateTime(timezone=True), nullable=False)
     proveedor = Column(String(20), nullable=True)
-    terminal_transaction_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    terminal_transaction_id = Column(UUID(as_uuid=True), nullable=True)
     referencia = Column(String(60), nullable=True)
     cuotas = Column(SmallInteger, nullable=True)
     monto_pyg = Column(Numeric(15, 0), nullable=True)

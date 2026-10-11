@@ -14,6 +14,7 @@ from api.src.sales.models import Sale, SalePayment
 
 AHORA = datetime(2026, 10, 10, 12, 0, tzinfo=timezone.utc)
 CO = uuid4()
+HUERFANOS_DESDE_REAL = getattr(rc, "HUERFANOS_DESDE", None)
 
 
 @pytest_asyncio.fixture
@@ -27,10 +28,16 @@ async def db():
     await engine.dispose()
 
 
+@pytest.fixture(autouse=True)
+def _huerfanos_desde_antiguo(monkeypatch):
+    # Los casos generales usan AHORA (anterior al despliegue); el corte de
+    # huerfanos tiene su propio test.
+    monkeypatch.setattr(rc, "HUERFANOS_DESDE", datetime(2000, 1, 1, tzinfo=timezone.utc), raising=False)
+
 
 async def _venta(db, **campos):
     from sqlalchemy import Numeric, String, Boolean, DateTime
-    vals = {"id": uuid4(), "company_id": CO}
+    vals = {"id": uuid4(), "company_id": CO, "fecha": AHORA - timedelta(hours=1)}
     for col in Sale.__table__.columns:
         if col.name in campos or col.name in vals:
             continue
@@ -59,10 +66,10 @@ async def _pago(db, sale_id, proveedor):
     await db.flush()
 
 
-async def _cobro(db, minutos, **campos):
+async def _cobro(db, minutos, base_hora=AHORA, **campos):
     cid = uuid4()
     base = dict(id=cid, company_id=CO, tipo_operacion="venta_debito", exitosa=True,
-                created_at=AHORA - timedelta(minutes=minutos))
+                created_at=base_hora - timedelta(minutes=minutos))
     base.update(campos)
     db.add(PosTerminalTransaction(**base))
     await db.flush()
@@ -101,9 +108,47 @@ async def test_multi_proveedor_solo_con_dos_proveedores_distintos(db):
     revisada = await _venta(db, pagos_revisado_at=AHORA)
     await _pago(db, revisada, "bancard")
     await _pago(db, revisada, "dinelco")
+    vieja = await _venta(db, fecha=AHORA - timedelta(days=8))
+    await _pago(db, vieja, "bancard")
+    await _pago(db, vieja, "dinelco")
     items = await rc.listar_revision(db, CO, "multi_proveedor", ahora=AHORA)
     assert [i["id"] for i in items] == [mixta]
     assert sorted(items[0]["proveedores"]) == ["bancard", "dinelco"]
+    assert set(items[0]) >= {"id", "numero", "fecha", "total", "proveedores"}
+
+
+async def test_ventana_por_defecto_ultimos_7_dias(db):
+    reciente = await _venta(db, pagos_revision="no_cuadran", fecha=AHORA - timedelta(days=6))
+    await _venta(db, pagos_revision="no_cuadran", fecha=AHORA - timedelta(days=8))
+    items = await rc.listar_revision(db, CO, "no_cuadran", ahora=AHORA)
+    assert [i["id"] for i in items] == [reciente]
+    # con limites explicitos manda el rango pedido
+    items = await rc.listar_revision(db, CO, "no_cuadran", desde=AHORA - timedelta(days=30), ahora=AHORA)
+    assert len(items) == 2
+    # huerfanos: tambien ventana de 7 dias por defecto
+    reciente_c = await _cobro(db, 60 * 24 * 6)
+    await _cobro(db, 60 * 24 * 8)
+    items = await rc.listar_revision(db, CO, "huerfanos", ahora=AHORA)
+    assert [i["id"] for i in items] == [reciente_c]
+
+
+async def test_huerfanos_ignora_cobros_anteriores_al_despliegue(db, monkeypatch):
+    monkeypatch.setattr(rc, "HUERFANOS_DESDE", AHORA - timedelta(hours=1))
+    nuevo = await _cobro(db, 20)
+    await _cobro(db, 120)
+    await _cobro(db, 120, exitosa=False, requiere_conciliacion=True)
+    items = await rc.listar_revision(db, CO, "huerfanos", ahora=AHORA)
+    assert [i["id"] for i in items] == [nuevo]
+    # un 'desde' anterior al corte no trae los historicos
+    items = await rc.listar_revision(db, CO, "huerfanos", desde=AHORA - timedelta(days=3), ahora=AHORA)
+    assert [i["id"] for i in items] == [nuevo]
+    # un 'desde' posterior al corte se respeta
+    items = await rc.listar_revision(db, CO, "huerfanos", desde=AHORA - timedelta(minutes=10), ahora=AHORA)
+    assert items == []
+
+
+def test_huerfanos_desde_es_la_fecha_de_despliegue():
+    assert HUERFANOS_DESDE_REAL == datetime(2026, 10, 12, 0, 0, tzinfo=timezone.utc)
 
 
 async def test_tipo_invalido(db):
@@ -150,7 +195,7 @@ async def test_endpoints_exigen_el_permiso(db, monkeypatch):
         return permitido["v"]
 
     monkeypatch.setattr("api.src.rbac.deps.service.check_permission", check)
-    cid = await _cobro(db, 20)
+    cid = await _cobro(db, 20, base_hora=datetime.now(timezone.utc))
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get("/api/v1/caja/revision-cobros", params={"tipo": "huerfanos"})
@@ -163,6 +208,28 @@ async def test_endpoints_exigen_el_permiso(db, monkeypatch):
             assert [i["id"] for i in r.json()] == [str(cid)]
             r = await c.post(f"/api/v1/caja/revision-cobros/huerfanos/{cid}/revisar")
             assert r.status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+
+
+async def test_superadmin_sin_empresa_recibe_400(db):
+    from httpx import ASGITransport, AsyncClient
+    from api.src.auth.middleware import require_auth
+    from api.src.db import get_db
+    from api.src.main import app
+
+    user = {"id": str(uuid4()), "tenant_id": str(uuid4()), "company_id": None, "is_superadmin": True}
+    app.dependency_overrides[require_auth] = lambda: user
+    app.dependency_overrides[get_db] = lambda: db
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.get("/api/v1/caja/revision-cobros", params={"tipo": "huerfanos"})
+            assert r.status_code == 400
+            r = await c.post(f"/api/v1/caja/revision-cobros/huerfanos/{uuid4()}/revisar")
+            assert r.status_code == 400
+            del user["company_id"]
+            r = await c.get("/api/v1/caja/revision-cobros", params={"tipo": "no_cuadran"})
+            assert r.status_code == 400
     finally:
         app.dependency_overrides.clear()
 

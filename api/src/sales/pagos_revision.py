@@ -17,6 +17,22 @@ from sqlalchemy import or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 TOLERANCIA_PAGOS_PYG = Decimal("50")
+# Limites de las columnas: sale_payments.monto NUMERIC(15,2), monto_pyg NUMERIC(15,0).
+_LIMITE_MONTO = Decimal("1e13")
+_LIMITE_MONTO_PYG = Decimal("1e15")
+
+
+def _importe_valido(valor: Any, limite: Decimal) -> Decimal | None:
+    """Devuelve el importe si es finito, no negativo y cabe en la columna; si no, None."""
+    if valor is None:
+        return None
+    try:
+        d = Decimal(valor)
+    except (ArithmeticError, TypeError, ValueError):
+        return None
+    if not d.is_finite() or d < 0 or abs(d) >= limite:
+        return None
+    return d
 
 # Prioridad de marcas: la mas grave gana.
 _PRIORIDAD_MARCAS = ("enlace_invalido", "no_cuadran", "no_verificable")
@@ -126,29 +142,39 @@ async def registrar_pagos_de_venta(
     from api.src.sales.models import SalePayment
 
     lineas: list[LineaPago] = []
+    monto_descartado = False
     for p in pagos:
         moneda = (p.moneda or "PYG").strip().upper()[:3] or "PYG"
         forma_pago = (p.forma_pago or "")[:30]
         cuotas = p.cuotas if p.cuotas is not None and 1 <= p.cuotas <= 32767 else None
         referencia = p.referencia[:60] if p.referencia else p.referencia
         proveedor = p.proveedor[:20] if p.proveedor else p.proveedor
+        # Importes fuera de rango nunca llegan a la DB (romperian la venta):
+        # monto_pyg invalido -> None (PYG usa monto; extranjera queda no_verificable);
+        # monto invalido -> 0 y la venta se marca no_cuadran para revision.
+        monto_pyg = _importe_valido(p.monto_pyg, _LIMITE_MONTO_PYG)
+        monto = _importe_valido(p.monto, _LIMITE_MONTO)
+        if monto is None:
+            monto, monto_descartado = Decimal("0"), True
         db.add(SalePayment(
             id=uuid4(),
             company_id=company_id,
             sale_id=sale.id,
             forma_pago=forma_pago,
-            monto=p.monto,
+            monto=monto,
             moneda=moneda,
             fecha=ahora,
             proveedor=proveedor,
             terminal_transaction_id=p.terminal_transaction_id,
             referencia=referencia,
             cuotas=cuotas,
-            monto_pyg=p.monto_pyg,
+            monto_pyg=monto_pyg,
         ))
-        lineas.append(LineaPago(forma_pago, p.monto, moneda, p.monto_pyg))
+        lineas.append(LineaPago(forma_pago, monto, moneda, monto_pyg))
 
     marca, diferencia = evaluar_pagos(sale.total, lineas)
+    if monto_descartado:
+        marca = marca_prevalente(marca, "no_cuadran")
     terminal_ids = [p.terminal_transaction_id for p in pagos if p.terminal_transaction_id]
     no_vinculados = (
         await vincular_cobros_terminal(db, company_id, sale.id, terminal_ids)

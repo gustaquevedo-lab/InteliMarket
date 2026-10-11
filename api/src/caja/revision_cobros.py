@@ -1,13 +1,14 @@
 """Panel "Revision de cobros": ventas cuyos pagos no cuadran, cobros del terminal
 huerfanos (sin venta) y ventas con mas de un proveedor de cobro.
 
-Solo SQL portable: la antiguedad de 15 minutos se calcula en Python."""
+Solo SQL portable: la antiguedad de 15 minutos se calcula en Python.
+Sin limites de fecha, los listados miran los ultimos DIAS_VENTANA_DEFECTO dias."""
 
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
@@ -18,6 +19,10 @@ from api.src.sales.models import Sale, SalePayment
 
 TIPOS_REVISION = ("no_cuadran", "huerfanos", "multi_proveedor")
 MINUTOS_HUERFANO = 15
+DIAS_VENTANA_DEFECTO = 7
+# Fecha de despliegue del pago mixto: los cobros anteriores nunca se enlazaron a
+# su venta, asi que no se listan como huerfanos (inundarian el panel).
+HUERFANOS_DESDE = datetime(2026, 10, 12, 0, 0, tzinfo=timezone.utc)
 
 
 def _validar_tipo(tipo: str) -> None:
@@ -35,19 +40,25 @@ async def listar_revision(
 ) -> list[dict]:
     _validar_tipo(tipo)
     ahora = ahora or datetime.now(timezone.utc)
+    if desde is None and hasta is None:
+        desde = ahora - timedelta(days=DIAS_VENTANA_DEFECTO)
 
     if tipo == "huerfanos":
         corte = ahora - timedelta(minutes=MINUTOS_HUERFANO)
-        q = select(Cobro).where(
+        desde = HUERFANOS_DESDE if desde is None else max(desde, HUERFANOS_DESDE)
+        q = select(
+            Cobro.id, Cobro.created_at, Cobro.tipo_operacion, Cobro.monto,
+            Cobro.punto_emision, Cobro.exitosa, Cobro.requiere_conciliacion,
+            Cobro.nombre_tarjeta, Cobro.codigo_autorizacion,
+        ).where(
             Cobro.company_id == company_id,
             Cobro.sale_id.is_(None),
             Cobro.revisado_at.is_(None),
+            Cobro.created_at >= desde,
         )
-        if desde is not None:
-            q = q.where(Cobro.created_at >= desde)
         if hasta is not None:
             q = q.where(Cobro.created_at <= hasta)
-        filas = (await db.execute(q.order_by(Cobro.created_at.desc()))).scalars().all()
+        filas = (await db.execute(q.order_by(Cobro.created_at.desc()))).all()
         resultado = []
         for c in filas:
             creado = c.created_at
@@ -64,36 +75,53 @@ async def listar_revision(
             })
         return resultado
 
-    q = select(Sale).where(Sale.company_id == company_id, Sale.pagos_revisado_at.is_(None))
-    if tipo == "no_cuadran":
-        q = q.where(Sale.pagos_revision == "no_cuadran")
+    filtros = [Sale.company_id == company_id, Sale.pagos_revisado_at.is_(None)]
     if desde is not None:
-        q = q.where(Sale.fecha >= desde)
+        filtros.append(Sale.fecha >= desde)
     if hasta is not None:
-        q = q.where(Sale.fecha <= hasta)
-    ventas = (await db.execute(q.order_by(Sale.fecha.desc()))).scalars().all()
+        filtros.append(Sale.fecha <= hasta)
 
     if tipo == "no_cuadran":
+        q = select(
+            Sale.id, Sale.numero, Sale.fecha, Sale.total,
+            Sale.pagos_revision, Sale.pagos_diferencia,
+        ).where(*filtros, Sale.pagos_revision == "no_cuadran")
+        filas = (await db.execute(q.order_by(Sale.fecha.desc()))).all()
         return [{
             "id": v.id, "numero": v.numero, "fecha": v.fecha, "total": v.total,
             "pagos_revision": v.pagos_revision, "pagos_diferencia": v.pagos_diferencia,
-        } for v in ventas]
+        } for v in filas]
 
-    if not ventas:
-        return []
-    ids = [v.id for v in ventas]
-    pagos = (await db.execute(
-        select(SalePayment.sale_id, SalePayment.proveedor).where(
-            SalePayment.sale_id.in_(ids), SalePayment.proveedor.is_not(None)
+    # multi_proveedor: una sola consulta. La subconsulta elige las ventas con
+    # 2+ proveedores distintos; la externa trae (venta, proveedor) distintos.
+    con_varios = (
+        select(Sale.id)
+        .join(SalePayment, SalePayment.sale_id == Sale.id)
+        .where(*filtros, SalePayment.proveedor.is_not(None))
+        .group_by(Sale.id)
+        .having(func.count(distinct(SalePayment.proveedor)) >= 2)
+    )
+    q = (
+        select(Sale.id, Sale.numero, Sale.fecha, Sale.total, SalePayment.proveedor)
+        .distinct()
+        .join(SalePayment, SalePayment.sale_id == Sale.id)
+        .where(
+            Sale.company_id == company_id,
+            Sale.id.in_(con_varios),
+            SalePayment.proveedor.is_not(None),
         )
-    )).all()
-    por_venta: dict = {}
-    for sale_id, proveedor in pagos:
-        por_venta.setdefault(sale_id, set()).add(proveedor)
-    return [{
-        "id": v.id, "numero": v.numero, "fecha": v.fecha, "total": v.total,
-        "proveedores": sorted(por_venta[v.id]),
-    } for v in ventas if len(por_venta.get(v.id, ())) >= 2]
+        .order_by(Sale.fecha.desc(), Sale.id)
+    )
+    resultado: dict = {}
+    for fila in (await db.execute(q)).all():
+        item = resultado.setdefault(fila.id, {
+            "id": fila.id, "numero": fila.numero, "fecha": fila.fecha,
+            "total": fila.total, "proveedores": [],
+        })
+        item["proveedores"].append(fila.proveedor)
+    for item in resultado.values():
+        item["proveedores"] = sorted(set(item["proveedores"]))
+    return list(resultado.values())
 
 
 async def marcar_revisado(
@@ -133,6 +161,16 @@ async def marcar_revisado(
 router = APIRouter(prefix="/api/v1/caja", tags=["caja-revision-cobros"])
 
 
+def _empresa_del_usuario(user: dict) -> UUID:
+    company_id = user.get("company_id")
+    if not company_id:
+        raise HTTPException(status_code=400, detail="el usuario no tiene empresa seleccionada")
+    try:
+        return UUID(str(company_id))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="empresa invalida")
+
+
 @router.get("/revision-cobros")
 async def listar(
     tipo: str = Query(..., description="no_cuadran | huerfanos | multi_proveedor"),
@@ -143,7 +181,7 @@ async def listar(
 ):
     if tipo not in TIPOS_REVISION:
         raise HTTPException(status_code=400, detail="tipo invalido")
-    return await listar_revision(db, UUID(str(user["company_id"])), tipo, desde, hasta)
+    return await listar_revision(db, _empresa_del_usuario(user), tipo, desde, hasta)
 
 
 @router.post("/revision-cobros/{tipo}/{item_id}/revisar")
@@ -155,7 +193,7 @@ async def revisar(
 ):
     if tipo not in TIPOS_REVISION:
         raise HTTPException(status_code=400, detail="tipo invalido")
-    if not await marcar_revisado(db, UUID(str(user["company_id"])), tipo, item_id, user):
+    if not await marcar_revisado(db, _empresa_del_usuario(user), tipo, item_id, user):
         raise HTTPException(status_code=404, detail="no encontrado")
     await db.commit()
     return {"ok": True}

@@ -231,3 +231,33 @@ class TestRegistrarPagos:
         await registrar_pagos_de_venta(sqlite_db, company_id=uuid4(), sale=sale, pagos=pagos, ahora=AHORA)
         (f,) = await _lineas(sqlite_db, sale)
         assert len(f.forma_pago) == 30 and f.moneda == "PYG"
+
+    async def test_sanea_monto_pyg_fuera_de_rango_o_negativo(self, sqlite_db):
+        sale = _sale(3000)
+        pagos = [
+            SalePaymentInput(forma_pago="EFECTIVO", monto=Decimal("1000"), monto_pyg=Decimal("1e15")),
+            SalePaymentInput(forma_pago="EFECTIVO", monto=Decimal("1000"), monto_pyg=Decimal("-5")),
+            SalePaymentInput(forma_pago="EFECTIVO", monto=Decimal("1000"), monto_pyg=Decimal("1000")),
+        ]
+        await registrar_pagos_de_venta(sqlite_db, company_id=uuid4(), sale=sale, pagos=pagos, ahora=AHORA)
+        filas = await _lineas(sqlite_db, sale)
+        assert sorted(str(f.monto_pyg) for f in filas) == ["1000", "None", "None"]
+        # lineas PYG sin monto_pyg valido usan el monto: la venta cuadra
+        assert sale.pagos_revision is None
+
+    async def test_monto_pyg_invalido_en_moneda_extranjera_queda_no_verificable(self, sqlite_db):
+        sale = _sale(100000)
+        pagos = [SalePaymentInput(forma_pago="EFECTIVO", monto=Decimal("20"), moneda="USD",
+                                  monto_pyg=Decimal("-100000"))]
+        await registrar_pagos_de_venta(sqlite_db, company_id=uuid4(), sale=sale, pagos=pagos, ahora=AHORA)
+        (f,) = await _lineas(sqlite_db, sale)
+        assert f.monto_pyg is None
+        assert sale.pagos_revision == "no_verificable"
+
+    async def test_monto_fuera_de_rango_no_rompe_y_marca_no_cuadran(self, sqlite_db):
+        sale = _sale(1000)
+        pagos = [SalePaymentInput(forma_pago="EFECTIVO", monto=Decimal("1e14"))]
+        await registrar_pagos_de_venta(sqlite_db, company_id=uuid4(), sale=sale, pagos=pagos, ahora=AHORA)
+        (f,) = await _lineas(sqlite_db, sale)
+        assert f.monto == Decimal("0")
+        assert sale.pagos_revision == "no_cuadran"
