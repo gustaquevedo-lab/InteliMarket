@@ -22,7 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.src.finance_agent.service import get_inter_agent_sync, get_liquidity_control_tower
 from api.src.marketing_agent.schemas import (
     CustomerSegment, CampaignSuggestion, CustomerProfileDetail, TopProductHabit,
-    TripartiteSyncResponse, DirectiveItem, MarketingDashboard, LearnedRuleItem
+    TripartiteSyncResponse, DirectiveItem, MarketingDashboard, LearnedRuleItem,
+    PromotionPulseItem
 )
 
 logger = logging.getLogger("cmo_marketing_service")
