@@ -1986,6 +1986,12 @@ export interface ProductSupplierComparisonResponse {
   proveedores: SupplierPriceComparisonItem[]
 }
 
+export type RevisionCobrosTipo = "no_cuadran" | "huerfanos" | "multi_proveedor"
+export interface RevisionNoCuadran { id: string; numero: string; fecha: string; total: number; pagos_revision: string | null; pagos_diferencia: number | null }
+export interface RevisionHuerfano { id: string; fecha: string; tipo_operacion: string | null; monto: number; punto_emision: string | null; exitosa: boolean; requiere_conciliacion: boolean; nombre_tarjeta: string | null; codigo_autorizacion: string | null }
+export interface RevisionMultiProveedor { id: string; numero: string; fecha: string; total: number; proveedores: string[] }
+export interface RevisionCobrosItems { no_cuadran: RevisionNoCuadran; huerfanos: RevisionHuerfano; multi_proveedor: RevisionMultiProveedor }
+
 export const api = {
   auth: {
     login: (data: { email: string; password: string }) => client.post<{ access_token: string; refresh_token: string }>("/v1/auth/login", data),
@@ -2227,8 +2233,8 @@ export const api = {
   },
   caja: {
     revisionCobros: {
-      list: (tipo: "no_cuadran" | "huerfanos" | "multi_proveedor", params?: { desde?: string; hasta?: string }) =>
-        client.get<Array<Record<string, any>>>("/v1/caja/revision-cobros", { tipo, ...params }),
+      list: <K extends RevisionCobrosTipo>(tipo: K, params?: { desde?: string; hasta?: string }) =>
+        client.get<RevisionCobrosItems[K][]>("/v1/caja/revision-cobros", { tipo, ...params }),
       revisar: (tipo: string, id: string) =>
         client.post<{ ok: boolean }>(`/v1/caja/revision-cobros/${tipo}/${id}/revisar`, {}),
     },

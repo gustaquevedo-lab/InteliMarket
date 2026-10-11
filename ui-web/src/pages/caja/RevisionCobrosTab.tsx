@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Loader2, RefreshCw, Check, Calendar } from "lucide-react"
-import { api } from "../../api"
+import { api, type RevisionCobrosTipo, type RevisionCobrosItems } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDateTime } from "../../utils/format"
 
-type Tipo = "no_cuadran" | "huerfanos" | "multi_proveedor"
+type Tipo = RevisionCobrosTipo
+type Item = RevisionCobrosItems[Tipo]
 
 const SUBTABS: { key: Tipo; label: string }[] = [
   { key: "no_cuadran", label: "Pagos que no cuadran" },
@@ -21,27 +22,32 @@ const MOTIVOS: Record<string, string> = {
 export default function RevisionCobrosTab() {
   const toast = useToast()
   const [tipo, setTipo] = useState<Tipo>("no_cuadran")
-  const [items, setItems] = useState<Array<Record<string, any>>>([])
+  const [items, setItems] = useState<Item[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [desde, setDesde] = useState("")
   const [hasta, setHasta] = useState("")
   const [busyId, setBusyId] = useState<string | null>(null)
 
+  const reqId = useRef(0)
+
   const load = useCallback(async () => {
+    const my = ++reqId.current
     setLoading(true)
     setError(null)
     try {
       const res = await api.caja.revisionCobros.list(tipo, {
-        desde: desde ? `${desde}T00:00:00` : undefined,
-        hasta: hasta ? `${hasta}T23:59:59` : undefined,
+        desde: desde ? `${desde}T00:00:00-03:00` : undefined,
+        hasta: hasta ? `${hasta}T23:59:59.999-03:00` : undefined,
       })
+      if (my !== reqId.current) return
       setItems(Array.isArray(res) ? res : [])
     } catch (err: any) {
+      if (my !== reqId.current) return
       setItems([])
       setError(err?.message || "No se pudo cargar la revisión de cobros.")
     } finally {
-      setLoading(false)
+      if (my === reqId.current) setLoading(false)
     }
   }, [tipo, desde, hasta])
 
@@ -68,7 +74,8 @@ export default function RevisionCobrosTab() {
 
   const cell = "p-3.5 text-gray-800 dark:text-gray-200"
 
-  const renderRow = (it: Record<string, any>) => {
+  const renderRow = (raw: Item) => {
+    const it = raw as any
     if (tipo === "no_cuadran") {
       return (
         <>

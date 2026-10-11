@@ -3365,8 +3365,10 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
         </div>
       )}
 
-      {/* TAB 9: GOBERNANZA DE FALTANTES & INTEGRACIÓN SUELDOK */}
+      {/* TAB: REVISIÓN DE COBROS (pago mixto) */}
       {activeTab === "revision_cobros" && <RevisionCobrosTab />}
+
+      {/* TAB 9: GOBERNANZA DE FALTANTES & INTEGRACIÓN SUELDOK */}
 
       {activeTab === "sueldok_faltantes" && (
         <div className="space-y-6 animate-fade-in">
