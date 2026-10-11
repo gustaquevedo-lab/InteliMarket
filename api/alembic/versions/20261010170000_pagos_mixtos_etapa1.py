@@ -48,6 +48,19 @@ def upgrade() -> None:
     # CONCURRENTLY no puede ir dentro de una transaccion: va despues de los ALTER
     # (autocommit_block confirma lo anterior y vuelve a abrir transaccion al salir).
     with op.get_context().autocommit_block():
+        # Un CONCURRENTLY fallado en un intento anterior deja el indice INVALID
+        # y el IF NOT EXISTS lo saltaria: se borra solo si existe e es invalido.
+        op.execute(
+            "DO $$ BEGIN "
+            "PERFORM set_config('lock_timeout', '5s', true); "
+            "IF EXISTS (SELECT 1 FROM pg_index i "
+            "JOIN pg_class c ON c.oid = i.indexrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE c.relname = 'ix_sale_payments_terminal_tx' "
+            "AND n.nspname = current_schema() AND NOT i.indisvalid) THEN "
+            "DROP INDEX ix_sale_payments_terminal_tx; "
+            "END IF; END $$"
+        )
         op.execute(
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_sale_payments_terminal_tx "
             "ON sale_payments (terminal_transaction_id)"

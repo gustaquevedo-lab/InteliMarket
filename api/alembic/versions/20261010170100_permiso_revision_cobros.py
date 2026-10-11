@@ -23,6 +23,9 @@ ROLES = ("Supervisor", "Gerente")
 
 
 def upgrade() -> None:
+    # Solo INSERTs (lock ROW EXCLUSIVE, no bloquea ventas); el lock_timeout es
+    # defensivo por si algo tuviera tomadas las tablas rbac_*.
+    op.execute("SET LOCAL lock_timeout = '5s'")
     op.execute(
         "INSERT INTO rbac_permissions (id, name, description, module) "
         f"VALUES (gen_random_uuid(), '{PERMISO}', '{DESCRIPCION}', 'caja') "
