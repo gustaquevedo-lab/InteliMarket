@@ -13,7 +13,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import or_, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 TOLERANCIA_PAGOS_PYG = Decimal("50")
@@ -127,6 +127,39 @@ async def vincular_cobros_terminal(
     return no_vinculados
 
 
+async def _descuadre_contra_cobros(
+    db: AsyncSession,
+    company_id: UUID,
+    sale_id: UUID,
+    lineas: Sequence[tuple[UUID, Decimal | None]],
+) -> Decimal | None:
+    """Suma de (linea - cobro) de las lineas que difieren de su cobro enlazado
+    en mas de la tolerancia; None si ninguna difiere. Omite cobros sin monto y
+    lineas sin monto comparable."""
+    from api.src.pos_terminal_transactions.models import PosTerminalTransaction as T
+
+    comparables = [(tid, m) for tid, m in lineas if m is not None]
+    if not comparables:
+        return None
+    res = await db.execute(
+        select(T.id, T.monto).where(
+            T.id.in_({tid for tid, _ in comparables}),
+            T.company_id == company_id,
+            T.sale_id == sale_id,
+        )
+    )
+    montos_cobro = {tid: m for tid, m in res.all()}
+    descuadre: Decimal | None = None
+    for tid, monto_linea in comparables:
+        cobrado = montos_cobro.get(tid)
+        if cobrado is None:
+            continue
+        dif = Decimal(monto_linea) - Decimal(cobrado)
+        if abs(dif) > TOLERANCIA_PAGOS_PYG:
+            descuadre = (descuadre or Decimal("0")) + dif
+    return descuadre
+
+
 async def registrar_pagos_de_venta(
     db: AsyncSession,
     *,
@@ -143,6 +176,8 @@ async def registrar_pagos_de_venta(
 
     lineas: list[LineaPago] = []
     monto_descartado = False
+    # (terminal_transaction_id, monto de la linea en PYG o None si no se puede comparar)
+    contra_cobro: list[tuple[UUID, Decimal | None]] = []
     for p in pagos:
         moneda = (p.moneda or "PYG").strip().upper()[:3] or "PYG"
         forma_pago = (p.forma_pago or "")[:30]
@@ -171,6 +206,9 @@ async def registrar_pagos_de_venta(
             monto_pyg=monto_pyg,
         ))
         lineas.append(LineaPago(forma_pago, monto, moneda, monto_pyg))
+        if p.terminal_transaction_id:
+            monto_linea = monto_pyg if monto_pyg is not None else (monto if moneda == "PYG" else None)
+            contra_cobro.append((p.terminal_transaction_id, monto_linea))
 
     marca, diferencia = evaluar_pagos(sale.total, lineas)
     if monto_descartado:
@@ -180,8 +218,19 @@ async def registrar_pagos_de_venta(
         await vincular_cobros_terminal(db, company_id, sale.id, terminal_ids)
         if terminal_ids else []
     )
+    # Cada linea enlazada a un cobro del terminal debe coincidir con lo que el
+    # terminal cobro (misma tolerancia). Si no, se marca no_cuadran; nunca se
+    # rechaza la venta (las ventas offline se reenvian y no pueden trabarse).
+    descuadre_cobro = await _descuadre_contra_cobros(
+        db, company_id, sale.id,
+        [(tid, m) for tid, m in contra_cobro if tid not in no_vinculados],
+    )
+    if descuadre_cobro is not None and diferencia is None:
+        diferencia = descuadre_cobro
     sale.pagos_revision = marca_prevalente(
-        "enlace_invalido" if no_vinculados else None, marca
+        "enlace_invalido" if no_vinculados else None,
+        marca,
+        "no_cuadran" if descuadre_cobro is not None else None,
     )
     sale.pagos_diferencia = diferencia
     await db.flush()

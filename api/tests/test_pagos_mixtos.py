@@ -27,6 +27,25 @@ from api.src.sales.pagos_revision import (
 
 
 class TestEsquemas:
+    def test_campos_nuevos_invalidos_no_rechazan_la_venta(self):
+        # Una venta offline reencolada nunca puede quedar trabada en 422 por
+        # los campos nuevos: los invalidos se descartan (None).
+        p = SalePaymentInput(
+            forma_pago="QR", monto=Decimal("1000"), terminal_transaction_id="no-es-uuid",
+            cuotas="tres", monto_pyg="abc", proveedor=123, referencia={"x": 1},
+        )
+        assert (p.terminal_transaction_id, p.cuotas, p.monto_pyg) == (None, None, None)
+        assert p.proveedor == "123" and p.referencia is None
+
+    def test_campos_nuevos_validos_y_vacios(self):
+        tid = uuid4()
+        p = SalePaymentInput(forma_pago="QR", monto=Decimal("1000"), terminal_transaction_id=str(tid),
+                             cuotas="3", monto_pyg="1000", proveedor="", referencia="")
+        assert (p.terminal_transaction_id, p.cuotas, p.monto_pyg) == (tid, 3, Decimal("1000"))
+        assert p.proveedor is None and p.referencia is None
+        p = SalePaymentInput(forma_pago="QR", monto=Decimal("1000"), terminal_transaction_id="", cuotas=None)
+        assert p.terminal_transaction_id is None and p.cuotas is None
+
     def test_payload_viejo_sigue_valido(self):
         p = SalePaymentInput(forma_pago="EFECTIVO", monto=Decimal("1000"))
         assert p.proveedor is None and p.terminal_transaction_id is None and p.monto_pyg is None
@@ -122,10 +141,10 @@ async def sqlite_db():
     await engine.dispose()
 
 
-async def _cobro(db, company_id, sale_id=None):
+async def _cobro(db, company_id, sale_id=None, monto=None):
     tid = uuid4()
     db.add(PosTerminalTransaction(
-        id=tid, company_id=company_id, sale_id=sale_id, tipo_operacion="venta_debito",
+        id=tid, company_id=company_id, sale_id=sale_id, tipo_operacion="venta_debito", monto=monto,
     ))
     await db.flush()
     return tid
@@ -253,6 +272,58 @@ class TestRegistrarPagos:
         (f,) = await _lineas(sqlite_db, sale)
         assert f.monto_pyg is None
         assert sale.pagos_revision == "no_verificable"
+
+    async def test_linea_igual_al_cobro_enlazado_no_marca(self, sqlite_db):
+        co, sale = uuid4(), _sale(100000)
+        tid = await _cobro(sqlite_db, co, monto=Decimal("100000"))
+        pagos = [SalePaymentInput(forma_pago="TARJETA DEBITO", monto=Decimal("100000"), monto_pyg=Decimal("100000"),
+                                  proveedor="bancard", terminal_transaction_id=tid)]
+        await registrar_pagos_de_venta(sqlite_db, company_id=co, sale=sale, pagos=pagos, ahora=AHORA)
+        assert sale.pagos_revision is None and sale.pagos_diferencia is None
+        assert await _sale_id_de(sqlite_db, tid) == sale.id
+
+    async def test_linea_distinta_del_cobro_enlazado_marca_no_cuadran(self, sqlite_db):
+        # la venta cuadra (90000 = total) pero el terminal cobro 100000
+        co, sale = uuid4(), _sale(90000)
+        tid = await _cobro(sqlite_db, co, monto=Decimal("100000"))
+        pagos = [SalePaymentInput(forma_pago="TARJETA DEBITO", monto=Decimal("90000"), monto_pyg=Decimal("90000"),
+                                  proveedor="bancard", terminal_transaction_id=tid)]
+        await registrar_pagos_de_venta(sqlite_db, company_id=co, sale=sale, pagos=pagos, ahora=AHORA)
+        assert sale.pagos_revision == "no_cuadran"
+        assert sale.pagos_diferencia == Decimal("-10000")
+        assert len(await _lineas(sqlite_db, sale)) == 1
+
+    async def test_diferencia_dentro_de_tolerancia_con_cobro_no_marca(self, sqlite_db):
+        co, sale = uuid4(), _sale(100000)
+        tid = await _cobro(sqlite_db, co, monto=Decimal("100040"))
+        pagos = [SalePaymentInput(forma_pago="QR", monto=Decimal("100000"), terminal_transaction_id=tid)]
+        await registrar_pagos_de_venta(sqlite_db, company_id=co, sale=sale, pagos=pagos, ahora=AHORA)
+        assert sale.pagos_revision is None
+
+    async def test_cobro_sin_monto_se_omite(self, sqlite_db):
+        co, sale = uuid4(), _sale(100000)
+        tid = await _cobro(sqlite_db, co)
+        pagos = [SalePaymentInput(forma_pago="QR", monto=Decimal("100000"), terminal_transaction_id=tid)]
+        await registrar_pagos_de_venta(sqlite_db, company_id=co, sale=sale, pagos=pagos, ahora=AHORA)
+        assert sale.pagos_revision is None
+
+    async def test_enlace_invalido_prevalece_sobre_monto_distinto(self, sqlite_db):
+        co, sale = uuid4(), _sale(90000)
+        tid = await _cobro(sqlite_db, co, monto=Decimal("100000"))
+        ajeno = await _cobro(sqlite_db, uuid4(), monto=Decimal("5"))
+        pagos = [SalePaymentInput(forma_pago="QR", monto=Decimal("90000"), terminal_transaction_id=tid),
+                 SalePaymentInput(forma_pago="QR", monto=Decimal("1"), terminal_transaction_id=ajeno)]
+        await registrar_pagos_de_venta(sqlite_db, company_id=co, sale=sale, pagos=pagos, ahora=AHORA)
+        assert sale.pagos_revision == "enlace_invalido"
+
+    async def test_reenvio_offline_ya_enlazado_a_esta_venta_se_acepta(self, sqlite_db):
+        # replay de una venta encolada: el cobro ya quedo enlazado a esta venta
+        co, sale = uuid4(), _sale(100000)
+        tid = await _cobro(sqlite_db, co, monto=Decimal("100000"))
+        pagos = [SalePaymentInput(forma_pago="QR", monto=Decimal("100000"), terminal_transaction_id=tid)]
+        await registrar_pagos_de_venta(sqlite_db, company_id=co, sale=sale, pagos=pagos, ahora=AHORA)
+        await registrar_pagos_de_venta(sqlite_db, company_id=co, sale=sale, pagos=pagos, ahora=AHORA)
+        assert sale.pagos_revision is None
 
     async def test_monto_fuera_de_rango_no_rompe_y_marca_no_cuadran(self, sqlite_db):
         sale = _sale(1000)
