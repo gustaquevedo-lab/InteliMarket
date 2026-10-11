@@ -25,6 +25,8 @@ import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatBRL, formatUSD, formatDateTime, getTodayAsuncion, getAsuncionDateStr, parseAsuncionDateStr } from "../../utils/format"
 import CurrencyInput from "../../components/CurrencyInput"
+import { usePermissions } from "../../context/PermissionsContext"
+import RevisionCobrosTab from "./RevisionCobrosTab"
 
 // Sesiones del sistema legacy anterior (Supermer) o pruebas accidentales
 const LEGACY_SESSION_IDS = new Set([
@@ -173,7 +175,8 @@ const DENOMINACIONES_PYG = [
 
 export default function CajaPage() {
   const { user } = useAuth()
-  const [activeTab, setActiveTab] = useState<"registers" | "sessions" | "entregas" | "historial" | "cajeros" | "donaciones" | "reportes" | "bancos_mapping" | "sueldok_faltantes">("registers")
+  const { hasPermission } = usePermissions()
+  const [activeTab, setActiveTab] = useState<"registers" | "sessions" | "entregas" | "historial" | "cajeros" | "donaciones" | "reportes" | "bancos_mapping" | "sueldok_faltantes" | "revision_cobros">("registers")
   
   // ── CENTRO DE REPORTES DE CAJA (PARAGUAY TIMEZONE) ──
   const getInitialPyDate = () => {
@@ -1529,6 +1532,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
           { key: "reportes", label: "📊 Centro de Reportes", icon: FileSpreadsheet },
           { key: "bancos_mapping", label: "🏦 Linkeo Bancario", icon: Building2 },
           { key: "sueldok_faltantes", label: "⚖️ Faltantes & SueldOK", icon: ShieldAlert, count: shortageRequests.filter(r => r.estado === 'PENDIENTE').length },
+          ...(hasPermission("caja:revision_cobros") ? [{ key: "revision_cobros", label: "Revisión de cobros", icon: ClipboardCheck }] : []),
         ].map((t) => {
           const Icon = t.icon
           const active = activeTab === t.key
@@ -3362,6 +3366,8 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
       )}
 
       {/* TAB 9: GOBERNANZA DE FALTANTES & INTEGRACIÓN SUELDOK */}
+      {activeTab === "revision_cobros" && <RevisionCobrosTab />}
+
       {activeTab === "sueldok_faltantes" && (
         <div className="space-y-6 animate-fade-in">
           {/* Configuración de Políticas y Umbrales */}

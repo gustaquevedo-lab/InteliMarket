@@ -2226,6 +2226,12 @@ export const api = {
     listByWarehouse: (warehouseId: string) => client.get<StockItem[]>(`/v1/warehouses/${warehouseId}/stock`),
   },
   caja: {
+    revisionCobros: {
+      list: (tipo: "no_cuadran" | "huerfanos" | "multi_proveedor", params?: { desde?: string; hasta?: string }) =>
+        client.get<Array<Record<string, any>>>("/v1/caja/revision-cobros", { tipo, ...params }),
+      revisar: (tipo: string, id: string) =>
+        client.post<{ ok: boolean }>(`/v1/caja/revision-cobros/${tipo}/${id}/revisar`, {}),
+    },
     registers: {
       list: () => client.get<CashRegister[]>("/v1/cash-registers"),
       create: (data: Partial<CashRegister>) => client.post<CashRegister>("/v1/cash-registers", data),
