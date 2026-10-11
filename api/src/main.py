@@ -44,6 +44,7 @@ from api.src.supervisor_requests.router import router as supervisor_requests_rou
 from api.src.kiosk.router import router as kiosk_router
 from api.src.integrations.scales.router import router as scales_router
 from api.src.caja.router import router as caja_router
+from api.src.caja.revision_cobros import router as revision_cobros_router
 from api.src.intelicont.router import router as intelicont_router
 from api.src.inteliaudit.router import router as inteliaudit_router
 from api.src.sueldok.router import router as sueldok_router
@@ -375,6 +376,7 @@ app.include_router(reports_router)
 app.include_router(integrations_router)
 app.include_router(scales_router)
 app.include_router(caja_router)
+app.include_router(revision_cobros_router)
 app.include_router(intelicont_router)
 app.include_router(inteliaudit_router)
 app.include_router(sueldok_router)

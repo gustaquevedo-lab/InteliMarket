@@ -64,6 +64,7 @@ DEFAULT_PERMISSIONS = [
     ("caja:open", "Abrir caja", "caja"),
     ("caja:close", "Cerrar caja", "caja"),
     ("caja:retiro", "Registrar retiros", "caja"),
+    ("caja:revision_cobros", "Revisar cobros que no cuadran, huérfanos y multi-proveedor", "caja"),
     # Reports
     ("reports:view", "Ver reportes", "reports"),
     ("reports:export", "Exportar reportes", "reports"),
@@ -173,7 +174,7 @@ DEFAULT_ROLES = [
         "permissions": [
             "sales:view", "sales:create", "sales:cancel", "sales:refund",
             "pos:view", "pos:sell", "pos:discount",
-            "caja:view", "caja:open", "caja:close", "caja:retiro",
+            "caja:view", "caja:open", "caja:close", "caja:retiro", "caja:revision_cobros",
             "customers:view", "customers:create",
             "credit:view", "credit:manage",
         ],
@@ -205,6 +206,7 @@ DEFAULT_ROLES = [
         "is_default": False,
         "permissions": [
             "mermas:approve", "salon:manage", "inventory:view", "reports:view",
+            "caja:revision_cobros",
             "products:view", "products:update", "products:edit_cost", "products:edit_price",
             "price_lists:view", "price_lists:manage",
         ],
