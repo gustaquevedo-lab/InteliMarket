@@ -142,13 +142,28 @@ TOOL_DEFINITIONS = [
                 "required": ["tag_name"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_promotions_pulse",
+            "description": "Obtiene el diagnóstico comercial en vivo de todas las promociones: pulso, volumen vendido, productos reales involucrados y efectividad en cajas.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
     }
 ]
 
 
 async def _execute_tool(db: AsyncSession, company_id: str, tool_name: str, args: Dict[str, Any]) -> Any:
     """Ejecuta las herramientas reales de Marketing contra la base de datos."""
-    if tool_name == "get_tripartite_status":
+    if tool_name == "get_promotions_pulse":
+        promos = await service.get_promotions_with_ai_pulse(db, company_id)
+        return [p.dict() for p in promos[:8]]
+
+    elif tool_name == "get_tripartite_status":
         sync = await service.get_tripartite_sync_status(db, company_id)
         return {
             "estado_general": sync.estado_general,

@@ -213,7 +213,7 @@ async def get_executive_analysis(
             SUM(COALESCE(si.costo_unitario, p.costo_promedio, p.ultimo_costo, si.precio_unitario * 0.75) * si.cantidad) AS cmv
         FROM sale_items si
         JOIN products p ON p.id = si.product_id
-        LEFT JOIN product_categories c ON c.id = p.category_id
+        LEFT JOIN product_categories c ON c.id = p.categoria_id
         JOIN sales s ON s.id = si.sale_id
         WHERE s.company_id = :cid AND s.estado IN ('completado', 'confirmado')
           AND {where_period}
@@ -270,7 +270,7 @@ async def get_executive_analysis(
             COALESCE(kvi.motivo_gancho, '') AS motivo_gancho_db
         FROM sale_items si
         JOIN products p ON p.id = si.product_id
-        LEFT JOIN product_categories c ON c.id = p.category_id
+        LEFT JOIN product_categories c ON c.id = p.categoria_id
         LEFT JOIN company_kvi_products kvi ON kvi.product_id = p.id AND kvi.company_id = :cid
         JOIN sales s ON s.id = si.sale_id
         WHERE s.company_id = :cid AND s.estado IN ('completado', 'confirmado')
@@ -597,7 +597,7 @@ async def get_pareto_analysis(
                 SUM(si.total) - SUM(COALESCE(si.costo_unitario, p.costo_promedio, p.ultimo_costo, si.precio_unitario * 0.75) * si.cantidad) AS ganancia_bruta
             FROM sale_items si
             JOIN products p ON p.id = si.product_id
-            LEFT JOIN product_categories c ON c.id = p.category_id
+            LEFT JOIN product_categories c ON c.id = p.categoria_id
             JOIN sales s ON s.id = si.sale_id
             WHERE s.company_id = :cid AND s.estado IN ('completado', 'confirmado')
               AND {where_period}

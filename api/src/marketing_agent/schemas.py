@@ -39,7 +39,30 @@ class CustomerProfileDetail(BaseModel):
     cantidad_compras: int = 0
     dias_inactivo: Optional[int] = None
     segmento: str = "General"
+    segmentos_tags: List[str] = Field(default_factory=list)
     productos_favoritos: List[TopProductHabit] = Field(default_factory=list)
+    accion_sugerida_ia: Optional[str] = None
+    whatsapp_mensaje_sugerido: Optional[str] = None
+
+
+class PromotionPulseItem(BaseModel):
+    id: str
+    nombre: str
+    tipo: str
+    descuento_pct: Optional[float] = None
+    activo: bool = True
+    fecha_inicio: Optional[str] = None
+    fecha_fin: Optional[str] = None
+    dias_restantes: Optional[int] = None
+    productos_count: int = 0
+    productos_nombres: List[str] = Field(default_factory=list)
+    total_usos: int = 0
+    monto_facturado_gs: float = 0.0
+    descuento_total_gs: float = 0.0
+    pulso_nivel: str = "estable"  # alta_traccion, estable, bajo_impacto
+    pulso_label: str = "Pulso Estable"
+    diagnostico_ia: str = ""
+    recomendacion_ia: str = ""
 
 
 class CampaignSuggestion(BaseModel):

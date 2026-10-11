@@ -7,22 +7,24 @@ import {
   Layers, Check, X, ChevronRight, ThumbsUp, ShoppingCart, Percent,
   Monitor, ImagePlus, Pencil, Trash2, ArrowUp, ArrowDown, Loader2,
   Activity, MessageSquare, BookOpen, PlusCircle, Building2, Scale,
-  Flame, CheckSquare, Search, Award
+  Flame, CheckSquare, Search, Award, Mic, MicOff, Volume2, Share2,
+  ExternalLink, Globe
 } from "lucide-react"
 import { api, type KioskBanner } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { useAuth } from "../../context/AuthContext"
 import { formatPYG } from "../../utils/format"
+import { Promotion360Modal } from "../marketing/Promotion360Modal"
 
-type Tab = "comando" | "audiencias" | "promociones_pos" | "kiosco" | "memoria" | "chat"
+type Tab = "comando" | "audiencias" | "promociones_pos" | "kiosco" | "chat" | "memoria"
 
 const KIOSK_COLORS = [
-  { id: "orange", label: "Naranja" },
-  { id: "emerald", label: "Verde" },
-  { id: "amber", label: "Ámbar" },
-  { id: "purple", label: "Violeta" },
-  { id: "blue", label: "Azul" },
-  { id: "rose", label: "Rosa" },
+  { id: "orange", label: "Naranja", bg: "from-orange-500 to-amber-600" },
+  { id: "emerald", label: "Verde", bg: "from-emerald-500 to-teal-600" },
+  { id: "amber", label: "Ámbar", bg: "from-amber-500 to-yellow-600" },
+  { id: "purple", label: "Violeta", bg: "from-purple-600 to-indigo-700" },
+  { id: "blue", label: "Azul", bg: "from-blue-600 to-cyan-700" },
+  { id: "rose", label: "Rosa", bg: "from-rose-500 to-pink-600" },
 ]
 
 export default function MarketingAgentPage() {
@@ -37,12 +39,18 @@ export default function MarketingAgentPage() {
   const [syncStatus, setSyncStatus] = useState<any>(null)
   const [rfmCustomers, setRfmCustomers] = useState<any[]>([])
   const [loadingRfm, setLoadingRfm] = useState(false)
+  const [rfmFilter, setRfmFilter] = useState<"todos" | "inactivos">("todos")
   const [learnedRules, setLearnedRules] = useState<any[]>([])
   const [promotionsList, setPromotionsList] = useState<any[]>([])
   const [loadingPromos, setLoadingPromos] = useState(false)
+
+  // Promociones con Pulso Comercial de IA & Modal 360
+  const [promotionsPulseList, setPromotionsPulseList] = useState<any[]>([])
+  const [loadingPromosPulse, setLoadingPromosPulse] = useState(false)
+  const [selectedPromo360Id, setSelectedPromo360Id] = useState<string | null>(null)
   
   // Filtros de Audiencias y Etiquetas Dinámicas
-  const [rfmFilter, setRfmFilter] = useState<"todos" | "inactivos">("inactivos")
+  const [selectedRfmSegment, setSelectedRfmSegment] = useState<string | null>(null)
   const [searchCustomer, setSearchCustomer] = useState("")
   const [audienceTags, setAudienceTags] = useState<any[]>([])
   const [selectedTag, setSelectedTag] = useState<string>("todos")
@@ -54,34 +62,38 @@ export default function MarketingAgentPage() {
   // Formulario de Nueva Regla de Memoria
   const [newRuleText, setNewRuleText] = useState("")
   const [savingRule, setSavingRule] = useState(false)
+  const [showMemoryPanel, setShowMemoryPanel] = useState(false)
 
-  // Banners del Verificador de Precios (kiosco)
+  // Banners del Verificador de Precios y Web
   const [kioskBanners, setKioskBanners] = useState<KioskBanner[]>([])
   const [kioskLoading, setKioskLoading] = useState(false)
+  const [kioskChannelFilter, setKioskChannelFilter] = useState<"todos" | "kiosco" | "web">("todos")
   const [editingBanner, setEditingBanner] = useState<KioskBanner | null>(null)
   const [showBannerForm, setShowBannerForm] = useState(false)
   const [bannerForm, setBannerForm] = useState({
-    titulo: "", subtitulo: "", etiqueta: "", descuento_texto: "", color: "orange", activo: true,
+    titulo: "", subtitulo: "", etiqueta: "", descuento_texto: "", color: "purple", activo: true,
   })
   const [bannerImageFile, setBannerImageFile] = useState<File | null>(null)
   const [bannerImagePreview, setBannerImagePreview] = useState<string | null>(null)
   const [savingBanner, setSavingBanner] = useState(false)
 
-  // Chat State
+  // Chat State y Control de Voz
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string; action_outcome?: any; suggestions?: string[] }>>([
     {
       role: "assistant",
-      content: "👋 ¡Hola! Soy el **CMO Virtual** de Extra Supermercado. Estoy conectado en tiempo real a los **7.856 clientes fidelizados**, al sobre-stock del **CFO** y a las metas del **Copiloto Comercial**. ¿Qué estrategia de ventas o rescate querés que coordinemos hoy?",
+      content: "👋 ¡Hola! Soy el **CMO Virtual** de Extra Supermercado. Gestiono en vivo los **7.856 clientes**, el sobre-stock del **CFO** y las promociones activas en cajas POS. Podés consultarme o darme directivas por texto o por voz usando el micrófono.",
       suggestions: [
-        "Ver estado de sincronización con el CFO",
-        "¿Cuáles son los VIPs en riesgo de abandono?",
-        "Crear combo para liquidar sobre-stock",
+        "¿Cuáles son los VIPs en riesgo de abandono y qué les ofrecemos?",
+        "Analizar el pulso y tracción de las promociones en cajas",
+        "Crear combo para liquidar sobre-stock de carnicería",
         "Ver reglas aprendidas de marketing"
       ]
     }
   ])
   const [inputMessage, setInputMessage] = useState("")
   const [chatLoading, setChatLoading] = useState(false)
+  const [isListening, setIsListening] = useState(false)
+  const [isSpeaking, setIsSpeaking] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // Carga Principal
@@ -108,14 +120,15 @@ export default function MarketingAgentPage() {
     loadInitialData()
   }, [loadInitialData])
 
-  // Cargar Clientes RFM cuando entra a la pestaña
-  const fetchRfmCustomers = useCallback(async (inactivos: boolean) => {
+  // Cargar Clientes RFM con Filtros Reales
+  const fetchRfmCustomers = useCallback(async (segment?: string, search?: string) => {
     setLoadingRfm(true)
     try {
       const list = await api.marketingAgent.customersRfm({
         companyId,
-        limit: 20,
-        solo_inactivos: inactivos
+        limit: 30,
+        segmento: segment,
+        search: search
       })
       setRfmCustomers(list || [])
     } catch (e: any) {
@@ -127,10 +140,29 @@ export default function MarketingAgentPage() {
 
   useEffect(() => {
     if (tab === "audiencias") {
-      fetchRfmCustomers(rfmFilter === "inactivos")
+      fetchRfmCustomers(selectedRfmSegment || undefined, searchCustomer)
       fetchAudienceTags()
     }
-  }, [tab, rfmFilter, fetchRfmCustomers])
+  }, [tab, selectedRfmSegment, fetchRfmCustomers])
+
+  // Cargar Pulso de Promociones de IA
+  const fetchPromotionsPulse = useCallback(async () => {
+    setLoadingPromosPulse(true)
+    try {
+      const list = await api.marketingAgent.promotionsPulse(companyId)
+      setPromotionsPulseList(list || [])
+    } catch (e: any) {
+      toast.error("No se pudo cargar el pulso de promociones", e?.message)
+    } finally {
+      setLoadingPromosPulse(false)
+    }
+  }, [companyId, toast])
+
+  useEffect(() => {
+    if (tab === "promociones_pos") {
+      fetchPromotionsPulse()
+    }
+  }, [tab, fetchPromotionsPulse])
 
   // Cargar Etiquetas Dinámicas de Audiencia
   const fetchAudienceTags = useCallback(async () => {
@@ -150,7 +182,7 @@ export default function MarketingAgentPage() {
       toast.success("Re-Perfilado Completado", res?.mensaje || "Se recalcularon las métricas y hábitos.")
       await Promise.all([
         loadInitialData(),
-        fetchRfmCustomers(rfmFilter === "inactivos"),
+        fetchRfmCustomers(rfmFilter === "inactivos" ? "inactivos" : undefined),
         fetchAudienceTags(),
       ])
     } catch (e: any) {
@@ -177,12 +209,109 @@ export default function MarketingAgentPage() {
       setShowTagModal(false)
       setNewTagForm({ tag_name: "", producto_keyword: "", barrio: "", min_gasto: "" })
       await fetchAudienceTags()
-      await fetchRfmCustomers(rfmFilter === "inactivos")
+      await fetchRfmCustomers(selectedRfmSegment || undefined, searchCustomer)
     } catch (e: any) {
       toast.error("Error al crear etiqueta", e?.message)
     } finally {
       setSavingTag(false)
     }
+  }
+
+  // Acción Individual: Enviar Oferta Personalizada por WhatsApp
+  const handleOpenWhatsApp = (c: any) => {
+    const textMsg = encodeURIComponent(c.whatsapp_mensaje_sugerido || `¡Hola ${c.nombre}! Te esperamos en Extra Supermercado.`)
+    const rawPhone = c.telefono ? String(c.telefono).replace(/\D/g, "") : ""
+    if (!rawPhone) {
+      navigator.clipboard.writeText(c.whatsapp_mensaje_sugerido || "")
+      toast.warning("Sin Teléfono Registrado", `Mensaje copiado al portapapeles para ${c.nombre}.`)
+      return
+    }
+    const fullPhone = rawPhone.startsWith("595") ? rawPhone : `595${rawPhone.replace(/^0/, "")}`
+    window.open(`https://wa.me/${fullPhone}?text=${textMsg}`, "_blank")
+  }
+
+  // Acción Individual: Crear Cupón Nominativo en POS
+  const handleCreatePersonalCoupon = async (c: any) => {
+    try {
+      const favProd = c.productos_favoritos?.[0]?.producto_nombre || "Compras Habituales"
+      await api.marketingAgent.launchCampaign({
+        company_id: companyId,
+        campaign_id: `INDIV-${c.documento}`,
+        segmento: `Cliente ${c.nombre} (${c.documento})`,
+        crear_en_pos: true,
+        descuento_pct: 15.0,
+        message: `Cupón 15% OFF en ${favProd} para cédula ${c.documento}`
+      })
+      toast.success("Cupón Registrado en POS", `Beneficio activado en cajas para ${c.nombre} (CI: ${c.documento}).`)
+      await fetchPromotionsPulse()
+    } catch (e: any) {
+      toast.error("Error al generar cupón", e?.message)
+    }
+  }
+
+  // Sugerir Banner con IA desde Sobre-Stock
+  const handleSuggestBannerWithAI = () => {
+    const sobreStockTxt = syncStatus?.cfo_sobrestock_valor_gs ? formatPYG(syncStatus.cfo_sobrestock_valor_gs) : "62.425.000 Gs"
+    setEditingBanner(null)
+    setBannerForm({
+      titulo: "¡Mega Oportunidad Extra Supermercado!",
+      subtitulo: `Aprovechá cortes y productos seleccionados a precio mayorista (${sobreStockTxt} en liquidación)`,
+      etiqueta: "LIQUIDACIÓN SALÓN",
+      descuento_texto: "25% OFF",
+      color: "purple",
+      activo: true
+    })
+    setShowBannerForm(true)
+    toast.success("Banner Generado con IA", "Sugerencia lista basada en las directivas de sobre-stock del CFO.")
+  }
+
+  // Soporte de Voz (Speech to Text)
+  const toggleListening = () => {
+    if (isListening) {
+      setIsListening(false)
+      return
+    }
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      toast.warning("Reconocimiento de Voz No Disponible", "Tu navegador no soporta Web Speech API.")
+      return
+    }
+    try {
+      const recognition = new SpeechRecognition()
+      recognition.lang = "es-PY"
+      recognition.continuous = false
+      recognition.interimResults = false
+
+      recognition.onstart = () => setIsListening(true)
+      recognition.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript
+        setInputMessage(prev => prev ? `${prev} ${transcript}` : transcript)
+        setIsListening(false)
+      }
+      recognition.onerror = () => setIsListening(false)
+      recognition.onend = () => setIsListening(false)
+      recognition.start()
+    } catch {
+      setIsListening(false)
+    }
+  }
+
+  // Reproducir Respuesta Hablada (Text to Speech)
+  const speakText = (text: string) => {
+    if (!window.speechSynthesis) return
+    if (isSpeaking) {
+      window.speechSynthesis.cancel()
+      setIsSpeaking(false)
+      return
+    }
+    const cleanText = text.replace(/[*#_`]/g, "")
+    const utterance = new SpeechSynthesisUtterance(cleanText)
+    utterance.lang = "es-ES"
+    utterance.rate = 1.05
+    utterance.onend = () => setIsSpeaking(false)
+    utterance.onerror = () => setIsSpeaking(false)
+    setIsSpeaking(true)
+    window.speechSynthesis.speak(utterance)
   }
 
   // Cargar Banners Kiosco
@@ -462,10 +591,9 @@ export default function MarketingAgentPage() {
         {[
           { id: "comando", label: "Comando & Directivas Activas", icon: Target, badge: dashboard?.campañas_sugeridas?.length },
           { id: "audiencias", label: "Audiencias & RFM Real", icon: Users, badge: "7.856" },
-          { id: "promociones_pos", label: "Promociones en Cajas POS", icon: Percent, badge: promotionsList.length || undefined },
-          { id: "kiosco", label: "Banners en Kioscos", icon: Monitor, badge: kioskBanners.length || undefined },
-          { id: "memoria", label: "Memoria & Buenas Prácticas", icon: BookOpen, badge: learnedRules.length || undefined },
-          { id: "chat", label: "Sesión de Estrategia CMO", icon: MessageSquare },
+          { id: "promociones_pos", label: "Promociones POS & Pulso IA", icon: Percent, badge: promotionsPulseList.length || promotionsList.length || undefined },
+          { id: "kiosco", label: "Banners Omnicanal (Kiosco & Web)", icon: Globe, badge: kioskBanners.length || undefined },
+          { id: "chat", label: "Estrategia CMO (Voz & Memoria)", icon: MessageSquare, badge: "IA" },
         ].map((t) => {
           const Icon = t.icon
           const isActive = tab === t.id
@@ -570,27 +698,77 @@ export default function MarketingAgentPage() {
       {/* TAB 2: AUDIENCIAS & RFM REAL */}
       {tab === "audiencias" && (
         <div className="space-y-5">
-          {/* MATRIZ DE SEGMENTOS */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-            {dashboard?.segmentos?.map((seg: any) => (
-              <div
-                key={seg.id}
-                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 shadow-sm space-y-2"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-extrabold uppercase text-slate-400">{seg.nombre}</span>
-                  <span className="text-xs font-black px-2 py-0.5 rounded-full bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 font-mono">
-                    {seg.cantidad.toLocaleString()}
-                  </span>
-                </div>
-                <p className="text-lg font-black text-slate-900 dark:text-white font-mono">
-                  {formatPYG(seg.ticket_promedio_gs)}
-                </p>
-                <p className="text-[11px] text-slate-500 font-medium leading-tight">
-                  {seg.criterio}
-                </p>
-              </div>
-            ))}
+          {/* MATRIZ DE SEGMENTOS INTERACTIVA CON FILTRADO EN 1 CLIC */}
+          <div>
+            <div className="flex items-center justify-between pb-2">
+              <span className="text-[11px] font-black uppercase tracking-wider text-slate-500">
+                Segmentos RFM Reales · Hacé clic en una tarjeta para filtrar la lista:
+              </span>
+              {selectedRfmSegment && (
+                <button
+                  onClick={() => {
+                    setSelectedRfmSegment(null)
+                    fetchRfmCustomers(undefined, searchCustomer)
+                  }}
+                  className="text-[11px] font-bold text-purple-600 hover:text-purple-700 underline cursor-pointer"
+                >
+                  Limpiar Filtro (Ver Todos)
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+              {dashboard?.segmentos?.map((seg: any) => {
+                const segKey = seg.id === "vip_champions" ? "champions" :
+                               seg.id === "vip_inactivos" ? "churn" :
+                               seg.id === "frecuentes" ? "frecuentes" : "ocasionales"
+                const isSelected = selectedRfmSegment === segKey
+
+                return (
+                  <button
+                    type="button"
+                    key={seg.id}
+                    onClick={() => {
+                      const next = isSelected ? null : segKey
+                      setSelectedRfmSegment(next)
+                      fetchRfmCustomers(next || undefined, searchCustomer)
+                    }}
+                    className={`text-left rounded-3xl p-4 shadow-sm space-y-2.5 transition cursor-pointer border ${
+                      isSelected
+                        ? "bg-purple-50/90 dark:bg-purple-950/40 border-purple-600 ring-2 ring-purple-600/30 dark:border-purple-500"
+                        : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-purple-300"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-extrabold uppercase text-slate-400">{seg.nombre}</span>
+                      <span className={`text-xs font-black px-2 py-0.5 rounded-full font-mono ${
+                        isSelected
+                          ? "bg-purple-600 text-white"
+                          : "bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300"
+                      }`}>
+                        {seg.cantidad.toLocaleString()}
+                      </span>
+                    </div>
+                    <p className="text-lg font-black text-slate-900 dark:text-white font-mono">
+                      {formatPYG(seg.ticket_promedio_gs)}
+                    </p>
+                    <p className="text-[11px] text-slate-500 font-medium leading-tight line-clamp-2">
+                      {seg.criterio}
+                    </p>
+                    <div className="pt-1 flex items-center justify-between text-[10px] font-bold">
+                      <span className={isSelected ? "text-purple-600 font-extrabold" : "text-slate-400"}>
+                        {isSelected ? "✓ Filtrando este segmento" : "Clic para filtrar ↓"}
+                      </span>
+                      {isSelected && (
+                        <span className="px-1.5 py-0.2 rounded bg-purple-200 dark:bg-purple-900 text-purple-800 dark:text-purple-200 text-[9px]">
+                          ACTIVO
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
           </div>
 
           {/* BARRA DE ACCIÓN: RE-PERFILADO CONTINUO Y CREACIÓN DE ETIQUETAS */}
@@ -629,9 +807,13 @@ export default function MarketingAgentPage() {
                 Filtrar por Etiqueta:
               </span>
               <button
-                onClick={() => setSelectedTag("todos")}
+                onClick={() => {
+                  setSelectedTag("todos")
+                  setSelectedRfmSegment(null)
+                  fetchRfmCustomers(undefined, searchCustomer)
+                }}
                 className={`px-3 py-1 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
-                  selectedTag === "todos"
+                  selectedTag === "todos" && !selectedRfmSegment
                     ? "bg-purple-600 text-white shadow-xs"
                     : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800"
                 }`}
@@ -641,16 +823,20 @@ export default function MarketingAgentPage() {
               {audienceTags.map(tag => (
                 <button
                   key={tag.etiqueta}
-                  onClick={() => setSelectedTag(tag.etiqueta)}
+                  onClick={() => {
+                    setSelectedTag(tag.etiqueta)
+                    setSelectedRfmSegment(tag.etiqueta)
+                    fetchRfmCustomers(tag.etiqueta, searchCustomer)
+                  }}
                   className={`px-3 py-1 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-                    selectedTag === tag.etiqueta
+                    selectedRfmSegment === tag.etiqueta
                       ? "bg-purple-600 text-white shadow-xs"
                       : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-purple-50 dark:hover:bg-slate-800"
                   }`}
                 >
                   <span>{tag.etiqueta}</span>
                   <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-mono font-bold ${
-                    selectedTag === tag.etiqueta ? "bg-purple-800 text-white" : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
+                    selectedRfmSegment === tag.etiqueta ? "bg-purple-800 text-white" : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
                   }`}>
                     {tag.cantidad}
                   </span>
@@ -659,15 +845,15 @@ export default function MarketingAgentPage() {
             </div>
           )}
 
-          {/* LISTADO DE CLIENTES REALES CON HÁBITOS DE COMPRA */}
+          {/* LISTADO DE CLIENTES REALES CON HÁBITOS Y ACCIONES INDIVIDUALES DE IA */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-extrabold text-slate-900 dark:text-white uppercase flex items-center gap-2">
-                  <Users className="w-4 h-4 text-purple-600" /> Clientes Reales con Productos Favoritos Detectados
+                  <Users className="w-4 h-4 text-purple-600" /> Clientes Reales con Acciones Individuales Personalizadas (IA)
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Calculado a partir de los 278.020 productos analizados en cupon_ticket_items.
+                  {selectedRfmSegment ? `Filtrando por: ${selectedRfmSegment.toUpperCase()}` : "Mostrando clientes con mayor volumen de compra en Extra Supermercado"}
                 </p>
               </div>
 
@@ -676,22 +862,27 @@ export default function MarketingAgentPage() {
                   <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3" />
                   <input
                     type="text"
-                    placeholder="Buscar cliente, cédula o barrio..."
+                    placeholder="Buscar nombre, cédula o barrio..."
                     value={searchCustomer}
-                    onChange={e => setSearchCustomer(e.target.value)}
-                    className="pl-8 pr-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none w-56"
+                    onChange={e => {
+                      setSearchCustomer(e.target.value)
+                      if (!e.target.value.trim()) {
+                        fetchRfmCustomers(selectedRfmSegment || undefined, undefined)
+                      }
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === "Enter") {
+                        fetchRfmCustomers(selectedRfmSegment || undefined, searchCustomer)
+                      }
+                    }}
+                    className="pl-8 pr-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none w-64"
                   />
                 </div>
                 <button
-                  onClick={() => setRfmFilter(rfmFilter === "inactivos" ? "todos" : "inactivos")}
-                  className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border ${
-                    rfmFilter === "inactivos"
-                      ? "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800"
-                      : "bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300"
-                  }`}
+                  onClick={() => fetchRfmCustomers(selectedRfmSegment || undefined, searchCustomer)}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white transition cursor-pointer"
                 >
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                  {rfmFilter === "inactivos" ? "Filtrado: En Riesgo (>20d)" : "Todos los VIPs"}
+                  Buscar
                 </button>
               </div>
             </div>
@@ -704,7 +895,7 @@ export default function MarketingAgentPage() {
                     <h4 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase flex items-center gap-2">
                       <PlusCircle className="w-4 h-4 text-purple-600" /> Crear Nueva Etiqueta de Audiencia
                     </h4>
-                    <button onClick={() => setShowTagModal(false)} className="text-slate-400 hover:text-slate-600">
+                    <button onClick={() => setShowTagModal(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
                       <X className="w-4 h-4" />
                     </button>
                   </div>
@@ -744,14 +935,14 @@ export default function MarketingAgentPage() {
                       <button
                         type="button"
                         onClick={() => setShowTagModal(false)}
-                        className="px-3 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        className="px-3 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                       >
                         Cancelar
                       </button>
                       <button
                         type="submit"
                         disabled={savingTag || !newTagForm.tag_name.trim()}
-                        className="px-4 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50"
+                        className="px-4 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50 cursor-pointer"
                       >
                         {savingTag ? "Creando y asignando..." : "Crear y Asignar"}
                       </button>
@@ -766,302 +957,570 @@ export default function MarketingAgentPage() {
                 <Loader2 className="w-6 h-6 animate-spin text-purple-600" />
               </div>
             ) : filteredCustomers.length === 0 ? (
-              <div className="p-8 text-center text-xs text-slate-500">
-                No se encontraron clientes para el filtro actual.
+              <div className="p-12 text-center text-xs text-slate-500 space-y-2">
+                <p className="font-bold">No se encontraron clientes para el filtro actual.</p>
+                <p className="text-[11px] text-slate-400">Probá limpiando el filtro de búsqueda o seleccionando otro segmento.</p>
+                <button
+                  onClick={() => {
+                    setSelectedRfmSegment(null)
+                    setSearchCustomer("")
+                    fetchRfmCustomers(undefined, undefined)
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-purple-100 text-purple-800 text-xs font-bold hover:bg-purple-200 transition"
+                >
+                  Restablecer Filtros
+                </button>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredCustomers.map((c) => (
-                  <div
-                    key={c.id}
-                    className="p-4 rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850/40 space-y-3"
-                  >
-                    <div className="flex items-start justify-between gap-2 border-b border-slate-200/60 dark:border-slate-800 pb-2.5">
-                      <div>
-                        <h4 className="font-extrabold text-xs text-slate-900 dark:text-white">{c.nombre}</h4>
-                        <p className="text-[10px] text-slate-400 font-mono mt-0.5">
-                          DOC: {c.documento} · {c.barrio || "PJC"}
-                        </p>
-                      </div>
-                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-purple-100 text-purple-800 dark:bg-purple-950/80 dark:text-purple-300">
-                        {c.segmento}
-                      </span>
-                    </div>
+                {filteredCustomers.map((c) => {
+                  const esChurn = c.dias_inactivo >= 20
+                  return (
+                    <div
+                      key={c.id}
+                      className="p-4 rounded-3xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-3.5 flex flex-col justify-between"
+                    >
+                      <div className="space-y-3">
+                        <div className="flex items-start justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2.5">
+                          <div>
+                            <h4 className="font-extrabold text-xs text-slate-900 dark:text-white leading-snug">{c.nombre}</h4>
+                            <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                              DOC: {c.documento} · {c.barrio || "PJC"}
+                            </p>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
+                            esChurn
+                              ? "bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300"
+                              : "bg-purple-100 text-purple-800 dark:bg-purple-950/80 dark:text-purple-300"
+                          }`}>
+                            {c.segmento}
+                          </span>
+                        </div>
 
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="text-slate-500">Gasto Total Acumulado:</span>
-                        <b className="font-mono text-slate-900 dark:text-white">{formatPYG(c.total_gastado_gs)}</b>
-                      </div>
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="text-slate-500">Última Compra:</span>
-                        <span className={`font-bold ${c.dias_inactivo >= 20 ? "text-rose-600" : "text-emerald-600"}`}>
-                          hace {c.dias_inactivo} días
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* TOP PRODUCTOS FAVORITOS */}
-                    {c.productos_favoritos && c.productos_favoritos.length > 0 && (
-                      <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60 space-y-1.5">
-                        <span className="text-[9px] font-extrabold uppercase text-slate-400 flex items-center gap-1">
-                          <ShoppingBag className="w-3 h-3 text-purple-500" /> Productos Habituales:
-                        </span>
                         <div className="space-y-1">
-                          {c.productos_favoritos.map((p: any, idx: number) => (
-                            <div key={idx} className="flex items-center justify-between text-[10px]">
-                              <span className="truncate max-w-[170px] text-slate-700 dark:text-slate-300 font-medium">
-                                • {p.producto_nombre}
-                              </span>
-                              <span className="font-mono text-slate-400">{p.compras_count}x</span>
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="text-slate-500">Gasto Total Acumulado:</span>
+                            <b className="font-mono text-slate-900 dark:text-white">{formatPYG(c.total_gastado_gs)}</b>
+                          </div>
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="text-slate-500">Última Compra en Cajas:</span>
+                            <span className={`font-bold ${esChurn ? "text-rose-600 font-extrabold" : "text-emerald-600"}`}>
+                              {esChurn ? `⚠️ Inactivo hace ${c.dias_inactivo} días` : `hace ${c.dias_inactivo} días`}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* TOP PRODUCTOS FAVORITOS */}
+                        {c.productos_favoritos && c.productos_favoritos.length > 0 && (
+                          <div className="p-2.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-700/60 space-y-1.5">
+                            <span className="text-[9px] font-extrabold uppercase text-slate-400 flex items-center gap-1">
+                              <ShoppingBag className="w-3 h-3 text-purple-500" /> Productos Habituales:
+                            </span>
+                            <div className="space-y-1">
+                              {c.productos_favoritos.map((p: any, idx: number) => (
+                                <div key={idx} className="flex items-center justify-between text-[10px]">
+                                  <span className="truncate max-w-[170px] text-slate-700 dark:text-slate-300 font-medium">
+                                    • {p.producto_nombre}
+                                  </span>
+                                  <span className="font-mono text-slate-400 font-bold">{p.compras_count}x</span>
+                                </div>
+                              ))}
                             </div>
-                          ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* CAJA DE ACCIÓN IA HIPER-PERSONALIZADA */}
+                      <div className="p-3 rounded-2xl bg-gradient-to-br from-purple-50 to-indigo-50 dark:from-purple-950/40 dark:to-indigo-950/40 border border-purple-200 dark:border-purple-900/60 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black uppercase text-purple-900 dark:text-purple-200 flex items-center gap-1">
+                            <Sparkles className="w-3 h-3 text-purple-600" /> Acción IA Individual
+                          </span>
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-200/80 dark:bg-purple-900/80 text-purple-900 dark:text-purple-200">
+                            Personalizada
+                          </span>
+                        </div>
+                        <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200 leading-snug">
+                          {c.accion_sugerida_ia || "Generar beneficio para incentivar ticket"}
+                        </p>
+                        <div className="pt-1 flex items-center gap-2">
+                          <button
+                            onClick={() => handleOpenWhatsApp(c)}
+                            className="flex-1 py-1.5 px-2.5 rounded-xl text-[11px] font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center gap-1 transition shadow-xs cursor-pointer"
+                            title="Enviar oferta hiper-personalizada por WhatsApp"
+                          >
+                            <MessageCircle className="w-3.5 h-3.5" />
+                            WhatsApp
+                          </button>
+                          <button
+                            onClick={() => handleCreatePersonalCoupon(c)}
+                            className="flex-1 py-1.5 px-2.5 rounded-xl text-[11px] font-extrabold bg-purple-600 hover:bg-purple-700 text-white flex items-center justify-center gap-1 transition shadow-xs cursor-pointer"
+                            title="Crear cupón nominativo en cajas registradoras"
+                          >
+                            <Zap className="w-3.5 h-3.5" />
+                            Cupón POS
+                          </button>
                         </div>
                       </div>
-                    )}
-                  </div>
-                ))}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* TAB 3: PROMOCIONES EN CAJAS POS */}
+      {/* TAB 3: PROMOCIONES EN CAJAS POS CON PULSO IA & VISIÓN 360 */}
       {tab === "promociones_pos" && (
-        <div className="space-y-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm flex items-center justify-between">
+        <div className="space-y-5">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-extrabold uppercase tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-                <Percent className="w-4 h-4 text-purple-600" /> Promociones Activas en Cajas Registradoras (POS)
+                <Percent className="w-4 h-4 text-purple-600" /> Rendimiento & Pulso IA de Promociones en Cajas (POS)
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Reglas reales sincronizadas con los terminales POS de Extra Supermercado.
+                Diagnóstico en tiempo real del CMO: tracción en caja, productos involucrados y auditoría financiera 360°.
               </p>
             </div>
-            <button
-              onClick={() => setTab("chat")}
-              className="px-4 py-2 rounded-xl text-xs font-bold bg-purple-600 text-white hover:bg-purple-700 transition"
-            >
-              + Pedir Nueva Promo a la IA
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => fetchPromotionsPulse()}
+                disabled={loadingPromosPulse}
+                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingPromosPulse ? "animate-spin" : ""}`} />
+                Actualizar Pulso
+              </button>
+              <button
+                onClick={() => setTab("chat")}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-purple-600 text-white hover:bg-purple-700 transition cursor-pointer"
+              >
+                + Diseñar Nueva Promo con IA
+              </button>
+            </div>
           </div>
 
-          {loadingPromos ? (
-            <div className="flex items-center justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-purple-600" /></div>
-          ) : promotionsList.length === 0 ? (
-            <div className="p-8 text-center text-xs text-slate-500 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800">
-              No hay promociones activas registradas en la base de datos.
+          {loadingPromosPulse ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="w-8 h-8 animate-spin text-purple-600" />
+            </div>
+          ) : promotionsPulseList.length === 0 ? (
+            <div className="p-12 text-center text-xs text-slate-500 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 space-y-2">
+              <p className="font-bold">No hay promociones activas registradas en la base de datos.</p>
+              <button
+                onClick={() => setTab("chat")}
+                className="px-4 py-2 rounded-xl bg-purple-600 text-white font-bold text-xs"
+              >
+                Crear una con el CMO
+              </button>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {promotionsList.slice(0, 18).map((p: any) => (
-                <div
-                  key={p.id}
-                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-3"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300">
-                      Activa en POS
-                    </span>
-                    <span className="font-mono text-xs font-black text-purple-600">
-                      {p.tipo === "porcentaje" ? `${p.valor}% OFF` : `₲ ${formatPYG(p.valor)}`}
-                    </span>
+              {promotionsPulseList.map((p: any) => {
+                const esAlta = p.pulso_nivel === "alta_traccion"
+                const esBaja = p.pulso_nivel === "bajo_impacto"
+                return (
+                  <div
+                    key={p.id}
+                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4 flex flex-col justify-between hover:border-purple-300 dark:hover:border-purple-700 transition"
+                  >
+                    <div className="space-y-3">
+                      {/* HEADER Y SEMÁFORO DE PULSO IA */}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                          esAlta
+                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300"
+                            : esBaja
+                            ? "bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300"
+                            : "bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300"
+                        }`}>
+                          {p.pulso_label}
+                        </span>
+                        <span className="font-mono text-xs font-black text-purple-600">
+                          {p.descuento_pct ? `${p.descuento_pct}% OFF` : p.tipo.toUpperCase()}
+                        </span>
+                      </div>
+
+                      <div>
+                        <h4 className="font-extrabold text-sm text-slate-900 dark:text-white leading-snug">
+                          {p.nombre}
+                        </h4>
+                        <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono mt-1">
+                          <span>Vigencia: {p.fecha_inicio || "Hoy"} - {p.fecha_fin || "Indefinida"}</span>
+                          {p.dias_restantes !== null && (
+                            <span className="font-bold text-slate-600 dark:text-slate-300">
+                              ({p.dias_restantes} días restantes)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* PRODUCTOS REALES AFECTADOS */}
+                      {p.productos_nombres && p.productos_nombres.length > 0 && (
+                        <div className="p-2.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-700/60 space-y-1">
+                          <span className="text-[9px] font-extrabold uppercase text-slate-400">
+                            Productos en Promoción ({p.productos_count}):
+                          </span>
+                          <div className="flex flex-wrap gap-1">
+                            {p.productos_nombres.map((pname: string, pIdx: number) => (
+                              <span
+                                key={pIdx}
+                                className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-[10px] font-medium border border-slate-200/60 dark:border-slate-600 truncate max-w-[200px]"
+                              >
+                                {pname}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* DIAGNÓSTICO DEL CMO IA */}
+                      <div className="p-3 rounded-2xl bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200/70 dark:border-purple-900/50 space-y-1.5">
+                        <span className="text-[9px] font-black uppercase text-purple-900 dark:text-purple-300 flex items-center gap-1">
+                          <Sparkles className="w-3 h-3 text-purple-600" /> Diagnóstico del CMO:
+                        </span>
+                        <p className="text-[11px] text-slate-700 dark:text-slate-300 font-medium leading-relaxed">
+                          {p.diagnostico_ia}
+                        </p>
+                        <p className="text-[10px] text-purple-800 dark:text-purple-300 font-bold pt-0.5">
+                          💡 Sugerencia: {p.recomendacion_ia}
+                        </p>
+                      </div>
+
+                      {/* MÉTRICAS EN CAJAS */}
+                      <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 dark:border-slate-800 text-[11px]">
+                        <div>
+                          <span className="text-slate-400 text-[10px] uppercase font-bold block">Ventas Registradas</span>
+                          <b className="font-mono text-slate-900 dark:text-white">{p.total_usos} tickets</b>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-slate-400 text-[10px] uppercase font-bold block">Volumen Estimado</span>
+                          <b className="font-mono text-purple-600 font-extrabold">{formatPYG(p.monto_facturado_gs)}</b>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* BOTÓN PROMOTION 360 MODAL */}
+                    <button
+                      onClick={() => setSelectedPromo360Id(p.id)}
+                      className="w-full py-2.5 rounded-xl text-xs font-extrabold bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-purple-700 dark:hover:bg-purple-200 flex items-center justify-center gap-1.5 transition shadow-xs cursor-pointer"
+                    >
+                      <BarChart3 className="w-3.5 h-3.5" />
+                      Abrir Auditoría & Visión 360°
+                    </button>
                   </div>
-                  <div>
-                    <h4 className="font-extrabold text-xs text-slate-900 dark:text-white leading-snug">{p.nombre}</h4>
-                    <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">{p.descripcion || "Sin descripción"}</p>
-                  </div>
-                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[10px] text-slate-400">
-                    <span>Validez: {p.valido_hasta ? String(p.valido_hasta) : "Indefinida"}</span>
-                    <span>{p.producto_ids?.length ? `${p.producto_ids.length} productos` : "General"}</span>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
       )}
 
-      {/* TAB 4: BANNERS EN KIOSCOS */}
+      {/* TAB 4: BANNERS OMNICANAL (KIOSCO & WEB) */}
       {tab === "kiosco" && (
-        <div className="space-y-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between flex-wrap gap-3">
+        <div className="space-y-5">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div>
               <h3 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase flex items-center gap-2">
-                <Monitor className="w-4 h-4 text-pink-600" /> Banners de Ofertas en Terminales del Salón
+                <Globe className="w-4 h-4 text-pink-600" /> Banners Omnicanal (Verificadores de Precios + Web Móvil)
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Rotan en los verificadores de precios distribuidos en el salón de ventas.
+                Publicá ofertas coordinadas en los terminales táctiles del salón y en la barra superior de la tienda web.
               </p>
             </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleSuggestBannerWithAI}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-50 dark:bg-purple-950/60 border border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 text-xs font-extrabold hover:bg-purple-100 transition cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-purple-600" /> Sugerir Banner IA desde Sobre-Stock
+              </button>
+              <button
+                onClick={() => {
+                  setEditingBanner(null)
+                  setBannerForm({ titulo: "", subtitulo: "", etiqueta: "", descuento_texto: "", color: "purple", activo: true })
+                  setShowBannerForm(true)
+                }}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-pink-600 hover:bg-pink-700 text-white text-xs font-bold transition shadow-xs cursor-pointer"
+              >
+                <ImagePlus className="w-4 h-4" /> + Crear Banner
+              </button>
+            </div>
+          </div>
+
+          {/* FILTRO DE CANALES */}
+          <div className="flex items-center gap-2">
+            {[
+              { id: "todos", label: "Todos los Canales" },
+              { id: "kiosco", label: "🖥️ Verificadores Salón (Kioscos)" },
+              { id: "web", label: "📱 Tienda Web / E-commerce" },
+            ].map(c => (
+              <button
+                key={c.id}
+                onClick={() => setKioskChannelFilter(c.id as any)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                  kioskChannelFilter === c.id
+                    ? "bg-pink-600 text-white"
+                    : "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100"
+                }`}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
+
+          {/* LISTADO CON VISTA PREVIA INTERACTIVA */}
+          {kioskLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-6 h-6 animate-spin text-pink-600" />
+            </div>
+          ) : kioskBanners.length === 0 ? (
+            <div className="p-12 text-center text-xs text-slate-500 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 space-y-3">
+              <p className="font-bold">No hay banners publicados actualmente.</p>
+              <button
+                onClick={handleSuggestBannerWithAI}
+                className="px-4 py-2 rounded-xl bg-purple-600 text-white font-bold text-xs"
+              >
+                Generar primer banner con IA
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {kioskBanners.map((b) => {
+                const colorObj = KIOSK_COLORS.find(c => c.id === b.color) || KIOSK_COLORS[3]
+                return (
+                  <div
+                    key={b.id}
+                    className="rounded-3xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-white dark:bg-slate-900 shadow-sm space-y-3 p-4 flex flex-col justify-between"
+                  >
+                    {/* LIVE PREVIEW VISUAL DEL BANNER */}
+                    <div className={`rounded-2xl p-4 bg-gradient-to-r ${colorObj.bg} text-white shadow-inner space-y-2 relative overflow-hidden min-h-[110px] flex flex-col justify-between`}>
+                      <div className="flex items-center justify-between">
+                        <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-black/30 backdrop-blur-xs">
+                          {b.etiqueta || "OFERTA SALÓN"}
+                        </span>
+                        <span className="font-mono text-sm font-black px-2 py-0.5 rounded-full bg-white text-slate-900">
+                          {b.descuento_texto || "PROMO"}
+                        </span>
+                      </div>
+                      <div>
+                        <h4 className="font-extrabold text-sm leading-tight drop-shadow-xs">{b.titulo}</h4>
+                        {b.subtitulo && (
+                          <p className="text-[10px] text-white/90 font-medium leading-tight mt-0.5 line-clamp-2">
+                            {b.subtitulo}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1 text-[11px] text-slate-500">
+                      <span className="flex items-center gap-1 font-bold">
+                        <Monitor className="w-3 h-3 text-slate-400" /> Kiosco Salón + Web
+                      </span>
+                      <span className={b.activo ? "text-emerald-600 font-bold" : "text-slate-400"}>
+                        {b.activo ? "● Activo al aire" : "○ Pausado"}
+                      </span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 5: SESIÓN DE ESTRATEGIA CMO (CON VOZ, REGLAS Y MEMORIA INTEGRADA) */}
+      {tab === "chat" && (
+        <div className="space-y-4">
+          {/* BARRA SUPERIOR CON TOGGLE DE MEMORIA ACTIVA */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-4 shadow-sm flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-pink-500 animate-pulse" />
+              <div>
+                <span className="text-xs font-bold text-slate-900 dark:text-white">
+                  Sesión Estratégica con el CMO (Qwen 2.5 7B Local + Gemini)
+                </span>
+                <p className="text-[10px] text-slate-400">
+                  Tool Calling Activo: 7.856 clientes RFM · Sobre-Stock CFO ({formatPYG(syncStatus?.cfo_sobrestock_valor_gs || 62425000)}) · Promociones en Cajas
+                </p>
+              </div>
+            </div>
             <button
-              onClick={() => {
-                setEditingBanner(null)
-                setBannerForm({ titulo: "", subtitulo: "", etiqueta: "", descuento_texto: "", color: "orange", activo: true })
-                setShowBannerForm(true)
-              }}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-pink-600 hover:bg-pink-700 text-white text-xs font-bold transition shadow-xs cursor-pointer"
+              onClick={() => setShowMemoryPanel(!showMemoryPanel)}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                showMemoryPanel
+                  ? "bg-purple-600 text-white"
+                  : "bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800"
+              }`}
             >
-              <ImagePlus className="w-4 h-4" /> Nuevo Banner
+              <BookOpen className="w-3.5 h-3.5" />
+              {showMemoryPanel ? "Ocultar Memoria" : `Ver Cerebro & Memoria (${learnedRules.length})`}
             </button>
           </div>
 
-          {kioskLoading ? (
-            <div className="flex items-center justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-pink-600" /></div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {kioskBanners.map((b) => (
-                <div key={b.id} className="rounded-3xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-white dark:bg-slate-900 shadow-sm p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-extrabold text-xs text-slate-900 dark:text-white">{b.titulo}</span>
-                    <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-pink-100 text-pink-700 uppercase">
-                      {b.descuento_texto || "PROMO"}
-                    </span>
-                  </div>
-                  {b.subtitulo && <p className="text-xs text-slate-500">{b.subtitulo}</p>}
+          {/* PANEL LATERAL / SUPERIOR DE MEMORIA ACTIVA */}
+          {showMemoryPanel && (
+            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-purple-200 dark:border-purple-900/60 p-5 shadow-sm space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-extrabold uppercase text-purple-900 dark:text-purple-200 flex items-center gap-1.5">
+                    <BookOpen className="w-4 h-4 text-purple-600" /> Memoria Corporativa Continua (company_business_rules)
+                  </h4>
+                  <p className="text-[11px] text-slate-500">
+                    Reglas estratégicas y políticas aprendidas por el CMO que condicionan sus decisiones automáticas.
+                  </p>
                 </div>
-              ))}
+              </div>
+
+              <form onSubmit={handleSaveRule} className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Enseñale una nueva regla fija (ej: 'Los miércoles de verduras el descuento nunca supera el 15%')..."
+                  value={newRuleText}
+                  onChange={e => setNewRuleText(e.target.value)}
+                  className="flex-1 px-4 py-2.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={!newRuleText.trim() || savingRule}
+                  className="px-4 py-2.5 rounded-xl text-xs font-bold bg-purple-600 text-white hover:bg-purple-700 transition disabled:opacity-50 cursor-pointer"
+                >
+                  {savingRule ? "Guardando..." : "Guardar Regla"}
+                </button>
+              </form>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {learnedRules.map((r) => (
+                  <div
+                    key={r.id}
+                    className="p-3.5 rounded-2xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-100 dark:border-purple-900/40 space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="px-2 py-0.2 rounded-full text-[9px] font-black uppercase bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+                        {r.categoria}
+                      </span>
+                      <span className="text-[9px] text-slate-400 font-mono">Confianza: 95%</span>
+                    </div>
+                    <p className="text-xs font-medium text-slate-800 dark:text-slate-200 leading-snug">
+                      "{r.regla}"
+                    </p>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
-        </div>
-      )}
 
-      {/* TAB 5: MEMORIA & BUENAS PRÁCTICAS */}
-      {tab === "memoria" && (
-        <div className="space-y-6">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
-            <div>
-              <h3 className="text-sm font-extrabold uppercase tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-                <BookOpen className="w-4 h-4 text-purple-600" /> Memoria Corporativa Continua (company_business_rules)
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Reglas y políticas que el CMO Virtual aprende de tus indicaciones y nunca olvida al tomar decisiones.
-              </p>
-            </div>
-
-            <form onSubmit={handleSaveRule} className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Enseñale una nueva regla (ej: 'Los miércoles de verduras el descuento sugerido nunca supera el 15%')..."
-                value={newRuleText}
-                onChange={e => setNewRuleText(e.target.value)}
-                className="flex-1 px-4 py-2.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none"
-              />
-              <button
-                type="submit"
-                disabled={!newRuleText.trim() || savingRule}
-                className="px-4 py-2.5 rounded-xl text-xs font-bold bg-purple-600 text-white hover:bg-purple-700 transition disabled:opacity-50"
-              >
-                {savingRule ? "Guardando..." : "Guardar en Memoria"}
-              </button>
-            </form>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {learnedRules.map((r) => (
-              <div
-                key={r.id}
-                className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-2"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300">
-                    {r.categoria}
-                  </span>
-                  <span className="text-[10px] text-slate-400 font-mono">{r.created_at || "Vigente"}</span>
-                </div>
-                <p className="text-xs font-medium text-slate-800 dark:text-slate-200 leading-relaxed">
-                  "{r.regla}"
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* TAB 6: CHAT CON EL CMO VIRTUAL */}
-      {tab === "chat" && (
-        <div className="h-[680px] bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col">
-          <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-850/50">
-            <div className="flex items-center gap-2.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-pink-500 animate-pulse" />
-              <span className="text-xs font-bold text-slate-900 dark:text-white">
-                Sesión Estratégica con el CMO (Qwen 2.5 7B Local + Gemini)
-              </span>
-            </div>
-            <span className="text-[10px] font-mono font-bold text-slate-400">
-              Tool Calling Activo: PostgreSQL / POS / Cupones
-            </span>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-6 space-y-4">
-            {messages.map((m, idx) => (
-              <div key={idx} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[85%] rounded-2xl p-4 space-y-2 text-xs leading-relaxed ${
-                  m.role === "user"
-                    ? "bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-tr-none shadow-sm"
-                    : "bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700/80 rounded-tl-none"
-                }`}>
-                  <div className="whitespace-pre-wrap font-sans leading-relaxed">{m.content}</div>
-
-                  {/* ACTION OUTCOME CARD SI HUBO TOOL CALLING */}
-                  {m.action_outcome && (
-                    <div className="p-3 mt-2 rounded-xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 text-purple-900 dark:text-purple-200 flex items-center justify-between">
-                      <div>
-                        <span className="text-[10px] font-black uppercase">{m.action_outcome.titulo}</span>
-                        <p className="text-xs font-bold">{m.action_outcome.descripcion}</p>
-                      </div>
-                      <CheckCircle2 className="w-4 h-4 text-purple-600 shrink-0" />
-                    </div>
-                  )}
-
-                  {m.suggestions && m.suggestions.length > 0 && (
-                    <div className="pt-2 flex flex-wrap gap-1.5">
-                      {m.suggestions.map((p, pIdx) => (
+          {/* CONTENEDOR DE MENSAJES Y CONVERSACIÓN */}
+          <div className="h-[640px] bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col">
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              {messages.map((m, idx) => (
+                <div key={idx} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[85%] rounded-2xl p-4 space-y-2 text-xs leading-relaxed ${
+                    m.role === "user"
+                      ? "bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-tr-none shadow-sm"
+                      : "bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700/80 rounded-tl-none"
+                  }`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="whitespace-pre-wrap font-sans leading-relaxed">{m.content}</div>
+                      {m.role === "assistant" && (
                         <button
-                          key={pIdx}
-                          onClick={() => handleSendMessage(p)}
-                          className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 dark:bg-purple-950/80 dark:text-purple-300 hover:bg-purple-100 transition cursor-pointer"
+                          onClick={() => speakText(m.content)}
+                          className="text-slate-400 hover:text-purple-600 transition shrink-0 p-1 cursor-pointer"
+                          title="Escuchar respuesta por voz"
                         >
-                          {p}
+                          <Volume2 className={`w-4 h-4 ${isSpeaking ? "text-purple-600 animate-pulse" : ""}`} />
                         </button>
-                      ))}
+                      )}
                     </div>
-                  )}
-                </div>
-              </div>
-            ))}
 
-            {chatLoading && (
-              <div className="flex justify-start">
-                <div className="bg-slate-50 dark:bg-slate-800/80 rounded-2xl p-4 text-xs text-slate-500 flex items-center gap-2 border border-slate-200 dark:border-slate-700">
-                  <Loader2 className="w-4 h-4 animate-spin text-purple-500" />
-                  El CMO Virtual está consultando los 7.856 clientes y sobre-stock en tiempo real...
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
+                    {/* ACTION OUTCOME CARD SI HUBO TOOL CALLING */}
+                    {m.action_outcome && (
+                      <div className="p-3 mt-2 rounded-xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 text-purple-900 dark:text-purple-200 flex items-center justify-between">
+                        <div>
+                          <span className="text-[10px] font-black uppercase">{m.action_outcome.titulo}</span>
+                          <p className="text-xs font-bold">{m.action_outcome.descripcion}</p>
+                        </div>
+                        <CheckCircle2 className="w-4 h-4 text-purple-600 shrink-0" />
+                      </div>
+                    )}
 
-          <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850/50">
-            <form onSubmit={e => { e.preventDefault(); handleSendMessage() }} className="flex items-center gap-2">
-              <input
-                type="text"
-                placeholder="Preguntale al CMO sobre liquidar sobre-stock, rescatar VIPs o crear promos en POS..."
-                value={inputMessage}
-                onChange={e => setInputMessage(e.target.value)}
-                className="flex-1 px-4 py-3 text-xs rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-              />
-              <button
-                type="submit"
-                disabled={!inputMessage.trim() || chatLoading}
-                className="px-5 py-3 rounded-2xl bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-purple-500/20 transition cursor-pointer"
-              >
-                <Send className="w-4 h-4" />
-              </button>
-            </form>
+                    {m.suggestions && m.suggestions.length > 0 && (
+                      <div className="pt-2 flex flex-wrap gap-1.5">
+                        {m.suggestions.map((p, pIdx) => (
+                          <button
+                            key={pIdx}
+                            onClick={() => handleSendMessage(p)}
+                            className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 dark:bg-purple-950/80 dark:text-purple-300 hover:bg-purple-100 transition cursor-pointer"
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              {chatLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-slate-50 dark:bg-slate-800/80 rounded-2xl p-4 text-xs text-slate-500 flex items-center gap-2 border border-slate-200 dark:border-slate-700">
+                    <Loader2 className="w-4 h-4 animate-spin text-purple-500" />
+                    El CMO Virtual está consultando los 7.856 clientes y sobre-stock en tiempo real...
+                  </div>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* INPUT CON INTERACCIÓN DE VOZ Y TEXTO */}
+            <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850/50">
+              <form onSubmit={e => { e.preventDefault(); handleSendMessage() }} className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Escribí o hablá al CMO sobre liquidar sobre-stock, rescatar VIPs o crear combos..."
+                  value={inputMessage}
+                  onChange={e => setInputMessage(e.target.value)}
+                  className="flex-1 px-4 py-3 text-xs rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+
+                {/* BOTÓN DE VOZ (MICROPHONE) */}
+                <button
+                  type="button"
+                  onClick={toggleListening}
+                  className={`p-3 rounded-2xl transition cursor-pointer ${
+                    isListening
+                      ? "bg-rose-600 text-white animate-bounce shadow-md shadow-rose-500/30"
+                      : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-purple-100 hover:text-purple-700"
+                  }`}
+                  title={isListening ? "Escuchando... Clic para detener" : "Hablar con el CMO"}
+                >
+                  {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={!inputMessage.trim() || chatLoading}
+                  className="px-5 py-3 rounded-2xl bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-purple-500/20 transition cursor-pointer"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </form>
+            </div>
           </div>
         </div>
+      )}
+
+      {/* MODAL PROMOTION 360 INTEGRADO */}
+      {selectedPromo360Id && (
+        <Promotion360Modal
+          promoId={selectedPromo360Id}
+          onClose={() => setSelectedPromo360Id(null)}
+          onUpdate={() => {
+            fetchPromotionsPulse()
+            loadInitialData()
+          }}
+        />
       )}
     </div>
   )

@@ -3446,8 +3446,16 @@ export const api = {
       client.get<any>("/v1/marketing-agent/dashboard", { company_id: companyId || COMPANY_ID }),
     chat: (data: { message: string; conversation_history?: any[]; company_id?: string }) =>
       client.post<{ reply: string; action_outcome?: any; suggested_prompts?: string[] }>("/v1/marketing-agent/chat", { company_id: data.company_id || COMPANY_ID, ...data }),
-    customersRfm: (params?: { companyId?: string; limit?: number; solo_inactivos?: boolean }) =>
-      client.get<any[]>("/v1/marketing-agent/customers-rfm", { company_id: params?.companyId || COMPANY_ID, limit: params?.limit || 12, solo_inactivos: params?.solo_inactivos || false }),
+    customersRfm: (params?: { companyId?: string; limit?: number; solo_inactivos?: boolean; segmento?: string; search?: string }) =>
+      client.get<any[]>("/v1/marketing-agent/customers-rfm", {
+        company_id: params?.companyId || COMPANY_ID,
+        limit: params?.limit || 24,
+        solo_inactivos: params?.solo_inactivos || false,
+        segmento: params?.segmento,
+        search: params?.search
+      }),
+    promotionsPulse: (companyId?: string) =>
+      client.get<any[]>("/v1/marketing-agent/promotions-pulse", { company_id: companyId || COMPANY_ID }),
     tripartiteSync: (companyId?: string) =>
       client.get<any>("/v1/marketing-agent/tripartite-sync", { company_id: companyId || COMPANY_ID }),
     learnedRules: (companyId?: string) =>

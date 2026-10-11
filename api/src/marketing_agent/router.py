@@ -8,7 +8,8 @@ from api.src.marketing_agent import service, agent_orchestrator
 from api.src.marketing_agent.schemas import (
     MarketingDashboard, ChatMessageRequest, ChatMessageResponse,
     SendCouponRequest, LaunchCampaignRequest, CustomerProfileDetail,
-    TripartiteSyncResponse, LearnedRuleItem, ApproveDirectiveRequest
+    TripartiteSyncResponse, LearnedRuleItem, ApproveDirectiveRequest,
+    PromotionPulseItem
 )
 
 router = APIRouter(prefix="/api/v1/marketing-agent", tags=["marketing-agent"], dependencies=[Depends(require_auth)])
@@ -23,14 +24,22 @@ async def get_dashboard(company_id: str = Query(...), db: AsyncSession = Depends
 @router.get("/customers-rfm", response_model=List[CustomerProfileDetail])
 async def get_customers_rfm(
     company_id: str = Query(...),
-    limit: int = Query(12, ge=1, le=100),
+    segmento: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    limit: int = Query(24, ge=1, le=100),
     solo_inactivos: bool = Query(False),
     db: AsyncSession = Depends(get_db)
 ):
-    """Clientes reales con sus 3 productos favoritos detectados en cupon_ticket_items."""
+    """Clientes reales con filtrado estricto por segmento RFM, búsqueda libre y acciones individuales IA."""
     return await service.get_top_customers_with_favorite_products(
-        db, company_id, limit=limit, solo_inactivos=solo_inactivos
+        db, company_id, segmento=segmento, search=search, limit=limit, solo_inactivos=solo_inactivos
     )
+
+
+@router.get("/promotions-pulse", response_model=List[PromotionPulseItem])
+async def get_promotions_pulse(company_id: str = Query(...), db: AsyncSession = Depends(get_db)):
+    """Promociones activas e históricas con pulso de IA, productos reales y tracción en cajas físicas."""
+    return await service.get_promotions_with_ai_pulse(db, company_id)
 
 
 @router.get("/tripartite-sync", response_model=TripartiteSyncResponse)

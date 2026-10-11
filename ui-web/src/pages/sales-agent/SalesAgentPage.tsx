@@ -92,15 +92,18 @@ export default function SalesAgentPage() {
       setAnalysis(data)
       setTargetMinPct(data.margen_minimo_target_pct || 20.0)
       setTargetIdealPct(data.margen_ideal_target_pct || 24.0)
-
-      // Cargar reglas de negocio activas
-      const rules = await api.salesAgent.getBusinessRules(companyId)
-      setBusinessRules(rules || [])
     } catch (e: any) {
       console.error("SalesAgent load error:", e)
-      toast.error("Error al cargar análisis de ventas")
+      toast.error("Error al cargar análisis de ventas", e?.message || "Verifique la conexión con la API central")
     } finally {
       setLoading(false)
+    }
+
+    try {
+      const rules = await api.salesAgent.getBusinessRules(companyId)
+      setBusinessRules(rules || [])
+    } catch (ruleErr) {
+      console.warn("No se pudieron cargar reglas del negocio:", ruleErr)
     }
   }
 
@@ -355,67 +358,161 @@ export default function SalesAgentPage() {
   })
 
   return (
-    <div className="p-4 md:p-8 space-y-6 max-w-7xl mx-auto">
-      {/* ══════════════════════ HEADER GLOBAL CON PERÍODO Y METAS ══════════════════════ */}
-      <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-lg shadow-indigo-500/20">
-            <TrendingUp className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">Gerente de Ventas IA</h1>
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-950/80 dark:text-indigo-400">
-                Torre Comercial 2.0
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER (CANÓNICO INTELIMARKET / FACTURACIÓN) */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/90 text-white p-7 border border-indigo-500/20 shadow-2xl shadow-indigo-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-blue-500 border border-indigo-400/30 text-white flex items-center justify-center shadow-lg shadow-indigo-500/25">
+                  <TrendingUp className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500 border-2 border-slate-950"></span>
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-indigo-400 uppercase bg-indigo-500/10 px-2.5 py-0.5 rounded-md border border-indigo-500/20">
+                    INTELIGENCIA ARTIFICIAL · TORRE DE CONTROL COMERCIAL
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    Target Margen: {analysis?.margen_ideal_target_pct || targetIdealPct}% · Mínimo: {analysis?.margen_minimo_target_pct || targetMinPct}%
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Gerente de Ventas IA
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Auditoría de márgenes en tiempo real, elasticidad de precios, Pareto 80/20 y copiloto comercial
+                </p>
+              </div>
+            </div>
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                ⚡ Copiloto: Qwen 2.5 Local + Heurística ReAct
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-indigo-300">
+                📊 {analysis?.tickets_mes ? Number(analysis.tickets_mes).toLocaleString() : "..."} tickets auditados
               </span>
             </div>
-            <p className="text-xs text-slate-500 mt-0.5">Auditoría en tiempo real de márgenes, Pareto 80/20, remarcaciones y copiloto ReAct</p>
+          </div>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <div className="flex items-center gap-1.5 bg-slate-900/90 px-3 py-2 rounded-xl border border-slate-700/80 text-xs">
+              <Calendar className="w-3.5 h-3.5 text-indigo-400" />
+              <select
+                value={periodo}
+                onChange={(e) => {
+                  const p = e.target.value as PeriodType
+                  setPeriodo(p)
+                  loadData(p)
+                }}
+                className="bg-transparent border-none text-slate-200 font-bold focus:ring-0 cursor-pointer text-xs"
+              >
+                <option value="mes_actual" className="bg-slate-900 text-white">Mes en Curso (MTD)</option>
+                <option value="mes_anterior" className="bg-slate-900 text-white">Mes Anterior</option>
+                <option value="ultimos_30_dias" className="bg-slate-900 text-white">Últimos 30 Días</option>
+              </select>
+            </div>
+
+            <button
+              onClick={() => setSettingsModalOpen(true)}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-200 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm cursor-pointer"
+            >
+              <Settings className="w-3.5 h-3.5 text-indigo-400" />
+              Metas ({analysis?.margen_ideal_target_pct || targetIdealPct}%)
+            </button>
+
+            <button
+              onClick={() => loadData(periodo)}
+              disabled={loading}
+              className="px-4 py-2.5 rounded-xl text-xs font-extrabold text-white bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 border border-indigo-400/40 shadow-lg shadow-indigo-600/30 transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+              Auditar
+            </button>
           </div>
         </div>
 
-        {/* Controles de Período y Botón de Metas */}
-        <div className="flex items-center flex-wrap gap-2.5 w-full lg:w-auto">
-          <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-2xl border border-slate-200 dark:border-slate-700 text-xs">
-            <Calendar className="w-3.5 h-3.5 text-slate-500" />
-            <select
-              value={periodo}
-              onChange={(e) => setPeriodo(e.target.value as PeriodType)}
-              className="bg-transparent border-none text-slate-800 dark:text-slate-200 font-bold focus:ring-0 cursor-pointer text-xs"
-            >
-              <option value="mes_actual">Mes en Curso (MTD)</option>
-              <option value="mes_anterior">Mes Anterior</option>
-              <option value="ultimos_30_dias">Últimos 30 Días</option>
-            </select>
+        {/* 📊 BARRA DE KPIS EJECUTIVOS (ESTRUCTURA DE FACTURACIÓN) */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Facturación Período</span>
+              <span className="text-[10px] font-bold text-emerald-400">Ventas</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+              {formatPYG(analysis?.facturacion_mes || 0)}
+            </p>
+            <p className="text-[11px] text-slate-400 font-mono">
+              Proyección: {formatPYG(analysis?.proyeccion_cierre_mes_gs || 0)}
+            </p>
           </div>
 
-          <button
-            onClick={() => setSettingsModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition"
-          >
-            <Settings className="w-3.5 h-3.5 text-indigo-500" />
-            Metas ({analysis?.margen_ideal_target_pct || 24}%)
-          </button>
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Margen Actual</span>
+              <span className={`text-[10px] font-bold ${margen >= 20 ? "text-emerald-400" : "text-amber-400"}`}>
+                {margen >= 20 ? "Saludable" : "Bajo Target"}
+              </span>
+            </div>
+            <p className={`text-2xl font-black font-mono tracking-tight ${margen >= 20 ? "text-emerald-400" : "text-amber-400"}`}>
+              {margen.toFixed(1)}%
+            </p>
+            <p className="text-[11px] text-slate-400 font-mono">
+              Ganancia Bruta: {formatPYG(analysis?.ganancia_bruta_mes || 0)}
+            </p>
+          </div>
 
-          <button
-            onClick={() => loadData(periodo)}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md shadow-indigo-600/20 transition disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-            Auditar
-          </button>
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Gap a Meta (24%)</span>
+              <span className="text-[10px] font-bold text-rose-400">Recuperable</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
+              {formatPYG(gap24)}
+            </p>
+            <p className="text-[11px] text-slate-400 font-mono">
+              Fuga mensual por precios descalzados
+            </p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Volumen & Tickets</span>
+              <span className="text-[10px] font-mono text-indigo-400">Operaciones</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-indigo-300">
+              {(analysis?.tickets_mes || 0).toLocaleString()} <span className="text-sm font-semibold text-slate-400">tix</span>
+            </p>
+            <p className="text-[11px] text-emerald-400 font-mono">
+              Ticket Promedio: {formatPYG((analysis?.tickets_mes || 0) > 0 ? Math.round((analysis?.facturacion_mes || 0) / (analysis?.tickets_mes || 1)) : 0)}
+            </p>
+          </div>
         </div>
       </div>
 
-      {/* ══════════════════════ TABS DE NAVEGACIÓN ══════════════════════ */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 border-b border-slate-200 dark:border-slate-800">
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS (CANÓNICO FACTURACIÓN) */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
         {[
           { key: "rentabilidad", label: "Torre de Control", icon: Activity },
           { key: "pareto", label: "Matriz Pareto 80/20", icon: PieChart },
-          { key: "precios", label: "Propuestas de Precios & KVI", icon: Tag },
+          { key: "precios", label: "Propuestas de Precios & KVI", icon: Tag, count: analysis?.propuestas_precios?.length },
           { key: "simulador", label: "Simulador de Margen", icon: Sliders },
           { key: "chat", label: "Copiloto Comercial IA", icon: Bot },
-          { key: "acciones", label: "Plan de Acción 1-Click", icon: ListTodo }
+          { key: "acciones", label: "Plan de Acción 1-Click", icon: ListTodo, count: analysis?.plan_accion_diario?.length }
         ].map((t) => {
           const Icon = t.icon
           const isActive = tab === t.key
@@ -423,14 +520,21 @@ export default function SalesAgentPage() {
             <button
               key={t.key}
               onClick={() => setTab(t.key as AgentTab)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold whitespace-nowrap transition ${
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
                 isActive
-                  ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20"
-                  : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
               }`}
             >
-              <Icon className="w-3.5 h-3.5" />
-              {t.label}
+              <Icon className="w-4 h-4" />
+              <span>{t.label}</span>
+              {t.count !== undefined && t.count > 0 && (
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  isActive ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                }`}>
+                  {t.count}
+                </span>
+              )}
             </button>
           )
         })}
