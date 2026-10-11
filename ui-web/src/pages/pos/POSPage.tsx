@@ -1653,7 +1653,7 @@ export default function POSPage() {
   }
 
   const handleGenerateBancardCloudQr = async () => {
-    const monto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    const monto = montoLineaPrincipalPyg("bancard")
     if (monto <= 0) {
       toast.warning("Monto inválido", "Cargá el monto a cobrar por QR antes de continuar.")
       return
@@ -1801,7 +1801,7 @@ export default function POSPage() {
       toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Bancard para esta caja en \"Configurar Terminales POS\".")
       return
     }
-    const montoBancard = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "bancard")) ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    const montoBancard = montoLineaPrincipalPyg("bancard")
     if (montoBancard <= 0) {
       toast.warning("Monto inválido", "Cargá el monto a cobrar por Bancard antes de continuar.")
       return
@@ -1987,7 +1987,7 @@ export default function POSPage() {
       toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Dinelco para esta caja en \"Configurar Terminales POS\".")
       return
     }
-    const montoDinelco = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "dinelco")) ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    const montoDinelco = montoLineaPrincipalPyg("dinelco")
     if (montoDinelco <= 0) {
       toast.warning("Monto inválido", "Cargá el monto a cobrar por Dinelco antes de continuar.")
       return
@@ -2073,7 +2073,7 @@ export default function POSPage() {
       toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Dinelco para esta caja en \"Configurar Terminales POS\".")
       return
     }
-    const montoQrDinelco = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "dinelco")) ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    const montoQrDinelco = montoLineaPrincipalPyg("dinelco")
     if (montoQrDinelco <= 0) {
       toast.warning("Monto inválido", "Cargá el monto a cobrar por QR antes de continuar.")
       return
@@ -2237,7 +2237,7 @@ export default function POSPage() {
       toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Bancard para esta caja en \"Configurar Terminales POS\".")
       return
     }
-    const montoQr = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    const montoQr = montoLineaPrincipalPyg("bancard")
     if (montoQr <= 0) {
       toast.warning("Monto inválido", "Cargá el monto a cobrar por QR antes de continuar.")
       return
@@ -6804,6 +6804,17 @@ export default function POSPage() {
   }, [cart, rates, appliedDiscount])
 
 
+  // Monto de la linea principal de Bancard/Dinelco. Es el UNICO valor que
+  // se cobra (tarjeta o QR/PIX), se suma a "recibido" y se guarda como
+  // pago -- antes los QR leian su propio campo "Monto QR" y el total/el pago guardado
+  // mixedCardPyg/mixedDinelcoPyg, y una venta podia cobrar un monto y
+  // registrar otro (hallazgo 9). Con un solo medio y sin tarjetas extra
+  // del mismo metodo es el total de la venta.
+  const montoLineaPrincipalPyg = (metodo: "bancard" | "dinelco"): number => {
+    const montoStr = metodo === "bancard" ? mixedCardPyg : mixedDinelcoPyg
+    return (isMultiPayment || extraPaymentLegs.some((l) => l.method === metodo)) ? parseInt(montoStr.replace(/\D/g, "") || "0", 10) : totalPyg
+  }
+
   // Cálculos dinámicos de vuelto multimoneda en el modal de cobro (SIN CÉNTIMOS EN PYG)
   const { totalRecibidoPyg, saldoRestantePyg, vueltoPyg } = useMemo(() => {
     let recibido = 0
@@ -6825,11 +6836,11 @@ export default function POSPage() {
       recibido += pyg + brl + usd
     }
     if (activeMethods.has("bancard")) {
-      recibido += (isMultiPayment || extraPaymentLegs.some((l) => l.method === "bancard")) ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+      recibido += montoLineaPrincipalPyg("bancard")
       recibido += extraLegsMontoEntered("bancard")
     }
     if (activeMethods.has("dinelco")) {
-      recibido += (isMultiPayment || extraPaymentLegs.some((l) => l.method === "dinelco")) ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+      recibido += montoLineaPrincipalPyg("dinelco")
       recibido += extraLegsMontoEntered("dinelco")
     }
     if (activeMethods.has("qr")) {
@@ -6876,10 +6887,10 @@ export default function POSPage() {
     otros += brl + usd
 
     if (activeMethods.has("bancard") && excluirMetodo !== "bancard") {
-      otros += parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10)
+      otros += montoLineaPrincipalPyg("bancard")
     }
     if (activeMethods.has("dinelco") && excluirMetodo !== "dinelco") {
-      otros += parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10)
+      otros += montoLineaPrincipalPyg("dinelco")
     }
     if (activeMethods.has("qr") && excluirMetodo !== "qr") {
       otros += parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)
@@ -7401,7 +7412,7 @@ export default function POSPage() {
         let otrosMonto = 0
 
         if (activeMethods.has("bancard")) {
-          cardMonto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "bancard")) ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          cardMonto = montoLineaPrincipalPyg("bancard")
           if (cardMonto > 0) {
             let fp = "TARJETA_BANCARD"
             if (bancardSubMethod === "debito") fp = "TARJETA DEBITO"
@@ -7417,7 +7428,7 @@ export default function POSPage() {
           }
         }
         if (activeMethods.has("dinelco")) {
-          dinelcoMonto = (isMultiPayment || extraPaymentLegs.some((l) => l.method === "dinelco")) ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          dinelcoMonto = montoLineaPrincipalPyg("dinelco")
           if (dinelcoMonto > 0) {
             let fp = "TARJETA_DINELCO"
             if (dinelcoSubMethod === "debito") fp = "TARJETA DEBITO"
@@ -11712,52 +11723,13 @@ export default function POSPage() {
                               <QrCode className="w-7 h-7 text-purple-600" />
                               <div className="text-left">
                                 <div className="font-bold text-xs text-slate-900 dark:text-white">QR Dinámico Bancard Zimple</div>
-                                {!(isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) && (
+                                {!(isMultiPayment || extraPaymentLegs.some((l) => l.method === "bancard")) && (
                                   <div className="text-xs font-posMono tabular-nums font-black text-purple-600 dark:text-purple-400">
                                     {formatPYG(totalPyg)} (R$ {totalBrl})
                                   </div>
                                 )}
                               </div>
                             </div>
-
-                            {(isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) && (
-                              <div className="w-full max-w-sm text-left">
-                                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto QR en esta línea (₲):</label>
-                                <div className="flex gap-1">
-                                  <input
-                                    type="text"
-                                    value={mixedQrPyg}
-                                    onChange={(e) => {
-                                      const clean = e.target.value.replace(/\D/g, "")
-                                      const valNum = clean ? parseInt(clean, 10) : 0
-                                      setMixedQrPyg(clean ? valNum.toLocaleString("es-PY") : "")
-                                      if (!hasClickedQuickCash && activeMethods.has("cash")) {
-                                        const rem = Math.max(0, totalPyg - valNum)
-                                        setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
-                                      }
-                                    }}
-                                    onFocus={(e) => e.target.select()}
-                                    placeholder="0"
-                                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
-                                  />
-                                  <button
-                                    type="button"
-                                    title="Completar con el resto"
-                                    onClick={() => {
-                                      const resto = getSaldoRestanteParaMetodo("qr")
-                                      setMixedQrPyg(resto > 0 ? resto.toLocaleString("es-PY") : "")
-                                      if (!hasClickedQuickCash && activeMethods.has("cash")) {
-                                        const rem = Math.max(0, totalPyg - resto)
-                                        setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
-                                      }
-                                    }}
-                                    className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
-                                  >
-                                    Resto
-                                  </button>
-                                </div>
-                              </div>
-                            )}
 
                             {bancardQrState !== "aprobada" && (
                               <button
@@ -11964,52 +11936,13 @@ export default function POSPage() {
                               <QrCode className="w-7 h-7 text-blue-600" />
                               <div className="text-left">
                                 <div className="font-bold text-xs text-slate-900 dark:text-white">QR Bancard (Pantalla API)</div>
-                                {!(isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) && (
+                                {!(isMultiPayment || extraPaymentLegs.some((l) => l.method === "bancard")) && (
                                   <div className="text-xs font-posMono tabular-nums font-black text-blue-600 dark:text-blue-400">
                                     {formatPYG(totalPyg)}
                                   </div>
                                 )}
                               </div>
                             </div>
-
-                            {(isMultiPayment || extraPaymentLegs.some((l) => l.method === "qr")) && (
-                              <div className="w-full max-w-sm text-left">
-                                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto QR en esta línea (₲):</label>
-                                <div className="flex gap-1">
-                                  <input
-                                    type="text"
-                                    value={mixedQrPyg}
-                                    onChange={(e) => {
-                                      const clean = e.target.value.replace(/\D/g, "")
-                                      const valNum = clean ? parseInt(clean, 10) : 0
-                                      setMixedQrPyg(clean ? valNum.toLocaleString("es-PY") : "")
-                                      if (!hasClickedQuickCash && activeMethods.has("cash")) {
-                                        const rem = Math.max(0, totalPyg - valNum)
-                                        setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
-                                      }
-                                    }}
-                                    onFocus={(e) => e.target.select()}
-                                    placeholder="0"
-                                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-blue-600 dark:text-blue-400 outline-none focus:border-blue-500"
-                                  />
-                                  <button
-                                    type="button"
-                                    title="Completar con el resto"
-                                    onClick={() => {
-                                      const resto = getSaldoRestanteParaMetodo("qr")
-                                      setMixedQrPyg(resto > 0 ? resto.toLocaleString("es-PY") : "")
-                                      if (!hasClickedQuickCash && activeMethods.has("cash")) {
-                                        const rem = Math.max(0, totalPyg - resto)
-                                        setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
-                                      }
-                                    }}
-                                    className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
-                                  >
-                                    Resto
-                                  </button>
-                                </div>
-                              </div>
-                            )}
 
                             {bancardCloudQrState === "idle" && (
                               <button
@@ -12497,45 +12430,6 @@ export default function POSPage() {
                                 )}
                               </div>
                             </div>
-
-                            {(isMultiPayment || extraPaymentLegs.some((l) => l.method === "dinelco")) && (
-                              <div className="w-full max-w-md text-left">
-                                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto Dinelco QR/PIX en esta línea (₲):</label>
-                                <div className="flex gap-1">
-                                  <input
-                                    type="text"
-                                    value={mixedQrPyg}
-                                    onChange={(e) => {
-                                      const clean = e.target.value.replace(/\D/g, "")
-                                      const valNum = clean ? parseInt(clean, 10) : 0
-                                      setMixedQrPyg(clean ? valNum.toLocaleString("es-PY") : "")
-                                      if (!hasClickedQuickCash && activeMethods.has("cash")) {
-                                        const rem = Math.max(0, totalPyg - valNum)
-                                        setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
-                                      }
-                                    }}
-                                    onFocus={(e) => e.target.select()}
-                                    placeholder="0"
-                                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
-                                  />
-                                  <button
-                                    type="button"
-                                    title="Completar con el resto"
-                                    onClick={() => {
-                                      const resto = getSaldoRestanteParaMetodo("dinelco")
-                                      setMixedQrPyg(resto > 0 ? resto.toLocaleString("es-PY") : "")
-                                      if (!hasClickedQuickCash && activeMethods.has("cash")) {
-                                        const rem = Math.max(0, totalPyg - resto)
-                                        setPayCashPyg(rem > 0 ? rem.toLocaleString("es-PY") : "")
-                                      }
-                                    }}
-                                    className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
-                                  >
-                                    Resto
-                                  </button>
-                                </div>
-                              </div>
-                            )}
 
                             {!activePosConfig.dinelcoIp && (
                               <div className="w-full max-w-sm p-2 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300">
