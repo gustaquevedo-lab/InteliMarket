@@ -98,3 +98,48 @@ test("totalConfirmadoPyg ignora lineas en curso y sin cobrar", () => {
   ]
   assert.equal(totalConfirmadoPyg(ls), 30000)
 })
+
+const codigo = (r: ReturnType<typeof validarCierre>) => (r.ok ? "ok" : r.codigo)
+
+test("vuelto mayor al efectivo entregado se rechaza", () => {
+  const r = validarCierre(
+    [linea({ metodo: "bancard", montoPyg: 150000 }), linea({ metodo: "cash", montoPyg: 10000 })],
+    ctx(),
+  )
+  assert.equal(codigo(r), "suma_no_cuadra")
+})
+
+test("efectivo + tarjeta con resto exacto cierra", () => {
+  const r = validarCierre(
+    [linea({ metodo: "cash", montoPyg: 60000 }), linea({ metodo: "bancard", montoPyg: 40000 })],
+    ctx(),
+  )
+  assert.equal(codigo(r), "ok")
+})
+
+test("orden de evaluacion: extra sin metodo activo gana a en_curso", () => {
+  const r = validarCierre(
+    [linea({ metodo: "qr", montoPyg: 100000, esExtra: true, estado: "en_curso" })],
+    ctx({ metodosActivos: ["cash"] }),
+  )
+  assert.equal(codigo(r), "linea_extra_sin_metodo_activo")
+})
+
+test("montos negativo, NaN e Infinity son invalidos", () => {
+  for (const m of [-5, NaN, Infinity]) {
+    assert.equal(codigo(validarCierre([linea({ metodo: "cash", montoPyg: m })], ctx())), "monto_invalido")
+  }
+})
+
+test("extra club: saldo igual al monto cierra; tieneLinea false se rechaza", () => {
+  const ls = [linea({ metodo: "extra_club", montoPyg: 100000 })]
+  assert.equal(codigo(validarCierre(ls, ctx({ extraClub: { tieneLinea: true, saldoDisponible: 100000 } }))), "ok")
+  assert.equal(
+    codigo(validarCierre(ls, ctx({ extraClub: { tieneLinea: false, saldoDisponible: 100000 } }))),
+    "extra_club_sin_saldo",
+  )
+})
+
+test("otrosCompleto undefined cuenta como completo", () => {
+  assert.equal(codigo(validarCierre([linea({ metodo: "otros", montoPyg: 100000 })], ctx())), "ok")
+})
