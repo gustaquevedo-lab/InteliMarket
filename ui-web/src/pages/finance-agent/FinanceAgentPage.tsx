@@ -1,11 +1,14 @@
 import { useState, useEffect, useRef } from "react"
+import * as XLSX from "xlsx"
 import {
   Bot, Landmark, Banknote, TrendingUp, AlertTriangle, ShieldCheck,
   ArrowUpRight, ArrowDownRight, RefreshCw, Send, CheckCircle2,
   Calendar, Layers, Clock, Zap, MessageSquare, DollarSign,
   PieChart, BarChart3, ChevronRight, ThumbsUp, Activity,
   Scale, ShieldAlert, Sparkles, Filter, Check, X, FileText,
-  UserCheck, AlertCircle, ShoppingBag, Eye, Wallet, Loader2
+  UserCheck, AlertCircle, ShoppingBag, Eye, Wallet, Loader2,
+  Mic, MicOff, Volume2, Copy, Paperclip, FileSpreadsheet,
+  ImageIcon, Trash2, Brain
 } from "lucide-react"
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 import { api } from "../../api"
@@ -15,6 +18,108 @@ import { formatPYG, formatDate } from "../../utils/format"
 
 type CFOActiveTab = "torre" | "inter_agente" | "flujo_caja" | "chat"
 
+interface ChatAttachment {
+  file?: File
+  name: string
+  type: "image" | "spreadsheet" | "document"
+  size: string
+  preview?: string
+  data?: string
+}
+
+interface ChatMessage {
+  role: "user" | "assistant"
+  content: string
+  suggestions?: string[]
+  timestamp?: string
+  attachment?: ChatAttachment
+}
+
+function FormattedMessage({ content }: { content: string }) {
+  if (!content) return null
+
+  const lines = content.split("\n")
+  const elements: JSX.Element[] = []
+  let listItems: string[] = []
+
+  const renderInline = (str: string) => {
+    const parts = str.split(/(\*\*.*?\*\*|`.*?`|\*.*?\*)/g)
+    return parts.map((part, i) => {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        return (
+          <strong key={i} className="font-extrabold text-slate-900 dark:text-white">
+            {part.slice(2, -2)}
+          </strong>
+        )
+      }
+      if (part.startsWith("`") && part.endsWith("`")) {
+        return (
+          <code key={i} className="px-1.5 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 font-mono text-[11px] border border-emerald-200/50 dark:border-emerald-800/50">
+            {part.slice(1, -1)}
+          </code>
+        )
+      }
+      if (part.startsWith("*") && part.endsWith("*") && !part.startsWith("**")) {
+        return (
+          <em key={i} className="italic text-slate-700 dark:text-slate-300">
+            {part.slice(1, -1)}
+          </em>
+        )
+      }
+      return part
+    })
+  }
+
+  const flushList = (key: number) => {
+    if (listItems.length > 0) {
+      elements.push(
+        <ul key={`ul-${key}`} className="space-y-1.5 my-1.5 pl-1">
+          {listItems.map((li, liIdx) => (
+            <li key={liIdx} className="flex items-start gap-2 text-slate-700 dark:text-slate-300 leading-relaxed">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-1.5 shrink-0" />
+              <span>{renderInline(li)}</span>
+            </li>
+          ))}
+        </ul>
+      )
+      listItems = []
+    }
+  }
+
+  lines.forEach((line, idx) => {
+    const trimmed = line.trim()
+    if (trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("• ")) {
+      listItems.push(trimmed.slice(2).trim())
+    } else {
+      flushList(idx)
+      if (trimmed.startsWith("### ")) {
+        elements.push(
+          <h4 key={idx} className="font-black text-xs uppercase tracking-wider text-emerald-600 dark:text-emerald-400 mt-2 mb-1">
+            {renderInline(trimmed.slice(4))}
+          </h4>
+        )
+      } else if (trimmed.startsWith("## ")) {
+        elements.push(
+          <h3 key={idx} className="font-black text-sm text-slate-900 dark:text-white mt-2 mb-1">
+            {renderInline(trimmed.slice(3))}
+          </h3>
+        )
+      } else if (trimmed === "") {
+        elements.push(<div key={idx} className="h-1.5" />)
+      } else {
+        elements.push(
+          <p key={idx} className="leading-relaxed text-slate-700 dark:text-slate-300">
+            {renderInline(trimmed)}
+          </p>
+        )
+      }
+    }
+  })
+  flushList(lines.length)
+
+  return <div className="space-y-1 text-xs">{elements}</div>
+}
+
 export default function FinanceAgentPage() {
   const [tab, setTab] = useState<CFOActiveTab>("torre")
   const [loading, setLoading] = useState(true)
@@ -22,21 +127,33 @@ export default function FinanceAgentPage() {
   const [syncData, setSyncData] = useState<any>(null)
   const [cashFlowData, setCashFlowData] = useState<any>(null)
 
-  // Chat State
-  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string; suggestions?: string[] }>>([
+  // Memoria y Reglas de Negocio Financieras
+  const [businessRules, setBusinessRules] = useState<any[]>([])
+  const [newRuleText, setNewRuleText] = useState("")
+
+  // Chat Multimodal State (Voz, Archivos, Memoria)
+  const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "assistant",
-      content: "👋 **Bienvenido al Copiloto Financiero IA (CFO Virtual).**\n\nCargando posición de liquidez en tiempo real desde la base de datos...\n\n¿En qué aspecto financiero o de tesorería deseas que profundicemos hoy?",
+      content: "👋 **Bienvenido al Copiloto Financiero IA (CFO Virtual).**\n\nCargando posición de liquidez y pasivos comerciales en tiempo real desde la base de datos...\n\n¿En qué aspecto financiero o de tesorería deseas que profundicemos hoy?",
       suggestions: [
         "¿Cuánto vence con proveedores en los próximos 7 días?",
         "Ver reporte de morosidad y clientes bloqueados",
-        "¿Qué directivas enviamos al Gerente de Ventas?",
+        "¿Qué directivas emitiste al Gerente de Ventas?",
         "Simular flujo de caja de los próximos 30 días"
-      ]
+      ],
+      timestamp: "En línea"
     }
   ])
   const [inputMessage, setInputMessage] = useState("")
   const [chatLoading, setChatLoading] = useState(false)
+  const [isListening, setIsListening] = useState(false)
+  const [isSpeaking, setIsSpeaking] = useState(false)
+  const [attachment, setAttachment] = useState<ChatAttachment | null>(null)
+  const [fileProcessing, setFileProcessing] = useState(false)
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const toast = useToast()
@@ -46,11 +163,13 @@ export default function FinanceAgentPage() {
   const loadAllFinancialData = async () => {
     setLoading(true)
     try {
-      const [towerRes, syncRes, cashRes] = await Promise.all([
+      const [towerRes, syncRes, cashRes, rulesRes] = await Promise.all([
         api.financeAgent.getControlTower(companyId),
         api.financeAgent.getInterAgentSync(companyId),
-        api.financeAgent.getCashFlowForecast(companyId)
+        api.financeAgent.getCashFlowForecast(companyId),
+        api.financeAgent.getBusinessRules(companyId).catch(() => [])
       ])
+      setBusinessRules(rulesRes || [])
       setTowerData(towerRes)
       setSyncData(syncRes)
       setCashFlowData(cashRes)
@@ -87,29 +206,215 @@ export default function FinanceAgentPage() {
     }
   }, [messages, tab])
 
+  // Manejo de Memoria / Reglas de Negocio
+  const handleCreateRule = async () => {
+    if (!newRuleText.trim()) return
+    try {
+      await api.financeAgent.createBusinessRule({
+        regla: newRuleText.trim(),
+        categoria: "financiera",
+        company_id: companyId
+      })
+      toast.success("Directiva registrada en la memoria del CFO")
+      setNewRuleText("")
+      const updatedRules = await api.financeAgent.getBusinessRules(companyId)
+      setBusinessRules(updatedRules || [])
+    } catch (err: any) {
+      toast.error("Error al guardar directiva")
+    }
+  }
+
+  // Soporte de Voz (Speech to Text)
+  const toggleListening = () => {
+    if (isListening) {
+      setIsListening(false)
+      return
+    }
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      toast.warning("Voz no disponible", "Tu navegador no soporta Web Speech API.")
+      return
+    }
+    try {
+      const recognition = new SpeechRecognition()
+      recognition.lang = "es-PY"
+      recognition.continuous = false
+      recognition.interimResults = false
+
+      recognition.onstart = () => setIsListening(true)
+      recognition.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript
+        setInputMessage(prev => prev ? `${prev} ${transcript}` : transcript)
+        setIsListening(false)
+      }
+      recognition.onerror = () => setIsListening(false)
+      recognition.onend = () => setIsListening(false)
+      recognition.start()
+    } catch {
+      setIsListening(false)
+    }
+  }
+
+  // Reproducir Texto con Voz (Text to Speech)
+  const speakText = (text: string) => {
+    if (!window.speechSynthesis) return
+    if (isSpeaking) {
+      window.speechSynthesis.cancel()
+      setIsSpeaking(false)
+      return
+    }
+    const cleanText = text.replace(/[*#_`]/g, "")
+    const utterance = new SpeechSynthesisUtterance(cleanText)
+    utterance.lang = "es-ES"
+    utterance.rate = 1.05
+    utterance.onend = () => setIsSpeaking(false)
+    utterance.onerror = () => setIsSpeaking(false)
+    setIsSpeaking(true)
+    window.speechSynthesis.speak(utterance)
+  }
+
+  // Procesamiento de Archivos (Imágenes, Excel, CSV, PDF)
+  const processIncomingFile = async (file: File) => {
+    setFileProcessing(true)
+    try {
+      const sizeStr = `${(file.size / 1024).toFixed(1)} KB`
+      const isImage = file.type.startsWith("image/")
+      const isSheet = file.name.endsWith(".xlsx") || file.name.endsWith(".xls") || file.name.endsWith(".csv")
+
+      if (isImage) {
+        const reader = new FileReader()
+        reader.onload = () => {
+          const base64 = reader.result as string
+          setAttachment({
+            file,
+            name: file.name,
+            type: "image",
+            size: sizeStr,
+            preview: base64,
+            data: base64
+          })
+          toast.info("Comprobante / Imagen adjunta", "Lista para cotejo de tesorería.")
+        }
+        reader.readAsDataURL(file)
+      } else if (isSheet) {
+        const reader = new FileReader()
+        reader.onload = (evt) => {
+          try {
+            const bstr = evt.target?.result
+            const wb = XLSX.read(bstr, { type: "binary" })
+            const wsname = wb.SheetNames[0]
+            const ws = wb.Sheets[wsname]
+            const jsonRows: any[] = XLSX.utils.sheet_to_json(ws, { header: 1 })
+            const previewRows = jsonRows.slice(0, 30)
+            const textSummary = `Hoja: ${wsname} (${jsonRows.length} filas)\nDatos detectados:\n${JSON.stringify(previewRows, null, 2)}`
+            setAttachment({
+              file,
+              name: file.name,
+              type: "spreadsheet",
+              size: sizeStr,
+              data: textSummary
+            })
+            toast.success("Planilla procesada", `${jsonRows.length} filas extraídas de ${file.name}.`)
+          } catch (err: any) {
+            toast.error("Error al leer Excel", err.message)
+          }
+        }
+        reader.readAsBinaryString(file)
+      } else {
+        const reader = new FileReader()
+        reader.onload = () => {
+          const text = (reader.result as string) || ""
+          setAttachment({
+            file,
+            name: file.name,
+            type: "document",
+            size: sizeStr,
+            data: text.slice(0, 15000)
+          })
+          toast.info("Documento adjunto", file.name)
+        }
+        reader.readAsText(file)
+      }
+    } catch (err: any) {
+      toast.error("Error procesando archivo", err.message)
+    } finally {
+      setFileProcessing(false)
+    }
+  }
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    processIncomingFile(file)
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
+
+  const handleCopyMessage = (idx: number, text: string) => {
+    navigator.clipboard.writeText(text)
+    setCopiedIdx(idx)
+    setTimeout(() => setCopiedIdx(null), 2000)
+  }
+
+  const handleClearChat = () => {
+    if (towerData) {
+      setMessages([
+        {
+          role: "assistant",
+          content: `👋 **Conversación reiniciada.**\n\nPosición auditada: **${formatPYG(towerData.liquidez_total_gs)}** en liquidez vs **${formatPYG(towerData.deuda_total_exigible_gs || 0)}** en pasivos comerciales.\n\n¿En qué consulta de tesorería deseas que profundicemos?`,
+          suggestions: [
+            "¿Cuánto vence con proveedores en los próximos 7 días?",
+            "Ver saldos bancarios y detalle de cuentas",
+            "Simular flujo de caja de los próximos 30 días"
+          ],
+          timestamp: "En línea"
+        }
+      ])
+      toast.info("Chat reiniciado")
+    }
+  }
+
   const handleSendMessage = async (msgText?: string) => {
     const textToSend = msgText || inputMessage
-    if (!textToSend.trim() || chatLoading) return
+    if ((!textToSend.trim() && !attachment) || chatLoading) return
 
-    const newMessages = [...messages, { role: "user" as const, content: textToSend }]
+    const currentAttachment = attachment
+    const userMsg: ChatMessage = {
+      role: "user",
+      content: textToSend || `Consulta sobre archivo adjunto: ${currentAttachment?.name}`,
+      attachment: currentAttachment || undefined,
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    }
+
+    const newMessages = [...messages, userMsg]
     setMessages(newMessages)
     if (!msgText) setInputMessage("")
+    setAttachment(null)
     setChatLoading(true)
 
     try {
+      const historyPayload = newMessages.slice(-6).map(m => ({
+        role: m.role,
+        content: m.content
+      }))
+
       const res = await api.financeAgent.chat({
         company_id: companyId,
-        message: textToSend,
+        message: textToSend || `Adjunto archivo: ${currentAttachment?.name}`,
+        conversation_history: historyPayload,
+        attachment_name: currentAttachment?.name,
+        attachment_type: currentAttachment?.type,
+        attachment_data: currentAttachment?.data
       })
 
-      const botReply = {
-        role: "assistant" as const,
+      const botReply: ChatMessage = {
+        role: "assistant",
         content: res.response || (res as any).reply || "No se pudo obtener una respuesta del Gerente Financiero IA.",
-        suggestions: res.suggestions || (res as any).suggested_prompts || []
+        suggestions: res.suggestions || (res as any).suggested_prompts || [],
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
       }
       setMessages([...newMessages, botReply])
     } catch (err: any) {
-      toast.error("Error al enviar mensaje al CFO")
+      toast.error("Error al comunicarse con el CFO Virtual")
       console.error(err)
     } finally {
       setChatLoading(false)
@@ -636,41 +941,102 @@ export default function FinanceAgentPage() {
       {/* ══════════════════════ TAB 4: COPILOTO FINANCIERO IA ══════════════════════ */}
       {tab === "chat" && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Columna Izquierda: Perfil, Memoria Financiera y Capacidades */}
           <div className="lg:col-span-4 space-y-4">
             <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-md">
-                  <Bot className="w-6 h-6" />
+                <div className="relative">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 via-teal-500 to-emerald-500 text-white flex items-center justify-center shadow-lg shadow-emerald-500/25">
+                    <Landmark className="w-7 h-7" />
+                  </div>
+                  <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500 border-2 border-white dark:border-slate-900"></span>
+                  </span>
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">Gerente Financiero IA</h3>
-                  <p className="text-[11px] text-slate-500">CFO Virtual · Motor Gemini 2.5</p>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight">Gerente Financiero Autónomo</h3>
+                  <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1 mt-0.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> CFO Virtual · Qwen + Gemini
+                  </p>
                 </div>
-              </div>
-              <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 text-xs text-slate-600 dark:text-slate-300 space-y-1.5">
-                <div className="flex items-center gap-1.5 font-bold text-emerald-600 dark:text-emerald-400">
-                  <Activity className="w-3.5 h-3.5" /> Capacidades Activas
-                </div>
-                <p>• Análisis de solvencia y pasivos a 7/30 días.</p>
-                <p>• Conciliación de bóveda y saldos bancarios.</p>
-                <p>• Emisión de directivas a Ventas y Compras.</p>
               </div>
 
-              <div className="space-y-2 pt-2">
-                <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Consultas Rápidas Sugeridas</span>
-                <div className="flex flex-col gap-2">
+              {/* Capacidades Activas Multimodales */}
+              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-[10px]">
+                <div className="p-2.5 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900/40 space-y-1">
+                  <span className="font-extrabold text-emerald-700 dark:text-emerald-300 block flex items-center gap-1">
+                    <Mic className="w-3 h-3" /> Dictado por Voz
+                  </span>
+                  <p className="text-slate-500 dark:text-slate-400">Web Speech API nativo (es-PY)</p>
+                </div>
+                <div className="p-2.5 rounded-xl bg-teal-50/70 dark:bg-teal-950/40 border border-teal-100 dark:border-teal-900/40 space-y-1">
+                  <span className="font-extrabold text-teal-700 dark:text-teal-300 block flex items-center gap-1">
+                    <FileSpreadsheet className="w-3 h-3" /> Planillas & Fotos
+                  </span>
+                  <p className="text-slate-500 dark:text-slate-400">Excel (.xlsx), CSV y extractos</p>
+                </div>
+              </div>
+
+              {/* Memoria Activa del Negocio (CFO) */}
+              <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
+                  <span className="flex items-center gap-1.5">
+                    <Brain className="w-3.5 h-3.5 text-emerald-500" />
+                    Memoria Activa del Negocio ({businessRules.length})
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono">PostgreSQL</span>
+                </div>
+                <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                  {businessRules.length === 0 ? (
+                    <p className="text-[11px] text-slate-400 italic">No hay directivas financieras registradas aún.</p>
+                  ) : (
+                    businessRules.map((r, rIdx) => (
+                      <div key={rIdx} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 text-[11px] text-slate-600 dark:text-slate-300 flex items-start justify-between gap-2">
+                        <span>{r.regla}</span>
+                        <span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 shrink-0">
+                          {r.categoria || "financiera"}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Agregar directiva rápida */}
+                <div className="pt-2 flex gap-1.5">
+                  <input
+                    type="text"
+                    placeholder="Instruir directiva al CFO..."
+                    value={newRuleText}
+                    onChange={(e) => setNewRuleText(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleCreateRule()}
+                    className="flex-1 px-3 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400"
+                  />
+                  <button
+                    onClick={handleCreateRule}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer"
+                  >
+                    Guardar
+                  </button>
+                </div>
+              </div>
+
+              {/* Consultas Rápidas Sugeridas */}
+              <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Consultas Ejecutivas Frecuentes</span>
+                <div className="flex flex-col gap-1.5">
                   {[
-                    "¿Cuánto vence con proveedores en los próximos 7 días?",
-                    "Ver reporte de morosidad y clientes bloqueados",
-                    "¿Qué directivas enviamos al Gerente de Ventas?",
-                    "Simular flujo de caja de los próximos 30 días"
+                    "¿Cuánto debemos a proveedores entre cheques y facturas?",
+                    "Ver desglose de saldos bancarios y sobregiros",
+                    "Simular proyección de flujo de caja a 30 días",
+                    "Ver productos con mayor sobrestock inmovilizado"
                   ].map((q, idx) => (
                     <button
                       key={idx}
                       onClick={() => handleSendMessage(q)}
-                      className="text-left text-xs p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-slate-700 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 border border-slate-100 dark:border-slate-800 transition"
+                      className="text-left text-[11px] p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-slate-700 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 border border-slate-100 dark:border-slate-800 transition cursor-pointer"
                     >
-                      {q}
+                      💡 {q}
                     </button>
                   ))}
                 </div>
@@ -678,33 +1044,132 @@ export default function FinanceAgentPage() {
             </div>
           </div>
 
-          <div className="lg:col-span-8 flex flex-col h-[650px] bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-850/50">
+          {/* Columna Derecha: Chat Interactivo Command Deck */}
+          <div
+            className={`lg:col-span-8 bg-white dark:bg-slate-900 rounded-3xl border transition-all ${
+              isDragging
+                ? "border-emerald-500 ring-2 ring-emerald-500/30"
+                : "border-slate-200 dark:border-slate-800"
+            } shadow-sm flex flex-col h-[650px] overflow-hidden relative`}
+            onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={(e) => {
+              e.preventDefault()
+              setIsDragging(false)
+              const dropped = e.dataTransfer.files?.[0]
+              if (dropped) processIncomingFile(dropped)
+            }}
+          >
+            {/* Header de la Ventana de Chat */}
+            <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850/50 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-xs font-bold text-slate-900 dark:text-white">Sesión Activa con el CFO Virtual</span>
+                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-xs font-extrabold text-slate-800 dark:text-slate-200">
+                  Torre de Control Financiera en Vivo
+                </span>
+                <span className="hidden sm:inline-block text-[10px] text-slate-400 px-2 py-0.5 rounded-full bg-slate-200/60 dark:bg-slate-800">
+                  PostgreSQL + Cheques & Bancos
+                </span>
               </div>
-              <span className="text-[10px] font-mono font-bold text-slate-400">Contexto: Tesorería en Tiempo Real</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleClearChat}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition text-xs flex items-center gap-1 cursor-pointer"
+                  title="Reiniciar conversación"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span className="text-[11px] hidden md:inline">Limpiar</span>
+                </button>
+              </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            {/* Zona de Mensajes */}
+            <div className="flex-1 p-6 overflow-y-auto space-y-4">
               {messages.map((m, idx) => (
-                <div key={idx} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                  <div className={`max-w-[85%] rounded-2xl p-4 space-y-2 text-xs leading-relaxed ${
+                <div key={idx} className={`flex gap-3 ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                  {m.role === "assistant" && (
+                    <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
+                      <Landmark className="w-4 h-4" />
+                    </div>
+                  )}
+
+                  <div className={`max-w-2xl rounded-2xl p-4 text-xs space-y-2.5 ${
                     m.role === "user"
-                      ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-tr-none shadow-md shadow-emerald-500/10"
-                      : "bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700/80 rounded-tl-none"
+                      ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-tr-none shadow-md shadow-emerald-600/10"
+                      : "bg-slate-50 dark:bg-slate-800/70 text-slate-800 dark:text-slate-200 rounded-tl-none border border-slate-200/80 dark:border-slate-800 shadow-xs"
                   }`}>
-                    <div className="whitespace-pre-wrap font-sans">{m.content}</div>
+                    {/* Adjunto previo si es mensaje de usuario */}
+                    {m.attachment && (
+                      <div className="mb-2">
+                        {m.attachment.type === "image" && m.attachment.preview && (
+                          <div className="relative group max-w-xs overflow-hidden rounded-xl border border-white/20 mb-1.5">
+                            <img src={m.attachment.preview} alt="Adjunto" className="w-full max-h-48 object-cover rounded-xl" />
+                            <div className="absolute bottom-1 left-1 px-2 py-0.5 rounded-md bg-black/60 text-white text-[10px] font-mono">
+                              📷 {m.attachment.name}
+                            </div>
+                          </div>
+                        )}
+                        {m.attachment.type === "spreadsheet" && (
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/20 border border-white/30 text-white font-bold text-[11px]">
+                            <FileSpreadsheet className="w-4 h-4" />
+                            <span>Planilla: {m.attachment.name}</span>
+                          </div>
+                        )}
+                        {m.attachment.type === "document" && (
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/20 border border-white/30 text-white font-bold text-[11px]">
+                            <FileText className="w-4 h-4" />
+                            <span>Documento: {m.attachment.name}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Contenido Formateado (Sin asteriscos crudos) */}
+                    <div className="leading-relaxed">
+                      {m.role === "assistant" ? (
+                        <FormattedMessage content={m.content} />
+                      ) : (
+                        <p className="whitespace-pre-line leading-relaxed font-medium">{m.content}</p>
+                      )}
+                    </div>
+
+                    {/* Barra de utilidades del mensaje del asistente (Voz + Copiar + Timestamp) */}
+                    {m.role === "assistant" && (
+                      <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between text-[10px] text-slate-400">
+                        <span className="font-mono">{m.timestamp || "CFO Virtual"}</span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => speakText(m.content)}
+                            className={`p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer flex items-center gap-1 ${
+                              isSpeaking ? "text-emerald-600 dark:text-emerald-400 animate-pulse font-bold" : "text-slate-400"
+                            }`}
+                            title="Escuchar respuesta en voz alta"
+                          >
+                            <Volume2 className="w-3.5 h-3.5" />
+                            <span className="text-[10px]">Escuchar</span>
+                          </button>
+                          <button
+                            onClick={() => handleCopyMessage(idx, m.content)}
+                            className="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer flex items-center gap-1 text-slate-400"
+                            title="Copiar texto"
+                          >
+                            {copiedIdx === idx ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                            <span className="text-[10px]">{copiedIdx === idx ? "Copiado" : "Copiar"}</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Sugerencias Rápidas */}
                     {m.suggestions && m.suggestions.length > 0 && (
                       <div className="pt-2 flex flex-wrap gap-1.5">
-                        {m.suggestions.map((p, pIdx) => (
+                        {m.suggestions.map((pTxt, pIdx) => (
                           <button
                             key={pIdx}
-                            onClick={() => handleSendMessage(p)}
-                            className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/80 dark:text-emerald-300 hover:bg-emerald-100 transition"
+                            onClick={() => handleSendMessage(pTxt)}
+                            className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-slate-800 transition shadow-xs cursor-pointer"
                           >
-                            {p}
+                            💡 {pTxt}
                           </button>
                         ))}
                       </div>
@@ -712,34 +1177,117 @@ export default function FinanceAgentPage() {
                   </div>
                 </div>
               ))}
+
               {chatLoading && (
-                <div className="flex justify-start">
-                  <div className="bg-slate-50 dark:bg-slate-800/80 rounded-2xl p-4 text-xs text-slate-500 flex items-center gap-2 border border-slate-200 dark:border-slate-700">
-                    <Loader2 className="w-4 h-4 animate-spin text-emerald-500" />
-                    El Gerente Financiero IA está consultando la tesorería y cuentas contables...
-                  </div>
+                <div className="flex items-center gap-2 text-xs text-slate-400 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 w-fit border border-slate-100 dark:border-slate-800">
+                  <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+                  <span>El CFO Virtual está consultando extractos, cheques y facturas en tiempo real...</span>
                 </div>
               )}
               <div ref={messagesEndRef} />
             </div>
 
-            <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850/50">
-              <form onSubmit={e => { e.preventDefault(); handleSendMessage() }} className="flex items-center gap-2">
+            {/* Barra de Entrada de Chat Multimodal */}
+            <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-850/70 space-y-2">
+              {/* Chip de Archivo Adjunto Pendiente */}
+              {attachment && (
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-100 dark:bg-emerald-950/80 border border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200 text-xs animate-fade-in">
+                  {attachment.type === "image" ? (
+                    <ImageIcon className="w-3.5 h-3.5 text-emerald-600" />
+                  ) : attachment.type === "spreadsheet" ? (
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                  ) : (
+                    <FileText className="w-3.5 h-3.5 text-teal-600" />
+                  )}
+                  <span className="font-bold truncate max-w-xs">{attachment.name}</span>
+                  <span className="text-[10px] text-slate-500 font-mono">({attachment.size})</span>
+                  <button
+                    onClick={() => setAttachment(null)}
+                    className="p-0.5 rounded-full hover:bg-emerald-200 dark:hover:bg-emerald-900 transition text-slate-500 hover:text-rose-600 cursor-pointer ml-1"
+                    title="Quitar adjunto"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {/* Banner de Estado de Escucha por Micrófono */}
+              {isListening && (
+                <div className="flex items-center justify-between px-3.5 py-2 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs animate-pulse">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-rose-600 animate-ping" />
+                    <span className="font-bold">🎙️ Escuchando dictado en vivo... Hablá sobre deudas, bancos o flujo de caja.</span>
+                  </div>
+                  <button
+                    onClick={toggleListening}
+                    className="px-2 py-0.5 rounded-lg bg-rose-600 text-white font-bold text-[10px] hover:bg-rose-700 cursor-pointer"
+                  >
+                    Terminar
+                  </button>
+                </div>
+              )}
+
+              {/* Formulario de Input */}
+              <div className="flex items-center gap-2">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileUpload}
+                  accept="image/*,.xlsx,.xls,.csv,.pdf,.txt"
+                  className="hidden"
+                />
+
+                {/* Botón de Adjuntar Archivo */}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={fileProcessing || chatLoading}
+                  className="p-3 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-emerald-600 hover:border-emerald-300 dark:hover:border-emerald-600 transition shadow-xs cursor-pointer disabled:opacity-50"
+                  title="Adjuntar factura, comprobante bancario, foto de cheque o planilla Excel (.xlsx, .csv)"
+                >
+                  {fileProcessing ? <Loader2 className="w-4 h-4 animate-spin text-emerald-600" /> : <Paperclip className="w-4 h-4" />}
+                </button>
+
+                {/* Campo de Texto Principal */}
                 <input
                   type="text"
-                  placeholder="Preguntale al CFO sobre liquidez, morosidad o flujo de caja..."
+                  placeholder={
+                    isListening
+                      ? "Escuchando tu voz..."
+                      : attachment
+                      ? `Escribí tu consulta sobre ${attachment.name}...`
+                      : "Escribí tu consulta, adjuntá una planilla o hablá por micrófono..."
+                  }
                   value={inputMessage}
-                  onChange={e => setInputMessage(e.target.value)}
-                  className="flex-1 px-4 py-3 text-xs rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  onChange={(e) => setInputMessage(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
+                  className="flex-1 px-4 py-3 text-xs rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-xs"
                 />
+
+                {/* Botón de Voz / Micrófono */}
                 <button
-                  type="submit"
-                  disabled={!inputMessage.trim() || chatLoading}
-                  className="px-5 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-500/20 transition"
+                  type="button"
+                  onClick={toggleListening}
+                  className={`p-3 rounded-2xl transition shadow-xs cursor-pointer ${
+                    isListening
+                      ? "bg-rose-600 text-white animate-bounce shadow-md shadow-rose-500/30"
+                      : "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-slate-700"
+                  }`}
+                  title={isListening ? "Detener dictado" : "Dictar por voz (micrófono)"}
+                >
+                  {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                </button>
+
+                {/* Botón de Enviar */}
+                <button
+                  onClick={() => handleSendMessage()}
+                  disabled={(!inputMessage.trim() && !attachment) || chatLoading}
+                  className="p-3 px-5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-500/20 transition cursor-pointer disabled:opacity-40"
                 >
                   <Send className="w-4 h-4" />
+                  <span className="hidden sm:inline">Enviar</span>
                 </button>
-              </form>
+              </div>
             </div>
           </div>
         </div>

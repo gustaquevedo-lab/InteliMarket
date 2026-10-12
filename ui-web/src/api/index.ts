@@ -3431,8 +3431,10 @@ export const api = {
     getControlTower: (companyId?: string) => client.get<any>("/v1/finance-agent/control-tower", { company_id: companyId || COMPANY_ID }),
     getInterAgentSync: (companyId?: string) => client.get<any>("/v1/finance-agent/inter-agent/sync", { company_id: companyId || COMPANY_ID }),
     getCashFlowForecast: (companyId?: string) => client.get<any>("/v1/finance-agent/cash-flow-forecast", { company_id: companyId || COMPANY_ID }),
-    chat: (data: { message: string; conversation_history?: any[]; company_id?: string }) =>
+    chat: (data: { message: string; conversation_history?: any[]; company_id?: string; attachment_name?: string; attachment_type?: string; attachment_data?: string }) =>
       client.post<{ response: string; suggestions: string[]; action_proposal?: any }>("/v1/finance-agent/chat", { company_id: data.company_id || COMPANY_ID, ...data }),
+    getBusinessRules: (companyId?: string) => client.get<any[]>("/v1/finance-agent/business-rules", { company_id: companyId || COMPANY_ID }),
+    createBusinessRule: (data: { regla: string; categoria?: string; company_id?: string }) => client.post<any>("/v1/finance-agent/business-rules", { company_id: data.company_id || COMPANY_ID, ...data }),
     recommendations: (status?: string, tipo?: string, limit?: number, offset?: number) =>
       client.get<FinanceRecommendation[]>("/v1/finance-agent/recommendations", { company_id: COMPANY_ID, status, tipo, limit, offset }),
     countByTipo: (status?: string) => client.get<{ tipo: string; cantidad: number }[]>("/v1/finance-agent/recommendations/count-by-tipo", { company_id: COMPANY_ID, status }),

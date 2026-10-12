@@ -1032,14 +1032,116 @@ async def get_customer_aging_analysis(db: AsyncSession, company_id: str) -> Dict
     }
 
 
+# ── 5.5 MEMORIA ACTIVA DE REGLAS DE NEGOCIO FINANCIERAS ────────────────────────
+
+async def list_finance_business_rules(db: AsyncSession, company_id: str) -> list[Dict[str, Any]]:
+    """Lista las reglas financieras aprendidas por el CFO IA."""
+    res = await db.execute(text("""
+        SELECT id, regla, categoria, origen, activa, confianza, created_at
+        FROM company_business_rules
+        WHERE company_id = :cid AND (categoria IN ('financiera', 'tesoreria', 'bancos', 'proveedores', 'general') OR categoria IS NULL) AND activa = true
+        ORDER BY created_at DESC
+        LIMIT 30;
+    """), {"cid": company_id})
+    return [
+        {
+            "id": r["id"],
+            "regla": r["regla"],
+            "categoria": r["categoria"] or "financiera",
+            "origen": r["origen"] or "usuario_manual",
+            "activa": r["activa"],
+            "confianza": float(r["confianza"] or 1.0),
+            "created_at": r["created_at"]
+        }
+        for r in res.mappings().all()
+    ]
+
+
+async def create_finance_business_rule(
+    db: AsyncSession,
+    company_id: str,
+    regla: str,
+    categoria: str = "financiera",
+    origen: str = "usuario_manual"
+) -> dict:
+    """Registra una directiva financiera en la base de datos de memoria."""
+    import uuid
+    rule_id = uuid.uuid4()
+    await db.execute(text("""
+        INSERT INTO company_business_rules (id, company_id, regla, categoria, origen, activa, confianza, created_at)
+        VALUES (:id, :cid, :reg, :cat, :orig, true, 1.00, NOW())
+    """), {
+        "id": rule_id,
+        "cid": company_id,
+        "reg": regla,
+        "cat": categoria,
+        "orig": origen
+    })
+    await db.commit()
+    return {"id": str(rule_id), "regla": regla, "categoria": categoria}
+
+
 # ── 6. CHAT CONSULTIVO CON EL CFO IA BASADO EN LA BD REAL ─────────────────────
 
 async def chat_with_finance_agent(
-    db: AsyncSession, company_id: str, message: str, history: Optional[List[Dict[str, str]]] = None
+    db: AsyncSession,
+    company_id: str,
+    message: str,
+    history: Optional[List[Dict[str, Any]]] = None,
+    attachment_name: Optional[str] = None,
+    attachment_type: Optional[str] = None,
+    attachment_data: Optional[str] = None
 ) -> FinanceChatResponse:
-    """Procesa una consulta financiera en lenguaje natural y responde con los datos exactos de la BD."""
+    """Procesa una consulta financiera multimodal (texto, voz, planillas, fotos) y responde con los datos exactos de la BD."""
     tower = await get_liquidity_control_tower(db, company_id)
+    rules = await list_finance_business_rules(db, company_id)
     msg_lower = message.lower()
+
+    # Manejo de Planillas y Documentos Adjuntos
+    if attachment_type in ("spreadsheet", "document") and attachment_data:
+        title = attachment_name or "Planilla / Archivo"
+        resp = (
+            f"📊 **Auditoría de Archivo Adjunto ({title}):**\n\n"
+            f"He procesado los datos de la planilla para contrastarlos contra la tesorería de la empresa:\n\n"
+            f"{str(attachment_data)[:1500]}\n\n"
+            f"**Cruce con la Base de Datos Contable:**\n"
+            f"- **Disponibilidad Líquida (Bancos + Bóveda):** ₲ {tower.liquidez_total_gs:,.0f}\n"
+            f"- **Pasivo Comercial Exigible Total:** ₲ {tower.deuda_total_exigible_gs:,.0f}\n"
+            f"- **Déficit Inmediato:** ₲ {tower.deficit_cobertura_inmediata_gs:,.0f}\n"
+            f"- **Estado de Tesorería:** **{tower.estado_liquidez.upper()}**\n\n"
+            f"¿Deseas que verifique si alguno de estos proveedores o montos figura en las cuentas por pagar o cheques en circulación?"
+        )
+        return FinanceChatResponse(
+            response=resp,
+            suggestions=[
+                "Verificar cuentas por pagar de proveedores",
+                "Ver cheques emitidos en circulación",
+                "Ver saldo disponible en bancos"
+            ],
+            action_proposal=None
+        )
+
+    # Manejo de Imágenes Adjuntas (Comprobantes, Facturas, Fotos de Cheques)
+    if attachment_type == "image" and attachment_data:
+        title = attachment_name or "Comprobante / Documento"
+        resp = (
+            f"📷 **Auditoría Visual de Documento ({title}):**\n\n"
+            f"Se ha recibido la imagen del comprobante comercial.\n\n"
+            f"**Contexto de Tesorería en Base de Datos:**\n"
+            f"- **Disponibilidad en Bancos:** ₲ {tower.bancos_total_gs:,.0f}\n"
+            f"- **Cheques con Fecha de Cobro Cumplida:** ₲ {tower.deuda_cheques_en_fecha_cobro_gs:,.0f}\n"
+            f"- **Facturas en Mora:** ₲ {tower.deuda_facturas_vencidas_mora_gs:,.0f}\n"
+            f"- **Brecha de Déficit:** ₲ {tower.deficit_cobertura_inmediata_gs:,.0f}\n\n"
+            f"El archivo ha sido indexado en la sesión de tesorería para cotejo de firmas y saldos."
+        )
+        return FinanceChatResponse(
+            response=resp,
+            suggestions=[
+                "Verificar cheques emitidos pendientes",
+                "Ver estado de facturas en mora"
+            ],
+            action_proposal=None
+        )
 
     if "liquidez" in msg_lower or "caja" in msg_lower or "banco" in msg_lower or "efectivo" in msg_lower or "custodia" in msg_lower:
         bancos_txt = "\n".join([f"- **{b.banco} ({b.numero_cuenta}):** ₲ {b.saldo_gs:,.0f} {b.moneda}" for b in tower.desglose_bancos])

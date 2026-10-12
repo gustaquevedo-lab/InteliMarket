@@ -178,10 +178,30 @@ class CashFlowForecastResponse(BaseModel):
     estado_general_flujo: str = "deficit"
 
 
+class FinanceBusinessRuleCreate(BaseModel):
+    company_id: UUID
+    regla: str
+    categoria: Optional[str] = 'financiera'
+    origen: Optional[str] = 'usuario_manual'
+
+
+class FinanceBusinessRuleResponse(BaseModel):
+    id: UUID
+    regla: str
+    categoria: str
+    origen: str
+    activa: bool
+    confianza: float
+    created_at: Optional[datetime] = None
+
+
 class FinanceChatRequest(BaseModel):
     company_id: UUID
     message: str
-    conversation_history: Optional[List[Dict[str, str]]] = None
+    conversation_history: Optional[List[Dict[str, Any]]] = None
+    attachment_name: Optional[str] = None
+    attachment_type: Optional[str] = None
+    attachment_data: Optional[str] = None
 
 
 class FinanceChatResponse(BaseModel):

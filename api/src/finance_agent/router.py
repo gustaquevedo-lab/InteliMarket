@@ -8,7 +8,7 @@ from api.src.auth.middleware import require_auth
 from api.src.finance_agent import service
 from api.src.finance_agent.schemas import (
     TriggerRunRequest, FinanceAgentRunResponse, FinanceRecommendationResponse, DecisionRequest, BulkDecisionRequest,
-    LiquidityControlTower, InterAgentSyncResponse, CashFlowForecastResponse, FinanceChatRequest, FinanceChatResponse
+    LiquidityControlTower, InterAgentSyncResponse, CashFlowForecastResponse, FinanceChatRequest, FinanceChatResponse, FinanceBusinessRuleCreate, FinanceBusinessRuleResponse
 )
 
 router = APIRouter(prefix="/api/v1/finance-agent", tags=["finance-agent"])
@@ -41,13 +41,41 @@ async def get_cash_flow_forecast(
     return await service.get_cash_flow_forecast(db, company_id)
 
 
+@router.get("/business-rules", response_model=list[FinanceBusinessRuleResponse])
+async def list_business_rules(
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Lista las reglas y directivas financieras aprendidas por el CFO IA."""
+    return await service.list_finance_business_rules(db, company_id)
+
+
+@router.post("/business-rules", response_model=dict)
+async def create_business_rule(
+    body: FinanceBusinessRuleCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Crea una nueva directiva o regla financiera para la memoria del agente."""
+    return await service.create_finance_business_rule(
+        db, str(body.company_id), body.regla, body.categoria or "financiera", body.origen or "usuario_manual"
+    )
+
+
 @router.post("/chat", response_model=FinanceChatResponse)
 async def chat_with_cfo(
     body: FinanceChatRequest,
     db: AsyncSession = Depends(get_db)
 ):
     """Procesa una consulta financiera en lenguaje natural y genera una respuesta ejecutiva fundamentada."""
-    return await service.chat_with_finance_agent(db, str(body.company_id), body.message, body.conversation_history)
+    return await service.chat_with_finance_agent(
+        db,
+        str(body.company_id),
+        body.message,
+        body.conversation_history,
+        body.attachment_name,
+        body.attachment_type,
+        body.attachment_data
+    )
 
 
 @router.post("/run", response_model=FinanceAgentRunResponse)
