@@ -342,20 +342,21 @@ async def get_promotions_with_ai_pulse(db: AsyncSession, company_id: str) -> Lis
                     FROM sale_items si
                     JOIN sales s ON s.id = si.sale_id
                     WHERE si.product_id::text = ANY(:pids)
-                      AND s.company_id = :cid
+                      AND s.company_id::text = :cid
                       AND s.estado IN ('completado', 'confirmado')
-                      AND (:desde::date IS NULL OR s.created_at::date >= :desde)
+                      AND (CAST(:desde AS date) IS NULL OR s.created_at >= CAST(:desde AS timestamp))
                 """)
                 s_row = (await db.execute(q_sales, {
                     "pids": valid_uuids,
-                    "cid": company_id,
+                    "cid": str(company_id),
                     "desde": v_desde if v_desde else None
                 })).fetchone()
                 if s_row:
                     usos = max(usos, int(s_row[0] or 0))
                     monto_facturado = float(s_row[1] or 0)
-            except Exception:
-                pass
+            except Exception as _e:
+                import logging
+                logging.getLogger("uvicorn.error").warning(f"Error calculando ventas de promo {nombre}: {_e}")
             
         dias_restantes = None
         if v_hasta:

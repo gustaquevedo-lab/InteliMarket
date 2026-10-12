@@ -138,21 +138,37 @@ export default function MarketingAgentPage() {
   const loadInitialData = useCallback(async () => {
     setLoading(true)
     try {
-      const [dashRes, syncRes, rulesRes] = await Promise.allSettled([
+      const [dashRes, syncRes, rulesRes, bannersRes, promosPulseRes] = await Promise.allSettled([
         api.marketingAgent.dashboard(companyId),
         api.marketingAgent.tripartiteSync(companyId),
         api.marketingAgent.learnedRules(companyId),
+        api.kiosk.banners.list(),
+        api.marketingAgent.promotionsPulse(companyId),
       ])
 
       if (dashRes.status === "fulfilled") setDashboard(dashRes.value)
       if (syncRes.status === "fulfilled") setSyncStatus(syncRes.value)
       if (rulesRes.status === "fulfilled") setLearnedRules(rulesRes.value || [])
+      if (bannersRes.status === "fulfilled") setKioskBanners(bannersRes.value || [])
+      if (promosPulseRes.status === "fulfilled") setPromotionsPulseList(promosPulseRes.value || [])
     } catch (e: any) {
       toast.error("Error al cargar datos del CMO", e?.message)
     } finally {
       setLoading(false)
     }
   }, [companyId, toast])
+
+  // Subir imagen para un banner existente
+  const handleUploadBannerImage = async (bannerId: string, file: File) => {
+    try {
+      toast.info("Subiendo imagen...", "Procesando creativo para terminales de salón.")
+      await api.kiosk.banners.uploadImage(bannerId, file)
+      toast.success("Imagen Publicada", "La nueva imagen ya está visible en los verificadores de precios.")
+      await fetchKioskBanners()
+    } catch (err: any) {
+      toast.error("Error al subir imagen", err?.message)
+    }
+  }
 
   useEffect(() => {
     loadInitialData()
@@ -1218,7 +1234,8 @@ export default function MarketingAgentPage() {
               {promotionsPulseList.map((p: any) => {
                 const esAlta = p.pulso_nivel === "alta_traccion"
                 const esBaja = p.pulso_nivel === "bajo_impacto"
-                const esVigente = p.activo && (p.dias_restantes === null || p.dias_restantes > 0)
+                const esVigente = p.activo && (p.dias_restantes === null || p.dias_restantes >= 0)
+                const venceHoy = p.activo && p.dias_restantes === 0
 
                 return (
                   <div
@@ -1242,13 +1259,17 @@ export default function MarketingAgentPage() {
                           {p.pulso_label}
                         </span>
                         <div className="flex items-center gap-1.5">
-                          {esVigente ? (
+                          {venceHoy ? (
+                            <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-[10px] font-black uppercase shadow-xs">
+                              🔥 VENCE HOY
+                            </span>
+                          ) : esVigente ? (
                             <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 text-[10px] font-black uppercase">
-                              VIGENTE
+                              {p.dias_restantes !== null ? `VIGENTE (${p.dias_restantes}d)` : "VIGENTE"}
                             </span>
                           ) : (
                             <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 text-[10px] font-bold uppercase">
-                              VENCIDA / INACTIVA
+                              FINALIZADA
                             </span>
                           )}
                           <span className="font-mono text-xs font-black text-purple-600">
@@ -1264,7 +1285,7 @@ export default function MarketingAgentPage() {
                         <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono mt-1">
                           <span>Vigencia: {p.fecha_inicio || "Hoy"} - {p.fecha_fin || "Indefinida"}</span>
                           {p.dias_restantes !== null && (
-                            <span className={`font-bold ${p.dias_restantes <= 3 ? "text-rose-500" : "text-slate-600 dark:text-slate-300"}`}>
+                            <span className={`font-bold ${p.dias_restantes <= 0 ? "text-amber-500" : "text-slate-600 dark:text-slate-300"}`}>
                               ({p.dias_restantes === 0 ? "Vence hoy" : `${p.dias_restantes} días restantes`})
                             </span>
                           )}
@@ -1341,7 +1362,7 @@ export default function MarketingAgentPage() {
                 <Globe className="w-4 h-4 text-pink-600" /> Banners Omnicanal (Verificadores de Precios Salón + Web Móvil)
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Rotan en los terminales táctiles del salón y en la tienda online. Modificá, pausá o eliminá banners en vivo.
+                Rotan en los terminales táctiles del salón y en la tienda online. Modificá, pausá, cambiá la imagen o eliminá banners en vivo.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -1364,7 +1385,7 @@ export default function MarketingAgentPage() {
             </div>
           </div>
 
-          {/* SIMULADOR DE PANTALLA TÁCTIL DE KIOSCO (LIVE PREVIEW SALÓN) */}
+          {/* SIMULADOR DE PANTALLA TÁCTIL DE KIOSCO (LIVE PREVIEW SALÓN CON IMAGEN REAL) */}
           <div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 shadow-2xl space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
               <div className="flex items-center gap-2">
@@ -1389,29 +1410,50 @@ export default function MarketingAgentPage() {
                 </div>
               </div>
 
-              {/* Banner activo destacado */}
+              {/* Banner activo destacado con IMAGEN REAL */}
               {kioskBanners.length > 0 ? (
                 (() => {
                   const b = kioskBanners.find(x => x.activo) || kioskBanners[0]
                   const colorObj = KIOSK_COLORS.find(c => c.id === b.color) || KIOSK_COLORS[3]
                   return (
-                    <div className={`rounded-2xl p-6 bg-gradient-to-r ${colorObj.bg} text-white shadow-xl space-y-3 relative overflow-hidden min-h-[140px] flex flex-col justify-between animate-fade-in`}>
-                      <div className="flex items-center justify-between">
-                        <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase bg-black/40 backdrop-blur-xs tracking-wider">
-                          {b.etiqueta || "OFERTA SALÓN"}
-                        </span>
-                        <span className="font-mono text-base font-black px-3 py-1 rounded-full bg-white text-slate-900 shadow-md">
-                          {b.descuento_texto || "PROMO"}
-                        </span>
-                      </div>
-                      <div>
-                        <h3 className="font-black text-xl leading-tight drop-shadow-sm">{b.titulo}</h3>
-                        {b.subtitulo && (
-                          <p className="text-xs text-white/95 font-medium leading-relaxed mt-1">
-                            {b.subtitulo}
-                          </p>
-                        )}
-                      </div>
+                    <div className="space-y-2">
+                      {b.imagen_url ? (
+                        <div className="relative rounded-2xl overflow-hidden border-2 border-slate-700 shadow-2xl bg-black flex items-center justify-center max-h-[420px]">
+                          <img
+                            src={b.imagen_url}
+                            alt={b.titulo}
+                            className="w-full h-auto max-h-[420px] object-contain rounded-2xl"
+                          />
+                          <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-black/70 backdrop-blur-md text-white text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                            {b.etiqueta || "EN PANTALLA"} · {b.titulo}
+                          </div>
+                          {b.descuento_texto && (
+                            <div className="absolute top-3 right-3 px-3 py-1 rounded-full bg-white text-slate-900 font-mono text-sm font-black shadow-lg">
+                              {b.descuento_texto}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className={`rounded-2xl p-6 bg-gradient-to-r ${colorObj.bg} text-white shadow-xl space-y-3 relative overflow-hidden min-h-[140px] flex flex-col justify-between animate-fade-in`}>
+                          <div className="flex items-center justify-between">
+                            <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase bg-black/40 backdrop-blur-xs tracking-wider">
+                              {b.etiqueta || "OFERTA SALÓN"}
+                            </span>
+                            <span className="font-mono text-base font-black px-3 py-1 rounded-full bg-white text-slate-900 shadow-md">
+                              {b.descuento_texto || "PROMO"}
+                            </span>
+                          </div>
+                          <div>
+                            <h3 className="font-black text-xl leading-tight drop-shadow-sm">{b.titulo}</h3>
+                            {b.subtitulo && (
+                              <p className="text-xs text-white/95 font-medium leading-relaxed mt-1">
+                                {b.subtitulo}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )
                 })()
@@ -1427,10 +1469,10 @@ export default function MarketingAgentPage() {
             </div>
           </div>
 
-          {/* LISTADO DE BANNERS CON ACCIONES REALES (EDITAR, BORRAR, TOGGLE) */}
+          {/* LISTADO DE BANNERS CON ACCIONES REALES (IMAGEN REAL, EDITAR, BORRAR, TOGGLE) */}
           <div className="space-y-3">
             <h4 className="text-xs font-black uppercase tracking-wider text-slate-500">
-              Listado de Banners Configurados ({kioskBanners.length}):
+              Listado de Banners Publicados ({kioskBanners.length}):
             </h4>
 
             {kioskLoading ? (
@@ -1448,36 +1490,63 @@ export default function MarketingAgentPage() {
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                 {kioskBanners.map((b) => {
                   const colorObj = KIOSK_COLORS.find(c => c.id === b.color) || KIOSK_COLORS[3]
                   return (
                     <div
                       key={b.id}
-                      className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm space-y-3.5 p-4 flex flex-col justify-between"
+                      className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm space-y-3 p-4 flex flex-col justify-between"
                     >
-                      {/* PREVIEW DE LA TARJETA */}
-                      <div className={`rounded-2xl p-4 bg-gradient-to-r ${colorObj.bg} text-white shadow-sm space-y-2 relative overflow-hidden min-h-[110px] flex flex-col justify-between`}>
-                        <div className="flex items-center justify-between">
-                          <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-black/30 backdrop-blur-xs">
+                      {/* IMAGEN REAL PUBLICADA */}
+                      {b.imagen_url ? (
+                        <div className="relative rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-xs group bg-slate-950 flex items-center justify-center min-h-[180px]">
+                          <img
+                            src={b.imagen_url}
+                            alt={b.titulo}
+                            className="w-full h-48 object-cover object-center group-hover:scale-105 transition-transform duration-300"
+                          />
+                          <div className="absolute top-2 left-2 px-2.5 py-0.5 rounded-full bg-black/70 backdrop-blur-md text-white text-[9px] font-black uppercase">
                             {b.etiqueta || "OFERTA SALÓN"}
-                          </span>
-                          <span className="font-mono text-xs font-black px-2 py-0.5 rounded-full bg-white text-slate-900">
-                            {b.descuento_texto || "PROMO"}
-                          </span>
-                        </div>
-                        <div>
-                          <h4 className="font-extrabold text-sm leading-tight">{b.titulo}</h4>
-                          {b.subtitulo && (
-                            <p className="text-[10px] text-white/90 font-medium leading-tight mt-0.5 line-clamp-2">
-                              {b.subtitulo}
-                            </p>
+                          </div>
+                          {b.descuento_texto && (
+                            <div className="absolute top-2 right-2 px-2.5 py-0.5 rounded-full bg-white text-slate-900 font-mono text-xs font-black shadow-md">
+                              {b.descuento_texto}
+                            </div>
                           )}
                         </div>
+                      ) : (
+                        <div className={`rounded-2xl p-4 bg-gradient-to-r ${colorObj.bg} text-white shadow-sm space-y-2 relative overflow-hidden min-h-[140px] flex flex-col justify-between`}>
+                          <div className="flex items-center justify-between">
+                            <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-black/30 backdrop-blur-xs">
+                              {b.etiqueta || "OFERTA SALÓN"}
+                            </span>
+                            <span className="font-mono text-xs font-black px-2 py-0.5 rounded-full bg-white text-slate-900">
+                              {b.descuento_texto || "PROMO"}
+                            </span>
+                          </div>
+                          <div>
+                            <h4 className="font-extrabold text-sm leading-tight">{b.titulo}</h4>
+                            {b.subtitulo && (
+                              <p className="text-[10px] text-white/90 font-medium leading-tight mt-0.5 line-clamp-2">
+                                {b.subtitulo}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="space-y-1">
+                        <h4 className="font-extrabold text-sm text-slate-900 dark:text-white leading-tight">{b.titulo}</h4>
+                        {b.subtitulo && (
+                          <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
+                            {b.subtitulo}
+                          </p>
+                        )}
                       </div>
 
-                      {/* BOTONES DE ACCIÓN: EDITAR, TOGGLE ACTIVO, ELIMINAR */}
-                      <div className="flex items-center justify-between pt-1 border-t border-slate-100 dark:border-slate-800 text-xs">
+                      {/* BOTONES DE ACCIÓN: EDITAR, SUBIR IMAGEN, TOGGLE ACTIVO, ELIMINAR */}
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800 text-xs gap-1">
                         <button
                           onClick={() => handleToggleBanner(b)}
                           className={`flex items-center gap-1 font-bold text-[11px] px-2.5 py-1 rounded-lg transition cursor-pointer ${
@@ -1492,10 +1561,29 @@ export default function MarketingAgentPage() {
                         </button>
 
                         <div className="flex items-center gap-1">
+                          {/* Botón Subir Imagen / Cambiar Creativo */}
+                          <label
+                            className="p-1.5 rounded-lg text-pink-600 hover:bg-pink-50 dark:hover:bg-slate-800 transition cursor-pointer flex items-center gap-1"
+                            title="Subir o cambiar imagen del banner"
+                          >
+                            <ImagePlus className="w-4 h-4" />
+                            <span className="text-[10px] font-bold hidden sm:inline">Foto</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={async (e) => {
+                                if (e.target.files?.[0]) {
+                                  await handleUploadBannerImage(b.id, e.target.files[0])
+                                }
+                              }}
+                            />
+                          </label>
+
                           <button
                             onClick={() => handleEditBanner(b)}
                             className="p-1.5 rounded-lg text-slate-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-slate-800 transition cursor-pointer"
-                            title="Modificar banner"
+                            title="Modificar texto"
                           >
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
