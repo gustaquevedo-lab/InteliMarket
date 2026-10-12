@@ -190,3 +190,50 @@ async def list_settlements(
     """
     return await service.list_labor_settlements(db, company_id)
 
+
+
+# ── PayrollDossier Endpoints ──────────────────────────────────────────────
+
+@router.post("/dossiers", response_model=schemas.PayrollDossierOut)
+async def create_dossier(
+    payload: schemas.PayrollDossierCreate,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: Any = Depends(require_auth)
+):
+    """
+    Crea un Expediente Mensual de Nómina (PayrollDossier) a partir de una liquidación
+    aprobada en SueldOK, subdividiendo automáticamente la masa salarial y retenciones
+    en sus fases de ejecución (SIPAP, Efectivo, Compensaciones internas, Convenios Terceros, IPS).
+    """
+    user_id = str(user.get("id")) if isinstance(user, dict) else str(getattr(user, "id", ""))
+    return await service.create_payroll_dossier(db, company_id, payload, user_id)
+
+
+@router.get("/dossiers", response_model=list[schemas.PayrollDossierOut])
+async def list_dossiers(
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: Any = Depends(require_auth)
+):
+    """
+    Lista todos los expedientes de nómina registrados para la empresa.
+    """
+    return await service.list_payroll_dossiers(db, company_id)
+
+
+@router.get("/dossiers/{dossier_id}", response_model=schemas.PayrollDossierOut)
+async def get_dossier(
+    dossier_id: str,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: Any = Depends(require_auth)
+):
+    """
+    Obtiene el detalle completo de un expediente de nómina y sus fases.
+    """
+    res = await service.get_payroll_dossier(db, company_id, dossier_id)
+    if not res:
+        raise HTTPException(status_code=404, detail="Expediente de nómina no encontrado")
+    return res
+

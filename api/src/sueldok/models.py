@@ -125,7 +125,7 @@ class PayrollDossierPhase(Base):
     collection_receipt_id = Column(UUID(as_uuid=True), nullable=True)
 
     # Flexible metadata: employee list, bank details, third-party info, etc.
-    metadata = Column(JSONB, nullable=True)
+    phase_metadata = Column("metadata", JSONB, nullable=True)
 
     # IPS: legal due date = day 12 of the month after the payroll period
     fecha_vencimiento = Column(Date, nullable=True)

@@ -110,3 +110,106 @@ class SettlementResponse(BaseModel):
     observaciones: Optional[str] = None
     created_at: Optional[datetime] = None
 
+
+# ── PayrollDossier Schemas ────────────────────────────────────────────────
+
+
+class DisbursementBatchEntry(BaseModel):
+    """One employee's disbursement info within a batch."""
+    employee_id: str
+    name: str
+    ci: str
+    net_salary: float
+    account_number: Optional[str] = None
+    bank_account_type: Optional[str] = None
+
+
+class BankBatch(BaseModel):
+    employees: list[DisbursementBatchEntry]
+    total: float
+
+
+class ChequeeBatch(BaseModel):
+    employees: list[DisbursementBatchEntry]
+    total: float
+
+
+class ThirdPartyDeduction(BaseModel):
+    """One external creditor's retained amount."""
+    third_party_name: str
+    third_party_ruc: Optional[str] = None
+    total: float
+    employees: list[dict]  # [{employee_id, name, ci, amount, invoice_reference}]
+
+
+class ExtraClubTicket(BaseModel):
+    """One Extra Club / commercial debt ticket to offset."""
+    employee_id: str
+    employee_name: str
+    employee_ci: str
+    ticket_ref: Optional[str] = None
+    amount: float
+
+
+class PayrollDossierCreate(BaseModel):
+    """Input payload to create a PayrollDossier from an approved SueldOK run."""
+    periodo: str                           # "YYYY-MM"
+    sueldok_run_id: Optional[str] = None
+
+    # Aggregate totals
+    masa_salarial_bruta: float
+    total_neto: float
+    total_ips_obrero: float
+    total_ips_patronal: float
+    total_anticipos: float = 0
+    total_extra_club: float = 0
+    total_uniformes: float = 0
+    total_convenios_terceros: float = 0
+    total_judiciales: float = 0
+
+    # Disbursement batches per channel (from getPayrollDisbursementBatches)
+    lotes_banco: dict[str, BankBatch] = {}     # bankName -> BankBatch
+    lotes_efectivo: dict[str, BankBatch] = {}  # branchName -> BankBatch
+    lote_cheque: Optional[ChequeeBatch] = None
+
+    # Non-cash deductions
+    extra_club_tickets: list[ExtraClubTicket] = []
+    uniformes_items: list[ExtraClubTicket] = []  # reuse same structure
+
+    # Third-party creditors (Comercial Malou, etc.)
+    terceros_desglose: list[ThirdPartyDeduction] = []
+
+    observaciones: Optional[str] = None
+
+
+class PayrollDossierPhaseOut(BaseModel):
+    id: str
+    phase_type: str
+    phase_label: Optional[str]
+    monto: float
+    estado: str
+    payment_order_id: Optional[str] = None
+    collection_receipt_id: Optional[str] = None
+    fecha_vencimiento: Optional[str] = None
+    pdf_storage_key: Optional[str] = None
+    executed_at: Optional[datetime] = None
+
+
+class PayrollDossierOut(BaseModel):
+    id: str
+    company_id: str
+    periodo: str
+    sueldok_run_id: Optional[str]
+    masa_salarial_bruta: float
+    total_neto: float
+    total_ips_obrero: float
+    total_ips_patronal: float
+    total_anticipos: float
+    total_extra_club: float
+    total_uniformes: float
+    total_convenios_terceros: float
+    total_judiciales: float
+    estado: str
+    observaciones: Optional[str]
+    created_at: Optional[datetime]
+    phases: list[PayrollDossierPhaseOut] = []

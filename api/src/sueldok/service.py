@@ -11,7 +11,12 @@ from typing import Optional, List, Dict, Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.src.sueldok.schemas import SYNC_EVENTS
+from api.src.sueldok.schemas import (
+    SYNC_EVENTS,
+    PayrollPaymentOrderCreate,
+    SettlementCreate,
+    PayrollDossierCreate,
+)
 
 SUELDOK_BASE_URL = os.environ.get("SUELDOK_URL", "https://sueldok.intellihouse.lat")
 SUELDOK_SYSTEM_KEY = os.environ.get("SUELDOK_SYSTEM_KEY", "ifk_santateresa_live_api_key_2026")
@@ -543,4 +548,244 @@ async def list_labor_settlements(db: AsyncSession, company_id: str) -> list[dict
         })
     return items
 
+
+
+
+# ── PayrollDossier Service ────────────────────────────────────────────────
+
+def _calculate_ips_due_date(periodo: str):
+    from datetime import date
+    try:
+        parts = periodo.split("-")
+        year = int(parts[0])
+        month = int(parts[1])
+        if month == 12:
+            return date(year + 1, 1, 12)
+        else:
+            return date(year, month + 1, 12)
+    except Exception:
+        today = date.today()
+        return date(today.year, today.month, 12)
+
+
+def format_dossier(dossier) -> dict:
+    return {
+        "id": str(dossier.id),
+        "company_id": str(dossier.company_id),
+        "periodo": dossier.periodo,
+        "sueldok_run_id": dossier.sueldok_run_id,
+        "masa_salarial_bruta": float(dossier.masa_salarial_bruta or 0),
+        "total_neto": float(dossier.total_neto or 0),
+        "total_ips_obrero": float(dossier.total_ips_obrero or 0),
+        "total_ips_patronal": float(dossier.total_ips_patronal or 0),
+        "total_anticipos": float(dossier.total_anticipos or 0),
+        "total_extra_club": float(dossier.total_extra_club or 0),
+        "total_uniformes": float(dossier.total_uniformes or 0),
+        "total_convenios_terceros": float(dossier.total_convenios_terceros or 0),
+        "total_judiciales": float(dossier.total_judiciales or 0),
+        "estado": dossier.estado,
+        "observaciones": dossier.observaciones,
+        "created_at": dossier.created_at.isoformat() if dossier.created_at else None,
+        "phases": [
+            {
+                "id": str(p.id),
+                "phase_type": p.phase_type,
+                "phase_label": p.phase_label,
+                "monto": float(p.monto or 0),
+                "estado": p.estado,
+                "payment_order_id": str(p.payment_order_id) if p.payment_order_id else None,
+                "collection_receipt_id": str(p.collection_receipt_id) if p.collection_receipt_id else None,
+                "fecha_vencimiento": p.fecha_vencimiento.isoformat() if p.fecha_vencimiento else None,
+                "pdf_storage_key": p.pdf_storage_key,
+                "executed_at": p.executed_at.isoformat() if p.executed_at else None,
+                "metadata": p.phase_metadata,
+            }
+            for p in (dossier.phases or [])
+        ]
+    }
+
+
+async def create_payroll_dossier(
+    db: AsyncSession,
+    company_id: str,
+    data: Any,
+    user_id: Optional[str] = None
+) -> dict:
+    import uuid
+    from decimal import Decimal
+    from api.src.sueldok.models import PayrollDossier, PayrollDossierPhase
+
+    cid = uuid.UUID(company_id)
+    uid = uuid.UUID(user_id) if user_id else None
+
+    dossier = PayrollDossier(
+        company_id=cid,
+        periodo=data.periodo,
+        sueldok_run_id=data.sueldok_run_id,
+        masa_salarial_bruta=Decimal(str(int(data.masa_salarial_bruta))),
+        total_neto=Decimal(str(int(data.total_neto))),
+        total_ips_obrero=Decimal(str(int(data.total_ips_obrero))),
+        total_ips_patronal=Decimal(str(int(data.total_ips_patronal))),
+        total_anticipos=Decimal(str(int(data.total_anticipos))),
+        total_extra_club=Decimal(str(int(data.total_extra_club))),
+        total_uniformes=Decimal(str(int(data.total_uniformes))),
+        total_convenios_terceros=Decimal(str(int(data.total_convenios_terceros))),
+        total_judiciales=Decimal(str(int(data.total_judiciales))),
+        estado="borrador",
+        observaciones=data.observaciones,
+        created_by=uid,
+    )
+    db.add(dossier)
+    await db.flush()
+
+    # 1. Net salary batches per bank (SIPAP)
+    for bank_name, batch in (data.lotes_banco or {}).items():
+        if batch.total > 0:
+            phase = PayrollDossierPhase(
+                dossier_id=dossier.id,
+                phase_type=f"salario_neto_banco_{bank_name.lower().replace(' ', '_')}",
+                phase_label=f"Pago Salarios SIPAP {bank_name.upper()} ({len(batch.employees)} pers.)",
+                monto=Decimal(str(int(batch.total))),
+                estado="pendiente",
+                phase_metadata={
+                    "bank": bank_name,
+                    "count": len(batch.employees),
+                    "employees": [e.model_dump() for e in batch.employees]
+                }
+            )
+            db.add(phase)
+
+    # 2. Net salary batches in cash (Sobres)
+    for branch_name, batch in (data.lotes_efectivo or {}).items():
+        if batch.total > 0:
+            phase = PayrollDossierPhase(
+                dossier_id=dossier.id,
+                phase_type=f"salario_neto_efectivo_{branch_name.lower().replace(' ', '_')}",
+                phase_label=f"Pago Salarios Efectivo - {branch_name} ({len(batch.employees)} pers.)",
+                monto=Decimal(str(int(batch.total))),
+                estado="pendiente",
+                phase_metadata={
+                    "branch": branch_name,
+                    "count": len(batch.employees),
+                    "employees": [e.model_dump() for e in batch.employees]
+                }
+            )
+            db.add(phase)
+
+    # 3. Net salary cheques
+    if data.lote_cheque and data.lote_cheque.total > 0:
+        phase = PayrollDossierPhase(
+            dossier_id=dossier.id,
+            phase_type="salario_neto_cheque",
+            phase_label=f"Pago Salarios Cheques ({len(data.lote_cheque.employees)} pers.)",
+            monto=Decimal(str(int(data.lote_cheque.total))),
+            estado="pendiente",
+            phase_metadata={
+                "count": len(data.lote_cheque.employees),
+                "employees": [e.model_dump() for e in data.lote_cheque.employees]
+            }
+        )
+        db.add(phase)
+
+    # 4. Compensaciones no-cash (Extra Club + Uniformes)
+    total_nocash = (data.total_extra_club or 0) + (data.total_uniformes or 0)
+    if total_nocash > 0 or data.extra_club_tickets or data.uniformes_items:
+        phase = PayrollDossierPhase(
+            dossier_id=dossier.id,
+            phase_type="compensacion_no_cash",
+            phase_label="Compensaciones Internas (Extra Club + Uniformes)",
+            monto=Decimal(str(int(total_nocash))),
+            estado="pendiente",
+            phase_metadata={
+                "extra_club": [t.model_dump() for t in data.extra_club_tickets],
+                "uniformes": [u.model_dump() for u in data.uniformes_items]
+            }
+        )
+        db.add(phase)
+
+    # 5. Convenios con Terceros (Comercial Malou, etc.)
+    for t in (data.terceros_desglose or []):
+        if t.total > 0:
+            phase = PayrollDossierPhase(
+                dossier_id=dossier.id,
+                phase_type=f"convenio_tercero_{t.third_party_name.lower().replace(' ', '_')}",
+                phase_label=f"Convenio {t.third_party_name}",
+                monto=Decimal(str(int(t.total))),
+                estado="pendiente",
+                phase_metadata=t.model_dump()
+            )
+            db.add(phase)
+
+    # 6. Retenciones Judiciales
+    if (data.total_judiciales or 0) > 0:
+        phase = PayrollDossierPhase(
+            dossier_id=dossier.id,
+            phase_type="judiciales",
+            phase_label="Retenciones Judiciales",
+            monto=Decimal(str(int(data.total_judiciales))),
+            estado="pendiente",
+            phase_metadata={"monto": data.total_judiciales}
+        )
+        db.add(phase)
+
+    # 7. Previsión Aporte IPS (25.5%)
+    total_ips = (data.total_ips_obrero or 0) + (data.total_ips_patronal or 0)
+    if total_ips > 0:
+        due_date = _calculate_ips_due_date(data.periodo)
+        phase = PayrollDossierPhase(
+            dossier_id=dossier.id,
+            phase_type="prevision_ips",
+            phase_label=f"Aporte IPS {data.periodo} (9% Obrero + 16.5% Patronal)",
+            monto=Decimal(str(int(total_ips))),
+            estado="pendiente",
+            fecha_vencimiento=due_date,
+            phase_metadata={
+                "ips_obrero": data.total_ips_obrero,
+                "ips_patronal": data.total_ips_patronal,
+                "due_date": due_date.isoformat(),
+            }
+        )
+        db.add(phase)
+
+    await db.commit()
+    return await get_payroll_dossier(db, company_id, str(dossier.id))
+
+
+async def get_payroll_dossier(db: AsyncSession, company_id: str, dossier_id: str) -> Optional[dict]:
+    import uuid
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+    from api.src.sueldok.models import PayrollDossier
+
+    cid = uuid.UUID(company_id)
+    did = uuid.UUID(dossier_id)
+
+    query = (
+        select(PayrollDossier)
+        .options(selectinload(PayrollDossier.phases))
+        .where(PayrollDossier.company_id == cid, PayrollDossier.id == did)
+    )
+    res = await db.execute(query)
+    dossier = res.scalars().first()
+    if not dossier:
+        return None
+    return format_dossier(dossier)
+
+
+async def list_payroll_dossiers(db: AsyncSession, company_id: str) -> list[dict]:
+    import uuid
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+    from api.src.sueldok.models import PayrollDossier
+
+    cid = uuid.UUID(company_id)
+    query = (
+        select(PayrollDossier)
+        .options(selectinload(PayrollDossier.phases))
+        .where(PayrollDossier.company_id == cid)
+        .order_by(PayrollDossier.periodo.desc(), PayrollDossier.created_at.desc())
+    )
+    res = await db.execute(query)
+    dossiers = res.scalars().all()
+    return [format_dossier(d) for d in dossiers]
 
