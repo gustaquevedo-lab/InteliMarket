@@ -1913,10 +1913,53 @@ def generate_acta_verificacion_tesoreria_pdf(
     tot_facturado = recon.get("total_cobrado_gs", 0)
     cant_tickets = recon.get("total_ventas_count", 0)
 
+    # Pre-cálculo de auditoría de vouchers y consolidación del turno
+    grupos_v = punteo_data.get("grupos_comprobantes") or []
+    tot_vouchers_fisico_prec = 0.0
+    tot_vouchers_esp_prec = 0.0
+    for g in grupos_v:
+        v_list = g.get("vouchers") or []
+        tot_g = float(sum(float(v.get("monto_gs") or 0) for v in v_list)) if v_list else float(g.get("total_esperado_gs") or g.get("monto_gs") or 0)
+        tot_fis = float(sum(float(v.get("monto_fisico") if v.get("monto_fisico") is not None else (v.get("monto_gs") or 0)) for v in v_list)) if v_list else float(g.get("monto_fisico_gs") if g.get("monto_fisico_gs") is not None else tot_g)
+        tot_vouchers_fisico_prec += tot_fis
+        tot_vouchers_esp_prec += tot_g
+    dif_tot_vouch_prec = tot_vouchers_fisico_prec - tot_vouchers_esp_prec
+
+    # Pre-cálculo de efectivo para evaluación global
+    t_no_ef_prec = recon.get("total_no_efectivo_gs", 0)
+    v_ef_prec = recon.get("ventas_ef_total_gs", max(0, tot_facturado - t_no_ef_prec))
+    dr_prec = recon.get("total_drops_gs", 0)
+    esp_ef_prec = recon.get("esperado_total_gs", max(0, v_ef_prec - dr_prec))
+
+    t_brl_prec = recon.get("tasa_brl", 1130)
+    t_usd_prec = recon.get("tasa_usd", 5840.1)
+    if handoff.get("monto_confirmado_pyg") is not None:
+        c_pyg_p = float(handoff.get("monto_confirmado_pyg") or 0)
+        c_brl_p = float(handoff.get("monto_confirmado_brl") or 0)
+        c_usd_p = float(handoff.get("monto_confirmado_usd") or 0)
+    else:
+        c_pyg_p = float(recon.get("contado_pyg", 0))
+        c_brl_p = float(recon.get("contado_brl", 0))
+        c_usd_p = float(recon.get("contado_usd", 0))
+    c_tot_ef_prec = round(c_pyg_p + (c_brl_p * t_brl_prec) + (c_usd_p * t_usd_prec))
+    dif_ef_prec = c_tot_ef_prec - esp_ef_prec
+
+    dif_neto_prec = dif_ef_prec + dif_tot_vouch_prec
+    turno_cuadra_neto_prec = abs(dif_neto_prec) <= 10000
+    has_faltante_real_prec = dif_neto_prec < -10000
+    cruce_medios_prec = turno_cuadra_neto_prec and (abs(dif_ef_prec) > 5000 or abs(dif_tot_vouch_prec) > 0)
+
+    if has_faltante_real_prec:
+        estado_hdr_str = "<font color='#DC2626'><b>⚠ VERIFICADA CON FALTANTE</b></font>"
+    elif cruce_medios_prec:
+        estado_hdr_str = "<font color='#047857'><b>✓ VERIFICADA EN BÓVEDA (CUADRADA)</b></font>"
+    else:
+        estado_hdr_str = "<font color='#047857'><b>✓ VERIFICADA EN BÓVEDA</b></font>"
+
     # 1. METADATOS DE VERIFICACIÓN
     meta_data = [
         ["Cajero/a:", Paragraph(f"<b>{cajero_nombre}</b>", styles["Normal"]), "Caja / Terminal:", Paragraph(f"<b>{caja_nombre}</b>", styles["Normal"])],
-        ["Turno / ID:", Paragraph(f"<b>{turno_id}</b>", styles["Normal"]), "Estado:", Paragraph("<font color='#047857'><b>✓ VERIFICADA EN BÓVEDA</b></font>", styles["Normal"])],
+        ["Turno / ID:", Paragraph(f"<b>{turno_id}</b>", styles["Normal"]), "Estado:", Paragraph(estado_hdr_str, styles["Normal"])],
         ["Apertura / Cierre:", f"{apertura_str} a {cierre_str}", "Fecha Verificación:", f"{fecha_verif_str} (PYT)"],
         ["Tesorera Actuante:", Paragraph(f"<b>{tesorera_nombre}</b>", styles["Normal"]), "Régimen:", Paragraph("<b>Extra Supermercado (PYG)</b>", styles["Normal"])],
     ]
@@ -1932,13 +1975,21 @@ def generate_acta_verificacion_tesoreria_pdf(
     elements.append(Spacer(1, 5))
 
     # 2. DECLARACIÓN DE ASUNCIÓN DE CUSTODIA (BÓVEDA)
-    clausula_texto = (
-        f"<b>DECLARACIÓN DE RECEPCIÓN Y CUSTODIA EN BÓVEDA:</b> Por la presente, el Departamento de Tesorería de "
-        f"<b>{company.get('nombre_fantasia', 'Extra Supermercado')}</b> certifica haber realizado el recuento físico "
-        f"de los fondos rendidos y el cotejo del 100% de los comprobantes de pago no efectivo correspondientes a este turno. "
-        f"Con la firma de este documento, Tesorería <b>asume formalmente la custodia y responsabilidad patrimonial</b> "
-        f"de los valores detallados a continuación, deslindando al cajero/a de los fondos entregados conforme."
-    )
+    if has_faltante_real_prec:
+        clausula_texto = (
+            f"<b>DECLARACIÓN DE RECEPCIÓN Y CUSTODIA EN BÓVEDA (CON FALTANTE OBSERVADO):</b> Por la presente, el Departamento de Tesorería de "
+            f"<b>{company.get('nombre_fantasia', 'Extra Supermercado')}</b> certifica haber realizado el recuento físico "
+            f"de los fondos y el cotejo de comprobantes. Tesorería asume formalmente la custodia patrimonial de los valores efectivamente ingresados, "
+            f"<b>dejando constancia formal de un FALTANTE NETO de Gs. {_fmt_val(abs(dif_neto_prec))}</b> pendiente de descargo o retención administrativa."
+        )
+    else:
+        clausula_texto = (
+            f"<b>DECLARACIÓN DE RECEPCIÓN Y CUSTODIA EN BÓVEDA:</b> Por la presente, el Departamento de Tesorería de "
+            f"<b>{company.get('nombre_fantasia', 'Extra Supermercado')}</b> certifica haber realizado el recuento físico "
+            f"de los fondos rendidos y el cotejo del 100% de los comprobantes de pago no efectivo correspondientes a este turno. "
+            f"Con la firma de este documento, Tesorería <b>asume formalmente la custodia y responsabilidad patrimonial</b> "
+            f"de los valores detallados a continuación, deslindando al cajero/a de los fondos entregados conforme."
+        )
     t_clausula = Table([[Paragraph(clausula_texto, ParagraphStyle("Clausula", parent=styles["Normal"], fontSize=6.8, leading=8.5, textColor=HexColor("#065F46")))]], colWidths=[186 * mm])
     t_clausula.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), HexColor("#ECFDF5")),
@@ -2021,8 +2072,8 @@ def generate_acta_verificacion_tesoreria_pdf(
         [Paragraph(f"Efectivo Dólares (US$ {_fmt_val(c_usd, is_divisa=True)} x {_fmt_val(tasa_usd)}):", style_td_lbl), Paragraph(f"Gs. {_fmt_val(c_usd_gs)}", style_td_val)],
         [Paragraph("<b>TOTAL RECIBIDO EN BÓVEDA:</b>", ParagraphStyle("B3_V", parent=style_td_lbl, fontName=FONT_BOLD, textColor=HexColor("#047857"))),
          Paragraph(f"<font color='#047857'><b>Gs. {_fmt_val(c_total)}</b></font>", style_td_val)],
-        [Paragraph("<b>DIFERENCIA EFECTIVO EN GAVETA:</b>", ParagraphStyle("B4_V", parent=style_td_lbl, fontName=FONT_BOLD, textColor=HexColor(dif_color_ef))),
-         Paragraph(f"<font color='{dif_color_ef}'><b>{signo_ef}Gs. {_fmt_val(dif_efectivo)} ({estado_cuadre_ef})</b></font>", style_td_val)],
+        [Paragraph("<b>DIFERENCIA EFECTIVO EN GAVETA:</b>", ParagraphStyle("B4_V", parent=style_td_lbl, fontName=FONT_BOLD, textColor=HexColor("#D97706" if (cruce_medios_prec and dif_efectivo < 0) else dif_color_ef))),
+         Paragraph(f"<font color='{'#D97706' if (cruce_medios_prec and dif_efectivo < 0) else dif_color_ef}'><b>{signo_ef}Gs. {_fmt_val(dif_efectivo)} {(' (COMPENSADO POR VOUCHERS)' if (cruce_medios_prec and dif_efectivo < 0) else f' ({estado_cuadre_ef})')}</b></font>", style_td_val)],
     ]
     if dif_entrega_gs != 0:
         signo_ent = "+" if dif_entrega_gs > 0 else ""
@@ -2040,7 +2091,7 @@ def generate_acta_verificacion_tesoreria_pdf(
         ("TOPPADDING", (0, 0), (-1, -1), 1.8),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 1.8),
         ("BACKGROUND", (0, 4), (-1, 4), HexColor("#DCFCE7")),
-        ("BACKGROUND", (0, 5), (-1, 5), HexColor("#FEF2F2" if dif_efectivo < 0 else "#F0FDF4")),
+        ("BACKGROUND", (0, 5), (-1, 5), HexColor("#FEF3C7" if (cruce_medios_prec and dif_efectivo < 0) else ("#FEF2F2" if dif_efectivo < 0 else "#F0FDF4"))),
     ]))
 
     t_bloque_ef = Table([[t_esp, t_rec]], colWidths=[92 * mm, 92 * mm])
@@ -2162,8 +2213,39 @@ def generate_acta_verificacion_tesoreria_pdf(
     obs_dictamen = handoff.get("observaciones") or ""
     dif_neto_turno = dif_efectivo + dif_tot_vouch
     signo_neto = "+" if dif_neto_turno >= 0 else ""
-    estado_neto = "CONFORME (TURNO CUADRADO)" if abs(dif_neto_turno) < 30000 else ("SOBRANTE EN TURNO" if dif_neto_turno > 0 else "FALTANTE EN TURNO")
-    color_neto = "#059669" if abs(dif_neto_turno) < 30000 else ("#D97706" if dif_neto_turno > 0 else "#DC2626")
+
+    turno_cuadra_neto = abs(dif_neto_turno) <= 10000
+    has_faltante_neto_real = dif_neto_turno < -10000
+    has_sobrante_neto_real = dif_neto_turno > 10000
+    cruce_medios_compensado = turno_cuadra_neto and (abs(dif_efectivo) > 5000 or abs(dif_tot_vouch) > 0)
+
+    if turno_cuadra_neto:
+        if cruce_medios_compensado:
+            estado_neto = "CONFORME (TURNO CUADRADO CON CRUCE DE MEDIOS)"
+            color_neto = "#059669"
+            nota_cruce = (
+                f"<br/><font color='#D97706'><b>OBSERVACIÓN DE AUDITORÍA:</b></font> "
+                f"El turno cuadra en su totalidad patrimonial ({signo_neto}Gs. {_fmt_val(dif_neto_turno)}). "
+                f"La diferencia en gaveta ({signo_ef}Gs. {_fmt_val(dif_efectivo)}) queda compensada "
+                f"por comprobantes en POS ({'+' if dif_tot_vouch > 0 else ''}Gs. {_fmt_val(dif_tot_vouch)}). "
+                f"Sin perjuicio económico patrimonial."
+            )
+        else:
+            estado_neto = "CONFORME (TURNO CUADRADO)"
+            color_neto = "#059669"
+            nota_cruce = ""
+    elif has_faltante_neto_real:
+        estado_neto = f"OBSERVADO (FALTANTE REAL EN TURNO: {signo_neto}Gs. {_fmt_val(dif_neto_turno)})"
+        color_neto = "#DC2626"
+        nota_cruce = (
+            f"<br/><font color='#DC2626'><b>FALTANTE NO RESUELTO:</b></font> "
+            f"El turno presenta un descuadre neto no compensado de Gs. {_fmt_val(abs(dif_neto_turno))}, "
+            f"quedando pendiente de descargo administrativo por el cajero/a."
+        )
+    else:
+        estado_neto = f"SOBRANTE EN TURNO ({signo_neto}Gs. {_fmt_val(dif_neto_turno)})"
+        color_neto = "#0284C7"
+        nota_cruce = ""
 
     txt_dictamen = (
         f"<b>DICTAMEN DE CONFORMIDAD Y AUDITORÍA DE TESORERÍA:</b> "
@@ -2171,7 +2253,8 @@ def generate_acta_verificacion_tesoreria_pdf(
         f"Efectivo asumido en Bóveda: <b>Gs. {_fmt_val(c_total)}</b> (Dif. Gaveta: {signo_ef}Gs. {_fmt_val(dif_efectivo)}). "
         f"Comprobantes archivados: <b>{total_cant_vouchers} vouchers (Gs. {_fmt_val(total_monto_vouchers)})</b> (Dif. Vouchers: {'+' if dif_tot_vouch > 0 else ''}Gs. {_fmt_val(dif_tot_vouch)}). "
         f"<br/><b>CONCILIACIÓN NETA DEL TURNO (Efectivo + Comprobantes):</b> "
-        f"<font color='{color_neto}'><b>{signo_neto}Gs. {_fmt_val(dif_neto_turno)} — {estado_neto}</b></font>. "
+        f"<font color='{color_neto}'><b>{signo_neto}Gs. {_fmt_val(dif_neto_turno)} — {estado_neto}</b></font>."
+        f"{nota_cruce}"
     )
     if obs_dictamen:
         txt_dictamen += f"<br/><i>Observaciones de Tesorería: {obs_dictamen.strip()}</i>"

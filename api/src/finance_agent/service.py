@@ -458,7 +458,9 @@ async def get_inter_agent_sync(db: AsyncSession, company_id: str) -> InterAgentS
     y el Gerente de Ventas usando los datos 100% reales de inventario, clientes y directivas persistidas."""
     tower = await get_liquidity_control_tower(db, company_id)
 
-    # 1. Top Productos con Mayor Capital Inmovilizado / Sobre-Stock Real de Ñemuha
+    # 1. Top Productos Terminados de Venta al Público con Mayor Capital Inmovilizado / Sobre-Stock
+    # IMPORTANTE: Se excluyen rigurosamente insumos de producción, materias primas (panadería, carnicería),
+    # empaques y uso interno, ya que no son productos comerciales para liquidar a clientes en el salón.
     q_overstock = text("""
         SELECT 
             p.id, 
@@ -469,7 +471,18 @@ async def get_inter_agent_sync(db: AsyncSession, company_id: str) -> InterAgentS
             (COALESCE(SUM(st.cantidad), 0) * p.costo_promedio) as valor_stock
         FROM products p
         JOIN stock st ON p.id = st.product_id
-        WHERE p.company_id = :cid AND p.costo_promedio > 0
+        WHERE p.company_id = :cid 
+          AND p.costo_promedio > 0
+          AND p.activo = true
+          AND p.precio_venta > 0
+          AND COALESCE(p.tipo_producto, 'producto') NOT IN ('insumo', 'materia_prima', 'servicio')
+          AND COALESCE(p.tipo, 'producto') NOT IN ('insumo', 'materia_prima', 'servicio')
+          AND p.nombre NOT ILIKE '%INSUMO%'
+          AND p.nombre NOT ILIKE '%P/INSUMO%'
+          AND p.nombre NOT ILIKE '%(INSUMO)%'
+          AND p.nombre NOT ILIKE '%BOLSA%INTERNA%'
+          AND p.nombre NOT ILIKE '%USO INTERNO%'
+          AND p.nombre NOT ILIKE '%MATERIA PRIMA%'
         GROUP BY p.id, p.nombre, p.costo_promedio, p.precio_venta
         HAVING COALESCE(SUM(st.cantidad), 0) > 0
         ORDER BY (COALESCE(SUM(st.cantidad), 0) * p.costo_promedio) DESC

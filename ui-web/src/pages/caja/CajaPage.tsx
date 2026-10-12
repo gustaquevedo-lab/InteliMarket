@@ -5077,6 +5077,12 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
 
                   // D) Diferencia Total Consolidada del Turno (Efectivo + Comprobantes)
                   const difTotalConsolidadaGs = difEfectivoGs + difVouchersGs
+                  // Tolerancia estándar de caja (+- 10.000 Gs) para redondeos y sencillos
+                  const turnoCuadraNeto = Math.abs(difTotalConsolidadaGs) <= 10000
+                  const hasFaltanteNetoReal = difTotalConsolidadaGs < -10000
+                  const hasSobranteNetoReal = difTotalConsolidadaGs > 10000
+                  // Cruce de medios: el turno cuadra en su totalidad, pero hay discrepancia interna entre efectivo y vouchers (ej: cobrado con QR en vez de efectivo)
+                  const hayCruceMediosCompensado = turnoCuadraNeto && (hasFaltanteEfectivo || hasSobranteEfectivo || hasFaltanteVouchers || difVouchersGs !== 0)
 
                   return (
                     <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-b from-slate-900 to-slate-950 text-white border border-slate-700/80 shadow-xl space-y-4">
@@ -5373,16 +5379,16 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
 
                         {/* Tarjeta 3: Dictamen de Custodia y Comparativo Final */}
                         <div className={`p-3.5 rounded-xl border flex flex-col justify-between space-y-2.5 ${
-                          hasFaltanteEfectivo || hasShortageSobre
+                          hasFaltanteNetoReal || hasShortageSobre
                             ? "bg-rose-950/40 border-rose-500/60 ring-1 ring-rose-500/30"
-                            : hasFaltanteVouchers
+                            : hayCruceMediosCompensado
                             ? "bg-amber-950/40 border-amber-500/60 ring-1 ring-amber-500/30"
-                            : hasSobranteEfectivo || hasSurplusSobre
+                            : hasSobranteNetoReal || hasSurplusSobre
                             ? "bg-blue-950/40 border-blue-500/60 ring-1 ring-blue-500/30"
                             : "bg-emerald-950/20 border-emerald-600/40"
                         }`}>
                           <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider">
-                            <span className={hasFaltanteEfectivo || hasShortageSobre ? "text-rose-300" : hasFaltanteVouchers ? "text-amber-300" : hasSobranteEfectivo || hasSurplusSobre ? "text-blue-300" : "text-emerald-300"}>
+                            <span className={hasFaltanteNetoReal || hasShortageSobre ? "text-rose-300" : hayCruceMediosCompensado ? "text-amber-300" : hasSobranteNetoReal || hasSurplusSobre ? "text-blue-300" : "text-emerald-300"}>
                               3. Comparativo y Auditoría
                             </span>
                             <span className="text-[10px] text-slate-400 font-mono">Doble Control</span>
@@ -5481,16 +5487,29 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
 
                             {/* Banner de Dictamen */}
                             <div>
-                              {hasFaltanteEfectivo ? (
+                              {hasFaltanteNetoReal ? (
                                 <div className="p-2 rounded-lg bg-rose-900/60 border border-rose-500 text-rose-200 text-xs font-bold flex items-start gap-2">
                                   <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                                   <div>
-                                    <span className="block font-black">🔴 FALTANTE EN RENDICIÓN DE EFECTIVO</span>
+                                    <span className="block font-black">🔴 DESCUADRE / FALTANTE REAL EN TURNO</span>
                                     <span className="text-[11px] font-normal leading-tight block text-rose-300">
-                                      Efectivo en gaveta faltante: <strong>{formatPYG(difEfectivoGs)}</strong>.
+                                      Faltante neto sin compensar: <strong>{formatPYG(difTotalConsolidadaGs)}</strong>.
+                                      {hasFaltanteEfectivo ? ` Efectivo gaveta: ${formatPYG(difEfectivoGs)}. ` : ""}
                                       {hasShortageSobre ? ` Vino menos en sobre de lo declarado (${formatPYG(difSobreTotalGs)}). ` : ""}
-                                      {hasFaltanteVouchers ? ` Además faltan ${countVouchersFaltantes} comprobante(s) (${formatPYG(difVouchersGs)}). ` : ""}
-                                      Diferencia Total Turno: <strong>{formatPYG(difTotalConsolidadaGs)}</strong>.
+                                      {hasFaltanteVouchers ? ` Faltan ${countVouchersFaltantes} comprobante(s) (${formatPYG(difVouchersGs)}). ` : ""}
+                                    </span>
+                                  </div>
+                                </div>
+                              ) : hayCruceMediosCompensado ? (
+                                <div className="p-2 rounded-lg bg-amber-900/40 border border-amber-500/70 text-amber-200 text-xs font-bold flex items-start gap-2">
+                                  <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                                  <div>
+                                    <span className="block font-black text-amber-300">🟡 TURNO CUADRADO CON OBSERVACIÓN (CRUCE DE MEDIOS DE PAGO)</span>
+                                    <span className="text-[11px] font-normal leading-tight block text-amber-200/90">
+                                      El turno cuadra en su totalidad patrimonial ({difTotalConsolidadaGs >= 0 ? `+${formatPYG(difTotalConsolidadaGs)}` : formatPYG(difTotalConsolidadaGs)}).
+                                      {hasFaltanteEfectivo && difVouchersGs > 0
+                                        ? ` La diferencia física en gaveta (${formatPYG(difEfectivoGs)}) queda compensada por el superávit de comprobantes en POS (${difVouchersGs > 0 ? "+" : ""}${formatPYG(difVouchersGs)}). Sin faltante patrimonial.`
+                                        : ` Cruce operativo entre efectivo (${formatPYG(difEfectivoGs)}) y comprobantes (${difVouchersGs > 0 ? "+" : ""}${formatPYG(difVouchersGs)}).`}
                                     </span>
                                   </div>
                                 </div>
@@ -5499,20 +5518,10 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                   <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
                                   <span>🔴 FALTANTE EN SOBRE: Vino menos de lo declarado ({formatPYG(difSobreTotalGs)}).</span>
                                 </div>
-                              ) : hasSobranteEfectivo ? (
+                              ) : hasSobranteNetoReal ? (
                                 <div className="p-2 rounded-lg bg-blue-900/60 border border-blue-500 text-blue-200 text-xs font-bold flex items-center gap-2">
                                   <Info className="w-4 h-4 text-blue-400 shrink-0" />
-                                  <span>🔵 SOBRANTE EN EFECTIVO: +{formatPYG(difEfectivoGs)}. {hasFaltanteVouchers ? `(Con ${countVouchersFaltantes} comprobante(s) faltante(s)). ` : ""}Diferencia Turno: {formatPYG(difTotalConsolidadaGs)}.</span>
-                                </div>
-                              ) : hasFaltanteVouchers ? (
-                                <div className="p-2 rounded-lg bg-amber-900/60 border border-amber-500 text-amber-200 text-xs font-bold flex items-start gap-2">
-                                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                                  <div>
-                                    <span className="block font-black">🟡 EFECTIVO CUADRADO · COMPROBANTES CON FALTANTE</span>
-                                    <span className="text-[11px] font-normal leading-tight block text-amber-300">
-                                      La rendición de efectivo está conforme, pero faltan {countVouchersFaltantes} comprobante(s) físico(s) ({formatPYG(difVouchersGs)}). Impacto Neto Turno: <strong>{formatPYG(difTotalConsolidadaGs)}</strong>.
-                                    </span>
-                                  </div>
+                                  <span>🔵 SOBRANTE EN TURNO: +{formatPYG(difTotalConsolidadaGs)}. Efectivo: {formatPYG(difEfectivoGs)}, Comprobantes: {formatPYG(difVouchersGs)}.</span>
                                 </div>
                               ) : (
                                 <div className="p-2 rounded-lg bg-emerald-900/60 border border-emerald-500 text-emerald-200 text-xs font-bold flex items-center gap-2">
@@ -5527,11 +5536,12 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                             <span className="text-slate-400">Dictamen Oficial:</span>
                             <div className="flex items-center gap-1.5 flex-wrap justify-end">
                               <span className={`px-2 py-0.5 rounded font-black tracking-wider text-[10px] ${
-                                estadoRendicionEfectivo === "CUADRADO" ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40" :
-                                estadoRendicionEfectivo === "SOBRANTE" ? "bg-blue-500/20 text-blue-300 border border-blue-500/40" :
+                                Math.abs(difEfectivoGs) <= 5000 ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40" :
+                                hayCruceMediosCompensado && difEfectivoGs < 0 ? "bg-amber-500/20 text-amber-300 border border-amber-500/40" :
+                                difEfectivoGs > 0 ? "bg-blue-500/20 text-blue-300 border border-blue-500/40" :
                                 "bg-rose-500/20 text-rose-300 border border-rose-500/40"
                               }`}>
-                                Efec: {estadoRendicionEfectivo} ({difEfectivoGs >= 0 ? `+${formatPYG(difEfectivoGs)}` : formatPYG(difEfectivoGs)})
+                                Efec: {hayCruceMediosCompensado && difEfectivoGs < 0 ? `COMPENSADO (${formatPYG(difEfectivoGs)})` : `${estadoRendicionEfectivo} (${difEfectivoGs >= 0 ? `+${formatPYG(difEfectivoGs)}` : formatPYG(difEfectivoGs)})`}
                               </span>
                               <span className={`px-2 py-0.5 rounded font-black tracking-wider text-[10px] ${
                                 estadoComprobantes === "CONFORME" ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40" :
@@ -5540,11 +5550,11 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                 Vouchers: {estadoComprobantes} {difVouchersGs !== 0 ? `(${difVouchersGs > 0 ? "+" : ""}${formatPYG(difVouchersGs)})` : ""}
                               </span>
                               <span className={`px-2 py-0.5 rounded font-black tracking-wider text-[10px] ${
-                                Math.abs(difTotalConsolidadaGs) < 5000 ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40" :
-                                difTotalConsolidadaGs < 0 ? "bg-rose-500/20 text-rose-300 border border-rose-500/40" :
+                                turnoCuadraNeto ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40" :
+                                hasFaltanteNetoReal ? "bg-rose-500/20 text-rose-300 border border-rose-500/40" :
                                 "bg-blue-500/20 text-blue-300 border border-blue-500/40"
                               }`}>
-                                Turno: {difTotalConsolidadaGs >= 0 ? `+${formatPYG(difTotalConsolidadaGs)}` : formatPYG(difTotalConsolidadaGs)}
+                                Turno: {turnoCuadraNeto ? `CUADRADO (${difTotalConsolidadaGs >= 0 ? `+${formatPYG(difTotalConsolidadaGs)}` : formatPYG(difTotalConsolidadaGs)})` : (difTotalConsolidadaGs >= 0 ? `+${formatPYG(difTotalConsolidadaGs)}` : formatPYG(difTotalConsolidadaGs))}
                               </span>
                             </div>
                           </div>

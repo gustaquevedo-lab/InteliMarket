@@ -576,7 +576,12 @@ async def get_marketing_dashboard(db: AsyncSession, company_id: str) -> Marketin
             estado="propuesta"
         ))
         
-    for idx, opp in enumerate(cfo_sync.oportunidades_flash_stock[:2]):
+    insumo_keywords = ("insumo", "p/insumo", "bolsa interna", "uso interno", "materia prima")
+    cfo_opps_validas = [
+        opp for opp in cfo_sync.oportunidades_flash_stock
+        if not any(k in opp.producto.lower() for k in insumo_keywords)
+    ]
+    for idx, opp in enumerate(cfo_opps_validas[:2]):
         motivo_stock = f"Directiva del CFO: ₲ {opp.monto_inmovilizado_gs:,.0f} inmovilizados ({opp.stock_actual:,.0f} un). Margen protegido."
         campanas.append(CampaignSuggestion(
             id=f"promo-sobrestock-{opp.product_id}",
