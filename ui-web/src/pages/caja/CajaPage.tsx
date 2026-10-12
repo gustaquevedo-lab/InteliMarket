@@ -2158,13 +2158,20 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                 try {
                                   const safeCajero = (s.cajero_nombre || "caja").replace(/\s+/g, "_")
                                   const safeFecha = (s.fecha_apertura || "").slice(0, 10) || "sesion"
-                                  await downloadPdf(`/v1/cash-sessions/${s.id}/export/cierre.pdf`, `cierre_${safeCajero}_${safeFecha}.pdf`)
-                                  toast.success("Acta descargada", `Cierre de ${s.cajero_nombre || "caja"} descargado.`)
+                                  const isVerif = s.estado === "verificada"
+                                  const url = isVerif
+                                    ? `/v1/cash-sessions/${s.id}/export/acta-verificacion.pdf`
+                                    : `/v1/cash-sessions/${s.id}/export/cierre.pdf`
+                                  const filename = isVerif
+                                    ? `acta_verificacion_${safeCajero}_${safeFecha}.pdf`
+                                    : `cierre_${safeCajero}_${safeFecha}.pdf`
+                                  await downloadPdf(url, filename)
+                                  toast.success("Acta descargada", `Acta de ${s.cajero_nombre || "caja"} descargada.`)
                                 } catch {
                                   toast.error("Error", "No se pudo generar el PDF del cierre.")
                                 }
                               }}
-                              title="Descargar Acta Oficial en PDF"
+                              title={s.estado === "verificada" ? "Descargar Acta Oficial de Verificación en Bóveda (PDF)" : "Descargar Acta Oficial en PDF"}
                               className="p-1.5 rounded-lg border border-blue-200 dark:border-blue-900/40 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 inline-flex items-center gap-1 font-bold text-[11px]"
                             >
                               <FileText className="w-3.5 h-3.5" />
@@ -4505,17 +4512,24 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                     try {
                       const safeCajero = (selectedSession.cajero_nombre || "caja").replace(/\s+/g, "_")
                       const safeFecha = (selectedSession.fecha_apertura || "").slice(0, 10) || "sesion"
-                      await downloadPdf(`/v1/cash-sessions/${selectedSession.id}/export/cierre.pdf`, `cierre_${safeCajero}_${safeFecha}.pdf`)
-                      toast.success("Acta descargada", "Comprobante de cierre generado correctamente.")
+                      const isVerif = selectedSession.estado === "verificada"
+                      const url = isVerif
+                        ? `/v1/cash-sessions/${selectedSession.id}/export/acta-verificacion.pdf`
+                        : `/v1/cash-sessions/${selectedSession.id}/export/cierre.pdf`
+                      const filename = isVerif
+                        ? `acta_verificacion_${safeCajero}_${safeFecha}.pdf`
+                        : `cierre_${safeCajero}_${safeFecha}.pdf`
+                      await downloadPdf(url, filename)
+                      toast.success("Acta descargada", "Comprobante oficial generado correctamente.")
                     } catch {
-                      toast.error("Error", "No se pudo generar el PDF del cierre.")
+                      toast.error("Error", "No se pudo generar el PDF.")
                     }
                   }
                 }}
                 className="btn-outline !text-blue-600 dark:!text-blue-400 !border-blue-500/30 hover:!bg-blue-50 dark:hover:!bg-blue-950/30 text-xs flex items-center gap-1.5"
               >
                 <FileText className="w-4 h-4" />
-                Descargar Acta Oficial (PDF)
+                {selectedSession?.estado === "verificada" ? "Descargar Acta de Verificación en Bóveda (PDF)" : "Descargar Acta Oficial (PDF)"}
               </button>
               <button onClick={() => setShowBreakdownModal(false)} className="btn-primary text-xs">
                 Cerrar
@@ -5055,11 +5069,18 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                   const difVouchersGs = totVouchersFisicoGs - totVouchersEsperadoGs
 
                   // 5. Doble Control y Conciliación
-                  // A) Cotejo de Sobre de Efectivo: Recibido vs Declarado por Cajero/a
+                  // Reclasificaciones de efectivo a comprobantes entregados en el sobre
+                  const allAdjustments = punteoData.adjustments || []
+                  const totAdjEfectivoAVouchers = allAdjustments
+                    .filter((a: any) => ["EFECTIVO", "EFECTIVO_PYG"].includes((a.origen_forma_pago || "EFECTIVO").toUpperCase()) && !["EFECTIVO", "EFECTIVO_PYG"].includes(a.destino_canal_key))
+                    .reduce((acc: number, a: any) => acc + Number(a.monto_gs || 0), 0)
+
+                  // A) Cotejo de Sobre de Efectivo: Recibido vs Declarado por Cajero/a (sumando vouchers en sobre)
+                  const recEntregaTotalGs = recTotalGs + totAdjEfectivoAVouchers
                   const difSobrePyg = recPyg - declPyg
                   const difSobreBrl = recBrl - declBrl
                   const difSobreUsd = recUsd - declUsd
-                  const difSobreTotalGs = recTotalGs - declTotalGs
+                  const difSobreTotalGs = recEntregaTotalGs - declTotalGs
 
                   // B) Conciliación de Rendición de Efectivo en Gaveta
                   // La Rendición es exclusivamente de efectivo. Los comprobantes no forman parte de la rendición de efectivo.
@@ -5077,10 +5098,10 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
 
                   // D) Diferencia Total Consolidada del Turno (Efectivo + Comprobantes)
                   const difTotalConsolidadaGs = difEfectivoGs + difVouchersGs
-                  // Tolerancia estándar de caja (+- 10.000 Gs) para redondeos y sencillos
-                  const turnoCuadraNeto = Math.abs(difTotalConsolidadaGs) <= 10000
-                  const hasFaltanteNetoReal = difTotalConsolidadaGs < -10000
-                  const hasSobranteNetoReal = difTotalConsolidadaGs > 10000
+                  // Tolerancia estándar de caja (< 30.000 Gs) idéntica a auditoría y ticket térmico
+                  const turnoCuadraNeto = Math.abs(difTotalConsolidadaGs) < 30000
+                  const hasFaltanteNetoReal = difTotalConsolidadaGs <= -30000
+                  const hasSobranteNetoReal = difTotalConsolidadaGs >= 30000
                   // Cruce de medios: el turno cuadra en su totalidad, pero hay discrepancia interna entre efectivo y vouchers (ej: cobrado con QR en vez de efectivo)
                   const hayCruceMediosCompensado = turnoCuadraNeto && (hasFaltanteEfectivo || hasSobranteEfectivo || hasFaltanteVouchers || difVouchersGs !== 0)
 
@@ -5399,11 +5420,17 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                             <div className="p-2 rounded-lg bg-slate-900/60 border border-slate-800 space-y-1">
                               <span className="text-[10px] font-bold text-slate-400 uppercase block">A) Cotejo del Sobre (Recibido - Declarado)</span>
                               <div className="flex items-center justify-between">
-                                <span className="text-slate-300">Dif. Guaraníes:</span>
-                                <span className={`font-mono font-bold ${difSobrePyg === 0 ? "text-emerald-400" : difSobrePyg < 0 ? "text-rose-400" : "text-blue-400"}`}>
+                                <span className="text-slate-300">Efectivo Físico PYG:</span>
+                                <span className={`font-mono font-bold ${difSobrePyg === 0 ? "text-emerald-400" : difSobrePyg < 0 ? (totAdjEfectivoAVouchers > 0 ? "text-amber-400" : "text-rose-400") : "text-blue-400"}`}>
                                   {difSobrePyg !== 0 ? (difSobrePyg > 0 ? `+${formatPYG(difSobrePyg)}` : formatPYG(difSobrePyg)) : "₲ 0 (Conforme)"}
                                 </span>
                               </div>
+                              {totAdjEfectivoAVouchers > 0 && (
+                                <div className="flex items-center justify-between text-sky-400 text-[11px]">
+                                  <span>(+) Vouchers en sobre reclasificados:</span>
+                                  <span className="font-mono font-bold">+{formatPYG(totAdjEfectivoAVouchers)}</span>
+                                </div>
+                              )}
                               {(declBrl > 0 || recBrl > 0) && (
                                 <div className="flex items-center justify-between">
                                   <span className="text-slate-300">Dif. Reales:</span>
@@ -5420,6 +5447,12 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                   </span>
                                 </div>
                               )}
+                              <div className="flex items-center justify-between pt-1 border-t border-slate-800 text-[11px]">
+                                <span className="text-slate-300 font-bold">Entrega Total vs Declarado:</span>
+                                <span className={`font-mono font-bold ${Math.abs(difSobreTotalGs) <= 5000 ? "text-emerald-400" : difSobreTotalGs < 0 ? "text-rose-400" : "text-blue-400"}`}>
+                                  {Math.abs(difSobreTotalGs) <= 5000 ? (totAdjEfectivoAVouchers > 0 ? "✓ Conforme (Compensado)" : "✓ Conforme") : (difSobreTotalGs > 0 ? `+${formatPYG(difSobreTotalGs)}` : formatPYG(difSobreTotalGs))}
+                                </span>
+                              </div>
                             </div>
 
                             {/* Control B: Conciliación de Valores vs Sistema */}

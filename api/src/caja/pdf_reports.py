@@ -154,12 +154,12 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
     # ─────────────────────────────────────────────────────────────────────────
     # 1. KPI CARDS PANORÁMICAS (Fondo claro para impresión, 54.6mm c/u = 273mm)
     # ─────────────────────────────────────────────────────────────────────────
-    dif_color = "#059669" if abs(total_diferencia) < 5000 else ("#DC2626" if total_diferencia < 0 else "#D97706")
+    dif_color = "#059669" if abs(total_diferencia) < 30000 else ("#DC2626" if total_diferencia <= -30000 else "#D97706")
     dif_signo = "+" if total_diferencia > 0 else ""
     card_dif_text = f"{dif_signo}{_fmt_gs(total_diferencia)}"
-    if abs(total_diferencia) < 5000:
-        dictamen_global = "CONFORME (SIN DIFERENCIA)"
-    elif total_diferencia < 0:
+    if abs(total_diferencia) < 30000:
+        dictamen_global = "CONFORME (SIN DIFERENCIA SIGNIFICATIVA)" if abs(total_diferencia) > 0 else "CONFORME (EXACTO)"
+    elif total_diferencia <= -30000:
         dictamen_global = "FALTANTE CONSOLIDADO"
     else:
         dictamen_global = "SOBRANTE CONSOLIDADO"
@@ -311,7 +311,7 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
         esp = s.get("monto_cierre_esperado") or 0
         cont = (s.get("monto_total") if s.get("monto_total") is not None else s.get("monto_cierre")) or 0
         dif = s.get("diferencia") if s.get("diferencia") is not None else (cont - esp)
-        req_rev = bool(s.get("requiere_revision") or abs(dif) > 5000)
+        req_rev = bool(s.get("requiere_revision") or abs(dif) >= 30000)
 
         is_verificada = s.get("estado") == "verificada" or s.get("is_verificada")
         dif_txt = _fmt_dif(dif)
@@ -626,12 +626,27 @@ def generate_cierre_sesion_individual_pdf(
         sign_v = "+" if dif_vouch > 0 else ""
         dif_global = float(dif_consolidada + dif_vouch) if tiene_auditoria_vouchers else float(dif_consolidada)
         sign_g = "+" if dif_global > 0 else ""
-        color_g = "#065F46" if abs(dif_global) < 5000 else "#991B1B"
-        estado_global = "CUADRADO" if abs(dif_global) < 5000 else ("SOBRANTE" if dif_global > 0 else "FALTANTE")
 
-        estado_cuadre = "CUADRADO" if abs(dif_consolidada) < 5000 else ("SOBRANTE" if dif_consolidada > 0 else "FALTANTE")
+        turno_cuadra_global = abs(dif_global) < 30000
+        has_faltante_global_real = dif_global <= -30000
+        cruce_medios_global = turno_cuadra_global and (abs(dif_consolidada) > 5000 or abs(dif_vouch) > 0)
+
+        if turno_cuadra_global:
+            color_g = "#065F46"
+            estado_global = "CONFORME (CUADRADO CON CRUCE DE MEDIOS)" if cruce_medios_global else "CONFORME (CUADRADO)"
+            color_g_hex = "#059669"
+        elif has_faltante_global_real:
+            color_g = "#991B1B"
+            estado_global = "FALTANTE"
+            color_g_hex = "#DC2626"
+        else:
+            color_g = "#92400E"
+            estado_global = "SOBRANTE"
+            color_g_hex = "#D97706"
+
+        estado_cuadre = "CONFORME (CUADRADO)" if abs(dif_consolidada) < 30000 else ("COMPENSADO POR VOUCHERS" if (cruce_medios_global and dif_consolidada < 0) else ("SOBRANTE" if dif_consolidada > 0 else "FALTANTE"))
         signo_cons = "+" if dif_consolidada >= 0 else ""
-        dif_color_hex = "#059669" if abs(dif_consolidada) < 5000 else ("#D97706" if dif_consolidada > 0 else "#DC2626")
+        dif_color_hex = "#059669" if abs(dif_consolidada) < 30000 else ("#D97706" if (cruce_medios_global and dif_consolidada < 0) else ("#D97706" if dif_consolidada > 0 else "#DC2626"))
 
         style_th = ParagraphStyle("TH", parent=styles["Normal"], fontName=FONT_BOLD, fontSize=7.5, leading=9, textColor=HexColor("#0F172A"))
         style_tl = ParagraphStyle("TL", parent=styles["Normal"], fontSize=7, leading=8.5, textColor=HexColor("#334155"))
@@ -692,10 +707,18 @@ def generate_cierre_sesion_individual_pdf(
             [Paragraph("<b>TOTAL RENDIDO A TESORERÍA:</b>", style_th), Paragraph(f"<b>{_fmt_gs(c_total)}</b>", style_tr)],
             [Paragraph("<b>DIFERENCIA EFECTIVO (Rendido - Esperado):</b>", style_th), Paragraph(f"<font color='{dif_color_hex}'><b>{signo_cons}{_fmt_gs(dif_consolidada)} ({estado_cuadre})</b></font>", style_tr)],
         ]
+        if tot_ajustes > 0:
+            ren_rows.append([
+                Paragraph("<i>(+) Vouchers en sobre reclasificados:</i>", ParagraphStyle("TDE_ADJ", parent=style_tl, fontName="Helvetica-Oblique", fontSize=6.0, textColor=HexColor("#0284C7"))),
+                Paragraph(f"<font color='#0284C7'><i>+{_fmt_gs(tot_ajustes)}</i></font>", ParagraphStyle("TDEV_ADJ", parent=style_tr_num, fontName="Helvetica-Oblique", fontSize=6.0)),
+            ])
+            ren_rows.append([
+                Paragraph("<i>Entrega vs Declarado Cajera:</i>", ParagraphStyle("TDE", parent=style_tl, fontName="Helvetica-Oblique", fontSize=6.0)),
+                Paragraph("<font color='#059669'><i>Conforme (Compensado)</i></font>", ParagraphStyle("TDEV", parent=style_tr, fontName="Helvetica-Oblique", fontSize=6.0)),
+            ])
         if tiene_auditoria_vouchers:
-            color_v_hex = "#059669" if dif_vouch == 0 else "#DC2626"
-            estado_v = "CONFORME" if dif_vouch == 0 else ("SOBRANTE" if dif_vouch > 0 else "FALTANTE")
-            color_g_hex = "#059669" if abs(dif_global) < 5000 else ("#D97706" if dif_global > 0 else "#DC2626")
+            color_v_hex = "#059669" if abs(dif_vouch) < 30000 else ("#D97706" if dif_vouch > 0 else "#DC2626")
+            estado_v = "CONFORME" if abs(dif_vouch) < 30000 else ("SOBRANTE" if dif_vouch > 0 else "FALTANTE")
             ren_rows.extend([
                 [Paragraph("Dif. Comprobantes No Efectivo (Vouchers):", style_tl), Paragraph(f"<font color='{color_v_hex}'><b>{sign_v}{_fmt_gs(dif_vouch)} ({estado_v})</b></font>", style_tr_num)],
                 [Paragraph("<b>DIF. GLOBAL TURNO (Efectivo + Vouchers):</b>", style_th), Paragraph(f"<font color='{color_g_hex}'><b>{sign_g}{_fmt_gs(dif_global)} ({estado_global})</b></font>", style_tr)],
@@ -792,10 +815,10 @@ def generate_cierre_sesion_individual_pdf(
             elements.append(Spacer(1, 5))
 
         # Banner de Conciliación Consolidada
-        final_box_estado = estado_global if (tiene_auditoria_vouchers and dif_vouch != 0) else estado_cuadre
-        bg_color = HexColor("#ECFDF5") if final_box_estado == "CUADRADO" else (HexColor("#FEF3C7") if final_box_estado == "SOBRANTE" else HexColor("#FEE2E2"))
-        txt_color = HexColor("#065F46") if final_box_estado == "CUADRADO" else (HexColor("#92400E") if final_box_estado == "SOBRANTE" else HexColor("#991B1B"))
-        txt_color_hex = "#065F46" if final_box_estado == "CUADRADO" else ("#92400E" if final_box_estado == "SOBRANTE" else "#991B1B")
+        final_box_estado = estado_global if (tiene_auditoria_vouchers or cruce_medios_global) else ("CONFORME" if abs(dif_consolidada) < 30000 else estado_cuadre)
+        bg_color = HexColor("#ECFDF5") if ("CONFORME" in final_box_estado or final_box_estado == "CUADRADO") else (HexColor("#FEF3C7") if "SOBRANTE" in final_box_estado else HexColor("#FEE2E2"))
+        txt_color = HexColor("#065F46") if ("CONFORME" in final_box_estado or final_box_estado == "CUADRADO") else (HexColor("#92400E") if "SOBRANTE" in final_box_estado else HexColor("#991B1B"))
+        txt_color_hex = "#065F46" if ("CONFORME" in final_box_estado or final_box_estado == "CUADRADO") else ("#92400E" if "SOBRANTE" in final_box_estado else "#991B1B")
 
         style_box_cell = ParagraphStyle("BoxCell", parent=styles["Normal"], alignment=TA_CENTER, leading=10)
         
@@ -1026,12 +1049,65 @@ def generate_cierre_sesion_individual_pdf(
         ]))
         elements.append(t_cd)
 
-    elements.append(Spacer(1, 14))
+    # 4. RECLASIFICACIONES Y AJUSTES FORMALES DE TESORERÍA (si hubiere)
+    ajustes_lista = recon.get("ajustes_comprobantes") or []
+    if tot_ajustes > 0 or ajustes_lista:
+        elements.append(Paragraph("<b>4. RECLASIFICACIONES Y AJUSTES FORMALES DE TESORERÍA</b>", styles["Normal"]))
+        elements.append(Spacer(1, 3))
+        adj_headers = ["Destino Comprobante", "Origen Anterior", "Nro. Comprobante / Detalle", "Monto Reclasificado"]
+        adj_rows = [adj_headers]
+        for a in ajustes_lista:
+            dest = a.get("destino_canal_label") or a.get("destino_canal_key") or "Comprobante"
+            orig = a.get("origen_forma_pago") or "Efectivo"
+            nro = a.get("nro_comprobante") or "—"
+            mot = a.get("motivo") or "Reclasificación formal"
+            m_a = float(a.get("monto_gs") or 0)
+            adj_rows.append([
+                Paragraph(f"<b>{dest}</b>", styles["Small"]),
+                Paragraph(orig, styles["Small"]),
+                Paragraph(f"Comp: {nro} · {mot}", styles["Small"]),
+                Paragraph(f"<b>Gs. {_fmt_val(m_a)}</b>", ParagraphStyle("ADJR", parent=styles["Small"], alignment=TA_RIGHT)),
+            ])
+        t_adj = Table(adj_rows, colWidths=[55 * mm, 35 * mm, 60 * mm, 36 * mm])
+        t_adj.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
+            ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
+            ("FONTSIZE", (0, 0), (-1, -1), 7),
+            ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#0284C7")),
+            ("LINEBELOW", (0, 0), (-1, 0), 1.0, HexColor("#0284C7")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, HexColor("#F0F9FF")]),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+            ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+            ("ALIGN", (3, 0), (3, -1), "RIGHT"),
+        ]))
+        elements.append(t_adj)
+        elements.append(Spacer(1, 8))
 
     # 5. OBSERVACIONES Y DOBLE FIRMA DE CUSTODIA
     if s.get("observaciones"):
-        elements.append(Paragraph(f"<b>Observaciones:</b> {s['observaciones']}", styles["Small"]))
-        elements.append(Spacer(1, 12))
+        obs_raw = s["observaciones"]
+        import re
+        raw_blocks = re.findall(r"\[.*?\](?:\: [^\[]*)?", obs_raw, flags=re.DOTALL)
+        if not raw_blocks:
+            raw_blocks = [l.strip() for l in obs_raw.split("\n") if l.strip()]
+
+        unique_blocks = []
+        for b in raw_blocks:
+            b_clean = " ".join(b.split()).strip()
+            if not b_clean:
+                continue
+            if tot_ajustes > 0 and "FALTANTE EN ENTREGA" in b_clean:
+                b_clean = re.sub(
+                    r"Dictamen Custodia:\s*FALTANTE EN ENTREGA [^\]\.]*",
+                    f"Dictamen Custodia: CONFORME (Compensado por voucher en sobre reclasificado: +{tot_ajustes:,.0f} Gs.)",
+                    b_clean
+                )
+            if b_clean not in unique_blocks:
+                unique_blocks.append(b_clean)
+
+        obs_clean = "<br/>".join(unique_blocks)
+        elements.append(Paragraph(f"<b>Historial y Observaciones de Auditoría:</b><br/>{obs_clean}", styles["Small"]))
+        elements.append(Spacer(1, 10))
 
     firmas_data = [
         ["_________________________________________", "_________________________________________"],
@@ -1945,8 +2021,8 @@ def generate_acta_verificacion_tesoreria_pdf(
     dif_ef_prec = c_tot_ef_prec - esp_ef_prec
 
     dif_neto_prec = dif_ef_prec + dif_tot_vouch_prec
-    turno_cuadra_neto_prec = abs(dif_neto_prec) <= 10000
-    has_faltante_real_prec = dif_neto_prec < -10000
+    turno_cuadra_neto_prec = abs(dif_neto_prec) < 30000
+    has_faltante_real_prec = dif_neto_prec <= -30000
     cruce_medios_prec = turno_cuadra_neto_prec and (abs(dif_ef_prec) > 5000 or abs(dif_tot_vouch_prec) > 0)
 
     if has_faltante_real_prec:
@@ -2034,8 +2110,17 @@ def generate_acta_verificacion_tesoreria_pdf(
     c_usd_gs = round(c_usd * tasa_usd)
     c_total = round(c_pyg + c_brl_gs + c_usd_gs)
 
+    adjustments = punteo_data.get("adjustments") or []
+    tot_adj_efectivo_a_voucher = sum(
+        float(a.get("monto_gs") or 0)
+        for a in adjustments
+        if (a.get("origen_forma_pago") or "EFECTIVO").upper() in ["EFECTIVO", "EFECTIVO_PYG"]
+        and a.get("destino_canal_key") not in ["EFECTIVO", "EFECTIVO_PYG"]
+    )
+
     c_decl_total = round(c_decl_pyg + (c_decl_brl * tasa_brl) + (c_decl_usd * tasa_usd))
-    dif_entrega_gs = c_total - c_decl_total
+    c_entrega_total_con_vouchers = c_total + tot_adj_efectivo_a_voucher
+    dif_entrega_gs = c_entrega_total_con_vouchers - c_decl_total
 
     dif_efectivo = c_total - esp_total
     estado_cuadre_ef = "CUADRADO" if abs(dif_efectivo) < 5000 else ("SOBRANTE" if dif_efectivo > 0 else "FALTANTE")
@@ -2075,12 +2160,22 @@ def generate_acta_verificacion_tesoreria_pdf(
         [Paragraph("<b>DIFERENCIA EFECTIVO EN GAVETA:</b>", ParagraphStyle("B4_V", parent=style_td_lbl, fontName=FONT_BOLD, textColor=HexColor("#D97706" if (cruce_medios_prec and dif_efectivo < 0) else dif_color_ef))),
          Paragraph(f"<font color='{'#D97706' if (cruce_medios_prec and dif_efectivo < 0) else dif_color_ef}'><b>{signo_ef}Gs. {_fmt_val(dif_efectivo)} {(' (COMPENSADO POR VOUCHERS)' if (cruce_medios_prec and dif_efectivo < 0) else f' ({estado_cuadre_ef})')}</b></font>", style_td_val)],
     ]
-    if dif_entrega_gs != 0:
+    if tot_adj_efectivo_a_voucher > 0:
+        t_rec_data.append([
+            Paragraph("<i>(+) Vouchers en sobre reclasificados:</i>", ParagraphStyle("TDE_ADJ", parent=style_td_lbl, fontName="Helvetica-Oblique", fontSize=6.0, textColor=HexColor("#0284C7"))),
+            Paragraph(f"<font color='#0284C7'><i>+Gs. {_fmt_val(tot_adj_efectivo_a_voucher)}</i></font>", ParagraphStyle("TDEV_ADJ", parent=style_td_val, fontName="Helvetica-Oblique", fontSize=6.0)),
+        ])
+    if abs(dif_entrega_gs) > 5000:
         signo_ent = "+" if dif_entrega_gs > 0 else ""
         col_ent = "#059669" if dif_entrega_gs > 0 else "#DC2626"
         t_rec_data.append([
             Paragraph("<i>Dif. Entrega vs Declarado Cajera:</i>", ParagraphStyle("TDE", parent=style_td_lbl, fontName="Helvetica-Oblique", fontSize=6.0)),
             Paragraph(f"<font color='{col_ent}'><i>{signo_ent}Gs. {_fmt_val(dif_entrega_gs)}</i></font>", ParagraphStyle("TDEV", parent=style_td_val, fontName="Helvetica-Oblique", fontSize=6.0)),
+        ])
+    elif tot_adj_efectivo_a_voucher > 0:
+        t_rec_data.append([
+            Paragraph("<i>Dif. Entrega vs Declarado Cajera:</i>", ParagraphStyle("TDE", parent=style_td_lbl, fontName="Helvetica-Oblique", fontSize=6.0)),
+            Paragraph("<font color='#059669'><i>Conforme (Compensado)</i></font>", ParagraphStyle("TDEV", parent=style_td_val, fontName="Helvetica-Oblique", fontSize=6.0)),
         ])
 
     t_rec = Table(t_rec_data, colWidths=[58 * mm, 33 * mm])
@@ -2178,7 +2273,22 @@ def generate_acta_verificacion_tesoreria_pdf(
             dictamen_cell,
         ])
 
-    if not grupos:
+    if adjustments:
+        for a in adjustments:
+            dest_lbl = a.get("destino_canal_label") or a.get("destino_canal_key") or "Comprobante"
+            m_adj = float(a.get("monto_gs") or 0)
+            orig_lbl = a.get("origen_forma_pago") or "Efectivo"
+            motivo = a.get("motivo") or "Reclasificación en Tesorería"
+            nro_c = a.get("nro_comprobante") or "—"
+            t_vouch_rows.append([
+                Paragraph(f"<b>{dest_lbl} (Reclasificado)</b><br/><font size=5 color='#64748B'>Orig: {orig_lbl} · Comp: {nro_c} · {motivo}</font>", style_td_lbl),
+                Paragraph("Reclasificación", style_td_lbl),
+                Paragraph("1 comprobante", ParagraphStyle("TC_ADJ", parent=style_td_lbl, alignment=TA_CENTER)),
+                Paragraph(f"Gs. {_fmt_val(m_adj)}", style_td_val),
+                Paragraph("<font color='#0284C7'><b>✓ RECLASIF.</b></font>", ParagraphStyle("TCD_ADJ", parent=style_td_lbl, alignment=TA_CENTER)),
+            ])
+
+    if not grupos and not adjustments:
         t_vouch_rows.append([
             Paragraph("No se registraron ventas no efectivo en esta sesión.", style_td_lbl),
             "", "", "", ""
@@ -2214,9 +2324,9 @@ def generate_acta_verificacion_tesoreria_pdf(
     dif_neto_turno = dif_efectivo + dif_tot_vouch
     signo_neto = "+" if dif_neto_turno >= 0 else ""
 
-    turno_cuadra_neto = abs(dif_neto_turno) <= 10000
-    has_faltante_neto_real = dif_neto_turno < -10000
-    has_sobrante_neto_real = dif_neto_turno > 10000
+    turno_cuadra_neto = abs(dif_neto_turno) < 30000
+    has_faltante_neto_real = dif_neto_turno <= -30000
+    has_sobrante_neto_real = dif_neto_turno >= 30000
     cruce_medios_compensado = turno_cuadra_neto and (abs(dif_efectivo) > 5000 or abs(dif_tot_vouch) > 0)
 
     if turno_cuadra_neto:
@@ -2256,6 +2366,9 @@ def generate_acta_verificacion_tesoreria_pdf(
         f"<font color='{color_neto}'><b>{signo_neto}Gs. {_fmt_val(dif_neto_turno)} — {estado_neto}</b></font>."
         f"{nota_cruce}"
     )
+    if adjustments:
+        tot_adj_all = sum(float(a.get("monto_gs") or 0) for a in adjustments)
+        txt_dictamen += f"<br/><font color='#0284C7'><b>RECLASIFICACIONES EN TESORERÍA:</b></font> Se registraron {len(adjustments)} reclasificación(es) por Gs. {_fmt_val(tot_adj_all)} actuadas formalmente en Bóveda."
     if obs_dictamen:
         txt_dictamen += f"<br/><i>Observaciones de Tesorería: {obs_dictamen.strip()}</i>"
 

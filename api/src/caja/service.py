@@ -4905,8 +4905,22 @@ async def confirm_session_cash_reception(
     session_obj.estado = "verificada"
 
     now_py = datetime.now(TZ_ASUNCION).strftime("%d/%m/%Y %H:%M")
+    res_adj = await db.execute(
+        select(CashSessionPaymentAdjustment).where(
+            CashSessionPaymentAdjustment.session_id == sid,
+            CashSessionPaymentAdjustment.origen_forma_pago.in_(["EFECTIVO", "EFECTIVO_PYG"]),
+        )
+    )
+    adj_ef_list = list(res_adj.scalars().all())
+    tot_adj_ef_gs = sum(Decimal(str(a.monto_gs or 0)) for a in adj_ef_list)
+
+    entrega_total_pyg = monto_recibido_pyg + tot_adj_ef_gs
+    dif_entrega_pyg = entrega_total_pyg - m_decl_pyg
+
     if dif_pyg == 0 and dif_brl == 0:
         dictamen_txt = "CONFORME (Coincide con lo declarado)"
+    elif tot_adj_ef_gs > 0 and abs(dif_entrega_pyg) <= Decimal("5000") and dif_brl == 0:
+        dictamen_txt = f"CONFORME (Compensado por voucher en sobre reclasificado: +{tot_adj_ef_gs:,.0f} Gs.)"
     elif dif_pyg < 0 or dif_brl < 0:
         dictamen_txt = f"FALTANTE EN ENTREGA (Vino menos de lo declarado: {dif_pyg:+,.0f} Gs. / {dif_brl:+} R$)"
     else:
@@ -4915,7 +4929,8 @@ async def confirm_session_cash_reception(
     nota_rec = (
         f"\n[RECEPCIÓN Y RECUENTO DE EFECTIVO EN TESORERÍA ({now_py}) por {user_nombre}]: "
         f"Declarado: ₲ {float(m_decl_pyg):,.0f} | R$ {float(m_decl_brl):.2f}. "
-        f"Recibido Físico: ₲ {float(monto_recibido_pyg):,.0f} | R$ {float(monto_recibido_brl):.2f}. "
+        f"Recibido Físico: ₲ {float(monto_recibido_pyg):,.0f} | R$ {float(monto_recibido_brl):.2f}."
+        f"{f' Vouchers en sobre: ₲ {float(tot_adj_ef_gs):,.0f}.' if tot_adj_ef_gs > 0 else ''} "
         f"Dictamen Custodia: {dictamen_txt}."
     )
     if observaciones:
