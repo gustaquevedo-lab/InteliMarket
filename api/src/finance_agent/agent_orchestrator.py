@@ -439,47 +439,62 @@ REGLAS DE ACTUACIÓN:
         if "flujo" in msg_l or "proyec" in msg_l or "simula" in msg_l:
             cff = await service.get_cash_flow_forecast(db, company_id)
             final_reply = (
-                f"📈 **Proyección Ejecutiva de Flujo de Caja (30 Días):**\n\n"
-                f"- **Liquidez Inicial Consolidada:** Gs. {cff.saldo_actual_gs:,.0f}\n"
-                f"- **Ingresos Estimados 30d:** Gs. {cff.total_ingresos_30d_gs:,.0f} (Ventas en salón modeladas por día + Cobranzas AR)\n"
-                f"- **Egresos Comprometidos 30d:** Gs. {cff.total_egresos_30d_gs:,.0f} (Facturas de proveedores + Reposición de mercadería CMV + Nómina)\n"
-                f"- **Saldo Proyectado a Cierre de Mes:** Gs. {cff.saldo_proyectado_30d_gs:,.0f}\n"
-                f"- **Días en Alerta / Déficit:** {cff.dias_en_riesgo_count} días\n\n"
-                f"💡 *Recomendación:* Mantener la disciplina en el pago a proveedores y sincronizar con Ventas para monetizar el sobrestock."
+                f"📈 **Proyección Real de Flujo de Caja (30 Días con Pasivos Reales):**\n\n"
+                f"- **Disponibilidad Inicial Real:** ₲ {cff.saldo_actual_gs:,.0f}\n"
+                f"- **Pasivo Exigible Inmediato (Día 1):** ₲ {cff.pasivo_exigible_inmediato_gs:,.0f} (Cheques en fecha + Facturas en mora)\n"
+                f"- **Ingresos Estimados 30d:** ₲ {cff.total_ingresos_30d_gs:,.0f} (Ventas salón + Cobranzas AR)\n"
+                f"- **Egresos Totales Comprometidos 30d:** ₲ {cff.total_egresos_30d_gs:,.0f}\n"
+                f"  • Cheques diferidos a pagar: ₲ {cff.total_cheques_30d_gs:,.0f}\n"
+                f"  • Facturas de proveedores: ₲ {cff.total_facturas_30d_gs:,.0f}\n"
+                f"- **Posición Final Estimada (30d):** ₲ {cff.saldo_proyectado_30d_gs:,.0f}\n"
+                f"- **Días en Déficit / Riesgo:** {cff.dias_en_riesgo_count} de 30 días\n"
+                f"- **Diagnóstico de Tesorería:** **{cff.estado_general_flujo.upper()}**"
             )
-        elif "proveedor" in msg_l or "factura" in msg_l or "pagar" in msg_l:
-            ap_data = await service.get_supplier_debt_schedule_data(db, company_id, dias=15, limit=5)
-            prov_txt = "\n".join([f"- **{p['proveedor']}:** Gs. {p['saldo_pendiente_gs']:,.0f} (Vto: {p['fecha_vencimiento']})" for p in ap_data.get("facturas", [])])
+        elif "deuda" in msg_l or "proveedor" in msg_l or "factura" in msg_l or "pagar" in msg_l or "cheque" in msg_l:
+            items = await service.get_supplier_debt_schedule(db, company_id)
+            top_txt = "\n".join([f"- **{it['proveedor']}** ({it['numero_factura']}): ₲ {it['saldo_pendiente_gs']:,.0f} [{it['estado']}]" for it in items[:8]])
             final_reply = (
-                f"📑 **Compromisos con Proveedores (Próximos 15 Días):**\n\n"
-                f"- **Total a pagar en 7 días:** Gs. {tower.ap_proximos_7d_gs:,.0f}\n"
-                f"- **Total a pagar en 15 días:** Gs. {tower.ap_proximos_15d_gs:,.0f}\n"
-                f"- **Total general pendiente:** Gs. {tower.ap_total_mes_gs:,.0f} ({tower.ap_facturas_pendientes_count} facturas)\n\n"
-                f"**Principales Vencimientos:**\n{prov_txt or 'Sin facturas venciendo en esta ventana.'}"
+                f"📑 **Auditoría de Pasivos Comerciales y Deuda Exigible (Base de Datos Real):**\n\n"
+                f"- **Deuda Total Exigible:** **₲ {tower.deuda_total_exigible_gs:,.0f}**\n"
+                f"  • **Cheques emitidos en circulación:** ₲ {tower.deuda_cheques_emitidos_total_gs:,.0f} ({tower.deuda_cheques_count} cheques)\n"
+                f"    - Ya en fecha de cobro / vencidos: ₲ {tower.deuda_cheques_en_fecha_cobro_gs:,.0f}\n"
+                f"    - A vencer próximos 30d: ₲ {tower.deuda_cheques_proximos_30d_gs:,.0f}\n"
+                f"  • **Facturas de proveedores pendientes:** ₲ {tower.deuda_facturas_proveedores_total_gs:,.0f} ({tower.deuda_facturas_count} facturas)\n"
+                f"    - Ya vencidas en mora: ₲ {tower.deuda_facturas_vencidas_mora_gs:,.0f}\n"
+                f"    - A vencer próximos 30d: ₲ {tower.deuda_facturas_proximos_30d_gs:,.0f}\n\n"
+                f"- **Pasivo Inmediato Exigible Hoy:** **₲ {tower.deuda_exigible_inmediata_gs:,.0f}**\n"
+                f"- **Liquidez Disponible:** ₲ {tower.liquidez_total_gs:,.0f}\n"
+                f"- **Brecha de Déficit Inmediato:** **₲ {tower.deficit_cobertura_inmediata_gs:,.0f}**\n"
+                f"- **Posición Financiera Neta:** **₲ {tower.posicion_financiera_neta_gs:,.0f}**\n\n"
+                f"**Principales Compromisos Exigibles:**\n{top_txt or 'Sin compromisos pendientes.'}"
             )
         elif "cliente" in msg_l or "cobrar" in msg_l or "mora" in msg_l:
-            ar_data = await service.get_customer_aging_analysis_data(db, company_id, solo_morosos=True, limit=5)
-            clie_txt = "\n".join([f"- **{c['cliente']}:** Gs. {c['saldo_deudor_gs']:,.0f} (Mora: {c['dias_mora_max']} días) — {c['accion_sugerida']}" for c in ar_data.get("clientes_en_riesgo", [])])
+            ar_data = await service.get_customer_aging_analysis(db, company_id)
             final_reply = (
                 f"⚠️ **Auditoría de Créditos a Clientes (Cuentas por Cobrar):**\n\n"
-                f"- **Cartera Vigente al Día:** Gs. {tower.ar_vigente_gs:,.0f}\n"
-                f"- **Cartera Vencida en Mora:** Gs. {tower.ar_moroso_gs:,.0f}\n"
-                f"- **Clientes Morosos:** {tower.ar_clientes_morosos_count}\n\n"
-                f"**Casos Críticos:**\n{clie_txt or 'Sin clientes con mora activa superior a 15 días.'}"
+                f"- **Total Cartera:** ₲ {ar_data.get('total_cartera_gs', 0):,.0f}\n"
+                f"- **Cartera al Día:** ₲ {ar_data.get('al_dia_gs', 0):,.0f}\n"
+                f"- **Mora 1 a 30 días:** ₲ {ar_data.get('mora_1_30_gs', 0):,.0f}\n"
+                f"- **Mora más de 60 días:** ₲ {ar_data.get('mora_mas_60_gs', 0):,.0f}\n"
+                f"- **Total Clientes Deudores:** {ar_data.get('total_deudores', 0)}"
             )
         else:
-            bancos_txt = "\n".join([f"- **{b.banco} ({b.numero_cuenta}):** Gs. {b.saldo_gs:,.0f} {b.moneda}" for b in tower.desglose_bancos])
+            bancos_txt = "\n".join([f"- **{b.banco} ({b.numero_cuenta}):** ₲ {b.saldo_gs:,.0f} {b.moneda}" for b in tower.desglose_bancos])
             final_reply = (
-                f"🏦 **Diagnóstico Consolidado de Tesorería y Liquidez (Tiempo Real):**\n\n"
-                f"La **Posición Consolidada de Liquidez** asciende a **Gs. {tower.liquidez_total_gs:,.0f}**:\n\n"
-                f"1. **Disponibilidad Bancaria:** Gs. {tower.bancos_total_gs:,.0f} ({len(tower.desglose_bancos)} cuentas)\n"
-                f"{bancos_txt}\n\n"
-                f"2. **Custodia y Bóveda Central:** Gs. {tower.boveda_central_gs:,.0f}\n"
-                f"3. **Cajas POS en Salón Hoy:** Gs. {tower.cajas_pos_gs:,.0f}\n\n"
-                f"**Indicadores Clave:**\n"
-                f"- **Cobertura a 7 Días:** {tower.cobertura_7d_ratio}x sobre compromisos de proveedores (Gs. {tower.ap_proximos_7d_gs:,.0f})\n"
-                f"- **Cash Runway Estimado:** {tower.cash_runway_dias} días de operación\n"
-                f"- **Estado de Liquidez:** **{tower.estado_liquidez.upper()}**"
+                f"🏦 **Diagnóstico Consolidado de Tesorería y Pasivos (Tiempo Real):**\n\n"
+                f"**1. Activos Líquidos Disponibles:** **₲ {tower.liquidez_total_gs:,.0f}**\n"
+                f"- Bancos ({len(tower.desglose_bancos)} cuentas): ₲ {tower.bancos_total_gs:,.0f}\n"
+                f"{bancos_txt}\n"
+                f"- Bóveda Central (Custodia Físico): ₲ {tower.boveda_central_gs:,.0f}\n"
+                f"- Cajas POS Salón: ₲ {tower.cajas_pos_gs:,.0f}\n\n"
+                f"**2. Pasivos Comerciales Exigibles:** **₲ {tower.deuda_total_exigible_gs:,.0f}**\n"
+                f"- Cheques emitidos en circulación: ₲ {tower.deuda_cheques_emitidos_total_gs:,.0f} ({tower.deuda_cheques_count} cheques)\n"
+                f"- Facturas comerciales pendientes: ₲ {tower.deuda_facturas_proveedores_total_gs:,.0f} ({tower.deuda_facturas_count} facturas)\n"
+                f"- Exigible inmediato (en fecha + mora): ₲ {tower.deuda_exigible_inmediata_gs:,.0f}\n\n"
+                f"**3. Diagnóstico de Solvencia:**\n"
+                f"- **Posición Financiera Neta:** **₲ {tower.posicion_financiera_neta_gs:,.0f}** (Déficit)\n"
+                f"- **Cobertura Inmediata:** {tower.ratio_cobertura_inmediata}x\n"
+                f"- **Estado de Tesorería:** **{tower.estado_liquidez.upper()}**"
             )
 
     suggestions = [
