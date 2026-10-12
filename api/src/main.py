@@ -162,10 +162,15 @@ async def lifespan(app: FastAPI):
     # duplicado. Ver RUN_SCHEDULER en config.py.
     if settings.run_scheduler and "sandbox" not in (settings.db_search_path or ""):
         start_scheduler()
+        # Vigilante de precios de balanza (tiempo real); misma instancia unica que el scheduler.
+        from api.src.integrations.scales.watcher import balanza_watcher
+        balanza_watcher.start()
     from api.src.plataforma import capture as _capture
     _capture.install_log_handler()
     _capture.start_background()
     yield
+    from api.src.integrations.scales.watcher import balanza_watcher as _bw
+    await _bw.stop()
 
 
 app = FastAPI(

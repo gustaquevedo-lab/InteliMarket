@@ -69,23 +69,10 @@ async def _touch_products_for_promo(
 
 
 async def _sync_balanza_si_aplica(db: AsyncSession, promo: Promotion) -> None:
-    """Las promos tipo `precio_fijo_oferta` con `producto_ids` disparan el trigger
-    Postgres `trg_sync_promo_precio_fijo`, que pisa `products.precio_venta` directo
-    en SQL (ida al activar la promo, vuelta al desactivarla/vencer) -- por fuera de
-    cualquier código Python, así que nada le avisa a la balanza sola. Este helper
-    reconsulta los productos afectados (ya con el precio post-trigger) y empuja el
-    cambio a las balanzas para los que sean pesables."""
-    if promo.tipo != "precio_fijo_oferta" or not promo.producto_ids:
-        return
-    from api.src.integrations.scales import service as scales_service
-    r = await db.execute(select(Product).where(Product.id.in_(promo.producto_ids)))
-    for prod in r.scalars().all():
-        if not prod.plu_balanza:
-            continue
-        try:
-            await scales_service.auto_sync_product(db, str(promo.company_id), prod)
-        except Exception as e:  # noqa: BLE001 -- una balanza offline no debe bloquear la promo
-            logger.warning("Auto PLU sync (promo precio_fijo_oferta) fallo para producto %s: %s", prod.id, e)
+    """Sin accion: el trigger SQL `trg_notify_balanza_promo` y el vigilante de precios de balanza
+    (integrations/scales/watcher.py) se enteran solos de cualquier cambio de promo y de precio.
+    Se conserva la funcion porque la llaman varios flujos de promociones y el scheduler."""
+    return None
 
 
 def _aplicar_terminacion_psicologica(

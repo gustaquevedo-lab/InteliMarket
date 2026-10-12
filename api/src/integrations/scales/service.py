@@ -428,31 +428,12 @@ async def sync_plu(db: AsyncSession, company_id: str, scale_id: str, producto_id
 
 
 async def auto_sync_product(db: AsyncSession, company_id: str, product: Product) -> list[dict]:
-    """Called after a product's price/data changes. Pushes the update to every scale
-    configured with sync_automatico=True and scoped to this product's category
-    (categorias_ids vacio en la balanza = recibe todas las categorias)."""
-    r = await db.execute(
-        select(ScaleConfig).where(
-            ScaleConfig.company_id == company_id,
-            ScaleConfig.activa == True,  # noqa: E712
-            ScaleConfig.sync_automatico == True,  # noqa: E712
-        )
-    )
-    scales = list(r.scalars().all())
-    if not scales:
-        return []
-
-    categoria_id_str = str(product.categoria_id) if product.categoria_id else None
-    resultados = []
-    for s in scales:
-        scoped = s.categorias_ids or []
-        if scoped and categoria_id_str not in scoped:
-            continue
-        try:
-            resultados.append(await _run_plu_sync(db, s, [product], modo="auto"))
-        except Exception as e:
-            logger.warning("Auto PLU sync failed for scale %s (product %s): %s", s.id, product.id, e)
-    return resultados
+    """Ya no transmite nada: de eso se ocupa el vigilante de precios (integrations/scales/watcher.py),
+    que escucha los triggers de la base (products / promotions) y cubre CUALQUIER camino que cambie un
+    precio, no solo los que llamaban a esta funcion. Se conserva la firma porque hay llamadores
+    (edicion de producto, markdown, sync Nemuha, promos) que la invocan; transmitir desde aca abria una
+    conexion por producto y por balanza y competia con el vigilante (la balanza acepta una sola sesion)."""
+    return []
 
 
 # ═══════════════════════════════════════════════════════════════

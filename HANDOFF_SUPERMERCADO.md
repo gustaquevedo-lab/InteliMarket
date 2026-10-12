@@ -9,6 +9,24 @@
 
 ---
 
+## ⚖️ SESIÓN 2026-10-12 (tarde) — Vigilante de precios de balanza en tiempo real (sin cron)
+
+Pedido del cliente: que cualquier cambio de precio de un producto con PLU (por la razón que sea) y toda promo que entre/salga se transmita sola a las balanzas, sin cron ni intervención; el cron solo de respaldo. SDL.exe queda descartado como causa: la PC de Compras está apagada y sin internet.
+
+**Arquitectura (3 piezas)**
+1. **Triggers de aviso en la base** (migración `20261012120000`, solo `public`): `trg_notify_balanza_precio` en `products` (INSERT, o UPDATE de `precio_venta`/`nombre`/`plu_balanza`/`activo` en un producto con PLU) y `trg_notify_balanza_promo` en `promotions` (INSERT/DELETE, o UPDATE de cualquier columna salvo `updated_at`/`usos_actuales`; `unidades_vendidas_promo` solo cuenta si la promo limita unidades). Emiten `pg_notify` (se entrega al commit). Cubren **cualquier** camino: pantalla, otro trigger SQL (`trg_sync_promo_precio_fijo`), sync Ñemuha, scripts, SQL a mano. Probados con 17 casos sobre tablas temporales (incluye los que NO deben avisar: updated_at del job de 30 min, columnas irrelevantes, productos sin PLU).
+2. **Vigilante** `api/src/integrations/scales/watcher.py` (arranca en `lifespan` solo en la instancia con scheduler, nunca en sandbox): `LISTEN balanza_precio, balanza_promo`; al llegar un aviso espera 2 s (agrupa ráfagas) y corre el reconciliador. Para los cambios **por tiempo** (promo que arranca/termina por fecha, día o horario, que no generan ningún evento en la base) hace una pasada propia cada 30 s. Si una balanza está apagada: backoff 30 s→5 min en las pasadas por tiempo (un evento nuevo reintenta igual). Reconecta solo si cae la conexión de escucha y al reconectar hace pasada de recuperación.
+3. **Reconciliador compartido** `api/src/integrations/scales/reconciler.py` (calcula el precio que cobra la caja con `calcular_precios_balanza`, compara contra `scale_plu_state` y envía solo la diferencia; sesión propia por balanza para que un rollback no expire los productos compartidos). `scripts/reconcile_balanzas.py` es ahora un wrapper fino = **respaldo por cron** (cada 5 min + completa cada hora y a las 08:20 UTC-cron). Comparten el lock `/tmp/reconcile_balanzas.lock` (la balanza acepta una sola sesión).
+
+**Medido en producción**: cambio en la base -> transmitido a la balanza en **3 s** (trigger real); pendiente sin aviso -> detectado por el heartbeat en **26 s**.
+
+**Cambios de comportamiento a recordar**
+- `scales.service.auto_sync_product()` y `promotions.service._sync_balanza_si_aplica()` ahora **no transmiten** (se conservan por los llamadores): antes abrían una conexión por producto y balanza (miles de fallos/día y tormenta de conexiones que competía con el reconciliador). Único actor que transmite = vigilante (+ cron de respaldo + botón manual de `/escalas`).
+- Si el vigilante está caído (API reiniciando), el cron cubre en ≤5 min; al arrancar el API hace una pasada de recuperación.
+- Diagnóstico: `journalctl -u intelimarket-api | grep -i vigilante` (solo loguea envíos OK o errores); estado por balanza en `scale_sync_status`; `scripts/reconcile_balanzas.py --dry-run` muestra qué falta.
+- Deploy: reinicio escalonado (api-2, luego api); el vigilante vive en la instancia 1 (`RUN_SCHEDULER=true`).
+
+
 ## ⚖️ SESIÓN 2026-10-12 — "promos que entran/salen y la balanza no se entera": la balanza solo conocía UN tipo de promo
 
 Reclamo: promos pausadas / que entraron en vigencia no se reflejaban en las balanzas. Diagnóstico (sistema vs balanza, verificado):
