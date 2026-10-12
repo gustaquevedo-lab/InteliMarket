@@ -1072,6 +1072,32 @@ async def chat_with_finance_agent(
         ]
         action = None
 
+    elif "deuda" in msg_lower or "proveedor" in msg_lower or "factura" in msg_lower or "cheque" in msg_lower or "pagar" in msg_lower:
+        items = await get_supplier_debt_schedule(db, company_id)
+        top_txt = "\n".join([f"- **{it['proveedor']}** ({it['numero_factura']}): ₲ {it['saldo_pendiente_gs']:,.0f} [{it['estado']}]" for it in items[:8]])
+        resp = (
+            f"📑 **Auditoría Real de Pasivos Comerciales y Deuda Exigible (Base de Datos):**\n\n"
+            f"- **Deuda Total Exigible:** **₲ {tower.deuda_total_exigible_gs:,.0f}**\n"
+            f"  • **Cheques emitidos en circulación:** ₲ {tower.deuda_cheques_emitidos_total_gs:,.0f} ({tower.deuda_cheques_count} cheques)\n"
+            f"    - Con fecha de cobro cumplida / vencidos: ₲ {tower.deuda_cheques_en_fecha_cobro_gs:,.0f}\n"
+            f"    - A vencer en los próximos 30 días: ₲ {tower.deuda_cheques_proximos_30d_gs:,.0f}\n"
+            f"  • **Facturas de proveedores pendientes:** ₲ {tower.deuda_facturas_proveedores_total_gs:,.0f} ({tower.deuda_facturas_count} facturas)\n"
+            f"    - Ya vencidas en mora: ₲ {tower.deuda_facturas_vencidas_mora_gs:,.0f}\n"
+            f"    - A vencer en los próximos 30 días: ₲ {tower.deuda_facturas_proximos_30d_gs:,.0f}\n\n"
+            f"- **Pasivo Inmediato Exigible Hoy:** **₲ {tower.deuda_exigible_inmediata_gs:,.0f}**\n"
+            f"- **Disponibilidad Líquida (Bancos + Bóveda):** ₲ {tower.liquidez_total_gs:,.0f}\n"
+            f"- **Déficit de Cobertura Inmediato:** **₲ {tower.deficit_cobertura_inmediata_gs:,.0f}**\n"
+            f"- **Posición Financiera Neta:** **₲ {tower.posicion_financiera_neta_gs:,.0f}** (Déficit)\n"
+            f"- **Estado de Tesorería:** **{tower.estado_liquidez.upper()}**\n\n"
+            f"**Principales Vencimientos Programados:**\n{top_txt or 'Sin compromisos pendientes.'}"
+        )
+        suggestions = [
+            "Proyección de flujo de caja a 30 días",
+            "Ver saldos bancarios y efectivo disponible",
+            "Ver productos con mayor sobrestock para liquidar"
+        ]
+        action = None
+
     elif "cliente" in msg_lower or "cobrar" in msg_lower or "mora" in msg_lower or "credito" in msg_lower:
         sync = await get_inter_agent_sync(db, company_id)
         if sync.alertas_riesgo_crediticio:
@@ -1120,15 +1146,20 @@ async def chat_with_finance_agent(
 
     else:
         resp = (
-            f"💼 **Resumen Financiero Ejecutivo (Datos Reales de Ñemuha):**\n\n"
-            f"- **Liquidez Consolidada:** ₲ {tower.liquidez_total_gs:,.0f}\n"
-            f"- **Bancos PYG:** ₲ {tower.bancos_total_gs:,.0f}\n"
-            f"- **Efectivo en Custodia/Bóveda:** ₲ {tower.boveda_central_gs:,.0f}\n"
-            f"- **Efectivo Cajas Salón:** ₲ {tower.cajas_pos_gs:,.0f}\n"
-            f"- **Cuentas por Cobrar:** ₲ {tower.ar_total_gs:,.0f}\n"
-            f"- **Gastos Operativos Mes:** ₲ {tower.gastos_operativos_mes_gs:,.0f}\n"
-            f"- **Margen Comercial Real:** {tower.margen_bruto_mes_pct}%\n\n"
-            f"El canal de comunicación con el **Gerente de Ventas IA** está activo y sincronizado."
+            f"💼 **Diagnóstico Financiero Consolidado y Pasivos Reales:**\n\n"
+            f"**1. Activos Líquidos Disponibles:** **₲ {tower.liquidez_total_gs:,.0f}**\n"
+            f"- Bancos ({len(tower.desglose_bancos)} cuentas): ₲ {tower.bancos_total_gs:,.0f}\n"
+            f"- Bóveda Central (Custodia Físico): ₲ {tower.boveda_central_gs:,.0f}\n"
+            f"- Cajas POS Salón Turno: ₲ {tower.cajas_pos_gs:,.0f}\n\n"
+            f"**2. Pasivo Comercial Exigible:** **₲ {tower.deuda_total_exigible_gs:,.0f}**\n"
+            f"- Cheques emitidos en circulación: ₲ {tower.deuda_cheques_emitidos_total_gs:,.0f} ({tower.deuda_cheques_count} cheques)\n"
+            f"- Facturas comerciales pendientes: ₲ {tower.deuda_facturas_proveedores_total_gs:,.0f} ({tower.deuda_facturas_count} facturas)\n"
+            f"- Exigible inmediato (en fecha + mora): **₲ {tower.deuda_exigible_inmediata_gs:,.0f}**\n\n"
+            f"**3. Diagnóstico de Salud Financiera:**\n"
+            f"- **Posición Financiera Neta:** **₲ {tower.posicion_financiera_neta_gs:,.0f}** (Déficit)\n"
+            f"- **Brecha de Déficit Inmediato:** **₲ {tower.deficit_cobertura_inmediata_gs:,.0f}**\n"
+            f"- **Cobertura Inmediata:** {tower.ratio_cobertura_inmediata}x\n"
+            f"- **Estado de Tesorería:** **{tower.estado_liquidez.upper()}**"
         )
         suggestions = [
             "¿Cómo están nuestros saldos bancarios y efectivo?",
