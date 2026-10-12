@@ -29,6 +29,7 @@ import { useAuth } from "../../context/AuthContext"
 import { usePermissions } from "../../context/PermissionsContext"
 import CurrencyInput from "../../components/CurrencyInput"
 import Product360Modal from "./Product360Modal"
+import { useSearchParams } from "react-router-dom" 
 
 // Presets rápidos para carga veloz de códigos de pack/caja
 const PACK_PRESETS = [
@@ -346,8 +347,46 @@ export default function ProductsPage() {
     hasPermission("products:update")
   )
 
-  // Pestaña Principal
-  const [mainTab, setMainTab] = useState<"catalogo" | "variantes" | "packs" | "kits" | "guia">("catalogo")
+  // Sincronización de pestañas por query params (ej: /products?tab=variantes o /products?tab=packs)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [mainTab, setMainTab] = useState<"catalogo" | "variantes" | "packs" | "kits" | "guia">(() => {
+    const initial = new URLSearchParams(window.location.search).get("tab")?.toLowerCase()
+    if (initial === "variantes" || initial === "variants") return "variantes"
+    if (initial === "packs" || initial === "empaques") return "packs"
+    if (initial === "kits") return "kits"
+    if (initial === "guia") return "guia"
+    return "catalogo"
+  })
+
+  useEffect(() => {
+    const tabParam = searchParams.get("tab")?.toLowerCase()
+    if (tabParam) {
+      if (tabParam === "variantes" || tabParam === "variants") {
+        setMainTab("variantes")
+      } else if (tabParam === "packs" || tabParam === "empaques") {
+        setMainTab("packs")
+      } else if (tabParam === "kits") {
+        setMainTab("kits")
+      } else if (tabParam === "guia") {
+        setMainTab("guia")
+      } else if (tabParam === "catalogo") {
+        setMainTab("catalogo")
+      }
+    }
+  }, [searchParams])
+
+  const handleTabChange = (newTab: "catalogo" | "variantes" | "packs" | "kits" | "guia") => {
+    setMainTab(newTab)
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (newTab === "catalogo") {
+        next.delete("tab")
+      } else {
+        next.set("tab", newTab)
+      }
+      return next
+    }, { replace: true })
+  }
 
   // Datos principales
   const [products, setProducts] = useState<Product[]>([])
@@ -1434,8 +1473,8 @@ export default function ProductsPage() {
       <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
         {[
           { key: "catalogo", label: "Catálogo General", icon: Package, count: products.length },
-          { key: "variantes", label: "Variantes (Talles / Sabores)", icon: Palette, count: variantsList.length },
-          { key: "packs", label: "Códigos de Pack / Caja", icon: Box, count: packBarcodesList.length },
+          { key: "variantes", label: "Variantes de Producto", icon: Palette, count: variantsList.length },
+          { key: "packs", label: "Empaques & Códigos de Pack", icon: Box, count: packBarcodesList.length },
           { key: "kits", label: "Kits & Combos Promocionales", icon: Gift, count: kitsSaved.length },
           { key: "guia", label: "Manual Operativo & Ayuda", icon: BookOpen },
         ].map((tab) => {
@@ -1444,7 +1483,7 @@ export default function ProductsPage() {
           return (
             <button
               key={tab.key}
-              onClick={() => setMainTab(tab.key as any)}
+              onClick={() => handleTabChange(tab.key as any)}
               className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
                 active
                   ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
