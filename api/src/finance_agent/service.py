@@ -151,24 +151,59 @@ async def get_liquidity_control_tower(db: AsyncSession, company_id: str) -> Liqu
     # Posición Total de Liquidez en PYG (Bancos + Custodia/Bóveda + Cajas Salón)
     liquidez_total = bancos_total + boveda_total + cajas_total
 
-    # 4. Cuentas por Pagar Reales (AP - Proveedores de Ñemuha)
+    # 4. Pasivos Comerciales Reales (Cheques Emitidos en Cartera + Facturas a Proveedores)
     d7 = today + timedelta(days=7)
     d15 = today + timedelta(days=15)
+    d30 = today + timedelta(days=30)
 
+    # 4.1 Cheques emitidos pendientes de cobro
+    q_cheques = text("""
+        SELECT 
+            COALESCE(SUM(CASE WHEN fecha_pago <= :today THEN monto ELSE 0 END), 0) as ch_inmediatos,
+            COALESCE(SUM(CASE WHEN fecha_pago > :today AND fecha_pago <= :d7 THEN monto ELSE 0 END), 0) as ch_7d,
+            COALESCE(SUM(CASE WHEN fecha_pago > :today AND fecha_pago <= :d15 THEN monto ELSE 0 END), 0) as ch_15d,
+            COALESCE(SUM(CASE WHEN fecha_pago > :today AND fecha_pago <= :d30 THEN monto ELSE 0 END), 0) as ch_30d,
+            COALESCE(SUM(monto), 0) as ch_total,
+            COUNT(*) as ch_count,
+            COUNT(CASE WHEN fecha_pago <= :today THEN 1 END) as ch_inmediatos_count
+        FROM cheques
+        WHERE company_id = :cid AND tipo_cheque = 'emitido' AND estado = 'pendiente'
+    """)
+    r_ch = (await db.execute(q_cheques, {"cid": company_id, "today": today, "d7": d7, "d15": d15, "d30": d30})).fetchone()
+    ch_inmediatos = float(r_ch[0]) if r_ch and r_ch[0] else 0.0
+    ch_7d = float(r_ch[1]) if r_ch and r_ch[1] else 0.0
+    ch_15d = float(r_ch[2]) if r_ch and r_ch[2] else 0.0
+    ch_30d = float(r_ch[3]) if r_ch and r_ch[3] else 0.0
+    ch_total = float(r_ch[4]) if r_ch and r_ch[4] else 0.0
+    ch_count = int(r_ch[5]) if r_ch and r_ch[5] else 0
+
+    # 4.2 Facturas de proveedores pendientes
     q_ap = text("""
         SELECT 
-            COALESCE(SUM(CASE WHEN fecha_vencimiento <= :d7 THEN saldo_pendiente ELSE 0 END), 0) as ap_7d,
-            COALESCE(SUM(CASE WHEN fecha_vencimiento <= :d15 THEN saldo_pendiente ELSE 0 END), 0) as ap_15d,
+            COALESCE(SUM(CASE WHEN fecha_vencimiento < :today THEN saldo_pendiente ELSE 0 END), 0) as ap_mora,
+            COALESCE(SUM(CASE WHEN fecha_vencimiento >= :today AND fecha_vencimiento <= :d7 THEN saldo_pendiente ELSE 0 END), 0) as ap_7d,
+            COALESCE(SUM(CASE WHEN fecha_vencimiento >= :today AND fecha_vencimiento <= :d15 THEN saldo_pendiente ELSE 0 END), 0) as ap_15d,
+            COALESCE(SUM(CASE WHEN fecha_vencimiento >= :today AND fecha_vencimiento <= :d30 THEN saldo_pendiente ELSE 0 END), 0) as ap_30d,
             COALESCE(SUM(saldo_pendiente), 0) as ap_total,
-            COUNT(CASE WHEN saldo_pendiente > 0 THEN 1 END) as total_facturas
+            COUNT(CASE WHEN saldo_pendiente > 0 THEN 1 END) as total_facturas,
+            COUNT(CASE WHEN fecha_vencimiento < :today AND saldo_pendiente > 0 THEN 1 END) as facturas_mora_count
         FROM supplier_invoices
         WHERE company_id = :cid AND estado IN ('pendiente', 'parcial')
     """)
-    r_ap = (await db.execute(q_ap, {"cid": company_id, "d7": d7, "d15": d15})).fetchone()
-    ap_7d = float(r_ap[0]) if r_ap and r_ap[0] else 0.0
-    ap_15d = float(r_ap[1]) if r_ap and r_ap[1] else 0.0
-    ap_total = float(r_ap[2]) if r_ap and r_ap[2] else 0.0
-    ap_count = int(r_ap[3]) if r_ap and r_ap[3] else 0
+    r_ap = (await db.execute(q_ap, {"cid": company_id, "today": today, "d7": d7, "d15": d15, "d30": d30})).fetchone()
+    ap_mora = float(r_ap[0]) if r_ap and r_ap[0] else 0.0
+    ap_7d = float(r_ap[1]) if r_ap and r_ap[1] else 0.0
+    ap_15d = float(r_ap[2]) if r_ap and r_ap[2] else 0.0
+    ap_30d = float(r_ap[3]) if r_ap and r_ap[3] else 0.0
+    ap_total = float(r_ap[4]) if r_ap and r_ap[4] else 0.0
+    ap_count = int(r_ap[5]) if r_ap and r_ap[5] else 0
+
+    # 4.3 Consolidacion del Pasivo Exigible Real
+    deuda_inmediata_exigible = ch_inmediatos + ap_mora
+    deuda_total_exigible = ch_total + ap_total
+    posicion_financiera_neta = liquidez_total - deuda_total_exigible
+    deficit_cobertura_inmediata = max(0.0, deuda_inmediata_exigible - liquidez_total)
+    compromisos_7d = deuda_inmediata_exigible + ch_7d + ap_7d
 
     # 5. Cuentas por Cobrar Reales (AR - Clientes de Ñemuha)
     q_ar = text("""
@@ -220,13 +255,20 @@ async def get_liquidity_control_tower(db: AsyncSession, company_id: str) -> Liqu
 
     gasto_diario_estimado = max(gastos_operativos_mes_gs / 30.0, 1000000.0)
     cash_runway = round(liquidez_total / gasto_diario_estimado, 1) if liquidez_total > 0 else 0.0
-    cobertura_7d = round(liquidez_total / max(ap_7d, 1.0), 2) if ap_7d > 0 else 99.9
+    cobertura_7d = round(liquidez_total / max(compromisos_7d, 1.0), 2) if compromisos_7d > 0 else 99.9
+    cobertura_inmediata = round(liquidez_total / max(deuda_inmediata_exigible, 1.0), 2) if deuda_inmediata_exigible > 0 else 99.9
 
     # Configuración de colchón mínimo
     settings = await get_or_create_finance_settings(db, company_id)
     colchon_min = float(settings.colchon_minimo_bancos_gs) if settings else 50000000.0
 
-    estado_liq = "optimo" if liquidez_total >= (colchon_min * 2) else "precaucion" if liquidez_total >= colchon_min else "critico"
+    # Determinación rigurosa del estado de liquidez (NO esconder deuda)
+    if liquidez_total < deuda_inmediata_exigible or posicion_financiera_neta < 0:
+        estado_liq = "critico"
+    elif liquidez_total < compromisos_7d:
+        estado_liq = "precaucion"
+    else:
+        estado_liq = "optimo"
 
     return LiquidityControlTower(
         liquidez_total_gs=liquidez_total,
@@ -234,10 +276,25 @@ async def get_liquidity_control_tower(db: AsyncSession, company_id: str) -> Liqu
         boveda_central_gs=boveda_total,
         cajas_pos_gs=cajas_total,
         desglose_bancos=desglose_bancos,
-        ap_proximos_7d_gs=ap_7d,
-        ap_proximos_15d_gs=ap_15d,
-        ap_total_mes_gs=ap_total,
-        ap_facturas_pendientes_count=ap_count,
+        # Pasivos y deuda real
+        deuda_total_exigible_gs=deuda_total_exigible,
+        deuda_exigible_inmediata_gs=deuda_inmediata_exigible,
+        deuda_cheques_emitidos_total_gs=ch_total,
+        deuda_cheques_en_fecha_cobro_gs=ch_inmediatos,
+        deuda_cheques_proximos_30d_gs=ch_30d,
+        deuda_cheques_count=ch_count,
+        deuda_facturas_proveedores_total_gs=ap_total,
+        deuda_facturas_vencidas_mora_gs=ap_mora,
+        deuda_facturas_proximos_30d_gs=ap_30d,
+        deuda_facturas_count=ap_count,
+        posicion_financiera_neta_gs=posicion_financiera_neta,
+        deficit_cobertura_inmediata_gs=deficit_cobertura_inmediata,
+        ratio_cobertura_inmediata=cobertura_inmediata,
+        # Cuentas por pagar retrocompatibilidad
+        ap_proximos_7d_gs=ap_7d + ch_7d,
+        ap_proximos_15d_gs=ap_15d + ch_15d,
+        ap_total_mes_gs=ap_30d + ch_30d,
+        ap_facturas_pendientes_count=ap_count + ch_count,
         ar_vigente_gs=ar_vigente,
         ar_moroso_gs=ar_moroso,
         ar_total_gs=ar_vigente + ar_moroso,
@@ -538,12 +595,13 @@ async def get_inter_agent_sync(db: AsyncSession, company_id: str) -> InterAgentS
 # ── 4. PRONÓSTICO Y SIMULADOR PARAMÉTRICO DE FLUJO DE CAJA ─────────────────────
 
 async def get_cash_flow_forecast(db: AsyncSession, company_id: str) -> CashFlowForecastResponse:
-    """Genera la curva de flujo de caja proyectada día por día calculada sobre:
+    """Genera la curva de flujo de caja proyectada día por día calculada sobre la REALIDAD DEUDA + DISPONIBILIDAD:
     1. Saldo de liquidez inicial consolidada real (Bancos + Custodia/Bóveda + Cajas POS).
-    2. Promedio histórico real de ventas en salón por día de la semana.
-    3. Cobros de cuentas por cobrar (AR) según su fecha exacta de vencimiento.
-    4. Pagos de facturas a proveedores (AP) según su fecha exacta de vencimiento.
-    5. Costo de reposición operativa de mercadería (CMV ~72%) y gastos fijos / nómina.
+    2. Pasivo inmediato exigible: Cheques en cartera con fecha de pago cumplida + Facturas en mora en Día 1.
+    3. Cheques diferidos emitidos que vencen día a día según fecha_pago exacta.
+    4. Facturas de proveedores que vencen día a día según fecha_vencimiento.
+    5. Ventas reales de salón históricas por día de semana.
+    6. Costo operativo real de reposición (CMV ~72%) y gastos fijos.
     """
     tower = await get_liquidity_control_tower(db, company_id)
     saldo_acumulado = tower.liquidez_total_gs
@@ -576,7 +634,38 @@ async def get_cash_flow_forecast(db: AsyncSession, company_id: str) -> CashFlowF
     rows_ar = (await db.execute(q_ar_daily, {"cid": company_id, "s": start_date, "e": end_date})).fetchall()
     ar_daily_map = {r[0]: float(r[1]) for r in rows_ar}
 
-    # 3. Vencimientos de Cuentas por Pagar (AP)
+    # 3. Compromisos de Cheques Emitidos
+    # 3.1 Cheques ya vencidos / en fecha de cobro inmediata (en manos de proveedores)
+    q_ch_overdue = text("""
+        SELECT COALESCE(SUM(c.monto), 0)
+        FROM cheques c
+        WHERE c.company_id = :cid AND c.tipo_cheque = 'emitido' AND c.estado = 'pendiente'
+          AND c.fecha_pago <= :s
+    """)
+    ch_overdue_total = float((await db.execute(q_ch_overdue, {"cid": company_id, "s": start_date})).scalar() or 0.0)
+
+    # 3.2 Cheques diferidos que vencen día a día dentro de los 30 días
+    q_ch_daily = text("""
+        SELECT c.fecha_pago, SUM(c.monto)
+        FROM cheques c
+        WHERE c.company_id = :cid AND c.tipo_cheque = 'emitido' AND c.estado = 'pendiente'
+          AND c.fecha_pago BETWEEN :s AND :e
+        GROUP BY c.fecha_pago
+    """)
+    rows_ch = (await db.execute(q_ch_daily, {"cid": company_id, "s": start_date, "e": end_date})).fetchall()
+    ch_daily_map = {r[0]: float(r[1]) for r in rows_ch}
+
+    # 4. Facturas a Proveedores (AP)
+    # 4.1 Facturas ya vencidas en mora inmediata
+    q_ap_overdue = text("""
+        SELECT COALESCE(SUM(si.saldo_pendiente), 0)
+        FROM supplier_invoices si
+        WHERE si.company_id = :cid AND si.estado IN ('pendiente', 'parcial')
+          AND si.fecha_vencimiento < :s
+    """)
+    ap_overdue_total = float((await db.execute(q_ap_overdue, {"cid": company_id, "s": start_date})).scalar() or 0.0)
+
+    # 4.2 Facturas que vencen día a día dentro de los 30 días
     q_ap_daily = text("""
         SELECT si.fecha_vencimiento, SUM(si.saldo_pendiente)
         FROM supplier_invoices si
@@ -597,6 +686,9 @@ async def get_cash_flow_forecast(db: AsyncSession, company_id: str) -> CashFlowF
     tot_egresos = 0.0
 
     gasto_fijo_base_diario = tower.gastos_operativos_mes_gs / 30.0
+    pasivo_inmediato = ch_overdue_total + ap_overdue_total
+    tot_cheques_30d = sum(ch_daily_map.values()) + ch_overdue_total
+    tot_facturas_30d = sum(ap_daily_map.values()) + ap_overdue_total
 
     for i in range(30):
         current_d = start_date + timedelta(days=i)
@@ -606,7 +698,9 @@ async def get_cash_flow_forecast(db: AsyncSession, company_id: str) -> CashFlowF
         cobranzas_dia = ar_daily_map.get(current_d, 0.0)
         ingreso_dia = ventas_dia + cobranzas_dia
 
-        facturas_ap_dia = ap_daily_map.get(current_d, 0.0)
+        # Cheques y facturas del día (el Día 1 absorbe el pasivo en fecha de cobro y mora)
+        cheques_dia = ch_daily_map.get(current_d, 0.0) + (ch_overdue_total if i == 0 else 0.0)
+        facturas_dia = ap_daily_map.get(current_d, 0.0) + (ap_overdue_total if i == 0 else 0.0)
         reposicion_mercaderia = ventas_dia * 0.72
         gastos_fijos_dia = gasto_fijo_base_diario
         
@@ -614,13 +708,14 @@ async def get_cash_flow_forecast(db: AsyncSession, company_id: str) -> CashFlowF
         if current_d.day in (15, 30, 31):
             gastos_fijos_dia += 20000000.0
 
-        egreso_dia = facturas_ap_dia + reposicion_mercaderia + gastos_fijos_dia
+        egreso_dia = cheques_dia + facturas_dia + reposicion_mercaderia + gastos_fijos_dia
 
         saldo_ini = saldo_acumulado
         saldo_acumulado = saldo_acumulado + ingreso_dia - egreso_dia
         tot_ingresos += ingreso_dia
         tot_egresos += egreso_dia
 
+        deficit_brecha = max(0.0, -saldo_acumulado)
         estado = "superavit" if saldo_acumulado >= (colchon_min * 2) else "ajustado" if saldo_acumulado >= colchon_min else "deficit"
         if estado == "deficit":
             dias_en_riesgo += 1
@@ -633,7 +728,14 @@ async def get_cash_flow_forecast(db: AsyncSession, company_id: str) -> CashFlowF
             ingresos_esperados=ingreso_dia,
             egresos_comprometidos=egreso_dia,
             saldo_final_estimado=saldo_acumulado,
-            estado=estado
+            estado=estado,
+            cheques_dia_gs=cheques_dia,
+            facturas_dia_gs=facturas_dia,
+            reposicion_mercaderia_gs=reposicion_mercaderia,
+            gastos_operativos_dia_gs=gastos_fijos_dia,
+            ventas_dia_gs=ventas_dia,
+            cobranzas_dia_gs=cobranzas_dia,
+            deficit_brecha_gs=deficit_brecha
         ))
 
     return CashFlowForecastResponse(
@@ -642,7 +744,13 @@ async def get_cash_flow_forecast(db: AsyncSession, company_id: str) -> CashFlowF
         total_egresos_30d_gs=tot_egresos,
         saldo_proyectado_30d_gs=saldo_acumulado,
         dias_en_riesgo_count=dias_en_riesgo,
-        proyeccion_diaria=proyeccion
+        proyeccion_diaria=proyeccion,
+        pasivo_exigible_inmediato_gs=pasivo_inmediato,
+        total_cheques_30d_gs=tot_cheques_30d,
+        total_facturas_30d_gs=tot_facturas_30d,
+        deuda_total_comprometida_gs=tower.deuda_total_exigible_gs,
+        posicion_neta_inicial_gs=tower.posicion_financiera_neta_gs,
+        estado_general_flujo="deficit" if dias_en_riesgo > 5 else "ajustado" if dias_en_riesgo > 0 else "superavit"
     )
 
 
@@ -676,7 +784,7 @@ async def simulate_cash_flow(
     default_dow = {0: 30274000.0, 1: 33043000.0, 2: 35958000.0, 3: 34121000.0, 4: 32188000.0, 5: 43180000.0, 6: 60347000.0}
     dow_map = {int(r[0]): float(r[1]) for r in rows_dow} if rows_dow else default_dow
 
-    # AR & AP
+    # AR & AP & Cheques
     q_ar_daily = text("""
         SELECT ar.fecha_vencimiento, SUM(ar.saldo_pendiente)
         FROM accounts_receivable ar
@@ -687,8 +795,35 @@ async def simulate_cash_flow(
     rows_ar = (await db.execute(q_ar_daily, {"cid": company_id, "s": start_date, "e": end_date})).fetchall()
     ar_daily_map = {r[0]: float(r[1]) for r in rows_ar}
 
-    # Desplazamiento por prórroga de proveedores
+    # Cheques diferidos y cheques ya en fecha de cobro
+    q_ch_overdue = text("""
+        SELECT COALESCE(SUM(c.monto), 0)
+        FROM cheques c
+        WHERE c.company_id = :cid AND c.tipo_cheque = 'emitido' AND c.estado = 'pendiente'
+          AND c.fecha_pago <= :s
+    """)
+    ch_overdue_total = float((await db.execute(q_ch_overdue, {"cid": company_id, "s": start_date})).scalar() or 0.0)
+
+    q_ch_daily = text("""
+        SELECT c.fecha_pago, SUM(c.monto)
+        FROM cheques c
+        WHERE c.company_id = :cid AND c.tipo_cheque = 'emitido' AND c.estado = 'pendiente'
+          AND c.fecha_pago BETWEEN :s AND :e
+        GROUP BY c.fecha_pago
+    """)
+    rows_ch = (await db.execute(q_ch_daily, {"cid": company_id, "s": start_date, "e": end_date})).fetchall()
+    ch_sim_map = {r[0]: float(r[1]) for r in rows_ch}
+
+    # Facturas con desplazamiento por prórroga de proveedores
     d_offset = timedelta(days=sim.prorroga_proveedores_dias)
+    q_ap_overdue = text("""
+        SELECT COALESCE(SUM(si.saldo_pendiente), 0)
+        FROM supplier_invoices si
+        WHERE si.company_id = :cid AND si.estado IN ('pendiente', 'parcial')
+          AND si.fecha_vencimiento < :s
+    """)
+    ap_overdue_total = float((await db.execute(q_ap_overdue, {"cid": company_id, "s": start_date})).scalar() or 0.0)
+
     q_ap_daily = text("""
         SELECT si.fecha_vencimiento, SUM(si.saldo_pendiente)
         FROM supplier_invoices si
@@ -734,13 +869,14 @@ async def simulate_cash_flow(
 
         ingreso_dia = ventas_sim + cobranzas_dia + extra_ingreso
 
-        facturas_ap_dia = ap_sim_map.get(current_d, 0.0)
+        cheques_dia = ch_sim_map.get(current_d, 0.0) + (ch_overdue_total if i == 0 else 0.0)
+        facturas_ap_dia = ap_sim_map.get(current_d, 0.0) + (ap_overdue_total if i == 0 else 0.0)
         reposicion_mercaderia = ventas_sim * 0.72
         gastos_fijos_dia = gasto_fijo_base_diario
         if current_d.day in (15, 30, 31):
             gastos_fijos_dia += 20000000.0
 
-        egreso_dia = facturas_ap_dia + reposicion_mercaderia + gastos_fijos_dia
+        egreso_dia = cheques_dia + facturas_ap_dia + reposicion_mercaderia + gastos_fijos_dia
 
         saldo_ini = saldo_acumulado
         saldo_acumulado = saldo_acumulado + ingreso_dia - egreso_dia
@@ -815,22 +951,40 @@ async def simulate_cash_flow(
 # ── 5. CRONOGRAMAS Y AGING DETALLADO (PROVEEDORES Y CLIENTES) ─────────────────
 
 async def get_supplier_debt_schedule(db: AsyncSession, company_id: str) -> List[Dict[str, Any]]:
-    """Cronograma de pagos a proveedores agrupado por tramos de vencimiento."""
+    """Cronograma de pagos a proveedores consolidado: Facturas pendientes + Cheques emitidos."""
     q = text("""
         SELECT 
             si.id,
             COALESCE(s.razon_social, s.nombre_fantasia, 'Proveedor') as proveedor,
-            si.numero_factura,
-            si.fecha_vencimiento,
-            si.total,
-            si.saldo_pendiente,
-            si.estado,
-            CURRENT_DATE - si.fecha_vencimiento as dias_vencido
+            'FACTURA ' || si.numero_factura as instrumento,
+            si.fecha_vencimiento as fecha_exigible,
+            si.total as total_gs,
+            si.saldo_pendiente as saldo_pendiente_gs,
+            CASE WHEN si.fecha_vencimiento < CURRENT_DATE THEN 'VENCIDA (MORA)' ELSE 'POR VENCER' END as estado,
+            GREATEST(0, CURRENT_DATE - si.fecha_vencimiento) as dias_vencido,
+            'factura' as tipo_instrumento
         FROM supplier_invoices si
         LEFT JOIN suppliers s ON si.supplier_id = s.id
         WHERE si.company_id = :cid AND si.estado IN ('pendiente', 'parcial') AND si.saldo_pendiente > 0
-        ORDER BY si.fecha_vencimiento ASC
-        LIMIT 50
+
+        UNION ALL
+
+        SELECT 
+            c.id,
+            COALESCE(s.razon_social, s.nombre_fantasia, c.beneficiario, 'Proveedor') as proveedor,
+            'CHEQUE #' || c.numero as instrumento,
+            c.fecha_pago as fecha_exigible,
+            c.monto as total_gs,
+            c.monto as saldo_pendiente_gs,
+            CASE WHEN c.fecha_pago <= CURRENT_DATE THEN 'EN FECHA DE COBRO' ELSE 'DIFERIDO' END as estado,
+            GREATEST(0, CURRENT_DATE - c.fecha_pago) as dias_vencido,
+            'cheque' as tipo_instrumento
+        FROM cheques c
+        LEFT JOIN suppliers s ON c.supplier_id = s.id
+        WHERE c.company_id = :cid AND c.tipo_cheque = 'emitido' AND c.estado = 'pendiente'
+
+        ORDER BY fecha_exigible ASC
+        LIMIT 60
     """)
     rows = (await db.execute(q, {"cid": company_id})).fetchall()
     return [
@@ -842,7 +996,8 @@ async def get_supplier_debt_schedule(db: AsyncSession, company_id: str) -> List[
             "total_gs": float(r[4]),
             "saldo_pendiente_gs": float(r[5]),
             "estado": str(r[6]),
-            "dias_vencido": int(r[7]) if r[7] else 0
+            "dias_vencido": int(r[7]) if r[7] else 0,
+            "tipo_instrumento": str(r[8])
         }
         for r in rows
     ]

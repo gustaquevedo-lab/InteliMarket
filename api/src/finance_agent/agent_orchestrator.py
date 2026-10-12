@@ -188,8 +188,18 @@ async def _execute_finance_tool(db: AsyncSession, company_id: str, tool_name: st
                     {"banco": b.banco, "cuenta": b.numero_cuenta, "saldo_gs": b.saldo_gs, "moneda": b.moneda}
                     for b in tower.desglose_bancos
                 ],
+                # Pasivos exigibles y deuda real consolidada
+                "deuda_total_exigible_gs": tower.deuda_total_exigible_gs,
+                "deuda_exigible_inmediata_gs": tower.deuda_exigible_inmediata_gs,
+                "deuda_cheques_emitidos_total_gs": tower.deuda_cheques_emitidos_total_gs,
+                "deuda_cheques_en_fecha_cobro_gs": tower.deuda_cheques_en_fecha_cobro_gs,
+                "deuda_cheques_proximos_30d_gs": tower.deuda_cheques_proximos_30d_gs,
+                "deuda_facturas_proveedores_total_gs": tower.deuda_facturas_proveedores_total_gs,
+                "deuda_facturas_vencidas_mora_gs": tower.deuda_facturas_vencidas_mora_gs,
+                "posicion_financiera_neta_gs": tower.posicion_financiera_neta_gs,
+                "deficit_cobertura_inmediata_gs": tower.deficit_cobertura_inmediata_gs,
+                "ratio_cobertura_inmediata": tower.ratio_cobertura_inmediata,
                 "ap_proximos_7d_gs": tower.ap_proximos_7d_gs,
-                "ap_proximos_15d_gs": tower.ap_proximos_15d_gs,
                 "ap_total_mes_gs": tower.ap_total_mes_gs,
                 "ar_vigente_gs": tower.ar_vigente_gs,
                 "ar_moroso_gs": tower.ar_moroso_gs,
@@ -201,9 +211,9 @@ async def _execute_finance_tool(db: AsyncSession, company_id: str, tool_name: st
             }
 
         elif tool_name == "get_supplier_debt_schedule":
-            dias = int(arguments.get("dias", 15))
-            lim = int(arguments.get("limit", 8))
-            return await service.get_supplier_debt_schedule_data(db, company_id, dias=dias, limit=lim)
+            lim = int(arguments.get("limit", 15))
+            items = await service.get_supplier_debt_schedule(db, company_id)
+            return {"compromisos_proveedores": items[:lim]}
 
         elif tool_name == "get_customer_aging_analysis":
             solo_mora = bool(arguments.get("solo_morosos", True))
@@ -327,9 +337,10 @@ MEMORIA Y REGLAS DE NEGOCIO DEL DUEÑO:
 
 REGLAS DE ACTUACIÓN:
 1. NUNCA inventes saldos bancarios ni facturas. Usa SIEMPRE get_liquidity_summary, get_supplier_debt_schedule o get_customer_aging_analysis.
-2. Si el usuario te pide emitir una directiva al Gerente de Ventas, usa emit_inter_agent_directive.
-3. Si el usuario te plantea una hipótesis ("qué pasa si caen 10% las ventas", "si postergamos pagos"), usa simulate_cash_flow_scenario.
-4. Entrega diagnósticos con estructura clara: Balance, Puntos Críticos y Acciones Sugeridas.
+2. NUNCA maquilles la situación financiera. Considera SIEMPRE los cheques diferidos emitidos en circulación y las facturas vencidas en mora. Si los pasivos exigibles superan la liquidez disponible, informa con total crudeza el DÉFICIT y la BRECHA DE CAJA, y advierte sobre el riesgo inminente de rechazo de cheques o sobregiro bancario.
+3. Si el usuario te pide emitir una directiva al Gerente de Ventas, usa emit_inter_agent_directive.
+4. Si el usuario te plantea una hipótesis ("qué pasa si caen 10% las ventas", "si postergamos pagos"), usa simulate_cash_flow_scenario.
+5. Entrega diagnósticos con estructura clara: Balance Real, Pasivos Inmediatos, Puntos Críticos de Quiebre de Caja y Acciones Sugeridas.
 """
 
     messages = [{"role": "system", "content": system_prompt}]

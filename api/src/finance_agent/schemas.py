@@ -69,25 +69,40 @@ class LiquidityControlTower(BaseModel):
     cajas_pos_gs: float
     desglose_bancos: List[BankBalanceItem]
     
-    # Cuentas por Pagar (Proveedores)
-    ap_proximos_7d_gs: float
-    ap_proximos_15d_gs: float
-    ap_total_mes_gs: float
-    ap_facturas_pendientes_count: int
+    # Pasivo Comercial y Deuda Real Consolidada
+    deuda_total_exigible_gs: float = 0.0
+    deuda_exigible_inmediata_gs: float = 0.0
+    deuda_cheques_emitidos_total_gs: float = 0.0
+    deuda_cheques_en_fecha_cobro_gs: float = 0.0
+    deuda_cheques_proximos_30d_gs: float = 0.0
+    deuda_cheques_count: int = 0
+    deuda_facturas_proveedores_total_gs: float = 0.0
+    deuda_facturas_vencidas_mora_gs: float = 0.0
+    deuda_facturas_proximos_30d_gs: float = 0.0
+    deuda_facturas_count: int = 0
+    posicion_financiera_neta_gs: float = 0.0
+    deficit_cobertura_inmediata_gs: float = 0.0
+    ratio_cobertura_inmediata: float = 0.0
+    
+    # Cuentas por Pagar (Proveedores) - Retrocompatibilidad
+    ap_proximos_7d_gs: float = 0.0
+    ap_proximos_15d_gs: float = 0.0
+    ap_total_mes_gs: float = 0.0
+    ap_facturas_pendientes_count: int = 0
     
     # Cuentas por Cobrar (Clientes)
-    ar_vigente_gs: float
-    ar_moroso_gs: float
-    ar_total_gs: float
-    ar_clientes_morosos_count: int
+    ar_vigente_gs: float = 0.0
+    ar_moroso_gs: float = 0.0
+    ar_total_gs: float = 0.0
+    ar_clientes_morosos_count: int = 0
     
     # Indicadores de Salud Financiera
-    cash_runway_dias: float
-    cobertura_7d_ratio: float
-    estado_liquidez: str  # "optimo" | "precaucion" | "critico"
-    gastos_operativos_mes_gs: float
-    margen_bruto_mes_pct: float
-    ebitda_estimado_mes_gs: float
+    cash_runway_dias: float = 0.0
+    cobertura_7d_ratio: float = 0.0
+    estado_liquidez: str = "critico"  # "optimo" | "precaucion" | "critico"
+    gastos_operativos_mes_gs: float = 0.0
+    margen_bruto_mes_pct: float = 0.0
+    ebitda_estimado_mes_gs: float = 0.0
 
     # Aliases para compatibilidad con la UI
     dias_cobertura_operativa: Optional[float] = None
@@ -137,6 +152,14 @@ class CashFlowDayForecast(BaseModel):
     egresos_comprometidos: float
     saldo_final_estimado: float
     estado: str  # "superavit" | "ajustado" | "deficit"
+    # Detalle de obligaciones y rubros reales
+    cheques_dia_gs: float = 0.0
+    facturas_dia_gs: float = 0.0
+    reposicion_mercaderia_gs: float = 0.0
+    gastos_operativos_dia_gs: float = 0.0
+    ventas_dia_gs: float = 0.0
+    cobranzas_dia_gs: float = 0.0
+    deficit_brecha_gs: float = 0.0
 
 
 class CashFlowForecastResponse(BaseModel):
@@ -146,6 +169,13 @@ class CashFlowForecastResponse(BaseModel):
     saldo_proyectado_30d_gs: float
     dias_en_riesgo_count: int
     proyeccion_diaria: List[CashFlowDayForecast]
+    # Resumen de pasivos y déficit
+    pasivo_exigible_inmediato_gs: float = 0.0
+    total_cheques_30d_gs: float = 0.0
+    total_facturas_30d_gs: float = 0.0
+    deuda_total_comprometida_gs: float = 0.0
+    posicion_neta_inicial_gs: float = 0.0
+    estado_general_flujo: str = "deficit"
 
 
 class FinanceChatRequest(BaseModel):

@@ -204,50 +204,58 @@ export default function FinanceAgentPage() {
           </div>
         </div>
 
-        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        {/* 📊 BARRA DE KPIS EJECUTIVOS REALES (NO MAQUILLAJE) */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
           <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Liquidez Total</span>
-              <span className="text-[10px] font-bold text-emerald-400">Disponible</span>
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Liquidez Disponible</span>
+              <span className="text-[10px] font-bold text-emerald-400">Real</span>
             </div>
             <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
               {towerData ? formatPYG(towerData.liquidez_total_gs) : "-"}
             </p>
-            <p className="text-[11px] text-slate-400">Bancos + Bóveda + Cajas Salón</p>
+            <p className="text-[11px] text-slate-400">Bancos + Bóveda + Cajas Turno</p>
           </div>
 
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-rose-900/50">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Cuentas por Pagar (AP)</span>
-              <span className="text-[10px] font-bold text-rose-400">{towerData?.ap_facturas_pendientes_count || 0} facturas</span>
+              <span className="text-[11px] font-bold text-rose-300 uppercase tracking-wider">Pasivo Exigible Total</span>
+              <span className="text-[10px] font-bold text-rose-400">Cheques + Facturas</span>
             </div>
             <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
-              {towerData ? formatPYG(towerData.ap_total_mes_gs) : "-"}
+              {towerData ? formatPYG(towerData.deuda_total_exigible_gs || towerData.ap_total_mes_gs) : "-"}
             </p>
-            <p className="text-[11px] text-slate-400">Próximos 7d: {towerData ? formatPYG(towerData.ap_proximos_7d_gs) : "-"}</p>
+            <p className="text-[11px] text-rose-400/80 truncate">
+              {towerData?.deuda_cheques_count ? `${towerData.deuda_cheques_count} Chq (${formatPYG(towerData.deuda_cheques_emitidos_total_gs)})` : "-"}
+            </p>
           </div>
 
           <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Cuentas por Cobrar (AR)</span>
-              <span className="text-[10px] font-bold text-blue-400 font-mono">Clientes</span>
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Posición Neta</span>
+              <span className={`text-[10px] font-bold ${(towerData?.posicion_financiera_neta_gs ?? 0) < 0 ? "text-rose-400" : "text-emerald-400"}`}>
+                {(towerData?.posicion_financiera_neta_gs ?? 0) < 0 ? "Déficit" : "Superávit"}
+              </span>
             </div>
-            <p className="text-2xl font-black font-mono tracking-tight text-blue-300">
-              {towerData ? formatPYG(towerData.ar_total_gs) : "-"}
+            <p className={`text-2xl font-black font-mono tracking-tight ${(towerData?.posicion_financiera_neta_gs ?? 0) < 0 ? "text-rose-400" : "text-emerald-400"}`}>
+              {towerData ? formatPYG(towerData.posicion_financiera_neta_gs) : "-"}
             </p>
-            <p className="text-[11px] text-blue-400 font-mono">Vigente: {towerData ? formatPYG(towerData.ar_vigente_gs) : "-"}</p>
+            <p className="text-[11px] text-slate-400 truncate">
+              Inmediato: {towerData ? formatPYG(towerData.deuda_exigible_inmediata_gs) : "-"}
+            </p>
           </div>
 
           <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Ratio de Solvencia</span>
-              <span className="text-[10px] font-mono text-teal-400">7 Días</span>
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Estado de Tesorería</span>
+              <span className="text-[10px] font-mono text-amber-400">Semáforo</span>
             </div>
-            <p className="text-2xl font-black font-mono tracking-tight text-teal-300">
-              {towerData ? `${(towerData.ratio_solvencia_7d ?? towerData.cobertura_7d_ratio ?? 0).toFixed(2)}x` : "-"}
+            <p className={`text-2xl font-black font-mono tracking-tight ${towerData?.estado_liquidez === "critico" ? "text-rose-500 animate-pulse" : towerData?.estado_liquidez === "precaucion" ? "text-amber-400" : "text-emerald-400"}`}>
+              {towerData?.estado_liquidez === "critico" ? "DÉFICIT CRÍTICO" : towerData?.estado_liquidez === "precaucion" ? "EN PRECAUCIÓN" : "ESTABLE"}
             </p>
-            <p className="text-[11px] text-slate-400">Solvencia líquida sobre pasivos inmediatos</p>
+            <p className="text-[11px] text-slate-400">
+              Cob. Inmediata: {towerData ? `${(towerData.ratio_cobertura_inmediata || 0).toFixed(2)}x` : "-"}
+            </p>
           </div>
         </div>
       </div>
@@ -532,10 +540,22 @@ export default function FinanceAgentPage() {
               <div className="flex items-center gap-4 text-xs font-bold">
                 <div className="flex items-center gap-1.5">
                   <span className="w-3 h-3 rounded-full bg-emerald-500" />
-                  <span className="text-slate-700 dark:text-slate-300">Saldo Disponible Proyectado</span>
+                  <span className="text-slate-700 dark:text-slate-300">Curva de Tesorería Proyectada</span>
                 </div>
               </div>
             </div>
+
+            {cashFlowData?.pasivo_exigible_inmediato_gs ? (
+              <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-start gap-3 text-xs">
+                <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="font-bold text-rose-400">Pasivo Exigible Inmediato Impactando Flujo de Caja</h4>
+                  <p className="text-slate-300 mt-0.5">
+                    Se registran <strong className="font-mono text-white">{formatPYG(cashFlowData.pasivo_exigible_inmediato_gs)}</strong> en compromisos inmediatos exigibles (cheques en manos de proveedores con fecha de cobro cumplida y facturas vencidas en mora). La curva descuenta día por día los cheques diferidos y facturas programadas de tesorería.
+                  </p>
+                </div>
+              </div>
+            ) : null}
 
             <div className="h-72 w-full pt-4">
               <ResponsiveContainer width="100%" height="100%">
@@ -576,13 +596,13 @@ export default function FinanceAgentPage() {
               </ResponsiveContainer>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 pt-4 border-t border-slate-100 dark:border-slate-800">
               <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60">
-                <span className="text-xs text-slate-500">Ingresos Totales Esperados (30d)</span>
+                <span className="text-xs text-slate-500">Ingresos Totales (30d)</span>
                 <p className="text-base font-black text-emerald-600 dark:text-emerald-400 mt-1 font-mono">
                   {cashFlowData ? formatPYG(cashFlowData.total_ingresos_30d_gs) : "₲ 0"}
                 </p>
-                <p className="text-[11px] text-slate-400 mt-0.5">Ventas según DOW + Cobranzas AR</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Ventas Salón + Cobranzas AR</p>
               </div>
 
               <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60">
@@ -590,15 +610,23 @@ export default function FinanceAgentPage() {
                 <p className="text-base font-black text-rose-600 dark:text-rose-400 mt-1 font-mono">
                   {cashFlowData ? formatPYG(cashFlowData.total_egresos_30d_gs) : "₲ 0"}
                 </p>
-                <p className="text-[11px] text-slate-400 mt-0.5">Facturas AP + Reposición CMV + Nómina</p>
+                <p className="text-[11px] text-slate-400 mt-0.5 truncate">Chq + Facturas + Reposición + Fijos</p>
               </div>
 
               <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60">
-                <span className="text-xs text-slate-500">Saldo Final Proyectado a 30d</span>
-                <p className="text-base font-black text-blue-600 dark:text-blue-400 mt-1 font-mono">
+                <span className="text-xs text-slate-500">Saldo Final Estimado</span>
+                <p className={`text-base font-black mt-1 font-mono ${(cashFlowData?.saldo_proyectado_30d_gs ?? 0) < 0 ? "text-rose-500" : "text-blue-400"}`}>
                   {cashFlowData ? formatPYG(cashFlowData.saldo_proyectado_30d_gs) : "₲ 0"}
                 </p>
-                <p className="text-[11px] text-slate-400 mt-0.5">Posición neta estimada a cierre</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Posición neta a 30 días</p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-rose-900/30">
+                <span className="text-xs text-rose-400 font-bold">Días en Déficit / Riesgo</span>
+                <p className="text-base font-black text-rose-500 mt-1 font-mono">
+                  {cashFlowData?.dias_en_riesgo_count || 0} de 30 Días
+                </p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Períodos bajo cobertura</p>
               </div>
             </div>
           </div>
