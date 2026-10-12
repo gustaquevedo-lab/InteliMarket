@@ -964,16 +964,60 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
     demanda_diaria = round(ventas_30d_qty / 30.0, 2)
     autonomia_dias = round(total_stock / demanda_diaria, 1) if demanda_diaria > 0 else (999 if total_stock > 0 else 0)
 
-    # 7. Kardex / Movimientos (últimos 50 movimientos con comprobante y desglose)
+    # 7. Kardex / Movimientos (últimos 50 movimientos con comprobante, usuario y desglose)
     mov_rows = await db.execute(
         text("""
             SELECT im.id, im.tipo, im.cantidad, im.costo_unitario, im.motivo, im.referencia_type,
                    im.referencia_id, im.created_at, w.nombre as warehouse_nombre,
-                   s.numero as sale_numero, po.numero as po_numero
+                   COALESCE(s.numero, po.numero, pr.numero, adj.codigo, ret.numero, sret.numero_nota_credito) as comprobante_numero,
+                   COALESCE(
+                       u_im.nombre,
+                       cs.cajero_nombre,
+                       u_sale.nombre,
+                       po.created_by_name,
+                       u_po.nombre,
+                       u_pr.nombre,
+                       adj.aprobado_por_gerencia_nombre,
+                       adj.aprobado_por_administracion_nombre,
+                       u_adj.nombre,
+                       u_ret.nombre,
+                       u_sw.nombre,
+                       'Sistema'
+                   ) as usuario_nombre,
+                   COALESCE(
+                       u_im.email,
+                       u_sale.email,
+                       u_po.email,
+                       u_pr.email,
+                       u_adj.email,
+                       u_ret.email,
+                       u_sw.email
+                   ) as usuario_email,
+                   COALESCE(
+                       u_im.rol,
+                       u_sale.rol,
+                       u_po.rol,
+                       u_pr.rol,
+                       u_adj.rol,
+                       'cajero'
+                   ) as usuario_rol
             FROM inventory_movements im
             LEFT JOIN warehouses w ON w.id = im.warehouse_id
+            LEFT JOIN users u_im ON u_im.id = im.user_id
             LEFT JOIN sales s ON s.id = im.referencia_id AND im.referencia_type = 'sale'
+            LEFT JOIN users u_sale ON u_sale.id = s.user_id
+            LEFT JOIN cash_sessions cs ON cs.id = s.session_id
             LEFT JOIN purchase_orders po ON po.id = im.referencia_id AND (im.referencia_type = 'purchase_order' OR im.referencia_type = 'purchase')
+            LEFT JOIN users u_po ON u_po.id = po.user_id
+            LEFT JOIN purchase_receipts pr ON pr.id = im.referencia_id AND im.referencia_type = 'purchase_receipt'
+            LEFT JOIN users u_pr ON u_pr.id = pr.user_id
+            LEFT JOIN inventory_adjustments adj ON adj.id = im.referencia_id AND im.referencia_type = 'inventory_adjustment'
+            LEFT JOIN users u_adj ON u_adj.id = adj.user_id
+            LEFT JOIN returns ret ON ret.id = im.referencia_id AND im.referencia_type = 'return'
+            LEFT JOIN users u_ret ON u_ret.id = ret.user_id
+            LEFT JOIN supermer_waste_logs sw ON sw.id = im.referencia_id AND im.referencia_type = 'supermer_waste_log'
+            LEFT JOIN users u_sw ON u_sw.id = sw.registrado_por
+            LEFT JOIN supplier_returns sret ON sret.id = im.referencia_id AND im.referencia_type = 'supplier_return'
             WHERE im.product_id = :p_id
             ORDER BY im.created_at DESC
             LIMIT 50
@@ -1017,7 +1061,7 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
         else:
             total_salidas_kardex += abs(c)
 
-        comprobante = m.get("sale_numero") or m.get("po_numero") or None
+        comprobante = m.get("comprobante_numero")
         if not comprobante and m.get("referencia_id"):
             comprobante = f"REF #{str(m.get('referencia_id'))[:8].upper()}"
 
@@ -1035,6 +1079,9 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
             "referencia_type": m.get("referencia_type"),
             "referencia_id": str(m.get("referencia_id")) if m.get("referencia_id") else None,
             "comprobante_numero": comprobante,
+            "usuario_nombre": m.get("usuario_nombre") or "Sistema",
+            "usuario_email": m.get("usuario_email"),
+            "usuario_rol": m.get("usuario_rol"),
             "warehouse_nombre": m.get("warehouse_nombre") or "Depósito Central",
             "created_at": m["created_at"].isoformat() if m.get("created_at") else None,
         })
@@ -1058,6 +1105,9 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
                 "referencia_type": "sale",
                 "referencia_id": str(sa.get("id")),
                 "comprobante_numero": sa.get("numero") or "Ticket Venta",
+                "usuario_nombre": sa.get("cajero_nombre") or "Sistema",
+                "usuario_email": None,
+                "usuario_rol": "cajero",
                 "warehouse_nombre": "Salón de Ventas",
                 "created_at": sa.get("fecha").isoformat() if hasattr(sa.get("fecha"), "isoformat") else str(sa.get("fecha")),
             })

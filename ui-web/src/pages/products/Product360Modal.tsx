@@ -1338,6 +1338,7 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                       <th className="p-3 text-left">Fecha / Hora</th>
                       <th className="p-3 text-left">Comprobante</th>
                       <th className="p-3 text-left">Tipo de Movimiento</th>
+                      <th className="p-3 text-left">Usuario / Operador</th>
                       <th className="p-3 text-right">Cantidad</th>
                       <th className="p-3 text-right">Costo Unit.</th>
                       <th className="p-3 text-right">Total Val.</th>
@@ -1375,6 +1376,23 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                               {mov.tipo_label || mov.tipo?.replace(/_/g, " ")}
                             </span>
                           </td>
+                          <td className="p-3">
+                            <div className="flex items-center gap-2 min-w-[130px]">
+                              <div className="w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center text-[10px] font-bold shrink-0 shadow-xs">
+                                {(mov.usuario_nombre || "S")[0].toUpperCase()}
+                              </div>
+                              <div className="truncate">
+                                <p className="font-semibold text-slate-800 dark:text-slate-200 text-[11px] truncate leading-tight" title={mov.usuario_email ? `${mov.usuario_nombre} (${mov.usuario_email})` : mov.usuario_nombre || "Sistema"}>
+                                  {mov.usuario_nombre || "Sistema"}
+                                </p>
+                                {mov.usuario_rol && (
+                                  <span className="text-[9px] text-slate-400 dark:text-slate-500 font-medium capitalize">
+                                    {mov.usuario_rol}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </td>
                           <td className={`p-3 text-right font-mono font-black text-sm ${esPos ? "text-emerald-600" : "text-rose-600"}`}>
                             {esPos ? `+${cantNum}` : cantNum}
                             <span className="text-[10px] font-normal text-slate-400 ml-1">{p.unidad_medida}</span>
@@ -1396,7 +1414,7 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                     })}
                     {filteredKardex.length === 0 && (
                       <tr>
-                        <td colSpan={8} className="p-10 text-center text-slate-400">
+                        <td colSpan={9} className="p-10 text-center text-slate-400">
                           <Layers className="w-8 h-8 text-slate-300 mx-auto mb-2" />
                           <p className="font-bold">No se encontraron movimientos registrados en este filtro.</p>
                         </td>

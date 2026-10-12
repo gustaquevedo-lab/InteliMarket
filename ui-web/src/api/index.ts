@@ -911,6 +911,9 @@ export interface Product360Response {
     referencia_type?: string
     referencia_id?: string
     comprobante_numero?: string
+    usuario_nombre?: string
+    usuario_email?: string
+    usuario_rol?: string
     created_at: string
     warehouse_nombre?: string
   }>
@@ -928,6 +931,9 @@ export interface Product360Response {
     referencia_type?: string
     referencia_id?: string
     comprobante_numero?: string
+    usuario_nombre?: string
+    usuario_email?: string
+    usuario_rol?: string
     created_at: string
     warehouse_nombre?: string
   }>
