@@ -1,0 +1,83 @@
+{
+  "timestamp": "2026-10-12T17:07:00.646028",
+  "total_excel": 2597,
+  "total_en_bd": 244,
+  "total_nuevas": 2353,
+  "cuentas": [
+    {
+      "banco": "BANCO CONTINENTAL-CTE",
+      "numero_cuenta": "382364779308",
+      "tipo": "corriente",
+      "hoja": "CTE",
+      "total_excel": 202,
+      "en_bd": 148,
+      "nuevas": 54,
+      "debito_nuevas": 250917076.0,
+      "credito_nuevas": 236310724.0,
+      "saldo_anterior_excel": 56076992.0,
+      "saldo_cierre_excel": 50816460.0,
+      "saldo_actual_bd": 459212768.0,
+      "ajuste_contable": -408396308.0
+    },
+    {
+      "banco": "BANCO CONTINENTAL-DINELCO",
+      "numero_cuenta": "38250039706001",
+      "tipo": "ahorro",
+      "hoja": "AHORRO",
+      "total_excel": 52,
+      "en_bd": 0,
+      "nuevas": 52,
+      "debito_nuevas": 6376345.0,
+      "credito_nuevas": 13200000.0,
+      "saldo_anterior_excel": 8497854.0,
+      "saldo_cierre_excel": 1674199.0,
+      "saldo_actual_bd": 7497854.0,
+      "ajuste_contable": -5823655.0
+    },
+    {
+      "banco": "BANCO CONTINENTAL-PLUGPAY",
+      "numero_cuenta": "38250039706208",
+      "tipo": "ahorro",
+      "hoja": "AHORRO PIX",
+      "total_excel": 32,
+      "en_bd": 0,
+      "nuevas": 32,
+      "debito_nuevas": 31964399.0,
+      "credito_nuevas": 36000000.0,
+      "saldo_anterior_excel": 8772272.0,
+      "saldo_cierre_excel": 4736671.0,
+      "saldo_actual_bd": 61441614.0,
+      "ajuste_contable": -56704943.0
+    },
+    {
+      "banco": "BANCO INTERFISA-CTE",
+      "numero_cuenta": "259058910",
+      "tipo": "corriente",
+      "hoja": "CTE",
+      "total_excel": 124,
+      "en_bd": 96,
+      "nuevas": 28,
+      "debito_nuevas": 86017158.0,
+      "credito_nuevas": 95985987.0,
+      "saldo_anterior_excel": 40238158.0,
+      "saldo_cierre_excel": 9140355.0,
+      "saldo_actual_bd": 112969679.0,
+      "ajuste_contable": -103829324.0
+    },
+    {
+      "banco": "BANCO INTERFISA-AHORRO",
+      "numero_cuenta": "259026699",
+      "tipo": "ahorro",
+      "hoja": "AHORRO",
+      "total_excel": 2187,
+      "en_bd": 0,
+      "nuevas": 2187,
+      "debito_nuevas": 382409444.0,
+      "credito_nuevas": 357928630.0,
+      "saldo_anterior_excel": 31987133.0,
+      "saldo_cierre_excel": 7506319.0,
+      "saldo_actual_bd": -188958118.0,
+      "ajuste_contable": 196464437.0
+    }
+  ]
+}
