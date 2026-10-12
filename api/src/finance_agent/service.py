@@ -1251,6 +1251,27 @@ async def chat_with_finance_agent(
         ]
         action = None
 
+    elif "regla" in msg_lower or "memoria" in msg_lower or "directiva" in msg_lower or "instrucci" in msg_lower:
+        if rules:
+            r_list = "\n".join([f"- **{r['regla']}** [{r['categoria']}]" for r in rules])
+            resp = (
+                f"🧠 **Memoria Activa del Negocio (Directivas Financieras Registradas en PostgreSQL):**\n\n"
+                f"{r_list}\n\n"
+                f"Estas directivas norman las prioridades de tesorería y la calendarización de pagos a proveedores."
+            )
+        else:
+            resp = (
+                f"🧠 **Memoria Activa del Negocio:**\n\n"
+                f"No hay directivas financieras registradas aún.\n"
+                f"Podés instruir directivas como *'Priorizar cobertura de cheques antes que compras al contado'* desde el panel lateral de Memoria Activa."
+            )
+        suggestions = [
+            "¿Cuánto debemos a proveedores entre cheques y facturas?",
+            "Ver desglose de saldos bancarios y sobregiros",
+            "Simular proyección de flujo de caja a 30 días"
+        ]
+        action = None
+
     else:
         resp = (
             f"💼 **Diagnóstico Financiero Consolidado y Pasivos Reales:**\n\n"
