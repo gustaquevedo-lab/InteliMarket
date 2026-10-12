@@ -162,7 +162,7 @@ def generate_third_party_annex_pdf(
         ],
         [
             Paragraph("<b>TOTAL RENDICIÓN GS.:</b>", meta_label),
-            Paragraph(f"<b>₲ {int(total_monto):,}".replace(",", "."), title_style),
+            Paragraph(f"<b>₲ {int(total_monto):,}</b>".replace(",", "."), title_style),
         ]
     ]
     t_meta = Table(meta_box, colWidths=[55 * mm, 127 * mm])

@@ -3818,6 +3818,18 @@ export const api = {
     }),
     createSettlement: (data: any) => client.post<LaborSettlement>(`/v1/sueldok/settlements?company_id=${COMPANY_ID}`, data),
     listSettlements: () => client.get<LaborSettlement[]>(`/v1/sueldok/settlements`, { company_id: COMPANY_ID }),
+    createDossier: (data: any) => client.post<any>(`/v1/sueldok/dossiers?company_id=${COMPANY_ID}`, data),
+    listDossiers: () => client.get<any[]>(`/v1/sueldok/dossiers`, { company_id: COMPANY_ID }),
+    getDossier: (id: string) => client.get<any>(`/v1/sueldok/dossiers/${id}`, { company_id: COMPANY_ID }),
+    executeCompensations: (dossierId: string) => client.post<any>(`/v1/sueldok/dossiers/${dossierId}/execute-compensations?company_id=${COMPANY_ID}`),
+    executeThirdPartyPhase: (dossierId: string, phaseId: string, chequeNumero?: string, bancoNombre?: string) => {
+      const q = new URLSearchParams({ company_id: COMPANY_ID })
+      if (chequeNumero) q.set("cheque_numero", chequeNumero)
+      if (bancoNombre) q.set("banco_nombre", bancoNombre)
+      return client.post<any>(`/v1/sueldok/dossiers/${dossierId}/phases/${phaseId}/execute-third-party?${q.toString()}`)
+    },
+    executeIpsPhase: (dossierId: string, phaseId: string) =>
+      client.post<any>(`/v1/sueldok/dossiers/${dossierId}/phases/${phaseId}/execute-ips?company_id=${COMPANY_ID}`),
   },
   security: {
     apiKeys: () => client.get<SecurityApiKey[]>("/v1/security/api-keys"),
