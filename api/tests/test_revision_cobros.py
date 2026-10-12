@@ -148,8 +148,8 @@ async def test_huerfanos_ignora_cobros_anteriores_al_despliegue(db, monkeypatch)
 
 
 def test_huerfanos_desde_es_la_fecha_de_despliegue():
-    # 00:00 de Asuncion (UTC-3) del dia de despliegue
-    assert HUERFANOS_DESDE_REAL == datetime(2026, 10, 12, 3, 0, tzinfo=timezone.utc)
+    # Momento del despliegue (22:20 de Asuncion, UTC-3, del 11/10/2026)
+    assert HUERFANOS_DESDE_REAL == datetime(2026, 10, 12, 1, 20, tzinfo=timezone.utc)
 
 
 async def test_desde_sin_zona_se_toma_como_hora_de_asuncion(db, monkeypatch):

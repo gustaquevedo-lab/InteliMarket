@@ -23,7 +23,7 @@ DIAS_VENTANA_DEFECTO = 7
 # Fecha de despliegue del pago mixto (00:00 de Asuncion en UTC): los cobros
 # anteriores nunca se enlazaron a su venta, asi que no se listan como huerfanos
 # (inundarian el panel). MOVER al dia real del despliegue.
-HUERFANOS_DESDE = datetime(2026, 10, 12, 3, 0, tzinfo=timezone.utc)
+HUERFANOS_DESDE = datetime(2026, 10, 12, 1, 20, tzinfo=timezone.utc)
 # Fechas sin zona que llegan por query se toman como hora de Asuncion (UTC-3).
 ZONA_LOCAL = timezone(timedelta(hours=-3))
 
