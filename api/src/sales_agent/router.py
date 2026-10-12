@@ -163,7 +163,8 @@ async def chat_with_sales_agent(
 ):
     """Invoca al copiloto comercial autónomo con Qwen 2.5 7B en Ollama local y Tool-Calling."""
     return await agent_orchestrator.chat_with_sales_agent(
-        db, str(body.company_id), body.message, body.context_tab or "general", body.conversation_history
+        db, str(body.company_id), body.message, body.context_tab or "general", body.conversation_history,
+        attachment_name=body.attachment_name, attachment_type=body.attachment_type, attachment_data=body.attachment_data
     )
 
 

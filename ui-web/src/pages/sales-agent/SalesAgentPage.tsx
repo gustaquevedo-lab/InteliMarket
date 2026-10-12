@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
+import * as XLSX from "xlsx"
 import {
   TrendingUp, Sparkles, CheckCircle2, XCircle, Loader2, AlertTriangle, RefreshCw,
   DollarSign, Target, Scale, Zap, MessageSquare, Send, Check, ArrowRight,
@@ -7,7 +8,8 @@ import {
   ListTodo, Clock, Flame, BarChart3, Bot, ThumbsUp, ArrowUpRight, ArrowDownRight,
   Sliders, Search, Filter, PlayCircle, Award, CheckCircle, Info, Calculator,
   ChevronDown, ChevronUp, Package, Layers2, Boxes, Edit3, X, Activity, UserCheck,
-  Star, Brain, Phone, Settings, Calendar
+  Star, Brain, Phone, Settings, Calendar,
+  Mic, MicOff, Volume2, VolumeX, Paperclip, FileSpreadsheet, FileText, Image as ImageIcon, Copy, Trash2
 } from "lucide-react"
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -16,6 +18,110 @@ import { formatPYG, formatDate, formatDateTime } from "../../utils/format"
 
 type AgentTab = "rentabilidad" | "pareto" | "precios" | "simulador" | "chat" | "acciones"
 type PeriodType = "mes_actual" | "mes_anterior" | "ultimos_30_dias" | "personalizado"
+
+interface ChatAttachment {
+  file?: File
+  name: string
+  type: "image" | "spreadsheet" | "document"
+  size?: string
+  preview?: string
+  data?: string
+}
+
+interface ChatMessage {
+  role: "user" | "assistant"
+  content: string
+  outcome?: any
+  prompts?: string[]
+  attachment?: ChatAttachment
+  timestamp?: string
+}
+
+function FormattedMessage({ content }: { content: string }) {
+  if (!content) return null
+
+  const lines = content.split("\n")
+  const elements: JSX.Element[] = []
+  let listItems: string[] = []
+
+  const renderInline = (str: string) => {
+    // Regex splits on **bold**, `code`, *italic*
+    const parts = str.split(/(\*\*.*?\*\*|`.*?`|\*.*?\*)/g)
+    return parts.map((part, i) => {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        return (
+          <strong key={i} className="font-extrabold text-slate-900 dark:text-white">
+            {part.slice(2, -2)}
+          </strong>
+        )
+      }
+      if (part.startsWith("`") && part.endsWith("`")) {
+        return (
+          <code key={i} className="px-1.5 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 font-mono text-[11px] border border-indigo-200/50 dark:border-indigo-800/50">
+            {part.slice(1, -1)}
+          </code>
+        )
+      }
+      if (part.startsWith("*") && part.endsWith("*") && !part.startsWith("**")) {
+        return (
+          <em key={i} className="italic text-slate-700 dark:text-slate-300">
+            {part.slice(1, -1)}
+          </em>
+        )
+      }
+      return part
+    })
+  }
+
+  const flushList = (key: number) => {
+    if (listItems.length > 0) {
+      elements.push(
+        <ul key={`ul-${key}`} className="space-y-1.5 my-1.5 pl-1">
+          {listItems.map((li, liIdx) => (
+            <li key={liIdx} className="flex items-start gap-2 text-slate-700 dark:text-slate-300 leading-relaxed">
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 mt-1.5 shrink-0" />
+              <span>{renderInline(li)}</span>
+            </li>
+          ))}
+        </ul>
+      )
+      listItems = []
+    }
+  }
+
+  lines.forEach((line, idx) => {
+    const trimmed = line.trim()
+    if (trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("• ")) {
+      listItems.push(trimmed.slice(2).trim())
+    } else {
+      flushList(idx)
+      if (trimmed.startsWith("### ")) {
+        elements.push(
+          <h4 key={idx} className="font-black text-xs uppercase tracking-wider text-indigo-600 dark:text-indigo-400 mt-2 mb-1">
+            {renderInline(trimmed.slice(4))}
+          </h4>
+        )
+      } else if (trimmed.startsWith("## ")) {
+        elements.push(
+          <h3 key={idx} className="font-black text-sm text-slate-900 dark:text-white mt-2 mb-1">
+            {renderInline(trimmed.slice(3))}
+          </h3>
+        )
+      } else if (trimmed === "") {
+        elements.push(<div key={idx} className="h-1.5" />)
+      } else {
+        elements.push(
+          <p key={idx} className="leading-relaxed text-slate-700 dark:text-slate-300">
+            {renderInline(trimmed)}
+          </p>
+        )
+      }
+    }
+  })
+  flushList(lines.length)
+
+  return <div className="space-y-1 text-xs">{elements}</div>
+}
 
 export default function SalesAgentPage() {
   const [tab, setTab] = useState<AgentTab>("rentabilidad")
@@ -58,22 +164,177 @@ export default function SalesAgentPage() {
   const [businessRules, setBusinessRules] = useState<any[]>([])
   const [newRuleText, setNewRuleText] = useState("")
 
-  // Estado de Chat
-  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string; outcome?: any; prompts?: string[] }>>([
+  // Estado de Chat y Control Multimodal (Voz, Archivos, Memoria)
+  const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "assistant",
-      content: "👋 **Buenas tardes. Bienvenido a la Torre de Control Comercial del Gerente de Ventas IA.**\n\nEstoy conectado en tiempo real a la base de datos de **Extra Supermercado** con inferencia local de IA y capacidad de ejecutar acciones.\n\n¿En qué área comercial o remarcación deseas que nos enfoquemos hoy?",
+      content: "👋 **Buenas tardes. Bienvenido a la Torre de Control Comercial del Gerente de Ventas IA.**\n\nEstoy conectado en tiempo real a la base de datos de **Extra Supermercado** con inferencia local de IA, soporte para análisis por **voz**, carga de **planillas Excel** y auditoría visual de **fotos**.\n\n¿En qué área comercial o remarcación deseas que nos enfoquemos hoy?",
       prompts: [
         "¿Cuáles son los productos con peor margen?",
         "Ver desglose de Pareto Clase A",
         "Modificar meta general a 22%",
         "Propuestas de precios en Carnicería"
-      ]
+      ],
+      timestamp: "En línea"
     }
   ])
   const [inputMessage, setInputMessage] = useState("")
   const [chatLoading, setChatLoading] = useState(false)
+  const [isListening, setIsListening] = useState(false)
+  const [isSpeaking, setIsSpeaking] = useState(false)
+  const [attachment, setAttachment] = useState<ChatAttachment | null>(null)
+  const [fileProcessing, setFileProcessing] = useState(false)
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Soporte de Voz (Speech to Text)
+  const toggleListening = () => {
+    if (isListening) {
+      setIsListening(false)
+      return
+    }
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      toast.warning("Voz no disponible", "Tu navegador no soporta Web Speech API.")
+      return
+    }
+    try {
+      const recognition = new SpeechRecognition()
+      recognition.lang = "es-PY"
+      recognition.continuous = false
+      recognition.interimResults = false
+
+      recognition.onstart = () => setIsListening(true)
+      recognition.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript
+        setInputMessage(prev => prev ? `${prev} ${transcript}` : transcript)
+        setIsListening(false)
+      }
+      recognition.onerror = () => setIsListening(false)
+      recognition.onend = () => setIsListening(false)
+      recognition.start()
+    } catch {
+      setIsListening(false)
+    }
+  }
+
+  // Reproducir Texto con Voz (Text to Speech)
+  const speakText = (text: string) => {
+    if (!window.speechSynthesis) return
+    if (isSpeaking) {
+      window.speechSynthesis.cancel()
+      setIsSpeaking(false)
+      return
+    }
+    const cleanText = text.replace(/[*#_`]/g, "")
+    const utterance = new SpeechSynthesisUtterance(cleanText)
+    utterance.lang = "es-ES"
+    utterance.rate = 1.05
+    utterance.onend = () => setIsSpeaking(false)
+    utterance.onerror = () => setIsSpeaking(false)
+    setIsSpeaking(true)
+    window.speechSynthesis.speak(utterance)
+  }
+
+  // Procesamiento de Archivos (Imágenes, Excel, CSV, PDF)
+  const processIncomingFile = async (file: File) => {
+    setFileProcessing(true)
+    try {
+      const sizeStr = `${(file.size / 1024).toFixed(1)} KB`
+      const isImage = file.type.startsWith("image/")
+      const isSheet = file.name.endsWith(".xlsx") || file.name.endsWith(".xls") || file.name.endsWith(".csv")
+
+      if (isImage) {
+        const reader = new FileReader()
+        reader.onload = () => {
+          const base64 = reader.result as string
+          setAttachment({
+            file: file as any,
+            name: file.name,
+            type: "image",
+            size: sizeStr,
+            preview: base64,
+            data: base64
+          })
+          toast.info("Imagen adjunta", "Lista para análisis visual con Gemini Multimodal.")
+        }
+        reader.readAsDataURL(file)
+      } else if (isSheet) {
+        const reader = new FileReader()
+        reader.onload = (evt) => {
+          try {
+            const bstr = evt.target?.result
+            const wb = XLSX.read(bstr, { type: "binary" })
+            const wsname = wb.SheetNames[0]
+            const ws = wb.Sheets[wsname]
+            const jsonRows: any[] = XLSX.utils.sheet_to_json(ws, { header: 1 })
+            const previewRows = jsonRows.slice(0, 30)
+            const textSummary = `Hoja: ${wsname} (${jsonRows.length} filas)\nDatos detectados:\n${JSON.stringify(previewRows, null, 2)}`
+            setAttachment({
+              file: file as any,
+              name: file.name,
+              type: "spreadsheet",
+              size: sizeStr,
+              data: textSummary
+            })
+            toast.success("Planilla leída", `${jsonRows.length} filas extraídas de ${file.name}.`)
+          } catch (err: any) {
+            toast.error("Error al leer Excel", err.message)
+          }
+        }
+        reader.readAsBinaryString(file)
+      } else {
+        const reader = new FileReader()
+        reader.onload = () => {
+          const text = (reader.result as string) || ""
+          setAttachment({
+            file: file as any,
+            name: file.name,
+            type: "document",
+            size: sizeStr,
+            data: text.slice(0, 15000)
+          })
+          toast.info("Documento adjunto", file.name)
+        }
+        reader.readAsText(file)
+      }
+    } catch (err: any) {
+      toast.error("Error procesando archivo", err.message)
+    } finally {
+      setFileProcessing(false)
+    }
+  }
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    processIncomingFile(file)
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
+
+  const handleCopyMessage = (idx: number, text: string) => {
+    navigator.clipboard.writeText(text)
+    setCopiedIdx(idx)
+    setTimeout(() => setCopiedIdx(null), 2000)
+  }
+
+  const handleClearChat = () => {
+    setMessages([
+      {
+        role: "assistant",
+        content: "🔄 Conversación reiniciada. ¿Qué área comercial o análisis deseás evaluar?",
+        prompts: [
+          "¿Cuáles son los productos con peor margen?",
+          "Ver desglose de Pareto Clase A",
+          "Auditar carnicería y cortes nobles"
+        ],
+        timestamp: "Ahora"
+      }
+    ])
+    setAttachment(null)
+  }
 
   const toast = useToast()
   const { user } = useAuth()
@@ -593,26 +854,143 @@ export default function SalesAgentPage() {
             </p>
           </div>
 
-          {/* Desglose por Departamento */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">Rendimiento por Departamento</h3>
+          {/* Desglose por Departamento — Tarjetas Ejecutivas de Rentabilidad */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-5">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900 dark:text-white uppercase tracking-wider">
+                  Rendimiento por Departamento & Sección
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Auditoría de <b>Margen Bruto</b> (rentabilidad real), <b>Facturación</b> y su <b>Participación</b> sobre las ventas totales del supermercado
+                </p>
+              </div>
+              <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 flex-wrap">
+                <span className="flex items-center gap-1 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 px-2 py-1 rounded-md border border-emerald-200 dark:border-emerald-900/50">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Margen en Meta (≥ Target)
+                </span>
+                <span className="flex items-center gap-1 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 px-2 py-1 rounded-md border border-blue-200 dark:border-blue-900/50">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500" /> Margen Saludable (≥ 15%)
+                </span>
+                <span className="flex items-center gap-1 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 px-2 py-1 rounded-md border border-rose-200 dark:border-rose-900/50">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500" /> Bajo Meta / Gancho KVI
+                </span>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {analysis.rentabilidad_por_departamento?.map((d: any, idx: number) => (
-                <div key={idx} className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">{d.departamento}</h4>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
-                      d.margen_actual_pct >= d.target_sugerido_pct ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300" :
-                      d.margen_actual_pct >= 15 ? "bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300" :
-                      "bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300"
-                    }`}>
-                      {d.margen_actual_pct}%
-                    </span>
+              {analysis.rentabilidad_por_departamento?.map((d: any, idx: number) => {
+                const totalTienda = Number(analysis.facturacion_mes || 0)
+                const partPct = d.participacion_ventas_pct !== undefined
+                  ? d.participacion_ventas_pct
+                  : (totalTienda > 0 ? Number(((d.facturacion_gs / totalTienda) * 100).toFixed(1)) : 0)
+                const margenActual = Number(d.margen_actual_pct || 0)
+                const metaTarget = Number(d.target_sugerido_pct || 22.0)
+                const gapPp = Number((margenActual - metaTarget).toFixed(1))
+                const gananciaBruta = d.ganancia_bruta_gs !== undefined
+                  ? d.ganancia_bruta_gs
+                  : Math.round(Number(d.facturacion_gs) * (margenActual / 100))
+                const costoCmv = d.cmv_gs !== undefined
+                  ? d.cmv_gs
+                  : Math.round(Number(d.facturacion_gs) - gananciaBruta)
+                const saludMargen = margenActual >= metaTarget ? "optimo" : margenActual >= 15 ? "saludable" : "bajo"
+
+                return (
+                  <div
+                    key={idx}
+                    className="p-5 rounded-3xl bg-slate-50/80 dark:bg-slate-800/40 border border-slate-200/90 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700/60 shadow-sm hover:shadow-md transition-all space-y-4"
+                  >
+                    {/* Header del Card: Nombre + Participación + Margen */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-0.5">
+                        <h4 className="text-sm font-black text-slate-900 dark:text-white tracking-tight uppercase">
+                          {d.departamento}
+                        </h4>
+                        <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/70 dark:border-indigo-900/50">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Ventas Tienda:</span>
+                          <span className="text-[11px] font-black font-mono text-indigo-700 dark:text-indigo-300">{partPct}%</span>
+                        </div>
+                      </div>
+
+                      {/* Badge de Margen Bruto y Meta */}
+                      <div className="text-right shrink-0">
+                        <div className="flex items-center gap-1 justify-end">
+                          <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Margen:</span>
+                          <span className={`px-2.5 py-0.5 rounded-full text-xs font-mono font-black ${
+                            saludMargen === "optimo"
+                              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800"
+                              : saludMargen === "saludable"
+                              ? "bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300 border border-blue-300 dark:border-blue-800"
+                              : "bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 border border-rose-300 dark:border-rose-800"
+                          }`}>
+                            {margenActual}%
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                          Meta: <span className="font-bold text-slate-600 dark:text-slate-300">{metaTarget}%</span>
+                          <span className={`ml-1 font-bold ${gapPp >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
+                            ({gapPp > 0 ? `+${gapPp}` : gapPp} pp)
+                          </span>
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Barra visual de Margen vs Meta */}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium">
+                        <span>Rendimiento del Margen</span>
+                        <span className="font-mono font-bold">
+                          {Math.min(100, Math.round((margenActual / Math.max(metaTarget, 1)) * 100))}% de la meta
+                        </span>
+                      </div>
+                      <div className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${
+                            saludMargen === "optimo" ? "bg-emerald-500" : saludMargen === "saludable" ? "bg-blue-500" : "bg-rose-500"
+                          }`}
+                          style={{ width: `${Math.min(100, Math.max(5, (margenActual / Math.max(metaTarget, 1)) * 100))}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Desglose Cuantitativo: Facturación, Ganancia Bruta, Costo CMV */}
+                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200/60 dark:border-slate-800/60">
+                      <div className="bg-white dark:bg-slate-900/70 p-2.5 rounded-xl border border-slate-200/60 dark:border-slate-800/60">
+                        <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">
+                          Facturación Total
+                        </span>
+                        <p className="text-xs font-black font-mono text-slate-900 dark:text-white mt-0.5">
+                          {formatPYG(d.facturacion_gs)}
+                        </p>
+                      </div>
+
+                      <div className="bg-white dark:bg-slate-900/70 p-2.5 rounded-xl border border-slate-200/60 dark:border-slate-800/60">
+                        <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">
+                          Ganancia Bruta
+                        </span>
+                        <p className="text-xs font-black font-mono text-emerald-600 dark:text-emerald-400 mt-0.5">
+                          {formatPYG(gananciaBruta)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 px-1">
+                      <span>Costo (CMV): <b className="text-slate-600 dark:text-slate-300">{formatPYG(costoCmv)}</b></span>
+                      {d.transacciones ? (
+                        <span>{d.transacciones.toLocaleString()} tickets</span>
+                      ) : null}
+                    </div>
+
+                    {/* Dictamen Estratégico IA */}
+                    <div className="p-3 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/50 text-[11px] text-slate-700 dark:text-slate-300 leading-relaxed">
+                      <span className="font-extrabold text-indigo-700 dark:text-indigo-400 mr-1 block sm:inline">
+                        💡 Estrategia IA:
+                      </span>
+                      {d.estrategia}
+                    </div>
                   </div>
-                  <p className="text-[11px] font-mono text-slate-500">Facturación: {formatPYG(d.facturacion_gs)}</p>
-                  <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">{d.estrategia}</p>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         </div>
@@ -937,29 +1315,57 @@ export default function SalesAgentPage() {
         </div>
       )}
 
-      {/* ══════════════════════ PESTAÑA 5: COPILOTO COMERCIAL IA (REACT + MEMORIA) ══════════════════════ */}
+      {/* ══════════════════════ PESTAÑA 5: COPILOTO COMERCIAL IA MULTIMODAL (VOZ + ARCHIVOS + MEMORIA) ══════════════════════ */}
       {!loading && tab === "chat" && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Columna Izquierda: Perfil y Memoria del Negocio */}
+          {/* Columna Izquierda: Perfil, Memoria y Capacidades Multimodales */}
           <div className="lg:col-span-4 space-y-4">
+            {/* Tarjeta de Estado del Copiloto */}
             <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 to-blue-500 text-white flex items-center justify-center shadow-md">
-                  <Bot className="w-6 h-6" />
+                <div className="relative">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-blue-500 text-white flex items-center justify-center shadow-lg shadow-indigo-500/25">
+                    <Bot className="w-7 h-7" />
+                  </div>
+                  <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500 border-2 border-white dark:border-slate-900"></span>
+                  </span>
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">Gerente Comercial Autónomo</h3>
-                  <p className="text-[11px] text-slate-500">Inferencia local Qwen 2.5 7B en Ollama</p>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight">Gerente Comercial Autónomo</h3>
+                  <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1 mt-0.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Qwen 2.5 7B + Gemini Multimodal
+                  </p>
+                </div>
+              </div>
+
+              {/* Capacidades Activas */}
+              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-[10px]">
+                <div className="p-2.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/40 space-y-1">
+                  <span className="font-extrabold text-indigo-700 dark:text-indigo-300 block flex items-center gap-1">
+                    <Mic className="w-3 h-3" /> Dictado por Voz
+                  </span>
+                  <p className="text-slate-500 dark:text-slate-400">Web Speech API nativo (es-PY)</p>
+                </div>
+                <div className="p-2.5 rounded-xl bg-purple-50/70 dark:bg-purple-950/40 border border-purple-100 dark:border-purple-900/40 space-y-1">
+                  <span className="font-extrabold text-purple-700 dark:text-purple-300 block flex items-center gap-1">
+                    <FileSpreadsheet className="w-3 h-3" /> Planillas & Fotos
+                  </span>
+                  <p className="text-slate-500 dark:text-slate-400">Excel (.xlsx), CSV e imágenes</p>
                 </div>
               </div>
 
               {/* Memoria de Reglas del Negocio */}
               <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
-                  <Brain className="w-3.5 h-3.5 text-indigo-500" />
-                  Memoria Activa del Negocio ({businessRules.length})
+                <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
+                  <span className="flex items-center gap-1.5">
+                    <Brain className="w-3.5 h-3.5 text-indigo-500" />
+                    Memoria Activa del Negocio ({businessRules.length})
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono">PostgreSQL</span>
                 </div>
-                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
                   {businessRules.length === 0 ? (
                     <p className="text-[11px] text-slate-400 italic">No hay directivas registradas aún.</p>
                   ) : (
@@ -978,11 +1384,11 @@ export default function SalesAgentPage() {
                     placeholder="Instruir directiva al agente..."
                     value={newRuleText}
                     onChange={(e) => setNewRuleText(e.target.value)}
-                    className="flex-1 px-3 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                    className="flex-1 px-3 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400"
                   />
                   <button
                     onClick={handleCreateRule}
-                    className="px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700"
+                    className="px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 transition cursor-pointer"
                   >
                     Guardar
                   </button>
@@ -991,28 +1397,132 @@ export default function SalesAgentPage() {
             </div>
           </div>
 
-          {/* Columna Derecha: Chat Interactivo */}
-          <div className="lg:col-span-8 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col h-[600px] overflow-hidden">
+          {/* Columna Derecha: Chat Interactivo Command Deck */}
+          <div
+            className={`lg:col-span-8 bg-white dark:bg-slate-900 rounded-3xl border transition-all ${
+              isDragging
+                ? "border-indigo-500 ring-2 ring-indigo-500/30"
+                : "border-slate-200 dark:border-slate-800"
+            } shadow-sm flex flex-col h-[650px] overflow-hidden relative`}
+            onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={(e) => {
+              e.preventDefault()
+              setIsDragging(false)
+              const dropped = e.dataTransfer.files?.[0]
+              if (dropped) processIncomingFile(dropped)
+            }}
+          >
+            {/* Header de la Ventana de Chat */}
+            <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850/50 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-xs font-extrabold text-slate-800 dark:text-slate-200">
+                  Torre de Control Comercial en Vivo
+                </span>
+                <span className="hidden sm:inline-block text-[10px] text-slate-400 px-2 py-0.5 rounded-full bg-slate-200/60 dark:bg-slate-800">
+                  PostgreSQL + ReAct
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleClearChat}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition text-xs flex items-center gap-1 cursor-pointer"
+                  title="Reiniciar conversación"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span className="text-[11px] hidden md:inline">Limpiar</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Zona de Mensajes */}
             <div className="flex-1 p-6 overflow-y-auto space-y-4">
               {messages.map((m, idx) => (
                 <div key={idx} className={`flex gap-3 ${m.role === "user" ? "justify-end" : "justify-start"}`}>
                   {m.role === "assistant" && (
-                    <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+                    <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-600 to-blue-500 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
                       <Bot className="w-4 h-4" />
                     </div>
                   )}
-                  <div className={`max-w-xl p-4 rounded-2xl text-xs space-y-2 ${
-                    m.role === "user"
-                      ? "bg-indigo-600 text-white rounded-tr-none"
-                      : "bg-slate-50 dark:bg-slate-800/60 text-slate-800 dark:text-slate-200 rounded-tl-none border border-slate-100 dark:border-slate-800"
-                  }`}>
-                    <div className="whitespace-pre-line leading-relaxed font-sans">{m.content}</div>
 
-                    {/* Outcome de acción */}
+                  <div className={`max-w-2xl rounded-2xl p-4 text-xs space-y-2.5 ${
+                    m.role === "user"
+                      ? "bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-tr-none shadow-md shadow-indigo-600/10"
+                      : "bg-slate-50 dark:bg-slate-800/70 text-slate-800 dark:text-slate-200 rounded-tl-none border border-slate-200/80 dark:border-slate-800 shadow-xs"
+                  }`}>
+                    {/* Adjunto previo si es mensaje de usuario */}
+                    {m.attachment && (
+                      <div className="mb-2">
+                        {m.attachment.type === "image" && m.attachment.preview && (
+                          <div className="relative group max-w-xs overflow-hidden rounded-xl border border-white/20 mb-1.5">
+                            <img src={m.attachment.preview} alt="Adjunto" className="w-full max-h-48 object-cover rounded-xl" />
+                            <div className="absolute bottom-1 left-1 px-2 py-0.5 rounded-md bg-black/60 text-white text-[10px] font-mono">
+                              📷 {m.attachment.name}
+                            </div>
+                          </div>
+                        )}
+                        {m.attachment.type === "spreadsheet" && (
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/20 border border-white/30 text-white font-bold text-[11px]">
+                            <FileSpreadsheet className="w-4 h-4" />
+                            <span>Planilla: {m.attachment.name}</span>
+                          </div>
+                        )}
+                        {m.attachment.type === "document" && (
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/20 border border-white/30 text-white font-bold text-[11px]">
+                            <FileText className="w-4 h-4" />
+                            <span>Documento: {m.attachment.name}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Contenido Formateado (Sin asteriscos crudos) */}
+                    <div className="leading-relaxed">
+                      {m.role === "assistant" ? (
+                        <FormattedMessage content={m.content} />
+                      ) : (
+                        <p className="whitespace-pre-line leading-relaxed font-medium">{m.content}</p>
+                      )}
+                    </div>
+
+                    {/* Barra de utilidades del mensaje del asistente (Voz + Copiar + Timestamp) */}
+                    {m.role === "assistant" && (
+                      <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between text-[10px] text-slate-400">
+                        <span className="font-mono">{m.timestamp || "Gerente IA"}</span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => speakText(m.content)}
+                            className={`p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer flex items-center gap-1 ${
+                              isSpeaking ? "text-indigo-600 dark:text-indigo-400 animate-pulse font-bold" : "text-slate-400"
+                            }`}
+                            title="Escuchar respuesta en voz alta"
+                          >
+                            <Volume2 className="w-3.5 h-3.5" />
+                            <span className="text-[10px]">Escuchar</span>
+                          </button>
+                          <button
+                            onClick={() => handleCopyMessage(idx, m.content)}
+                            className="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer flex items-center gap-1 text-slate-400"
+                            title="Copiar texto"
+                          >
+                            {copiedIdx === idx ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                            <span className="text-[10px]">{copiedIdx === idx ? "Copiado" : "Copiar"}</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Outcome de acción ejecutada */}
                     {m.outcome && (
-                      <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs space-y-1">
-                        <span className="font-bold text-indigo-600 uppercase text-[10px]">{m.outcome.titulo}</span>
-                        <p className="text-slate-600 dark:text-slate-300">{m.outcome.descripcion}</p>
+                      <div className="p-3 mt-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-950 dark:text-indigo-200 flex items-start justify-between gap-2">
+                        <div>
+                          <span className="font-extrabold uppercase text-[10px] tracking-wider block text-indigo-700 dark:text-indigo-300">
+                            ⚡ {m.outcome.titulo}
+                          </span>
+                          <p className="text-xs font-semibold mt-0.5 text-slate-700 dark:text-slate-300">{m.outcome.descripcion}</p>
+                        </div>
+                        <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
                       </div>
                     )}
 
@@ -1023,9 +1533,9 @@ export default function SalesAgentPage() {
                           <button
                             key={pIdx}
                             onClick={() => handleSendMessage(pTxt)}
-                            className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 transition"
+                            className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-slate-800 transition shadow-xs cursor-pointer"
                           >
-                            {pTxt}
+                            💡 {pTxt}
                           </button>
                         ))}
                       </div>
@@ -1033,32 +1543,117 @@ export default function SalesAgentPage() {
                   </div>
                 </div>
               ))}
+
               {chatLoading && (
-                <div className="flex items-center gap-2 text-xs text-slate-400 p-2">
+                <div className="flex items-center gap-2 text-xs text-slate-400 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 w-fit border border-slate-100 dark:border-slate-800">
                   <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
-                  Qwen 2.5 consultando herramientas y base de datos...
+                  <span>Qwen 2.5 & Gemini analizando base de datos y herramientas comerciales...</span>
                 </div>
               )}
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input de Chat */}
-            <div className="p-4 border-t border-slate-100 dark:border-slate-800 flex gap-2">
-              <input
-                type="text"
-                placeholder="Escribí una consulta comercial, remarcación o directiva..."
-                value={inputMessage}
-                onChange={(e) => setInputMessage(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
-                className="flex-1 px-4 py-2 text-xs rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
-              />
-              <button
-                onClick={() => handleSendMessage()}
-                disabled={chatLoading}
-                className="p-2.5 rounded-2xl bg-indigo-600 text-white hover:bg-indigo-700 transition disabled:opacity-50"
-              >
-                <Send className="w-4 h-4" />
-              </button>
+            {/* Barra de Entrada de Chat Multimodal */}
+            <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-850/70 space-y-2">
+              {/* Chip de Archivo Adjunto Pendiente */}
+              {attachment && (
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-indigo-100 dark:bg-indigo-950/80 border border-indigo-200 dark:border-indigo-800 text-indigo-900 dark:text-indigo-200 text-xs animate-fade-in">
+                  {attachment.type === "image" ? (
+                    <ImageIcon className="w-3.5 h-3.5 text-indigo-600" />
+                  ) : attachment.type === "spreadsheet" ? (
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                  ) : (
+                    <FileText className="w-3.5 h-3.5 text-blue-600" />
+                  )}
+                  <span className="font-bold truncate max-w-xs">{attachment.name}</span>
+                  <span className="text-[10px] text-slate-500 font-mono">({attachment.size})</span>
+                  <button
+                    onClick={() => setAttachment(null)}
+                    className="p-0.5 rounded-full hover:bg-indigo-200 dark:hover:bg-indigo-900 transition text-slate-500 hover:text-rose-600 cursor-pointer ml-1"
+                    title="Quitar adjunto"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {/* Banner de Estado de Escucha por Micrófono */}
+              {isListening && (
+                <div className="flex items-center justify-between px-3.5 py-2 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs animate-pulse">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-rose-600 animate-ping" />
+                    <span className="font-bold">🎙️ Escuchando dictado en vivo... Hablá sobre tus productos, metas o remarcaciones.</span>
+                  </div>
+                  <button
+                    onClick={toggleListening}
+                    className="px-2 py-0.5 rounded-lg bg-rose-600 text-white font-bold text-[10px] hover:bg-rose-700 cursor-pointer"
+                  >
+                    Terminar
+                  </button>
+                </div>
+              )}
+
+              {/* Formulario de Input */}
+              <div className="flex items-center gap-2">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileUpload}
+                  accept="image/*,.xlsx,.xls,.csv,.pdf,.txt"
+                  className="hidden"
+                />
+
+                {/* Botón de Adjuntar Archivo */}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={fileProcessing || chatLoading}
+                  className="p-3 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-indigo-600 hover:border-indigo-300 dark:hover:border-indigo-600 transition shadow-xs cursor-pointer disabled:opacity-50"
+                  title="Adjuntar foto de góndola, remisión, etiqueta o planilla Excel (.xlsx, .csv)"
+                >
+                  {fileProcessing ? <Loader2 className="w-4 h-4 animate-spin text-indigo-600" /> : <Paperclip className="w-4 h-4" />}
+                </button>
+
+                {/* Campo de Texto Principal */}
+                <input
+                  type="text"
+                  placeholder={
+                    isListening
+                      ? "Escuchando tu voz..."
+                      : attachment
+                      ? `Escribí tu consulta sobre ${attachment.name}...`
+                      : "Escribí tu consulta, adjuntá una planilla o hablá por micrófono..."
+                  }
+                  value={inputMessage}
+                  onChange={(e) => setInputMessage(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
+                  className="flex-1 px-4 py-3 text-xs rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xs"
+                />
+
+                {/* Botón de Voz / Micrófono */}
+                <button
+                  type="button"
+                  onClick={toggleListening}
+                  className={`p-3 rounded-2xl transition shadow-xs cursor-pointer ${
+                    isListening
+                      ? "bg-rose-600 text-white animate-bounce shadow-md shadow-rose-500/30"
+                      : "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-slate-700"
+                  }`}
+                  title={isListening ? "Detener dictado" : "Dictar por voz (micrófono)"}
+                >
+                  {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                </button>
+
+                {/* Botón de Enviar */}
+                <button
+                  onClick={() => handleSendMessage()}
+                  disabled={(!inputMessage.trim() && !attachment) || chatLoading}
+                  className="p-3 px-5 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-indigo-500/20 transition cursor-pointer disabled:opacity-40"
+                >
+                  <Send className="w-4 h-4" />
+                  <span className="hidden sm:inline">Enviar</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

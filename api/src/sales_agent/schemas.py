@@ -27,6 +27,9 @@ class ChatMessageRequest(BaseModel):
     message: str
     context_tab: Optional[str] = "general"
     conversation_history: Optional[list[dict]] = None
+    attachment_name: Optional[str] = None
+    attachment_type: Optional[str] = None
+    attachment_data: Optional[str] = None
 
 
 class ActionOutcome(BaseModel):

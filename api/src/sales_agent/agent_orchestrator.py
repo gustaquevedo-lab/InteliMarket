@@ -222,12 +222,47 @@ async def _execute_tool(db: AsyncSession, company_id: str, tool_name: str, argum
         return {"error": str(e)}
 
 
+async def _analyze_image_with_gemini(image_base64: str, mime_type: str, user_prompt: str, system_context: str) -> str:
+    """Llama a Gemini 2.5 Flash para analisis comercial multimodal de imagenes."""
+    try:
+        raw_b64 = image_base64.split(",", 1)[1] if "," in image_base64 else image_base64
+        api_key = settings.gemini_api_key
+        if not api_key:
+            return "No se cuenta con GEMINI_API_KEY para analisis visual."
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        payload = {
+            "system_instruction": {"parts": [{"text": system_context}]},
+            "contents": [{
+                "parts": [
+                    {"inline_data": {"mime_type": mime_type or "image/jpeg", "data": raw_b64}},
+                    {"text": user_prompt or "Analiza los productos, precios o discrepancias en esta imagen comercial de supermercado."}
+                ]
+            }],
+            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1200}
+        }
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            res = await client.post(url, json=payload)
+            if res.status_code == 200:
+                data = res.json()
+                candidates = data.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts:
+                        return parts[0].get("text", "")
+            return f"Error al procesar imagen con Gemini (HTTP {res.status_code})."
+    except Exception as e:
+        logger.error(f"Error en analisis de imagen Gemini: {e}")
+        return f"Ocurrio un error al analizar la imagen: {str(e)}"
+
 async def chat_with_sales_agent(
     db: AsyncSession,
     company_id: str,
     message: str,
     context_tab: str = "general",
-    conversation_history: list[dict] | None = None
+    conversation_history: list[dict] | None = None,
+    attachment_name: str | None = None,
+    attachment_type: str | None = None,
+    attachment_data: str | None = None
 ) -> ChatMessageResponse:
     """Procesa la consulta del usuario con Qwen 2.5 7B en Ollama local usando Tool-Calling."""
     # 1. Cargar memoria semantica activa de la empresa
@@ -263,6 +298,24 @@ REGLAS CRÍTICAS DE EJECUCIÓN:
         for ch in conversation_history[-6:]:
             if ch.get("role") in ("user", "assistant"):
                 messages.append({"role": ch["role"], "content": ch.get("content", "")})
+
+    # Manejo de archivo adjunto
+    if attachment_type == "image" and attachment_data:
+        img_analysis = await _analyze_image_with_gemini(
+            attachment_data, "image/jpeg", message, system_prompt
+        )
+        return ChatMessageResponse(
+            reply=img_analysis,
+            suggested_prompts=[
+                "¿Cómo impactan estos productos en el margen de la categoría?",
+                "Verificar costos y precios en POS de estos SKUs",
+                "Crear directiva para proteger precios de esta lista"
+            ]
+        )
+
+    if attachment_type in ("spreadsheet", "document") and attachment_data:
+        title = attachment_name or "Archivo"
+        message = message + "\n\n[PLANILLA / DOCUMENTO ADJUNTO: " + title + "]\n" + str(attachment_data)
 
     messages.append({"role": "user", "content": message})
 
