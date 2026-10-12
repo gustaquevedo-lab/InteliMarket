@@ -71,6 +71,7 @@ const IntelliZappPage = lazy(() => import("./pages/intellizapp/IntelliZappPage")
 const ExpensesPage = lazy(() => import("./pages/expenses/ExpensesPage"))
 const FinancialPage = lazy(() => import("./pages/financial/FinancialPage"))
 const PayrollDossierPage = lazy(() => import("./pages/financial/PayrollDossierPage"))
+const MonthlyClosingPage = lazy(() => import("./pages/financial/MonthlyClosingPage"))
 const BancosPage = lazy(() => import("./pages/bancos/BancosPage"))
 const SupplierContractsPage = lazy(() => import("./pages/supplier-contracts/SupplierContractsPage"))
 const ChequesPage = lazy(() => import("./pages/cheques/ChequesPage"))
@@ -331,6 +332,8 @@ function AppRoutes() {
           ["whatsapp", <WhatsAppPage />],
           ["gastos", <ExpensesPage />],
           ["financiero", <FinancialPage />],
+          ["financiero/cierre-mensual", <MonthlyClosingPage />],
+          ["cierre-mensual", <MonthlyClosingPage />],
           ["financiero/expediente-nomina", <PayrollDossierPage />],
           ["financiero/expediente-nomina/:id", <PayrollDossierPage />],
           ["sueldok/expediente-nomina", <PayrollDossierPage />],
