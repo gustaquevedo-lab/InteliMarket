@@ -368,15 +368,16 @@ async def get_promotions_with_ai_pulse(db: AsyncSession, company_id: str) -> Lis
                 pass
             
         # Calcular pulso comercial y diagnóstico del CMO
+        monto_str = f"Gs. {int(monto_facturado):,}".replace(",", ".")
         if usos >= 20:
             nivel = "alta_traccion"
             label = "🔥 Alta Tracción"
-            diag = f"Promoción validada en cajas con {usos} tickets de venta reales y {formatPYG(monto_facturado) if monto_facturado else 'alto flujo'}. Fuerte respuesta del consumidor."
+            diag = f"Promoción validada en cajas con {usos} tickets de venta reales y {monto_str}. Fuerte respuesta del consumidor."
             rec = "Extender vigencia o promocionar en cabeceras de góndola para maximizar rotación."
         elif usos >= 5:
             nivel = "estable"
             label = "⚡ Pulso Estable"
-            diag = f"Registra {usos} tickets en cajas con {formatPYG(monto_facturado)}. Flujo constante sin canibalización de margen."
+            diag = f"Registra {usos} tickets en cajas con {monto_str}. Flujo constante sin canibalización de margen."
             rec = "Reforzar con banner en verificadores de precios y WhatsApp para acelerar salida."
         else:
             nivel = "bajo_impacto"
