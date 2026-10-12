@@ -464,27 +464,52 @@ async def get_tripartite_sync_status(db: AsyncSession, company_id: str) -> Tripa
             payload={"product_id": top_stock.product_id, "descuento_sugerido_pct": top_stock.descuento_sugerido_pct}
         ))
         
-    # Calcular semáforo de alineación
+    # Consultar métricas vivas y metas comerciales del Gerente de Ventas (CSO)
+    from api.src.sales_agent import service as sa_service
+    sa_exec = await sa_service.get_executive_analysis(db, company_id)
+    sa_cfg = await sa_service.get_company_settings(db, company_id)
+
+    cso_margen_actual = float(sa_exec.margen_actual_pct)
+    cso_margen_piso = float(sa_cfg.get("min_pct") or 20.0)
+    cso_margen_ideal = float(sa_cfg.get("ideal_pct") or 24.0)
+    cso_tickets = sa_exec.tickets_mes
+    cso_facturacion = float(sa_exec.facturacion_mes)
+    cso_tkt_prom = cso_facturacion / max(1, cso_tickets)
+    cso_gap = float(sa_exec.gap_para_20_pct_gs)
+    cso_cumplimiento = round(min(100.0, (cso_margen_actual / max(0.1, cso_margen_piso)) * 100), 1)
+
+    # Calcular semáforo y diagnóstico de alineación tripartita con datos reales
     alertas = []
     estado_general = "sincronizado"
-    if cfo_tower.margen_bruto_mes_pct < cfo_sync.meta_margen_minimo_exigido_pct:
-        alertas.append(f"Margen real ({cfo_tower.margen_bruto_mes_pct}%) está por debajo del piso exigido ({cfo_sync.meta_margen_minimo_exigido_pct}%). Prohibido otorgar descuentos agresivos sin compensación.")
+    if cso_margen_actual < cso_margen_piso:
+        dif = round(cso_margen_piso - cso_margen_actual, 1)
+        alertas.append(
+            f"Margen real del mes ({cso_margen_actual}%) está {dif}% por debajo del piso comercial exigido ({cso_margen_piso}%). "
+            f"Brecha a recuperar: ₲ {cso_gap:,.0f}. Prohibido autorizar descuentos en KVIs sin combo compensatorio."
+        )
         estado_general = "advertencia"
         
     tot_sobrestock = sum(o.monto_inmovilizado_gs for o in cfo_sync.oportunidades_flash_stock)
     if tot_sobrestock > 50_000_000 and promos_activas == 0:
-        alertas.append(f"Hay más de ₲ 50.000.000 inmovilizados en sobre-stock y no hay promociones activas en caja para liquidarlo.")
+        alertas.append(f"Hay ₲ {tot_sobrestock:,.0f} inmovilizados en sobre-stock y no hay promociones activas en caja para liquidarlo.")
         estado_general = "desalineado"
 
     return TripartiteSyncResponse(
         estado_general=estado_general,
-        cfo_margen_actual_pct=cfo_tower.margen_bruto_mes_pct,
-        cfo_margen_piso_pct=cfo_sync.meta_margen_minimo_exigido_pct,
+        cfo_margen_actual_pct=cso_margen_actual,
+        cfo_margen_piso_pct=cso_margen_piso,
         cfo_sobrestock_valor_gs=tot_sobrestock,
         cmo_promociones_activas=promos_activas,
         cmo_clientes_fidelizados_impactados=wa_enviados,
-        cso_meta_cumplimiento_pct=88.5,
-        cso_ticket_promedio_gs=cfo_tower.cajas_pos_gs / 45 if cfo_tower.cajas_pos_gs > 0 else 72_500.0,
+        cso_meta_cumplimiento_pct=cso_cumplimiento,
+        cso_ticket_promedio_gs=cso_tkt_prom,
+        cso_margen_actual_pct=cso_margen_actual,
+        cso_margen_piso_pct=cso_margen_piso,
+        cso_margen_ideal_pct=cso_margen_ideal,
+        cso_tickets_mes=cso_tickets,
+        cso_facturacion_mes_gs=cso_facturacion,
+        cso_gap_meta_gs=cso_gap,
+        cso_proyeccion_cierre_gs=float(sa_exec.proyeccion_cierre_mes_gs),
         directivas_activas=directivas,
         alertas_alineacion=alertas
     )

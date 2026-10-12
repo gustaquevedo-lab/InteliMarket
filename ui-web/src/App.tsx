@@ -400,7 +400,7 @@ function AppRoutes() {
         <Route path="suscripciones" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="suscripciones"><SuscripcionesPage /></FeatureRoute></Suspense>} />
         <Route path="retail" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="retail"><RetailPage /></FeatureRoute></Suspense>} />
         <Route path="sifen-avanzado" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="sifen_avanzado"><SifenAvanzadoPage /></FeatureRoute></Suspense>} />
-        <Route path="variants" element={<Suspense fallback={<PageLoader />}><VariantsPage /></Suspense>} />
+        <Route path="variants" element={<Navigate to="/products?tab=variantes" replace />} />
         <Route path="kits" element={<Suspense fallback={<PageLoader />}><KitsPage /></Suspense>} />
         <Route path="price-lists" element={<Suspense fallback={<PageLoader />}><PriceListsPage /></Suspense>} />
         <Route path="imports" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="imports"><ImportsPage /></FeatureRoute></Suspense>} />

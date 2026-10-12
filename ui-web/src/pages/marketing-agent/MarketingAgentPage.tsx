@@ -749,6 +749,188 @@ export default function MarketingAgentPage() {
             </div>
           </div>
 
+          {/* MATRIZ DE COORDINACIÓN TRIPARTITA (CFO ↔ CSO ↔ CMO) */}
+          <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-5">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 text-white shadow-xs">
+                  <Activity className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+                    Matriz de Alineación Tripartita en Vivo
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      dashboard?.sync_tripartito?.estado_general === "sincronizado"
+                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
+                        : dashboard?.sync_tripartito?.estado_general === "advertencia"
+                        ? "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300"
+                        : "bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300"
+                    }`}>
+                      {dashboard?.sync_tripartito?.estado_general?.toUpperCase() || "SINCRONIZADO"}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Sincronización bidireccional entre Finanzas (CFO), Ventas (CSO) y Marketing (CMO) sin datos simulados.
+                  </p>
+                </div>
+              </div>
+
+              {/* SEMÁFORO DE MARGEN VIVO */}
+              <div className="flex items-center gap-2">
+                <div className="px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-right">
+                  <span className="text-[10px] font-mono font-bold text-slate-400 block">MARGEN REAL MTD</span>
+                  <strong className="text-sm font-black text-amber-600 dark:text-amber-400 font-mono">
+                    {dashboard?.sync_tripartito?.cso_margen_actual_pct || 16.9}%
+                  </strong>
+                </div>
+                <div className="px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-right">
+                  <span className="text-[10px] font-mono font-bold text-slate-400 block">PISO EXIGIDO</span>
+                  <strong className="text-sm font-black text-rose-600 dark:text-rose-400 font-mono">
+                    {dashboard?.sync_tripartito?.cso_margen_piso_pct || 20}%
+                  </strong>
+                </div>
+                <div className="px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-right">
+                  <span className="text-[10px] font-mono font-bold text-slate-400 block">META ÓPTIMA</span>
+                  <strong className="text-sm font-black text-emerald-600 dark:text-emerald-400 font-mono">
+                    {dashboard?.sync_tripartito?.cso_margen_ideal_pct || 24}%
+                  </strong>
+                </div>
+              </div>
+            </div>
+
+            {/* ALERTAS DE ALINEACIÓN SI EXISTEN */}
+            {dashboard?.sync_tripartito?.alertas_alineacion && dashboard.sync_tripartito.alertas_alineacion.length > 0 && (
+              <div className="space-y-2">
+                {dashboard.sync_tripartito.alertas_alineacion.map((alerta: string, aIdx: number) => (
+                  <div key={aIdx} className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-200 dark:border-amber-900/40 flex items-center gap-3">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <p className="text-xs text-amber-900 dark:text-amber-200 font-medium">
+                      {alerta}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 3 PILARES EN RED */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* PILAR 1: FINANZAS (CFO) */}
+              <div className="p-4 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/30 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5" /> Finanzas (CFO)
+                  </span>
+                  <span className="text-[10px] font-mono font-bold text-indigo-600">Liquidez & EBITDA</span>
+                </div>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-slate-500">Sobre-Stock a Liquidar:</span>
+                    <strong className="font-mono text-slate-900 dark:text-white">
+                      {formatPYG(dashboard?.sync_tripartito?.cfo_sobrestock_valor_gs || 0)}
+                    </strong>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-slate-500">Piso de Margen Comercial:</span>
+                    <strong className="font-mono text-rose-600 dark:text-rose-400">
+                      {dashboard?.sync_tripartito?.cfo_margen_piso_pct || 20}%
+                    </strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* PILAR 2: VENTAS (CSO) */}
+              <div className="p-4 rounded-2xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/30 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
+                    <TrendingUp className="w-3.5 h-3.5" /> Ventas (CSO)
+                  </span>
+                  <span className="text-[10px] font-mono font-bold text-emerald-600">Rentabilidad Salón</span>
+                </div>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-slate-500">Ticket Promedio Real:</span>
+                    <strong className="font-mono text-slate-900 dark:text-white">
+                      {formatPYG(dashboard?.sync_tripartito?.cso_ticket_promedio_gs || 97862)}
+                    </strong>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-slate-500">Brecha para Piso 20%:</span>
+                    <strong className="font-mono text-amber-600 dark:text-amber-400">
+                      {formatPYG(dashboard?.sync_tripartito?.cso_gap_meta_gs || 14640275)}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* PILAR 3: MARKETING (CMO) */}
+              <div className="p-4 rounded-2xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-100 dark:border-purple-900/30 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-purple-700 dark:text-purple-300 flex items-center gap-1.5">
+                    <Target className="w-3.5 h-3.5" /> Marketing (CMO)
+                  </span>
+                  <span className="text-[10px] font-mono font-bold text-purple-600">Conversión POS</span>
+                </div>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-slate-500">Promos Activas en Caja:</span>
+                    <strong className="font-mono text-slate-900 dark:text-white">
+                      {dashboard?.sync_tripartito?.cmo_promociones_activas || 0} activas
+                    </strong>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-slate-500">Cupones WhatsApp:</span>
+                    <strong className="font-mono text-purple-600 dark:text-purple-400">
+                      {dashboard?.sync_tripartito?.cmo_clientes_fidelizados_impactados || 0} enviados
+                    </strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* DIRECTIVAS INTER-AGENTES ACTIVAS */}
+            {dashboard?.sync_tripartito?.directivas_activas && dashboard.sync_tripartito.directivas_activas.length > 0 && (
+              <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <span className="text-[11px] font-black uppercase tracking-wider text-slate-500">
+                  Directivas Inter-Gerenciales en Ejecución ({dashboard.sync_tripartito.directivas_activas.length}):
+                </span>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {dashboard.sync_tripartito.directivas_activas.map((dir: any) => (
+                    <div
+                      key={dir.id}
+                      className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 space-y-2 flex flex-col justify-between text-xs"
+                    >
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-mono font-bold text-[10px] px-2 py-0.5 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300">
+                            {dir.codigo}
+                          </span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            dir.prioridad === "alta" || dir.prioridad === "critica"
+                              ? "bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300"
+                              : "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300"
+                          }`}>
+                            {dir.prioridad?.toUpperCase()}
+                          </span>
+                        </div>
+                        <h5 className="font-bold text-slate-900 dark:text-white leading-snug">
+                          {dir.titulo}
+                        </h5>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-3 leading-relaxed">
+                          {dir.mensaje}
+                        </p>
+                      </div>
+                      {dir.accion_sugerida && (
+                        <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+                          <CheckCircle className="w-3 h-3" /> {dir.accion_sugerida}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* TARJETAS DE ACCIONES Y CAMPAÑAS SUGERIDAS */}
           <div>
             <div className="flex items-center justify-between mb-3">

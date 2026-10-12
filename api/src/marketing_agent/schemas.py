@@ -101,6 +101,14 @@ class TripartiteSyncResponse(BaseModel):
     cmo_clientes_fidelizados_impactados: int
     cso_meta_cumplimiento_pct: float
     cso_ticket_promedio_gs: float
+    # Indicadores completos y reales del Gerente de Ventas (CSO)
+    cso_margen_actual_pct: Optional[float] = None
+    cso_margen_piso_pct: Optional[float] = None
+    cso_margen_ideal_pct: Optional[float] = None
+    cso_tickets_mes: Optional[int] = None
+    cso_facturacion_mes_gs: Optional[float] = None
+    cso_gap_meta_gs: Optional[float] = None
+    cso_proyeccion_cierre_gs: Optional[float] = None
     directivas_activas: List[DirectiveItem] = Field(default_factory=list)
     alertas_alineacion: List[str] = Field(default_factory=list)
 

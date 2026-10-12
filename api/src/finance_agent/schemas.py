@@ -139,6 +139,14 @@ class InterAgentSyncResponse(BaseModel):
     alertas_riesgo_crediticio: List[CreditRiskAlert]
     meta_margen_minimo_exigido_pct: float
     
+    # Métricas y metas sincronizadas con el Gerente de Ventas (CSO)
+    margen_actual_mes_pct: Optional[float] = None
+    meta_margen_ideal_pct: Optional[float] = None
+    gap_recuperacion_margen_gs: Optional[float] = None
+    ventas_mes_actual_gs: Optional[float] = None
+    tickets_mes_actual: Optional[int] = None
+    ticket_promedio_gs: Optional[float] = None
+
     # Proyecciones recibidas del Gerente de Ventas
     ventas_proyectadas_fin_semana_gs: float
     ventas_proyectadas_cierre_mes_gs: float

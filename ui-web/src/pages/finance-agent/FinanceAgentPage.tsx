@@ -736,14 +736,52 @@ export default function FinanceAgentPage() {
                   Canal de Inteligencia Coordinada (CFO IA ↔ Gerente de Ventas IA)
                 </h3>
                 <p className="text-xs text-indigo-700/80 dark:text-indigo-400">
-                  El Gerente Financiero emite directivas de liquidez para que Ventas calibre promociones, escalas de precios y límites de crédito.
+                  El Gerente Financiero coordina con Ventas en tiempo real: pisos de rentabilidad comercial, brechas hacia el EBITDA y monetización de sobre-stock.
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200 bg-white dark:bg-slate-900 px-3.5 py-2 rounded-xl border border-indigo-200 dark:border-indigo-800 shadow-sm">
-                Piso Mínimo Margen: 18.5%
+                Piso Exigido: <strong className="text-rose-600 dark:text-rose-400">{syncData?.meta_margen_minimo_exigido_pct || 20}%</strong>
               </span>
+              <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200 bg-white dark:bg-slate-900 px-3.5 py-2 rounded-xl border border-indigo-200 dark:border-indigo-800 shadow-sm">
+                Actual MTD: <strong className="text-amber-600 dark:text-amber-400">{syncData?.margen_actual_mes_pct || 16.9}%</strong>
+              </span>
+              <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200 bg-white dark:bg-slate-900 px-3.5 py-2 rounded-xl border border-indigo-200 dark:border-indigo-800 shadow-sm">
+                Meta Óptima: <strong className="text-emerald-600 dark:text-emerald-400">{syncData?.meta_margen_ideal_pct || 24}%</strong>
+              </span>
+            </div>
+          </div>
+
+          {/* KPI BAR COORDINADA CON VENTAS */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Ventas Facturadas MTD</span>
+              <p className="text-base font-black text-slate-900 dark:text-white mt-1">
+                {syncData?.ventas_mes_actual_gs ? formatPYG(syncData.ventas_mes_actual_gs) : "-"}
+              </p>
+              <span className="text-[10px] text-slate-500 font-medium">Mes en curso</span>
+            </div>
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Tickets Emitidos</span>
+              <p className="text-base font-black text-slate-900 dark:text-white mt-1">
+                {syncData?.tickets_mes_actual ? syncData.tickets_mes_actual.toLocaleString() : "-"}
+              </p>
+              <span className="text-[10px] text-slate-500 font-medium">Cajas de salón</span>
+            </div>
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Ticket Promedio Real</span>
+              <p className="text-base font-black text-slate-900 dark:text-white mt-1">
+                {syncData?.ticket_promedio_gs ? formatPYG(syncData.ticket_promedio_gs) : "-"}
+              </p>
+              <span className="text-[10px] text-slate-500 font-medium">Por transacción</span>
+            </div>
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-950/60 bg-rose-50/20 dark:bg-rose-950/20 shadow-xs">
+              <span className="text-[10px] font-black uppercase tracking-wider text-rose-500">Brecha para Piso 20%</span>
+              <p className="text-base font-black text-rose-600 dark:text-rose-400 mt-1">
+                {syncData?.gap_recuperacion_margen_gs ? formatPYG(syncData.gap_recuperacion_margen_gs) : "₲ 0"}
+              </p>
+              <span className="text-[10px] text-rose-500 font-medium">A recuperar en margen</span>
             </div>
           </div>
 

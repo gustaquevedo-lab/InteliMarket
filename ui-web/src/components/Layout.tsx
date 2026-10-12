@@ -75,8 +75,9 @@ const navGroups: NavGroup[] = [
   {
     title: "Inventario",
     items: [
+      // "Variantes & Empaques" se degrado a pestañas internas dentro de "Catálogo de Productos"
+      // (/products?tab=variantes y /products?tab=packs) para simplificar la barra lateral y evitar ruido.
       { icon: Tags, label: "Catálogo de Productos", path: "/products" },
-      { icon: Copy, label: "Variantes & Empaques", path: "/variants" },
       { icon: Package, label: "Kits & Combos", path: "/kits" },
       { icon: Warehouse, label: "Depósitos & Stock", path: "/inventory", permission: "inventory:adjust" },
       { icon: ArrowLeftRight, label: "Transferencias entre Depósitos", path: "/transferencias", permission: "inventory:transfer" },

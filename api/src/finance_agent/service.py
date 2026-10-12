@@ -219,16 +219,20 @@ async def get_liquidity_control_tower(db: AsyncSession, company_id: str) -> Liqu
     ar_moroso = float(r_ar[1]) if r_ar and r_ar[1] else 0.0
     ar_morosos_count = int(r_ar[2]) if r_ar and r_ar[2] else 0
 
-    # 6. Ventas Totales y Margen Real
+    # 6. Ventas del Mes en Curso (MTD) y Margen Real Comercial
+    f_desde_mes = datetime(today.year, today.month, 1)
     q_sales_m = text("""
         SELECT 
             COALESCE(SUM(si.total), 0) as total_v,
-            COALESCE(SUM(si.cantidad * si.costo_unitario), 0) as total_c
+            COALESCE(SUM(COALESCE(si.costo_unitario, p.costo_promedio, p.ultimo_costo, si.precio_unitario * 0.75) * si.cantidad), 0) as total_c
         FROM sale_items si
+        JOIN products p ON p.id = si.product_id
         JOIN sales s ON si.sale_id = s.id
         WHERE s.company_id = :cid
+          AND s.estado IN ('completado', 'confirmado')
+          AND s.fecha >= :f_desde
     """)
-    r_sm = (await db.execute(q_sales_m, {"cid": company_id})).fetchone()
+    r_sm = (await db.execute(q_sales_m, {"cid": company_id, "f_desde": f_desde_mes})).fetchone()
     tot_v = float(r_sm[0]) if r_sm and r_sm[0] else 0.0
     tot_c = float(r_sm[1]) if r_sm and r_sm[1] else 0.0
     margen_pct = round(((tot_v - tot_c) / tot_v * 100), 1) if tot_v > 0 else 18.0
@@ -522,11 +526,40 @@ async def get_inter_agent_sync(db: AsyncSession, company_id: str) -> InterAgentS
             accion_sugerida=accion
         ))
 
-    # 3. Directivas Reales Persistidas (o sincronizadas en la BD)
+    # 3. Métricas y Metas Reales Coordinadas con el Gerente de Ventas (CSO)
+    from api.src.sales_agent import service as sa_service
+    sa_cfg = await sa_service.get_company_settings(db, company_id)
+    sa_exec = await sa_service.get_executive_analysis(db, company_id)
+    target_min_pct = float(sa_cfg.get("min_pct") or 20.0)
+    target_ideal_pct = float(sa_cfg.get("ideal_pct") or 24.0)
+    margen_actual_pct = float(sa_exec.margen_actual_pct)
+    gap_min_gs = float(sa_exec.gap_para_20_pct_gs)
+
+    # 4. Directivas Reales Persistidas (o sincronizadas en la BD)
     directivas_db = await list_inter_agent_directives(db, company_id, emisor="cfo_agent", receptor="sales_agent")
     
-    # Si aún no hay directivas guardadas en la BD para esta empresa, sembrar las 3 directivas estratégicas iniciales
-    if not directivas_db:
+    # Si existen directivas, asegurar que la directiva de margen refleje la meta y margen real vivo del CSO
+    if directivas_db:
+        for d in directivas_db:
+            if d.codigo == "DIR-CFO-002" or "margen" in d.titulo.lower():
+                nuevo_tit = f"Piso de Margen Comercial Exigido: {target_min_pct}% (Actual MTD: {margen_actual_pct}%)"
+                nuevo_msg = (
+                    f"El margen bruto real de ventas acumulado del mes es de {margen_actual_pct}%, ubicándose "
+                    f"por debajo del piso acordado de {target_min_pct}% (brecha a recuperar: ₲ {gap_min_gs:,.0f}). "
+                    f"Mantener las remarcaciones por encima de este umbral para resguardar el EBITDA."
+                ) if margen_actual_pct < target_min_pct else (
+                    f"El margen comercial acumulado del mes es de {margen_actual_pct}%, cumpliendo satisfactoriamente "
+                    f"el piso acordado de {target_min_pct}%. Mantener disciplina para converger al {target_ideal_pct}%."
+                )
+                prio = "alta" if margen_actual_pct < target_min_pct else "media"
+                if d.titulo != nuevo_tit or d.mensaje != nuevo_msg:
+                    d.titulo = nuevo_tit
+                    d.mensaje = nuevo_msg
+                    d.prioridad = prio
+                    d.impacto_estimado_gs = Decimal(str(gap_min_gs))
+                    await db.commit()
+    else:
+        # Sembrar las 3 directivas estratégicas coordinadas con datos vivos
         d1 = await create_inter_agent_directive(
             db, company_id,
             InterAgentDirectiveCreate(
@@ -542,11 +575,11 @@ async def get_inter_agent_sync(db: AsyncSession, company_id: str) -> InterAgentS
             db, company_id,
             InterAgentDirectiveCreate(
                 receptor="sales_agent",
-                titulo=f"Piso de Margen Comercial Exigido: {tower.margen_bruto_mes_pct}%",
-                mensaje=f"El margen bruto real de ventas acumulado es de {tower.margen_bruto_mes_pct}%. Mantener las remarcaciones por encima de este umbral para resguardar el EBITDA.",
+                titulo=f"Piso de Margen Comercial Exigido: {target_min_pct}% (Actual MTD: {margen_actual_pct}%)",
+                mensaje=f"El margen bruto real de ventas acumulado del mes es de {margen_actual_pct}%, ubicándose por debajo del piso acordado de {target_min_pct}% (brecha a recuperar: ₲ {gap_min_gs:,.0f}). Mantener las remarcaciones por encima de este umbral para resguardar el EBITDA.",
                 accion_sugerida="Monitorear Margen en POS y Listas de Precios",
-                prioridad="media",
-                impacto_estimado_gs=0.0
+                prioridad="alta" if margen_actual_pct < target_min_pct else "media",
+                impacto_estimado_gs=gap_min_gs
             )
         )
         directivas_db = [d1, d2]
@@ -587,13 +620,19 @@ async def get_inter_agent_sync(db: AsyncSession, company_id: str) -> InterAgentS
     return InterAgentSyncResponse(
         estado_enlace="activo_sincronizado",
         timestamp=datetime.now(),
-        cfo_summary=f"Enlace financiero activo. Posición consolidada de ₲ {tower.liquidez_total_gs:,.0f} (Bancos: ₲ {tower.bancos_total_gs:,.0f} | Custodia/Bóveda: ₲ {tower.boveda_central_gs:,.0f} | Cajas Salón: ₲ {tower.cajas_pos_gs:,.0f}). Se registran {len(directivas_format)} directivas inter-agente vigentes.",
+        cfo_summary=f"Enlace inter-gerencial activo. Ventas MTD: ₲ {float(sa_exec.facturacion_mes):,.0f} ({margen_actual_pct}% margen vs meta {target_min_pct}%). Posición de caja y bancos: ₲ {tower.liquidez_total_gs:,.0f}. Se coordinan {len(directivas_format)} directivas estratégicas en vivo.",
         directivas_a_ventas=directivas_format,
         oportunidades_flash_stock=oportunidades_flash,
         alertas_riesgo_crediticio=alertas_credito,
-        meta_margen_minimo_exigido_pct=tower.margen_bruto_mes_pct,
+        meta_margen_minimo_exigido_pct=target_min_pct,
+        margen_actual_mes_pct=margen_actual_pct,
+        meta_margen_ideal_pct=target_ideal_pct,
+        gap_recuperacion_margen_gs=gap_min_gs,
+        ventas_mes_actual_gs=float(sa_exec.facturacion_mes),
+        tickets_mes_actual=sa_exec.tickets_mes,
+        ticket_promedio_gs=float(sa_exec.facturacion_mes) / max(1, sa_exec.tickets_mes),
         ventas_proyectadas_fin_semana_gs=v_diaria_prom * 2.5,
-        ventas_proyectadas_cierre_mes_gs=v_diaria_prom * 30.0
+        ventas_proyectadas_cierre_mes_gs=float(sa_exec.proyeccion_cierre_mes_gs)
     )
 
 
