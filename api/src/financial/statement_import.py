@@ -53,14 +53,14 @@ def _classify_sheet(sheet_name: str, title) -> str | None:
     return None
 
 
-def account_tipo_normalizado(tipo: str | None, titular: str | None, numero_cuenta: str | None) -> str:
+def account_tipo_normalizado(tipo: str | None, titular: str | None, numero_cuenta: str | None, alias: str | None = None, banco: str | None = None) -> str:
     """Mapea el tipo/nombre de una BankAccount de InteliMarket al mismo
     vocabulario que usa el extracto ('cuenta_corriente'/'ahorro'/'ahorro_pix'),
     porque tipo en bank_accounts no está normalizado de forma consistente
     (cuentas viejas usan 'cuenta_corriente', el formulario nuevo usa
     'corriente')."""
-    blob = f"{titular or ''} {numero_cuenta or ''}".upper()
-    if "PIX" in blob:
+    blob = f"{titular or ''} {numero_cuenta or ''} {alias or ''} {banco or ''}".upper()
+    if "PIX" in blob or "PLUGPAY" in blob or (numero_cuenta and "38250039706208" in str(numero_cuenta)):
         return "ahorro_pix"
     t = (tipo or "").lower()
     if "ahorro" in t:
@@ -126,6 +126,7 @@ def parse_statement(file_bytes: bytes, mes: int, anio: int, banco: str, account_
             "sheet_matched": sheet_name,
             "saldo_anterior": saldo_anterior,
             "closing_from_totals": closing_from_totals,
+            "saldo_cierre": closing_from_totals,
             "transacciones": txs,
         }
 
