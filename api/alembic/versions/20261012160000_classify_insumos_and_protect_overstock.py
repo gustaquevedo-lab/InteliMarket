@@ -1,8 +1,8 @@
 """classify_insumos_and_protect_overstock
 
-Revision ID: 20261012110000
-Revises: 20261012100000
-Create Date: 2026-10-12 11:00:00.000000
+Revision ID: 20261012160000
+Revises: 20261012150000
+Create Date: 2026-10-12 16:00:00.000000
 
 Clasifica formalmente en el catalogo de productos todos los insumos de produccion interna
 (panaderia, carniceria, bolsas internas de empaque) con tipo_producto = 'insumo' y tipo = 'insumo',
@@ -12,8 +12,8 @@ from typing import Sequence, Union
 from alembic import op
 
 
-revision: str = '20261012110000'
-down_revision: Union[str, None] = '20261012100000'
+revision: str = '20261012160000'
+down_revision: Union[str, None] = '20261012150000'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
