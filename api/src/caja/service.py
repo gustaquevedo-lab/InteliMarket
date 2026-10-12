@@ -57,6 +57,7 @@ PAYMENT_CHANNEL_DEFINITIONS = [
     ("CHEQUES", "Cheques", "cheque", "file-check"),
     ("VALE_CONVENIO", "Vales de Compra / Convenio", "vale", "file-check"),
     ("NOTA_CREDITO", "Nota de Crédito (NC)", "nota_credito", "file-text"),
+    ("RETENCION_NOMINA", "Retención Nómina de Salarios", "compensacion_interna", "briefcase"),
     ("OTROS", "Otros Medios", "otros", "file-text"),
 ]
 

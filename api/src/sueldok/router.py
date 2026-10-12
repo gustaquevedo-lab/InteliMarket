@@ -237,3 +237,24 @@ async def get_dossier(
         raise HTTPException(status_code=404, detail="Expediente de nómina no encontrado")
     return res
 
+
+
+@router.post("/dossiers/{dossier_id}/execute-compensations")
+async def execute_dossier_compensations(
+    dossier_id: str,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: Any = Depends(require_auth)
+):
+    """
+    Ejecuta el neteo de la fase de compensaciones no-cash (Extra Club y Uniformes),
+    generando los recibos RC-NOMINA correspondientes y cancelando saldos deudores
+    sin afectar saldos de cuentas bancarias ni cajas físicas.
+    """
+    from api.src.sueldok.compensations_service import process_payroll_compensations
+    user_id = str(user.get("id")) if isinstance(user, dict) else str(getattr(user, "id", ""))
+    try:
+        return await process_payroll_compensations(db, company_id, dossier_id, user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
