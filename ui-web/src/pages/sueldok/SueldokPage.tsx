@@ -52,6 +52,7 @@ import { formatPYG, formatDate, formatDateTime, getTodayAsuncion } from "../../u
 import CurrencyInput from "../../components/CurrencyInput"
 import { useToast } from "../../context/ToastContext"
 import { api, BankAccount, LaborSettlement } from "../../api"
+import PayrollDossierView from "./PayrollDossierView"
 
 // ── Configuración de Integración con SueldOK ──────────────────────────
 const SUELDOK_BASE_URL = "https://sueldok.intellihouse.lat"
@@ -89,7 +90,7 @@ const COLORES_AVATAR = [
   "#f97316",
 ]
 
-type TabType = "dashboard" | "payroll" | "settlements" | "advances" | "deductions" | "asistencia" | "funcionarios"
+type TabType = "dashboard" | "payroll" | "expediente" | "settlements" | "advances" | "deductions" | "asistencia" | "funcionarios"
 
 export interface PayrollItem {
   id: string
@@ -1003,6 +1004,7 @@ export default function SueldokPage() {
           {[
             { id: "dashboard", label: "Dashboard Estratégico", icon: Activity },
             { id: "payroll", label: `Nómina & Liquidación (${payrollItems.length})`, icon: Receipt },
+            { id: "expediente", label: "Expediente Multi-Fase", icon: ShieldCheck },
             { id: "settlements", label: `Finiquitos Laborales (${settlements.length})`, icon: Briefcase },
             { id: "advances", label: `Anticipos (${advances.length})`, icon: PiggyBank },
             { id: "deductions", label: `Descuentos & Faltantes (${deductions.length})`, icon: Scissors },
@@ -1670,6 +1672,13 @@ export default function SueldokPage() {
                 <span>Recalcular Nómina</span>
               </button>
               <button
+                onClick={() => setTab("expediente")}
+                className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-purple-600/30"
+              >
+                <Briefcase className="w-3.5 h-3.5" />
+                <span>Expediente de Desembolso Multi-Fase</span>
+              </button>
+              <button
                 onClick={handleOpenNominaOPModal}
                 disabled={payrollItems.length === 0}
                 className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-emerald-600/30 disabled:opacity-50"
@@ -1730,6 +1739,17 @@ export default function SueldokPage() {
               </table>
             </div>
           </section>
+        </div>
+      )}
+
+      {/* 2.4 EXPEDIENTE DE NÓMINA & DESEMBOLSO MULTI-FASE */}
+      {tab === "expediente" && (
+        <div className="flex flex-col gap-6">
+          <PayrollDossierView
+            initialPeriodo={periodoNomina}
+            onBackToPayroll={() => setTab("payroll")}
+            embedded={true}
+          />
         </div>
       )}
 
