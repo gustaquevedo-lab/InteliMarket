@@ -3819,6 +3819,11 @@ export const api = {
     createSettlement: (data: any) => client.post<LaborSettlement>(`/v1/sueldok/settlements?company_id=${COMPANY_ID}`, data),
     listSettlements: () => client.get<LaborSettlement[]>(`/v1/sueldok/settlements`, { company_id: COMPANY_ID }),
     createDossier: (data: any) => client.post<any>(`/v1/sueldok/dossiers?company_id=${COMPANY_ID}`, data),
+    syncFromSueldok: (periodo: string = "2026-09", apiKey?: string, force: boolean = false) => {
+      const q = new URLSearchParams({ company_id: COMPANY_ID, periodo, force: String(force) })
+      if (apiKey) q.set("api_key", apiKey)
+      return client.post<any>(`/v1/sueldok/dossiers/sync-from-sueldok?${q.toString()}`)
+    },
     listDossiers: () => client.get<any[]>(`/v1/sueldok/dossiers`, { company_id: COMPANY_ID }),
     getDossier: (id: string) => client.get<any>(`/v1/sueldok/dossiers/${id}`, { company_id: COMPANY_ID }),
     executeCompensations: (dossierId: string) => client.post<any>(`/v1/sueldok/dossiers/${dossierId}/execute-compensations?company_id=${COMPANY_ID}`),

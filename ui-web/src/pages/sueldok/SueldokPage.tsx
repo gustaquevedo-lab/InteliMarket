@@ -457,7 +457,7 @@ export default function SueldokPage() {
         totalNet,
       }
     })
-  }, [employees, advances, deductions])
+  }, [data?.approvedPayroll, employees, advances, deductions])
 
   // Totales de la nómina
   const totalPayrollGross = useMemo(() => payrollItems.reduce((acc: number, p: PayrollItem) => acc + p.totalGross, 0), [payrollItems])
@@ -1660,10 +1660,26 @@ export default function SueldokPage() {
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <span className="text-xs text-slate-400">Periodo activo:</span>
-              <span className="px-3 py-1 rounded-xl bg-slate-800 font-mono font-bold text-indigo-300 border border-slate-700 text-xs">
-                {periodoNomina}
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-slate-400">Periodo activo:</span>
+                {data?.availablePayrolls && data.availablePayrolls.length > 0 ? (
+                  <select
+                    value={periodoNomina}
+                    onChange={(e) => setPeriodoNomina(e.target.value)}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 font-mono font-bold text-indigo-300 border border-slate-700 text-xs outline-none cursor-pointer"
+                  >
+                    {data.availablePayrolls.map((p: any) => (
+                      <option key={p.id || p.periodo} value={p.periodo}>
+                        {p.periodo} ({p.status === "approved" ? "Aprobada" : p.status})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="px-3 py-1 rounded-xl bg-slate-800 font-mono font-bold text-indigo-300 border border-slate-700 text-xs">
+                    {periodoNomina}
+                  </span>
+                )}
+              </div>
               <button
                 onClick={() => setModalNominaOpen(true)}
                 className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-indigo-600/30"

@@ -82,6 +82,26 @@ export default function PayrollDossierView({
   // Third party cheque inputs
   const [chequeInputs, setChequeInputs] = useState<Record<string, { num: string; banco: string }>>({})
 
+  const handleSyncFromSueldok = useCallback(async (targetPeriodo = initialPeriodo || "2026-09", force = false) => {
+    try {
+      setActionLoading("sync")
+      const res = await api.sueldok.syncFromSueldok(targetPeriodo, undefined, force)
+      toast.success(
+        "Expediente Sincronizado",
+        `Nómina ${res.periodo} importada exitosamente (${res.phases?.length || 0} fases de desembolso generadas).`
+      )
+      const list = await api.sueldok.listDossiers()
+      setDossiers(list || [])
+      setSelectedDossier(res)
+      return res
+    } catch (err: any) {
+      toast.error("Error al sincronizar nómina de SueldOK", err.message || err.response?.data?.detail)
+      return null
+    } finally {
+      setActionLoading(null)
+    }
+  }, [initialPeriodo, toast])
+
   const loadDossiers = useCallback(async () => {
     try {
       setLoading(true)
@@ -97,13 +117,16 @@ export default function PayrollDossierView({
         } else {
           setSelectedDossier(list[0])
         }
+      } else {
+        // Si no hay expedientes, auto-sincronizar el período activo desde SueldOK
+        await handleSyncFromSueldok(initialPeriodo || "2026-09", false)
       }
     } catch (err: any) {
       toast.error("Error al cargar expedientes de nómina")
     } finally {
       setLoading(false)
     }
-  }, [id, initialPeriodo, toast])
+  }, [id, initialPeriodo, toast, handleSyncFromSueldok])
 
   useEffect(() => {
     loadDossiers()
@@ -255,6 +278,16 @@ export default function PayrollDossierView({
           </select>
 
           <button
+            onClick={() => handleSyncFromSueldok(selectedDossier?.periodo || initialPeriodo || "2026-09", true)}
+            disabled={actionLoading === "sync" || loading}
+            className="px-3.5 py-2 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition flex items-center gap-1.5 shadow-sm shadow-indigo-600/20 disabled:opacity-50"
+            title="Importar corrida de nómina aprobada desde SueldOK"
+          >
+            <Download className={`w-3.5 h-3.5 ${actionLoading === "sync" ? "animate-bounce" : ""}`} />
+            <span>{actionLoading === "sync" ? "Sincronizando..." : "Sincronizar SueldOK"}</span>
+          </button>
+
+          <button
             onClick={() => selectedDossier && reloadSelected(selectedDossier.id)}
             disabled={loading}
             className="p-2 border rounded-lg border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
@@ -266,12 +299,20 @@ export default function PayrollDossierView({
       </div>
 
       {!selectedDossier && !loading && (
-        <div className="text-center py-16 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm">
-          <Briefcase className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-          <h3 className="text-lg font-bold text-gray-900 dark:text-white">Sin Expedientes Registrados</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto mt-1">
-            Cuando apruebes una corrida salarial mensual en SueldOK, el expediente se creará automáticamente aquí para su desembolso y conciliación.
+        <div className="text-center py-16 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm px-6">
+          <Briefcase className="w-12 h-12 text-indigo-500 mx-auto mb-3 opacity-80" />
+          <h3 className="text-lg font-bold text-gray-900 dark:text-white">Expediente Listo para Sincronizar</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto mt-1 mb-5">
+            Detectamos la corrida salarial aprobada del período <strong className="text-indigo-600 dark:text-indigo-400">{initialPeriodo || "2026-09"}</strong> en SueldOK. Haz clic abajo para importarla y generar las fases de desembolso bancario, compensaciones y previsión IPS.
           </p>
+          <button
+            onClick={() => handleSyncFromSueldok(initialPeriodo || "2026-09", true)}
+            disabled={actionLoading === "sync"}
+            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-black shadow-lg shadow-indigo-600/30 transition flex items-center gap-2 mx-auto disabled:opacity-50 cursor-pointer"
+          >
+            <Download className={`w-4 h-4 ${actionLoading === "sync" ? "animate-bounce" : ""}`} />
+            <span>{actionLoading === "sync" ? "Importando nómina desde SueldOK..." : "Importar Nómina Setiembre 2026 desde SueldOK"}</span>
+          </button>
         </div>
       )}
 

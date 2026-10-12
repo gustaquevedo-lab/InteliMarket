@@ -789,3 +789,180 @@ async def list_payroll_dossiers(db: AsyncSession, company_id: str) -> list[dict]
     dossiers = res.scalars().all()
     return [format_dossier(d) for d in dossiers]
 
+
+async def sync_payroll_dossier_from_sueldok(
+    db: AsyncSession,
+    company_id: str,
+    periodo: str = "2026-09",
+    api_key: Optional[str] = None,
+    user_id: Optional[str] = None,
+    force: bool = False
+) -> dict:
+    """
+    Sincroniza e importa la nómina aprobada desde SueldOK (Convex) para un período dado,
+    agrupando automáticamente funcionarios por canal (SIPAP bancos / Efectivo sobres)
+    y discriminando retenciones (Extra Club, Uniformes, Convenios terceros, Judiciales, IPS)
+    para instanciar el expediente multi-fase en la base de datos de InteliMarket.
+    """
+    import uuid
+    import httpx
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+    from api.src.sueldok.models import PayrollDossier
+    from api.src.sueldok.schemas import (
+        PayrollDossierCreate, BankBatch, DisbursementBatchEntry,
+        ExtraClubTicket, ThirdPartyDeduction
+    )
+
+    cid = uuid.UUID(company_id)
+
+    # 1. Verificar si ya existe el expediente
+    res = await db.execute(
+        select(PayrollDossier)
+        .options(selectinload(PayrollDossier.phases))
+        .where(PayrollDossier.company_id == cid, PayrollDossier.periodo == periodo)
+    )
+    existing = res.scalars().first()
+    if existing and not force:
+        return format_dossier(existing)
+
+    # 2. Consultar a SueldOK Overview
+    key = api_key or "ifk_santateresa_live_api_key_2026"
+    url = f"https://sueldok.intellihouse.lat/http/api/intelimarket/overview?apiKey={key}&periodo={periodo}"
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 InteliMarket/1.0"
+    }
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(url, headers=headers)
+        if resp.status_code != 200:
+            raise ValueError(f"SueldOK retornó error {resp.status_code}: {resp.text}")
+        data = resp.json()
+
+    approved = data.get("approvedPayroll")
+    if not approved:
+        raise ValueError(f"No se encontró corrida salarial aprobada en SueldOK para el período {periodo}")
+
+    items = approved.get("items", [])
+    deductions = data.get("deductions", [])
+
+    # 3. Clasificar lotes bancarios y efectivo
+    lotes_banco: dict[str, BankBatch] = {}
+    lotes_efectivo: dict[str, BankBatch] = {}
+
+    for it in items:
+        banco = (it.get("bank") or "").strip().upper()
+        cuenta = (it.get("bankAccount") or "").strip()
+        net_sal = float(it.get("totalNet", 0))
+        entry = DisbursementBatchEntry(
+            employee_id=str(it.get("employeeId") or it.get("id")),
+            name=it.get("nombre", "Funcionario"),
+            ci=str(it.get("ci", "—")),
+            net_salary=net_sal,
+            account_number=cuenta or None,
+            bank_account_type=it.get("paymentMethod") or "transferencia"
+        )
+        if banco and cuenta:
+            if banco not in lotes_banco:
+                lotes_banco[banco] = BankBatch(employees=[], total=0.0)
+            lotes_banco[banco].employees.append(entry)
+            lotes_banco[banco].total += net_sal
+        else:
+            depto = (it.get("depto") or "Central / Salón").strip()
+            if depto not in lotes_efectivo:
+                lotes_efectivo[depto] = BankBatch(employees=[], total=0.0)
+            lotes_efectivo[depto].employees.append(entry)
+            lotes_efectivo[depto].total += net_sal
+
+    # 4. Clasificar deducciones
+    extra_club = []
+    uniformes = []
+    terceros_dict: dict[str, list[dict]] = {}
+    tot_judicial = 0.0
+    tot_anticipos = 0.0
+
+    for d in deductions:
+        desc = (d.get("descripcion") or "").upper()
+        com = (d.get("comentarios") or "").upper()
+        full = f"{desc} {com}"
+        monto = float(d.get("monto", 0))
+
+        if "ANTICIPO" in full:
+            tot_anticipos += monto
+        elif "UNIFORME" in full:
+            uniformes.append(ExtraClubTicket(
+                employee_id=str(d.get("employeeId", "")),
+                employee_name=d.get("nombre", "Funcionario"),
+                employee_ci=str(d.get("ci", "—")),
+                ticket_ref=str(d.get("id", "")),
+                amount=monto
+            ))
+        elif "EXTRA CLUB" in full or "MERCADERIA" in full or "VALE" in full:
+            extra_club.append(ExtraClubTicket(
+                employee_id=str(d.get("employeeId", "")),
+                employee_name=d.get("nombre", "Funcionario"),
+                employee_ci=str(d.get("ci", "—")),
+                ticket_ref=str(d.get("id", "")),
+                amount=monto
+            ))
+        elif "JUDICIAL" in full or "EMBARGO" in full:
+            tot_judicial += monto
+            t_name = "JUZGADO / RETENCION JUDICIAL"
+            if t_name not in terceros_dict:
+                terceros_dict[t_name] = []
+            terceros_dict[t_name].append({
+                "employee_id": str(d.get("employeeId", "")),
+                "name": d.get("nombre", ""),
+                "ci": str(d.get("ci", "")),
+                "amount": monto,
+                "invoice_reference": d.get("descripcion", "")
+            })
+        else:
+            t_name = "CREDI PORA" if "CREDI" in full else ("CAFETERIA MALOU" if "MALOU" in full or "CAFETERIA" in full else "CONVENIO GENERAL TERCEROS")
+            if t_name not in terceros_dict:
+                terceros_dict[t_name] = []
+            terceros_dict[t_name].append({
+                "employee_id": str(d.get("employeeId", "")),
+                "name": d.get("nombre", ""),
+                "ci": str(d.get("ci", "")),
+                "amount": monto,
+                "invoice_reference": d.get("descripcion", "")
+            })
+
+    terceros_desglose = [
+        ThirdPartyDeduction(
+            third_party_name=k,
+            third_party_ruc=None,
+            total=sum(x["amount"] for x in v),
+            employees=v
+        )
+        for k, v in terceros_dict.items()
+    ]
+
+    create_payload = PayrollDossierCreate(
+        periodo=approved.get("periodo", periodo),
+        sueldok_run_id=str(approved.get("id")),
+        masa_salarial_bruta=float(approved.get("totalGross", 0)),
+        total_neto=float(approved.get("totalNet", 0)),
+        total_ips_obrero=float(approved.get("totalIpsWorker", 0)),
+        total_ips_patronal=float(approved.get("totalIpsEmployer", 0)),
+        total_anticipos=tot_anticipos,
+        total_extra_club=sum(x.amount for x in extra_club),
+        total_uniformes=sum(x.amount for x in uniformes),
+        total_convenios_terceros=sum(t.total for t in terceros_desglose),
+        total_judiciales=tot_judicial,
+        lotes_banco=lotes_banco,
+        lotes_efectivo=lotes_efectivo,
+        extra_club_tickets=extra_club,
+        uniformes_items=uniformes,
+        terceros_desglose=terceros_desglose,
+        observaciones=f"Expediente importado de SueldOK - Corrida de Nómina {periodo} ({len(items)} funcionarios)"
+    )
+
+    if existing and force:
+        await db.delete(existing)
+        await db.flush()
+
+    return await create_payroll_dossier(db, company_id, create_payload, user_id)
+

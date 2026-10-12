@@ -210,6 +210,28 @@ async def create_dossier(
     return await service.create_payroll_dossier(db, company_id, payload, user_id)
 
 
+@router.post("/dossiers/sync-from-sueldok", response_model=schemas.PayrollDossierOut)
+async def sync_dossier_from_sueldok(
+    periodo: str = Query("2026-09", description="Período de nómina a importar (YYYY-MM)"),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    api_key: Optional[str] = Query(None, description="API Key de la empresa en SueldOK"),
+    force: bool = Query(False, description="Sobrescribir expediente existente si está en borrador"),
+    db: AsyncSession = Depends(get_db),
+    user: Any = Depends(require_auth)
+):
+    """
+    Sincroniza e importa automáticamente la corrida aprobada en SueldOK para el período especificado,
+    generando el expediente multi-fase y todas sus fases operativas y financieras.
+    """
+    user_id = str(user.get("id")) if isinstance(user, dict) else str(getattr(user, "id", ""))
+    try:
+        return await service.sync_payroll_dossier_from_sueldok(
+            db, company_id, periodo, api_key, user_id, force
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.get("/dossiers", response_model=list[schemas.PayrollDossierOut])
 async def list_dossiers(
     company_id: str = Query("00000000-0000-0000-0000-000000000010"),
