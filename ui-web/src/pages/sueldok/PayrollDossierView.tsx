@@ -347,7 +347,9 @@ export default function PayrollDossierView({
               <div className="text-lg font-bold text-emerald-700 dark:text-emerald-300">
                 {formatPYG(selectedDossier.total_extra_club + selectedDossier.total_uniformes)}
               </div>
-              <span className="text-[11px] text-emerald-600/80">Extra Club + Uniformes</span>
+              <span className="text-[11px] text-emerald-600/80 block truncate" title={`Extra Club: ${formatPYG(selectedDossier.total_extra_club)} | Uniformes: ${formatPYG(selectedDossier.total_uniformes)}`}>
+                Extra Club {formatPYG(selectedDossier.total_extra_club)} + Uniformes
+              </span>
             </div>
 
             <div className="p-4 rounded-xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 shadow-sm">
@@ -357,7 +359,9 @@ export default function PayrollDossierView({
               <div className="text-lg font-bold text-amber-700 dark:text-amber-300">
                 {formatPYG(selectedDossier.total_convenios_terceros + selectedDossier.total_judiciales)}
               </div>
-              <span className="text-[11px] text-amber-600/80">Comercial Malou / Judicial</span>
+              <span className="text-[11px] text-amber-600/80 block truncate">
+                Cafetería Malou + Credi Porá
+              </span>
             </div>
 
             <div className="p-4 rounded-xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/40 shadow-sm">
