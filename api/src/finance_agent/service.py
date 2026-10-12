@@ -94,43 +94,57 @@ async def get_liquidity_control_tower(db: AsyncSession, company_id: str) -> Liqu
             moneda=moneda
         ))
 
-    # 2. Bóveda Central y Efectivo Físico en Custodia / Rendición (cash_handoffs + vault_entries)
+    # 2. Bóveda Central y Efectivo Físico en Custodia (Solo lo físicamente en bóveda + traspasos de cajas abiertas)
     boveda_total = 0.0
     try:
-        q_handoffs = text("""
+        # Solo entradas de bóveda que siguen efectivamente 'en_boveda' (no depositadas ni pagadas)
+        q_vault = text("""
+            SELECT 
+                COALESCE(SUM(ve.monto_pyg), 0) as pyg,
+                COALESCE(SUM(ve.monto_usd), 0) as usd,
+                COALESCE(SUM(ve.monto_brl), 0) as brl
+            FROM vault_entries ve 
+            WHERE ve.company_id = :cid AND ve.estado = 'en_boveda'
+        """)
+        row_v = (await db.execute(q_vault, {"cid": company_id})).fetchone()
+        v_pyg = float(row_v[0]) if row_v and row_v[0] else 0.0
+        v_usd = float(row_v[1]) if row_v and row_v[1] else 0.0
+        v_brl = float(row_v[2]) if row_v and row_v[2] else 0.0
+
+        # Traspasos de cajeros pendientes de confirmación pero SOLO de sesiones de caja actualmente ABIERTAS
+        q_handoffs_open = text("""
             SELECT COALESCE(SUM(COALESCE(ch.monto_confirmado_pyg, ch.monto_pyg)), 0)
             FROM cash_handoffs ch
-            WHERE ch.company_id = :cid AND ch.estado = 'pendiente'
+            JOIN cash_sessions cs ON ch.session_id = cs.id
+            WHERE ch.company_id = :cid AND ch.estado = 'pendiente' AND cs.estado = 'abierta'
         """)
-        r_hand = (await db.execute(q_handoffs, {"cid": company_id})).scalar() or 0.0
+        r_hand = (await db.execute(q_handoffs_open, {"cid": company_id})).scalar() or 0.0
 
-        q_vault = text("""
-            SELECT COALESCE(SUM(ve.monto_pyg), 0) FROM vault_entries ve WHERE ve.company_id = :cid
-        """)
-        r_vault = (await db.execute(q_vault, {"cid": company_id})).scalar() or 0.0
-        boveda_total = float(r_hand) + float(r_vault)
+        boveda_total = v_pyg + (v_usd * tasa_usd) + (v_brl * tasa_brl) + float(r_hand)
     except Exception:
         boveda_total = 0.0
 
-    # 3. Cajas POS en Salón (Aperturas de turnos abiertos + Cobros en efectivo del día)
+    # 3. Cajas POS en Salón (Solo cajas activas actualmente ABIERTAS en este turno)
     cajas_total = 0.0
     try:
-        q_aperturas = text("""
-            SELECT COALESCE(SUM(cs.monto_apertura), 0)
+        q_cajas_abiertas = text("""
+            SELECT 
+                COALESCE(SUM(cs.monto_apertura), 0) +
+                COALESCE(SUM(COALESCE(cs.monto_apertura_usd, 0) * :tasa_usd), 0) +
+                COALESCE(SUM(COALESCE(cs.monto_apertura_brl, 0) * :tasa_brl), 0) +
+                COALESCE((
+                    SELECT SUM(sp.monto)
+                    FROM sale_payments sp
+                    JOIN sales s ON sp.sale_id = s.id
+                    WHERE s.session_id = cs.id AND sp.forma_pago = 'EFECTIVO'
+                ), 0)
             FROM cash_sessions cs
             JOIN cash_registers cr ON cs.register_id = cr.id
             WHERE cr.company_id = :cid AND cs.estado = 'abierta'
+            GROUP BY cs.id
         """)
-        r_ap = float((await db.execute(q_aperturas, {"cid": company_id})).scalar() or 0.0)
-
-        q_ef_hoy = text("""
-            SELECT COALESCE(SUM(sp.monto), 0)
-            FROM sale_payments sp
-            JOIN sales s ON sp.sale_id = s.id
-            WHERE s.company_id = :cid AND sp.forma_pago = 'EFECTIVO' AND date(s.fecha) = CURRENT_DATE
-        """)
-        r_ef_hoy = float((await db.execute(q_ef_hoy, {"cid": company_id})).scalar() or 0.0)
-        cajas_total = r_ap + r_ef_hoy
+        rows_cajas = (await db.execute(q_cajas_abiertas, {"cid": company_id, "tasa_usd": tasa_usd, "tasa_brl": tasa_brl})).fetchall()
+        cajas_total = sum(float(r[0]) for r in rows_cajas) if rows_cajas else 0.0
     except Exception:
         cajas_total = 0.0
 
