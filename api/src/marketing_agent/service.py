@@ -120,7 +120,7 @@ async def get_top_customers_with_favorite_products(
     filtros = ["cc.company_id = :cid", "cc.activo = true"]
     params: Dict[str, Any] = {"cid": company_id, "lim": limit}
 
-    # 1. Filtro estricto por segmento RFM
+    # 1. Filtro estricto por segmento RFM y Etiquetas Dinámicas
     seg_clean = (segmento or "").strip().lower()
     if solo_inactivos or seg_clean in ("churn", "inactivos", "riesgo", "riesgo churn"):
         filtros.append("""
@@ -142,15 +142,25 @@ async def get_top_customers_with_favorite_products(
         params["vip_min"] = VIP_MIN_GASTO_GS
         params["churn_dias"] = DIAS_CHURN_RIESGO
     elif seg_clean in ("frecuentes", "frecuente"):
-        filtros.append("(cc.cantidad_compras >= 4 AND cc.total_gastado < :vip_min)")
+        filtros.append("""(
+            (cc.cantidad_compras >= 4 AND cc.total_gastado < :vip_min)
+            OR cc.segmentos ILIKE :seg_tag_frec
+        )""")
         params["vip_min"] = VIP_MIN_GASTO_GS
-    elif seg_clean in ("ocasionales", "ocasional", "nuevos", "nuevo"):
-        filtros.append("(cc.cantidad_compras < 4 AND cc.total_gastado < :vip_min)")
+        params["seg_tag_frec"] = "%Frecuente%"
+    elif "nuevo" in seg_clean or "ocasional" in seg_clean:
+        filtros.append("""(
+            (cc.cantidad_compras < 4 AND cc.total_gastado < :vip_min)
+            OR cc.segmentos ILIKE :seg_tag_ocas
+            OR cc.segmentos ILIKE :seg_tag_nuev
+        )""")
         params["vip_min"] = VIP_MIN_GASTO_GS
+        params["seg_tag_ocas"] = "%Ocasional%"
+        params["seg_tag_nuev"] = "%Nuevo%"
     elif seg_clean and seg_clean != "todos":
         # Buscar por etiqueta dinámica en segmentos
         filtros.append("cc.segmentos ILIKE :seg_tag")
-        params["seg_tag"] = f"%{segmento}%"
+        params["seg_tag"] = f"%{segmento.strip()}%"
 
     # 2. Filtro de búsqueda libre (nombre, documento, barrio)
     if search and search.strip():
@@ -270,7 +280,8 @@ async def get_top_customers_with_favorite_products(
 
 
 async def get_promotions_with_ai_pulse(db: AsyncSession, company_id: str) -> List[PromotionPulseItem]:
-    """Obtiene todas las promociones con diagnóstico de IA, productos afectados y pulso comercial."""
+    """Obtiene todas las promociones con diagnóstico de IA, productos afectados, ventas reales en cajas
+    y ordenamiento estricto: vigentes primero en orden de próximo vencimiento."""
     now = datetime.now(PARAGUAY_TZ)
     q = text("""
         SELECT 
@@ -278,8 +289,15 @@ async def get_promotions_with_ai_pulse(db: AsyncSession, company_id: str) -> Lis
             p.producto_ids, COALESCE(p.usos_actuales, 0) as usos, p.activo, p.descripcion
         FROM promotions p
         WHERE p.company_id = :cid
-        ORDER BY p.activo DESC, p.created_at DESC
-        LIMIT 25
+        ORDER BY 
+            CASE 
+                WHEN p.activo = true AND (p.valido_hasta IS NULL OR p.valido_hasta >= CURRENT_DATE) THEN 0
+                WHEN p.activo = true THEN 1
+                ELSE 2
+            END,
+            p.valido_hasta ASC NULLS LAST,
+            p.created_at DESC
+        LIMIT 35
     """)
     rows = (await db.execute(q, {"cid": company_id})).fetchall()
     
@@ -297,10 +315,10 @@ async def get_promotions_with_ai_pulse(db: AsyncSession, company_id: str) -> Lis
         
         # Obtener nombres de productos afectados
         prod_names = []
+        valid_uuids = []
         if isinstance(p_ids, list) and p_ids:
             try:
                 import uuid as _uuid
-                valid_uuids = []
                 for x in p_ids[:6]:
                     try:
                         valid_uuids.append(str(_uuid.UUID(str(x))))
@@ -310,6 +328,32 @@ async def get_promotions_with_ai_pulse(db: AsyncSession, company_id: str) -> Lis
                     q_pnames = text("SELECT nombre FROM products WHERE id::text = ANY(:ids)")
                     pn_rows = (await db.execute(q_pnames, {"ids": valid_uuids})).fetchall()
                     prod_names = [str(pn[0]) for pn in pn_rows]
+            except Exception:
+                pass
+
+        # Consultar tickets reales y volumen facturado en cajas registradoras
+        monto_facturado = 0.0
+        if valid_uuids:
+            try:
+                q_sales = text("""
+                    SELECT 
+                        COUNT(DISTINCT si.sale_id) as tickets,
+                        COALESCE(SUM(si.total), 0) as total_gs
+                    FROM sale_items si
+                    JOIN sales s ON s.id = si.sale_id
+                    WHERE si.product_id::text = ANY(:pids)
+                      AND s.company_id = :cid
+                      AND s.estado IN ('completado', 'confirmado')
+                      AND (:desde::date IS NULL OR s.created_at::date >= :desde)
+                """)
+                s_row = (await db.execute(q_sales, {
+                    "pids": valid_uuids,
+                    "cid": company_id,
+                    "desde": v_desde if v_desde else None
+                })).fetchone()
+                if s_row:
+                    usos = max(usos, int(s_row[0] or 0))
+                    monto_facturado = float(s_row[1] or 0)
             except Exception:
                 pass
             
@@ -326,17 +370,17 @@ async def get_promotions_with_ai_pulse(db: AsyncSession, company_id: str) -> Lis
         if usos >= 20:
             nivel = "alta_traccion"
             label = "🔥 Alta Tracción"
-            diag = f"Promoción validada en cajas con {usos} ventas registradas. Fuerte respuesta del consumidor."
+            diag = f"Promoción validada en cajas con {usos} tickets de venta reales y {formatPYG(monto_facturado) if monto_facturado else 'alto flujo'}. Fuerte respuesta del consumidor."
             rec = "Extender vigencia o promocionar en cabeceras de góndola para maximizar rotación."
         elif usos >= 5:
             nivel = "estable"
             label = "⚡ Pulso Estable"
-            diag = f"Registra {usos} aplicaciones en cajas. Flujo constante sin canibalización de margen."
+            diag = f"Registra {usos} tickets en cajas con {formatPYG(monto_facturado)}. Flujo constante sin canibalización de margen."
             rec = "Reforzar con banner en verificadores de precios y WhatsApp para acelerar salida."
         else:
             nivel = "bajo_impacto"
             label = "⚠️ Bajo Rendimiento"
-            diag = f"Apenas {usos} ventas con esta promo. El cliente no la percibe o los productos tienen baja visibilidad."
+            diag = f"Apenas {usos} tickets registrados. El cliente no percibe la oferta o los productos tienen baja visibilidad en góndola."
             rec = "Revisar cartelera en góndola, aumentar el descuento al 20% o convertir a formato 2x1."
             
         result.append(PromotionPulseItem(
@@ -351,8 +395,7 @@ async def get_promotions_with_ai_pulse(db: AsyncSession, company_id: str) -> Lis
             productos_count=len(p_ids) if isinstance(p_ids, list) else 0,
             productos_nombres=prod_names,
             total_usos=usos,
-            monto_facturado_gs=float(usos * 85_000),
-            descuento_total_gs=float(usos * 12_500),
+            monto_facturado_gs=monto_facturado,
             pulso_nivel=nivel,
             pulso_label=label,
             diagnostico_ia=diag,
