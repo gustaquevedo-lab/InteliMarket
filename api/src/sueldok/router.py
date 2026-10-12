@@ -258,3 +258,84 @@ async def execute_dossier_compensations(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
+
+from fastapi.responses import Response, FileResponse
+
+
+@router.post("/dossiers/{dossier_id}/phases/{phase_id}/execute-third-party")
+async def execute_dossier_third_party_phase(
+    dossier_id: str,
+    phase_id: str,
+    cheque_numero: Optional[str] = Query(None),
+    banco_nombre: Optional[str] = Query(None),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: Any = Depends(require_auth)
+):
+    """
+    Ejecuta una fase de retención de convenios a terceros:
+    Emite la OP consolidada para el acreedor (con cheque/transferencia)
+    y compila la Planilla Anexa de Rendición en PDF formal.
+    """
+    from api.src.sueldok.third_party_reports import execute_third_party_phase
+    user_id = str(user.get("id")) if isinstance(user, dict) else str(getattr(user, "id", ""))
+    try:
+        return await execute_third_party_phase(
+            db, company_id, phase_id, cheque_numero, banco_nombre, user_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/dossiers/{dossier_id}/phases/{phase_id}/annex-pdf")
+async def get_third_party_annex_pdf(
+    dossier_id: str,
+    phase_id: str,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: Any = Depends(require_auth)
+):
+    """
+    Descarga la Planilla Anexa de Rendición de Descuentos en PDF.
+    """
+    import os
+    import uuid
+    from sqlalchemy import select
+    from api.src.sueldok.models import PayrollDossierPhase
+
+    pid = uuid.UUID(phase_id)
+    res = await db.execute(select(PayrollDossierPhase).where(PayrollDossierPhase.id == pid))
+    phase = res.scalars().first()
+    if not phase:
+        raise HTTPException(status_code=404, detail="Fase no encontrada")
+
+    if not phase.pdf_storage_key or not os.path.exists(phase.pdf_storage_key):
+        raise HTTPException(status_code=404, detail="PDF de la fase no ha sido generado aún")
+
+    return FileResponse(
+        phase.pdf_storage_key,
+        media_type="application/pdf",
+        filename=os.path.basename(phase.pdf_storage_key)
+    )
+
+
+@router.post("/dossiers/{dossier_id}/phases/{phase_id}/execute-ips")
+async def execute_dossier_ips_phase(
+    dossier_id: str,
+    phase_id: str,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: Any = Depends(require_auth)
+):
+    """
+    Ejecuta la fase de previsión IPS, emitiendo la Orden de Pago al Instituto
+    de Previsión Social por el 25.5% legal con su fecha de vencimiento fiscal.
+    """
+    from api.src.sueldok.third_party_reports import execute_ips_phase
+    user_id = str(user.get("id")) if isinstance(user, dict) else str(getattr(user, "id", ""))
+    try:
+        return await execute_ips_phase(db, company_id, phase_id, user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+

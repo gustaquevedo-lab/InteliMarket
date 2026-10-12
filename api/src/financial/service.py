@@ -1,5 +1,7 @@
 """Financial service — AP, banking, cash flow, budgets, payment runs, dashboards"""
 
+from typing import Any, Optional, List, Dict
+
 from sqlalchemy import select, func, and_, or_, text, case, delete
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +35,7 @@ from api.src.financial.schemas import (
     PaymentOrderDisbursementCreate,
     MultiSupplierPaymentBatchCreate,
     SettleValesAndPayRequest,
+    SupplierLegalInvoiceInput,
 )
 from api.src.purchases.models import Supplier, PurchaseReceipt, PurchaseOrder
 from api.src.caja.models import VaultEntry, CashRegisterMovement
