@@ -323,73 +323,86 @@ export default function IntegratedFinancePage() {
                     </span>
                   </div>
 
-                  <div className="space-y-3 font-mono text-xs">
-                    {/* Ingresos Operativos */}
-                    <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/30">
-                      <div className="flex items-center gap-2 text-emerald-900 dark:text-emerald-300 font-sans font-bold text-sm">
-                        <ArrowUpRight className="w-4 h-4 text-emerald-600" />
-                        (+) Ingresos Operativos por Ventas
+                  {(() => {
+                    const ingresosOp = Number(ebitdaData?.ingresos_operativos ?? dashboardData?.ingresos ?? 0)
+                    const costoVentas = Number(ebitdaData?.costo_ventas ?? 0)
+                    const margenBrutoVal = ingresosOp - costoVentas
+                    const margenBrutoPct = ingresosOp > 0 ? ((margenBrutoVal / ingresosOp) * 100).toFixed(1) : "0.0"
+                    const gastosOp = Number(ebitdaData?.gastos_operativos ?? 0)
+                    const ebitdaVal = Number(ebitdaData?.ebitda ?? (margenBrutoVal - gastosOp))
+                    const deprecVal = Number(ebitdaData?.depreciaciones ?? 0)
+                    const ebitVal = ebitdaVal - deprecVal
+
+                    return (
+                      <div className="space-y-3 font-mono text-xs">
+                        {/* Ingresos Operativos */}
+                        <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/30">
+                          <div className="flex items-center gap-2 text-emerald-900 dark:text-emerald-300 font-sans font-bold text-sm">
+                            <ArrowUpRight className="w-4 h-4 text-emerald-600" />
+                            (+) Ingresos Operativos por Ventas
+                          </div>
+                          <span className="font-bold text-sm text-emerald-700 dark:text-emerald-400">
+                            {formatPYG(ingresosOp)}
+                          </span>
+                        </div>
+
+                        {/* Costo de Ventas */}
+                        <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-700/60">
+                          <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300 font-sans font-semibold">
+                            <ArrowDownRight className="w-4 h-4 text-red-500" />
+                            (-) Costo de Mercaderías Vendidas (CMV)
+                          </div>
+                          <span className="font-semibold text-slate-800 dark:text-slate-200">
+                            {formatPYG(costoVentas)}
+                          </span>
+                        </div>
+
+                        {/* Margen Bruto */}
+                        <div className="flex items-center justify-between px-3 py-2 border-b border-t border-slate-200 dark:border-slate-700">
+                          <span className="font-sans font-bold text-slate-900 dark:text-white uppercase tracking-wider text-[11px]">
+                            (=) Margen Bruto
+                          </span>
+                          <span className="font-bold text-indigo-600 dark:text-indigo-400">
+                            {formatPYG(margenBrutoVal)} ({margenBrutoPct}%)
+                          </span>
+                        </div>
+
+                        {/* Gastos Operativos */}
+                        <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-700/60">
+                          <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300 font-sans font-semibold">
+                            <ArrowDownRight className="w-4 h-4 text-amber-500" />
+                            (-) Gastos Administrativos, Personal y Salarios
+                          </div>
+                          <span className="font-semibold text-slate-800 dark:text-slate-200">
+                            {formatPYG(gastosOp)}
+                          </span>
+                        </div>
+
+                        {/* EBITDA */}
+                        <div className="flex items-center justify-between p-3.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800">
+                          <div className="flex items-center gap-2 text-indigo-950 dark:text-indigo-200 font-sans font-black text-sm">
+                            <Sparkles className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                            (=) EBITDA (Resultado Operacional antes de D&A)
+                          </div>
+                          <span className="font-black text-base text-indigo-700 dark:text-indigo-300">
+                            {formatPYG(ebitdaVal)}
+                          </span>
+                        </div>
+
+                        {/* Depreciación */}
+                        <div className="flex items-center justify-between p-2.5 text-slate-500 dark:text-slate-400">
+                          <span className="font-sans">(-) Depreciación & Amortización de Activos Fijos</span>
+                          <span>{formatPYG(deprecVal)}</span>
+                        </div>
+
+                        {/* EBIT */}
+                        <div className="flex items-center justify-between p-3 rounded-xl bg-slate-100 dark:bg-slate-800 font-black text-slate-900 dark:text-white">
+                          <span className="font-sans">(=) EBIT / Resultado Operativo Neto</span>
+                          <span>{formatPYG(ebitVal)}</span>
+                        </div>
                       </div>
-                      <span className="font-bold text-sm text-emerald-700 dark:text-emerald-400">
-                        {formatPYG(ebitdaData?.ingresos_operativos || dashboardData?.ingresos || 2485000000)}
-                      </span>
-                    </div>
-
-                    {/* Costo de Ventas */}
-                    <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-700/60">
-                      <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300 font-sans font-semibold">
-                        <ArrowDownRight className="w-4 h-4 text-red-500" />
-                        (-) Costo de Mercaderías Vendidas (CMV)
-                      </div>
-                      <span className="font-semibold text-slate-800 dark:text-slate-200">
-                        {formatPYG(ebitdaData?.costo_ventas || 1789200000)}
-                      </span>
-                    </div>
-
-                    {/* Margen Bruto */}
-                    <div className="flex items-center justify-between px-3 py-2 border-b border-t border-slate-200 dark:border-slate-700">
-                      <span className="font-sans font-bold text-slate-900 dark:text-white uppercase tracking-wider text-[11px]">
-                        (=) Margen Bruto
-                      </span>
-                      <span className="font-bold text-indigo-600 dark:text-indigo-400">
-                        {formatPYG((ebitdaData?.ingresos_operativos || 2485000000) - (ebitdaData?.costo_ventas || 1789200000))} (28.0%)
-                      </span>
-                    </div>
-
-                    {/* Gastos Operativos */}
-                    <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-700/60">
-                      <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300 font-sans font-semibold">
-                        <ArrowDownRight className="w-4 h-4 text-amber-500" />
-                        (-) Gastos Administrativos, Personal y Salarios
-                      </div>
-                      <span className="font-semibold text-slate-800 dark:text-slate-200">
-                        {formatPYG(ebitdaData?.gastos_operativos || 238000000)}
-                      </span>
-                    </div>
-
-                    {/* EBITDA */}
-                    <div className="flex items-center justify-between p-3.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800">
-                      <div className="flex items-center gap-2 text-indigo-950 dark:text-indigo-200 font-sans font-black text-sm">
-                        <Sparkles className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                        (=) EBITDA (Resultado Operacional antes de D&A)
-                      </div>
-                      <span className="font-black text-base text-indigo-700 dark:text-indigo-300">
-                        {formatPYG(ebitdaData?.ebitda || 457800000)}
-                      </span>
-                    </div>
-
-                    {/* Depreciación */}
-                    <div className="flex items-center justify-between p-2.5 text-slate-500 dark:text-slate-400">
-                      <span className="font-sans">(-) Depreciación & Amortización de Activos Fijos</span>
-                      <span>{formatPYG(ebitdaData?.depreciaciones || 42000000)}</span>
-                    </div>
-
-                    {/* EBIT */}
-                    <div className="flex items-center justify-between p-3 rounded-xl bg-slate-100 dark:bg-slate-800 font-black text-slate-900 dark:text-white">
-                      <span className="font-sans">(=) EBIT / Resultado Operativo Neto</span>
-                      <span>{formatPYG((ebitdaData?.ebitda || 457800000) - (ebitdaData?.depreciaciones || 42000000))}</span>
-                    </div>
-                  </div>
+                    )
+                  })()}
                 </div>
 
                 {/* Health & Compliance Card */}

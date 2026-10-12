@@ -706,7 +706,7 @@ export default function SueldokPage() {
     { mes: "Jun 26", bruto: 102800000, neto: 84600000, ips: 26214000, anticipos: 8900000 },
     { mes: "Jul 26", bruto: 105400000, neto: 86900000, ips: 26877000, anticipos: 9400000 },
     { mes: "Ago 26", bruto: 107200000, neto: 88400000, ips: 27336000, anticipos: 9800000 },
-    { mes: "Sep 26 (Act)", bruto: totalPayrollGross || 108950000, neto: totalPayrollNet || 89850000, ips: (totalIpsWorker + totalIpsEmployer) || 27782250, anticipos: totalAdvancesSum || 10100000 },
+    { mes: "Sep 26 (Act)", bruto: totalPayrollGross || 0, neto: totalPayrollNet || 0, ips: (totalIpsWorker + totalIpsEmployer) || 0, anticipos: totalAdvancesSum || 0 },
   ], [totalPayrollGross, totalPayrollNet, totalIpsWorker, totalIpsEmployer, totalAdvancesSum])
 
   // 2. Costo Laboral Total Real Empresa por Sector (Stacked)
@@ -748,10 +748,10 @@ export default function SueldokPage() {
     const otrasDeducciones = Math.max(0, totalDeductionsSum - faltantesArqueo)
 
     return [
-      { name: "IPS Obrero (9%)", valor: totalIpsWorker || 9805500, color: "#3b82f6" },
+      { name: "IPS Obrero (9%)", valor: totalIpsWorker || 0, color: "#3b82f6" },
       { name: "Anticipos Quincenales", valor: totalAdvancesSum, color: "#f59e0b" },
-      { name: "Faltantes Arqueo POS", valor: faltantesArqueo || 247790, color: "#f43f5e" },
-      { name: "Otras Retenciones", valor: otrasDeducciones || 150000, color: "#8b5cf6" },
+      { name: "Faltantes Arqueo POS", valor: faltantesArqueo || 0, color: "#f43f5e" },
+      { name: "Otras Retenciones", valor: otrasDeducciones || 0, color: "#8b5cf6" },
     ]
   }, [totalIpsWorker, totalAdvancesSum, totalDeductionsSum, deductions])
 

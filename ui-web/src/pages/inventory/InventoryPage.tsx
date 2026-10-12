@@ -576,7 +576,7 @@ export default function InventoryPage() {
                   </span>
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
                     <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                    {warehouses.length || 3} Depósitos Conectados
+                    {warehouses.length} Depósitos Conectados
                   </span>
                 </div>
                 <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
@@ -597,7 +597,7 @@ export default function InventoryPage() {
                 📦 {stock.length} registros de stock
               </span>
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
-                💰 {formatPYG(stats?.total_valor_costo || stats?.total_value_cost || 485000000)} en existencias
+                💰 {loadingStats ? "Cargando existencias..." : `${formatPYG(stats?.valor_total_costo ?? 0)} en existencias`}
               </span>
             </div>
           </div>
@@ -630,7 +630,7 @@ export default function InventoryPage() {
               <Warehouse className="w-4 h-4 text-blue-400" />
             </div>
             <p className="text-2xl font-black font-mono tracking-tight text-blue-300">
-              {warehouses.length || 3}
+              {warehouses.length}
             </p>
             <p className="text-[11px] text-slate-400">Salón, cámaras y reserva</p>
           </div>
@@ -641,7 +641,7 @@ export default function InventoryPage() {
               <DollarSign className="w-4 h-4 text-emerald-400" />
             </div>
             <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
-              {formatPYG(stats?.total_valor_costo || stats?.total_value_cost || 485000000)}
+              {loadingStats ? "—" : formatPYG(stats?.valor_total_costo ?? 0)}
             </p>
             <p className="text-[11px] text-slate-400">Patrimonio en inventario</p>
           </div>
@@ -652,7 +652,7 @@ export default function InventoryPage() {
               <AlertTriangle className="w-4 h-4 text-rose-400" />
             </div>
             <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
-              {stats?.sin_stock || stock.filter(s => (s.cantidad ?? 0) <= 0).length || 0}
+              {loadingStats ? "—" : (stats?.total_quiebres ?? stock.filter(s => (s.cantidad ?? 0) <= 0).length)}
             </p>
             <p className="text-[11px] text-slate-400">SKUs sin disponibilidad</p>
           </div>
@@ -663,7 +663,7 @@ export default function InventoryPage() {
               <ShieldAlert className="w-4 h-4 text-amber-400" />
             </div>
             <p className="text-2xl font-black font-mono tracking-tight text-amber-400">
-              {stats?.stock_bajo || 12}
+              {loadingStats ? "—" : (stats?.total_bajos ?? 0)}
             </p>
             <p className="text-[11px] text-slate-400">Alerta de punto de pedido</p>
           </div>

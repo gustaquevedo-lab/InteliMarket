@@ -344,8 +344,8 @@ function DashboardTab({
     { min_qty: 2, count: 228 },
     { min_qty: 4, count: 176 },
   ]
-  const totalTiersCount = summary?.total_tiers || 11542
-  const totalProductsWithTiers = summary?.total_products_with_tiers || 8630
+  const totalTiersCount = summary?.total_tiers ?? 0
+  const totalProductsWithTiers = summary?.total_products_with_tiers ?? 0
 
   return (
     <div className="space-y-6">

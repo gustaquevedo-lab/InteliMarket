@@ -384,7 +384,7 @@ export default function PromocionesPage() {
 
   // KPIs Consolidados
   const analytics = useMemo(() => {
-    const total = promotions.length || 500
+    const total = promotions.length
     const activas = promotions.filter(p => p.activo && p.estado === "activa").length
     const cortoVencimiento = promotions.filter(p => p.origen === "corto_vencimiento" || (p as any).fecha_vencimiento_lote).length
     const sellOutCount = promotions.filter(p => p.financiamiento === "proveedor_sell_out").length
@@ -398,7 +398,7 @@ export default function PromocionesPage() {
       sellOutCount,
       pendientesCount: pendientes,
       totalNcComprometido,
-      alertasVencimientoCount: expiringAlerts.length || 244
+      alertasVencimientoCount: expiringAlerts.length
     }
   }, [promotions, expiringAlerts])
 

@@ -52,19 +52,19 @@ export default function ShrinkagePage() {
   }, [loadShrinkageData])
 
   const kpis = dashboardData?.kpis || {
-    merma_total_gs: 179819104,
-    merma_tasa_pct: 1.42,
-    tasa_meta_pct: 2.0,
-    total_ventas_gs: 12663317172,
-    total_inventario_costo_gs: 3858414370,
-    ahorro_prevencion_gs: 68331260,
+    merma_total_gs: 0,
+    merma_tasa_pct: 0,
+    tasa_meta_pct: 0,
+    total_ventas_gs: 0,
+    total_inventario_costo_gs: 0,
+    ahorro_prevencion_gs: 0,
   }
 
   const descomp = dashboardData?.descomposicion || {
-    caducidad_vencimiento: { monto: 86313170, pct: 48 },
-    rotura_manipulacion: { monto: 43156585, pct: 24 },
-    deshidratacion_frio: { monto: 28771057, pct: 16 },
-    perdida_desconocida: { monto: 21578292, pct: 12 },
+    caducidad_vencimiento: { monto: 0, pct: 0 },
+    rotura_manipulacion: { monto: 0, pct: 0 },
+    deshidratacion_frio: { monto: 0, pct: 0 },
+    perdida_desconocida: { monto: 0, pct: 0 },
   }
 
   const categoriesCrit = dashboardData?.categorias_criticas || []
@@ -253,28 +253,28 @@ export default function ShrinkagePage() {
             </h3>
 
             <div className="space-y-2.5">
-              {(categoriesCrit.length > 0 ? categoriesCrit : [
-                { category: "Panadería & Rotisería", tasa_merma_pct: 3.20, monto_merma_gs: 2800000, nivel: "critico" },
-                { category: "Verdulería & Frutas Frescas", tasa_merma_pct: 2.85, monto_merma_gs: 2450000, nivel: "alto" },
-                { category: "Lácteos & Fiambrería", tasa_merma_pct: 1.60, monto_merma_gs: 1800000, nivel: "normal" },
-                { category: "Carnicería & Aves", tasa_merma_pct: 1.10, monto_merma_gs: 950000, nivel: "normal" },
-                { category: "Almacén General & Bebidas", tasa_merma_pct: 0.45, monto_merma_gs: 450000, nivel: "normal" },
-              ]).map((d: any) => (
-                <div key={d.category} className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-2xl flex items-center justify-between text-xs">
-                  <div>
-                    <p className="font-extrabold text-slate-900 dark:text-white">{d.category}</p>
-                    <span className="text-[10px] text-slate-400">Pérdida calculada: {formatPYG(d.monto_merma_gs)}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="font-mono font-bold text-slate-900 dark:text-white">{d.tasa_merma_pct}%</span>
-                    <span className={`block text-[10px] font-black uppercase ${
-                      d.nivel === "critico" ? "text-rose-500" : d.nivel === "alto" ? "text-amber-500" : "text-emerald-500"
-                    }`}>
-                      {d.nivel === "critico" ? "Atención" : d.nivel === "alto" ? "Revisar" : "Normal"}
-                    </span>
-                  </div>
+              {categoriesCrit.length === 0 ? (
+                <div className="p-6 text-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
+                  Sin departamentos con merma crítica en el período
                 </div>
-              ))}
+              ) : (
+                categoriesCrit.map((d: any) => (
+                  <div key={d.category} className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-2xl flex items-center justify-between text-xs">
+                    <div>
+                      <p className="font-extrabold text-slate-900 dark:text-white">{d.category}</p>
+                      <span className="text-[10px] text-slate-400">Pérdida calculada: {formatPYG(d.monto_merma_gs)}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="font-mono font-bold text-slate-900 dark:text-white">{d.tasa_merma_pct}%</span>
+                      <span className={`block text-[10px] font-black uppercase ${
+                        d.nivel === "critico" ? "text-rose-500" : d.nivel === "alto" ? "text-amber-500" : "text-emerald-500"
+                      }`}>
+                        {d.nivel === "critico" ? "Atención" : d.nivel === "alto" ? "Revisar" : "Normal"}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>

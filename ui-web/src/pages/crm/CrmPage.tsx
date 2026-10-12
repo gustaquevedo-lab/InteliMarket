@@ -282,7 +282,7 @@ export default function CrmPage() {
 
   // KPIs reales
   const analytics = useMemo(() => {
-    const total = retailCustomers.length || 4422
+    const total = retailCustomers.length
     const conTelefono = retailCustomers.filter(c => c.telefono).length
     const conEmail = retailCustomers.filter(c => c.email).length
     const totalStockPremios = rewards.reduce((acc, r) => acc + (r.stock || 0), 0)
@@ -630,7 +630,7 @@ export default function CrmPage() {
                   </span>
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                    {retailCustomers.length || 4422} Socios ExtraClub
+                    {retailCustomers.length} Socios ExtraClub
                   </span>
                 </div>
                 <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
@@ -722,7 +722,7 @@ export default function CrmPage() {
       {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
       <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
         {[
-          { id: "miembros", label: `Socios ExtraClub (${customers.length || 4864})`, icon: Users },
+          { id: "miembros", label: `Socios ExtraClub (${customers.length})`, icon: Users },
           { id: "tarjetas", label: "Tarjetas Extra Club (Zebra ZC300)", icon: CreditCard },
           { id: "solicitudes", label: `Solicitudes Web (${solicitudes.length})`, icon: Clock },
           { id: "rfm", label: "Segmentación RFM (126.345 Ventas)", icon: BarChart2 },
