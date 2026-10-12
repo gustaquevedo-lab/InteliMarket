@@ -1087,3 +1087,8 @@ async def update_supplier_payment_agreement(
         raise HTTPException(status_code=404, detail="Proveedor no encontrado")
     return result
 
+
+from api.src.financial.router_closing import router as closing_router
+router.include_router(closing_router)
+
+
