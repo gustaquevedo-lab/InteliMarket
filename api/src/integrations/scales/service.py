@@ -2,10 +2,11 @@
 
 import logging
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 from typing import Optional
 from datetime import datetime
 
-from sqlalchemy import select, delete, func as sa_func
+from sqlalchemy import select, delete, text, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.integrations.scales.models import (
@@ -300,25 +301,92 @@ async def detect_protocol(data) -> ProtocolDetectResult:
 # PLU SYNC
 # ═══════════════════════════════════════════════════════════════
 
-def _product_to_plu_dict(p: Product) -> dict:
+# Promos que se pueden expresar como precio unitario por kg en la etiqueta/visor de la
+# balanza. Las de cantidad (2x1, 3x2, nxm, segunda unidad, combos) dependen del carrito
+# y no tienen un "precio por kg" -- esas solo las aplica la caja.
+TIPOS_PROMO_PRECIO_UNITARIO = ("precio_fijo_oferta", "porcentaje", "monto_fijo")
+PY_TZ = ZoneInfo("America/Asuncion")
+
+
+async def calcular_precios_balanza(db: AsyncSession, company_id, productos: list[Product]) -> dict:
+    """Precio que debe mostrar la balanza AHORA para cada producto: el mismo que cobra la caja
+    (motor de precio dual de promociones), no solo `products.precio_venta`.
+
+    `precio_venta` solo refleja las promos `precio_fijo_oferta` (las aplica el trigger SQL
+    trg_sync_promo_precio_fijo); las de porcentaje / monto fijo y los precios por producto
+    se calculan al vuelo en caja y la balanza nunca se enteraba. Se evalua con la hora de
+    Paraguay a proposito: los crons corren en UTC y sin esto los dias/horarios quedarian
+    corridos."""
+    from api.src.promotions.models import Promotion
+    from api.src.promotions.service import resolve_product_promotions
+
+    ahora = datetime.now(PY_TZ).replace(tzinfo=None)
+    r = await db.execute(select(Promotion).where(
+        Promotion.company_id == company_id,
+        Promotion.activo == True,  # noqa: E712
+        Promotion.estado == "activa",
+        Promotion.tipo.in_(TIPOS_PROMO_PRECIO_UNITARIO),
+        Promotion.valido_desde <= ahora.date(),
+        Promotion.valido_hasta >= ahora.date(),
+    ))
+    promos = list(r.scalars().all())
+    ids_validos = {str(pr.id) for pr in promos}
+    pids, cids = set(), set()
+    for pr in promos:
+        pids.update(pr.producto_ids or [])
+        cids.update(pr.categoria_ids or [])
+
+    precios = {}
+    for p in productos:
+        base = Decimal(str(p.precio_venta or 0))
+        precios[p.id] = base
+        if base <= 0 or not (p.id in pids or (p.categoria_id and p.categoria_id in cids)):
+            continue
+        dual = await resolve_product_promotions(db, str(company_id), str(p.id), float(base), current_dt=ahora)
+        if dual.en_promocion and dual.promocion_id in ids_validos and dual.precio_promocional > 0:
+            precios[p.id] = Decimal(str(dual.precio_promocional))
+    return precios
+
+
+def _product_to_plu_dict(p: Product, precio: Optional[Decimal] = None) -> dict:
+    precio_final = float(precio if precio is not None else (p.precio_venta or 0))
     return {
         "id": str(p.id),
         "codigo": p.sku or str(p.id)[:20],
         "sku": p.sku,
         "nombre": p.nombre,
-        "precio": float(p.precio_venta or 0),
-        "precio_venta": float(p.precio_venta or 0),
+        "precio": precio_final,
+        "precio_venta": precio_final,
         "codigo_barras": p.codigo_barra,
         "plu_balanza": p.plu_balanza,
         "tara": 0,
     }
 
 
+async def registrar_estado_balanza(db: AsyncSession, scale_id, plu_list: list[dict]) -> None:
+    """Deja asentado lo ultimo transmitido por PLU, para que el reconciliador
+    (scripts/reconcile_balanzas.py) sepa que ya esta enviado y no lo repita."""
+    for d in plu_list:
+        if not d.get("plu_balanza") or (d.get("precio_venta") or 0) <= 0:
+            continue
+        await db.execute(text("""
+            INSERT INTO scale_plu_state (scale_id, plu, product_id, precio, nombre, pushed_at)
+            VALUES (:s, :plu, :pid, :precio, :nombre, NOW())
+            ON CONFLICT (scale_id, plu) DO UPDATE SET product_id = :pid, precio = :precio,
+                nombre = :nombre, pushed_at = NOW()"""),
+            {"s": str(scale_id), "plu": int(d["plu_balanza"]), "pid": d["id"],
+             "precio": Decimal(str(d["precio_venta"])).quantize(Decimal("0.01")), "nombre": d["nombre"]})
+
+
 async def _run_plu_sync(db: AsyncSession, s: ScaleConfig, productos: list[Product], modo: str) -> dict:
-    plu_list = [_product_to_plu_dict(p) for p in productos]
+    precios = await calcular_precios_balanza(db, s.company_id, [p for p in productos if p.plu_balanza])
+    plu_list = [_product_to_plu_dict(p, precios.get(p.id)) for p in productos]
 
     driver = get_driver(s)
     result = await driver.sync_plu(plu_list)
+
+    if result.exitosos:
+        await registrar_estado_balanza(db, s.id, plu_list)
 
     sync_log = ScalePLUSync(
         company_id=s.company_id,

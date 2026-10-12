@@ -9,6 +9,26 @@
 
 ---
 
+## ⚖️ SESIÓN 2026-10-12 — "promos que entran/salen y la balanza no se entera": la balanza solo conocía UN tipo de promo
+
+Reclamo: promos pausadas / que entraron en vigencia no se reflejaban en las balanzas. Diagnóstico (sistema vs balanza, verificado):
+- El sistema calcula bien: 0 diferencias entre lo que cada promo `precio_fijo_oferta` vigente hoy debe dar y `products.precio_venta`; el reconciliador decía "al día" en las 3 balanzas.
+- **Causa raíz**: `products.precio_venta` solo cambia por las promos `precio_fijo_oferta` (trigger SQL `trg_sync_promo_precio_fijo`, que además se re-evalúa cada 30 min por el job `promotions_sync` del scheduler). Las promos `porcentaje` / `monto_fijo` (y los `precios_por_producto` que arma la UI) las calcula **la caja al vuelo** (motor de precio dual) y no tocan `precio_venta`; los hooks y el reconciliador solo miraban `precio_venta`, así que la balanza **nunca** se enteraba. Caso real de hoy: "promo flv" (7%): caja cobra BANANA DE ORO 10.377 y REPOLLO MORADO 11.377, la balanza mostraba 15.677 y 14.677.
+- Además los pushes de los hooks no actualizaban `scale_plu_state` y no tenían noción de precio efectivo (3 nociones distintas de "precio").
+
+**Arreglado**
+- `scales/service.py`: nuevo `calcular_precios_balanza()` = precio que cobra la caja HOY (reusa `resolve_product_promotions`; solo tipos `precio_fijo_oferta`/`porcentaje`/`monto_fijo`; las de cantidad 2x1/3x2/nxm/combos no tienen precio por kg y siguen solo en caja). Evalúa con hora de Paraguay explícita (los crons corren en UTC: sin esto los días/horarios de promo quedaban corridos). `_run_plu_sync` (hooks, botón manual) y `scripts/reconcile_balanzas.py` usan el mismo cálculo; los hooks ahora también asientan `scale_plu_state`.
+- Corrido: BANANA DE ORO y REPOLLO MORADO transmitidos a las 3 balanzas (confirmado ack, 2da corrida "al día").
+- Cron: carga completa **cada hora** (06:07-22:07 local) además de la diaria y de los incrementales de 5 min. Motivo: las balanzas no se pueden leer de vuelta (`UPL\tPLU` no responde, probado con 3 variantes y 25 s de espera), así que no hay forma de detectar si alguien las pisó; el refresco completo acota cualquier divergencia a ≤1 h.
+- Reinicio escalonado de las 2 instancias para cargar el código nuevo en los hooks.
+
+**Aprendizajes / ojo**
+- Los crons corren en **UTC** aunque la shell diga -03 (`expire_promotions` "00:05" corre a las 21:05 locales; el log del reconciliador está en UTC). Cualquier lógica de fechas en scripts de cron debe usar `America/Asuncion` explícito.
+- WinRM a la PC de Compras (192.168.0.231:5985) ya no responde: no se puede revisar el log de SDL.exe para confirmar/descartar que siga pisando las balanzas. Si el cliente reporta de nuevo una divergencia con el sistema "al día", la hipótesis pendiente es SDL.exe transmitiendo precios viejos de `SDL.mdb`.
+- 4.473 warnings `No route to host` en 24 h = balanzas apagadas de noche (esperado); el reconciliador entrega al encenderlas (last_ok 06:05 / 07:25).
+- Pendiente de producto: mostrar `scale_sync_status` (last_ok/last_error) en `/escalas` para que el supermercado vea si una balanza está desactualizada sin pedirnos.
+
+
 ## ⚖️ SESIÓN 2026-10-07 — Balanzas: "hay que transmitir a mano cada vez" -> reconciliador con reintento
 
 Reclamo del supermercado: los cambios de precio no llegan solos a la balanza. **La conexión funciona** (INF OK a las 3), pero el envío de los hooks (edición de producto, promos, markdown, Ñemuha) es *dispara-y-olvida*: si falla solo queda un `logger.warning` y nunca se reintenta. Evidencia: de noche (00-07 y 21-23 h) fallan el **100%** de los envíos (balanzas apagadas; ej. promo que revierte a las 00:01/00:05 nunca llegaba y la mañana siguiente la balanza seguía con precio de oferta), y de día hubo ráfagas de `Connection refused` (55 en la hora de las 17).

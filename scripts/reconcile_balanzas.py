@@ -24,7 +24,7 @@ from sqlalchemy import select, text
 from api.src.db import async_session_factory
 from api.src.integrations.scales.drivers import DRIVER_REGISTRY
 from api.src.integrations.scales.models import ScaleConfig
-from api.src.integrations.scales.service import _build_driver_config, _product_to_plu_dict
+from api.src.integrations.scales.service import _build_driver_config, _product_to_plu_dict, calcular_precios_balanza
 from api.src.products.models import Product
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -59,6 +59,8 @@ async def reconciliar_balanza(db, s: ScaleConfig, full: bool, dry: bool) -> str:
     for plu, nombres in conflictos:
         log.warning("[%s] PLU %s ambiguo (se omite): %s", s.nombre, plu, nombres)
 
+    precios = await calcular_precios_balanza(db, s.company_id, list(deseados.values()))
+
     estado = {row[0]: (row[1], row[2]) for row in (await db.execute(
         text("SELECT plu, precio, nombre FROM scale_plu_state WHERE scale_id = :s"), {"s": sid})).all()}
     pend = (await db.execute(
@@ -67,7 +69,7 @@ async def reconciliar_balanza(db, s: ScaleConfig, full: bool, dry: bool) -> str:
 
     a_enviar = [
         p for plu, p in deseados.items()
-        if completo or estado.get(plu) != (Decimal(str(p.precio_venta)).quantize(Decimal("0.01")), p.nombre)
+        if completo or estado.get(plu) != (precios[p.id].quantize(Decimal("0.01")), p.nombre)
     ]
     if not a_enviar:
         return f"{s.nombre}: al dia ({len(deseados)} PLU)"
@@ -79,7 +81,7 @@ async def reconciliar_balanza(db, s: ScaleConfig, full: bool, dry: bool) -> str:
     try:
         for i in range(0, len(a_enviar), CHUNK):
             lote = a_enviar[i:i + CHUNK]
-            res = await driver.sync_plu([_product_to_plu_dict(p) for p in lote])
+            res = await driver.sync_plu([_product_to_plu_dict(p, precios[p.id]) for p in lote])
             if res.exitosos != len(lote):
                 raise RuntimeError(f"la balanza acepto {res.exitosos}/{len(lote)}: {res.errores[:2]}")
             for p in lote:
@@ -89,7 +91,7 @@ async def reconciliar_balanza(db, s: ScaleConfig, full: bool, dry: bool) -> str:
                     ON CONFLICT (scale_id, plu) DO UPDATE SET product_id = :pid, precio = :precio,
                         nombre = :nombre, pushed_at = NOW()"""),
                     {"s": sid, "plu": int(p.plu_balanza), "pid": str(p.id),
-                     "precio": Decimal(str(p.precio_venta)).quantize(Decimal("0.01")), "nombre": p.nombre})
+                     "precio": precios[p.id].quantize(Decimal("0.01")), "nombre": p.nombre})
             await db.commit()
             enviados += len(lote)
     except Exception as e:  # noqa: BLE001 -- offline/ocupada: reintenta en la proxima corrida
