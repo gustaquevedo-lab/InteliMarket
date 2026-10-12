@@ -674,6 +674,8 @@ export default function POSPage() {
   // para que el escaneo lo resuelva en memoria, igual que el resto del
   // catalogo -- no pega al backend por cada escaneo.
   const [packBarcodeMap, setPackBarcodeMap] = useState<Map<string, { productId: string; etiqueta: string; unidadesPorPaquete: number }>>(new Map())
+  // Kits & Combos Promocionales (1 código = combo unificado IVA 10% o explosión desglosada)
+  const [kitBarcodeMap, setKitBarcodeMap] = useState<Map<string, any>>(new Map())
   const [stockMap, setStockMap] = useState<Record<string, number>>({})
   const [searchResults, setSearchResults] = useState<Product[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -2681,12 +2683,13 @@ export default function POSPage() {
 
       // 2. Consulta en segundo plano de metadatos y sincronización delta
       try {
-        const [whData, staffData, topData, stockData, packBarcodeData] = await Promise.allSettled([
+        const [whData, staffData, topData, stockData, packBarcodeData, kitsData] = await Promise.allSettled([
           api.warehouses.list(),
           api.auth.posAuthorizers(),
           api.reports.salesByProduct({ limit: 100 }),
           api.inventory.getStockMap(),
           api.products.packBarcodes.list(),
+          api.kits.list(),
         ])
 
         if (whData.status === "fulfilled" && isMounted) {
@@ -2715,6 +2718,20 @@ export default function POSPage() {
             })
           }
           setPackBarcodeMap(map)
+        }
+
+        if (kitsData && kitsData.status === "fulfilled" && isMounted) {
+          const kmap = new Map<string, any>()
+          for (const kit of (kitsData.value as any) || []) {
+            if (kit.codigo_barra) {
+              const cb = String(kit.codigo_barra).trim()
+              kmap.set(cb, kit)
+              if (cb.length >= 8) kmap.set(cb.padStart(13, "0"), kit)
+            }
+            if (kit.sku) kmap.set(String(kit.sku).trim(), kit)
+            if (kit.product_id) kmap.set(String(kit.product_id), kit)
+          }
+          setKitBarcodeMap(kmap)
         }
 
         // 3. Sincronización DELTA liviana (solo novedades desde el último sync)
@@ -3439,6 +3456,92 @@ export default function POSPage() {
       applyTieredPrice(product.id, newQty, customer.id)
     }
   }, [currentScaleWeight, cart, customer.id, cajaAbierta, cashSessionId])
+
+  // ── MANEJO DE ESCANEO DE KITS & COMBOS PROMOCIONALES ─────────────────────
+  // Soporta 2 modalidades fiscales según especificación DNIT:
+  // 1. item_unico: Agrega 1 línea con el nombre del combo e IVA 10% fija
+  // 2. desglosado: Explota e inserta cada producto individualmente con su IVA original y descuento prorrateado
+  const handleKitScan = useCallback((kit: any, qtyMultiplier: number = 1) => {
+    const modalidad = kit.modalidad_facturacion || "item_unico"
+
+    if (modalidad === "item_unico") {
+      const kitProduct: Product = {
+        id: kit.product_id || kit.id,
+        nombre: kit.nombre,
+        sku: kit.sku || "",
+        codigo_barra: kit.codigo_barra,
+        precio_venta: kit.precio_venta,
+        iva_tasa: 10,
+        tipo: "kit",
+        tipo_producto: "producto",
+      } as any
+
+      addToCart(kitProduct, qtyMultiplier)
+      toast.success(
+        `Combo: ${kit.nombre}`,
+        `Agregado como Ítem Único (IVA 10% DNIT) por ₲${Number(kit.precio_venta).toLocaleString("es-PY")}.`
+      )
+    } else {
+      const kitItems = kit.items || []
+      if (kitItems.length === 0) {
+        toast.warning("Combo sin componentes", "El combo no contiene artículos configurados.")
+        return
+      }
+
+      const totalPVP = kitItems.reduce(
+        (acc: number, it: any) => acc + (Number(it.precio_unitario || 0) * Number(it.cantidad || 1)),
+        0
+      )
+      const factorDesc = (totalPVP > 0 && kit.precio_venta < totalPVP)
+        ? (kit.precio_venta / totalPVP)
+        : 1.0
+
+      setCart((prev) => {
+        let updated = [...prev]
+        for (const item of kitItems) {
+          const itemQty = Number(item.cantidad || 1) * qtyMultiplier
+          const unitPrice = Number(item.precio_con_descuento || Math.round(Number(item.precio_unitario || 0) * factorDesc))
+          const basePrice = Number(item.precio_unitario || unitPrice)
+          const ivaTasa = Number(item.iva_tasa !== undefined ? item.iva_tasa : 10)
+
+          const existingIdx = updated.findIndex(
+            (c) => c.product_id === item.product_id && !c.es_pesable && c.precio === unitPrice
+          )
+
+          if (existingIdx >= 0) {
+            updated[existingIdx] = {
+              ...updated[existingIdx],
+              quantity: updated[existingIdx].quantity + itemQty,
+            }
+          } else {
+            updated = [
+              {
+                id: `${item.product_id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                product_id: item.product_id,
+                nombre: `${item.nombre} [Combo: ${kit.nombre}]`,
+                precio: unitPrice,
+                precio_base: basePrice,
+                sku: item.sku || "",
+                codigo_barra: item.codigo_barra,
+                quantity: itemQty,
+                iva_tasa: ivaTasa,
+                es_pesable: false,
+                origen_balanza: null,
+              },
+              ...updated,
+            ]
+          }
+        }
+        return updated
+      })
+
+      toast.success(
+        `Combo Desglosado: ${kit.nombre}`,
+        `${kitItems.length} artículos agregados con IVA individual (Total: ₲${Number(kit.precio_venta).toLocaleString("es-PY")}).`
+      )
+    }
+  }, [addToCart, toast])
+
 
   // ── ESCALA DE PRECIOS POR CANTIDAD (sp_tiered_prices) ──────────────────────
   // Recalcula el precio unitario de `productId` (pesable o unitario) contra
@@ -5632,6 +5735,16 @@ export default function POSPage() {
     // 2. Coincidencia exacta en memoria local (con soporte estricto de padding para EAN-13/UPC)
 
     const cleanCode = code.trim()
+
+    // 2.0 Búsqueda prioritaria en Kits & Combos Promocionales (por código EAN retail o SKU)
+    const kitMatch = kitBarcodeMap.get(cleanCode) ||
+      (cleanCode.length >= 8 ? kitBarcodeMap.get(cleanCode.padStart(13, "0")) : undefined)
+    if (kitMatch) {
+      handleKitScan(kitMatch, qtyPrefix ?? 1)
+      setSearch("")
+      searchInputRef.current?.focus()
+      return
+    }
     const localMatch = products.find((p) => {
       if (p.codigo_barra === cleanCode || p.sku === cleanCode) return true
       const pCode = p.codigo_barra?.trim()
@@ -5642,7 +5755,12 @@ export default function POSPage() {
     })
 
     if (localMatch) {
-      addToCart(localMatch, qtyPrefix ?? undefined)
+      const kitByProd = kitBarcodeMap.get(localMatch.id) || (localMatch.codigo_barra ? kitBarcodeMap.get(localMatch.codigo_barra) : undefined)
+      if (kitByProd && kitByProd.modalidad_facturacion === "desglosado") {
+        handleKitScan(kitByProd, qtyPrefix ?? 1)
+      } else {
+        addToCart(localMatch, qtyPrefix ?? undefined)
+      }
       setSearch("")
       searchInputRef.current?.focus()
       return
@@ -5682,6 +5800,17 @@ export default function POSPage() {
           searchInputRef.current?.focus()
           return
         }
+      }
+    } catch (err) {}
+
+    // 3.1 Consulta de Kit en servidor (si es un combo recién creado o prefijo 28)
+    try {
+      const serverKit = await api.kits.getByBarcode(cleanCode)
+      if (serverKit) {
+        handleKitScan(serverKit, qtyPrefix ?? 1)
+        setSearch("")
+        searchInputRef.current?.focus()
+        return
       }
     } catch (err) {}
 

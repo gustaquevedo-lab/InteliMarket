@@ -3886,6 +3886,7 @@ export const api = {
     update: (id: string, data: any) => client.put<any>(`/v1/kits/${id}`, data),
     delete: (id: string) => client.delete<void>(`/v1/kits/${id}`),
     calculatePrice: (id: string) => client.get<any>(`/v1/kits/${id}/price`),
+    getByBarcode: (barcode: string) => client.get<any>(`/v1/kits/by-barcode/${encodeURIComponent(barcode)}`),
   },
   // Salud del servidor, reportada por el vigia (solo superadmin)
   sistema: {

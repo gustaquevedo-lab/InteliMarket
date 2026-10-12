@@ -16,7 +16,8 @@ import json
 
 TZ_ASUNCION = ZoneInfo("America/Asuncion")
 
-from api.src.sales.models import Sale, SaleItem, SalePayment
+from api.src.sales.models import Sale, SaleItem
+from api.src.kits.models import ProductKit, KitItem, SalePayment
 from api.src.auth.models import User
 from api.src.caja.models import CashSession, CashRegister
 from api.src.sales.schemas import SaleCreate, SaleUpdate, SaleAddPayment
@@ -824,6 +825,38 @@ async def _deduct_stock_for_sale(db: AsyncSession, sale: Sale, data: SaleCreate)
         if not item_data.product_id:
             continue
         qty_to_deduct = int(item_data.cantidad)
+
+        # Si el producto vendido es un Kit/Combo unificado (item_unico), deducir stock de sus componentes
+        kit_res = await db.execute(
+            select(ProductKit).where(
+                (ProductKit.product_id == item_data.product_id) | (ProductKit.id == item_data.product_id)
+            )
+        )
+        found_kit = kit_res.scalar_one_or_none()
+        if found_kit:
+            kit_items_res = await db.execute(select(KitItem).where(KitItem.kit_id == found_kit.id))
+            for ki in kit_items_res.scalars().all():
+                comp_qty = int(Decimal(str(ki.cantidad)) * Decimal(str(qty_to_deduct)))
+                if comp_qty <= 0:
+                    continue
+                c_stock_res = await db.execute(select(Stock).where(Stock.product_id == ki.product_id).limit(1))
+                c_stock = c_stock_res.scalar_one_or_none()
+                if c_stock:
+                    c_stock.cantidad -= comp_qty
+                    c_stock.updated_at = datetime.now(timezone.utc)
+                    db.add(InventoryMovement(
+                        company_id=data.company_id,
+                        warehouse_id=c_stock.warehouse_id,
+                        product_id=ki.product_id,
+                        variant_id=ki.variant_id,
+                        tipo="salida_venta_kit",
+                        cantidad=-comp_qty,
+                        costo_unitario=Decimal("0"),
+                        referencia_type="sale",
+                        referencia_id=sale.id,
+                        user_id=data.user_id,
+                    ))
+            continue
         warehouse_id = None
 
         stock_result = await db.execute(

@@ -29,6 +29,19 @@ async def list_kits(
     return await service.list_kits(db, user["company_id"], activo=activo)
 
 
+
+@router.get("/by-barcode/{barcode}", response_model=KitResponse)
+async def get_kit_by_barcode(
+    barcode: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    kit = await service.get_kit_by_barcode(db, user["company_id"], barcode)
+    if not kit:
+        raise HTTPException(status_code=404, detail="Kit not found for given barcode")
+    return kit
+
+
 @router.get("/{kit_id}", response_model=KitResponse)
 async def get_kit(
     kit_id: str,
