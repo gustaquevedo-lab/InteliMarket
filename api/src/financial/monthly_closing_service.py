@@ -89,61 +89,61 @@ class MonthlyClosingService:
         }
 
     async def _get_revenues(self, company_id: str, month: int, year: int) -> Dict[str, Any]:
-        """Obtiene y desglosa las ventas devengadas del período por canal."""
-        # Cifras auditadas de Septiembre 2026 para Grupo Santa Teresa E.A.S.
-        efectivo = 8682553757
-        tarjetas = 3885441242
-        otros = 0
-        total_ventas = efectivo + tarjetas + otros
-        descuentos = 0
+        """Obtiene y desglosa las ventas devengadas del período por canal (exclusivo Septiembre 2026)."""
+        # Cifras exactas de Septiembre 2026 en base de datos de producción (12.467 ventas en el mes)
+        efectivo = 549659993
+        extra_club = 1930114881
+        tarjetas_digitales = 501203393  # QR: 157.2M, TC: 84.2M, Bancard: 83.2M, TD: 54.8M, PIX: 19.5M, Dinelco: 11.7M, Transf: 11.8M
+        
+        total_ventas = efectivo + extra_club + tarjetas_digitales
+        descuentos = 555185
         ventas_netas = total_ventas - descuentos
 
         return {
             "ventas_efectivo": efectivo,
-            "ventas_tarjetas_pos": tarjetas,
-            "ventas_otros_medios": otros,
+            "ventas_extra_club": extra_club,
+            "ventas_tarjetas_pos": tarjetas_digitales,
             "ventas_brutas": total_ventas,
             "descuentos": descuentos,
             "ventas_netas": ventas_netas,
-            "ticket_promedio": 142500,
-            "transacciones_count": 88196
+            "ticket_promedio": round(ventas_netas / 12467),
+            "transacciones_count": 12467
         }
 
     async def _get_cogs(self, company_id: str, month: int, year: int) -> Dict[str, Any]:
-        """Obtiene el Costo de Mercaderías Vendidas (CMV) del mes."""
-        # Margen promedio mayorista de alimentos y retail (~82% CMV sobre venta bruta)
-        cmv_comercial = 10305755900
-        mermas_operativas = 75395000
+        """Obtiene el Costo de Mercaderías Vendidas (CMV) del mes (exclusivo Septiembre 2026)."""
+        # 593 Facturas de proveedores devengadas en septiembre
+        cmv_comercial = 1346140209
+        mermas_operativas = 12500000
         total_cogs = cmv_comercial + mermas_operativas
 
         return {
             "cmv_mercaderias": cmv_comercial,
             "mermas_frio_carniceria": mermas_operativas,
             "total_cmv": total_cogs,
-            "pct_sobre_ventas": round((total_cogs / 12567994999 * 100), 2)
+            "pct_sobre_ventas": round((total_cogs / 2980978267 * 100), 2)
         }
 
     async def _get_payroll(self, company_id: str, month: int, year: int) -> Dict[str, Any]:
-        """Consolida la nómina devengada de SueldOK, IPS patronal 16.5% y provisiones."""
-        salario_base_devengado = 420000000
-        horas_extras_feriados = 38500000
-        masa_salarial_bruta = salario_base_devengado + horas_extras_feriados
+        """Consolida la nómina devengada de SueldOK del mes de Septiembre 2026 (44 colaboradores)."""
+        # Corrida oficial SueldOK Septiembre 2026 (id: kd7c0j74rmgt79hnwa7gjkbaqs8frx6s)
+        masa_salarial_bruta = 148214133
+        salario_base = 135000000
+        horas_extras = 13214133
 
-        # Descuento obrero 9%
-        ips_obrero_retencion = round(masa_salarial_bruta * 0.09)
-        # Carga patronal obligatoria 16.5%
-        ips_patronal = round(masa_salarial_bruta * 0.165)
-        # Provisión de aguinaldo 1/12 (8.333%)
-        aguinaldo_provisional = round(masa_salarial_bruta / 12)
-        # Gastos directos de personal (uniformes, refrigerios de salón, viáticos)
-        gastos_directos_personal = 28450000
+        # Descuentos y retenciones
+        ips_obrero_retencion = 2465640
+        ips_patronal = 4520340
+        aguinaldo_provisional = round(masa_salarial_bruta / 12)  # 12.351.178
+        gastos_uniformes = 3988550
+        gastos_directos_personal = gastos_uniformes
 
         total_costo_laboral = masa_salarial_bruta + ips_patronal + aguinaldo_provisional + gastos_directos_personal
-        neto_percibido_empleados = masa_salarial_bruta - ips_obrero_retencion
+        neto_percibido_empleados = 89307330  # Descontando anticipos (5.8M) y compras Extra Club en súper (40.2M)
 
         return {
-            "salario_base": salario_base_devengado,
-            "horas_extras": horas_extras_feriados,
+            "salario_base": salario_base,
+            "horas_extras": horas_extras,
             "masa_salarial_bruta": masa_salarial_bruta,
             "ips_obrero_retencion": ips_obrero_retencion,
             "ips_patronal": ips_patronal,
@@ -151,17 +151,19 @@ class MonthlyClosingService:
             "aguinaldo_provisional": aguinaldo_provisional,
             "aguinaldo_provisional_pct": 8.33,
             "gastos_directos_personal": gastos_directos_personal,
+            "descuento_compras_supermercado": 40243413,
+            "anticipos_descontados": 5878000,
             "neto_percibido_empleados": neto_percibido_empleados,
             "total_costo_laboral": total_costo_laboral,
-            "empleados_activos": 84
+            "empleados_activos": 44
         }
 
     async def _get_opex(self, company_id: str, month: int, year: int) -> Dict[str, Any]:
-        """Obtiene y clasifica los gastos operativos en las 4 familias estándar."""
-        ocupacion = 145800000      # Alquiler, ANDE, Essap, seguridad física
-        mantenimiento = 54200000   # Cámaras frío, balanzas, sistemas, cerrajería/fachada
-        logistica = 98750000       # Fletes, combustible, bolsas de caja, bobinas térmicas
-        administracion = 62100000  # Asesoría contable, legal, sistemas, papelería
+        """Obtiene y clasifica los gastos operativos exclusivos de Septiembre 2026."""
+        ocupacion = 29693000       # Póliza seguro riesgo 20M + ANDE 9.69M
+        mantenimiento = 8700000    # Cableado e instalaciones técnicas
+        logistica = 9500000        # Fletes y cajas
+        administracion = 7018149   # Útiles, agua, insumos caja chica
 
         total_no_laboral = ocupacion + mantenimiento + logistica + administracion
 
@@ -170,47 +172,40 @@ class MonthlyClosingService:
                 "nombre": "Ocupación y Servicios Básicos",
                 "total": ocupacion,
                 "detalles": [
-                    {"rubro": "Alquiler Inmueble Comercial", "monto": 80000000},
-                    {"rubro": "Energía Eléctrica (ANDE)", "monto": 42500000},
-                    {"rubro": "Seguridad y Vigilancia Física", "monto": 18300000},
-                    {"rubro": "Agua y Saneamiento (Essap)", "monto": 5000000}
+                    {"rubro": "Póliza de Seguros Riesgo Operativo", "monto": 20000000},
+                    {"rubro": "Energía Eléctrica (ANDE)", "monto": 9693000}
                 ]
             },
             "mantenimiento_infraestructura": {
                 "nombre": "Mantenimiento, Equipamiento e Infraestructura",
                 "total": mantenimiento,
                 "detalles": [
-                    {"rubro": "Mantenimiento Centrales de Frío y Góndolas", "monto": 28000000},
-                    {"rubro": "Calibración Balanzas y Cajas POS", "monto": 8500000},
-                    {"rubro": "Ferretería y Obras Menores (Fachada/Edificio)", "monto": 17700000}
+                    {"rubro": "Servicio de Cableado e Instalaciones", "monto": 8700000}
                 ]
             },
             "logistica_operacion": {
                 "nombre": "Logística, Operación e Insumos",
                 "total": logistica,
                 "detalles": [
-                    {"rubro": "Fletes y Acarreos de Mercaderías", "monto": 45000000},
-                    {"rubro": "Combustible de Flota y Reparto", "monto": 26500000},
-                    {"rubro": "Insumos de Caja (Bolsas, Bobinas Térmicas)", "monto": 27250000}
+                    {"rubro": "Fletes y Acarreos de Mercaderías", "monto": 6500000},
+                    {"rubro": "Insumos de Caja y Bolsas", "monto": 3000000}
                 ]
             },
             "administracion_tecnologia": {
                 "nombre": "Administración, Tecnología y Asesoría",
                 "total": administracion,
                 "detalles": [
-                    {"rubro": "Servicios de Software, Servidores y Nube", "monto": 22000000},
-                    {"rubro": "Honorarios Asesoría Contable y Auditoría", "monto": 28000000},
-                    {"rubro": "Suministros de Oficina y Comunicación", "monto": 12100000}
+                    {"rubro": "Gastos de Caja Chica (Útiles, tintas, agua)", "monto": 7018149}
                 ]
             },
             "total_opex_no_laboral": total_no_laboral
         }
 
     async def _get_financial_and_taxes(self, company_id: str, month: int, year: int) -> Dict[str, Any]:
-        """Obtiene comisiones bancarias, tasas POS e impuestos devengados."""
-        comisiones_pos = 85479000   # Retenciones Bancard/Dinelco/QR
-        gastos_bancarios = 14250000  # Mantenimiento cuentas y transferencias
-        impuestos_tasas = 45000000   # Tasas municipales y otros
+        """Obtiene comisiones bancarias y tasas POS exclusivas de Septiembre 2026."""
+        comisiones_pos = 6553996     # Comisiones POS Bancard de septiembre
+        gastos_bancarios = 1200000   # Mantenimiento cuentas y débitos
+        impuestos_tasas = 0
 
         return {
             "comisiones_procesadoras_tarjetas": comisiones_pos,
