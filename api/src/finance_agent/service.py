@@ -254,7 +254,12 @@ async def get_liquidity_control_tower(db: AsyncSession, company_id: str) -> Liqu
         gastos_operativos_mes_gs = max(ventas_mes_est * 0.085, 30000000.0)
 
     gasto_diario_estimado = max(gastos_operativos_mes_gs / 30.0, 1000000.0)
-    cash_runway = round(liquidez_total / gasto_diario_estimado, 1) if liquidez_total > 0 else 0.0
+    # Si el pasivo inmediato sobrepasa la liquidez total disponible, el runway real es 0 días (déficit de caja)
+    if liquidez_total < deuda_inmediata_exigible:
+        cash_runway = 0.0
+    else:
+        burn_diario = gasto_diario_estimado + max(compromisos_30d / 30.0, 0.0)
+        cash_runway = round((liquidez_total - deuda_inmediata_exigible) / max(burn_diario, 1.0), 1)
     cobertura_7d = round(liquidez_total / max(compromisos_7d, 1.0), 2) if compromisos_7d > 0 else 99.9
     cobertura_inmediata = round(liquidez_total / max(deuda_inmediata_exigible, 1.0), 2) if deuda_inmediata_exigible > 0 else 99.9
 
@@ -1045,7 +1050,7 @@ async def chat_with_finance_agent(
             f"{bancos_txt}\n\n"
             f"2. **Efectivo Físico en Custodia / Bóveda:** ₲ {tower.boveda_central_gs:,.0f} (Rendiciones de caja en custodia de tesorería)\n"
             f"3. **Efectivo en Cajas POS Salón Hoy:** ₲ {tower.cajas_pos_gs:,.0f} (Aperturas de turnos + Cobros en efectivo del día)\n\n"
-            f"Nuestra cobertura operativa calculada es de **{tower.cash_runway_dias} días**."
+            f"Cobertura de pasivos inmediatos: **{tower.ratio_cobertura_inmediata}x** (Déficit inmediato de **₲ {tower.deficit_cobertura_inmediata_gs:,.0f}** | Runway frente a pasivos: **{tower.cash_runway_dias} días**)."
         )
         suggestions = [
             "¿Cuánto tenemos en cuentas por cobrar de clientes?",
@@ -1184,7 +1189,7 @@ async def run_diagnosis(db: AsyncSession, company_id: str) -> Any:
         id=company_id,
         company_id=company_id,
         status="completed",
-        diagnostico=f"Diagnóstico financiero completado. Liquidez total de ₲ {tower.liquidez_total_gs:,.0f} con runway de {tower.cash_runway_dias} días.",
+        diagnostico=f"Diagnóstico financiero completado. Liquidez disponible: ₲ {tower.liquidez_total_gs:,.0f} vs Pasivos Comerciales: ₲ {tower.deuda_total_exigible_gs:,.0f} (Déficit neto: ₲ {abs(tower.posicion_financiera_neta_gs):,.0f}). Estado: {tower.estado_liquidez.upper()}.",
         started_at=datetime.now(),
         finished_at=datetime.now()
     )
