@@ -875,60 +875,119 @@ async def sync_payroll_dossier_from_sueldok(
             lotes_efectivo[depto].employees.append(entry)
             lotes_efectivo[depto].total += net_sal
 
-    # 4. Clasificar deducciones
-    extra_club = []
-    uniformes = []
+    # 4. Clasificar deducciones reales (Extra Club, Uniformes, Malou, Credi Pora, Anticipos)
+    extra_club: list[ExtraClubTicket] = []
+    uniformes: list[ExtraClubTicket] = []
     terceros_dict: dict[str, list[dict]] = {}
     tot_judicial = 0.0
     tot_anticipos = 0.0
 
+    # 4a. Extra Club (Compras y consumo de supermercado comercial)
+    commercial_debts = approved.get("commercialDebts", [])
+    for cd in commercial_debts:
+        monto = float(cd.get("amount") or cd.get("deductedAmount") or cd.get("originalAmount") or 0)
+        if monto > 0:
+            extra_club.append(ExtraClubTicket(
+                employee_id=str(cd.get("employeeId", "")),
+                employee_name=cd.get("nombre", "Funcionario"),
+                employee_ci=str(cd.get("ci", "—")),
+                ticket_ref=str(cd.get("ticketReference") or cd.get("id", "")),
+                amount=monto
+            ))
+
+    # Respaldo: si commercialDebts está vacío, extraer commercialDeduction de los items de nómina
+    tot_commercial_items = float(approved.get("totalCommercialDeduction", 0))
+    if not extra_club and tot_commercial_items > 0:
+        for it in items:
+            comm = float(it.get("commercialDeduction", 0))
+            if comm > 0:
+                extra_club.append(ExtraClubTicket(
+                    employee_id=str(it.get("employeeId") or it.get("id")),
+                    employee_name=it.get("nombre", "Funcionario"),
+                    employee_ci=str(it.get("ci", "—")),
+                    ticket_ref=f"COM-{it.get('ci', '0')}",
+                    amount=comm
+                ))
+
+    # 4b. Consolidar préstamos y adelantos (Malou, Credi Porá, Uniformes, Judiciales, Anticipos)
+    raw_deductions = []
     for d in deductions:
         desc = (d.get("descripcion") or "").upper()
         com = (d.get("comentarios") or "").upper()
-        full = f"{desc} {com}"
-        monto = float(d.get("monto", 0))
+        raw_deductions.append({
+            "employeeId": d.get("employeeId", ""),
+            "nombre": d.get("nombre", "Funcionario"),
+            "ci": d.get("ci", "—"),
+            "id": d.get("id", ""),
+            "monto": float(d.get("monto", 0)),
+            "full_desc": f"{desc} {com}",
+            "descripcion": d.get("descripcion", "")
+        })
 
-        if "ANTICIPO" in full:
-            tot_anticipos += monto
-        elif "UNIFORME" in full:
+    for a in data.get("advances", []):
+        mot = (a.get("motivo") or "").upper()
+        raw_deductions.append({
+            "employeeId": a.get("employeeId", ""),
+            "nombre": a.get("nombre", "Funcionario"),
+            "ci": a.get("ci", "—"),
+            "id": a.get("id", ""),
+            "monto": float(a.get("monto", 0)),
+            "full_desc": mot,
+            "descripcion": a.get("motivo", "")
+        })
+
+    for r in raw_deductions:
+        full = r["full_desc"]
+        monto = r["monto"]
+        if monto <= 0:
+            continue
+
+        if "UNIFORME" in full:
             uniformes.append(ExtraClubTicket(
-                employee_id=str(d.get("employeeId", "")),
-                employee_name=d.get("nombre", "Funcionario"),
-                employee_ci=str(d.get("ci", "—")),
-                ticket_ref=str(d.get("id", "")),
+                employee_id=str(r["employeeId"]),
+                employee_name=r["nombre"],
+                employee_ci=str(r["ci"]),
+                ticket_ref=str(r["id"]),
                 amount=monto
             ))
-        elif "EXTRA CLUB" in full or "MERCADERIA" in full or "VALE" in full:
-            extra_club.append(ExtraClubTicket(
-                employee_id=str(d.get("employeeId", "")),
-                employee_name=d.get("nombre", "Funcionario"),
-                employee_ci=str(d.get("ci", "—")),
-                ticket_ref=str(d.get("id", "")),
-                amount=monto
-            ))
+        elif "MALOU" in full or "CAFETERIA" in full or "CAFFE" in full:
+            t_name = "CAFETERIA MALOU"
+            if t_name not in terceros_dict:
+                terceros_dict[t_name] = []
+            terceros_dict[t_name].append({
+                "employee_id": str(r["employeeId"]),
+                "name": r["nombre"],
+                "ci": str(r["ci"]),
+                "amount": monto,
+                "invoice_reference": r["descripcion"]
+            })
+        elif "CREDI" in full or "PORA" in full:
+            t_name = "CREDI PORA"
+            if t_name not in terceros_dict:
+                terceros_dict[t_name] = []
+            terceros_dict[t_name].append({
+                "employee_id": str(r["employeeId"]),
+                "name": r["nombre"],
+                "ci": str(r["ci"]),
+                "amount": monto,
+                "invoice_reference": r["descripcion"]
+            })
         elif "JUDICIAL" in full or "EMBARGO" in full:
             tot_judicial += monto
             t_name = "JUZGADO / RETENCION JUDICIAL"
             if t_name not in terceros_dict:
                 terceros_dict[t_name] = []
             terceros_dict[t_name].append({
-                "employee_id": str(d.get("employeeId", "")),
-                "name": d.get("nombre", ""),
-                "ci": str(d.get("ci", "")),
+                "employee_id": str(r["employeeId"]),
+                "name": r["nombre"],
+                "ci": str(r["ci"]),
                 "amount": monto,
-                "invoice_reference": d.get("descripcion", "")
+                "invoice_reference": r["descripcion"]
             })
+        elif "ANTICIPO" in full or "ADELANTO" in full:
+            tot_anticipos += monto
         else:
-            t_name = "CREDI PORA" if "CREDI" in full else ("CAFETERIA MALOU" if "MALOU" in full or "CAFETERIA" in full else "CONVENIO GENERAL TERCEROS")
-            if t_name not in terceros_dict:
-                terceros_dict[t_name] = []
-            terceros_dict[t_name].append({
-                "employee_id": str(d.get("employeeId", "")),
-                "name": d.get("nombre", ""),
-                "ci": str(d.get("ci", "")),
-                "amount": monto,
-                "invoice_reference": d.get("descripcion", "")
-            })
+            tot_anticipos += monto
 
     terceros_desglose = [
         ThirdPartyDeduction(
