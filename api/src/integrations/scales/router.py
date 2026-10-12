@@ -23,6 +23,30 @@ router = APIRouter(prefix="/api/v1/scales", tags=["Scales"])
 
 
 # ═══════════════════════════════════════════════════════════════
+# ESTADO Y REGISTRO DE TRANSMISIONES
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/sync-status", response_model=list[dict])
+async def sync_status(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.get_sync_status(db, user["company_id"])
+
+
+@router.get("/sync-log", response_model=list[dict])
+async def sync_log(
+    scale_id: Optional[str] = Query(None),
+    estado: Optional[str] = Query(None, pattern="^(ok|error)$"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.list_sync_log(db, user["company_id"], scale_id, estado, limit, offset)
+
+
+# ═══════════════════════════════════════════════════════════════
 # SCALE CONFIG CRUD
 # ═══════════════════════════════════════════════════════════════
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react"
-import { api, type ScaleConfig, type ScaleLabelTemplate, type ConnectionTestResult } from "../../api"
+import { api, type ScaleConfig, type ScaleLabelTemplate, type ConnectionTestResult, type ScaleSyncStatus, type ScaleSyncLogRow } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import {
   Search, Plus, Loader2, Plug, Wifi, Printer, Weight, FileText,
@@ -9,7 +9,7 @@ import {
 } from "lucide-react"
 import { formatPYG } from "../../utils/format"
 
-type Tab = "configs" | "usb_checkout" | "plu_sync" | "labels" | "logs"
+type Tab = "configs" | "usb_checkout" | "plu_sync" | "sync_log" | "labels" | "logs"
 
 interface ScaleConfigForm {
   nombre: string
@@ -27,6 +27,36 @@ interface ScaleConfigForm {
   etiqueta_cabecera: string
 }
 
+// ── Helpers de estado de transmisión (vigilante de precios) ──────────────
+const hace = (iso?: string | null): string => {
+  if (!iso) return "nunca"
+  const seg = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000))
+  if (seg < 60) return `hace ${seg} s`
+  if (seg < 3600) return `hace ${Math.floor(seg / 60)} min`
+  if (seg < 86400) return `hace ${Math.floor(seg / 3600)} h ${Math.floor((seg % 3600) / 60)} min`
+  return `hace ${Math.floor(seg / 86400)} d`
+}
+
+const fechaHora = (iso?: string | null): string =>
+  iso ? new Date(iso).toLocaleString("es-PY", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"
+
+const gs = (n: number | null | undefined): string => (n == null ? "—" : n.toLocaleString("es-PY", { maximumFractionDigits: 0 }))
+
+type EstadoTx = "al_dia" | "error" | "inactivo" | "sin_datos"
+const estadoTransmision = (st?: ScaleSyncStatus): EstadoTx => {
+  if (!st || (!st.last_ok_at && !st.last_error)) return "sin_datos"
+  if (st.last_error) return "error"
+  const sinChequeo = !st.last_check_at || Date.now() - new Date(st.last_check_at).getTime() > 3 * 60 * 1000
+  return sinChequeo ? "inactivo" : "al_dia"
+}
+
+const ORIGEN_LABEL: Record<string, string> = {
+  evento: "Cambio detectado",
+  tiempo: "Chequeo programado",
+  respaldo: "Respaldo (cron)",
+  respaldo_completa: "Carga completa (cron)",
+}
+
 export default function ScalesPage() {
   const [tab, setTab] = useState<Tab>("configs")
   const [loading, setLoading] = useState(true)
@@ -40,6 +70,11 @@ export default function ScalesPage() {
   const [pingResults, setPingResults] = useState<Record<string, ConnectionTestResult>>({})
   const [pingingId, setPingingId] = useState<string | null>(null)
   const [syncingPlu, setSyncingPlu] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<ScaleSyncStatus[]>([])
+  const [syncLog, setSyncLog] = useState<ScaleSyncLogRow[]>([])
+  const [logScale, setLogScale] = useState<string>("")
+  const [logEstado, setLogEstado] = useState<"" | "ok" | "error">("")
+  const [, setTick] = useState(0)
 
   // ── ESTADOS DE DIAGNÓSTICO WEB SERIAL USB (BALMAK BCK30 CHECKOUT) ────────
   const [usbConnected, setUsbConnected] = useState(false)
@@ -71,6 +106,31 @@ export default function ScalesPage() {
   useEffect(() => {
     fetchAll()
   }, [])
+
+  const fetchSync = async () => {
+    try {
+      const [st, lg] = await Promise.all([
+        api.scales.syncStatus(),
+        api.scales.syncLog({ limit: 100, scale_id: logScale || undefined, estado: logEstado || undefined }),
+      ])
+      setSyncStatus(st || [])
+      setSyncLog(lg || [])
+    } catch {
+      // se reintenta en el siguiente ciclo
+    }
+    setTick((t) => t + 1)
+  }
+
+  useEffect(() => {
+    fetchSync()
+    const id = setInterval(fetchSync, 10000)
+    return () => clearInterval(id)
+  }, [logScale, logEstado])
+
+  const statusDe = (scaleId: string) => syncStatus.find((x) => x.scale_id === scaleId)
+  const conError = syncStatus.filter((x) => x.last_error)
+  const alDia = syncStatus.filter((x) => estadoTransmision(x) === "al_dia").length
+  const pluMax = syncStatus.reduce((m, x) => Math.max(m, x.plu_cargados || 0), 0)
 
   const testScale = async (scale: ScaleConfig) => {
     setPingingId(scale.id)
@@ -259,11 +319,11 @@ export default function ScalesPage() {
             </div>
           </div>
           <p className="text-2xl font-black font-mono text-cyan-600 dark:text-cyan-400">
-            6 balanzas
+            {syncStatus.length} balanzas
           </p>
           <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-            <span>Modelos: <strong className="text-slate-700 dark:text-slate-200 font-mono">Toledo P03 / Systel</strong></span>
-            <span className="text-cyan-600 font-bold font-mono">Etiquetadoras</span>
+            <span>Transmisión: <strong className="text-slate-700 dark:text-slate-200 font-mono">{alDia} de {syncStatus.length} al día</strong></span>
+            <span className={`font-bold font-mono ${conError.length ? "text-rose-600" : "text-cyan-600"}`}>{conError.length ? `${conError.length} con error` : "Etiquetadoras"}</span>
           </div>
         </div>
 
@@ -295,11 +355,11 @@ export default function ScalesPage() {
             </div>
           </div>
           <p className="text-2xl font-black font-mono text-purple-600 dark:text-purple-400">
-            342 ítems
+            {pluMax} ítems
           </p>
           <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-            <span>Secciones: <strong className="text-slate-700 dark:text-slate-200 font-mono">Carnes, Fiambres</strong></span>
-            <span className="text-purple-600 font-bold font-mono">Sincronizado</span>
+            <span>Cargados en cada balanza (último envío confirmado)</span>
+            <span className={`font-bold font-mono ${conError.length ? "text-amber-600" : "text-purple-600"}`}>{conError.length ? "Pendiente" : "Sincronizado"}</span>
           </div>
         </div>
 
@@ -322,12 +382,30 @@ export default function ScalesPage() {
         </div>
       </div>
 
+      {/* ── ALERTA: balanzas con envío pendiente ── */}
+      {conError.length > 0 && (
+        <div className="rounded-2xl border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 p-4 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+          <div className="text-xs space-y-1">
+            <p className="font-black text-rose-800 dark:text-rose-200">
+              {conError.length === 1 ? "Una balanza tiene precios pendientes de transmitir" : `${conError.length} balanzas tienen precios pendientes de transmitir`}
+            </p>
+            {conError.map((x) => (
+              <p key={x.scale_id} className="text-rose-700 dark:text-rose-300">
+                <strong>{x.nombre}</strong>: {x.last_error} · desde {fechaHora(x.last_error_at)} ({hace(x.last_error_at)}). Se reintenta sola apenas la balanza vuelva a estar en línea.
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ── TABS BAR ── */}
       <div className="flex gap-1.5 bg-gray-100/50 dark:bg-slate-800/50 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-1.5 w-full overflow-x-auto shadow-inner">
         {[
           { key: "configs", label: "Balanzas de Red & IP", icon: Wifi },
           { key: "usb_checkout", label: "Diagnóstico USB Checkout", icon: Usb },
           { key: "plu_sync", label: "Sincronización de PLUs", icon: Weight },
+          { key: "sync_log", label: "Registro de transmisiones", icon: Activity },
         ].map(t => (
           <button
             key={t.key}
@@ -385,6 +463,25 @@ export default function ScalesPage() {
                       {b.host ? `${b.host}:${b.puerto_tcp}` : b.puerto_com || "sin conexión configurada"}
                     </p>
                     {ping && <p className="text-[11px] text-gray-400">{ping.mensaje}{ping.latencia_ms != null ? ` · ${ping.latencia_ms}ms` : ""}</p>}
+                    {(() => {
+                      const st = statusDe(b.id)
+                      const est = estadoTransmision(st)
+                      const estilo = {
+                        al_dia: "bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-950/30 dark:border-emerald-900 dark:text-emerald-300",
+                        error: "bg-rose-50 border-rose-200 text-rose-800 dark:bg-rose-950/30 dark:border-rose-900 dark:text-rose-300",
+                        inactivo: "bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-950/30 dark:border-amber-900 dark:text-amber-300",
+                        sin_datos: "bg-gray-100 border-gray-200 text-gray-600 dark:bg-slate-800 dark:border-slate-700 dark:text-gray-300",
+                      }[est]
+                      const titulo = { al_dia: "Precios al día", error: "Envío pendiente (sin conexión)", inactivo: "Vigilante sin actividad reciente", sin_datos: "Sin transmisiones registradas" }[est]
+                      return (
+                        <div className={`mt-1 p-2.5 rounded-lg border text-[11px] space-y-0.5 ${estilo}`}>
+                          <p className="font-black text-xs">{titulo}</p>
+                          <p>Último envío exitoso: <strong>{hace(st?.last_ok_at)}</strong>{st?.last_ok_at ? ` (${fechaHora(st.last_ok_at)})` : ""}</p>
+                          {st?.last_error && <p>Error: {st.last_error} · desde {hace(st.last_error_at)}</p>}
+                          <p>PLU cargados: <strong>{st?.plu_cargados ?? 0}</strong> · Último chequeo del vigilante: {hace(st?.last_check_at)}</p>
+                        </div>
+                      )
+                    })()}
                     <div className="pt-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-700/60 text-xs">
                       <span className="text-gray-400 font-mono text-[11px]">{b.sync_automatico ? "Auto-sync ON" : "Auto-sync OFF"}</span>
                       <button
@@ -478,6 +575,116 @@ export default function ScalesPage() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* ── TAB: REGISTRO DE TRANSMISIONES ── */}
+      {tab === "sync_log" && (
+        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-black text-gray-900 dark:text-white">Registro de transmisiones a balanzas</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Cada envío de precios (cambios detectados, promociones que entran o salen, cargas completas) y su resultado. Se actualiza solo cada 10 s · se conservan 30 días.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <select
+                value={logScale}
+                onChange={(e) => setLogScale(e.target.value)}
+                className="px-3 py-1.5 text-xs font-bold rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-200"
+              >
+                <option value="">Todas las balanzas</option>
+                {syncStatus.map((x) => <option key={x.scale_id} value={x.scale_id}>{x.nombre}</option>)}
+              </select>
+              <select
+                value={logEstado}
+                onChange={(e) => setLogEstado(e.target.value as "" | "ok" | "error")}
+                className="px-3 py-1.5 text-xs font-bold rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-200"
+              >
+                <option value="">Exitosos y fallidos</option>
+                <option value="ok">Solo exitosos</option>
+                <option value="error">Solo fallidos</option>
+              </select>
+              <button onClick={fetchSync} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/40 rounded-xl border border-teal-300 dark:border-teal-800">
+                <RefreshCw className="w-3.5 h-3.5" /> Actualizar
+              </button>
+            </div>
+          </div>
+
+          {syncLog.length === 0 ? (
+            <p className="text-xs text-gray-400 py-6 text-center">Todavía no hay transmisiones registradas con este filtro.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700/60">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 dark:bg-slate-900/60 text-left text-[10px] uppercase tracking-wider text-gray-500">
+                  <tr>
+                    <th className="px-3 py-2">Hora</th>
+                    <th className="px-3 py-2">Balanza</th>
+                    <th className="px-3 py-2">Origen</th>
+                    <th className="px-3 py-2">Resultado</th>
+                    <th className="px-3 py-2">Detalle</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                  {syncLog.map((r) => {
+                    const items = r.detalle || []
+                    return (
+                      <tr key={r.id} className="align-top hover:bg-gray-50/60 dark:hover:bg-slate-800/60">
+                        <td className="px-3 py-2 font-mono whitespace-nowrap">
+                          {fechaHora(r.ultimo_intento)}
+                          <div className="text-[10px] text-gray-400">{hace(r.ultimo_intento)}</div>
+                        </td>
+                        <td className="px-3 py-2 font-bold text-gray-800 dark:text-gray-100">{r.scale_nombre}</td>
+                        <td className="px-3 py-2 text-gray-600 dark:text-gray-300">{ORIGEN_LABEL[r.origen] || r.origen}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          {r.estado === "ok" ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                              <CheckCircle2 className="w-3 h-3" /> Exitoso
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-bold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300">
+                              <XCircle className="w-3 h-3" /> Fallido{r.repeticiones > 1 ? ` ×${r.repeticiones}` : ""}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-gray-700 dark:text-gray-200 max-w-xl">
+                          {r.estado === "error" ? (
+                            <div className="space-y-0.5">
+                              <p className="font-bold text-rose-700 dark:text-rose-300">{r.error}</p>
+                              <p className="text-gray-500">
+                                {r.total} PLU pendientes · primer fallo {fechaHora(r.created_at)}{r.repeticiones > 1 ? ` · ${r.repeticiones} intentos, último ${hace(r.ultimo_intento)}` : ""}
+                              </p>
+                            </div>
+                          ) : (
+                            <p className="font-bold">
+                              {r.tipo === "completa" ? `Carga completa: ${r.total} PLU transmitidos` : `${r.total} PLU transmitidos`}
+                            </p>
+                          )}
+                          {items.length > 0 && (
+                            <details className="mt-1">
+                              <summary className="cursor-pointer text-teal-700 dark:text-teal-400 font-bold">
+                                {r.estado === "error" ? "Ver precios pendientes" : r.tipo === "completa" ? "Ver cambios incluidos" : "Ver precios"} ({items.length}{items.length >= 100 ? "+" : ""})
+                              </summary>
+                              <ul className="mt-1 space-y-0.5 font-mono text-[11px]">
+                                {items.map((it) => (
+                                  <li key={it.plu}>
+                                    <span className="text-gray-400">PLU {it.plu}</span> {it.nombre.trim()}:{" "}
+                                    {it.antes == null ? <span className="text-gray-500">nuevo → </span> : <span className="text-gray-500">{gs(it.antes)} → </span>}
+                                    <strong className={it.antes != null && it.ahora < it.antes ? "text-emerald-600" : "text-gray-900 dark:text-white"}>{gs(it.ahora)}</strong>
+                                  </li>
+                                ))}
+                              </ul>
+                            </details>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>

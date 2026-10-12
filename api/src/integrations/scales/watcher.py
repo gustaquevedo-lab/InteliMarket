@@ -116,7 +116,8 @@ class BalanzaWatcher:
             self._dirty.set()  # el cron de respaldo esta transmitiendo; reintenta enseguida
             return
         try:
-            resultados = await reconciliar_todas(async_session_factory, omitir=omitir)
+            resultados = await reconciliar_todas(async_session_factory, omitir=omitir,
+                                                 origen="evento" if por_evento else "tiempo")
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
             fd.close()

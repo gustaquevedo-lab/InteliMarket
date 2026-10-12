@@ -27,7 +27,8 @@ async def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--scale", help="solo balanzas cuyo nombre contenga este texto")
     args = ap.parse_args()
-    for r in await reconciliar_todas(async_session_factory, full=args.full, dry=args.dry_run, solo=args.scale):
+    origen = "respaldo_completa" if args.full else "respaldo"
+    for r in await reconciliar_todas(async_session_factory, full=args.full, dry=args.dry_run, solo=args.scale, origen=origen):
         log.info(str(r))
 
 

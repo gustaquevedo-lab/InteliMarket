@@ -9,6 +9,22 @@
 
 ---
 
+## ⚖️ SESIÓN 2026-10-12 (noche) — Estado y registro de transmisiones visible en `/escalas`
+
+Pedido: ver en pantalla el estado de cada balanza y un log de lo último transmitido (exitoso/fallido).
+
+**Backend**
+- Migración `20261012150000`: tabla `scale_sync_log` (una fila por envío: `origen` evento|tiempo|respaldo|respaldo_completa, `tipo` cambios|completa, `estado` ok|error, `total`, `detalle` JSONB con hasta 100 `{plu, nombre, antes, ahora}`, `error`, `repeticiones`, `ultimo_intento`; retención 30 días, se purga al registrar) y columna `scale_sync_status.last_check_at` (último chequeo del vigilante, se actualiza también cuando está "al día"). Public y sandbox.
+- `reconciler.py` registra cada envío OK (con qué precios cambiaron, antes→ahora) y cada error. **Un error repetido (balanza apagada toda la noche) no genera una fila por intento**: se cuenta en la misma fila (`repeticiones`, `ultimo_intento`) y su detalle muestra lo que quedó pendiente.
+- Endpoints (`scales/router.py`, `service.py`): `GET /api/v1/scales/sync-status` (por balanza: último OK, error vigente, último chequeo, PLU cargados) y `GET /api/v1/scales/sync-log?scale_id=&estado=ok|error&limit=&offset=`.
+
+**Frontend** (`ScalesPage.tsx`, `api/index.ts`): refresco automático cada 10 s; banner rojo si alguna balanza tiene envío pendiente; en cada tarjeta de balanza bloque "Precios al día / Envío pendiente / Vigilante sin actividad" con último envío exitoso, error y último chequeo; KPIs "Balanzas" y "Catálogo PLU" ahora son datos reales (antes hardcodeados); nueva pestaña **Registro de transmisiones** (filtros por balanza y exitosos/fallidos, detalle expandible con PLU, precio anterior → nuevo). Desplegado con `deploy-ui.sh`.
+
+**No verificado visualmente** (login bloqueado para mí): compila (`tsc` 0 errores) y el build ya contiene los endpoints; endpoints probados con `TestClient` + override de auth. Pendiente que el cliente lo mire en `/escalas`. Los KPIs 2 y 4 ("10 Cajas POS / 0ms", prefijo EAN) y las pills del header siguen hardcodeados.
+
+Nota de arnés: `TestClient` sin `with` usa un event loop por pedido y rompe el pool de asyncpg ("attached to a different loop"): usar `with TestClient(app) as c` y no mezclar con `asyncio.run` en el mismo proceso.
+
+
 ## ⚖️ SESIÓN 2026-10-12 (tarde) — Vigilante de precios de balanza en tiempo real (sin cron)
 
 Pedido del cliente: que cualquier cambio de precio de un producto con PLU (por la razón que sea) y toda promo que entre/salga se transmita sola a las balanzas, sin cron ni intervención; el cron solo de respaldo. SDL.exe queda descartado como causa: la PC de Compras está apagada y sin internet.

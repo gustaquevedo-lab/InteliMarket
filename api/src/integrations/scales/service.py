@@ -437,6 +437,41 @@ async def auto_sync_product(db: AsyncSession, company_id: str, product: Product)
 
 
 # ═══════════════════════════════════════════════════════════════
+# ESTADO Y REGISTRO DE TRANSMISIONES (vigilante de precios)
+# ═══════════════════════════════════════════════════════════════
+
+async def get_sync_status(db: AsyncSession, company_id: str) -> list[dict]:
+    """Estado de transmision por balanza: ultimo envio OK, error vigente, ultimo chequeo del vigilante, PLU cargados."""
+    r = await db.execute(text("""
+        SELECT sc.id::text AS scale_id, sc.nombre, sc.host, sc.puerto_tcp, sc.activa, sc.sync_automatico,
+               st.last_ok_at, st.last_error, st.last_error_at, st.last_check_at,
+               COALESCE(st.pendiente_completo, false) AS pendiente_completo,
+               (SELECT count(*) FROM scale_plu_state ps WHERE ps.scale_id = sc.id) AS plu_cargados,
+               (SELECT max(ps.pushed_at) FROM scale_plu_state ps WHERE ps.scale_id = sc.id) AS ultimo_envio_at
+        FROM scale_configs sc
+        LEFT JOIN scale_sync_status st ON st.scale_id = sc.id
+        WHERE sc.company_id = :c AND COALESCE(sc.host, '') <> ''
+        ORDER BY sc.nombre"""), {"c": str(company_id)})
+    return [dict(row._mapping) for row in r.all()]
+
+
+async def list_sync_log(db: AsyncSession, company_id: str, scale_id: Optional[str] = None,
+                        estado: Optional[str] = None, limit: int = 50, offset: int = 0) -> list[dict]:
+    r = await db.execute(text("""
+        SELECT l.id, l.scale_id::text AS scale_id, sc.nombre AS scale_nombre, l.created_at, l.ultimo_intento,
+               l.origen, l.tipo, l.estado, l.total, l.repeticiones, l.detalle, l.error
+        FROM scale_sync_log l JOIN scale_configs sc ON sc.id = l.scale_id
+        WHERE sc.company_id = :c
+          AND (CAST(:sid AS text) IS NULL OR l.scale_id::text = :sid)
+          AND (CAST(:est AS text) IS NULL OR l.estado = :est)
+        ORDER BY l.ultimo_intento DESC, l.id DESC
+        LIMIT :lim OFFSET :off"""),
+        {"c": str(company_id), "sid": scale_id or None, "est": estado or None,
+         "lim": max(1, min(limit, 200)), "off": max(0, offset)})
+    return [dict(row._mapping) for row in r.all()]
+
+
+# ═══════════════════════════════════════════════════════════════
 # LABEL PRINTING
 # ═══════════════════════════════════════════════════════════════
 

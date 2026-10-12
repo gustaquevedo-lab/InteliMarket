@@ -1105,6 +1105,9 @@ export interface PhysicalSession {
 
 
 export interface ScaleConfig { id: string; nombre: string; marca: string; modelo?: string; protocolo: string; conexion: string; puerto_com?: string; baudrate: number; data_bits?: number; host?: string; puerto_tcp: number; timeout_segundos: number; vendor_id?: string; product_id?: string; ruta_carga?: string; sync_automatico: boolean; etiqueta_formato: string; etiqueta_cabecera?: string; activa: boolean; created_at: string }
+export interface ScaleSyncStatus { scale_id: string; nombre: string; host: string; puerto_tcp: number; activa: boolean; sync_automatico: boolean; last_ok_at: string | null; last_error: string | null; last_error_at: string | null; last_check_at: string | null; pendiente_completo: boolean; plu_cargados: number; ultimo_envio_at: string | null }
+export interface ScaleSyncLogItem { plu: number; nombre: string; antes: number | null; ahora: number }
+export interface ScaleSyncLogRow { id: number; scale_id: string; scale_nombre: string; created_at: string; ultimo_intento: string; origen: string; tipo: "cambios" | "completa"; estado: "ok" | "error"; total: number; repeticiones: number; detalle: ScaleSyncLogItem[] | null; error: string | null }
 export interface ScaleWeightResult { scale_id: string; scale_nombre: string; protocolo: string; peso_bruto: number; peso_neto?: number; tara: number; unidad: string; estable: boolean; raw_response?: string; timestamp: string }
 export interface ConnectionTestResult { scale_id: string; scale_nombre: string; conectada: boolean; protocolo_detectado?: string; mensaje: string; latencia_ms?: number; peso_actual?: number }
 export interface GerencialDashboard {
@@ -4379,6 +4382,8 @@ export const api = {
     syncPLU: (id: string, data: ScalePLUSyncInput) => client.post<ScalePLUSyncResult>(`/v1/scales/${id}/plu-sync`, data),
     pluSyncs: (id: string, params?: { limit?: number; offset?: number }) => client.get<any[]>(`/v1/scales/${id}/plu-syncs`, params as any),
     weightLogs: (params?: { scale_id?: string; limit?: number; offset?: number }) => client.get<any[]>("/v1/scales/-/weight-logs", { ...params }),
+    syncStatus: () => client.get<ScaleSyncStatus[]>("/v1/scales/sync-status"),
+    syncLog: (params?: { scale_id?: string; estado?: "ok" | "error"; limit?: number; offset?: number }) => client.get<ScaleSyncLogRow[]>("/v1/scales/sync-log", { ...params }),
     printLabel: (data: PrintLabelInput) => client.post<any>("/v1/scales/print-label", data),
     weighProduct: (scaleId: string, data: { producto_id: string; precio_unitario?: number }) =>
       client.post<{ escala_id: string; escala_nombre: string; peso_kg: number; unidad: string; estable: boolean; producto_id: string; producto_nombre: string; precio_unitario: number; subtotal: number }>(`/v1/scales/${scaleId}/weigh-product`, data),
