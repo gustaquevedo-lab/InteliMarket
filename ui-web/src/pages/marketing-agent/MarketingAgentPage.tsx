@@ -119,7 +119,7 @@ export default function MarketingAgentPage() {
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string; action_outcome?: any; suggestions?: string[] }>>([
     {
       role: "assistant",
-      content: "👋 ¡Hola! Soy el **CMO Virtual** de Extra Supermercado. Gestiono en vivo los **7.856 clientes**, el sobre-stock del **CFO** y las promociones activas en cajas POS. Podés consultarme o darme directivas por texto o por voz usando el micrófono.",
+      content: "👋 ¡Hola! Soy el **CMO Virtual** de Extra Supermercado. Gestiono en vivo los clientes registrados, el sobre-stock del **CFO** y las promociones activas en cajas POS. Podés consultarme o darme directivas por texto o por voz usando el micrófono.",
       suggestions: [
         "¿Cuáles son los VIPs en riesgo de abandono y qué les ofrecemos?",
         "Analizar el pulso y tracción de las promociones en cajas",
@@ -605,7 +605,7 @@ export default function MarketingAgentPage() {
                 🏢 Extra Supermercado (Central)
               </span>
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-purple-300">
-                👥 {dashboard?.total_clientes_fidelizados ? dashboard.total_clientes_fidelizados.toLocaleString() : "7.856"} clientes registrados
+                👥 {dashboard?.total_clientes_fidelizados != null ? dashboard.total_clientes_fidelizados.toLocaleString() : "—"} clientes registrados
               </span>
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-pink-300">
                 ⚡ Tríada Activa: CFO (Piso {syncStatus?.cfo_margen_piso_pct || 22}%) ↔ CMO ↔ CSO
@@ -644,10 +644,10 @@ export default function MarketingAgentPage() {
               <span className="text-[10px] font-bold text-purple-400 font-mono">RFM</span>
             </div>
             <p className="text-2xl font-black font-mono tracking-tight text-purple-300">
-              {dashboard?.total_clientes_fidelizados ? dashboard.total_clientes_fidelizados.toLocaleString() : "7.856"}
+              {dashboard?.total_clientes_fidelizados != null ? dashboard.total_clientes_fidelizados.toLocaleString() : "—"}
             </p>
             <p className="text-[11px] text-slate-400 font-mono">
-              En riesgo Churn: <b className="text-rose-400">{dashboard?.clientes_en_riesgo_count || 1854}</b> clientes
+              En riesgo Churn: <b className="text-rose-400">{dashboard?.clientes_en_riesgo_count ?? 0}</b> clientes
             </p>
           </div>
 
@@ -657,7 +657,7 @@ export default function MarketingAgentPage() {
               <span className="text-[10px] font-bold text-amber-400 font-mono">A Liquidar</span>
             </div>
             <p className="text-2xl font-black font-mono tracking-tight text-amber-300">
-              {formatPYG(syncStatus?.cfo_sobrestock_valor_gs || 62425000)}
+              {formatPYG(syncStatus?.cfo_sobrestock_valor_gs ?? 0)}
             </p>
             <p className="text-[11px] text-slate-400 font-mono">
               Inventario excedente disponible
@@ -667,7 +667,7 @@ export default function MarketingAgentPage() {
           <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Margen Retail (CFO)</span>
-              <span className="text-[10px] font-bold text-emerald-400 font-mono">Piso: {syncStatus?.cfo_margen_piso_pct || 22}%</span>
+              <span className="text-[10px] font-bold text-emerald-400 font-mono">Piso: {syncStatus?.cfo_margen_piso_pct ?? 0}%</span>
             </div>
             <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
               {syncStatus?.cfo_margen_actual_pct ? `${syncStatus.cfo_margen_actual_pct}%` : "34.7%"}
@@ -698,7 +698,7 @@ export default function MarketingAgentPage() {
       <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
         {[
           { id: "comando", label: "Directivas & Matriz Tripartita", icon: Target },
-          { id: "audiencias", label: "Audiencias & RFM Real", icon: Users, badge: "7.856" },
+          { id: "audiencias", label: "Audiencias & RFM Real", icon: Users, badge: dashboard?.total_clientes_fidelizados != null ? String(dashboard.total_clientes_fidelizados) : undefined },
           { id: "promociones_pos", label: "Promociones en Cajas POS & Pulso", icon: Percent, badge: String(promotionsPulseList.length || 25) },
           { id: "kiosco", label: "Banners en Salón (Kioscos & Web)", icon: Monitor, badge: String(kioskBanners.length) },
           { id: "chat", label: "Copiloto Estratégico CMO (Voz & Chat)", icon: Bot, badge: "IA" },
@@ -850,13 +850,13 @@ export default function MarketingAgentPage() {
                   <div className="flex justify-between text-xs">
                     <span className="text-slate-500">Ticket Promedio Real:</span>
                     <strong className="font-mono text-slate-900 dark:text-white">
-                      {formatPYG(dashboard?.sync_tripartito?.cso_ticket_promedio_gs || 97862)}
+                      {formatPYG(dashboard?.sync_tripartito?.cso_ticket_promedio_gs ?? 0)}
                     </strong>
                   </div>
                   <div className="flex justify-between text-xs">
                     <span className="text-slate-500">Brecha para Piso 20%:</span>
                     <strong className="font-mono text-amber-600 dark:text-amber-400">
-                      {formatPYG(dashboard?.sync_tripartito?.cso_gap_meta_gs || 14640275)}
+                      {formatPYG(dashboard?.sync_tripartito?.cso_gap_meta_gs ?? 0)}
                     </strong>
                   </div>
                 </div>
@@ -940,50 +940,82 @@ export default function MarketingAgentPage() {
               <span className="text-xs text-slate-500">Integrado a POS y WhatsApp</span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {dashboard?.campanas_sugeridas?.map((camp: any) => (
-                <div
-                  key={camp.id}
-                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-3 flex flex-col justify-between"
-                >
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-purple-100 text-purple-800 dark:bg-purple-950/80 dark:text-purple-300">
-                        {camp.segmento}
-                      </span>
-                      <span className="text-xs font-bold text-slate-400 font-mono">
-                        {camp.cantidad_clientes?.toLocaleString()} clientes
-                      </span>
-                    </div>
-
-                    <h4 className="font-extrabold text-sm text-slate-900 dark:text-white leading-snug">
-                      {camp.titulo}
+            {(() => {
+              const campanas = dashboard?.campanas_sugeridas || (dashboard as any)?.campañas_sugeridas || []
+              if (campanas.length === 0) {
+                return (
+                  <div className="p-8 rounded-3xl bg-slate-50 dark:bg-slate-900/50 border border-dashed border-slate-200 dark:border-slate-800 text-center space-y-2">
+                    <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
+                    <h4 className="text-sm font-bold text-slate-700 dark:text-slate-300">
+                      Sin campañas urgentes pendientes de aprobación
                     </h4>
-
-                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                      {camp.descripcion}
+                    <p className="text-xs text-slate-500 max-w-md mx-auto">
+                      Las directivas de margen del CFO y los segmentos de clientes están en equilibrio. Cuando se detecte sobrestock o clientes VIP inactivos, aparecerán propuestas automáticas aquí.
                     </p>
                   </div>
+                )
+              }
 
-                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2.5">
-                    <div className="flex items-center justify-between text-xs font-mono">
-                      <span className="text-slate-400">Descuento Sugerido:</span>
-                      <b className="text-purple-600 dark:text-purple-400 font-black">
-                        {camp.descuento_sugerido_pct}% OFF
-                      </b>
-                    </div>
-
-                    <button
-                      onClick={() => handleExecuteSuggestion(camp)}
-                      className="w-full py-2.5 rounded-2xl text-xs font-extrabold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer"
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {campanas.map((camp: any) => (
+                    <div
+                      key={camp.id}
+                      className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-3 flex flex-col justify-between hover:border-purple-300 dark:hover:border-purple-800/60 transition group"
                     >
-                      <Zap className="w-3.5 h-3.5" />
-                      Activar en Cajas POS (1-Clic)
-                    </button>
-                  </div>
+                      <div className="space-y-2.5">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <span className="px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-purple-100 text-purple-800 dark:bg-purple-950/80 dark:text-purple-300">
+                            {camp.segmento}
+                          </span>
+                          <span className="text-xs font-bold text-slate-400 font-mono">
+                            {camp.cantidad_clientes?.toLocaleString()} clientes
+                          </span>
+                        </div>
+
+                        {camp.origen_directiva && (
+                          <div className="flex items-center gap-1.5 text-[10px] font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                            <span className="px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800">
+                              {camp.origen_directiva}
+                            </span>
+                            {camp.producto_destacado && (
+                              <span className="text-slate-500 truncate">
+                                • {camp.producto_destacado}
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        <h4 className="font-extrabold text-sm text-slate-900 dark:text-white leading-snug group-hover:text-purple-600 transition">
+                          {camp.titulo}
+                        </h4>
+
+                        <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                          {camp.descripcion || camp.motivo}
+                        </p>
+                      </div>
+
+                      <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2.5">
+                        <div className="flex items-center justify-between text-xs font-mono">
+                          <span className="text-slate-400">Descuento Sugerido:</span>
+                          <b className="text-purple-600 dark:text-purple-400 font-black text-sm">
+                            {camp.descuento_sugerido_pct}% OFF
+                          </b>
+                        </div>
+
+                        <button
+                          onClick={() => handleExecuteSuggestion(camp)}
+                          className="w-full py-2.5 rounded-2xl text-xs font-extrabold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer"
+                        >
+                          <Zap className="w-3.5 h-3.5" />
+                          Activar en Cajas POS (1-Clic)
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              )
+            })()}
           </div>
         </div>
       )}
@@ -1073,7 +1105,7 @@ export default function MarketingAgentPage() {
                 <Sparkles className="w-4 h-4 text-purple-600" /> Motor de Re-Perfilado Continuo & Etiquetas Dinámicas
               </h4>
               <p className="text-[11px] text-slate-500">
-                Recalcula recencia, frecuencia, compras en salón y actualiza productos habituales para los 7.856 clientes.
+                Recalcula recencia, frecuencia, compras en salón y actualiza productos habituales para la base de clientes.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -1995,7 +2027,7 @@ export default function MarketingAgentPage() {
                 <div className="flex justify-start">
                   <div className="bg-slate-50 dark:bg-slate-800/80 rounded-2xl p-4 text-xs text-slate-500 flex items-center gap-2 border border-slate-200 dark:border-slate-700">
                     <Loader2 className="w-4 h-4 animate-spin text-purple-500" />
-                    El CMO Virtual está consultando los 7.856 clientes y sobre-stock en tiempo real...
+                    El CMO Virtual está consultando clientes y sobre-stock en tiempo real...
                   </div>
                 </div>
               )}

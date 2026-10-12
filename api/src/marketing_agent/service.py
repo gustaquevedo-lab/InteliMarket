@@ -563,18 +563,21 @@ async def get_marketing_dashboard(db: AsyncSession, company_id: str) -> Marketin
     # Construir campañas sugeridas reales cruzando con el CFO
     campanas = []
     if rfm["vip_inactivos"]:
+        motivo_rescate = f"Gasto combinado de este grupo: ₲ {sum(c['total_gastado'] for c in rfm['vip_inactivos']):,.0f}. Enviar cupón personalizado en su producto favorito."
         campanas.append(CampaignSuggestion(
             id="rescate-vip-inactivos",
             titulo=f"Plan de Rescate: {len(rfm['vip_inactivos'])} VIPs Inactivos",
             segmento="VIPs sin compras en 20+ días",
             cantidad_clientes=len(rfm["vip_inactivos"]),
-            motivo=f"Gasto combinado de este grupo: ₲ {sum(c['total_gastado'] for c in rfm['vip_inactivos']):,.0f}. Enviar cupón personalizado en su producto favorito.",
+            motivo=motivo_rescate,
+            descripcion=motivo_rescate,
             descuento_sugerido_pct=15.0,
             origen_directiva="DIR-CMO-RESCATE",
             estado="propuesta"
         ))
         
     for idx, opp in enumerate(cfo_sync.oportunidades_flash_stock[:2]):
+        motivo_stock = f"Directiva del CFO: ₲ {opp.monto_inmovilizado_gs:,.0f} inmovilizados ({opp.stock_actual:,.0f} un). Margen protegido."
         campanas.append(CampaignSuggestion(
             id=f"promo-sobrestock-{opp.product_id}",
             titulo=f"Liquidación Estratégica: {opp.producto}",
@@ -582,7 +585,8 @@ async def get_marketing_dashboard(db: AsyncSession, company_id: str) -> Marketin
             cantidad_clientes=len(rfm["frecuentes"]),
             producto_destacado=opp.producto,
             descuento_sugerido_pct=opp.descuento_sugerido_pct,
-            motivo=f"Directiva del CFO: ₲ {opp.monto_inmovilizado_gs:,.0f} inmovilizados ({opp.stock_actual:,.0f} un). Margen protegido.",
+            motivo=motivo_stock,
+            descripcion=motivo_stock,
             origen_directiva=f"DIR-CFO-0{idx+1}",
             estado="propuesta"
         ))
@@ -596,6 +600,7 @@ async def get_marketing_dashboard(db: AsyncSession, company_id: str) -> Marketin
     return MarketingDashboard(
         total_clientes_fidelizados=rfm["total_clientes"],
         segmentos=segmentos,
+        campanas_sugeridas=campanas,
         campañas_sugeridas=campanas,
         resumen_ejecutivo=resumen,
         sync_tripartito=sync,

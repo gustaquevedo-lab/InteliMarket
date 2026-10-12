@@ -71,6 +71,7 @@ class CampaignSuggestion(BaseModel):
     segmento: str
     cantidad_clientes: int
     motivo: str
+    descripcion: Optional[str] = None  # Alias para compatibilidad con interfaces web
     producto_destacado: Optional[str] = None
     descuento_sugerido_pct: Optional[float] = None
     origen_directiva: Optional[str] = None  # ej. DIR-CFO-01
@@ -116,7 +117,8 @@ class TripartiteSyncResponse(BaseModel):
 class MarketingDashboard(BaseModel):
     total_clientes_fidelizados: int
     segmentos: List[CustomerSegment]
-    campañas_sugeridas: List[CampaignSuggestion]
+    campanas_sugeridas: List[CampaignSuggestion] = Field(default_factory=list)
+    campañas_sugeridas: List[CampaignSuggestion] = Field(default_factory=list)
     resumen_ejecutivo: str
     sync_tripartito: TripartiteSyncResponse
     reglas_aprendidas_count: int = 0
