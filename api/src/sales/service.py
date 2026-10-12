@@ -16,8 +16,8 @@ import json
 
 TZ_ASUNCION = ZoneInfo("America/Asuncion")
 
-from api.src.sales.models import Sale, SaleItem
-from api.src.kits.models import ProductKit, KitItem, SalePayment
+from api.src.sales.models import Sale, SaleItem, SalePayment
+from api.src.kits.models import ProductKit, KitItem
 from api.src.auth.models import User
 from api.src.caja.models import CashSession, CashRegister
 from api.src.sales.schemas import SaleCreate, SaleUpdate, SaleAddPayment
