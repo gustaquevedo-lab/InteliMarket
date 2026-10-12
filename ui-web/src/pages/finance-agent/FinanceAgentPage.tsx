@@ -26,7 +26,7 @@ export default function FinanceAgentPage() {
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string; suggestions?: string[] }>>([
     {
       role: "assistant",
-      content: "👋 **Buenas tardes. Bienvenido a la Torre de Control Financiera del Gerente Financiero IA (CFO Virtual).**\n\nHe auditado en tiempo real la **Posición Neta de Liquidez de Extra Supermercado** con **Gs. 441.800.000 disponibles** (Bancos, Bóveda Central y Cajas de Salón).\n\nNuestra cobertura operativa actual es de **138 días**, con un índice de solvencia de **4.67x** sobre los vencimientos a proveedores de los próximos 7 días (Gs. 94.5M).\n\nHe emitido **3 directivas estratégicas al Gerente de Ventas IA**, incluyendo una **Venta Flash de Sobre-Stock** para monetizar **Gs. 37.8M** en productos de baja rotación.\n\n¿En qué aspecto financiero o de tesorería deseas que profundicemos hoy?",
+      content: "👋 **Bienvenido al Copiloto Financiero IA (CFO Virtual).**\n\nCargando posición de liquidez en tiempo real desde la base de datos...\n\n¿En qué aspecto financiero o de tesorería deseas que profundicemos hoy?",
       suggestions: [
         "¿Cuánto vence con proveedores en los próximos 7 días?",
         "Ver reporte de morosidad y clientes bloqueados",
@@ -159,7 +159,7 @@ export default function FinanceAgentPage() {
                   </span>
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-teal-500/20 text-teal-300 border border-teal-500/30">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    Cobertura: {towerData?.dias_cobertura_operativa || 138} Días
+                    Cobertura: {towerData?.dias_cobertura_operativa ?? towerData?.cash_runway_dias ?? 0} Días
                   </span>
                 </div>
                 <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
@@ -212,7 +212,7 @@ export default function FinanceAgentPage() {
               <span className="text-[10px] font-bold text-emerald-400">Disponible</span>
             </div>
             <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
-              {towerData ? formatPYG(towerData.liquidez_total_gs) : "₲ 441.800.000"}
+              {towerData ? formatPYG(towerData.liquidez_total_gs) : "-"}
             </p>
             <p className="text-[11px] text-slate-400">Bancos + Bóveda + Cajas Salón</p>
           </div>
@@ -223,9 +223,9 @@ export default function FinanceAgentPage() {
               <span className="text-[10px] font-bold text-rose-400">{towerData?.ap_facturas_pendientes_count || 0} facturas</span>
             </div>
             <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
-              {towerData ? formatPYG(towerData.ap_total_mes_gs) : "₲ 268.000.000"}
+              {towerData ? formatPYG(towerData.ap_total_mes_gs) : "-"}
             </p>
-            <p className="text-[11px] text-slate-400">Próximos 7d: {towerData ? formatPYG(towerData.ap_proximos_7d_gs) : "₲ 94.5M"}</p>
+            <p className="text-[11px] text-slate-400">Próximos 7d: {towerData ? formatPYG(towerData.ap_proximos_7d_gs) : "-"}</p>
           </div>
 
           <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
@@ -234,9 +234,9 @@ export default function FinanceAgentPage() {
               <span className="text-[10px] font-bold text-blue-400 font-mono">Clientes</span>
             </div>
             <p className="text-2xl font-black font-mono tracking-tight text-blue-300">
-              {towerData ? formatPYG(towerData.ar_total_gs) : "₲ 142.000.000"}
+              {towerData ? formatPYG(towerData.ar_total_gs) : "-"}
             </p>
-            <p className="text-[11px] text-blue-400 font-mono">Vigente: {towerData ? formatPYG(towerData.ar_vigente_gs) : "₲ 142M"}</p>
+            <p className="text-[11px] text-blue-400 font-mono">Vigente: {towerData ? formatPYG(towerData.ar_vigente_gs) : "-"}</p>
           </div>
 
           <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
@@ -245,7 +245,7 @@ export default function FinanceAgentPage() {
               <span className="text-[10px] font-mono text-teal-400">7 Días</span>
             </div>
             <p className="text-2xl font-black font-mono tracking-tight text-teal-300">
-              {towerData ? `${towerData.ratio_solvencia_7d}x` : "4.67x"}
+              {towerData ? `${(towerData.ratio_solvencia_7d ?? towerData.cobertura_7d_ratio ?? 0).toFixed(2)}x` : "-"}
             </p>
             <p className="text-[11px] text-slate-400">Solvencia líquida sobre pasivos inmediatos</p>
           </div>
@@ -305,7 +305,7 @@ export default function FinanceAgentPage() {
                   </div>
                 </div>
                 <span className="text-sm font-black text-blue-600 dark:text-blue-400 tabular-nums font-mono">
-                  {towerData ? formatPYG(towerData.bancos_total_gs) : "₲ 348.500.000"}
+                  {towerData ? formatPYG(towerData.bancos_total_gs) : "-"}
                 </span>
               </div>
 
@@ -340,7 +340,7 @@ export default function FinanceAgentPage() {
                   </div>
                 </div>
                 <span className="text-sm font-black text-emerald-600 dark:text-emerald-400 tabular-nums font-mono">
-                  {towerData ? formatPYG(towerData.boveda_central_gs + towerData.cajas_pos_gs) : "₲ 93.300.000"}
+                  {towerData ? formatPYG(towerData.boveda_central_gs + towerData.cajas_pos_gs) : "-"}
                 </span>
               </div>
 
@@ -349,7 +349,7 @@ export default function FinanceAgentPage() {
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-emerald-950 dark:text-emerald-300">Bóveda Central de Tesorería</span>
                     <span className="text-xs font-black text-emerald-700 dark:text-emerald-400 tabular-nums font-mono">
-                      {towerData ? formatPYG(towerData.boveda_central_gs) : "₲ 68.500.000"}
+                      {towerData ? formatPYG(towerData.boveda_central_gs) : "-"}
                     </span>
                   </div>
                   <p className="text-[11px] text-emerald-700/80 dark:text-emerald-400/80 mt-1">Fondo de reserva y resguardo para cambio operativo.</p>
@@ -359,7 +359,7 @@ export default function FinanceAgentPage() {
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-blue-950 dark:text-blue-300">Cajas POS en Salón Comercial</span>
                     <span className="text-xs font-black text-blue-700 dark:text-blue-400 tabular-nums font-mono">
-                      {towerData ? formatPYG(towerData.cajas_pos_gs) : "₲ 24.800.000"}
+                      {towerData ? formatPYG(towerData.cajas_pos_gs) : "-"}
                     </span>
                   </div>
                   <p className="text-[11px] text-blue-700/80 dark:text-blue-400/80 mt-1">Recaudación acumulada en turnos activos de hoy.</p>
@@ -386,21 +386,21 @@ export default function FinanceAgentPage() {
                 <div className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60">
                   <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">A Pagar Próximos 7d (AP)</span>
                   <span className="text-xs font-bold text-rose-600 dark:text-rose-400 tabular-nums font-mono">
-                    {towerData ? formatPYG(towerData.ap_proximos_7d_gs) : "₲ 94.500.000"}
+                    {towerData ? formatPYG(towerData.ap_proximos_7d_gs) : "-"}
                   </span>
                 </div>
 
                 <div className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60">
                   <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">A Cobrar Clientes Vigentes (AR)</span>
                   <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 tabular-nums font-mono">
-                    {towerData ? formatPYG(towerData.ar_vigente_gs) : "₲ 142.000.000"}
+                    {towerData ? formatPYG(towerData.ar_vigente_gs) : "-"}
                   </span>
                 </div>
 
                 <div className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60">
                   <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">Gastos Operativos Mes MTD</span>
                   <span className="text-xs font-bold text-slate-900 dark:text-white tabular-nums font-mono">
-                    {towerData ? formatPYG(towerData.gastos_operativos_mes_gs) : "₲ 42.150.000"}
+                    {towerData ? formatPYG(towerData.gastos_operativos_mes_gs) : "-"}
                   </span>
                 </div>
               </div>

@@ -234,6 +234,9 @@ async def get_liquidity_control_tower(db: AsyncSession, company_id: str) -> Liqu
         gastos_operativos_mes_gs=gastos_operativos_mes_gs,
         margen_bruto_mes_pct=margen_pct,
         ebitda_estimado_mes_gs=max(tot_v - tot_c - gastos_operativos_mes_gs, 0.0),
+        # Aliases para la UI
+        dias_cobertura_operativa=cash_runway,
+        ratio_solvencia_7d=cobertura_7d,
     )
 
 

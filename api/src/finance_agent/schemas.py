@@ -89,6 +89,10 @@ class LiquidityControlTower(BaseModel):
     margen_bruto_mes_pct: float
     ebitda_estimado_mes_gs: float
 
+    # Aliases para compatibilidad con la UI
+    dias_cobertura_operativa: Optional[float] = None
+    ratio_solvencia_7d: Optional[float] = None
+
 
 class OverstockFlashOpportunity(BaseModel):
     product_id: str
