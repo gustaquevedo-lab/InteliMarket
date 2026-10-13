@@ -138,6 +138,13 @@ def _fetch_sync(sql: str, params: tuple = ()) -> list[dict]:
         conn.close()
 
 
+
+def _es_cod_balanza(cod) -> bool:
+    """Codigo de balanza Extra: 2000 + PLU (3 digitos). Un producto por unidad con este codigo puede
+    tener PLU legitimo (la balanza solo lo codifica); Nemuha no debe anularlo."""
+    import re as _re
+    return bool(cod) and bool(_re.fullmatch(r"2000\d{3}", str(cod).strip()))
+
 async def _fetch(sql: str, params: tuple = ()) -> list[dict]:
     return await asyncio.to_thread(_fetch_sync, sql, params)
 
@@ -2666,7 +2673,8 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
                 prod.unidad_medida = um
                 prod.tipo_venta = tipo_venta_val
                 if um == "UN":
-                    prod.plu_balanza = None
+                    if not _es_cod_balanza(prod.codigo_barra or codigo_barra_legacy):
+                        prod.plu_balanza = None
                 elif um == "KG" and plu_val:
                     prod.plu_balanza = plu_val
                 changed = True
@@ -2675,7 +2683,8 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
                 changed = True
 
             # 3. Si el producto es UN pero aún tenía plu_balanza asignado previamente (solo si no es pesable)
-            if prod.unidad_medida == "UN" and not nombre_indica_kg and prod.plu_balanza is not None:
+            if prod.unidad_medida == "UN" and not nombre_indica_kg and prod.plu_balanza is not None \
+                    and not _es_cod_balanza(prod.codigo_barra or codigo_barra_legacy):
                 prod.plu_balanza = None
                 changed = True
 
@@ -2690,7 +2699,7 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
                     prod.codigo_barra = codigo_barra_legacy
                     if um == "KG" and plu_val:
                         prod.plu_balanza = plu_val
-                    elif um == "UN" and not nombre_indica_kg:
+                    elif um == "UN" and not nombre_indica_kg and not _es_cod_balanza(codigo_barra_legacy):
                         prod.plu_balanza = None
                     changed = True
 

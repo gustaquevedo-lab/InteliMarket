@@ -101,9 +101,11 @@ _PLU_TEMPLATE_FIELDS = [
 assert len(_PLU_TEMPLATE_FIELDS) == 148, len(_PLU_TEMPLATE_FIELDS)
 
 
-def _build_plu_record(plu_id: int, precio: Decimal, nombre: str) -> str:
+def _build_plu_record(plu_id: int, precio: Decimal, nombre: str, por_unidad: bool = False) -> str:
     fields = list(_PLU_TEMPLATE_FIELDS)
     fields[1] = str(plu_id)
+    # UnitID del SDL (tabla Unit): 2 = Unid (la balanza codifica cantidad en la etiqueta), 3 = kg
+    fields[4] = "2" if por_unidad else "3"
     fields[5] = f"{int(round(precio))},0"
     fields[15] = nombre
     return "\t".join(fields)
@@ -217,7 +219,7 @@ class BalmakEdgeDriver(ScaleDriver):
             try:
                 precio = Decimal(str(p.get("precio_venta") or p.get("precio") or 0))
                 nombre = p.get("nombre") or ""
-                records.append(_build_plu_record(int(plu_balanza), precio, nombre))
+                records.append(_build_plu_record(int(plu_balanza), precio, nombre, bool(p.get("por_unidad"))))
             except Exception as e:
                 errors.append({"producto_id": p.get("id"), "error": str(e)})
 

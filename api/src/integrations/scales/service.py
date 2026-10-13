@@ -359,6 +359,7 @@ def _product_to_plu_dict(p: Product, precio: Optional[Decimal] = None) -> dict:
         "precio_venta": precio_final,
         "codigo_barras": p.codigo_barra,
         "plu_balanza": p.plu_balanza,
+        "por_unidad": p.tipo_venta == "unidad",
         "tara": 0,
     }
 
