@@ -1206,6 +1206,9 @@ export interface MapWaypoint { customer_id: string; razon_social: string; orden_
 export interface MapRouteData { route_id: string; route_name: string; seller_id: string; seller_name: string; color_index: number; color: string; waypoints: MapWaypoint[]; depot_lat: number; depot_lng: number; instance_status: string | null }
 export interface MapCustomerData { customer_id: string; razon_social: string; lat: number; lng: number; route_id: string | null; color_index: number | null; visit_status: string; direccion?: string; ciudad?: string; telefono?: string }
 export interface SellerPerformance { seller_id: string; seller_name: string; photo_url: string | null; coverage_pct: number; conversion_rate: number; avg_ticket: number; total_amount: number; total_collected: number; avg_visit_minutes: number | null; stops_completed: number; stops_total: number; weekly_coverage: number[] }
+export interface Pagare { id: string; company_id: string; customer_id: string; receivable_account_id?: string; numero_pagare: string; monto_original: number; saldo_pendiente: number; fecha_emision: string; fecha_vencimiento: string; motivo?: string; estado: "vigente" | "pagado" | "protestado" | "anulado"; cobrador_id?: string; created_at: string }
+export interface DeliveryNote { id: string; company_id: string; customer_id: string; sale_id?: string; numero_nota: string; numero_factura_ref?: string; fecha: string; monto: number; concepto: "no_es_su_pedido" | "faltante_deposito" | "sin_dinero" | "vencimiento_averia" | "otro"; descripcion?: string; vendedor_id?: string; cobrador_id?: string; estado: "pendiente" | "aplicada" | "anulada"; aplicada_en_cobro_id?: string; created_at: string }
+export interface RouteCobranzaClient { customer_id: string; customer_name: string; customer_telefono?: string; saldo_total: number; n_docs: number; ultimo_cobro?: string }
 export interface ExpenseCategory { id: string; nombre: string; descripcion?: string; presupuesto_mensual?: number; activo?: boolean; created_at?: string }
 export interface CostCenter { id: string; nombre: string; tipo: "sector" | "global"; peso_prorateo: number; activo?: boolean; created_at?: string }
 export interface Expense {
@@ -3092,6 +3095,10 @@ export const api = {
       titular_cheque?: string;
     }) => client.post<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}/pay`, data),
     listBanks: () => client.get<any[]>("/v1/financial/banks", { company_id: COMPANY_ID } as any),
+    byRoute: (companyId: string, routeId: string, fecha: string) =>
+      client.get<RouteCobranzaClient[]>(`/v1/companies/${companyId}/accounts-receivable/by-route`, { route_id: routeId, fecha } as any),
+    bounceCheck: (companyId: string, chequeId: string, motivo: string) =>
+      client.post<{ ok: boolean }>(`/v1/companies/${companyId}/accounts-receivable/cheques/${chequeId}/bounce`, { motivo }),
   },
 
   backups: {
@@ -3966,6 +3973,18 @@ export const api = {
       map: {
         routes: (companyId: string) => client.get<MapRouteData[]>(`/v1/distribuidora/map/routes/${companyId}`),
         customers: (companyId: string) => client.get<MapCustomerData[]>(`/v1/distribuidora/map/customers/${companyId}`),
+      },
+      pagares: {
+        list: (companyId: string, params?: Record<string, string>) => client.get<Pagare[]>(`/v1/distribuidora/pagares`, { company_id: companyId, ...params } as any),
+        create: (data: object) => client.post<Pagare>(`/v1/distribuidora/pagares`, data),
+        pay: (pagareId: string, data: object) => client.post<Pagare>(`/v1/distribuidora/pagares/${pagareId}/pay`, data),
+        protest: (pagareId: string, data: object) => client.post<Pagare>(`/v1/distribuidora/pagares/${pagareId}/protest`, data),
+      },
+      deliveryNotes: {
+        list: (companyId: string, params?: Record<string, string>) => client.get<DeliveryNote[]>(`/v1/distribuidora/delivery-notes`, { company_id: companyId, ...params } as any),
+        create: (data: object) => client.post<DeliveryNote>(`/v1/distribuidora/delivery-notes`, data),
+        apply: (noteId: string, data: object) => client.post<DeliveryNote>(`/v1/distribuidora/delivery-notes/${noteId}/apply`, data),
+        cancel: (noteId: string) => client.post<DeliveryNote>(`/v1/distribuidora/delivery-notes/${noteId}/cancel`),
       },
     },
   },
