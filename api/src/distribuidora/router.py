@@ -513,3 +513,25 @@ async def map_customers(
 ):
     """Geocoded customers with route assignment and today's visit status."""
     return await service.get_map_customers(db, company_id)
+
+
+# ═══════════════════════════════════════════════════════════════
+# RENDIMIENTO DE VENDEDORES
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/performance/sellers/{company_id}")
+async def seller_performance(
+    company_id: str,
+    fecha_desde: str = Query(default=None),
+    fecha_hasta: str = Query(default=None),
+    route_id: str = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_auth),
+):
+    """Performance metrics per seller: coverage, conversion, ticket, weekly trend."""
+    from datetime import date, timedelta
+    if not fecha_desde:
+        fecha_desde = str(date.today() - timedelta(days=30))
+    if not fecha_hasta:
+        fecha_hasta = str(date.today())
+    return await service.get_seller_performance(db, company_id, fecha_desde, fecha_hasta, route_id)

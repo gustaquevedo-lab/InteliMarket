@@ -1223,3 +1223,153 @@ async def get_map_customers(db: AsyncSession, company_id: str) -> list[dict]:
         })
 
     return output
+
+
+async def get_seller_performance(
+    db: AsyncSession,
+    company_id: str,
+    fecha_desde: str,
+    fecha_hasta: str,
+    route_id: str | None = None,
+) -> list[dict]:
+    """Performance metrics per seller for the given date range.
+
+    Aggregates RouteInstance + RouteStopVisit data. Returns an empty list
+    when no instances exist. Division by zero always yields 0.0.
+    """
+    from datetime import datetime, timedelta, timezone
+    from api.src.distribuidora.tracking_models import RouteInstance, RouteStopVisit
+    from api.src.auth.models import User
+    from api.src.distribuidora.tracking_models import SellerProfile
+
+    from_dt = datetime.fromisoformat(fecha_desde)
+    to_dt = datetime.fromisoformat(fecha_hasta) + timedelta(days=1)
+
+    q_instances = select(RouteInstance).where(
+        RouteInstance.company_id == UUID(company_id),
+        RouteInstance.fecha >= from_dt,
+        RouteInstance.fecha < to_dt,
+    )
+    if route_id:
+        q_instances = q_instances.where(RouteInstance.route_id == UUID(route_id))
+
+    instances_result = await db.execute(q_instances)
+    instances = instances_result.scalars().all()
+    if not instances:
+        return []
+
+    instance_ids = [inst.id for inst in instances]
+    seller_ids = list({str(inst.seller_id) for inst in instances})
+
+    q_stops = select(RouteStopVisit).where(RouteStopVisit.instance_id.in_(instance_ids))
+    stops_result = await db.execute(q_stops)
+    stops = stops_result.scalars().all()
+
+    seller_uuids = [UUID(s) for s in seller_ids]
+    q_users = select(User).where(User.id.in_(seller_uuids))
+    users_result = await db.execute(q_users)
+    users_by_id = {str(u.id): u for u in users_result.scalars().all()}
+
+    q_profiles = select(SellerProfile).where(SellerProfile.user_id.in_(seller_uuids))
+    profiles_result = await db.execute(q_profiles)
+    profiles_by_user = {str(p.user_id): p for p in profiles_result.scalars().all()}
+
+    instance_to_seller = {str(inst.id): str(inst.seller_id) for inst in instances}
+    stops_by_seller: dict[str, list] = {s: [] for s in seller_ids}
+    for stop in stops:
+        seller = instance_to_seller.get(str(stop.instance_id))
+        if seller:
+            stops_by_seller.setdefault(seller, []).append(stop)
+
+    today = datetime.now(timezone.utc).date()
+    week_ranges = [
+        (today - timedelta(days=(3 - i) * 7 + 7), today - timedelta(days=(3 - i) * 7))
+        for i in range(4)
+    ]
+
+    output = []
+    for seller_id_str in seller_ids:
+        seller_stops = stops_by_seller.get(seller_id_str, [])
+        user = users_by_id.get(seller_id_str)
+        profile = profiles_by_user.get(seller_id_str)
+
+        stops_total = len(seller_stops)
+        completed = [s for s in seller_stops if s.status == "completed"]
+        stops_completed = len(completed)
+
+        coverage_pct = (stops_completed / stops_total * 100.0) if stops_total > 0 else 0.0
+        with_order = [s for s in completed if float(s.order_amount or 0) > 0]
+        conversion_rate = (len(with_order) / stops_completed * 100.0) if stops_completed > 0 else 0.0
+        total_amount = sum(float(s.order_amount or 0) for s in completed)
+        total_collected = sum(float(s.payment_collected or 0) for s in completed)
+        avg_ticket = (total_amount / len(with_order)) if with_order else 0.0
+
+        durations = []
+        for s in completed:
+            if s.actual_arrival and s.actual_departure:
+                try:
+                    delta = (s.actual_departure - s.actual_arrival).total_seconds() / 60.0
+                    if delta > 0:
+                        durations.append(delta)
+                except Exception:
+                    pass
+        avg_visit_minutes = (sum(durations) / len(durations)) if durations else None
+
+        weekly_coverage = _compute_weekly_coverage(seller_id_str, instances, stops_by_seller, week_ranges)
+
+        output.append({
+            "seller_id": seller_id_str,
+            "seller_name": user.nombre if user else seller_id_str,
+            "photo_url": profile.photo_url if profile else None,
+            "coverage_pct": coverage_pct,
+            "conversion_rate": conversion_rate,
+            "avg_ticket": avg_ticket,
+            "total_amount": total_amount,
+            "total_collected": total_collected,
+            "avg_visit_minutes": avg_visit_minutes,
+            "stops_completed": stops_completed,
+            "stops_total": stops_total,
+            "weekly_coverage": weekly_coverage,
+        })
+
+    return output
+
+
+def _compute_weekly_coverage(
+    seller_id_str: str,
+    instances: list,
+    stops_by_seller: dict,
+    week_ranges: list,
+) -> list[float]:
+    """Compute 4-week coverage percentages for one seller."""
+    from datetime import datetime, timezone
+
+    result = []
+    seller_stops = stops_by_seller.get(seller_id_str, [])
+
+    from datetime import date as date_type
+
+    instance_ids_in_week: dict = {}
+    for inst in instances:
+        if str(inst.seller_id) != seller_id_str:
+            continue
+        try:
+            raw = inst.fecha
+            inst_date = raw.date() if callable(getattr(raw, 'date', None)) else raw
+            if not isinstance(inst_date, date_type):
+                continue
+        except Exception:
+            continue
+        instance_ids_in_week[str(inst.id)] = inst_date
+
+    for wk_from, wk_to in week_ranges:
+        wk_instance_ids = {
+            iid for iid, idate in instance_ids_in_week.items()
+            if wk_from <= idate <= wk_to
+        }
+        wk_stops = [s for s in seller_stops if str(s.instance_id) in wk_instance_ids]
+        wk_total = len(wk_stops)
+        wk_completed = sum(1 for s in wk_stops if s.status == "completed")
+        result.append(round((wk_completed / wk_total * 100.0) if wk_total > 0 else 0.0, 2))
+
+    return result
