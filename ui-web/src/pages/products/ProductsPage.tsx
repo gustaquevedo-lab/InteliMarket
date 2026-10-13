@@ -3041,12 +3041,26 @@ export default function ProductsPage() {
       {selectedProduct360Id && product360Data && !loading360 && (
         <Product360Modal
           data={product360Data}
-          onClose={() => { setSelectedProduct360Id(null) }}
+          onClose={() => {
+            setSelectedProduct360Id(null)
+            setProduct360Data(null)
+            loadStats()
+          }}
           onPriceUpdated={(productId, newPrice) => {
             setProducts(prev => prev.map(p =>
               p.id === productId ? { ...p, precio_venta: newPrice } : p
             ))
-            setSelectedProduct360Id(null)
+            loadStats()
+          }}
+          onTiersUpdated={(productId, precioMayorista, minQty) => {
+            setProducts(prev => prev.map(p =>
+              p.id === productId ? {
+                ...p,
+                precio_mayorista: precioMayorista,
+                precio_mayorista_min_qty: minQty,
+              } : p
+            ))
+            loadStats()
           }}
         />
       )}

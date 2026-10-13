@@ -115,9 +115,10 @@ interface Props {
   data: Product360Response
   onClose: () => void
   onPriceUpdated?: (productId: string, newPrice: number) => void
+  onTiersUpdated?: (productId: string, precioMayorista: number | null, minQty: number | null) => void
 }
 
-export default function Product360Modal({ data, onClose, onPriceUpdated }: Props) {
+export default function Product360Modal({ data: initialData, onClose, onPriceUpdated, onTiersUpdated }: Props) {
   const toast = useToast()
   const { hasPermission, isAdministrador } = usePermissions()
   const canEditPrice = isAdministrador || hasPermission("products:edit_price") || hasPermission("products:update")
@@ -125,9 +126,11 @@ export default function Product360Modal({ data, onClose, onPriceUpdated }: Props
   const [iaLoading, setIaLoading] = useState(false)
   const [iaText, setIaText] = useState<string | null>(null)
   const [locked, setLocked] = useState(true)
-  const [newPrice, setNewPrice] = useState(String(data.metricas_financieras.precio_venta))
-  const [savingPrice, setSavingPrice] = useState(false)
-  const [kardexFilter, setKardexFilter] = useState<"todos" | "salidas" | "entradas" | "ajustes">("todos")
+
+  const [data, setData] = useState<Product360Response>(initialData)
+  useEffect(() => {
+    setData(initialData)
+  }, [initialData])
 
   const p = data.product
   const m = data.metricas_financieras
@@ -142,9 +145,28 @@ export default function Product360Modal({ data, onClose, onPriceUpdated }: Props
   const [savingTier, setSavingTier] = useState<boolean>(false)
   const [deletingTierId, setDeletingTierId] = useState<string | null>(null)
 
+  const [newPrice, setNewPrice] = useState(String(data.metricas_financieras?.precio_venta || data.product?.precio_venta || 0))
+  const [savingPrice, setSavingPrice] = useState(false)
+  const [kardexFilter, setKardexFilter] = useState<"todos" | "salidas" | "entradas" | "ajustes">("todos")
+
+  const [unitTargetMargin, setUnitTargetMargin] = useState<string>(() => {
+    const pU = Number(data.metricas_financieras?.precio_venta || data.product?.precio_venta || 0)
+    const cU = Number(data.costos_estructura?.costo_promedio || data.metricas_financieras?.costo_promedio || data.product?.costo_promedio || data.metricas_financieras?.costo_unitario || 0)
+    if (pU > 0 && cU > 0) {
+      return (((pU - cU) / pU) * 100).toFixed(1)
+    }
+    return "25"
+  })
+
   useEffect(() => {
     setLocalEscalas(data.escalas_precio || [])
-  }, [data.escalas_precio])
+    const pU = Number(data.metricas_financieras?.precio_venta || data.product?.precio_venta || 0)
+    const cU = Number(data.costos_estructura?.costo_promedio || data.metricas_financieras?.costo_promedio || data.product?.costo_promedio || data.metricas_financieras?.costo_unitario || 0)
+    if (pU > 0 && cU > 0) {
+      setUnitTargetMargin((((pU - cU) / pU) * 100).toFixed(1))
+    }
+    setNewPrice(String(pU))
+  }, [data])
 
   const escalas = localEscalas
 
@@ -212,14 +234,59 @@ export default function Product360Modal({ data, onClose, onPriceUpdated }: Props
   const newMargenPct = newPriceNum > 0 ? (newMargenMonto / newPriceNum) * 100 : 0
   const newMarkup = costoBaseSim > 0 ? (newMargenMonto / costoBaseSim) * 100 : 0
 
+  const handleUnitMarginChange = useCallback((valStr: string) => {
+    setUnitTargetMargin(valStr)
+    const mNum = parseFloat(valStr)
+    if (!isNaN(mNum) && mNum < 100 && costoBaseSim > 0) {
+      const rawPrice = Math.round(costoBaseSim / (1 - (mNum / 100)))
+      setNewPrice(String(rawPrice))
+    }
+  }, [costoBaseSim])
+
+  const handleUnitPriceChange = useCallback((numValue: number) => {
+    setNewPrice(String(numValue))
+    if (numValue > 0 && costoBaseSim > 0) {
+      const mPct = ((numValue - costoBaseSim) / numValue) * 100
+      setUnitTargetMargin(mPct.toFixed(1))
+    }
+  }, [costoBaseSim])
+
+  const applyUnitPsychological = useCallback((type: "77" | "900" | "500" | "000") => {
+    const currentP = newPriceNum || costoBaseSim
+    if (currentP <= 0) return
+    let newP = currentP
+    if (type === "77") {
+      newP = Math.floor(currentP / 100) * 100 + 77
+      if (newP < 77) newP = 77
+    } else if (type === "900") {
+      newP = Math.floor(currentP / 1000) * 1000 + 900
+    } else if (type === "500") {
+      newP = Math.floor(currentP / 1000) * 1000 + 500
+    } else if (type === "000") {
+      newP = Math.round(currentP / 1000) * 1000
+    }
+    setNewPrice(String(newP))
+    if (costoBaseSim > 0 && newP > 0) {
+      const mPct = ((newP - costoBaseSim) / newP) * 100
+      setUnitTargetMargin(mPct.toFixed(1))
+    }
+  }, [newPriceNum, costoBaseSim])
+
   const handleSavePrice = useCallback(async () => {
     if (!newPriceNum || newPriceNum <= 0) { toast.error("Precio inválido", "Ingrese un precio mayor a 0"); return }
     setSavingPrice(true)
     try {
       await api.products.update(p.id, { precio_venta: newPriceNum })
       toast.success("Precio actualizado", `${p.nombre} → ${formatPYG(newPriceNum)}`)
+
+      // Refrescar Ficha 360 en vivo sin salir del modal
+      const fresh360 = await api.products.get360(p.id)
+      if (fresh360) {
+        setData(fresh360)
+        setLocalEscalas(fresh360.escalas_precio || [])
+      }
+
       onPriceUpdated?.(p.id, newPriceNum)
-      setLocked(true)
     } catch (e: any) { toast.error("Error al actualizar precio", e.message) }
     finally { setSavingPrice(false) }
   }, [newPriceNum, p.id, p.nombre, onPriceUpdated, toast])
@@ -326,8 +393,14 @@ export default function Product360Modal({ data, onClose, onPriceUpdated }: Props
 
       // Refrescar Ficha 360 en vivo
       const fresh360 = await api.products.get360(p.id)
-      if (fresh360?.escalas_precio) {
-        setLocalEscalas(fresh360.escalas_precio)
+      if (fresh360) {
+        setData(fresh360)
+        if (fresh360.escalas_precio) {
+          setLocalEscalas(fresh360.escalas_precio)
+        }
+        const activeTiers = fresh360.escalas_precio || []
+        const firstTier = activeTiers.length > 0 ? activeTiers[0] : null
+        onTiersUpdated?.(p.id, firstTier ? firstTier.precio_unitario : null, firstTier ? firstTier.min_qty : null)
       }
       setEditingTierId(null)
     } catch (e: any) {
@@ -335,7 +408,7 @@ export default function Product360Modal({ data, onClose, onPriceUpdated }: Props
     } finally {
       setSavingTier(false)
     }
-  }, [tierPrice, tierMinQty, tierMaxQty, editingTierId, p.id, toast])
+  }, [tierPrice, tierMinQty, tierMaxQty, editingTierId, p.id, onTiersUpdated, toast])
 
   const handleDeleteTier = useCallback(async (tierId: string) => {
     if (!window.confirm("¿Estás seguro de eliminar esta escala de precio mayorista?")) return
@@ -344,10 +417,19 @@ export default function Product360Modal({ data, onClose, onPriceUpdated }: Props
       await api.smartPricing.deleteTieredPrice(tierId)
       toast.success("Escala eliminada", "La escala fue eliminada correctamente")
       const fresh360 = await api.products.get360(p.id)
-      if (fresh360?.escalas_precio) {
-        setLocalEscalas(fresh360.escalas_precio)
+      if (fresh360) {
+        setData(fresh360)
+        if (fresh360.escalas_precio) {
+          setLocalEscalas(fresh360.escalas_precio)
+        } else {
+          setLocalEscalas(prev => prev.filter(e => e.id !== tierId))
+        }
+        const activeTiers = fresh360.escalas_precio || []
+        const firstTier = activeTiers.length > 0 ? activeTiers[0] : null
+        onTiersUpdated?.(p.id, firstTier ? firstTier.precio_unitario : null, firstTier ? firstTier.min_qty : null)
       } else {
         setLocalEscalas(prev => prev.filter(e => e.id !== tierId))
+        onTiersUpdated?.(p.id, null, null)
       }
       if (editingTierId === tierId) setEditingTierId(null)
     } catch (e: any) {
@@ -355,7 +437,7 @@ export default function Product360Modal({ data, onClose, onPriceUpdated }: Props
     } finally {
       setDeletingTierId(null)
     }
-  }, [p.id, editingTierId, toast])
+  }, [p.id, editingTierId, onTiersUpdated, toast])
 
   const handleAnalyzeIA = useCallback(async () => {
     setIaLoading(true)
@@ -711,13 +793,13 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
               </div>
 
               {/* Candado de Seguridad y Modificación de Precio */}
-              <div className={`rounded-2xl border p-5 ${locked ? "bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800" : "bg-gradient-to-br from-indigo-50 to-violet-50/50 dark:from-indigo-950/30 dark:to-violet-950/30 border-indigo-300 dark:border-indigo-700"}`}>
+              <div className={`rounded-2xl border p-5 ${locked ? "bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800" : "bg-gradient-to-br from-indigo-50/90 via-white to-violet-50/50 dark:from-slate-900 dark:via-indigo-950/30 dark:to-slate-900 border-2 border-indigo-400/80 dark:border-indigo-600 shadow-xl space-y-4 animate-in fade-in zoom-in-95 duration-150"}`}>
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
                     {locked ? <Lock className="w-5 h-5 text-slate-400" /> : <Unlock className="w-5 h-5 text-indigo-500" />}
                     <div>
                       <h4 className="text-sm font-black text-slate-800 dark:text-white">{locked ? "Candado de Precio Activo" : "Modificación de Precio Desbloqueada"}</h4>
-                      <p className="text-[10px] text-slate-400">{locked ? "El precio de lista está protegido contra cambios accidentales. Presioná Desbloquear para editar." : "Modificá el precio y evaluá en tiempo real los márgenes proyectados."}</p>
+                      <p className="text-[10px] text-slate-400">{locked ? "El precio de lista está protegido contra cambios accidentales. Presioná Desbloquear para editar." : "Modificá el precio y evaluá en tiempo real los márgenes proyectados con terminaciones psicológicas."}</p>
                     </div>
                   </div>
                   {canEditPrice ? (
@@ -732,27 +814,165 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                 </div>
 
                 {!locked && canEditPrice && (
-                  <div className="space-y-4">
-                    <div className="flex items-end gap-3">
-                      <div className="flex-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Nuevo Precio de Venta Unitario de Lista (₲)</label>
-                        <CurrencyInput
-                          currency="PYG"
-                          value={newPriceNum}
-                          onChangeValue={(num) => setNewPrice(String(num))}
-                          className="w-full px-4 py-3 rounded-xl border-2 border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-900 font-black text-lg text-indigo-700 dark:text-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
-                        />
+                  <div className="space-y-4 pt-2 border-t border-indigo-100 dark:border-slate-800">
+                    <div className="flex items-center justify-between border-b border-indigo-100 dark:border-slate-800 pb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2.5 py-1 rounded-lg text-xs font-black bg-indigo-600 text-white uppercase tracking-wider">
+                          Modificar Precio Unitario de Lista
+                        </span>
+                        <span className="text-xs text-slate-600 dark:text-slate-300 font-bold">
+                          Costo PPP de Referencia: <strong className="font-mono text-amber-600 dark:text-amber-400">{formatPYG(costoBaseSim)}</strong>
+                        </span>
                       </div>
-                      <button onClick={handleSavePrice} disabled={savingPrice || newPriceNum <= 0} className="flex items-center gap-2 px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-bold transition-colors cursor-pointer">
-                        {savingPrice ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}Guardar Precio
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLocked(true)
+                          setNewPrice(String(m.precio_venta))
+                        }}
+                        className="text-xs font-bold text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                      >
+                        Cancelar
                       </button>
                     </div>
 
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {/* Margen Objetivo Deseado */}
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Margen Objetivo Comercial (%)</label>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            step="0.5"
+                            value={unitTargetMargin}
+                            onChange={e => handleUnitMarginChange(e.target.value)}
+                            className="w-full px-3.5 py-2 rounded-xl border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-900 font-bold font-mono text-indigo-700 dark:text-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 pr-8"
+                          />
+                          <span className="absolute right-3 top-2 text-xs font-bold text-slate-400">%</span>
+                        </div>
+                      </div>
+
+                      {/* Referencia de Últ. Costo */}
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Últ. Costo de Compra</label>
+                        <div className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold font-mono text-slate-700 dark:text-slate-300">
+                          {costos.ultimo_costo > 0 ? formatPYG(costos.ultimo_costo) : "—"}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Presets rápidos de margen */}
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 mr-1">Márgenes Rápidos:</span>
+                      {["15", "18", "20", "22", "25", "28", "30", "35"].map(mVal => (
+                        <button
+                          key={mVal}
+                          type="button"
+                          onClick={() => handleUnitMarginChange(mVal)}
+                          className={`px-2 py-0.5 rounded-lg font-mono text-[11px] font-bold border transition-colors cursor-pointer ${
+                            unitTargetMargin === mVal
+                              ? "bg-indigo-600 text-white border-indigo-600"
+                              : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-400"
+                          }`}
+                        >
+                          {mVal}%
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Barra de Atajos: Precios Psicológicos */}
+                    <div className="bg-indigo-50/60 dark:bg-indigo-950/40 border border-indigo-200/60 dark:border-indigo-800/60 rounded-xl p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-indigo-900 dark:text-indigo-300 flex items-center gap-1">
+                          <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                          Reglas de Precios Psicológicos (Supermercado):
+                        </span>
+                        <span className="text-[10px] text-slate-400">Click para ajustar terminación</span>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => applyUnitPsychological("77")}
+                          className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 text-xs font-black hover:bg-amber-50 dark:hover:bg-amber-950/50 transition-colors shadow-sm cursor-pointer"
+                        >
+                          <span>✨ Final .77</span>
+                          <span className="text-[10px] opacity-75 font-mono">
+                            ({formatPYG(Math.floor((newPriceNum || costoBaseSim) / 100) * 100 + 77)})
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => applyUnitPsychological("900")}
+                          className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 text-xs font-bold hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors cursor-pointer"
+                        >
+                          <span>🎯 Final .900</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => applyUnitPsychological("000")}
+                          className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                        >
+                          <span>⚪ Redondo .000</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => applyUnitPsychological("500")}
+                          className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                        >
+                          <span>🪙 Final .500</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Input Principal: Precio Unitario Editable */}
+                    <div className="flex flex-wrap items-end gap-3 pt-1">
+                      <div className="flex-1 min-w-[220px]">
+                        <label className="text-[10px] font-black uppercase text-indigo-900 dark:text-indigo-200 block mb-1">
+                          Precio Unitario Final Resultante (₲ / unidad) — 100% editable
+                        </label>
+                        <div className="relative">
+                          <CurrencyInput
+                            currency="PYG"
+                            value={newPriceNum}
+                            onChangeValue={(num) => handleUnitPriceChange(num)}
+                            className="w-full px-4 py-2.5 rounded-xl border-2 border-indigo-500 bg-white dark:bg-slate-900 font-black text-xl text-indigo-700 dark:text-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-400 font-mono"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleSavePrice}
+                          disabled={savingPrice || newPriceNum <= 0}
+                          className="flex items-center gap-2 px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-bold transition-all shadow-md hover:shadow-lg cursor-pointer"
+                        >
+                          {savingPrice ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                          Guardar Precio
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLocked(true)
+                            setNewPrice(String(m.precio_venta))
+                          }}
+                          className="px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-sm font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Métricas Proyectadas en Vivo */}
                     {newPriceNum > 0 && (
                       <div className="grid grid-cols-3 gap-3">
-                        <div className={`p-3 rounded-xl border text-center ${newMargenPct >= 20 ? "bg-emerald-50 border-emerald-200" : newMargenPct >= 10 ? "bg-amber-50 border-amber-200" : "bg-rose-50 border-rose-200"}`}>
+                        <div className={`p-3 rounded-xl border text-center ${newMargenPct >= 20 ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800" : newMargenPct >= 10 ? "bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800" : "bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800"}`}>
                           <p className="text-[10px] text-slate-500 font-bold uppercase">Margen Proyectado sobre PPP</p>
-                          <p className={`text-xl font-black font-mono ${newMargenPct >= 20 ? "text-emerald-600" : newMargenPct >= 10 ? "text-amber-600" : "text-rose-600"}`}>{newMargenPct.toFixed(1)}%</p>
+                          <p className={`text-xl font-black font-mono ${newMargenPct >= 20 ? "text-emerald-600 dark:text-emerald-400" : newMargenPct >= 10 ? "text-amber-600 dark:text-amber-400" : "text-rose-600 dark:text-rose-400"}`}>{newMargenPct.toFixed(1)}%</p>
                           <p className="text-[9px] text-slate-400 font-mono">Ganancia: {formatPYG(newMargenMonto)}</p>
                         </div>
                         <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-center">
@@ -764,14 +984,14 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                         </div>
                         <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-center">
                           <p className="text-[10px] text-slate-500 font-bold uppercase">Nuevo Markup</p>
-                          <p className="text-xl font-black font-mono text-violet-600">{newMarkup.toFixed(1)}%</p>
+                          <p className="text-xl font-black font-mono text-violet-600 dark:text-violet-400">{newMarkup.toFixed(1)}%</p>
                           <p className="text-[9px] text-slate-400">Sobre costo PPP</p>
                         </div>
                       </div>
                     )}
 
                     {newPriceNum > 0 && newPriceNum < costoBaseSim && (
-                      <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-xs flex items-center gap-2 text-rose-700">
+                      <div className="bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl p-3 text-xs flex items-center gap-2 text-rose-700 dark:text-rose-300">
                         <AlertTriangle className="w-4 h-4 flex-shrink-0" />
                         <span>⚠️ <strong>Atención crítica:</strong> El precio ingresado ({formatPYG(newPriceNum)}) es inferior al costo ({formatPYG(costoBaseSim)}). Estarías vendiendo con pérdida directa.</span>
                       </div>
@@ -939,14 +1159,12 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                           Precio Mayorista Final Resultante (₲ / unidad) — 100% editable
                         </label>
                         <div className="relative">
-                          <input
-                            type="number"
-                            min={0}
-                            value={tierPrice}
-                            onChange={e => handlePriceManualChange(e.target.value)}
+                          <CurrencyInput
+                            currency="PYG"
+                            value={parseFloat(tierPrice) || 0}
+                            onChangeValue={(num) => handlePriceManualChange(String(num))}
                             className="w-full px-4 py-2.5 rounded-xl border-2 border-indigo-500 bg-white dark:bg-slate-900 font-black text-xl text-indigo-700 dark:text-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-400 font-mono"
                           />
-                          <span className="absolute right-4 top-3 text-xs font-bold text-slate-400 font-mono">PYG</span>
                         </div>
                       </div>
 
