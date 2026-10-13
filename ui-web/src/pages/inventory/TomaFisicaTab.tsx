@@ -3,7 +3,7 @@ import { createPortal } from "react-dom"
 import {
   Barcode, CheckCircle2, AlertTriangle, Clock, X, Plus, Search,
   Filter, RefreshCw, Eye, UserCheck, ShieldAlert, ArrowRight,
-  TrendingDown, Check, Layers, ChevronRight, AlertCircle, Sparkles,
+  TrendingDown, TrendingUp, Scale, Check, Layers, ChevronRight, AlertCircle, Sparkles,
   ClipboardList, Users, Shield, ShieldCheck, ArrowLeft, Send,
   Printer, Building2, Tag, FileSpreadsheet
 } from "lucide-react"
@@ -385,7 +385,19 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
   // ---------------------------------------------------------------------------
   const sessionStats = useMemo(() => {
     if (!activeSession || !activeSession.items) {
-      return { total: 0, c1Counted: 0, c2Counted: 0, reconciled: 0, discrepancies: 0 }
+      return {
+        total: 0,
+        c1Counted: 0,
+        c2Counted: 0,
+        reconciled: 0,
+        discrepancies: 0,
+        totalSobrantesGs: 0,
+        totalFaltantesGs: 0,
+        balanceNetoGs: 0,
+        itemsSobrantes: 0,
+        itemsFaltantes: 0,
+        itemsSinDiferencia: 0,
+      }
     }
     const items = activeSession.items
     const total = items.length
@@ -394,7 +406,50 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
     const reconciled = items.filter((i) => i.estado === "reconciliado").length
     const discrepancies = items.filter((i) => i.estado === "conteo_2").length
 
-    return { total, c1Counted, c2Counted, reconciled, discrepancies }
+    let totalSobrantesGs = 0
+    let totalFaltantesGs = 0
+    let itemsSobrantes = 0
+    let itemsFaltantes = 0
+    let itemsSinDiferencia = 0
+
+    items.forEach((it) => {
+      const diff =
+        it.diferencia != null
+          ? Number(it.diferencia)
+          : it.cantidad_final != null
+          ? Number(it.cantidad_final) - Number(it.cantidad_sistema)
+          : null
+      if (diff == null) return
+
+      const costo = Number(it.costo_unitario || 0)
+      const impacto = it.impacto_gs != null ? Number(it.impacto_gs) : diff * costo
+
+      if (diff > 0.0001) {
+        totalSobrantesGs += Math.abs(impacto)
+        itemsSobrantes++
+      } else if (diff < -0.0001) {
+        totalFaltantesGs += Math.abs(impacto)
+        itemsFaltantes++
+      } else {
+        itemsSinDiferencia++
+      }
+    })
+
+    const balanceNetoGs = totalSobrantesGs - totalFaltantesGs
+
+    return {
+      total,
+      c1Counted,
+      c2Counted,
+      reconciled,
+      discrepancies,
+      totalSobrantesGs,
+      totalFaltantesGs,
+      balanceNetoGs,
+      itemsSobrantes,
+      itemsFaltantes,
+      itemsSinDiferencia,
+    }
   }, [activeSession])
 
   // Filtrado de ítems en la planilla
@@ -593,6 +648,98 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
             </p>
             <p className="text-[10px] text-amber-600/80 mt-1">
               {sessionStats.reconciled} auto/reconciliados
+            </p>
+          </div>
+        </div>
+
+        {/* ── BALANCE FINANCIERO: GANANCIAS (SOBRANTES) VS PÉRDIDAS (FALTANTES) ── */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* Sobrantes (Ganancia) */}
+          <div className="p-3.5 bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-200/80 dark:border-emerald-900/40 rounded-2xl shadow-xs space-y-1">
+            <div className="flex items-center justify-between text-xs font-bold text-emerald-700 dark:text-emerald-400">
+              <span className="flex items-center gap-1.5">
+                <TrendingUp className="w-4 h-4 text-emerald-600" />
+                <span>Sobrantes / Ganancia (+)</span>
+              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/60 font-black">
+                {sessionStats.itemsSobrantes} prod.
+              </span>
+            </div>
+            <p className="text-xl font-black font-mono text-emerald-700 dark:text-emerald-400">
+              +{formatPYG(sessionStats.totalSobrantesGs)}
+            </p>
+            <p className="text-[11px] text-emerald-600/80">
+              Mercadería física detectada por encima del sistema
+            </p>
+          </div>
+
+          {/* Faltantes (Pérdida) */}
+          <div className="p-3.5 bg-rose-50/60 dark:bg-rose-950/20 border border-rose-200/80 dark:border-rose-900/40 rounded-2xl shadow-xs space-y-1">
+            <div className="flex items-center justify-between text-xs font-bold text-rose-700 dark:text-rose-400">
+              <span className="flex items-center gap-1.5">
+                <TrendingDown className="w-4 h-4 text-rose-600" />
+                <span>Faltantes / Pérdida (-)</span>
+              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-900/60 font-black">
+                {sessionStats.itemsFaltantes} prod.
+              </span>
+            </div>
+            <p className="text-xl font-black font-mono text-rose-700 dark:text-rose-400">
+              -{formatPYG(sessionStats.totalFaltantesGs)}
+            </p>
+            <p className="text-[11px] text-rose-600/80">
+              Merma, rotura o desvío de stock a regularizar
+            </p>
+          </div>
+
+          {/* Balance Neto */}
+          <div
+            className={`p-3.5 border rounded-2xl shadow-xs space-y-1 ${
+              sessionStats.balanceNetoGs > 0
+                ? "bg-emerald-100/50 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800"
+                : sessionStats.balanceNetoGs < 0
+                ? "bg-rose-100/50 dark:bg-rose-950/30 border-rose-300 dark:border-rose-800"
+                : "bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800"
+            }`}
+          >
+            <div className="flex items-center justify-between text-xs font-bold">
+              <span className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300">
+                <Scale className="w-4 h-4 text-slate-500" />
+                <span>Balance Financiero Neto</span>
+              </span>
+              <span
+                className={`text-[10px] px-2 py-0.5 rounded-full font-black uppercase ${
+                  sessionStats.balanceNetoGs > 0
+                    ? "bg-emerald-200 text-emerald-900 dark:bg-emerald-900 dark:text-emerald-300"
+                    : sessionStats.balanceNetoGs < 0
+                    ? "bg-rose-200 text-rose-900 dark:bg-rose-900 dark:text-rose-300"
+                    : "bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                }`}
+              >
+                {sessionStats.balanceNetoGs > 0
+                  ? "Superávit (+)"
+                  : sessionStats.balanceNetoGs < 0
+                  ? "Déficit (-)"
+                  : "Cuadrado"}
+              </span>
+            </div>
+            <p
+              className={`text-xl font-black font-mono ${
+                sessionStats.balanceNetoGs > 0
+                  ? "text-emerald-700 dark:text-emerald-400"
+                  : sessionStats.balanceNetoGs < 0
+                  ? "text-rose-700 dark:text-rose-400"
+                  : "text-slate-600 dark:text-slate-400"
+              }`}
+            >
+              {sessionStats.balanceNetoGs > 0
+                ? `+${formatPYG(sessionStats.balanceNetoGs)}`
+                : sessionStats.balanceNetoGs < 0
+                ? `-${formatPYG(Math.abs(sessionStats.balanceNetoGs))}`
+                : "₲ 0"}
+            </p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Impacto final sobre el inventario valorizado
             </p>
           </div>
         </div>
@@ -876,23 +1023,79 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                             className={`p-3.5 text-right font-mono font-black ${
                               item.diferencia == null
                                 ? "text-slate-400"
-                                : item.diferencia === 0
+                                : Number(item.diferencia) === 0
                                 ? "text-slate-400"
-                                : item.diferencia > 0
+                                : Number(item.diferencia) > 0
                                 ? "text-emerald-600"
                                 : "text-rose-600"
                             }`}
                           >
-                            {item.diferencia != null
-                              ? item.diferencia > 0
-                                ? `+${item.diferencia}`
-                                : item.diferencia
-                              : "—"}
+                            {item.diferencia != null ? (
+                              Number(item.diferencia) > 0 ? (
+                                <span className="inline-flex items-center gap-1">
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400 font-bold uppercase">
+                                    Sob
+                                  </span>
+                                  +{item.diferencia}
+                                </span>
+                              ) : Number(item.diferencia) < 0 ? (
+                                <span className="inline-flex items-center gap-1">
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-400 font-bold uppercase">
+                                    Falt
+                                  </span>
+                                  {item.diferencia}
+                                </span>
+                              ) : (
+                                "0"
+                              )
+                            ) : (
+                              "—"
+                            )}
                           </td>
 
-                          {/* Impacto Gs. */}
-                          <td className="p-3.5 text-right font-mono font-bold text-slate-900 dark:text-white">
-                            {item.impacto_gs != null ? formatPYG(item.impacto_gs) : "—"}
+                          {/* Impacto Financiero Gs. */}
+                          <td className="p-3.5 text-right font-mono font-black">
+                            {item.diferencia != null ? (
+                              Number(item.diferencia) > 0 ? (
+                                <div className="flex flex-col items-end">
+                                  <span className="text-emerald-600 dark:text-emerald-400 text-xs sm:text-sm">
+                                    +{formatPYG(
+                                      Math.abs(
+                                        Number(
+                                          item.impacto_gs != null
+                                            ? item.impacto_gs
+                                            : Number(item.diferencia) * Number(item.costo_unitario || 0)
+                                        )
+                                      )
+                                    )}
+                                  </span>
+                                  <span className="text-[10px] font-extrabold text-emerald-600/80 uppercase">
+                                    Ganancia (+)
+                                  </span>
+                                </div>
+                              ) : Number(item.diferencia) < 0 ? (
+                                <div className="flex flex-col items-end">
+                                  <span className="text-rose-600 dark:text-rose-400 text-xs sm:text-sm">
+                                    -{formatPYG(
+                                      Math.abs(
+                                        Number(
+                                          item.impacto_gs != null
+                                            ? item.impacto_gs
+                                            : Number(item.diferencia) * Number(item.costo_unitario || 0)
+                                        )
+                                      )
+                                    )}
+                                  </span>
+                                  <span className="text-[10px] font-extrabold text-rose-600/80 uppercase">
+                                    Pérdida (-)
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 font-medium text-xs">₲ 0</span>
+                              )
+                            ) : (
+                              <span className="text-slate-400">—</span>
+                            )}
                           </td>
 
                           {/* Acción Reconciliar */}
@@ -1057,6 +1260,43 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                       válido.
                     </div>
                   )}
+
+                  {/* Resumen Financiero Pre-Cierre */}
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl space-y-2 text-xs">
+                    <span className="font-bold uppercase tracking-wider text-[10px] text-slate-400 block">
+                      Balance Financiero a Registrar:
+                    </span>
+                    <div className="flex justify-between items-center text-emerald-600 dark:text-emerald-400 font-bold">
+                      <span>Sobrantes / Ganancia (+):</span>
+                      <span className="font-mono font-black">
+                        +{formatPYG(sessionStats.totalSobrantesGs)} ({sessionStats.itemsSobrantes} prod.)
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-rose-600 dark:text-rose-400 font-bold">
+                      <span>Faltantes / Pérdida (-):</span>
+                      <span className="font-mono font-black">
+                        -{formatPYG(sessionStats.totalFaltantesGs)} ({sessionStats.itemsFaltantes} prod.)
+                      </span>
+                    </div>
+                    <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex justify-between items-center font-black">
+                      <span>Impacto Financiero Neto:</span>
+                      <span
+                        className={`font-mono text-sm ${
+                          sessionStats.balanceNetoGs > 0
+                            ? "text-emerald-600"
+                            : sessionStats.balanceNetoGs < 0
+                            ? "text-rose-600"
+                            : "text-slate-500"
+                        }`}
+                      >
+                        {sessionStats.balanceNetoGs > 0
+                          ? `+${formatPYG(sessionStats.balanceNetoGs)}`
+                          : sessionStats.balanceNetoGs < 0
+                          ? `-${formatPYG(Math.abs(sessionStats.balanceNetoGs))}`
+                          : "₲ 0"}
+                      </span>
+                    </div>
+                  </div>
 
                   <div className="flex items-center justify-end gap-2 pt-2">
                     <button
@@ -1508,8 +1748,30 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                       </td>
 
                       {/* Impacto Financiero Gs. */}
-                      <td className="p-3.5 text-right font-mono font-black text-slate-900 dark:text-white">
-                        {formatPYG(session.diferencia_total_gs || 0)}
+                      <td className="p-3.5 text-right font-mono font-black">
+                        {session.diferencia_total_gs != null && Number(session.diferencia_total_gs) !== 0 ? (
+                          Number(session.diferencia_total_gs) > 0 ? (
+                            <div className="flex flex-col items-end">
+                              <span className="text-emerald-600 dark:text-emerald-400 text-xs sm:text-sm">
+                                +{formatPYG(session.diferencia_total_gs)}
+                              </span>
+                              <span className="text-[10px] font-extrabold text-emerald-600/80 uppercase">
+                                Superávit (+)
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col items-end">
+                              <span className="text-rose-600 dark:text-rose-400 text-xs sm:text-sm">
+                                -{formatPYG(Math.abs(Number(session.diferencia_total_gs)))}
+                              </span>
+                              <span className="text-[10px] font-extrabold text-rose-600/80 uppercase">
+                                Déficit (-)
+                              </span>
+                            </div>
+                          )
+                        ) : (
+                          <span className="text-slate-400 font-medium text-xs">₲ 0</span>
+                        )}
                       </td>
 
                       {/* Estado */}

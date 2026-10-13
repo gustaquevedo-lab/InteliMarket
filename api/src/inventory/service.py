@@ -457,7 +457,7 @@ async def create_adjustment(
                 "al menos un archivo de evidencia (foto/documento) adjunto."
             )
 
-    # Pre-calcular impacto financiero sumando diferencias valorizadas
+    # Pre-calcular impacto financiero sumando diferencias valorizadas (con signo)
     impacto_total = 0
     enriched_items = []
     for item_data in data.items:
@@ -470,7 +470,8 @@ async def create_adjustment(
             if product:
                 costo = float(product.costo_promedio or product.ultimo_costo or 0)
 
-        impacto_item = abs(diff) * costo
+        # Impacto financiero con signo: diff > 0 -> ganancia (+), diff < 0 -> pérdida (-)
+        impacto_item = diff * costo
         impacto_total += impacto_item
         enriched_items.append((item_data, diff, costo, impacto_item))
 
@@ -1559,7 +1560,7 @@ async def register_item_count(
         if abs(float(body.cantidad) - float(item.cantidad_conteo_1)) < 0.001:
             item.cantidad_final = float(body.cantidad)
             item.diferencia = float(body.cantidad) - float(item.cantidad_sistema)
-            item.impacto_gs = int(abs(item.diferencia) * float(item.costo_unitario or 0))
+            item.impacto_gs = int(item.diferencia * float(item.costo_unitario or 0))
             item.estado = "reconciliado"
         else:
             item.estado = "conteo_2"  # Discrepancia — requiere reconciliación manual
@@ -1594,7 +1595,7 @@ async def reconcile_item(
 
     item.cantidad_final = float(body.cantidad_final)
     item.diferencia = float(body.cantidad_final) - float(item.cantidad_sistema)
-    item.impacto_gs = int(abs(item.diferencia) * float(item.costo_unitario or 0))
+    item.impacto_gs = int(item.diferencia * float(item.costo_unitario or 0))
     item.reconciliado_by = user_id
     item.nota_reconciliacion = body.nota_reconciliacion
     item.estado = "reconciliado"
@@ -1657,6 +1658,10 @@ async def close_physical_session(
 
     adjustment = None
     if items_con_diff:
+        # Desglose financiero claro de sobrantes (ganancia) vs faltantes (pérdida)
+        sobrantes_gs = sum(float(i.impacto_gs or 0) for i in items_con_diff if float(i.impacto_gs or 0) > 0)
+        faltantes_gs = abs(sum(float(i.impacto_gs or 0) for i in items_con_diff if float(i.impacto_gs or 0) < 0))
+
         # Crear ajuste automáticamente para las diferencias
         adj_code = f"ADJ-TF-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M')}-{uuid.uuid4().hex[:4].upper()}"
         motivo_info = MOTIVOS_AJUSTE["conteo_fisico"]
@@ -1670,7 +1675,9 @@ async def close_physical_session(
             motivo_detalle=(
                 f"Toma física {session.codigo} ({session.tipo}). "
                 f"{len(items_con_diff)} productos con diferencia. "
-                f"Impacto total: Gs. {int(diferencia_total_gs):,}"
+                f"Sobrantes (+): Gs. {int(sobrantes_gs):,} | "
+                f"Faltantes (-): Gs. -{int(faltantes_gs):,} | "
+                f"Impacto Neto: Gs. {int(diferencia_total_gs):,}"
             ),
             motivo=motivo_info["label"],
             riesgo=motivo_info["riesgo"],

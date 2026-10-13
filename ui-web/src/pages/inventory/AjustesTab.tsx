@@ -4,7 +4,7 @@ import {
   ShieldAlert, ShieldCheck, AlertCircle, CheckCircle2, Clock, X,
   Plus, Search, Filter, RefreshCw, FileText, UploadCloud, Trash2,
   ExternalLink, Eye, ChevronRight, Check, AlertTriangle, ArrowRight,
-  TrendingDown, TrendingUp, Layers, HelpCircle, UserCheck, Shield,
+  TrendingDown, TrendingUp, Scale, Layers, HelpCircle, UserCheck, Shield,
   Barcode
 } from "lucide-react"
 import {
@@ -376,10 +376,24 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
     return motivos.find((m) => m.codigo === createMotivoCodigo)
   }, [motivos, createMotivoCodigo])
 
-  // Cálculo en vivo del impacto total en el formulario
-  const totalImpactoEstimado = useMemo(() => {
-    return createItems.reduce((acc, item) => acc + Math.abs(item.impacto_gs), 0)
+  // Cálculo en vivo del impacto financiero desglosado en el formulario
+  const liveStats = useMemo(() => {
+    let ganancia = 0
+    let perdida = 0
+    createItems.forEach((it) => {
+      const imp = it.impacto_gs
+      if (imp > 0) ganancia += imp
+      else if (imp < 0) perdida += Math.abs(imp)
+    })
+    return {
+      ganancia,
+      perdida,
+      neto: ganancia - perdida,
+      totalAbsoluto: ganancia + perdida,
+    }
   }, [createItems])
+
+  const totalImpactoEstimado = liveStats.neto
 
   // Búsqueda de productos en el modal
   useEffect(() => {
@@ -626,11 +640,27 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
     const pGerencia = adjustments.filter((a) => a.estado === "pendiente_gerencia").length
     const pAdmin = adjustments.filter((a) => a.estado === "pendiente_administracion").length
     const aprobados = adjustments.filter((a) => a.estado === "aprobado").length
-    const impactoTotalPendiente = adjustments
-      .filter((a) => a.estado === "pendiente_gerencia" || a.estado === "pendiente_administracion")
-      .reduce((acc, a) => acc + Math.abs(Number(a.impacto_financiero_gs || 0)), 0)
 
-    return { total, pGerencia, pAdmin, aprobados, impactoTotalPendiente }
+    const pendientes = adjustments.filter(
+      (a) => a.estado === "pendiente_gerencia" || a.estado === "pendiente_administracion"
+    )
+    const gananciaPendiente = pendientes
+      .filter((a) => Number(a.impacto_financiero_gs || 0) > 0)
+      .reduce((acc, a) => acc + Number(a.impacto_financiero_gs || 0), 0)
+    const perdidaPendiente = pendientes
+      .filter((a) => Number(a.impacto_financiero_gs || 0) < 0)
+      .reduce((acc, a) => acc + Math.abs(Number(a.impacto_financiero_gs || 0)), 0)
+    const balanceNetoPendiente = gananciaPendiente - perdidaPendiente
+
+    return {
+      total,
+      pGerencia,
+      pAdmin,
+      aprobados,
+      gananciaPendiente,
+      perdidaPendiente,
+      balanceNetoPendiente,
+    }
   }, [adjustments])
 
   return (
@@ -674,17 +704,61 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
           </p>
         </div>
 
-        <div className="p-4 bg-rose-50/60 dark:bg-rose-950/20 border border-rose-200/80 dark:border-rose-900/40 rounded-2xl shadow-xs space-y-1">
-          <div className="flex items-center justify-between text-xs font-bold text-rose-700 dark:text-rose-400">
-            <span>Impacto Pendiente</span>
-            <ShieldAlert className="w-4 h-4 text-rose-500" />
+        <div
+          className={`p-4 border rounded-2xl shadow-xs space-y-1 ${
+            metrics.balanceNetoPendiente > 0
+              ? "bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-200/80 dark:border-emerald-900/40"
+              : metrics.balanceNetoPendiente < 0
+              ? "bg-rose-50/60 dark:bg-rose-950/20 border-rose-200/80 dark:border-rose-900/40"
+              : "bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800"
+          }`}
+        >
+          <div className="flex items-center justify-between text-xs font-bold">
+            <span
+              className={
+                metrics.balanceNetoPendiente > 0
+                  ? "text-emerald-700 dark:text-emerald-400"
+                  : metrics.balanceNetoPendiente < 0
+                  ? "text-rose-700 dark:text-rose-400"
+                  : "text-slate-600 dark:text-slate-400"
+              }
+            >
+              Balance Pendiente
+            </span>
+            <Scale
+              className={`w-4 h-4 ${
+                metrics.balanceNetoPendiente > 0
+                  ? "text-emerald-500"
+                  : metrics.balanceNetoPendiente < 0
+                  ? "text-rose-500"
+                  : "text-slate-400"
+              }`}
+            />
           </div>
-          <p className="text-xl font-black font-mono text-rose-700 dark:text-rose-400 truncate">
-            {formatPYG(metrics.impactoTotalPendiente)}
+          <p
+            className={`text-xl font-black font-mono truncate ${
+              metrics.balanceNetoPendiente > 0
+                ? "text-emerald-700 dark:text-emerald-400"
+                : metrics.balanceNetoPendiente < 0
+                ? "text-rose-700 dark:text-rose-400"
+                : "text-slate-700 dark:text-slate-300"
+            }`}
+          >
+            {metrics.balanceNetoPendiente > 0
+              ? `+${formatPYG(metrics.balanceNetoPendiente)}`
+              : metrics.balanceNetoPendiente < 0
+              ? `-${formatPYG(Math.abs(metrics.balanceNetoPendiente))}`
+              : "₲ 0"}
           </p>
-          <p className="text-[11px] text-rose-600/80 dark:text-rose-500/80">
-            En espera de doble resolución
-          </p>
+          <div className="flex items-center gap-1.5 text-[10px] font-bold">
+            <span className="text-emerald-600 dark:text-emerald-400">
+              +{formatPYG(metrics.gananciaPendiente)}
+            </span>
+            <span className="text-slate-300 dark:text-slate-700">•</span>
+            <span className="text-rose-600 dark:text-rose-400">
+              -{formatPYG(metrics.perdidaPendiente)}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -852,8 +926,28 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                       </td>
 
                       {/* Impacto Financiero Gs. */}
-                      <td className="p-3.5 text-right font-mono font-black text-sm text-slate-900 dark:text-white">
-                        {formatPYG(adj.impacto_financiero_gs || 0)}
+                      <td className="p-3.5 text-right font-mono font-black text-sm">
+                        {Number(adj.impacto_financiero_gs || 0) > 0 ? (
+                          <div className="flex flex-col items-end">
+                            <span className="text-emerald-600 dark:text-emerald-400 font-black">
+                              +{formatPYG(adj.impacto_financiero_gs)}
+                            </span>
+                            <span className="inline-flex items-center gap-0.5 text-[10px] font-extrabold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-300 px-1.5 py-0.5 rounded-sm uppercase">
+                              Ganancia (+)
+                            </span>
+                          </div>
+                        ) : Number(adj.impacto_financiero_gs || 0) < 0 ? (
+                          <div className="flex flex-col items-end">
+                            <span className="text-rose-600 dark:text-rose-400 font-black">
+                              -{formatPYG(Math.abs(Number(adj.impacto_financiero_gs)))}
+                            </span>
+                            <span className="inline-flex items-center gap-0.5 text-[10px] font-extrabold text-rose-700 bg-rose-50 dark:bg-rose-950/40 dark:text-rose-300 px-1.5 py-0.5 rounded-sm uppercase">
+                              Pérdida (-)
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-slate-400 font-medium text-xs">₲ 0</span>
+                        )}
                       </td>
 
                       {/* Estado Workflow */}
@@ -1323,7 +1417,11 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                                   item.impacto_gs < 0 ? "text-rose-600" : "text-emerald-600"
                                 }`}
                               >
-                                {formatPYG(item.impacto_gs)}
+                                {item.impacto_gs > 0
+                                  ? `+${formatPYG(item.impacto_gs)}`
+                                  : item.impacto_gs < 0
+                                  ? `-${formatPYG(Math.abs(item.impacto_gs))}`
+                                  : "₲ 0"}
                               </td>
                               <td className="p-2.5 text-center">
                                 <button
@@ -1394,19 +1492,41 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                   )}
                 </div>
 
-                {/* Total Impacto Calculado en Tiempo Real */}
-                <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl flex items-center justify-between border border-slate-200 dark:border-slate-700">
-                  <div>
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
-                      Impacto Financiero Total Estimado
-                    </span>
-                    <span className="text-xs text-slate-500">
-                      {createItems.length} producto(s) incluidos
+                {/* Total Impacto Calculado en Tiempo Real (Desglosado) */}
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
+                        Balance Financiero del Ajuste
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        {createItems.length} producto(s) incluidos
+                      </span>
+                    </div>
+                    <span
+                      className={`text-xl font-black font-mono ${
+                        liveStats.neto > 0
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : liveStats.neto < 0
+                          ? "text-rose-600 dark:text-rose-400"
+                          : "text-slate-900 dark:text-white"
+                      }`}
+                    >
+                      {liveStats.neto > 0
+                        ? `+${formatPYG(liveStats.neto)}`
+                        : liveStats.neto < 0
+                        ? `-${formatPYG(Math.abs(liveStats.neto))}`
+                        : "₲ 0"}
                     </span>
                   </div>
-                  <span className="text-xl font-black font-mono text-slate-900 dark:text-white">
-                    {formatPYG(totalImpactoEstimado)}
-                  </span>
+                  <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200 dark:border-slate-700">
+                    <span className="text-emerald-600 font-bold">
+                      Ganancia / Sobrantes: +{formatPYG(liveStats.ganancia)}
+                    </span>
+                    <span className="text-rose-600 font-bold">
+                      Pérdida / Faltantes: -{formatPYG(liveStats.perdida)}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Footer Modal */}
@@ -1591,10 +1711,14 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                             </td>
                             <td
                               className={`p-3 text-right font-mono font-extrabold ${
-                                it.impacto_gs < 0 ? "text-rose-600" : "text-emerald-600"
+                                it.diferencia < 0 ? "text-rose-600" : "text-emerald-600"
                               }`}
                             >
-                              {formatPYG(it.impacto_gs)}
+                              {it.diferencia > 0
+                                ? `+${formatPYG(Math.abs(Number(it.impacto_gs || 0)))}`
+                                : it.diferencia < 0
+                                ? `-${formatPYG(Math.abs(Number(it.impacto_gs || 0)))}`
+                                : "₲ 0"}
                             </td>
                           </tr>
                         ))}
