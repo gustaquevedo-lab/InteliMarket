@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
-from api.src.auth import require_auth
+from api.src.auth.middleware import require_auth
 from api.src.delivery_notes.schemas import (
     DeliveryNoteCreate,
     DeliveryNoteApplyInput,

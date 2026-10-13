@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
-from api.src.auth import require_auth
+from api.src.auth.middleware import require_auth
 from api.src.pagares.schemas import PagareCreate, PagarePayInput, PagareProtestInput, PagareResponse
 from api.src.pagares.service import PagareService
 
