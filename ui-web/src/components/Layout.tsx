@@ -131,6 +131,7 @@ const navGroups: NavGroup[] = [
       { icon: ReceiptText, label: "Gastos Operativos", path: "/gastos" },
       { icon: DollarSign, label: "PyG Diario por Depto.", path: "/pyg-diario" },
       { icon: Building, label: "Gestión Financiera", path: "/financiero" },
+      { icon: FileSpreadsheet, label: "Cierre Mensual de Resultados", path: "/financiero/cierre-mensual", keywords: ["cierre", "pnl", "resultados", "mensual", "setiembre", "septiembre", "balance"] },
     ]
   },
   {

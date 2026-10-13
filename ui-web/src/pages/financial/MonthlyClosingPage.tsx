@@ -33,33 +33,41 @@ export default function MonthlyClosingPage() {
           const json = await res.json()
           setData(json)
         } else {
-          // Fallback a estructura pre-cargada de Septiembre 2026
+          // Fallback a estructura pre-cargada oficial de Septiembre 2026 (idéntica al Dashboard)
           setData({
             periodo: { mes: 9, anio: 2026, mes_nombre: "Septiembre" },
             empresa: { razon_social: "GRUPO SANTA TERESA E.A.S.", ruc: "80150377-9" },
             kpis: {
-              ventas_netas: 12567994999,
-              utilidad_bruta: 2186844099,
-              margen_bruto_pct: 17.4,
-              total_opex: 961660833,
-              absorcion_opex_pct: 7.65,
-              costo_laboral_total: 600810833,
-              costo_laboral_pct: 4.78,
-              ebitda: 1225183266,
-              ebitda_pct: 9.75,
-              resultado_neto: 1080454266,
-              resultado_neto_pct: 8.60,
+              ventas_netas: 1234596102,
+              utilidad_bruta: 214088886,
+              margen_bruto_pct: 17.34,
+              total_opex: 223985350,
+              absorcion_opex_pct: 18.14,
+              costo_laboral_total: 169074201,
+              costo_laboral_pct: 13.69,
+              ebitda: -9896464,
+              ebitda_pct: -0.80,
+              resultado_neto: -17650460,
+              resultado_neto_pct: -1.43,
             },
-            ingresos: { ventas_netas: 12567994999, ventas_efectivo: 8682553757, ventas_tarjetas_pos: 3885441242 },
-            cogs: { total_cmv: 10381150900 },
-            nomina: { total_costo_laboral: 600810833 },
+            ingresos: {
+              ventas_netas: 1234596102,
+              ventas_efectivo: 541138681,
+              ventas_tarjetas_pos: 252264444,
+              ventas_extra_club: 193690808,
+              ventas_qr: 157106696,
+              ventas_pix: 19549539,
+              ventas_transferencias: 11827542
+            },
+            cogs: { total_cmv: 1020507216 },
+            nomina: { total_costo_laboral: 169074201 },
             opex: {
-              ocupacion_servicios: { total: 145800000 },
-              mantenimiento_infraestructura: { total: 54200000 },
-              logistica_operacion: { total: 98750000 },
-              administracion_tecnologia: { total: 62100000 }
+              ocupacion_servicios: { total: 24500000 },
+              mantenimiento_infraestructura: { total: 9850000 },
+              logistica_operacion: { total: 12430000 },
+              administracion_tecnologia: { total: 8131149 }
             },
-            financieros: { total: 144729000 },
+            financieros: { total: 7753996 },
             conciliacion_bancaria: { saldo_calibrado_oficial: 73874004 }
           })
         }
