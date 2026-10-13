@@ -66,3 +66,48 @@ class PriceListItemResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class PriceVariationItem(BaseModel):
+    id: uuid.UUID
+    company_id: uuid.UUID
+    product_id: uuid.UUID
+    product_nombre: Optional[str] = None
+    product_sku: Optional[str] = None
+    product_barcode: Optional[str] = None
+    categoria_nombre: Optional[str] = None
+    tipo: str  # 'unitario' | 'escala'
+    escala_min_qty: Optional[int] = None
+    precio_anterior: float
+    precio_nuevo: float
+    diferencia_monto: float
+    diferencia_pct: float
+    origen: Optional[str] = None
+    usuario_id: Optional[uuid.UUID] = None
+    usuario_nombre: Optional[str] = None
+    motivo: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PriceVariationsSummary(BaseModel):
+    total_modificaciones: int = 0
+    total_subidas: int = 0
+    total_bajadas: int = 0
+    promedio_variacion_pct: float = 0.0
+
+
+class PriceVariationsPagination(BaseModel):
+    total: int = 0
+    page: int = 1
+    page_size: int = 25
+    total_pages: int = 1
+
+
+class PriceVariationsResponse(BaseModel):
+    resumen: PriceVariationsSummary
+    paginacion: PriceVariationsPagination
+    items: list[PriceVariationItem]
+

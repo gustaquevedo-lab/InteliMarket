@@ -1,15 +1,18 @@
 """Price list service"""
 
-from sqlalchemy import select, text, func as sa_func
+from datetime import datetime, time
+from zoneinfo import ZoneInfo
+from sqlalchemy import select, text, func as sa_func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 import uuid
 
-from api.src.price_lists.models import PriceList, PriceListItem
+from api.src.price_lists.models import PriceList, PriceListItem, PriceVariationLog
 from api.src.price_lists.schemas import PriceListCreate, PriceListUpdate, PriceListItemCreate, PriceListItemUpdate
 from api.src.smart_pricing.models import PriceListAssignment
 from api.src.smart_pricing.service import get_applicable_tier_price
 from api.src.customers.models import Customer
+
 
 
 async def create_price_list(db: AsyncSession, data: PriceListCreate) -> PriceList:
@@ -284,4 +287,197 @@ async def get_products_with_tiers(
         "limit": limit,
         "offset": offset,
     }
+
+
+# =========================================================================
+# VARIACIONES DE PRECIOS REGULARES (AUDITORÍA & REPORTES)
+# =========================================================================
+
+PY_TZ = ZoneInfo("America/Asuncion")
+
+
+def _build_variations_filters(
+    company_id: str,
+    fecha_desde: Optional[str] = None,
+    fecha_hasta: Optional[str] = None,
+    tipo: Optional[str] = None,
+    search: Optional[str] = None,
+) -> list:
+    cid = uuid.UUID(company_id)
+    conditions = [PriceVariationLog.company_id == cid]
+
+    if fecha_desde and fecha_desde.strip():
+        try:
+            d_start = datetime.strptime(fecha_desde.strip(), "%Y-%m-%d").date()
+            start_dt = datetime.combine(d_start, time.min, tzinfo=PY_TZ)
+            conditions.append(PriceVariationLog.created_at >= start_dt)
+        except Exception:
+            pass
+
+    if fecha_hasta and fecha_hasta.strip():
+        try:
+            d_end = datetime.strptime(fecha_hasta.strip(), "%Y-%m-%d").date()
+            end_dt = datetime.combine(d_end, time.max, tzinfo=PY_TZ)
+            conditions.append(PriceVariationLog.created_at <= end_dt)
+        except Exception:
+            pass
+
+    if tipo and tipo.strip() and tipo.strip().lower() in ("unitario", "escala"):
+        conditions.append(PriceVariationLog.tipo == tipo.strip().lower())
+
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        conditions.append(
+            or_(
+                PriceVariationLog.product_nombre.ilike(pattern),
+                PriceVariationLog.product_sku.ilike(pattern),
+                PriceVariationLog.product_barcode.ilike(pattern),
+                PriceVariationLog.categoria_nombre.ilike(pattern),
+            )
+        )
+
+    return conditions
+
+
+def _build_variations_order(order_by: str = "fecha_desc") -> list:
+    if order_by == "fecha_asc":
+        return [PriceVariationLog.created_at.asc()]
+    elif order_by == "nombre_asc":
+        return [PriceVariationLog.product_nombre.asc().nulls_last(), PriceVariationLog.created_at.desc()]
+    elif order_by == "nombre_desc":
+        return [PriceVariationLog.product_nombre.desc().nulls_last(), PriceVariationLog.created_at.desc()]
+    return [PriceVariationLog.created_at.desc()]
+
+
+async def list_price_variations(
+    db: AsyncSession,
+    company_id: str,
+    fecha_desde: Optional[str] = None,
+    fecha_hasta: Optional[str] = None,
+    tipo: Optional[str] = None,
+    search: Optional[str] = None,
+    order_by: str = "fecha_desc",
+    page: int = 1,
+    page_size: int = 25,
+) -> dict:
+    conditions = _build_variations_filters(company_id, fecha_desde, fecha_hasta, tipo, search)
+    order_clause = _build_variations_order(order_by)
+
+    # 1. Resumen estadístico
+    summary_q = select(
+        sa_func.count(PriceVariationLog.id).label("total"),
+        sa_func.count(PriceVariationLog.id).filter(PriceVariationLog.diferencia_monto > 0).label("subidas"),
+        sa_func.count(PriceVariationLog.id).filter(PriceVariationLog.diferencia_monto < 0).label("bajadas"),
+        sa_func.avg(PriceVariationLog.diferencia_pct).label("promedio_pct"),
+    ).where(*conditions)
+
+    summary_res = (await db.execute(summary_q)).fetchone()
+    total = summary_res.total if summary_res else 0
+    subidas = summary_res.subidas if summary_res else 0
+    bajadas = summary_res.bajadas if summary_res else 0
+    promedio_pct = round(float(summary_res.promedio_pct or 0.0), 2) if summary_res else 0.0
+
+    # 2. Registros paginados
+    safe_page = max(1, page)
+    safe_page_size = max(1, min(page_size, 500))
+    offset = (safe_page - 1) * safe_page_size
+
+    data_q = (
+        select(PriceVariationLog)
+        .where(*conditions)
+        .order_by(*order_clause)
+        .offset(offset)
+        .limit(safe_page_size)
+    )
+    result = await db.execute(data_q)
+    rows = result.scalars().all()
+
+    items = []
+    for r in rows:
+        items.append({
+            "id": r.id,
+            "company_id": r.company_id,
+            "product_id": r.product_id,
+            "product_nombre": r.product_nombre,
+            "product_sku": r.product_sku,
+            "product_barcode": r.product_barcode,
+            "categoria_nombre": r.categoria_nombre,
+            "tipo": r.tipo,
+            "escala_min_qty": r.escala_min_qty,
+            "precio_anterior": float(r.precio_anterior or 0),
+            "precio_nuevo": float(r.precio_nuevo or 0),
+            "diferencia_monto": float(r.diferencia_monto or 0),
+            "diferencia_pct": float(r.diferencia_pct or 0),
+            "origen": r.origen,
+            "usuario_id": r.usuario_id,
+            "usuario_nombre": r.usuario_nombre,
+            "motivo": r.motivo,
+            "created_at": r.created_at,
+        })
+
+    total_pages = max(1, (total + safe_page_size - 1) // safe_page_size) if total > 0 else 1
+
+    return {
+        "resumen": {
+            "total_modificaciones": total,
+            "total_subidas": subidas,
+            "total_bajadas": bajadas,
+            "promedio_variacion_pct": promedio_pct,
+        },
+        "paginacion": {
+            "total": total,
+            "page": safe_page,
+            "page_size": safe_page_size,
+            "total_pages": total_pages,
+        },
+        "items": items,
+    }
+
+
+async def get_price_variations_for_export(
+    db: AsyncSession,
+    company_id: str,
+    fecha_desde: Optional[str] = None,
+    fecha_hasta: Optional[str] = None,
+    tipo: Optional[str] = None,
+    search: Optional[str] = None,
+    order_by: str = "fecha_desc",
+    max_records: int = 5000,
+) -> list[dict]:
+    conditions = _build_variations_filters(company_id, fecha_desde, fecha_hasta, tipo, search)
+    order_clause = _build_variations_order(order_by)
+
+    data_q = (
+        select(PriceVariationLog)
+        .where(*conditions)
+        .order_by(*order_clause)
+        .limit(max_records)
+    )
+    result = await db.execute(data_q)
+    rows = result.scalars().all()
+
+    items = []
+    for r in rows:
+        items.append({
+            "id": r.id,
+            "company_id": r.company_id,
+            "product_id": r.product_id,
+            "product_nombre": r.product_nombre,
+            "product_sku": r.product_sku,
+            "product_barcode": r.product_barcode,
+            "categoria_nombre": r.categoria_nombre,
+            "tipo": r.tipo,
+            "escala_min_qty": r.escala_min_qty,
+            "precio_anterior": float(r.precio_anterior or 0),
+            "precio_nuevo": float(r.precio_nuevo or 0),
+            "diferencia_monto": float(r.diferencia_monto or 0),
+            "diferencia_pct": float(r.diferencia_pct or 0),
+            "origen": r.origen,
+            "usuario_id": r.usuario_id,
+            "usuario_nombre": r.usuario_nombre,
+            "motivo": r.motivo,
+            "created_at": r.created_at,
+        })
+    return items
+
 
