@@ -6,7 +6,8 @@ import {
   Paperclip, ClipboardCheck, Scale, Filter, Eye, RefreshCw, ShieldAlert, ArrowRight,
   SlidersHorizontal, Check, AlertCircle, FileText, Download, Calendar, Tag,
   FileSpreadsheet, Printer, PieChart, BookOpen, FileCheck, ScrollText, CheckCheck,
-  Pencil, Package, RotateCcw, X, ChevronDown, UserCheck, Trash2, Settings, Edit3
+  Pencil, Package, RotateCcw, X, ChevronDown, UserCheck, Trash2, Settings, Edit3,
+  ChefHat, History
 } from "lucide-react"
 import {
   api, API_ORIGIN, type Expense, type ExpenseCategory, type CostCenter,
@@ -41,6 +42,7 @@ export default function ExpensesPage() {
   const [filterMonto, setFilterMonto] = useState("")
   const [filterRendicion, setFilterRendicion] = useState("")
   const [filterEstado, setFilterEstado] = useState("")
+  const [filterNaturaleza, setFilterNaturaleza] = useState("")
   const [filterFund, setFilterFund] = useState("")
   const [userFundInitialized, setUserFundInitialized] = useState(false)
   const [filterCategory, setFilterCategory] = useState("")
@@ -88,10 +90,16 @@ export default function ExpensesPage() {
     es_anticipo_sueldo: false,
     employee_id: "",
     employee_nombre: "",
-    employee_ci: "",
     periodo_nomina: getTodayAsuncion().slice(0, 7),
     cuotas_anticipo: "1",
     sueldok_sync_id: "",
+    // Clasificación Multinaturaleza
+    naturaleza_economica: "OPEX_GASTO_OPERATIVO",
+    production_area: "panaderia",
+    periodo_devengado: "",
+    cuota_actual: 1,
+    total_cuotas: 10,
+    requisicion_id: "",
   })
   const [catForm, setCatForm] = useState({ nombre: "", descripcion: "", presupuesto_mensual: "" })
   const [sectorForm, setSectorForm] = useState({ nombre: "", tipo: "sector", peso_prorateo: "1" })
@@ -1220,6 +1228,18 @@ export default function ExpensesPage() {
       toast.warning("Colaborador requerido", "Debes indicar el colaborador beneficiario del anticipo de sueldo.")
       return
     }
+    if (form.naturaleza_economica === "CMV_MATERIA_PRIMA" && !form.production_area) {
+      toast.warning("Área de producción requerida", "Seleccioná el sector de destino (Panadería, Rotisería, Carnicería, Verdulería).")
+      return
+    }
+    if (form.naturaleza_economica === "PASIVO_PERIODO_ANTERIOR" && !form.periodo_devengado) {
+      toast.warning("Período devengado requerido", "Ingresá el mes devengado (ej. 2026-08) para cancelar pasivo previo sin afectar el P&L actual.")
+      return
+    }
+    if (form.naturaleza_economica === "GASTO_DIFERIDO_CUOTAS" && (!form.cuota_actual || !form.total_cuotas)) {
+      toast.warning("Cuotas requeridas", "Ingresá la cuota actual y el total de cuotas para el gasto plurimensual.")
+      return
+    }
 
     try {
       let comprobante_url: string | undefined
@@ -1270,6 +1290,12 @@ export default function ExpensesPage() {
           periodo_nomina: form.es_anticipo_sueldo ? (form.periodo_nomina || undefined) : undefined,
           cuotas_anticipo: form.es_anticipo_sueldo && form.cuotas_anticipo ? Number(form.cuotas_anticipo) : undefined,
           sueldok_sync_id: form.es_anticipo_sueldo ? (form.sueldok_sync_id || undefined) : undefined,
+          naturaleza_economica: form.naturaleza_economica || "OPEX_GASTO_OPERATIVO",
+          production_area: form.naturaleza_economica === "CMV_MATERIA_PRIMA" ? form.production_area : undefined,
+          periodo_devengado: form.naturaleza_economica === "PASIVO_PERIODO_ANTERIOR" ? form.periodo_devengado : undefined,
+          cuota_actual: form.naturaleza_economica === "GASTO_DIFERIDO_CUOTAS" && form.cuota_actual ? Number(form.cuota_actual) : undefined,
+          total_cuotas: form.naturaleza_economica === "GASTO_DIFERIDO_CUOTAS" && form.total_cuotas ? Number(form.total_cuotas) : undefined,
+          requisicion_id: form.requisicion_id || undefined,
           ...(comprobante_url ? { comprobante_url } : {})
         })
         toast.success("Comprobante Actualizado", "Los cambios en el gasto fueron guardados exitosamente.")
@@ -1302,6 +1328,12 @@ export default function ExpensesPage() {
           periodo_nomina: form.es_anticipo_sueldo ? (form.periodo_nomina || undefined) : undefined,
           cuotas_anticipo: form.es_anticipo_sueldo && form.cuotas_anticipo ? Number(form.cuotas_anticipo) : undefined,
           sueldok_sync_id: form.es_anticipo_sueldo ? (form.sueldok_sync_id || undefined) : undefined,
+          naturaleza_economica: form.naturaleza_economica || "OPEX_GASTO_OPERATIVO",
+          production_area: form.naturaleza_economica === "CMV_MATERIA_PRIMA" ? form.production_area : undefined,
+          periodo_devengado: form.naturaleza_economica === "PASIVO_PERIODO_ANTERIOR" ? form.periodo_devengado : undefined,
+          cuota_actual: form.naturaleza_economica === "GASTO_DIFERIDO_CUOTAS" && form.cuota_actual ? Number(form.cuota_actual) : undefined,
+          total_cuotas: form.naturaleza_economica === "GASTO_DIFERIDO_CUOTAS" && form.total_cuotas ? Number(form.total_cuotas) : undefined,
+          requisicion_id: form.requisicion_id || undefined,
           comprobante_url
         })
         if (form.es_pago_proveedor && form.supplier_invoice_id && groupedExpenseIds.length > 0) {
@@ -1752,7 +1784,13 @@ export default function ExpensesPage() {
       if (e.rendicion_id !== filterRendicion) return false
     }
 
-    // 2. Filtro por Fondo y Sector
+    // 2. Filtro por Naturaleza Económica
+    if (filterNaturaleza) {
+      const eNat = e.naturaleza_economica || (e.es_pago_proveedor ? "CMV_REVENTA" : e.es_anticipo_sueldo ? "ANTICIPO_PERSONAL" : "OPEX_GASTO_OPERATIVO")
+      if (eNat !== filterNaturaleza) return false
+    }
+
+    // 2b. Filtro por Fondo y Sector
     let matchFund = true
     if (filterFund === "sin_fondo") {
       matchFund = !e.fund_id
@@ -2639,7 +2677,7 @@ export default function ExpensesPage() {
 
               {/* Barra de Filtros */}
               <div className="card p-4 bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700/60 space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 items-center">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 items-center">
                   {/* Buscador General */}
                   <div className="relative sm:col-span-2">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -2681,6 +2719,23 @@ export default function ExpensesPage() {
                         <XCircle className="w-3.5 h-3.5" />
                       </button>
                     )}
+                  </div>
+
+                  {/* Filtro por Naturaleza Económica */}
+                  <div>
+                    <select
+                      className="input-field text-xs w-full font-medium"
+                      value={filterNaturaleza}
+                      onChange={e => setFilterNaturaleza(e.target.value)}
+                    >
+                      <option value="">Toda Naturaleza</option>
+                      <option value="OPEX_GASTO_OPERATIVO">🏢 Gasto Operativo (OPEX)</option>
+                      <option value="CMV_MATERIA_PRIMA">🥖 Materia Prima (Producción)</option>
+                      <option value="CMV_REVENTA">📦 Mercadería Reventa (Salón)</option>
+                      <option value="ANTICIPO_PERSONAL">👤 Anticipo al Personal</option>
+                      <option value="PASIVO_PERIODO_ANTERIOR">⏳ Pasivo Anterior</option>
+                      <option value="GASTO_DIFERIDO_CUOTAS">📅 Póliza / En Cuotas</option>
+                    </select>
                   </div>
 
                   {/* Filtro por Rendición */}
@@ -2744,7 +2799,7 @@ export default function ExpensesPage() {
                     <span className="font-semibold text-slate-700 dark:text-slate-300">
                       Mostrando {filteredExpenses.length} de {expenses.length} comprobante(s)
                     </span>
-                    {(search || filterMonto || filterRendicion || filterEstado || filterFund || filterSector) && (
+                    {(search || filterMonto || filterRendicion || filterEstado || filterFund || filterSector || filterNaturaleza) && (
                       <button
                         type="button"
                         onClick={() => {
@@ -2752,6 +2807,7 @@ export default function ExpensesPage() {
                           setFilterMonto("")
                           setFilterRendicion("")
                           setFilterEstado("")
+                          setFilterNaturaleza("")
                           setFilterFund("")
                           setFilterSector("")
                         }}
@@ -2933,16 +2989,27 @@ export default function ExpensesPage() {
                             <td className="p-3.5 font-bold text-gray-900 dark:text-white max-w-xs">
                               <div className="flex items-center gap-1.5 flex-wrap">
                                 <span>{e.descripcion}</span>
-                                {e.es_pago_proveedor && (
+                                {e.naturaleza_economica === "CMV_MATERIA_PRIMA" ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200 border border-amber-300 dark:border-amber-700/60">
+                                    <ChefHat className="w-2.5 h-2.5 text-amber-600" /> Materia Prima ({e.production_area || "Panadería"})
+                                  </span>
+                                ) : e.naturaleza_economica === "CMV_REVENTA" || e.es_pago_proveedor ? (
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
-                                    <Package className="w-2.5 h-2.5" /> Mercaderías (Cuentas por Pagar)
+                                    <Package className="w-2.5 h-2.5" /> Mercaderías Reventa
                                   </span>
-                                )}
-                                {e.es_anticipo_sueldo && (
+                                ) : e.naturaleza_economica === "ANTICIPO_PERSONAL" || e.es_anticipo_sueldo ? (
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                                    <UserCheck className="w-2.5 h-2.5" /> Anticipo Sueldo: {e.employee_nombre || e.proveedor}
+                                    <UserCheck className="w-2.5 h-2.5" /> Anticipo: {e.employee_nombre || e.proveedor}
                                   </span>
-                                )}
+                                ) : e.naturaleza_economica === "PASIVO_PERIODO_ANTERIOR" ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-600">
+                                    <History className="w-2.5 h-2.5" /> Pasivo Devengado {e.periodo_devengado || "Ant."}
+                                  </span>
+                                ) : e.naturaleza_economica === "GASTO_DIFERIDO_CUOTAS" ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-800">
+                                    <Calendar className="w-2.5 h-2.5" /> Cuota {e.cuota_actual || 1}/{e.total_cuotas || 1}
+                                  </span>
+                                ) : null}
                               </div>
 
                               {/* Datos fiscales para ubicar el comprobante físico */}
@@ -4037,14 +4104,21 @@ export default function ExpensesPage() {
               {/* Selector de Naturaleza / Destino */}
               <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
                 <span className="font-bold text-gray-700 dark:text-gray-300 block text-[11px] uppercase tracking-wider">
-                  Destino del Comprobante:
+                  Naturaleza Económica & Destino Contable:
                 </span>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {/* 1. GASTO OPERATIVO (OPEX) */}
                   <button
                     type="button"
-                    onClick={() => setForm((prev: any) => ({ ...prev, es_pago_proveedor: false, es_anticipo_sueldo: false, supplier_invoice_id: "" }))}
+                    onClick={() => setForm((prev: any) => ({
+                      ...prev,
+                      naturaleza_economica: "OPEX_GASTO_OPERATIVO",
+                      es_pago_proveedor: false,
+                      es_anticipo_sueldo: false,
+                      supplier_invoice_id: ""
+                    }))}
                     className={`p-2.5 rounded-lg border text-left flex items-center gap-2 transition ${
-                      !form.es_pago_proveedor && !form.es_anticipo_sueldo
+                      form.naturaleza_economica === "OPEX_GASTO_OPERATIVO"
                         ? "bg-rose-50 border-rose-400 text-rose-800 dark:bg-rose-950/40 dark:border-rose-700 dark:text-rose-200 font-bold shadow-sm"
                         : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-gray-600 dark:text-gray-400 hover:bg-slate-50"
                     }`}
@@ -4052,26 +4126,57 @@ export default function ExpensesPage() {
                     <ReceiptIcon className="w-4 h-4 text-rose-500 shrink-0" />
                     <div>
                       <div className="text-xs">Gasto Operativo (OPEX)</div>
-                      <div className="text-[10px] text-gray-500 font-normal">Limpieza, insumos, fletes</div>
+                      <div className="text-[10px] text-gray-500 font-normal">Luz, reparaciones, útiles</div>
                     </div>
                   </button>
 
+                  {/* 2. MATERIA PRIMA PRODUCCIÓN */}
                   <button
                     type="button"
-                    onClick={() => setForm((prev: any) => ({ ...prev, es_pago_proveedor: true, es_anticipo_sueldo: false }))}
+                    onClick={() => setForm((prev: any) => ({
+                      ...prev,
+                      naturaleza_economica: "CMV_MATERIA_PRIMA",
+                      production_area: prev.production_area || "panaderia",
+                      es_pago_proveedor: false,
+                      es_anticipo_sueldo: false,
+                      supplier_invoice_id: ""
+                    }))}
                     className={`p-2.5 rounded-lg border text-left flex items-center gap-2 transition ${
-                      form.es_pago_proveedor && !form.es_anticipo_sueldo
+                      form.naturaleza_economica === "CMV_MATERIA_PRIMA"
+                        ? "bg-amber-50 border-amber-400 text-amber-800 dark:bg-amber-950/40 dark:border-amber-700 dark:text-amber-200 font-bold shadow-sm"
+                        : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-gray-600 dark:text-gray-400 hover:bg-slate-50"
+                    }`}
+                  >
+                    <ChefHat className="w-4 h-4 text-amber-500 shrink-0" />
+                    <div>
+                      <div className="text-xs">Materia Prima Producción</div>
+                      <div className="text-[10px] text-gray-500 font-normal">Harinas, carne, levaduras</div>
+                    </div>
+                  </button>
+
+                  {/* 3. MERCADERÍAS REVENTA (PAGO PROVEEDOR) */}
+                  <button
+                    type="button"
+                    onClick={() => setForm((prev: any) => ({
+                      ...prev,
+                      naturaleza_economica: "CMV_REVENTA",
+                      es_pago_proveedor: true,
+                      es_anticipo_sueldo: false
+                    }))}
+                    className={`p-2.5 rounded-lg border text-left flex items-center gap-2 transition ${
+                      form.naturaleza_economica === "CMV_REVENTA" || (form.es_pago_proveedor && !form.es_anticipo_sueldo)
                         ? "bg-purple-50 border-purple-400 text-purple-800 dark:bg-purple-950/40 dark:border-purple-700 dark:text-purple-200 font-bold shadow-sm"
                         : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-gray-600 dark:text-gray-400 hover:bg-slate-50"
                     }`}
                   >
                     <Package className="w-4 h-4 text-purple-500 shrink-0" />
                     <div>
-                      <div className="text-xs">Pago a Proveedor</div>
-                      <div className="text-[10px] text-gray-500 font-normal">Cuentas por Pagar (Mercaderías)</div>
+                      <div className="text-xs">Mercaderías Reventa Salón</div>
+                      <div className="text-[10px] text-gray-500 font-normal">Cuentas por pagar proveedores</div>
                     </div>
                   </button>
 
+                  {/* 4. ANTICIPO AL PERSONAL */}
                   <button
                     type="button"
                     onClick={() => {
@@ -4079,6 +4184,7 @@ export default function ExpensesPage() {
                       const currentPeriod = today.slice(0, 7)
                       setForm((prev: any) => ({
                         ...prev,
+                        naturaleza_economica: "ANTICIPO_PERSONAL",
                         es_pago_proveedor: false,
                         es_anticipo_sueldo: true,
                         supplier_invoice_id: "",
@@ -4101,18 +4207,172 @@ export default function ExpensesPage() {
                       }
                     }}
                     className={`p-2.5 rounded-lg border text-left flex items-center gap-2 transition ${
-                      form.es_anticipo_sueldo
+                      form.naturaleza_economica === "ANTICIPO_PERSONAL" || form.es_anticipo_sueldo
                         ? "bg-blue-50 border-blue-400 text-blue-800 dark:bg-blue-950/40 dark:border-blue-700 dark:text-blue-200 font-bold shadow-sm"
                         : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-gray-600 dark:text-gray-400 hover:bg-slate-50"
                     }`}
                   >
                     <UserCheck className="w-4 h-4 text-blue-500 shrink-0" />
                     <div>
-                      <div className="text-xs">Anticipo de Sueldo</div>
-                      <div className="text-[10px] text-gray-500 font-normal">Vale / Personal SueldOK</div>
+                      <div className="text-xs">Anticipo al Personal</div>
+                      <div className="text-[10px] text-gray-500 font-normal">Cta Cte Empleado SueldOK</div>
+                    </div>
+                  </button>
+
+                  {/* 5. PASIVO PERÍODO ANTERIOR */}
+                  <button
+                    type="button"
+                    onClick={() => setForm((prev: any) => ({
+                      ...prev,
+                      naturaleza_economica: "PASIVO_PERIODO_ANTERIOR",
+                      periodo_devengado: prev.periodo_devengado || "2026-08",
+                      es_pago_proveedor: false,
+                      es_anticipo_sueldo: false,
+                      supplier_invoice_id: ""
+                    }))}
+                    className={`p-2.5 rounded-lg border text-left flex items-center gap-2 transition ${
+                      form.naturaleza_economica === "PASIVO_PERIODO_ANTERIOR"
+                        ? "bg-slate-100 border-slate-400 text-slate-800 dark:bg-slate-800 dark:border-slate-600 dark:text-slate-200 font-bold shadow-sm"
+                        : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-gray-600 dark:text-gray-400 hover:bg-slate-50"
+                    }`}
+                  >
+                    <History className="w-4 h-4 text-slate-500 shrink-0" />
+                    <div>
+                      <div className="text-xs">Pasivo Período Anterior</div>
+                      <div className="text-[10px] text-gray-500 font-normal">Sueldos/IPS mes previo (0% P&L)</div>
+                    </div>
+                  </button>
+
+                  {/* 6. GASTO DIFERIDO EN CUOTAS */}
+                  <button
+                    type="button"
+                    onClick={() => setForm((prev: any) => ({
+                      ...prev,
+                      naturaleza_economica: "GASTO_DIFERIDO_CUOTAS",
+                      cuota_actual: prev.cuota_actual || 1,
+                      total_cuotas: prev.total_cuotas || 10,
+                      es_pago_proveedor: false,
+                      es_anticipo_sueldo: false,
+                      supplier_invoice_id: ""
+                    }))}
+                    className={`p-2.5 rounded-lg border text-left flex items-center gap-2 transition ${
+                      form.naturaleza_economica === "GASTO_DIFERIDO_CUOTAS"
+                        ? "bg-indigo-50 border-indigo-400 text-indigo-800 dark:bg-indigo-950/40 dark:border-indigo-700 dark:text-indigo-200 font-bold shadow-sm"
+                        : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-gray-600 dark:text-gray-400 hover:bg-slate-50"
+                    }`}
+                  >
+                    <Calendar className="w-4 h-4 text-indigo-500 shrink-0" />
+                    <div>
+                      <div className="text-xs">Póliza / Diferido en Cuotas</div>
+                      <div className="text-[10px] text-gray-500 font-normal">Río Seguros, devenga 1/N</div>
                     </div>
                   </button>
                 </div>
+
+                {/* Subpanel Materia Prima Producción */}
+                {form.naturaleza_economica === "CMV_MATERIA_PRIMA" && (
+                  <div className="mt-2.5 p-3 bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-xl space-y-2 animate-in fade-in">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-amber-900 dark:text-amber-200 text-[11px] flex items-center gap-1.5">
+                        <ChefHat className="w-4 h-4 text-amber-600" /> Sector de Producción / Transformación:
+                      </span>
+                      <span className="text-[10px] text-amber-700 dark:text-amber-300 font-medium">
+                        Se imputará al Costo de Ventas (CMV Producción)
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {[
+                        { id: "panaderia", label: "🥖 Panadería", desc: "Harinas, levaduras" },
+                        { id: "rotiseria", label: "🍗 Rotisería", desc: "Cocina, salsas, carnes" },
+                        { id: "carniceria", label: "🥩 Carnicería", desc: "Desposte, embutidos" },
+                        { id: "verduleria", label: "🥬 Verdulería", desc: "Fraccionamiento" },
+                      ].map(sec => (
+                        <button
+                          key={sec.id}
+                          type="button"
+                          onClick={() => setForm((p: any) => ({ ...p, production_area: sec.id }))}
+                          className={`p-2 rounded-lg border text-left text-xs transition ${
+                            form.production_area === sec.id
+                              ? "bg-amber-100 border-amber-400 text-amber-900 dark:bg-amber-900/60 dark:border-amber-600 dark:text-amber-100 font-bold"
+                              : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-gray-600 dark:text-gray-300 hover:bg-amber-50/50"
+                          }`}
+                        >
+                          <div>{sec.label}</div>
+                          <div className="text-[9px] text-gray-500 font-normal">{sec.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Subpanel Pasivo Período Anterior */}
+                {form.naturaleza_economica === "PASIVO_PERIODO_ANTERIOR" && (
+                  <div className="mt-2.5 p-3 bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-xl space-y-2 animate-in fade-in">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-900 dark:text-slate-100 text-[11px] flex items-center gap-1.5">
+                        <History className="w-4 h-4 text-slate-600 dark:text-slate-400" /> Cancelación de Pasivo Previo:
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-semibold">
+                        Afecta Tesorería / 0 impacto en el P&L corriente
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="w-48">
+                        <label className="text-[10px] font-bold text-gray-600 dark:text-gray-400 block mb-1">Período Devengado (YYYY-MM):</label>
+                        <input
+                          type="month"
+                          value={form.periodo_devengado || "2026-08"}
+                          onChange={e => setForm((p: any) => ({ ...p, periodo_devengado: e.target.value }))}
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold"
+                        />
+                      </div>
+                      <div className="text-[11px] text-gray-500 italic mt-3">
+                        Ejemplo: Pago en septiembre de salarios o IPS devengados en agosto.
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Subpanel Gasto Diferido en Cuotas */}
+                {form.naturaleza_economica === "GASTO_DIFERIDO_CUOTAS" && (
+                  <div className="mt-2.5 p-3 bg-indigo-50/80 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/60 rounded-xl space-y-2 animate-in fade-in">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-indigo-900 dark:text-indigo-200 text-[11px] flex items-center gap-1.5">
+                        <Calendar className="w-4 h-4 text-indigo-600" /> Devengamiento Mensual en Cuotas:
+                      </span>
+                      <span className="text-[10px] text-indigo-700 dark:text-indigo-300 font-medium">
+                        Devenga solo 1 cuota en el P&L mensual
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-600 dark:text-gray-400 block mb-1">Cuota Actual:</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={form.total_cuotas || 60}
+                          value={form.cuota_actual || 1}
+                          onChange={e => setForm((p: any) => ({ ...p, cuota_actual: Number(e.target.value) }))}
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-600 dark:text-gray-400 block mb-1">Total de Cuotas del Contrato:</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={120}
+                          value={form.total_cuotas || 10}
+                          onChange={e => setForm((p: any) => ({ ...p, total_cuotas: Number(e.target.value) }))}
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold"
+                        />
+                      </div>
+                      <div className="flex items-center text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold mt-4">
+                        Cuota {form.cuota_actual || 1} de {form.total_cuotas || 10}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {form.es_pago_proveedor && (
                   <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-700 space-y-3 animate-in fade-in">
