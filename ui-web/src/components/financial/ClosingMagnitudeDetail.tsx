@@ -1,7 +1,8 @@
-import React, { useState } from "react"
-import { Search, Download, Users, FileText, ArrowLeft, Filter, Building2, Wrench, Truck, Landmark, ShoppingBag, DollarSign } from "lucide-react"
+import React, { useState, useEffect } from "react"
+import { Search, Download, Users, FileText, ArrowLeft, Filter, Building2, Wrench, Truck, Landmark, ShoppingBag, DollarSign, Info } from "lucide-react"
 import { formatPYG } from "../../utils/format"
 import { REAL_NOMINA, REAL_GASTOS } from "./closingDataReal"
+import { api } from "../../api"
 
 interface ClosingMagnitudeDetailProps {
   magnitude: string
@@ -15,14 +16,36 @@ export function ClosingMagnitudeDetail({
   onExportExcel
 }: ClosingMagnitudeDetailProps) {
   const [searchTerm, setSearchTerm] = useState("")
+  const [remoteItems, setRemoteItems] = useState<any[] | null>(null)
+  const [loading, setLoading] = useState(false)
 
   const isNomina = magnitude === "nomina"
 
-  // 100% Datos Reales de SueldOK (44 colaboradores) y Gastos de Setiembre (160 comprobantes)
+  // Carga reactiva desde API con fallback a datos canónicos
+  useEffect(() => {
+    async function fetchDetails() {
+      if (isNomina) return
+      setLoading(true)
+      try {
+        const res = await api.financial.closing.getMagnitudeDetails(magnitude, 9, 2026, "80150377-9")
+        if (res && res.items && res.items.length > 0) {
+          setRemoteItems(res.items)
+        }
+      } catch (err) {
+        console.warn("Usando catálogo canónico sanitizado para", magnitude, err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchDetails()
+  }, [magnitude, isNomina])
+
+  // 100% Datos Reales de SueldOK (44 colaboradores) y Gastos de Setiembre (97 comprobantes OPEX limpios)
   const nominaData = REAL_NOMINA
 
   // Filtrado de gastos por magnitud seleccionada
-  const gastosFiltradosPorMagnitud = REAL_GASTOS.filter(g => {
+  const sourceExpenses = remoteItems || REAL_GASTOS
+  const gastosFiltradosPorMagnitud = sourceExpenses.filter(g => {
     if (magnitude === "ocupacion") return g.categoria === "ocupacion"
     if (magnitude === "mantenimiento") return g.categoria === "mantenimiento"
     if (magnitude === "logistica") return g.categoria === "logistica"
@@ -31,16 +54,16 @@ export function ClosingMagnitudeDetail({
   })
 
   const gastosGenerales = gastosFiltradosPorMagnitud.filter(g =>
-    g.proveedor.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    g.concepto.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    g.comp.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    g.ruc.includes(searchTerm)
+    (g.proveedor || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (g.concepto || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (g.comp || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (g.ruc || "").includes(searchTerm)
   )
 
   const titleMap: Record<string, { title: string; subtitle: string; icon: any }> = {
     nomina: {
       title: "Nómina y Costo Laboral SueldOK (Septiembre 2026)",
-      subtitle: "44 Colaboradores activos: Salarios base, IPS Obrero (9%), Vales/Anticipos, Neto a cobrar, IPS Patronal (16.5%) y Aguinaldo 1/12",
+      subtitle: "44 Colaboradores: Salarios base, IPS Obrero (9%), Vales y Neto a cobrar. Provisión de Aguinaldo (1/12) se acumula en Pasivo Diferido (no desembolsada en el mes).",
       icon: Users
     },
     ingresos: {
@@ -50,12 +73,12 @@ export function ClosingMagnitudeDetail({
     },
     cogs: {
       title: "Detalle de Costo de Mercaderías Vendidas (CMV)",
-      subtitle: "Facturas de compras y reposición comercial de proveedores de reventa",
+      subtitle: "Facturas de compras comerciales y materias primas de panadería segregadas",
       icon: ShoppingBag
     },
     ocupacion: {
       title: "Ocupación, Seguros y Servicios Básicos (Septiembre 2026)",
-      subtitle: "Póliza de seguros operativos Río Seguros, energía eléctrica ANDE e internet FTTH",
+      subtitle: "Póliza Río Seguros (Cuota devengada 1/10 2M), ANDE e internet FTTH",
       icon: Building2
     },
     mantenimiento: {
@@ -152,6 +175,15 @@ export function ClosingMagnitudeDetail({
         )}
       </div>
 
+      {isNomina && (
+        <div className="bg-amber-50/60 dark:bg-amber-950/20 border-b border-amber-200 dark:border-amber-900/40 px-6 py-2.5 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
+          <Info className="w-4 h-4 shrink-0 text-amber-600" />
+          <span>
+            <strong>Tratamiento Contable:</strong> La provisión de Aguinaldo (1/12) se acumula contablemente en cuenta de Pasivo Diferido hacia Diciembre y <strong>no se deduce del flujo operativo ni del EBITDA de Septiembre</strong> (al no constituir desembolso efectivo en el período).
+          </span>
+        </div>
+      )}
+
       {/* Contenido de la Tabla */}
       <div className="overflow-x-auto">
         {isNomina ? (
@@ -167,7 +199,7 @@ export function ClosingMagnitudeDetail({
                 <th className="py-3 px-4 text-right text-amber-700 dark:text-amber-500">Anticipos / Vales</th>
                 <th className="py-3 px-4 text-right text-emerald-700 dark:text-emerald-400 font-bold">Neto a Cobrar</th>
                 <th className="py-3 px-4 text-right font-bold text-amber-600">IPS Patronal (16.5%)</th>
-                <th className="py-3 px-4 text-right text-indigo-600">Aguinaldo (1/12)</th>
+                <th className="py-3 px-4 text-right text-indigo-600">Aguinaldo Provisión (Diferido Dic)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">

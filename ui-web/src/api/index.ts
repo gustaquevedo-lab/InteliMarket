@@ -4274,6 +4274,14 @@ export const api = {
     },
   },
   financial: {
+    closing: {
+      getSummary: (month: number = 9, year: number = 2026, companyId: string = "80150377-9") =>
+        client.get<any>(`/v1/financial/closing/summary?month=${month}&year=${year}&company_id=${companyId}`),
+      getMagnitudeDetails: (magnitude: string, month: number = 9, year: number = 2026, companyId: string = "80150377-9") =>
+        client.get<{ magnitude: string; month: number; year: number; count: number; items: any[] }>(
+          `/v1/financial/closing/details/${magnitude}?month=${month}&year=${year}&company_id=${companyId}`
+        ),
+    },
     invoices: {
       list: (params?: { estado?: string; supplier_id?: string; vencidas?: boolean; desde?: string; hasta?: string; limit?: number; offset?: number; order_by?: string }) => client.get<SupplierInvoice[]>("/v1/financial/invoices", { company_id: COMPANY_ID, ...params } as any),
       get: (id: string) => client.get<SupplierInvoice>(`/v1/financial/invoices/${id}`),

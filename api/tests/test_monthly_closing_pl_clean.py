@@ -31,7 +31,12 @@ async def test_monthly_closing_clean_pl_structure():
     # 3. OPEX no laboral limpio
     assert opex["total_opex_no_laboral"] == 94790810
 
-    # 4. Utilidad Bruta y EBITDA reflejan el nuevo criterio
+    # 4. Nómina excluye aguinaldo proporcional (tratado como provisión diferida a diciembre)
+    nomina = closing["nomina"]
+    assert nomina["aguinaldo_diferido_acumulado"] == 12351178
+    assert nomina["total_costo_laboral"] == 156723023
+
+    # 5. Utilidad Bruta y EBITDA reflejan el nuevo criterio limpio
     assert kpis["utilidad_bruta"] == 1234596102 - (1020507216 + 14873000)
-    assert kpis["total_opex"] == closing["nomina"]["total_costo_laboral"] + opex["total_opex_no_laboral"]
-    assert kpis["total_opex"] == 263865011
+    assert kpis["total_opex"] == nomina["total_costo_laboral"] + opex["total_opex_no_laboral"]
+    assert kpis["total_opex"] == 251513833

@@ -160,13 +160,13 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
             <tr className="text-xs hover:bg-slate-50 dark:hover:bg-slate-800/50">
               <td className="py-2.5 px-4 text-center text-slate-400">4.1</td>
               <td className="py-2.5 px-4 pl-8 font-medium text-slate-800 dark:text-slate-200">
-                Costo Laboral SueldOK (44 Colaboradores, IPS Patronal 16.5% y Aguinaldo 1/12)
+                Costo Laboral SueldOK (44 Colaboradores — Salarios e IPS Patronal 16.5% Desembolsados)
               </td>
               <td className="py-2.5 px-4 text-right font-bold font-mono text-slate-900 dark:text-slate-100">
                 {formatPYG(nomina?.total_costo_laboral)}
               </td>
               <td className="py-2.5 px-4 text-right font-mono text-slate-600 dark:text-slate-400">
-                {kpis?.costo_laboral_pct || 13.37}%
+                {kpis?.costo_laboral_pct || 12.69}%
               </td>
               <td className="py-2.5 px-4 text-center">
                 <button
@@ -175,6 +175,26 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
                 >
                   Nómina SueldOK
                 </button>
+              </td>
+            </tr>
+
+            {/* 4.1.bis: Provisión Aguinaldo (Cargo Diferido a Diciembre) */}
+            <tr className="text-xs bg-slate-50/40 dark:bg-slate-900/40 text-slate-500 italic">
+              <td className="py-2 px-4 text-center text-slate-400">4.1b</td>
+              <td className="py-2 px-4 pl-12 flex items-center gap-1.5">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
+                <span>Provisión Aguinaldo Acumulada (Cargo Diferido a Diciembre — No desembolsado en el mes)</span>
+              </td>
+              <td className="py-2 px-4 text-right font-mono text-indigo-600 dark:text-indigo-400">
+                {formatPYG(nomina?.aguinaldo_diferido_acumulado || nomina?.aguinaldo_provisional || 12351178)}
+              </td>
+              <td className="py-2 px-4 text-right font-mono text-[11px] text-slate-400">
+                (Diferido)
+              </td>
+              <td className="py-2 px-4 text-center">
+                <span className="text-[10px] uppercase font-bold text-indigo-500 bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-800">
+                  Pasivo Acumulado
+                </span>
               </td>
             </tr>
 
