@@ -1309,6 +1309,35 @@ async def apply_global_payment(
             obs_nota = f"Recibo AR #{numero_recibo}. {data.observaciones or ''}".strip()
             desc_gasto = f"Consumo Interno - Factura {app['numero_documento']} ({customer_name})"
 
+            # Detección y vinculación inteligente de Requisición de Salón
+            req_id_to_use = str(data.requisicion_id) if getattr(data, "requisicion_id", None) else None
+            req_area = getattr(data, "production_area", None)
+
+            if not req_id_to_use:
+                req_check = await db.execute(
+                    text("""
+                        SELECT id, area_destino FROM internal_requisitions
+                        WHERE company_id = :cid AND (
+                            numero_factura = :num_fac
+                            OR (sale_id IS NOT NULL AND sale_id = (SELECT sale_id FROM accounts_receivable WHERE id = :arid))
+                        )
+                        LIMIT 1
+                    """),
+                    {"cid": company_id, "num_fac": app["numero_documento"], "arid": doc_id}
+                )
+                rrow = req_check.first()
+                if rrow:
+                    req_id_to_use = str(rrow.id)
+                    req_area = req_area or rrow.area_destino
+
+            # Determinar si es CMV de Materia Prima para producción o Gasto Operativo
+            if req_area and req_area.lower() in ("panaderia", "rotiseria", "carniceria", "verduleria", "produccion"):
+                nat_econ = "CMV_MATERIA_PRIMA"
+                prod_area = req_area.lower()
+            else:
+                nat_econ = "OPEX_GASTO_OPERATIVO"
+                prod_area = None
+
             await db.execute(
                 text("""
                     INSERT INTO expenses (
@@ -1316,12 +1345,14 @@ async def apply_global_payment(
                         monto, descripcion, proveedor, ruc, timbrado, numero_factura,
                         tipo_comprobante, gravado_10, gravado_5, exentas, iva_10, iva_5,
                         tipo_pago, fecha_gasto, fecha_pago, estado, forma_pago_resumen,
+                        naturaleza_economica, production_area, requisicion_id,
                         notas, registrado_por, pagado_por, pagado_at, created_at
                     ) VALUES (
                         :id, :company_id, :branch_id, :category_id, :cost_center_id,
                         :monto, :descripcion, :proveedor, :ruc, :timbrado, :numero_factura,
                         'FACTURA_CONTADO', :gravado_10, :gravado_5, :exentas, :iva_10, :iva_5,
                         'compensacion_interna', :fecha_gasto, :fecha_pago, 'pagado', 'COMPENSACION_CONSUMO_INTERNO',
+                        :naturaleza_economica, :production_area, :requisicion_id,
                         :notas, :user_id, :user_id, NOW(), NOW()
                     )
                 """),
@@ -1344,10 +1375,20 @@ async def apply_global_payment(
                     "iva_5": float(iva_5),
                     "fecha_gasto": fecha_pago,
                     "fecha_pago": fecha_pago,
+                    "naturaleza_economica": nat_econ,
+                    "production_area": prod_area,
+                    "requisicion_id": req_id_to_use,
                     "notas": obs_nota,
                     "user_id": registrado_por,
                 },
             )
+
+            # Si existía requisición, actualizar su estado a COMPENSADA
+            if req_id_to_use:
+                await db.execute(
+                    text("UPDATE internal_requisitions SET estado = 'COMPENSADA', updated_at = NOW() WHERE id = :rid"),
+                    {"rid": req_id_to_use}
+                )
     else:
         treasury_res = await _record_treasury_ingress(
             db=db,

@@ -100,6 +100,8 @@ class ReceivablePaymentCreate(BaseModel):
     monto_cheque: Optional[Decimal] = Decimal("0")
     category_id: Optional[UUID] = None
     cost_center_id: Optional[UUID] = None
+    requisicion_id: Optional[UUID] = None
+    production_area: Optional[str] = None
     allocations: list[ReceivableAllocationInput] = Field(min_length=1)
 
 
