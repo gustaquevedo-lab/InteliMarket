@@ -10,6 +10,7 @@ import { useToast } from "../../context/ToastContext"
 import { usePermissions } from "../../context/PermissionsContext"
 import CurrencyInput from "../../components/CurrencyInput"
 import { formatPYG } from "../../utils/format"
+import PriceVariationsTab from "./PriceVariationsTab"
 
 export type TiersSummary = {
   total_lists: number
@@ -19,7 +20,7 @@ export type TiersSummary = {
   breakdown: { min_qty: number; count: number }[]
 }
 
-type TabKey = "dashboard" | "lists" | "items" | "assignments" | "tiers" | "margen"
+type TabKey = "dashboard" | "lists" | "items" | "assignments" | "tiers" | "margen" | "variaciones"
 
 const TABS: { key: TabKey; label: string; icon: LucideIcon }[] = [
   { key: "dashboard",   label: "Dashboard Ejecutivo", icon: LayoutDashboard },
@@ -28,7 +29,9 @@ const TABS: { key: TabKey; label: string; icon: LucideIcon }[] = [
   { key: "assignments", label: "Asignaciones & Grupos", icon: Users },
   { key: "tiers",       label: "Escalones por Volumen", icon: Layers },
   { key: "margen",      label: "Editor de Margen",    icon: DollarSign },
+  { key: "variaciones", label: "Variaciones de Precios", icon: TrendingUp },
 ]
+
 
 export default function PriceListsPage() {
   const [tab, setTab] = useState<TabKey>("dashboard")
@@ -214,9 +217,11 @@ export default function PriceListsPage() {
       {tab === "assignments"  && <AssignmentsTab lists={lists} />}
       {tab === "tiers"        && <TieredPricesTab lists={lists} />}
       {tab === "margen"       && <MargenEditorTab />}
+      {tab === "variaciones"  && <PriceVariationsTab />}
     </div>
   )
 }
+
 
 function Spinner() { return <Loader2 className="w-4 h-4 animate-spin text-sky-500" /> }
 
