@@ -1201,6 +1201,11 @@ export interface RouteVisit { id: string; route_id: string; customer_id: string;
 export interface CustomerCreditLimit { id: string; company_id: string; customer_id: string; limite_credito: number; limite_disponible: number; saldo_utilizado: number; dias_credito: number; scoring?: number; bloqueado_por_mora: boolean; created_at: string }
 export interface CreditAuthorization { id: string; company_id: string; customer_id: string; monto_solicitado: number; monto_autorizado?: number; motivo?: string; estado: string; created_at: string }
 export interface DistribuidoraDashboard { total_clientes: number; clientes_con_credito: number; clientes_bloqueados: number; ventas_mes: number; margen_promedio: number; facturas_vencidas: number; monto_vencido: number; contenedores_en_transito: number; contenedores_en_aduanas: number; productos_bajo_stock: number; visitas_hoy: number; visitas_completadas_hoy: number }
+
+export interface MapWaypoint { customer_id: string; razon_social: string; orden_visita: number; lat: number | null; lng: number | null; visit_status: string }
+export interface MapRouteData { route_id: string; route_name: string; seller_id: string; seller_name: string; color_index: number; color: string; waypoints: MapWaypoint[]; depot_lat: number; depot_lng: number; instance_status: string | null }
+export interface MapCustomerData { customer_id: string; razon_social: string; lat: number; lng: number; route_id: string | null; color_index: number | null; visit_status: string; direccion?: string; ciudad?: string; telefono?: string }
+export interface SellerPerformance { seller_id: string; seller_name: string; photo_url: string | null; coverage_pct: number; conversion_rate: number; avg_ticket: number; total_amount: number; total_collected: number; avg_visit_minutes: number | null; stops_completed: number; stops_total: number; weekly_coverage: number[] }
 export interface ExpenseCategory { id: string; nombre: string; descripcion?: string; presupuesto_mensual?: number; activo?: boolean; created_at?: string }
 export interface CostCenter { id: string; nombre: string; tipo: "sector" | "global"; peso_prorateo: number; activo?: boolean; created_at?: string }
 export interface Expense {
@@ -3919,6 +3924,8 @@ export const api = {
         get: (id: string) => client.get<any>(`/v1/distribuidora/sellers/detail/${id}`),
         create: (companyId: string, data: any) => client.post<any>(`/v1/distribuidora/sellers/${companyId}`, data),
         update: (id: string, data: any) => client.put<any>(`/v1/distribuidora/sellers/${id}`, data),
+        performance: (companyId: string, params?: { fecha_desde?: string; fecha_hasta?: string; route_id?: string }) =>
+          client.get<SellerPerformance[]>(`/v1/distribuidora/performance/sellers/${companyId}`, params as any),
       },
       tracking: {
         ping: (sellerId: string, data: any) => client.post<any>(`/v1/distribuidora/tracking/${sellerId}/ping`, data),
@@ -3956,6 +3963,10 @@ export const api = {
         ranking: (companyId: string, periodType?: string) => client.get<any[]>(`/v1/distribuidora/performance/ranking/${companyId}`, { period_type: periodType } as any),
       },
       liveMap: (companyId: string) => client.get<any>(`/v1/distribuidora/live-map/${companyId}`),
+      map: {
+        routes: (companyId: string) => client.get<MapRouteData[]>(`/v1/distribuidora/map/routes/${companyId}`),
+        customers: (companyId: string) => client.get<MapCustomerData[]>(`/v1/distribuidora/map/customers/${companyId}`),
+      },
     },
   },
   intellizapp: {

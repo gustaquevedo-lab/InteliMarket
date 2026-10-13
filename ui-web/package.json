@@ -15,7 +15,9 @@
   "dependencies": {
     "@capacitor/android": "^8.5.1",
     "@capacitor/core": "^8.5.1",
+    "@googlemaps/markerclusterer": "^2.5.3",
     "@hookform/resolvers": "^3.9.0",
+    "@react-google-maps/api": "^2.20.3",
     "@tanstack/react-query": "^5.50.0",
     "@tanstack/react-table": "^8.19.0",
     "@zxing/library": "^0.23.0",
