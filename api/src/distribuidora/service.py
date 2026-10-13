@@ -1,15 +1,23 @@
 """Distribuidora — Business logic for import, supplier/customer agreements, routes, credit, approvals, margins."""
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, cast, Date
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException
 
 from api.src.distribuidora import models as m
 from api.src.config import settings
+
+# Constants for map layers
+_DEPOT_LAT = -25.3235
+_DEPOT_LNG = -57.5641
+_ROUTE_COLORS = [
+    "#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6",
+    "#3b82f6", "#8b5cf6", "#ec4899", "#64748b", "#0ea5e9",
+]
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1034,3 +1042,184 @@ def calculate_truck_load_weight(items: list[dict], max_weight_kg: Decimal | floa
         "sobrecarga_kg": sobrecarga_kg,
         "aprobado_despacho": aprobado,
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+# MAP LAYERS
+# ═══════════════════════════════════════════════════════════════
+
+async def get_map_routes(db: AsyncSession, company_id: str) -> list[dict]:
+    """All active routes for the map layer with today's instance status.
+
+    Returns one dict per route with waypoints (customers with geocoords),
+    assigned color_index (0–9 cycling), and today's RouteStopVisit status
+    per waypoint when a RouteInstance exists for today.
+    """
+    from api.src.customers.models import Customer
+    from api.src.auth.models import User
+    from api.src.distribuidora.tracking_models import RouteInstance, RouteStopVisit
+
+    today = datetime.now(timezone.utc).date()
+
+    q_routes = (
+        select(m.SalesRoute, User.nombre)
+        .outerjoin(User, User.id == m.SalesRoute.user_id)
+        .where(
+            m.SalesRoute.company_id == UUID(company_id),
+            m.SalesRoute.estado == "activo",
+        )
+        .order_by(m.SalesRoute.nombre)
+    )
+    routes_result = await db.execute(q_routes)
+    routes = routes_result.all()
+
+    if not routes:
+        return []
+
+    q_instances = select(RouteInstance).where(
+        RouteInstance.company_id == UUID(company_id),
+        func.date(RouteInstance.fecha) == today,
+    )
+    inst_result = await db.execute(q_instances)
+    instances_by_route: dict[str, object] = {
+        str(inst.route_id): inst for inst in inst_result.scalars().all()
+    }
+
+    output = []
+    for idx, (route, seller_name) in enumerate(routes):
+        instance = instances_by_route.get(str(route.id))
+
+        stops_by_customer: dict[str, str] = {}
+        if instance:
+            q_stops = select(RouteStopVisit).where(RouteStopVisit.instance_id == instance.id)
+            stops_result = await db.execute(q_stops)
+            stops_by_customer = {
+                str(s.customer_id): s.status for s in stops_result.scalars().all()
+            }
+
+        q_customers = (
+            select(m.RouteCustomer, Customer)
+            .outerjoin(Customer, Customer.id == m.RouteCustomer.customer_id)
+            .where(m.RouteCustomer.route_id == route.id)
+            .order_by(m.RouteCustomer.orden_visita)
+        )
+        cust_result = await db.execute(q_customers)
+
+        waypoints = []
+        for rc, c in cust_result.all():
+            if c is None:
+                continue
+            waypoints.append({
+                "customer_id": str(c.id),
+                "razon_social": c.razon_social,
+                "orden_visita": rc.orden_visita,
+                "lat": float(c.lat) if c.lat is not None else None,
+                "lng": float(c.lng) if c.lng is not None else None,
+                "visit_status": stops_by_customer.get(str(c.id), "pending"),
+            })
+
+        output.append({
+            "route_id": str(route.id),
+            "route_name": route.nombre,
+            "seller_id": str(route.user_id),
+            "seller_name": seller_name or "",
+            "color_index": idx % 10,
+            "color": _ROUTE_COLORS[idx % 10],
+            "waypoints": waypoints,
+            "depot_lat": _DEPOT_LAT,
+            "depot_lng": _DEPOT_LNG,
+            "instance_status": instance.status if instance else None,
+        })
+
+    return output
+
+
+async def get_map_customers(db: AsyncSession, company_id: str) -> list[dict]:
+    """All geocoded customers for the unassigned-customers map layer.
+
+    Returns every customer with lat/lng, enriched with their route assignment
+    (color_index) and today's visit status when applicable.
+    """
+    from api.src.customers.models import Customer
+    from api.src.distribuidora.tracking_models import RouteInstance, RouteStopVisit
+
+    today = datetime.now(timezone.utc).date()
+
+    q = (
+        select(Customer, m.RouteCustomer)
+        .outerjoin(
+            m.RouteCustomer,
+            and_(
+                m.RouteCustomer.customer_id == Customer.id,
+            ),
+        )
+        .where(
+            Customer.company_id == UUID(company_id),
+            Customer.lat.isnot(None),
+            Customer.lng.isnot(None),
+        )
+        .order_by(Customer.razon_social)
+    )
+    result = await db.execute(q)
+    rows = result.all()
+
+    if not rows:
+        return []
+
+    route_ids = {str(rc.route_id) for _, rc in rows if rc is not None}
+    route_color_index: dict[str, int] = {}
+    if route_ids:
+        q_routes = (
+            select(m.SalesRoute)
+            .where(
+                m.SalesRoute.company_id == UUID(company_id),
+                m.SalesRoute.estado == "activo",
+            )
+            .order_by(m.SalesRoute.nombre)
+        )
+        r2 = await db.execute(q_routes)
+        for i, route in enumerate(r2.scalars().all()):
+            route_color_index[str(route.id)] = i % 10
+
+    q_instances = select(RouteInstance).where(
+        RouteInstance.company_id == UUID(company_id),
+        func.date(RouteInstance.fecha) == today,
+    )
+    inst_result = await db.execute(q_instances)
+    instance_ids = [inst.id for inst in inst_result.scalars().all()]
+
+    stops_by_customer: dict[str, str] = {}
+    if instance_ids:
+        q_stops = select(RouteStopVisit).where(
+            RouteStopVisit.instance_id.in_(instance_ids)
+        )
+        stops_result = await db.execute(q_stops)
+        stops_by_customer = {
+            str(s.customer_id): s.status for s in stops_result.scalars().all()
+        }
+
+    output = []
+    seen_ids: set[str] = set()
+    for customer, rc in rows:
+        cid = str(customer.id)
+        if cid in seen_ids:
+            continue
+        seen_ids.add(cid)
+
+        route_id = str(rc.route_id) if rc else None
+        color_idx = route_color_index.get(route_id, None) if route_id else None
+
+        output.append({
+            "customer_id": cid,
+            "razon_social": customer.razon_social,
+            "lat": float(customer.lat),
+            "lng": float(customer.lng),
+            "route_id": route_id,
+            "color_index": color_idx,
+            "visit_status": stops_by_customer.get(cid, "pending"),
+            "direccion": customer.direccion,
+            "ciudad": customer.ciudad,
+            "telefono": customer.telefono,
+        })
+
+    return output

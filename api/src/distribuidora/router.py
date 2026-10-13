@@ -489,3 +489,27 @@ async def customer_profitability(
     _=Depends(require_auth),
 ):
     return await service.get_customer_profitability(db, company_id)
+
+
+# ═══════════════════════════════════════════════════════════════
+# MAP LAYERS
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/map/routes/{company_id}")
+async def map_routes(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_auth),
+):
+    """Active routes with waypoints and today's visit status for the map layer."""
+    return await service.get_map_routes(db, company_id)
+
+
+@router.get("/map/customers/{company_id}")
+async def map_customers(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_auth),
+):
+    """Geocoded customers with route assignment and today's visit status."""
+    return await service.get_map_customers(db, company_id)
