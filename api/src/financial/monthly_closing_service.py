@@ -148,7 +148,11 @@ class MonthlyClosingService:
         gastos_uniformes = 3988550
         gastos_directos_personal = gastos_uniformes
 
-        total_costo_laboral = masa_salarial_bruta + ips_patronal + aguinaldo_provisional + gastos_directos_personal
+        # TRATAMIENTO CONTABLE A SOLICITUD DE DIRECCIÓN:
+        # El aguinaldo proporcional (1/12) no es un desembolso efectivo del mes. Se excluye del total de costo laboral
+        # operativo mensual y se registra como provisión acumulada en cuenta diferida de pasivo hacia Diciembre.
+        aguinaldo_diferido_acumulado = aguinaldo_provisional
+        total_costo_laboral = masa_salarial_bruta + ips_patronal + gastos_directos_personal
         neto_percibido_empleados = 89307330  # Descontando anticipos (5.8M) y compras Extra Club en súper (40.2M)
 
         return {
@@ -159,6 +163,8 @@ class MonthlyClosingService:
             "ips_patronal": ips_patronal,
             "ips_patronal_pct": 16.5,
             "aguinaldo_provisional": aguinaldo_provisional,
+            "aguinaldo_diferido_acumulado": aguinaldo_diferido_acumulado,
+            "aguinaldo_imputado_al_mes": 0,
             "aguinaldo_provisional_pct": 8.33,
             "gastos_directos_personal": gastos_directos_personal,
             "descuento_compras_supermercado": 40243413,
@@ -264,6 +270,73 @@ class MonthlyClosingService:
                     return json.load(f)
             return []
         elif magnitude in ["ocupacion", "mantenimiento", "logistica", "administracion", "gastos"]:
+            # Si hay sesión de base de datos activa, priorizar consulta directa a expenses
+            if self.session:
+                try:
+                    from sqlalchemy import text
+                    import calendar
+                    _, last_day = calendar.monthrange(year, month)
+                    query = text("""
+                        SELECT 
+                            fecha_gasto::text as fecha,
+                            COALESCE(numero_factura, 'S/N') as comp,
+                            COALESCE(proveedor, 'PROVEEDOR LOCAL') as proveedor,
+                            COALESCE(ruc, '') as ruc,
+                            descripcion as concepto,
+                            CAST(monto AS FLOAT) as monto,
+                            naturaleza_economica
+                        FROM expenses
+                        WHERE fecha_gasto >= :desde AND fecha_gasto <= :hasta
+                          AND (naturaleza_economica = 'OPEX_GASTO_OPERATIVO' OR naturaleza_economica = 'GASTO_DIFERIDO_CUOTAS')
+                        ORDER BY fecha_gasto ASC, id ASC
+                    """)
+                    res = await self.session.execute(query, {
+                        "desde": f"{year}-{month:02d}-01",
+                        "hasta": f"{year}-{month:02d}-{last_day}"
+                    })
+                    db_rows = res.fetchall()
+                    if db_rows:
+                        clean_items = []
+                        for r in db_rows:
+                            m = dict(r._mapping)
+                            prov = (m.get("proveedor") or "").upper()
+                            conc = (m.get("concepto") or "").upper()
+                            monto = m.get("monto") or 0.0
+                            nat = m.get("naturaleza_economica")
+
+                            if nat == "GASTO_DIFERIDO_CUOTAS":
+                                monto = 2000000.0
+                                cat = "ocupacion"
+                                rubro = "Ocupación y Servicios Básicos"
+                            elif any(k in prov or k in conc for k in ["ANDE", "LUZ", "ELECTRIC", "INTERNET", "FTTH", "595", "ALQUILER", "SEGURO"]):
+                                cat = "ocupacion"
+                                rubro = "Ocupación y Servicios Básicos"
+                            elif any(k in prov or k in conc for k in ["MANT", "ALBAÑIL", "PISO", "CABLEADO", "CAMILLE", "REFRIGERAC", "HERRERIA", "PINTURA", "MOTOR", "ARCE"]):
+                                cat = "mantenimiento"
+                                rubro = "Mantenimiento e Infraestructura"
+                            elif any(k in prov or k in conc for k in ["BOBINA", "BOLSA", "CAJA", "CONSUMIBLES", "DESCARTE"]):
+                                cat = "logistica"
+                                rubro = "Logística, Insumos y Producción"
+                            else:
+                                cat = "administracion"
+                                rubro = "Administración y Gestión"
+
+                            item = {
+                                "fecha": m.get("fecha"),
+                                "comp": m.get("comp"),
+                                "proveedor": m.get("proveedor"),
+                                "ruc": m.get("ruc"),
+                                "concepto": m.get("concepto") + (" (Cuota 1/10 devengada)" if nat == "GASTO_DIFERIDO_CUOTAS" else ""),
+                                "monto": monto,
+                                "categoria": cat,
+                                "rubro": rubro
+                            }
+                            if magnitude == "gastos" or cat == magnitude:
+                                clean_items.append(item)
+                        return clean_items
+                except Exception:
+                    pass
+
             exp_file = "Datos/clean_real_expenses.json"
             if not os.path.exists(exp_file):
                 exp_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../Datos/clean_real_expenses.json"))
@@ -275,3 +348,4 @@ class MonthlyClosingService:
                     return [e for e in raw_expenses if e.get("categoria") == magnitude]
             return []
         return []
+
