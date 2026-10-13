@@ -376,6 +376,67 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
     return motivos.find((m) => m.codigo === createMotivoCodigo)
   }, [motivos, createMotivoCodigo])
 
+  // Resumen semántico financiero del ajuste detallado en el modal (Pérdidas vs Ganancias)
+  const detailSummary = useMemo(() => {
+    if (!detailAdjustment) {
+      return {
+        sobrantesGs: 0,
+        faltantesGs: 0,
+        itemsSobrantes: 0,
+        itemsFaltantes: 0,
+        netoGs: 0,
+        esPerdida: false,
+        esGanancia: false,
+        esMixto: false,
+      }
+    }
+
+    let sobrantesGs = 0
+    let faltantesGs = 0
+    let itemsSobrantes = 0
+    let itemsFaltantes = 0
+
+    if (detailAdjustment.items && detailAdjustment.items.length > 0) {
+      detailAdjustment.items.forEach((it) => {
+        const diff = Number(it.diferencia || 0)
+        const costo = Number(it.costo_unitario || 0)
+        const itemImp = Math.abs(Number(it.impacto_gs != null ? it.impacto_gs : diff * costo))
+        if (diff > 0.0001) {
+          sobrantesGs += itemImp
+          itemsSobrantes++
+        } else if (diff < -0.0001) {
+          faltantesGs += itemImp
+          itemsFaltantes++
+        }
+      })
+    } else {
+      const totalImp = Number(detailAdjustment.impacto_financiero_gs || 0)
+      if (totalImp < 0) {
+        faltantesGs = Math.abs(totalImp)
+        itemsFaltantes = 1
+      } else {
+        faltantesGs = totalImp
+        itemsFaltantes = 1
+      }
+    }
+
+    const netoGs = sobrantesGs - faltantesGs
+    const esPerdida = netoGs < -0.001 || (itemsFaltantes > 0 && itemsSobrantes === 0)
+    const esGanancia = netoGs > 0.001 && itemsFaltantes === 0
+    const esMixto = itemsSobrantes > 0 && itemsFaltantes > 0
+
+    return {
+      sobrantesGs,
+      faltantesGs,
+      itemsSobrantes,
+      itemsFaltantes,
+      netoGs,
+      esPerdida,
+      esGanancia,
+      esMixto,
+    }
+  }, [detailAdjustment])
+
   // Cálculo en vivo del impacto financiero desglosado en el formulario
   const liveStats = useMemo(() => {
     let ganancia = 0
@@ -1615,15 +1676,104 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                       {detailAdjustment.riesgo}
                     </span>
                   </div>
-                  <div>
+                  <div
+                    className={`p-3 rounded-2xl border transition ${
+                      detailSummary.esPerdida
+                        ? "bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-400"
+                        : detailSummary.esGanancia
+                        ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-400"
+                        : "bg-slate-100 dark:bg-slate-800/50 border-slate-200 dark:border-slate-800"
+                    }`}
+                  >
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                      Impacto Financiero Total
+                      Balance Financiero Total
                     </span>
-                    <span className="font-mono font-black text-base text-slate-900 dark:text-white">
-                      {formatPYG(detailAdjustment.impacto_financiero_gs || 0)}
-                    </span>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span
+                        className={`font-mono font-black text-base ${
+                          detailSummary.esPerdida
+                            ? "text-rose-600 dark:text-rose-400"
+                            : detailSummary.esGanancia
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : "text-slate-900 dark:text-white"
+                        }`}
+                      >
+                        {detailSummary.esPerdida
+                          ? `-${formatPYG(Math.abs(detailSummary.netoGs))}`
+                          : detailSummary.esGanancia
+                          ? `+${formatPYG(detailSummary.netoGs)}`
+                          : "₲ 0"}
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase border ${
+                          detailSummary.esPerdida
+                            ? "bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800"
+                            : detailSummary.esGanancia
+                            ? "bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800"
+                            : "bg-slate-200 text-slate-700 border-slate-300"
+                        }`}
+                      >
+                        {detailSummary.esPerdida
+                          ? "🔴 Pérdida / Merma"
+                          : detailSummary.esGanancia
+                          ? "🟢 Ganancia / Sobrante"
+                          : "Cuadrado"}
+                      </span>
+                    </div>
+                    {detailSummary.esMixto && (
+                      <div className="flex items-center gap-2 text-[10px] font-bold mt-1">
+                        <span className="text-emerald-600">
+                          Sob: +{formatPYG(detailSummary.sobrantesGs)}
+                        </span>
+                        <span>•</span>
+                        <span className="text-rose-600">
+                          Falt: -{formatPYG(detailSummary.faltantesGs)}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
+
+                {/* Banner de Diagnóstico Económico del Ajuste */}
+                {detailSummary.esPerdida && (
+                  <div className="p-4 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60 rounded-2xl flex items-center gap-3">
+                    <div className="p-2.5 bg-rose-100 dark:bg-rose-900/60 rounded-xl text-rose-600 shrink-0">
+                      <TrendingDown className="w-5 h-5" />
+                    </div>
+                    <div className="text-xs space-y-0.5">
+                      <p className="font-extrabold text-rose-900 dark:text-rose-200 text-sm">
+                        PÉRDIDA / MERMA CONFIRMADA: -{formatPYG(Math.abs(detailSummary.netoGs))}
+                      </p>
+                      <p className="text-rose-700/90 dark:text-rose-300/80 text-[11px] leading-relaxed">
+                        Se registraron{" "}
+                        <strong>
+                          {detailSummary.itemsFaltantes} producto(s) con faltante físico
+                        </strong>{" "}
+                        en salón/depósito respecto al stock del sistema. Al firmar Administración,
+                        se registrará la baja de inventario.
+                      </p>
+                    </div>
+                  </div>
+                )}
+                {detailSummary.esGanancia && (
+                  <div className="p-4 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/60 rounded-2xl flex items-center gap-3">
+                    <div className="p-2.5 bg-emerald-100 dark:bg-emerald-900/60 rounded-xl text-emerald-600 shrink-0">
+                      <TrendingUp className="w-5 h-5" />
+                    </div>
+                    <div className="text-xs space-y-0.5">
+                      <p className="font-extrabold text-emerald-900 dark:text-emerald-200 text-sm">
+                        GANANCIA / SOBRANTE DE STOCK: +{formatPYG(detailSummary.netoGs)}
+                      </p>
+                      <p className="text-emerald-700/90 dark:text-emerald-300/80 text-[11px] leading-relaxed">
+                        Se registraron{" "}
+                        <strong>
+                          {detailSummary.itemsSobrantes} producto(s) con sobrante físico
+                        </strong>{" "}
+                        por encima del stock del sistema. Se dará de alta en el inventario.
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Justificación */}
                 {detailAdjustment.motivo_detalle && (
@@ -1695,30 +1845,66 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                             <td className="p-3 text-right font-mono font-bold text-slate-900 dark:text-white">
                               {it.cantidad_fisica}
                             </td>
-                            <td
-                              className={`p-3 text-right font-mono font-black ${
-                                it.diferencia === 0
-                                  ? "text-slate-400"
-                                  : it.diferencia > 0
-                                  ? "text-emerald-600"
-                                  : "text-rose-600"
-                              }`}
-                            >
-                              {it.diferencia > 0 ? `+${it.diferencia}` : it.diferencia}
+                            <td className="p-3 text-right font-mono font-black">
+                              {Number(it.diferencia) > 0 ? (
+                                <span className="inline-flex items-center gap-1 text-emerald-600">
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400 font-bold uppercase">
+                                    Sob
+                                  </span>
+                                  +{it.diferencia}
+                                </span>
+                              ) : Number(it.diferencia) < 0 ? (
+                                <span className="inline-flex items-center gap-1 text-rose-600">
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-400 font-bold uppercase">
+                                    Falt
+                                  </span>
+                                  {it.diferencia}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400">0</span>
+                              )}
                             </td>
                             <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-400">
                               {formatPYG(it.costo_unitario)}
                             </td>
-                            <td
-                              className={`p-3 text-right font-mono font-extrabold ${
-                                it.diferencia < 0 ? "text-rose-600" : "text-emerald-600"
-                              }`}
-                            >
-                              {it.diferencia > 0
-                                ? `+${formatPYG(Math.abs(Number(it.impacto_gs || 0)))}`
-                                : it.diferencia < 0
-                                ? `-${formatPYG(Math.abs(Number(it.impacto_gs || 0)))}`
-                                : "₲ 0"}
+                            <td className="p-3 text-right font-mono font-black">
+                              {Number(it.diferencia) > 0 ? (
+                                <div className="flex flex-col items-end">
+                                  <span className="text-emerald-600 dark:text-emerald-400 font-black text-sm">
+                                    +{formatPYG(
+                                      Math.abs(
+                                        Number(
+                                          it.impacto_gs != null
+                                            ? it.impacto_gs
+                                            : Number(it.diferencia) * Number(it.costo_unitario || 0)
+                                        )
+                                      )
+                                    )}
+                                  </span>
+                                  <span className="inline-flex items-center gap-0.5 text-[9px] font-extrabold uppercase text-emerald-700 bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 px-1.5 py-0.5 rounded-sm">
+                                    🟢 Ganancia
+                                  </span>
+                                </div>
+                              ) : Number(it.diferencia) < 0 ? (
+                                <div className="flex flex-col items-end">
+                                  <span className="text-rose-600 dark:text-rose-400 font-black text-sm">
+                                    -{formatPYG(
+                                      Math.abs(
+                                        Number(
+                                          it.impacto_gs != null
+                                            ? it.impacto_gs
+                                            : Number(it.diferencia) * Number(it.costo_unitario || 0)
+                                        )
+                                      )
+                                    )}
+                                  </span>
+                                  <span className="inline-flex items-center gap-0.5 text-[9px] font-extrabold uppercase text-rose-700 bg-rose-100 dark:bg-rose-950/40 dark:text-rose-300 px-1.5 py-0.5 rounded-sm">
+                                    🔴 Pérdida
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 font-medium text-xs">₲ 0</span>
+                              )}
                             </td>
                           </tr>
                         ))}
