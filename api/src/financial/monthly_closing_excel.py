@@ -106,10 +106,10 @@ def generate_closing_excel(data: Dict[str, Any]) -> bytes:
         
         ("4.0", "GASTOS OPERATIVOS (OPEX)", "=SUM(D16:D20)", True, "=D15/$D$10", "Resumen OPEX", True, False, LIGHT_GRAY_FILL),
         ("4.1", "  - Gastos de Personal (Sueldos, Jornales e IPS Patronal)", nomina.get("total_costo_laboral", 0), False, "=D16/$D$10", "4. Detalle Nomina SueldOK", False, False, None),
-        ("4.2", "  - Ocupación y Servicios Básicos (Alquiler, ANDE, Essap)", opex.get("ocupacion_servicios", {}).get("total", 0), False, "=D17/$D$10", "5. Ocupacion y Servicios", False, False, None),
-        ("4.3", "  - Mantenimiento, Equipamiento e Infraestructura", opex.get("mantenimiento_infraestructura", {}).get("total", 0), False, "=D18/$D$10", "6. Mantenimiento", False, False, None),
-        ("4.4", "  - Logística, Operación e Insumos (Fletes, Bolsas, Nafta)", opex.get("logistica_operacion", {}).get("total", 0), False, "=D19/$D$10", "7. Logistica e Insumos", False, False, None),
-        ("4.5", "  - Administración, Tecnología y Asesoría", opex.get("administracion_tecnologia", {}).get("total", 0), False, "=D20/$D$10", "8. Administracion y Finanzas", False, False, None),
+        ("4.2", "  - Ocupación, Seguros y Servicios (Póliza Río Seguros, ANDE, Internet)", opex.get("ocupacion_servicios", {}).get("total", 0), False, "=D17/$D$10", "5. Ocupacion y Servicios", False, False, None),
+        ("4.3", "  - Mantenimiento e Infraestructura (Albañilería, Cañerías, Cámaras Frío)", opex.get("mantenimiento_infraestructura", {}).get("total", 0), False, "=D18/$D$10", "6. Mantenimiento", False, False, None),
+        ("4.4", "  - Logística, Operación e Insumos (Harinas Uso Interno, Bolsas Cajas)", opex.get("logistica_operacion", {}).get("total", 0), False, "=D19/$D$10", "7. Logistica e Insumos", False, False, None),
+        ("4.5", "  - Administración, Cartelería y Gestión (Publicidad, Folletos, Sistemas)", opex.get("administracion_tecnologia", {}).get("total", 0), False, "=D20/$D$10", "8. Administracion y Finanzas", False, False, None),
         
         ("5.0", "EBITDA (RESULTADO OPERATIVO BRUTO)", "=D14-D15", True, "=D21/$D$10", "Margen Operativo", True, True, PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")),
         

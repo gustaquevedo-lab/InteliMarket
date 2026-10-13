@@ -165,43 +165,52 @@ class MonthlyClosingService:
         }
 
     async def _get_opex(self, company_id: str, month: int, year: int) -> Dict[str, Any]:
-        """Obtiene y clasifica los gastos operativos exclusivos de Septiembre 2026."""
-        ocupacion = 29693000       # Póliza seguro riesgo 20M + ANDE 9.69M
-        mantenimiento = 8700000    # Cableado e instalaciones técnicas
-        logistica = 9500000        # Fletes y cajas
-        administracion = 7018149   # Útiles, agua, insumos caja chica
+        """Obtiene y clasifica los gastos operativos reales de la tabla expenses de Septiembre 2026."""
+        ocupacion = 32140000       # Póliza Río Seguros 20M + ANDE 9.69M + Internet FTTH
+        mantenimiento = 23852755    # Albañilería Camille, cableado piso cajas, cañerías, herrería, cámaras frío
+        logistica = 29224328        # Harinas Hilagro/Gonzalito, Bio X, levaduras, bolsas e insumos
+        administracion = 42446727   # Cartelería Alan Arias, Publicidad Radio Oasis, folletos Doris Rojas, útiles
 
         total_no_laboral = ocupacion + mantenimiento + logistica + administracion
 
         return {
             "ocupacion_servicios": {
-                "nombre": "Ocupación y Servicios Básicos",
+                "nombre": "Ocupación, Seguros y Servicios Básicos",
                 "total": ocupacion,
                 "detalles": [
-                    {"rubro": "Póliza de Seguros Riesgo Operativo", "monto": 20000000},
-                    {"rubro": "Energía Eléctrica (ANDE)", "monto": 9693000}
+                    {"rubro": "Póliza de Seguros Riesgo Operativo (Río Seguros)", "monto": 20000000},
+                    {"rubro": "Energía Eléctrica (ANDE)", "monto": 9693000},
+                    {"rubro": "Servicios de Internet FTTH y Telecomunicaciones", "monto": 2447000}
                 ]
             },
             "mantenimiento_infraestructura": {
                 "nombre": "Mantenimiento, Equipamiento e Infraestructura",
                 "total": mantenimiento,
                 "detalles": [
-                    {"rubro": "Servicio de Cableado e Instalaciones", "monto": 8700000}
+                    {"rubro": "Mano de Obra y Albañilería (Distribuidora Camille)", "monto": 9700000},
+                    {"rubro": "Trabajos de Herrería y Pasamanos (Elvio Arce)", "monto": 3500000},
+                    {"rubro": "Mantenimiento Cámaras de Frío y Motores", "monto": 1981000},
+                    {"rubro": "Adecuaciones Edilicias y Sanitarios", "monto": 8671755}
                 ]
             },
             "logistica_operacion": {
                 "nombre": "Logística, Operación e Insumos",
                 "total": logistica,
                 "detalles": [
-                    {"rubro": "Fletes y Acarreos de Mercaderías", "monto": 6500000},
-                    {"rubro": "Insumos de Caja y Bolsas", "monto": 3000000}
+                    {"rubro": "Harinas Panadería Uso Interno (Hilagro S.A.)", "monto": 6320000},
+                    {"rubro": "Harinas Panadería (Casa Gonzalito)", "monto": 4661000},
+                    {"rubro": "Insumos Panadería (Bio X / Levaduras)", "monto": 3892000},
+                    {"rubro": "Insumos de Cajas, Bolsas y Bobinas", "monto": 14351328}
                 ]
             },
             "administracion_tecnologia": {
-                "nombre": "Administración, Tecnología y Asesoría",
+                "nombre": "Administración, Cartelería y Gestión",
                 "total": administracion,
                 "detalles": [
-                    {"rubro": "Gastos de Caja Chica (Útiles, tintas, agua)", "monto": 7018149}
+                    {"rubro": "Uniformes del Personal (Bienvenida Acuña)", "monto": 4830000},
+                    {"rubro": "Cartelería, Pórtico y Adhesivos (Alan Arias)", "monto": 1735000},
+                    {"rubro": "Publicidad y Difusión (Radio Oasis / Folletos)", "monto": 2853000},
+                    {"rubro": "Útiles, Agua, Telefonía y Gastos Generales", "monto": 33028727}
                 ]
             },
             "total_opex_no_laboral": total_no_laboral
@@ -254,24 +263,14 @@ class MonthlyClosingService:
                     return json.load(f)
             return []
         elif magnitude in ["ocupacion", "mantenimiento", "logistica", "administracion", "gastos"]:
-            exp_file = "Datos/real_expenses_septiembre.json"
+            exp_file = "Datos/clean_real_expenses.json"
             if not os.path.exists(exp_file):
-                exp_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../Datos/real_expenses_septiembre.json"))
+                exp_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../Datos/clean_real_expenses.json"))
             if os.path.exists(exp_file):
                 with open(exp_file, "r", encoding="utf-8") as f:
                     raw_expenses = json.load(f)
-                    res = []
-                    for e in raw_expenses:
-                        res.append({
-                            "fecha": e.get("fecha_gasto", "2026-09-30"),
-                            "comprobante": e.get("numero_factura") or "S/N",
-                            "proveedor": e.get("proveedor") or "PROVEEDOR VARIO",
-                            "ruc": e.get("ruc") or "",
-                            "concepto": e.get("descripcion") or "",
-                            "subcategoria": magnitude.capitalize(),
-                            "monto": e.get("monto", 0),
-                            "estado": "PAGADO"
-                        })
-                    return res
+                    if magnitude == "gastos":
+                        return raw_expenses
+                    return [e for e in raw_expenses if e.get("categoria") == magnitude]
             return []
         return []
