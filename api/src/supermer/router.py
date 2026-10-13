@@ -2312,3 +2312,119 @@ async def markdown_dashboard(
     user=Depends(require_auth),
 ):
     return await service_markdown.get_markdown_dashboard(user["company_id"], db)
+
+
+# ============================================================
+# REQUISICIONES DE SALÓN A PRODUCCIÓN (CONSUMO INTERNO)
+# ============================================================
+
+from api.src.supermer import requisitions_service
+from api.src.supermer.schemas import RequisitionCreate, RequisitionResponse
+
+
+class ApproveRequisitionInput(BaseModel):
+    approver_name: Optional[str] = None
+
+
+class LinkPosSaleInput(BaseModel):
+    sale_id: str
+    numero_factura: str
+
+
+@router.post("/requisitions", response_model=RequisitionResponse, status_code=201)
+async def create_requisition_endpoint(
+    data: RequisitionCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await requisitions_service.create_requisition(
+        db=db,
+        company_id=user["company_id"],
+        data=data,
+        branch_id=user.get("branch_id"),
+    )
+
+
+@router.get("/requisitions", response_model=list[RequisitionResponse])
+async def list_requisitions_endpoint(
+    estado: Optional[str] = Query(None),
+    area_destino: Optional[str] = Query(None),
+    branch_id: Optional[str] = Query(None),
+    limit: int = Query(50, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await requisitions_service.list_requisitions(
+        db=db,
+        company_id=user["company_id"],
+        branch_id=branch_id or user.get("branch_id"),
+        estado=estado,
+        area_destino=area_destino,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/requisitions/{requisition_id}", response_model=RequisitionResponse)
+async def get_requisition_endpoint(
+    requisition_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    req = await requisitions_service.get_requisition(db, requisition_id)
+    if not req or str(req.company_id) != user["company_id"]:
+        raise HTTPException(status_code=404, detail="Requisición no encontrada")
+    return req
+
+
+@router.put("/requisitions/{requisition_id}/approve")
+async def approve_requisition_endpoint(
+    requisition_id: str,
+    payload: Optional[ApproveRequisitionInput] = None,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    approver = (payload and payload.approver_name) or user.get("nombre") or user.get("email") or "Encargado de Salón"
+    try:
+        res = await requisitions_service.approve_requisition(db, requisition_id, approver)
+        return {
+            "success": True,
+            "requisition": RequisitionResponse.model_validate(res["requisition"]),
+            "ticket_text": res["ticket_text"],
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/requisitions/{requisition_id}/ticket")
+async def get_requisition_ticket_endpoint(
+    requisition_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    req = await requisitions_service.get_requisition(db, requisition_id)
+    if not req or str(req.company_id) != user["company_id"]:
+        raise HTTPException(status_code=404, detail="Requisición no encontrada")
+    return {
+        "numero_requisicion": req.numero_requisicion,
+        "ticket_text": requisitions_service.generate_thermal_ticket_text(req),
+    }
+
+
+@router.put("/requisitions/{requisition_id}/link-sale", response_model=RequisitionResponse)
+async def link_requisition_sale_endpoint(
+    requisition_id: str,
+    data: LinkPosSaleInput,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        return await requisitions_service.link_pos_sale(
+            db,
+            requisition_id=requisition_id,
+            sale_id=data.sale_id,
+            numero_factura=data.numero_factura,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

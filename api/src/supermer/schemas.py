@@ -1,5 +1,6 @@
 """Supermarket schemas"""
 
+from enum import Enum
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
 from datetime import datetime, date
@@ -638,3 +639,66 @@ class ForecastEnhanceInput(BaseModel):
     periodo_dias: int = 90
     incluir_clima: bool = False
     incluir_estacionalidad: bool = True
+
+
+# ============================================================
+# REQUISICIONES DE SALÓN A PRODUCCIÓN (CONSUMO INTERNO)
+# ============================================================
+
+class RequisitionStatus(str, Enum):
+    PENDIENTE = "PENDIENTE"
+    APROBADA = "APROBADA"
+    FACTURADA_EN_CAJA = "FACTURADA_EN_CAJA"
+    COMPENSADA = "COMPENSADA"
+    ANULADA = "ANULADA"
+
+
+class RequisitionItemCreate(BaseModel):
+    product_id: Optional[str] = None
+    barcode: Optional[str] = None
+    product_name: str
+    cantidad: Decimal = Field(..., gt=0)
+    unidad_medida: str = "UN"
+    costo_unitario_estimado: Decimal = Decimal("0")
+    precio_venta_salon: Decimal = Decimal("0")
+
+
+class RequisitionCreate(BaseModel):
+    solicitado_por: str
+    area_destino: str  # panaderia, rotiseria, carniceria, verduleria
+    branch_id: Optional[str] = None
+    observaciones: Optional[str] = None
+    items: list[RequisitionItemCreate] = Field(..., min_length=1)
+
+
+class RequisitionItemResponse(BaseModel):
+    id: UUID
+    requisition_id: UUID
+    product_id: Optional[UUID] = None
+    barcode: Optional[str] = None
+    product_name: str
+    cantidad: Decimal
+    unidad_medida: str
+    costo_unitario_estimado: Decimal
+    precio_venta_salon: Decimal
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RequisitionResponse(BaseModel):
+    id: UUID
+    numero_requisicion: str
+    company_id: UUID
+    branch_id: Optional[UUID] = None
+    solicitado_por: str
+    area_destino: str
+    estado: str
+    aprobado_por: Optional[str] = None
+    aprobado_at: Optional[datetime] = None
+    sale_id: Optional[UUID] = None
+    numero_factura: Optional[str] = None
+    observaciones: Optional[str] = None
+    created_at: Optional[datetime] = None
+    items: list[RequisitionItemResponse] = Field(default_factory=list)
+
+    model_config = ConfigDict(from_attributes=True)

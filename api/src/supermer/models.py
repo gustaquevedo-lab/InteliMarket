@@ -1717,3 +1717,50 @@ AuditExecution = StoreAuditExecution
 AuditAnswer = StoreAuditAnswer
 MaintenanceSchedule = EquipmentMaintenanceSchedule
 WorkOrder = EquipmentWorkOrder
+
+
+class RequisitionStatus(str, enum.Enum):
+    PENDIENTE = "PENDIENTE"
+    APROBADA = "APROBADA"
+    FACTURADA_EN_CAJA = "FACTURADA_EN_CAJA"
+    COMPENSADA = "COMPENSADA"
+    ANULADA = "ANULADA"
+
+
+class InternalRequisition(Base):
+    """Requisición de Salón a Producción (Consumo Interno)"""
+    __tablename__ = "internal_requisitions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    numero_requisicion = Column(String(30), unique=True, nullable=False, index=True)
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    branch_id = Column(UUID(as_uuid=True), nullable=True)
+    solicitado_por = Column(String(150), nullable=False)
+    area_destino = Column(String(50), nullable=False, index=True)  # panaderia, rotiseria, carniceria, etc.
+    estado = Column(String(30), nullable=False, server_default="PENDIENTE", index=True)
+    aprobado_por = Column(String(150))
+    aprobado_at = Column(DateTime(timezone=True))
+    sale_id = Column(UUID(as_uuid=True), index=True)
+    numero_factura = Column(String(50), index=True)
+    observaciones = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    items = relationship("InternalRequisitionItem", back_populates="requisition", cascade="all, delete-orphan")
+
+
+class InternalRequisitionItem(Base):
+    """Ítem solicitado en la requisición interna"""
+    __tablename__ = "internal_requisition_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    requisition_id = Column(UUID(as_uuid=True), ForeignKey("internal_requisitions.id", ondelete="CASCADE"), nullable=False, index=True)
+    product_id = Column(UUID(as_uuid=True))
+    barcode = Column(String(50))
+    product_name = Column(String(255), nullable=False)
+    cantidad = Column(Numeric(12, 3), nullable=False)
+    unidad_medida = Column(String(20), nullable=False, server_default="UN")
+    costo_unitario_estimado = Column(Numeric(15, 2), default=0)
+    precio_venta_salon = Column(Numeric(15, 2), default=0)
+
+    requisition = relationship("InternalRequisition", back_populates="items")
