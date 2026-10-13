@@ -110,8 +110,10 @@ def upgrade() -> None:
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
+    """)
 
-        DROP TRIGGER IF EXISTS tg_log_product_price_variation ON products;
+    op.execute("DROP TRIGGER IF EXISTS tg_log_product_price_variation ON products;")
+    op.execute("""
         CREATE TRIGGER tg_log_product_price_variation
         AFTER UPDATE ON products
         FOR EACH ROW
@@ -217,13 +219,16 @@ def upgrade() -> None:
             END IF;
         END;
         $$ LANGUAGE plpgsql;
+    """)
 
-        DROP TRIGGER IF EXISTS tg_log_tiered_price_variation ON sp_tiered_prices;
+    op.execute("DROP TRIGGER IF EXISTS tg_log_tiered_price_variation ON sp_tiered_prices;")
+    op.execute("""
         CREATE TRIGGER tg_log_tiered_price_variation
         AFTER INSERT OR UPDATE OR DELETE ON sp_tiered_prices
         FOR EACH ROW
         EXECUTE FUNCTION fn_tg_log_tiered_price_variation();
     """)
+
 
     # 5. Backfill inicial desde price_audit_log (si la tabla existe y tiene registros)
     op.execute("""
