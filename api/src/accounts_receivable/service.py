@@ -1798,6 +1798,7 @@ class AccountsReceivableService:
         delivery_note_id: str | None = None,
         delivery_note_monto: Decimal | None = None,
         cobrador_id: str | None = None,
+        allocations: list | None = None,
     ) -> dict:
         """Registra un cobro; si viene con NC valida que monto_nc <= saldo_pendiente del cliente."""
         if delivery_note_id and delivery_note_monto is not None:
@@ -1819,16 +1820,20 @@ class AccountsReceivableService:
                     detail=f"El monto de la nota de crédito ({delivery_note_monto}) supera el saldo pendiente del cliente ({saldo_total})",
                 )
         # Delegate to existing function
-        from dataclasses import dataclass
+        from dataclasses import dataclass, field as dc_field
+
+        _allocs = allocations or []
 
         @dataclass
         class _PaymentData:
             monto_total: Decimal
+            customer_id: str
+            fecha: date
+            allocations: list = dc_field(default_factory=list)
             forma_pago: str = "efectivo"
-            fecha: date = fecha
-            cobrador_id: str | None = cobrador_id
-            delivery_note_id: str | None = delivery_note_id
-            delivery_note_monto: Decimal | None = delivery_note_monto
+            cobrador_id: str | None = None
+            delivery_note_id: str | None = None
+            delivery_note_monto: Decimal | None = None
             observaciones: str | None = None
             referencia: str | None = None
             bank_account_id: str | None = None
@@ -1844,7 +1849,15 @@ class AccountsReceivableService:
             retencion_porcentaje: Decimal = Decimal("30.00")
             monto_efectivo_recibido: Decimal = Decimal("0")
 
-        data = _PaymentData(monto_total=monto_total)
+        data = _PaymentData(
+            monto_total=monto_total,
+            customer_id=customer_id,
+            fecha=fecha,
+            allocations=_allocs,
+            cobrador_id=cobrador_id,
+            delivery_note_id=delivery_note_id,
+            delivery_note_monto=delivery_note_monto,
+        )
         return await create_receivable_payment(self.db, company_id, data, created_by)
 
     async def get_by_route(
