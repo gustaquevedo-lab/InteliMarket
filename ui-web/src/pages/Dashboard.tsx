@@ -509,6 +509,31 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* ── BANNER DESTACADO: CIERRE OFICIAL DE SEPTIEMBRE 2026 ── */}
+      <div className="bg-gradient-to-r from-emerald-600 to-teal-700 text-white p-4 rounded-2xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-white/10 rounded-xl">
+            <FileText className="w-5 h-5 text-emerald-200" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-black text-sm uppercase tracking-wide">Cierre Contable & Financiero — Septiembre 2026</span>
+              <span className="bg-emerald-300 text-emerald-950 font-black text-[10px] px-2 py-0.5 rounded-full">AUDITADO</span>
+            </div>
+            <p className="text-xs text-emerald-100 mt-0.5">
+              Ventas Totales: <strong className="text-white font-mono">1.234.596.102 Gs.</strong> • CMV: 1.020.507.216 Gs. • Nómina SueldOK (44 pers.): 169.074.201 Gs. • Bancos: 73.874.004 Gs.
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={() => navigate("/cierre-mensual")}
+          className="shrink-0 flex items-center gap-2 px-4 py-2 bg-white text-emerald-800 hover:bg-emerald-50 rounded-xl font-bold text-xs shadow-sm transition-all cursor-pointer"
+        >
+          <span>Abrir Cierre Completo</span>
+          <ArrowRight className="w-4 h-4" />
+        </button>
+      </div>
+
       {/* ──────────────────────────────────────────────────────────────────────────
           AI EXECUTIVE BRIEFING (CENTRO DE INTELIGENCIA PREDICTIVA)
       ────────────────────────────────────────────────────────────────────────── */}

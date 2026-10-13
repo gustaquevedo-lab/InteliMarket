@@ -1590,6 +1590,13 @@ export default function FinancialPage() {
             </button>
           )
         })}
+        <a
+          href="/cierre-mensual"
+          className="ml-auto flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm"
+        >
+          <FileSpreadsheet className="w-4 h-4" />
+          <span>Cierre de Resultados Setiembre 2026</span>
+        </a>
       </div>
 
       {loading ? (

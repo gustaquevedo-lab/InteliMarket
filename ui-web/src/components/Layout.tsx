@@ -45,6 +45,7 @@ const navGroups: NavGroup[] = [
     title: "Inicio",
     items: [
       { icon: LayoutDashboard, label: "Dashboard", path: "/" },
+      { icon: FileSpreadsheet, label: "Cierre Mensual de Resultados", path: "/cierre-mensual", keywords: ["cierre", "pnl", "resultados", "mensual", "setiembre", "septiembre", "balance"] },
       { icon: TrendingUp, label: "Gerente de Ventas IA", path: "/sales-agent" },
       { icon: Bot, label: "Gerente Financiero IA", path: "/finance-agent" },
       { icon: Sparkles, label: "Gerente de Marketing IA", path: "/marketing-agent" },
@@ -131,7 +132,7 @@ const navGroups: NavGroup[] = [
       { icon: ReceiptText, label: "Gastos Operativos", path: "/gastos" },
       { icon: DollarSign, label: "PyG Diario por Depto.", path: "/pyg-diario" },
       { icon: Building, label: "Gestión Financiera", path: "/financiero" },
-      { icon: FileSpreadsheet, label: "Cierre Mensual de Resultados", path: "/financiero/cierre-mensual", keywords: ["cierre", "pnl", "resultados", "mensual", "setiembre", "septiembre", "balance"] },
+      { icon: FileSpreadsheet, label: "Cierre Mensual de Resultados", path: "/cierre-mensual", keywords: ["cierre", "pnl", "resultados", "mensual", "setiembre", "septiembre", "balance"] },
     ]
   },
   {
@@ -321,7 +322,7 @@ export default function Layout() {
                 <div className={`overflow-hidden transition-all duration-300 ${isExpanded ? "max-h-[800px] opacity-100" : "max-h-0 opacity-0"}`}>
                   <div className={`${group.title !== "Inicio" ? "ml-3 pl-2.5 border-l-2 border-white/20 space-y-1 py-1" : "space-y-1"}`}>
                     {visibleItems.map((item) => {
-                      const active = location.pathname === item.path
+                      const active = location.pathname === item.path || (item.path === "/cierre-mensual" && location.pathname === "/financiero/cierre-mensual")
                       return (
                         <button
                           key={item.path}
