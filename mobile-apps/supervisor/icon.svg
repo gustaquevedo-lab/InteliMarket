@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="bgGradSup" cx="50%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#00358e" />
+      <stop offset="45%" stop-color="#002665" />
+      <stop offset="85%" stop-color="#060f22" />
+      <stop offset="100%" stop-color="#020611" />
+    </radialGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FDE68A" />
+      <stop offset="35%" stop-color="#F59E0B" />
+      <stop offset="70%" stop-color="#FF6305" />
+      <stop offset="100%" stop-color="#D97706" />
+    </linearGradient>
+    <linearGradient id="shieldPlate" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1E3A8A" />
+      <stop offset="50%" stop-color="#0F2459" />
+      <stop offset="100%" stop-color="#071333" />
+    </linearGradient>
+    <linearGradient id="orangePill" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFA24C" />
+      <stop offset="40%" stop-color="#FF6305" />
+      <stop offset="100%" stop-color="#C84800" />
+    </linearGradient>
+    <filter id="goldGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="12" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <filter id="dropShadowSup" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.65" />
+    </filter>
+  </defs>
+
+  <!-- Fondo squircle premium -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGradSup)" />
+  <rect width="506" height="506" x="3" y="3" rx="109" fill="none" stroke="url(#goldGrad)" stroke-width="5" opacity="0.45" />
+
+  <!-- Luz ambiental central -->
+  <circle cx="256" cy="210" r="145" fill="#3B82F6" opacity="0.15" filter="url(#goldGlow)" />
+
+  <!-- Escudo de Autoridad y Llave Maestra -->
+  <g transform="translate(136, 68)" filter="url(#dropShadowSup)">
+    <!-- Silueta del Escudo Exterior -->
+    <path d="M 120 10 L 225 45 C 225 155 180 235 120 270 C 60 235 15 155 15 45 Z"
+          fill="url(#shieldPlate)" stroke="url(#goldGrad)" stroke-width="8" stroke-linejoin="round" />
+
+    <!-- Línea decorativa interior del escudo -->
+    <path d="M 120 28 L 205 58 C 205 145 168 215 120 248 C 72 215 35 145 35 58 Z"
+          fill="none" stroke="#60A5FA" stroke-width="3" opacity="0.6" stroke-dasharray="6,4" />
+
+    <!-- Estrellas de Rango de Supervisión (3 estrellas superiores) -->
+    <g fill="url(#goldGrad)" transform="translate(68, 48)">
+      <!-- Estrella Izquierda -->
+      <polygon points="12,0 15,8 24,8 17,13 20,22 12,17 4,22 7,13 0,8 9,8" transform="scale(0.8)" />
+      <!-- Estrella Central (Mayor) -->
+      <polygon points="52,-4 56,6 67,6 58,13 62,24 52,18 42,24 46,13 37,6 48,6" />
+      <!-- Estrella Derecha -->
+      <polygon points="92,0 95,8 104,8 97,13 100,22 92,17 84,22 87,13 80,8 89,8" transform="scale(0.8)" />
+    </g>
+
+    <!-- Llave Maestra / Sello de Autorización Cruzado -->
+    <!-- Llave en diagonal -->
+    <g transform="translate(62, 78)">
+      <!-- Mango circular de la llave -->
+      <circle cx="36" cy="36" r="28" fill="none" stroke="url(#goldGrad)" stroke-width="9" />
+      <circle cx="36" cy="36" r="10" fill="#071333" stroke="url(#goldGrad)" stroke-width="4" />
+      <!-- Vástago de la llave -->
+      <rect x="58" y="30" width="62" height="12" rx="4" fill="url(#goldGrad)" transform="rotate(45, 58, 30)" />
+      <!-- Dientes de la llave -->
+      <rect x="100" y="80" width="14" height="18" rx="2" fill="url(#goldGrad)" transform="rotate(45, 100, 80)" />
+      <rect x="114" y="94" width="14" height="24" rx="2" fill="url(#goldGrad)" transform="rotate(45, 114, 94)" />
+    </g>
+
+    <!-- Checkmark de Aprobación en relieve -->
+    <path d="M 85 155 L 110 180 L 165 118"
+          fill="none" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"
+          filter="url(#dropShadowSup)" />
+    <path d="M 85 155 L 110 180 L 165 118"
+          fill="none" stroke="url(#goldGrad)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" />
+  </g>
+
+  <!-- Badge EXTRA SUPERVISOR -->
+  <g transform="translate(80, 388)">
+    <rect width="352" height="58" rx="29" fill="url(#orangePill)" filter="url(#dropShadowSup)" />
+    <rect width="348" height="54" x="2" y="2" rx="27" fill="none" stroke="#FFFFFF" stroke-width="2" opacity="0.3" />
+    <text x="176" y="38" fill="#FFFFFF" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif" font-weight="900" font-size="21" text-anchor="middle" letter-spacing="3">
+      EXTRA SUPERVISOR
+    </text>
+  </g>
+</svg>

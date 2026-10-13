@@ -2,11 +2,27 @@ from decimal import Decimal
 from datetime import datetime, timezone
 import uuid
 
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.sales_orders.models import SalesOrder, SalesOrderItem
 from api.src.sales_orders.schemas import SalesOrderCreate, SalesOrderUpdate
+from api.src.customers.models import Customer
+from api.src.products.models import Product
+
+
+async def _attach_customers(db: AsyncSession, orders: list[SalesOrder]) -> list[SalesOrder]:
+    customer_ids = {o.customer_id for o in orders if o.customer_id}
+    if not customer_ids:
+        return orders
+    result = await db.execute(select(Customer).where(Customer.id.in_(customer_ids)))
+    customers_by_id = {c.id: c for c in result.scalars().all()}
+    for o in orders:
+        c = customers_by_id.get(o.customer_id)
+        o.customer = (
+            {"id": c.id, "razon_social": c.razon_social, "ruc": c.ruc, "ci": c.ci} if c else None
+        )
+    return orders
 
 
 def _calculate_taxes(item: dict) -> dict:
@@ -17,21 +33,23 @@ def _calculate_taxes(item: dict) -> dict:
 
     subtotal_bruto = precio * cantidad
     descuento_monto = subtotal_bruto * (descuento_pct / Decimal("100"))
-    base = subtotal_bruto - descuento_monto
+    # Mismo fix que sales/service.py::calculate_taxes -- el precio ya
+    # incluye el IVA, no hay que sumarlo de nuevo encima.
+    total = (subtotal_bruto - descuento_monto).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
 
     if iva_tasa == Decimal("0"):
         iva_monto = Decimal("0")
-        total = base
+        base = total
     else:
-        iva_monto = (base * iva_tasa / Decimal("100")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
-        total = base + iva_monto
+        base = (total / (Decimal("1") + iva_tasa / Decimal("100"))).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+        iva_monto = total - base
 
     return {
         "subtotal_bruto": subtotal_bruto.quantize(Decimal("1")),
         "descuento_monto": descuento_monto.quantize(Decimal("1")),
         "iva_monto": iva_monto,
-        "total": total.quantize(Decimal("1")),
-        "base": base.quantize(Decimal("1")),
+        "total": total,
+        "base": base,
     }
 
 
@@ -112,7 +130,7 @@ async def create_order(db: AsyncSession, data: SalesOrderCreate) -> SalesOrder:
     order.base_exenta = base_exenta
     order.iva_10 = iva_10
     order.iva_5 = iva_5
-    order.total = subtotal + iva_10 + iva_5
+    order.total = subtotal - descuento_total
 
     await db.flush()
     await db.refresh(order)
@@ -129,8 +147,27 @@ async def get_order_with_items(db: AsyncSession, order_id: str) -> dict | None:
     if not order:
         return None
     items_result = await db.execute(select(SalesOrderItem).where(SalesOrderItem.order_id == order.id))
-    items = items_result.scalars().all()
-    return {**{c.name: getattr(order, c.name) for c in order.__table__.columns}, "items": items}
+    items = list(items_result.scalars().all())
+    await _attach_customers(db, [order])
+
+    product_ids = {item.product_id for item in items if item.product_id}
+    products_by_id = {}
+    if product_ids:
+        prod_result = await db.execute(select(Product).where(Product.id.in_(product_ids)))
+        products_by_id = {p.id: p for p in prod_result.scalars().all()}
+    items_out = []
+    for item in items:
+        p = products_by_id.get(item.product_id)
+        items_out.append({
+            **{c.name: getattr(item, c.name) for c in item.__table__.columns},
+            "product": {"id": p.id, "nombre": p.nombre, "sku": p.sku} if p else None,
+        })
+
+    return {
+        **{c.name: getattr(order, c.name) for c in order.__table__.columns},
+        "customer": order.customer,
+        "items": items_out,
+    }
 
 
 async def list_orders(
@@ -148,7 +185,9 @@ async def list_orders(
         query = query.where(SalesOrder.estado == estado)
     query = query.order_by(SalesOrder.fecha.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
-    return list(result.scalars().all())
+    orders = list(result.scalars().all())
+    await _attach_customers(db, orders)
+    return orders
 
 
 async def update_order(db: AsyncSession, order_id: str, data: SalesOrderUpdate) -> SalesOrder | None:
@@ -199,7 +238,7 @@ async def update_order(db: AsyncSession, order_id: str, data: SalesOrderUpdate) 
         order.base_exenta = base_exenta
         order.iva_10 = iva_10
         order.iva_5 = iva_5
-        order.total = subtotal + iva_10 + iva_5
+        order.total = subtotal - descuento_total
 
     order.updated_at = datetime.now(timezone.utc)
     await db.flush()
@@ -263,19 +302,22 @@ async def approve_order(db: AsyncSession, order_id: str, aprobado_por: str) -> S
 
 
 async def get_orders_kpi(db: AsyncSession, company_id: str) -> dict:
-    result = await db.execute(select(SalesOrder).where(SalesOrder.company_id == company_id))
-    orders = list(result.scalars().all())
-    total = len(orders)
-    pendientes = sum(1 for o in orders if o.estado in ("borrador", "pendiente_aprobacion"))
-    en_curso = sum(1 for o in orders if o.estado in ("aprobado", "en_preparacion", "listo"))
-    completados = sum(1 for o in orders if o.estado == "completado")
-    cancelados = sum(1 for o in orders if o.estado == "cancelado")
-    total_monto = sum(int(o.total or 0) for o in orders)
+    result = await db.execute(
+        select(
+            func.count(SalesOrder.id),
+            func.count(SalesOrder.id).filter(SalesOrder.estado.in_(("borrador", "pendiente_aprobacion"))),
+            func.count(SalesOrder.id).filter(SalesOrder.estado.in_(("aprobado", "en_preparacion", "listo"))),
+            func.count(SalesOrder.id).filter(SalesOrder.estado == "completado"),
+            func.count(SalesOrder.id).filter(SalesOrder.estado == "cancelado"),
+            func.coalesce(func.sum(SalesOrder.total), 0),
+        ).where(SalesOrder.company_id == company_id)
+    )
+    total, pendientes, en_curso, completados, cancelados, total_monto = result.one()
     return {
         "total": total,
         "pendientes": pendientes,
         "en_curso": en_curso,
         "completados": completados,
         "cancelados": cancelados,
-        "total_monto": total_monto,
+        "total_monto": int(total_monto),
     }

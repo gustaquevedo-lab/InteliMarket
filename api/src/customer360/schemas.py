@@ -110,3 +110,8 @@ class Customer360DashboardResponse(BaseModel):
     by_stage: dict
     penetration_summary: dict
     churn_trend: list[dict]
+    total_with_phone: Optional[int] = 0
+    total_brasil: Optional[int] = 0
+    total_paraguay: Optional[int] = 0
+    total_points_loyalty: Optional[int] = 0
+    total_socios_vip: Optional[int] = 0

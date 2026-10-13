@@ -2,10 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.commercial_agreements import service
 from api.src.commercial_agreements.schemas import AgreementCreate, AgreementUpdate
 
-router = APIRouter(prefix="/api/v1", tags=["commercial-agreements"])
+router = APIRouter(prefix="/api/v1", tags=["commercial-agreements"], dependencies=[Depends(require_auth)])
 
 
 @router.post("/commercial-agreements")

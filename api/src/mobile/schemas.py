@@ -34,6 +34,7 @@ class InventoryCountResult(BaseModel):
 class ReceiveRemitItem(BaseModel):
     product_id: UUID
     cantidad_recibida: int = Field(..., ge=0)
+    cantidad_bonificada: int = Field(0, ge=0)
     lote: Optional[str] = None
     fecha_vencimiento: Optional[date] = None
 

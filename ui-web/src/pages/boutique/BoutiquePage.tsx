@@ -1,3 +1,4 @@
+import { useEntityLookup, getCustomerName } from "../../hooks/useEntityLookup"
 import { useState, useEffect, type ReactNode } from "react"
 import {
   LayoutDashboard, Shirt, ShoppingCart, Users, Award, Percent, Calendar,
@@ -36,14 +37,26 @@ const TABS: { key: TabKey; label: string; icon: LucideIcon }[] = [
   { key: "eventos",    label: "Eventos",    icon: Calendar },
 ]
 
+
 export default function BoutiquePage() {
+  useEntityLookup()
+  const [custMap, setCustMap] = useState<Record<string, string>>({})
+  useEffect(() => {
+    api.customers.list({ limit: 500 }).then((res: any) => {
+      const list = Array.isArray(res) ? res : res?.data || []
+      const map: Record<string, string> = {}
+      list.forEach((c: any) => { if (c.id) map[c.id] = c.razon_social || c.nombre || c.ruc })
+      setCustMap(map)
+    }).catch(() => {})
+  }, [])
+
   const [tab, setTab] = useState<TabKey>("dashboard")
 
   return (
     <div className="space-y-6 animate-fade-in-up">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Boutique / Indumentaria</h1>
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">Boutique / Indumentaria</h1>
           <p className="text-sm text-gray-500 mt-1">Gestión completa de moda — productos, ventas, clientes, loyalty, markdown IA, eventos</p>
         </div>
       </div>
@@ -868,7 +881,7 @@ function SalesSubTab() {
           {sales.map((s) => (
             <tr key={s.id} className="text-sm hover:bg-gray-50 dark:hover:bg-gray-700/30">
               <td className="px-4 py-3 font-medium">{s.codigo}</td>
-              <td className="px-4 py-3 text-gray-500">{s.customer_id?.slice(0, 8)}...</td>
+              <td className="px-4 py-3 text-gray-500">{getCustomerName(s.customer_id)}</td>
               <td className="px-4 py-3 text-gray-500">{new Date(s.fecha).toLocaleDateString("es-PY")}</td>
               <td className="px-4 py-3 text-right font-mono font-bold">{formatPYG(s.total)}</td>
               <td className="px-4 py-3 text-center">

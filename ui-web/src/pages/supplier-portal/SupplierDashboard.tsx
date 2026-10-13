@@ -107,20 +107,20 @@ export default function SupplierDashboard() {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="bg-white dark:bg-gray-800 rounded-xl p-5 shadow-sm border border-gray-100 dark:border-gray-700">
                 <p className="text-sm text-gray-500">Pendientes de confirmar</p>
-                <p className="text-3xl font-bold text-blue-600 mt-1">{dashboard?.pending_confirmations || 0}</p>
+                <p className="text-lg sm:text-xl xl:text-xl 2xl:text-2xl font-black font-mono tracking-tight truncate text-blue-600 mt-1">{dashboard?.pending_confirmations || 0}</p>
               </div>
               <div className="bg-white dark:bg-gray-800 rounded-xl p-5 shadow-sm border border-gray-100 dark:border-gray-700">
                 <p className="text-sm text-gray-500">Órdenes este mes</p>
-                <p className="text-3xl font-bold text-green-600 mt-1">{dashboard?.monthly_orders || 0}</p>
+                <p className="text-lg sm:text-xl xl:text-xl 2xl:text-2xl font-black font-mono tracking-tight truncate text-green-600 mt-1">{dashboard?.monthly_orders || 0}</p>
               </div>
               <div className="bg-white dark:bg-gray-800 rounded-xl p-5 shadow-sm border border-gray-100 dark:border-gray-700">
                 <p className="text-sm text-gray-500">Documentos subidos</p>
-                <p className="text-3xl font-bold text-purple-600 mt-1">{dashboard?.document_count || 0}</p>
+                <p className="text-lg sm:text-xl xl:text-xl 2xl:text-2xl font-black font-mono tracking-tight truncate text-purple-600 mt-1">{dashboard?.document_count || 0}</p>
               </div>
               <div className="bg-white dark:bg-gray-800 rounded-xl p-5 shadow-sm border border-gray-100 dark:border-gray-700">
                 <p className="text-sm text-gray-500">Total O/C</p>
-                <p className="text-3xl font-bold text-gray-700 mt-1">
-                  {Object.values(dashboard?.order_counts || {}).reduce((a: number, b: number) => a + b, 0)}
+                <p className="text-lg sm:text-xl xl:text-xl 2xl:text-2xl font-black font-mono tracking-tight truncate text-gray-700 mt-1">
+                  {(Object.values(dashboard?.order_counts || {}) as number[]).reduce((a, b) => Number(a) + Number(b), 0)}
                 </p>
               </div>
             </div>

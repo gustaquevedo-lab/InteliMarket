@@ -35,6 +35,30 @@ class WebhookEvent(BaseModel):
     payload: dict
 
 
+class PosMatchRequest(BaseModel):
+    procesador: str  # "BANCARD" | "DINELCO"
+    monto: int
+    desde: datetime  # momento en que se abrió el cobro en InteliMarket
+
+
+class PosMatchCandidate(BaseModel):
+    id: str
+    fecha: str
+    tarjeta_marca: str
+    monto: float
+    voucher: str
+    cajero: str
+
+
+class PosClaimRequest(BaseModel):
+    fin_operacao_pos_id: str
+    procesador: str
+    monto: int
+    voucher: Optional[str] = None
+    tarjeta_marca: Optional[str] = None
+    sale_id: Optional[str] = None
+
+
 class WebhookDelivery(BaseModel):
     id: int
     config_id: int

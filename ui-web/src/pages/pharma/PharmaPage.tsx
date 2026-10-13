@@ -167,7 +167,7 @@ export default function PharmaPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Farmacia</h1>
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">Farmacia</h1>
           <p className="text-sm text-gray-500">Búsqueda por principio activo y reportes DINALFA</p>
         </div>
       </div>

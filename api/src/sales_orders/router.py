@@ -2,10 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.sales_orders.schemas import SalesOrderCreate, SalesOrderUpdate, SalesOrderResponse, SalesOrderWithItems
 from api.src.sales_orders import service
 
-router = APIRouter(prefix="/api/v1", tags=["sales-orders"])
+router = APIRouter(prefix="/api/v1", tags=["sales-orders"], dependencies=[Depends(require_auth)])
 
 
 @router.post("/sales-orders", response_model=SalesOrderResponse, status_code=status.HTTP_201_CREATED)

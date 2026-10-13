@@ -1,3 +1,4 @@
+import { useEntityLookup, getCustomerName } from "../../hooks/useEntityLookup"
 import { useState, useEffect } from "react"
 import { Search, Filter, Calendar, Clock, DollarSign, ShoppingCart, Star, MapPin, CheckCircle, XCircle, AlertCircle } from "lucide-react"
 import { api } from "../../api"
@@ -13,9 +14,21 @@ const RESULT_LABELS: Record<string, string> = {
   visit_only: "Solo visita",
 }
 
+
 export default function VisitasPage() {
+  useEntityLookup()
+  const [custMap, setCustMap] = useState<Record<string, string>>({})
+  useEffect(() => {
+    api.customers.list({ limit: 500 }).then((res: any) => {
+      const list = Array.isArray(res) ? res : res?.data || []
+      const map: Record<string, string> = {}
+      list.forEach((c: any) => { if (c.id) map[c.id] = c.razon_social || c.nombre || c.ruc })
+      setCustMap(map)
+    }).catch(() => {})
+  }, [])
+
   const { user } = useAuth()
-  const companyId = user?.company_id || "00000000-0000-0000-0000-000000000010"
+  const companyId = (user as any)?.company_id || "00000000-0000-0000-0000-000000000010"
   const [visits, setVisits] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
@@ -61,7 +74,7 @@ export default function VisitasPage() {
     <div className="p-4 md:p-6 space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Visitas</h1>
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">Visitas</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{stats.total} visitas registradas</p>
         </div>
       </div>
@@ -109,7 +122,7 @@ export default function VisitasPage() {
             <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
               {filtered.map((v: any) => (
                 <tr key={v.id} onClick={() => setSelectedVisit(v)} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer">
-                  <td className="p-3 font-medium">{v.customer_id?.slice(0, 8)}...</td>
+                  <td className="p-3 font-medium">{getCustomerName(v.customer_id)}</td>
                   <td className="p-3">
                     <span className={`text-xs px-2 py-0.5 rounded-full ${v.status === "completed" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : v.status === "missed" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" : "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"}`}>
                       {v.status}
@@ -139,7 +152,7 @@ export default function VisitasPage() {
               <button onClick={() => setSelectedVisit(null)} className="text-gray-400 hover:text-gray-600">✕</button>
             </div>
             <div className="grid grid-cols-2 gap-3 text-sm">
-              <div><span className="text-gray-500">Cliente:</span> <span className="font-medium">{selectedVisit.customer_id?.slice(0, 8)}...</span></div>
+              <div><span className="text-gray-500">Cliente:</span> <span className="font-medium">{getCustomerName(selectedVisit.customer_id)}</span></div>
               <div><span className="text-gray-500">Estado:</span> <span className={`font-medium ${selectedVisit.status === "completed" ? "text-green-600" : selectedVisit.status === "missed" ? "text-red-600" : "text-yellow-600"}`}>{selectedVisit.status}</span></div>
               <div><span className="text-gray-500">Resultado:</span> <span>{RESULT_LABELS[selectedVisit.result] || selectedVisit.result || "-"}</span></div>
               <div><span className="text-gray-500">Rating:</span> <span>{selectedVisit.customer_rating ? "⭐".repeat(selectedVisit.customer_rating) : "-"}</span></div>

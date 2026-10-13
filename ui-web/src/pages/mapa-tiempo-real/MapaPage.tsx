@@ -1,350 +1,334 @@
-import { useState, useEffect, useRef, useCallback } from "react"
-import { api } from "../../api"
+import { useState, useEffect, useCallback, useRef } from "react"
+import { GoogleMap, useJsApiLoader, Polyline, Marker, InfoWindow } from "@react-google-maps/api"
+import { api, MapRouteData, MapCustomerData } from "../../api"
 import { useAuth } from "../../context/AuthContext"
-import maplibregl from "maplibre-gl"
-import "maplibre-gl/dist/maplibre-gl.css"
-import { MapPin, Navigation, BatteryFull, BatteryMedium, BatteryWarning, Users, Bell, AlertTriangle, RefreshCw, Eye, EyeOff, ChevronDown, ChevronUp, Clock, DollarSign, ShoppingCart } from "lucide-react"
+import {
+  MapPin, Navigation, Users, RefreshCw, Eye, EyeOff,
+  BatteryFull, BatteryMedium, BatteryWarning, AlertTriangle,
+} from "lucide-react"
 
-const POLL_INTERVAL = 15000
-const TILE_URL = "https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
+const GMAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY as string | undefined
+const POLL_INTERVAL_MS = 15_000
 
-const STATUS_COLORS: Record<string, string> = {
+const DEPOT = { lat: -25.3235, lng: -57.5641 }
+const MAP_CENTER = { lat: -25.29, lng: -57.57 }
+
+const ROUTE_COLORS = [
+  "#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6",
+  "#3b82f6", "#8b5cf6", "#ec4899", "#64748b", "#0ea5e9",
+]
+
+const VISIT_STATUS_COLORS: Record<string, string> = {
+  completed: "#22c55e",
+  in_progress: "#3b82f6",
+  pending: "#94a3b8",
+  missed: "#ef4444",
+  cancelled: "#6b7280",
+  rescheduled: "#f97316",
+}
+
+const SELLER_STATUS_COLORS: Record<string, string> = {
   online: "#22c55e",
   busy: "#f59e0b",
   idle: "#6b7280",
   offline: "#9ca3af",
 }
 
-const SEVERITY_COLORS: Record<string, string> = {
-  low: "#22c55e",
-  medium: "#f59e0b",
-  high: "#ef4444",
-  critical: "#dc2626",
+function visitStatusIcon(status: string): string {
+  const colors: Record<string, string> = VISIT_STATUS_COLORS
+  const c = colors[status] ?? "#94a3b8"
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">
+      <circle cx="14" cy="14" r="11" fill="${c}" stroke="white" stroke-width="2.5"/>
+    </svg>`
+  )}`
 }
 
-function SellerMarker({ photo, nombre, status, battery, lat, lng, map }: any) {
-  const el = document.createElement("div")
-  el.className = "seller-marker"
-  el.style.cssText = `
-    position: relative; width: 48px; height: 48px; cursor: pointer;
-    transform: translate(-50%, -100%);
-  `
-  const borderColor = STATUS_COLORS[status] || "#9ca3af"
-
-  if (photo) {
-    el.innerHTML = `
-      <div style="width:44px;height:44px;border-radius:50%;border:3px solid ${borderColor};overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.3);background:white;">
-        <img src="${photo}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>
-      </div>
-      <div style="position:absolute;bottom:-2px;right:-4px;display:flex;align-items:center;gap:2px;
-        background:rgba(0,0,0,0.8);color:white;font-size:10px;padding:1px 4px;border-radius:8px;">
-        ${getBatteryIcon(battery)}
-        <span>${battery}%</span>
-      </div>
-      <div style="position:absolute;top:-4px;left:-4px;width:14px;height:14px;border-radius:50%;
-        background:${borderColor};border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.3);"></div>
-      <div style="position:absolute;bottom:-18px;left:50%;transform:translateX(-50%);
-        background:rgba(0,0,0,0.75);color:white;font-size:10px;padding:2px 6px;border-radius:4px;
-        white-space:nowrap;font-weight:600;">${nombre}</div>
-    `
-  } else {
-    el.innerHTML = `
-      <div style="width:44px;height:44px;border-radius:50%;border:3px solid ${borderColor};
-        background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;
-        color:white;font-weight:bold;font-size:18px;box-shadow:0 2px 8px rgba(0,0,0,0.3);">
-        ${nombre.charAt(0).toUpperCase()}
-      </div>
-      <div style="position:absolute;bottom:-2px;right:-4px;display:flex;align-items:center;gap:2px;
-        background:rgba(0,0,0,0.8);color:white;font-size:10px;padding:1px 4px;border-radius:8px;">
-        ${getBatteryIcon(battery)}
-        <span>${battery}%</span>
-      </div>
-      <div style="position:absolute;bottom:-18px;left:50%;transform:translateX(-50%);
-        background:rgba(0,0,0,0.75);color:white;font-size:10px;padding:2px 6px;border-radius:4px;
-        white-space:nowrap;font-weight:600;">${nombre}</div>
-    `
-  }
-
-  const marker = new maplibregl.Marker({ element: el, anchor: "center" }).setLngLat([Number(lng), Number(lat)]).addTo(map)
-  return marker
-}
-
-function getBatteryIcon(level: number): string {
-  if (level <= 15) return "🪫"
-  if (level <= 30) return "🔋"
-  if (level <= 60) return "🔋"
-  return "🔋"
+function depotIcon(): string {
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36">
+      <polygon points="18,2 34,34 2,34" fill="#1e293b" stroke="white" stroke-width="2"/>
+    </svg>`
+  )}`
 }
 
 export default function MapaPage() {
   const { user } = useAuth()
-  const companyId = user?.company_id || "00000000-0000-0000-0000-000000000010"
-  const mapContainer = useRef<HTMLDivElement>(null)
-  const map = useRef<any>(null)
-  const markersRef = useRef<any[]>([])
-  const tracesRef = useRef<any[]>([])
-  const zonesRef = useRef<any[]>([])
+  const companyId = (user as any)?.company_id ?? "00000000-0000-0000-0000-000000000010"
 
-  const [data, setData] = useState<any>(null)
+  const { isLoaded, loadError } = useJsApiLoader({
+    googleMapsApiKey: GMAPS_KEY ?? "",
+    id: "google-map-script",
+  })
+
+  const [routes, setRoutes] = useState<MapRouteData[]>([])
+  const [customers, setCustomers] = useState<MapCustomerData[]>([])
+  const [liveData, setLiveData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
-  const [selectedSeller, setSelectedSeller] = useState<any>(null)
-  const [showTraces, setShowTraces] = useState(true)
-  const [showZones, setShowZones] = useState(true)
-  const [sellerFilter, setSellerFilter] = useState<string>("all")
-  const [statusFilter, setStatusFilter] = useState<string>("all")
-  const [autoRefresh, setAutoRefresh] = useState(true)
-  const [timeAgo, setTimeAgo] = useState("")
+  const [lastUpdate, setLastUpdate] = useState("")
 
-  const loadData = useCallback(async () => {
+  const [layerRoutes, setLayerRoutes] = useState(true)
+  const [layerCustomers, setLayerCustomers] = useState(true)
+  const [layerSellers, setLayerSellers] = useState(true)
+
+  const [selectedRoute, setSelectedRoute] = useState<MapRouteData | null>(null)
+  const [selectedCustomer, setSelectedCustomer] = useState<MapCustomerData | null>(null)
+  const [selectedSeller, setSelectedSeller] = useState<any | null>(null)
+
+  const mapRef = useRef<google.maps.Map | null>(null)
+
+  const loadStaticLayers = useCallback(async () => {
+    try {
+      const [r, c] = await Promise.all([
+        api.distribuidora.tracking.map.routes(companyId),
+        api.distribuidora.tracking.map.customers(companyId),
+      ])
+      setRoutes(r)
+      setCustomers(c)
+    } catch (e) {
+      console.error("map layers error", e)
+    }
+  }, [companyId])
+
+  const loadLive = useCallback(async () => {
     try {
       const d = await api.distribuidora.tracking.liveMap(companyId)
-      setData(d)
-      setTimeAgo(new Date().toLocaleTimeString())
-    } catch { console.error("Failed to load map data") }
+      setLiveData(d)
+      setLastUpdate(new Date().toLocaleTimeString())
+    } catch {}
     setLoading(false)
   }, [companyId])
 
   useEffect(() => {
-    loadData()
-    if (autoRefresh) {
-      const iv = setInterval(loadData, POLL_INTERVAL)
-      return () => clearInterval(iv)
-    }
-  }, [loadData, autoRefresh])
+    loadStaticLayers()
+    loadLive()
+    const iv = setInterval(loadLive, POLL_INTERVAL_MS)
+    return () => clearInterval(iv)
+  }, [loadStaticLayers, loadLive])
 
-  useEffect(() => {
-    if (!mapContainer.current || map.current) return
-    map.current = new maplibregl.Map({
-      container: mapContainer.current,
-      style: { version: 8, sources: { osm: { type: "raster", tiles: [TILE_URL], tileSize: 256, attribution: "© OpenStreetMap" } }, layers: [{ id: "osm", type: "raster", source: "osm" }] },
-      center: [-57.5759, -25.2637],
-      zoom: 12,
-    })
-    map.current.addControl(new maplibregl.NavigationControl(), "top-right")
-  }, [])
+  if (!GMAPS_KEY) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-4 text-center p-8">
+        <AlertTriangle className="w-12 h-12 text-yellow-500" />
+        <h2 className="text-xl font-semibold">Clave de Google Maps no configurada</h2>
+        <p className="text-sm text-gray-500 max-w-sm">
+          Agrega <code className="bg-gray-100 px-1 rounded">VITE_GOOGLE_MAPS_KEY=&lt;tu_clave&gt;</code> en{" "}
+          <code className="bg-gray-100 px-1 rounded">ui-web/.env.local</code> y reinicia el servidor.
+        </p>
+      </div>
+    )
+  }
 
-  useEffect(() => {
-    if (!map.current || !data) return
-    // Clear old markers
-    markersRef.current.forEach(m => m.remove())
-    markersRef.current = []
-    tracesRef.current.forEach(t => map.current.removeLayer(t.id).removeSource(t.id))
-    tracesRef.current = []
-    zonesRef.current.forEach(z => map.current.removeLayer(z.id).removeSource(z.id))
-    zonesRef.current = []
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-4 p-8">
+        <AlertTriangle className="w-12 h-12 text-red-500" />
+        <p className="text-sm text-red-600">Error al cargar Google Maps: {loadError.message}</p>
+      </div>
+    )
+  }
 
-    const sellers = (data.sellers || []).filter((s: any) => {
-      if (sellerFilter !== "all" && s.seller_id !== sellerFilter) return false
-      if (statusFilter !== "all" && s.status !== statusFilter) return false
-      return true
-    })
-
-    // Add markers
-    sellers.forEach((s: any) => {
-      if (!s.lat || !s.lng) return
-      const marker = SellerMarker({ ...s, map: map.current })
-      marker.getElement().addEventListener("click", () => setSelectedSeller(s))
-      markersRef.current.push(marker)
-    })
-
-    // GPS traces
-    if (showTraces && sellers.length > 0) {
-      sellers.forEach(async (s: any) => {
-        if (!s.seller_id) return
-        try {
-          const trail = await api.distribuidora.tracking.tracking.trail(s.seller_id, 100)
-          if (!trail || trail.length < 2) return
-          const coords = trail.map((p: any) => [Number(p.lng), Number(p.lat)])
-          const sourceId = `trace-${s.seller_id}`
-          const layerId = `trace-line-${s.seller_id}`
-          map.current.addSource(sourceId, { type: "geojson", data: { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: coords } } })
-          map.current.addLayer({ id: layerId, type: "line", source: sourceId, paint: { "line-color": STATUS_COLORS[s.status] || "#3b82f6", "line-width": 3, "line-opacity": 0.7 } })
-          tracesRef.current.push({ id: layerId, sourceId })
-        } catch {}
-      })
-    }
-
-    // Geofence zones
-    if (showZones && data.geofence_zones) {
-      data.geofence_zones.forEach((z: any) => {
-        if (z.geometry_type !== "polygon" || !z.coordinates || !Array.isArray(z.coordinates)) return
-        const coords = z.coordinates.map((c: any) => [c[0], c[1]])
-        if (coords.length < 3) return
-        coords.push(coords[0]) // Close polygon
-        const sourceId = `zone-${z.id}`
-        const fillId = `zone-fill-${z.id}`
-        const outlineId = `zone-outline-${z.id}`
-        map.current.addSource(sourceId, { type: "geojson", data: { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [coords] } } })
-        map.current.addLayer({ id: fillId, type: "fill", source: sourceId, paint: { "fill-color": z.color || "#ef4444", "fill-opacity": 0.15 } })
-        map.current.addLayer({ id: outlineId, type: "line", source: sourceId, paint: { "line-color": z.color || "#ef4444", "line-width": 2, "line-dasharray": [2, 2] } })
-        zonesRef.current.push({ id: fillId, sourceId }, { id: outlineId })
-
-        // Popup on hover
-        const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false })
-        map.current.on("mouseenter", fillId, (e: any) => {
-          map.current.getCanvas().style.cursor = "pointer"
-          popup.setLngLat(e.lngLat).setHTML(`<strong>${z.nombre}</strong><br/>${z.zone_type}<br/>${z.severity}`).addTo(map.current)
-        })
-        map.current.on("mouseleave", fillId, () => { map.current.getCanvas().style.cursor = ""; popup.remove() })
-      })
-    }
-
-    // Fit bounds to show all markers
-    if (sellers.length > 0) {
-      const bounds = new maplibregl.LngLatBounds()
-      sellers.filter((s: any) => s.lat && s.lng).forEach((s: any) => bounds.extend([Number(s.lng), Number(s.lat)]))
-      if (!bounds.isEmpty()) map.current.fitBounds(bounds, { padding: 80, maxZoom: 15 })
-    }
-  }, [data, showTraces, showZones, sellerFilter, statusFilter])
-
-  const seller = selectedSeller
-  const onlineCount = data?.sellers?.filter((s: any) => s.status === "online").length || 0
-  const offlineCount = (data?.sellers?.length || 0) - onlineCount
+  const sellers = (liveData?.sellers ?? [])
 
   return (
-    <div className="h-[calc(100vh-4rem)] flex flex-col animate-fade-in">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-        <div className="flex items-center gap-4">
-          <h1 className="text-lg font-bold text-gray-900 dark:text-white">Mapa en Tiempo Real</h1>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="flex items-center gap-1 text-green-600"><span className="w-2 h-2 rounded-full bg-green-500" /> {onlineCount} online</span>
-            <span className="flex items-center gap-1 text-gray-400"><span className="w-2 h-2 rounded-full bg-gray-400" /> {offlineCount} offline</span>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-gray-400">{timeAgo && `Última actualización: ${timeAgo}`}</span>
-          <button onClick={() => setAutoRefresh(!autoRefresh)} className={`p-1.5 rounded-lg ${autoRefresh ? "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" : "bg-gray-100 text-gray-400 dark:bg-gray-700"}`} title="Auto-refresh">
-            <RefreshCw className={`w-4 h-4 ${autoRefresh ? "animate-spin" : ""}`} />
+    <div className="flex flex-col h-full">
+      {/* Top bar */}
+      <div className="flex items-center gap-3 px-4 py-2 bg-white border-b flex-wrap">
+        <h1 className="text-base font-semibold mr-2">Mapa en tiempo real</h1>
+
+        {/* Layer toggles */}
+        <LayerToggle active={layerRoutes} onClick={() => setLayerRoutes(v => !v)} icon={<Navigation className="w-4 h-4" />} label="Rutas" />
+        <LayerToggle active={layerCustomers} onClick={() => setLayerCustomers(v => !v)} icon={<MapPin className="w-4 h-4" />} label="Clientes" />
+        <LayerToggle active={layerSellers} onClick={() => setLayerSellers(v => !v)} icon={<Users className="w-4 h-4" />} label="Vendedores" />
+
+        <div className="ml-auto flex items-center gap-2 text-xs text-gray-400">
+          {lastUpdate && <span>{lastUpdate}</span>}
+          <button onClick={() => { loadStaticLayers(); loadLive() }} className="p-1 hover:bg-gray-100 rounded" title="Actualizar">
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
           </button>
         </div>
       </div>
 
-      {/* Filters bar */}
-      <div className="flex items-center gap-3 px-4 py-2 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-        <select value={sellerFilter} onChange={e => setSellerFilter(e.target.value)} className="text-sm px-2 py-1 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
-          <option value="all">Todos los vendedores</option>
-          {(data?.sellers || []).map((s: any) => <option key={s.seller_id} value={s.seller_id}>{s.nombre}</option>)}
-        </select>
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="text-sm px-2 py-1 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
-          <option value="all">Todos estados</option>
-          <option value="online">Online</option>
-          <option value="busy">Ocupado</option>
-          <option value="idle">Inactivo</option>
-          <option value="offline">Offline</option>
-        </select>
-        <button onClick={() => setShowTraces(!showTraces)} className={`flex items-center gap-1 text-sm px-2 py-1 rounded ${showTraces ? "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" : "bg-gray-100 text-gray-500 dark:bg-gray-700"}`}>
-          {showTraces ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />} Rutas GPS
-        </button>
-        <button onClick={() => setShowZones(!showZones)} className={`flex items-center gap-1 text-sm px-2 py-1 rounded ${showZones ? "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" : "bg-gray-100 text-gray-500 dark:bg-gray-700"}`}>
-          {showZones ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />} Geocercas
-        </button>
-      </div>
+      {/* Map */}
+      <div className="flex-1 relative">
+        {isLoaded ? (
+          <GoogleMap
+            mapContainerStyle={{ width: "100%", height: "100%" }}
+            center={MAP_CENTER}
+            zoom={13}
+            options={{ mapTypeControl: false, streetViewControl: false, fullscreenControl: false }}
+            onLoad={m => { mapRef.current = m }}
+          >
+            {/* LAYER 1: Routes */}
+            {layerRoutes && routes.map(route => {
+              const validWps = route.waypoints.filter(w => w.lat != null && w.lng != null)
+              const allPoints = [
+                { lat: DEPOT.lat, lng: DEPOT.lng },
+                ...validWps.map(w => ({ lat: w.lat!, lng: w.lng! })),
+                { lat: DEPOT.lat, lng: DEPOT.lng },
+              ]
+              const color = ROUTE_COLORS[route.color_index] ?? "#3b82f6"
+              return (
+                <span key={route.route_id}>
+                  <Polyline
+                    path={allPoints}
+                    options={{ strokeColor: color, strokeWeight: 3, strokeOpacity: 0.8, geodesic: true }}
+                  />
+                  {/* Waypoint stop markers */}
+                  {validWps.map((wp, i) => (
+                    <Marker
+                      key={`wp-${route.route_id}-${i}`}
+                      position={{ lat: wp.lat!, lng: wp.lng! }}
+                      icon={{ url: visitStatusIcon(wp.visit_status), scaledSize: new google.maps.Size(22, 22), anchor: new google.maps.Point(11, 11) }}
+                      label={{ text: String(wp.orden_visita + 1), color: "white", fontSize: "9px", fontWeight: "bold" }}
+                      onClick={() => setSelectedRoute(route)}
+                    />
+                  ))}
+                </span>
+              )
+            })}
 
-      {/* Main content: Map + Side panel */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Map */}
-        <div ref={mapContainer} className="flex-1 relative">
-          {loading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-gray-900/50 z-10">
-              <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-            </div>
-          )}
-        </div>
+            {/* Depot marker */}
+            {layerRoutes && (
+              <Marker
+                position={DEPOT}
+                icon={{ url: depotIcon(), scaledSize: new google.maps.Size(32, 32), anchor: new google.maps.Point(16, 16) }}
+                title="Depósito Gonzalito"
+              />
+            )}
 
-        {/* Side panel */}
-        <div className="w-80 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 overflow-y-auto flex-shrink-0">
-          {/* KPIs */}
-          <div className="grid grid-cols-2 gap-2 p-3 border-b border-gray-200 dark:border-gray-700">
-            <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-2 text-center">
-              <p className="text-xs text-gray-500 dark:text-gray-400">Visitas hoy</p>
-              <p className="text-xl font-bold text-blue-600">{data?.today_visits || 0}</p>
-            </div>
-            <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-2 text-center">
-              <p className="text-xs text-gray-500 dark:text-gray-400">Completadas</p>
-              <p className="text-xl font-bold text-green-600">{data?.today_completed || 0}</p>
-            </div>
-            <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-2 text-center">
-              <p className="text-xs text-gray-500 dark:text-gray-400">Pedidos</p>
-              <p className="text-xl font-bold text-purple-600">{data?.today_orders || 0}</p>
-            </div>
-            <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-2 text-center">
-              <p className="text-xs text-gray-500 dark:text-gray-400">Monto Gs.</p>
-              <p className="text-xl font-bold text-amber-600">{(data?.today_amount || 0).toLocaleString()}</p>
-            </div>
-          </div>
+            {/* LAYER 2: Customers */}
+            {layerCustomers && customers.map(c => (
+              <Marker
+                key={c.customer_id}
+                position={{ lat: c.lat, lng: c.lng }}
+                icon={{ url: visitStatusIcon(c.visit_status), scaledSize: new google.maps.Size(18, 18), anchor: new google.maps.Point(9, 9) }}
+                onClick={() => setSelectedCustomer(c)}
+              />
+            ))}
 
-          {/* Seller list */}
-          <div className="p-3">
-            <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
-              <Users className="w-4 h-4" /> Vendedores ({data?.sellers?.length || 0})
-            </h3>
-            {(data?.sellers || []).map((s: any) => (
-              <div key={s.seller_id} onClick={() => setSelectedSeller(s)}
-                className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors mb-1 ${selectedSeller?.seller_id === s.seller_id ? "bg-blue-50 dark:bg-blue-900/20" : "hover:bg-gray-50 dark:hover:bg-gray-700/50"}`}>
-                <div className="relative flex-shrink-0">
-                  {s.photo_url ? (
-                    <img src={s.photo_url} alt="" className="w-9 h-9 rounded-full object-cover border-2" style={{ borderColor: STATUS_COLORS[s.status] || "#9ca3af" }} />
-                  ) : (
-                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-sm font-bold border-2" style={{ borderColor: STATUS_COLORS[s.status] || "#9ca3af" }}>
-                      {(s.nombre || "?").charAt(0).toUpperCase()}
+            {/* LAYER 3: Live sellers */}
+            {layerSellers && sellers.map((s: any) => {
+              if (!s.lat || !s.lng) return null
+              const color = SELLER_STATUS_COLORS[s.status] ?? "#9ca3af"
+              const svgIcon = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(
+                `<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44">
+                  <circle cx="22" cy="22" r="18" fill="${color}" stroke="white" stroke-width="3" opacity="0.9"/>
+                  <text x="22" y="27" text-anchor="middle" fill="white" font-size="18" font-weight="bold">${(s.nombre ?? "?").charAt(0).toUpperCase()}</text>
+                </svg>`
+              )}`
+              return (
+                <Marker
+                  key={s.seller_id}
+                  position={{ lat: Number(s.lat), lng: Number(s.lng) }}
+                  icon={{ url: svgIcon, scaledSize: new google.maps.Size(40, 40), anchor: new google.maps.Point(20, 20) }}
+                  onClick={() => setSelectedSeller(s)}
+                />
+              )
+            })}
+
+            {/* InfoWindow: selected route */}
+            {selectedRoute && (
+              <InfoWindow
+                position={{ lat: DEPOT.lat, lng: DEPOT.lng }}
+                onCloseClick={() => setSelectedRoute(null)}
+              >
+                <div className="text-sm">
+                  <div className="font-semibold mb-1">{selectedRoute.route_name}</div>
+                  <div className="text-gray-500">{selectedRoute.seller_name}</div>
+                  <div className="mt-1">{selectedRoute.waypoints.length} paradas</div>
+                  <div className="flex items-center gap-1 mt-1">
+                    <span className="w-3 h-3 rounded-full inline-block" style={{ background: ROUTE_COLORS[selectedRoute.color_index] }} />
+                    <span className="text-xs text-gray-400">Ruta {selectedRoute.color_index + 1}</span>
+                  </div>
+                </div>
+              </InfoWindow>
+            )}
+
+            {/* InfoWindow: selected customer */}
+            {selectedCustomer && (
+              <InfoWindow
+                position={{ lat: selectedCustomer.lat, lng: selectedCustomer.lng }}
+                onCloseClick={() => setSelectedCustomer(null)}
+              >
+                <div className="text-sm max-w-xs">
+                  <div className="font-semibold">{selectedCustomer.razon_social}</div>
+                  {selectedCustomer.direccion && <div className="text-gray-500 text-xs">{selectedCustomer.direccion}</div>}
+                  <div className="flex items-center gap-1 mt-1">
+                    <span className="w-2 h-2 rounded-full inline-block" style={{ background: VISIT_STATUS_COLORS[selectedCustomer.visit_status] ?? "#94a3b8" }} />
+                    <span className="text-xs capitalize">{selectedCustomer.visit_status}</span>
+                  </div>
+                </div>
+              </InfoWindow>
+            )}
+
+            {/* InfoWindow: selected seller */}
+            {selectedSeller && (
+              <InfoWindow
+                position={{ lat: Number(selectedSeller.lat), lng: Number(selectedSeller.lng) }}
+                onCloseClick={() => setSelectedSeller(null)}
+              >
+                <div className="text-sm">
+                  <div className="font-semibold">{selectedSeller.nombre}</div>
+                  <div className="flex items-center gap-1 mt-1">
+                    <span className="w-2 h-2 rounded-full inline-block" style={{ background: SELLER_STATUS_COLORS[selectedSeller.status] }} />
+                    <span className="capitalize text-xs">{selectedSeller.status}</span>
+                  </div>
+                  {selectedSeller.battery_level != null && (
+                    <div className="flex items-center gap-1 mt-1">
+                      {selectedSeller.battery_level <= 20
+                        ? <BatteryWarning className="w-3 h-3 text-red-500" />
+                        : selectedSeller.battery_level <= 50
+                        ? <BatteryMedium className="w-3 h-3 text-yellow-500" />
+                        : <BatteryFull className="w-3 h-3 text-green-500" />}
+                      <span className="text-xs">{selectedSeller.battery_level}%</span>
                     </div>
                   )}
-                  <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border border-white ${s.status === "online" ? "bg-green-500" : s.status === "busy" ? "bg-yellow-500" : "bg-gray-400"}`} />
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{s.nombre}</p>
-                  <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                    <span>{s.status}</span>
-                    {s.battery_level !== undefined && <span>🔋 {s.battery_level}%</span>}
-                  </div>
-                </div>
-                {s.speed_kmh > 0 && <span className="text-xs text-gray-400">{s.speed_kmh} km/h</span>}
-              </div>
-            ))}
+              </InfoWindow>
+            )}
+          </GoogleMap>
+        ) : (
+          <div className="flex items-center justify-center h-full">
+            <RefreshCw className="w-8 h-8 animate-spin text-gray-400" />
           </div>
+        )}
 
-          {/* Active alerts */}
-          {(data?.active_alerts || []).length > 0 && (
-            <div className="p-3 border-t border-gray-200 dark:border-gray-700">
-              <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-red-500" /> Alertas activas ({data.active_alerts.length})
-              </h3>
-              {data.active_alerts.slice(0, 5).map((a: any) => (
-                <div key={a.id} className="flex items-start gap-2 p-2 bg-red-50 dark:bg-red-900/10 rounded-lg mb-1">
-                  <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
-                  <div className="text-xs">
-                    <p className="font-medium text-red-700 dark:text-red-400">
-                      Entrada a zona restringida
-                    </p>
-                    <p className="text-gray-500 dark:text-gray-400 mt-0.5">
-                      {new Date(a.detected_at).toLocaleTimeString()}
-                    </p>
-                  </div>
-                </div>
-              ))}
+        {/* Legend */}
+        <div className="absolute bottom-4 left-4 bg-white/90 backdrop-blur rounded-lg shadow p-3 text-xs space-y-1">
+          {Object.entries(VISIT_STATUS_COLORS).map(([status, color]) => (
+            <div key={status} className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full inline-block flex-shrink-0" style={{ background: color }} />
+              <span className="capitalize">{status}</span>
             </div>
-          )}
-
-          {/* Seller detail panel */}
-          {seller && (
-            <div className="p-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-bold text-gray-900 dark:text-white">Detalle Vendedor</h3>
-                <button onClick={() => setSelectedSeller(null)} className="text-xs text-gray-400 hover:text-gray-600">Cerrar</button>
-              </div>
-              <div className="space-y-2 text-sm">
-                <p><span className="text-gray-500">Nombre:</span> <span className="font-medium">{seller.nombre}</span></p>
-                <p><span className="text-gray-500">Estado:</span> <span className={`font-medium ${seller.status === "online" ? "text-green-600" : "text-gray-500"}`}>{seller.status}</span></p>
-                <p><span className="text-gray-500">Batería:</span> <span className="font-medium">{seller.battery_level}%</span></p>
-                {seller.speed_kmh > 0 && <p><span className="text-gray-500">Velocidad:</span> <span className="font-medium">{seller.speed_kmh} km/h</span></p>}
-                <p><span className="text-gray-500">Ubicación:</span> <span className="font-medium">{Number(seller.lat || 0).toFixed(5)}, {Number(seller.lng || 0).toFixed(5)}</span></p>
-                {seller.last_updated && <p><span className="text-gray-500">Última actualización:</span> <span className="font-medium">{new Date(seller.last_updated).toLocaleTimeString()}</span></p>}
-              </div>
-            </div>
-          )}
+          ))}
         </div>
+
+        {/* Seller count badge */}
+        {layerSellers && sellers.length > 0 && (
+          <div className="absolute top-4 right-4 bg-white/90 rounded-lg shadow px-3 py-2 text-xs flex items-center gap-2">
+            <Users className="w-4 h-4 text-blue-500" />
+            <span>{sellers.filter((s: any) => s.status === "online").length} en línea</span>
+          </div>
+        )}
       </div>
     </div>
+  )
+}
+
+function LayerToggle({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+        active
+          ? "bg-blue-50 border-blue-300 text-blue-700"
+          : "bg-gray-50 border-gray-200 text-gray-400"
+      }`}
+    >
+      {active ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+      {icon}
+      {label}
+    </button>
   )
 }

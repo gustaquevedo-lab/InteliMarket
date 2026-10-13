@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
 from api.src.features import require_feature
+from api.src.rbac.deps import require_permission
 from api.src.advanced_inventory import service
 
 router = APIRouter(
@@ -135,6 +136,7 @@ async def list_cycle_counts(
     estado: str = Query(""),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_auth),
+    _=Depends(require_permission("inventory:cycle_count")),
 ):
     return await service.list_cycle_counts(db, user["company_id"], estado)
 
@@ -144,6 +146,7 @@ async def create_cycle_count(
     data: dict = Body(...),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_auth),
+    _=Depends(require_permission("inventory:cycle_count")),
 ):
     return await service.create_cycle_count(db, user["company_id"], data)
 
@@ -153,6 +156,7 @@ async def add_cycle_count_item(
     cc_id: str, data: dict = Body(...),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_auth),
+    _=Depends(require_permission("inventory:cycle_count")),
 ):
     try:
         return await service.add_cycle_count_item(db, user["company_id"], cc_id, data)
@@ -165,6 +169,7 @@ async def record_count(
     cc_id: str, item_id: str, data: dict = Body(...),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_auth),
+    _=Depends(require_permission("inventory:cycle_count")),
 ):
     try:
         return await service.record_count(db, user["company_id"], cc_id, item_id, data)
@@ -177,6 +182,7 @@ async def complete_cycle_count(
     cc_id: str,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_auth),
+    _=Depends(require_permission("inventory:cycle_count")),
 ):
     try:
         return await service.complete_cycle_count(db, user["company_id"], cc_id)
@@ -278,3 +284,23 @@ async def check_alerts(
     user: dict = Depends(require_auth),
 ):
     return await service.check_alerts(db, user["company_id"])
+
+
+@router.delete("/replenish-rules/{rule_id}")
+async def delete_replenish_rule(
+    rule_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_auth),
+):
+    ok = await service.delete_replenish_rule(db, user["company_id"], rule_id)
+    if not ok:
+        raise HTTPException(404, "Regla no encontrada")
+    return {"deleted": True}
+
+
+@router.get("/replenish-suggestions")
+async def get_replenish_suggestions(
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_auth),
+):
+    return await service.get_replenish_suggestions(db, user["company_id"])

@@ -6,56 +6,14 @@ import { formatPYG, formatDate, formatDateTime, formatTime } from "../../utils/f
 
 type SubTab = "recipes" | "plans" | "tempLogs" | "labels" | "markdown"
 
-const MOCK_RECIPES = [
-  { id: "r1", nombre: "Pollo Asado Entero", descripcion: "Pollo entero sazonado con sal, pimienta y especias", producto_terminado_nombre: "Pollo Asado Entero", cantidad_esperada: 20, unidad_medida: "UN", rendimiento_esperado: 95, activa: true, items: [{ producto_nombre: "Pollo Fresco Entero", cantidad: 1 }, { producto_nombre: "Sal Fina (g)", cantidad: 10 }, { producto_nombre: "Pimienta Negra (g)", cantidad: 5 }, { producto_nombre: "Aceite Vegetal (ml)", cantidad: 30 }] },
-  { id: "r2", nombre: "Milanesa de Carne", descripcion: "Milanesa de carne vacuna empanizada", producto_terminado_nombre: "Milanesa de Carne c/u", cantidad_esperada: 50, unidad_medida: "UN", rendimiento_esperado: 92, activa: true, items: [{ producto_nombre: "Carne de Cuadril (kg)", cantidad: 30 }, { producto_nombre: "Pan Rallado (kg)", cantidad: 5 }, { producto_nombre: "Huevo (UN)", cantidad: 20 }] },
-  { id: "r3", nombre: "Empanada de Carne", descripcion: "Empanada criolla de carne cortada a cuchillo", producto_terminado_nombre: "Empanada de Carne c/u", cantidad_esperada: 100, unidad_medida: "UN", rendimiento_esperado: 98, activa: false, items: [{ producto_nombre: "Carne Picada (kg)", cantidad: 15 }, { producto_nombre: "Cebolla (kg)", cantidad: 5 }, { producto_nombre: "Harina (kg)", cantidad: 10 }, { producto_nombre: "Huevo (UN)", cantidad: 12 }] },
-  { id: "r4", nombre: "Tortilla de Papa", descripcion: "Tortilla española de papa y cebolla", producto_terminado_nombre: "Tortilla de Papa c/u", cantidad_esperada: 30, unidad_medida: "UN", rendimiento_esperado: 90, activa: true, items: [{ producto_nombre: "Papa Blanca (kg)", cantidad: 8 }, { producto_nombre: "Huevo (UN)", cantidad: 40 }, { producto_nombre: "Cebolla (kg)", cantidad: 2 }, { producto_nombre: "Aceite (ml)", cantidad: 500 }] },
-  { id: "r5", nombre: "Salsa Boloñesa Casera", descripcion: "Salsa boloñesa base para pastas", producto_terminado_nombre: "Salsa Boloñesa (litro)", cantidad_esperada: 15, unidad_medida: "L", rendimiento_esperado: 96, activa: true, items: [{ producto_nombre: "Carne Picada (kg)", cantidad: 5 }, { producto_nombre: "Tomate Triturado (kg)", cantidad: 10 }, { producto_nombre: "Cebolla (kg)", cantidad: 3 }, { producto_nombre: "Ajo (kg)", cantidad: 0.5 }] },
-]
-
-const MOCK_PLANS = [
-  { id: "p1", receta_nombre: "Pollo Asado Entero", cantidad_objetivo: 20, estado: "en_progreso", fecha_inicio: new Date().toISOString(), notas: "Producción matutina" },
-  { id: "p2", receta_nombre: "Milanesa de Carne", cantidad_objetivo: 30, estado: "completada", fecha_inicio: new Date(Date.now() - 86400000).toISOString(), fecha_fin: new Date().toISOString(), notas: "Pedido especial" },
-  { id: "p3", receta_nombre: "Tortilla de Papa", cantidad_objetivo: 15, estado: "pendiente", notas: "Para el mediodía" },
-]
-
-const MOCK_TEMP_LOGS: Record<string, any[]> = {
-  p1: [
-    { id: "t1", tipo: "inicio", temperatura: 4.2, hora: new Date(Date.now() - 7200000).toISOString(), observacion: "Materia prima en recepción" },
-    { id: "t2", tipo: "coccion", temperatura: 75.8, hora: new Date(Date.now() - 3600000).toISOString(), observacion: "Pollo en horno, punto crítico alcanzado" },
-    { id: "t3", tipo: "enfriado", temperatura: 8.5, hora: new Date().toISOString(), observacion: "Enfriado en cámara" },
-  ],
-  p2: [
-    { id: "t4", tipo: "inicio", temperatura: 5.1, hora: new Date(Date.now() - 86400000).toISOString(), observacion: "Carne temperada" },
-    { id: "t5", tipo: "coccion", temperatura: 72.3, hora: new Date(Date.now() - 82800000).toISOString(), observacion: "Fritura profunda 180°C" },
-    { id: "t6", tipo: "enfriado", temperatura: 6.8, hora: new Date(Date.now() - 79200000).toISOString(), observacion: "En góndola refrigerada" },
-  ],
-}
-
-const MOCK_LABELS: Record<string, any[]> = {
-  p1: [
-    { id: "l1", producto_nombre: "Pollo Asado Entero", lote: "PA-20260527-A", peso_kg: 1.8, precio_unitario: 45000, fecha_vencimiento: "2026-05-28", generado_en: new Date().toISOString() },
-    { id: "l2", producto_nombre: "Pollo Asado Entero", lote: "PA-20260527-B", peso_kg: 2.1, precio_unitario: 45000, fecha_vencimiento: "2026-05-28", generado_en: new Date().toISOString() },
-  ],
-  p2: [
-    { id: "l3", producto_nombre: "Milanesa de Carne", lote: "MIL-20260526-A", peso_kg: 0.25, precio_unitario: 18000, fecha_vencimiento: "2026-05-29", generado_en: new Date(Date.now() - 86400000).toISOString() },
-  ],
-}
-
-const MOCK_MARKDOWNS = [
-  { id: "m1", producto_nombre: "Pollo Asado Entero", descuento_porcentaje: 30, precio_original: 45000, precio_markdown: 31500, fecha_inicio: "2026-05-27", motivo: "Fin de día — excedente de producción" },
-  { id: "m2", producto_nombre: "Milanesa de Carne", descuento_porcentaje: 40, precio_original: 18000, precio_markdown: 10800, fecha_inicio: "2026-05-26", motivo: "Vencimiento próximo" },
-]
-
 export default function RotiseriaTab() {
   const [subTab, setSubTab] = useState<SubTab>("recipes")
   const [loading, setLoading] = useState(true)
-  const [recipes, setRecipes] = useState<any[]>(MOCK_RECIPES)
-  const [plans, setPlans] = useState<any[]>(MOCK_PLANS)
-  const [tempLogs, setTempLogs] = useState<Record<string, any[]>>(MOCK_TEMP_LOGS)
-  const [labels, setLabels] = useState<Record<string, any[]>>(MOCK_LABELS)
-  const [markdowns, setMarkdowns] = useState<any[]>(MOCK_MARKDOWNS)
+  const [recipes, setRecipes] = useState<any[]>([])
+  const [plans, setPlans] = useState<any[]>([])
+  const [tempLogs, setTempLogs] = useState<Record<string, any[]>>({})
+  const [labels, setLabels] = useState<Record<string, any[]>>({})
+  const [markdowns, setMarkdowns] = useState<any[]>([])
   const [search, setSearch] = useState("")
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null)
   const [showRecipeModal, setShowRecipeModal] = useState(false)
@@ -636,7 +594,7 @@ function LabelsSubTab({ plans, selectedPlanId, onSelectPlan, labels }: any) {
                 <div className="flex justify-between"><span>Vencimiento:</span><span className="font-semibold">{formatDate(l.fecha_vencimiento)}</span></div>
                 <div className="flex justify-between"><span>Generado:</span><span className="font-semibold">{formatTime(l.generado_en)}</span></div>
               </div>
-              <button className="mt-3 w-full text-xs bg-gray-100 dark:bg-slate-700 hover:bg-gray-200 dark:hover:bg-slate-600 font-bold py-1.5 rounded-lg transition-colors flex items-center justify-center gap-1"><Printer className="w-3 h-3" /> Reimprimir</button>
+              <button onClick={() => window.print()} className="mt-3 w-full text-xs bg-gray-100 dark:bg-slate-700 hover:bg-gray-200 dark:hover:bg-slate-600 font-bold py-1.5 rounded-lg transition-colors flex items-center justify-center gap-1"><Printer className="w-3 h-3" /> Reimprimir</button>
             </div>
           ))}
         </div>

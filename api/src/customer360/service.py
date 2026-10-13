@@ -712,6 +712,24 @@ async def get_dashboard(db: AsyncSession, company_id: str) -> dict:
     )
     churn_trend = [{"month": int(row[0]), "avg_score": round(float(row[1]), 1), "count": row[2]} for row in r.all()]
 
+    # Métricas Retail y WhatsApp en vivo
+    r_phones = await db.execute(text("""
+        SELECT 
+            COUNT(CASE WHEN telefono IS NOT NULL AND telefono != '' THEN 1 END) as con_tel,
+            COUNT(CASE WHEN idioma = 'pt' OR telefono LIKE '+55%' THEN 1 END) as de_brasil,
+            COUNT(CASE WHEN extra_club_numero IS NOT NULL AND extra_club_numero != '' THEN 1 END) as socios_club
+        FROM customers
+        WHERE company_id = :cid
+    """), {"cid": company_id})
+    ph_row = r_phones.fetchone()
+    con_tel = int(ph_row.con_tel or 0) if ph_row else 0
+    de_brasil = int(ph_row.de_brasil or 0) if ph_row else 0
+    socios_vip = int(ph_row.socios_club or 0) if ph_row else 0
+    de_paraguay = max(0, total_customers - de_brasil)
+
+    r_pts = await db.execute(text("SELECT COALESCE(SUM(puntos), 0) FROM loyalty_points"))
+    total_pts = int(r_pts.scalar() or 0)
+
     return Customer360DashboardResponse(
         total_customers=total_customers,
         active_customers_30d=active_30d,
@@ -727,4 +745,382 @@ async def get_dashboard(db: AsyncSession, company_id: str) -> dict:
         by_stage=by_stage,
         penetration_summary={},
         churn_trend=churn_trend,
+        total_with_phone=con_tel,
+        total_brasil=de_brasil,
+        total_paraguay=de_paraguay,
+        total_points_loyalty=total_pts,
+        total_socios_vip=socios_vip,
     ).model_dump()
+
+
+
+# ── Comprehensive 360 Profile ──────────────────────────────────────────
+
+async def get_customer_profile_360(db: AsyncSession, company_id: str, customer_id: str) -> dict:
+    cid = uuid.UUID(customer_id) if isinstance(customer_id, str) else customer_id
+    comp_id = uuid.UUID(company_id) if isinstance(company_id, str) else company_id
+
+    # 1. Customer
+    from api.src.customers.models import Customer
+    c_res = await db.execute(select(Customer).where(Customer.id == cid, Customer.company_id == comp_id))
+    customer = c_res.scalar_one_or_none()
+    if not customer:
+        # Fallback without company filter if multi-tenant cross reference
+        c_res2 = await db.execute(select(Customer).where(Customer.id == cid))
+        customer = c_res2.scalar_one_or_none()
+        if not customer:
+            raise ValueError("Cliente no encontrado")
+
+    # 2. Sales Stats from real sales table
+    sales_stats_q = await db.execute(text("""
+        SELECT 
+            COUNT(*) as total_tickets,
+            COALESCE(SUM(total), 0) as total_spent,
+            MIN(COALESCE(fecha, created_at)) as first_purchase,
+            MAX(COALESCE(fecha, created_at)) as last_purchase
+        FROM sales
+        WHERE customer_id = :cid AND estado = 'confirmado'
+    """), {"cid": str(cid)})
+    s_row = sales_stats_q.fetchone()
+    total_tickets = int(s_row.total_tickets or 0)
+    total_spent = float(s_row.total_spent or 0)
+    first_purchase = s_row.first_purchase.isoformat() if s_row.first_purchase else None
+    last_purchase = s_row.last_purchase.isoformat() if s_row.last_purchase else None
+
+    # Fallback si las ventas provienen de cupones / tickets legacy
+    clean_doc = "".join([c for c in str(customer.ci or customer.ruc or "") if c.isdigit()])
+    if total_tickets == 0 and clean_doc:
+        ct_q = await db.execute(text("""
+            SELECT 
+                COUNT(ct.id) as total_tickets,
+                COALESCE(SUM(ct.monto_compra), 0) as total_spent,
+                MIN(COALESCE(ct.fecha_compra, ct.created_at)) as first_purchase,
+                MAX(COALESCE(ct.fecha_compra, ct.created_at)) as last_purchase
+            FROM cupon_tickets ct
+            JOIN cupones_clientes cc ON ct.cliente_id = cc.id
+            WHERE cc.documento = :doc
+        """), {"doc": clean_doc})
+        ct_row = ct_q.fetchone()
+        if ct_row and ct_row.total_tickets:
+            total_tickets = int(ct_row.total_tickets or 0)
+            total_spent = float(ct_row.total_spent or 0)
+            first_purchase = ct_row.first_purchase.isoformat() if ct_row.first_purchase else None
+            last_purchase = ct_row.last_purchase.isoformat() if ct_row.last_purchase else None
+
+    avg_ticket = round(total_spent / max(1, total_tickets))
+
+    days_since = 999
+    if last_purchase:
+        now = datetime.now(timezone.utc)
+        try:
+            lp_dt = datetime.fromisoformat(last_purchase)
+            if not lp_dt.tzinfo:
+                lp_dt = lp_dt.replace(tzinfo=timezone.utc)
+            days_since = max(0, (now - lp_dt).days)
+        except Exception:
+            pass
+
+    # Average days between visits
+    avg_days_between_visits = 0
+    if total_tickets >= 2 and first_purchase and last_purchase:
+        try:
+            fp_dt = datetime.fromisoformat(first_purchase)
+            lp_dt = datetime.fromisoformat(last_purchase)
+            span_days = max(1, (lp_dt - fp_dt).days)
+            avg_days_between_visits = round(span_days / max(1, total_tickets - 1), 1)
+        except Exception:
+            pass
+
+    # 3. Loyalty Points
+    pts_q = await db.execute(text("""
+        SELECT COALESCE(SUM(puntos), 0) FROM loyalty_points WHERE customer_id = :cid
+    """), {"cid": str(cid)})
+    total_points = int(pts_q.scalar() or 0)
+
+    # Tier Calculation
+    tier = "Plata"
+    tier_color = "text-slate-400"
+    if total_spent >= 10000000 or total_points >= 10000:
+        tier = "VIP Platino"
+        tier_color = "text-purple-500"
+    elif total_spent >= 3000000 or total_points >= 3000:
+        tier = "Oro"
+        tier_color = "text-amber-500"
+
+    # 4. RFM Segmentation & Scoring
+    if days_since <= 15 and (total_tickets >= 10 or total_spent >= 3000000):
+        rfm_segment = "Champions (VIP Platino)"
+        rfm_score = 95
+        risk_level = "Bajo"
+    elif days_since <= 30 and total_tickets >= 4:
+        rfm_segment = "Leales Recurrentes (Oro/Plata)"
+        rfm_score = 80
+        risk_level = "Bajo"
+    elif days_since <= 45:
+        rfm_segment = "Potenciales / Nuevos"
+        rfm_score = 65
+        risk_level = "Medio"
+    else:
+        rfm_segment = "En Riesgo de Fuga"
+        rfm_score = 35
+        risk_level = "Alto"
+
+    # 5. Top Frequent Products (Canasta Habitual)
+    top_prods_q = await db.execute(text("""
+        SELECT 
+            si.product_id,
+            COALESCE(p.nombre, 'Producto ' || SUBSTRING(si.product_id::text, 1, 8)) as producto_nombre,
+            COALESCE(cat.nombre, 'General') as categoria,
+            COUNT(DISTINCT s.id) as veces_comprado,
+            SUM(si.cantidad) as cantidad_total,
+            SUM(si.total) as monto_total
+        FROM sale_items si
+        JOIN sales s ON si.sale_id = s.id
+        LEFT JOIN products p ON si.product_id = p.id
+        LEFT JOIN product_categories cat ON p.categoria_id = cat.id
+        WHERE s.customer_id = :cid AND s.estado = 'confirmado'
+        GROUP BY si.product_id, p.nombre, cat.nombre
+        ORDER BY SUM(si.total) DESC
+        LIMIT 10
+    """), {"cid": str(cid)})
+    frequent_basket = [
+        {
+            "product_id": str(r.product_id),
+            "producto": r.producto_nombre,
+            "categoria": r.categoria.strip() if r.categoria else "General",
+            "veces": int(r.veces_comprado),
+            "unidades": float(r.cantidad_total or 0),
+            "total": float(r.monto_total or 0),
+        }
+        for r in top_prods_q.fetchall()
+    ]
+
+    # 6. Recent Sales
+    recent_sales_q = await db.execute(text("""
+        SELECT s.id, s.numero, COALESCE(s.fecha, s.created_at) as fecha, s.total, s.estado,
+               (SELECT COUNT(*) FROM sale_items WHERE sale_id = s.id) as items_count
+        FROM sales s
+        WHERE s.customer_id = :cid AND s.estado = 'confirmado'
+        ORDER BY COALESCE(s.fecha, s.created_at) DESC
+        LIMIT 10
+    """), {"cid": str(cid)})
+    recent_sales = [
+        {
+            "id": str(r.id),
+            "numero": r.numero or str(r.id)[:8],
+            "fecha": r.fecha.isoformat() if r.fecha else None,
+            "total": float(r.total or 0),
+            "estado": r.estado,
+            "items_count": int(r.items_count or 0),
+        }
+        for r in recent_sales_q.fetchall()
+    ]
+
+    # Si no tiene ventas directas, traer tickets de cupones
+    if len(recent_sales) == 0 and clean_doc:
+        ct_recent = await db.execute(text("""
+            SELECT ct.id, ct.nro_ticket, COALESCE(ct.fecha_compra, ct.created_at) as fecha, 
+                   ct.monto_compra, 'confirmado' as estado
+            FROM cupon_tickets ct
+            JOIN cupones_clientes cc ON ct.cliente_id = cc.id
+            WHERE cc.documento = :doc
+            ORDER BY COALESCE(ct.fecha_compra, ct.created_at) DESC
+            LIMIT 10
+        """), {"doc": clean_doc})
+        for r in ct_recent.fetchall():
+            recent_sales.append({
+                "id": str(r.id),
+                "numero": f"Ticket #{r.nro_ticket}",
+                "fecha": r.fecha.isoformat() if r.fecha else None,
+                "total": float(r.monto_compra or 0),
+                "estado": r.estado,
+                "items_count": 1,
+            })
+
+    return {
+        "customer": {
+            "id": str(customer.id),
+            "razon_social": customer.razon_social,
+            "ruc": customer.ruc or "S/R",
+            "ci": customer.ci,
+            "telefono": customer.telefono or "",
+            "email": customer.email or "",
+            "ciudad": customer.ciudad or "Pedro Juan Caballero",
+            "idioma": getattr(customer, 'idioma', 'es') or ('pt' if customer.telefono and customer.telefono.startswith('+55') else 'es'),
+            "whatsapp_valido": getattr(customer, 'whatsapp_valido', True),
+            "arquetipo": getattr(customer, 'arquetipo', None),
+            "tags": getattr(customer, 'tags', []) or [],
+            "ia_analisis": getattr(customer, 'ia_analisis', {}) or {},
+            "extra_club_numero": getattr(customer, 'extra_club_numero', None),
+            "limite_credito": float(getattr(customer, 'limite_credito', None) or getattr(customer, 'credito_limite', 0) or 0),
+            "credito_usado": float(customer.credito_usado or 0),
+            "tipo": getattr(customer, 'tipo', 'cliente'),
+        },
+        "kpis": {
+            "total_tickets": total_tickets,
+            "total_spent": total_spent,
+            "avg_ticket": avg_ticket,
+            "first_purchase": first_purchase,
+            "last_purchase": last_purchase,
+            "days_since_last_purchase": days_since,
+            "avg_days_between_visits": avg_days_between_visits,
+        },
+        "loyalty": {
+            "total_points": total_points,
+            "tier": tier,
+            "tier_color": tier_color,
+            "redeemable_value_pyg": total_points * 10,
+        },
+        "rfm": {
+            "segment": rfm_segment,
+            "score": rfm_score,
+            "risk_level": risk_level,
+            "days_since": days_since,
+            "total_tickets": total_tickets,
+            "total_spent": total_spent,
+        },
+        "frequent_basket": frequent_basket,
+        "recent_sales": recent_sales,
+    }
+
+
+# ── Ofertas Personalizadas "Te Extrañamos" con Blindaje Anti-Costo ──
+
+async def create_personalized_offer(
+    db: AsyncSession,
+    company_id: str,
+    customer_id: str,
+    product_id: str,
+    titulo: str,
+    descripcion: str,
+    tipo: str,
+    valor: float,
+    dias_validez: int = 7,
+) -> dict:
+    """Crea una oferta 1-a-1 en marketing_customer_offers con blindaje matemático anti-pérdida."""
+    from api.src.marketing.models import CustomerOffer
+    from api.src.products.models import Product
+
+    p_uuid = uuid.UUID(product_id) if isinstance(product_id, str) else product_id
+    prod_res = await db.execute(select(Product).where(Product.id == p_uuid))
+    product = prod_res.scalar_one_or_none()
+    if not product:
+        raise ValueError("Producto no encontrado para la oferta")
+
+    ultimo_costo = float(product.ultimo_costo or 0)
+    costo_promedio = float(product.costo_promedio or 0)
+    base_cost = max(ultimo_costo, costo_promedio)
+    precio_normal = float(product.precio_venta or 0)
+
+    # Piso de seguridad anti-pérdida estricto: Costo + 5% margen de seguridad mínimo
+    safety_floor = round(max(base_cost * 1.05, 500.0) if base_cost > 0 else (precio_normal * 0.5))
+
+    final_offer_price = 0.0
+    discount_val = float(valor)
+
+    if tipo == "precio_fijo":
+        if discount_val < safety_floor:
+            # Blindaje estricto: nunca por debajo de costo + 5%
+            discount_val = safety_floor
+            descripcion = f"{descripcion} [Ajustado a piso seguro anti-pérdida: Gs. {safety_floor:,.0f}]"
+        final_offer_price = discount_val
+    elif tipo == "descuento_porcentaje":
+        calculated_price = precio_normal * (1.0 - (discount_val / 100.0))
+        if calculated_price < safety_floor and precio_normal > safety_floor:
+            max_pct = max(0.0, ((precio_normal - safety_floor) / precio_normal) * 100.0)
+            discount_val = round(max_pct, 1)
+            final_offer_price = safety_floor
+            descripcion = f"{descripcion} [Descuento ajustado al {discount_val}% para respetar margen de costo]"
+        else:
+            final_offer_price = max(calculated_price, safety_floor)
+    else:
+        tipo = "precio_fijo"
+        final_offer_price = max(discount_val, safety_floor)
+
+    now = datetime.now(timezone.utc)
+    valido_hasta = now + timedelta(days=dias_validez)
+
+    offer = CustomerOffer(
+        company_id=uuid.UUID(company_id),
+        customer_id=uuid.UUID(customer_id),
+        product_id=p_uuid,
+        titulo=titulo,
+        descripcion=descripcion,
+        tipo=tipo,
+        valor=discount_val,
+        valido_desde=now,
+        valido_hasta=valido_hasta,
+        usado=False,
+    )
+    db.add(offer)
+    await db.commit()
+    await db.refresh(offer)
+
+    margen_pct = round(((final_offer_price - base_cost) / final_offer_price * 100.0), 1) if final_offer_price > 0 else 0.0
+
+    return {
+        "id": str(offer.id),
+        "customer_id": str(offer.customer_id),
+        "product_id": str(offer.product_id),
+        "producto_nombre": product.nombre,
+        "titulo": offer.titulo,
+        "descripcion": offer.descripcion,
+        "tipo": offer.tipo,
+        "valor": float(offer.valor),
+        "precio_normal": precio_normal,
+        "costo_base": base_cost,
+        "safety_floor": safety_floor,
+        "precio_oferta": final_offer_price,
+        "margen_estimado_pct": margen_pct,
+        "valido_desde": offer.valido_desde.isoformat() if offer.valido_desde else None,
+        "valido_hasta": offer.valido_hasta.isoformat() if offer.valido_hasta else None,
+        "usado": offer.usado,
+    }
+
+
+async def get_customer_offers(db: AsyncSession, company_id: str, customer_id: str) -> list[dict]:
+    """Retorna todas las ofertas creadas para un cliente ordenadas por vigencia."""
+    from api.src.marketing.models import CustomerOffer
+    from api.src.products.models import Product
+
+    cid = uuid.UUID(customer_id) if isinstance(customer_id, str) else customer_id
+    comp_id = uuid.UUID(company_id) if isinstance(company_id, str) else company_id
+    now = datetime.now(timezone.utc)
+
+    stmt = (
+        select(CustomerOffer, Product)
+        .outerjoin(Product, CustomerOffer.product_id == Product.id)
+        .where(
+            CustomerOffer.company_id == comp_id,
+            CustomerOffer.customer_id == cid,
+        )
+        .order_by(CustomerOffer.usado.asc(), CustomerOffer.created_at.desc())
+    )
+    res = await db.execute(stmt)
+    rows = res.all()
+
+    result = []
+    for off, prod in rows:
+        precio_normal = float(prod.precio_venta or 0) if prod else 0.0
+        val = float(off.valor or 0)
+        precio_promo = val if off.tipo == "precio_fijo" else (round(precio_normal * (1.0 - val / 100.0)) if off.tipo == "descuento_porcentaje" else val)
+        is_active = (not off.usado) and (off.valido_hasta is None or off.valido_hasta >= now)
+        result.append({
+            "id": str(off.id),
+            "customer_id": str(off.customer_id),
+            "product_id": str(off.product_id) if off.product_id else None,
+            "producto_nombre": prod.nombre if prod else "Producto",
+            "codigo_barra": prod.codigo_barra if prod else None,
+            "titulo": off.titulo,
+            "descripcion": off.descripcion,
+            "tipo": off.tipo,
+            "valor": val,
+            "precio_normal": precio_normal,
+            "precio_oferta": precio_promo,
+            "valido_desde": off.valido_desde.isoformat() if off.valido_desde else None,
+            "valido_hasta": off.valido_hasta.isoformat() if off.valido_hasta else None,
+            "usado": bool(off.usado),
+            "usado_at": off.usado_at.isoformat() if off.usado_at else None,
+            "is_active": is_active,
+        })
+    return result

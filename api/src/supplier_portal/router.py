@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.features import require_feature
 from api.src.supplier_portal.auth import require_supplier
 from api.src.supplier_portal import service
@@ -12,7 +13,6 @@ from api.src.supplier_portal import service
 router = APIRouter(
     prefix="/api/v1/supplier-portal",
     tags=["supplier-portal"],
-    dependencies=[Depends(require_feature("supplier_portal"))],
 )
 
 
@@ -167,3 +167,43 @@ async def get_whatsapp_url(
 ):
     url = await service.get_supplier_whatsapp_url(db, supplier["supplier_id"])
     return {"url": url}
+
+
+# ── Admin (Internal Supermarket Management) ──────────────────────────
+
+@router.get("/admin/users")
+async def list_admin_users(
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_auth),
+):
+    return await service.list_supplier_users_for_company(db, user["company_id"])
+
+
+@router.post("/admin/users", status_code=201)
+async def create_admin_user(
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_auth),
+):
+    data["company_id"] = user["company_id"]
+    created = await service.register_supplier_user(db, data)
+    return {"id": str(created.id), "email": created.email, "nombre": created.nombre, "activo": created.activo}
+
+
+@router.get("/admin/documents")
+async def list_admin_documents(
+    tipo: str = Query(""),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_auth),
+):
+    return await service.list_all_documents_for_company(db, user["company_id"], tipo)
+
+
+@router.put("/admin/users/{user_id}/toggle")
+async def toggle_admin_user(
+    user_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_auth),
+):
+    return await service.toggle_supplier_user(db, user_id, user["company_id"])
+

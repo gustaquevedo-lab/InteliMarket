@@ -2,23 +2,19 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.returns.schemas import ReturnCreate, ReturnResponse, ReturnWithItems, ReturnApprove
 from api.src.returns import service
 
-router = APIRouter(prefix="/api/v1", tags=["returns"])
+router = APIRouter(prefix="/api/v1", tags=["returns"], dependencies=[Depends(require_auth)])
 
 
 @router.post("/returns", response_model=ReturnResponse, status_code=status.HTTP_201_CREATED)
 async def create_return(body: ReturnCreate, db: AsyncSession = Depends(get_db)):
-    return await service.create_return(db, body)
-
-
-@router.get("/returns/{return_id}", response_model=ReturnWithItems)
-async def get_return(return_id: str, db: AsyncSession = Depends(get_db)):
-    result = await service.get_return_with_items(db, return_id)
-    if not result:
-        raise HTTPException(status_code=404, detail="Devolución no encontrada")
-    return result
+    try:
+        return await service.create_return(db, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/companies/{company_id}/returns", response_model=list[ReturnResponse])
@@ -32,11 +28,25 @@ async def list_returns(
     return await service.list_returns(db, company_id, estado, limit=limit, offset=offset)
 
 
+@router.get("/returns/motivos")
+async def list_motivos():
+    return service.RETURN_MOTIVOS
+
+
+@router.get("/returns/{return_id}", response_model=ReturnWithItems)
+async def get_return(return_id: str, db: AsyncSession = Depends(get_db)):
+    result = await service.get_return_with_items(db, return_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Devolución no encontrada")
+    return result
+
+
 @router.post("/returns/{return_id}/approve", response_model=ReturnResponse)
 async def approve_return(return_id: str, body: ReturnApprove, db: AsyncSession = Depends(get_db)):
     result = await service.approve_return(db, return_id, body)
     if not result:
         raise HTTPException(status_code=400, detail="No se pudo aprobar la devolución")
+    await db.commit()
     return result
 
 
@@ -49,9 +59,5 @@ async def reject_return(
     result = await service.reject_return(db, return_id, motivo)
     if not result:
         raise HTTPException(status_code=400, detail="No se pudo rechazar la devolución")
+    await db.commit()
     return result
-
-
-@router.get("/returns/motivos")
-async def list_motivos():
-    return service.RETURN_MOTIVOS

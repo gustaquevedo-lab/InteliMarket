@@ -115,3 +115,87 @@ async def get_dashboard(
     user=Depends(require_auth),
 ):
     return await service.get_dashboard(db, user["company_id"])
+
+
+from fastapi import UploadFile, File, Form
+from api.src.asistente_virtual.brain_engine import (
+    process_brain_chat,
+    process_voice_interaction,
+    get_brain_status,
+)
+
+
+@router.get("/brain/status")
+async def brain_status(company_id: Optional[str] = Query(None), user=Depends(require_auth)):
+    cid = company_id or user.get("company_id") or "00000000-0000-0000-0000-000000000010"
+    return await get_brain_status(cid)
+
+
+@router.post("/brain/chat")
+async def brain_chat(
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = data.get("company_id") or user.get("company_id") or "00000000-0000-0000-0000-000000000010"
+    user_query = data.get("query") or data.get("message") or ""
+    user_name = data.get("user_name") or user.get("nombre") or user.get("email", "").split("@")[0] or "Gustavo"
+    voice_pref = data.get("voice_preference") or data.get("voice") or "es-AR-TomasNeural"
+    model_pref = data.get("model_preference") or data.get("model") or "qwen2.5:7b"
+    gen_voice = data.get("generate_voice", False)
+
+    return await process_brain_chat(
+        db,
+        company_id=cid,
+        user_message=user_query,
+        user_name=user_name,
+        conversation_id=data.get("conversation_id"),
+        model=model_pref,
+        voice_preference=voice_pref,
+        generate_voice=gen_voice,
+        history=data.get("history", []),
+    )
+
+
+@router.post("/brain/speak")
+async def brain_speak(
+    data: dict,
+    user=Depends(require_auth),
+):
+    text = data.get("text", "")
+    voice = data.get("voice") or data.get("voice_preference") or "es-AR-TomasNeural"
+    from api.src.asistente_virtual.brain_engine import generate_speech_audio
+    audio_b64 = await generate_speech_audio(text, voice=voice)
+    return {"audio_base64": audio_b64}
+
+
+@router.post("/brain/voice")
+async def brain_voice(
+    audio: UploadFile = File(...),
+    company_id: Optional[str] = Form(None),
+    user_name: Optional[str] = Form(None),
+    voice_preference: Optional[str] = Form(None),
+    model_preference: Optional[str] = Form(None),
+    tts_voice: Optional[str] = Form(None),
+    model: Optional[str] = Form(None),
+    conversation_id: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    audio_bytes = await audio.read()
+    cid = company_id or user.get("company_id") or "00000000-0000-0000-0000-000000000010"
+    chosen_user = user_name or user.get("nombre") or user.get("email", "").split("@")[0] or "Gustavo"
+    chosen_voice = voice_preference or tts_voice or "es-AR-TomasNeural"
+    chosen_model = model_preference or model or "qwen2.5:7b"
+
+    return await process_voice_interaction(
+        db,
+        audio_bytes=audio_bytes,
+        company_id=cid,
+        user_name=chosen_user,
+        conversation_id=conversation_id,
+        model=chosen_model,
+        tts_voice=chosen_voice,
+    )
+
+

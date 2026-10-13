@@ -7,7 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
 from api.src.gerencial import service
-from api.src.gerencial.schemas import GerencialDashboard, DeptoPylItem, ProductoRanking
+from api.src.gerencial.schemas import GerencialDashboard, DeptoPylItem, ProductoRanking, AlertasNegocio
+from api.src.integrated_finance import pdf_reports
+from sqlalchemy import text
 
 router = APIRouter(prefix="/api/v1/gerencial", tags=["gerencial"])
 
@@ -50,6 +52,35 @@ async def get_ranking(
     user=Depends(require_auth),
 ):
     return await service.get_ranking(db, user["company_id"], desde, hasta, limit)
+
+
+@router.get("/alertas-negocio", response_model=AlertasNegocio)
+async def get_alertas_negocio(
+    margen_umbral: float = Query(15.0),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.get_alertas_negocio(db, user["company_id"], margen_umbral)
+
+
+@router.get("/export/pnl.pdf")
+async def export_pnl_pdf(
+    desde: date | None = Query(None),
+    hasta: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    pnl = await service.get_pnl_data(db, user["company_id"], desde, hasta)
+    comp_r = await db.execute(text("SELECT razon_social, ruc, logo_url FROM companies WHERE id = :cid"), {"cid": user["company_id"]})
+    comp = comp_r.first()
+    company = {"razon_social": comp.razon_social, "ruc": comp.ruc, "logo_url": comp.logo_url} if comp else {"razon_social": "Empresa", "ruc": "N/A"}
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = pdf_reports.generate_pnl_pdf(company, pnl, generated_by)
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=estado_resultados.pdf"},
+    )
 
 
 @router.get("/export/{report_type}")

@@ -43,3 +43,26 @@ class GerencialDashboard(BaseModel):
     top_productos: list[ProductoRanking]
     ventas_por_hora: list[VentaPorHora]
     deptos: list[DeptoPylItem]
+
+
+class MargenBajoItem(BaseModel):
+    producto_id: str
+    producto_nombre: str
+    cantidad_vendida_30d: float
+    total_ventas_30d: float
+    margen_porcentaje: float
+
+
+class CuentasVencidas(BaseModel):
+    cantidad: int
+    monto: float
+    total_pendiente: float
+
+
+class AlertasNegocio(BaseModel):
+    margen_bajo: list[MargenBajoItem]
+    margen_umbral: float
+    cxc_vencidas: CuentasVencidas
+    cxp_vencidas: CuentasVencidas
+    dias_cobro_promedio: Optional[float] = None
+    dias_pago_promedio: Optional[float] = None

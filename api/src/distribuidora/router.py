@@ -329,6 +329,17 @@ async def list_route_customers(
     return await service.list_route_customers(db, route_id)
 
 
+@router.post("/routes/{route_id}/optimize")
+async def optimize_route(
+    route_id: str,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_auth),
+):
+    """Optimiza el orden de paradas de la ruta usando Google Routes API (TSP) y notifica al preventista."""
+    return await service.optimize_route(db, route_id)
+
+
+
 @router.post("/routes/{route_id}/customers", status_code=201)
 async def add_route_customer(
     route_id: str,
@@ -478,3 +489,49 @@ async def customer_profitability(
     _=Depends(require_auth),
 ):
     return await service.get_customer_profitability(db, company_id)
+
+
+# ═══════════════════════════════════════════════════════════════
+# MAP LAYERS
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/map/routes/{company_id}")
+async def map_routes(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_auth),
+):
+    """Active routes with waypoints and today's visit status for the map layer."""
+    return await service.get_map_routes(db, company_id)
+
+
+@router.get("/map/customers/{company_id}")
+async def map_customers(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_auth),
+):
+    """Geocoded customers with route assignment and today's visit status."""
+    return await service.get_map_customers(db, company_id)
+
+
+# ═══════════════════════════════════════════════════════════════
+# RENDIMIENTO DE VENDEDORES
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/performance/sellers/{company_id}")
+async def seller_performance(
+    company_id: str,
+    fecha_desde: str = Query(default=None),
+    fecha_hasta: str = Query(default=None),
+    route_id: str = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_auth),
+):
+    """Performance metrics per seller: coverage, conversion, ticket, weekly trend."""
+    from datetime import date, timedelta
+    if not fecha_desde:
+        fecha_desde = str(date.today() - timedelta(days=30))
+    if not fecha_hasta:
+        fecha_hasta = str(date.today())
+    return await service.get_seller_performance(db, company_id, fecha_desde, fecha_hasta, route_id)

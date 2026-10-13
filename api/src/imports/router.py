@@ -51,7 +51,7 @@ async def preview_import(
 @router.get("/template/{tipo}")
 async def download_template(tipo: str):
     if tipo == "products":
-        headers = "sku;nombre;codigo_barra;descripcion;unidad_medida;iva_tasa;stock_minimo;category_id\n"
+        headers = "sku;nombre;codigo_barra;descripcion;unidad_medida;iva_tasa;stock_minimo;categoria_id\n"
         example = "PROD-001;Producto Ejemplo;123456789;Descripcion del producto;unidad;10;5;\n"
     elif tipo == "customers":
         headers = "razon_social;ruc;ci;tipo_persona;direccion;ciudad;telefono;email;credito_limite\n"

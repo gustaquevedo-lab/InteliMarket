@@ -242,3 +242,20 @@ async def delete_label_template(
     ok = await service.delete_label_template(db, template_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Template not found")
+
+# ═══════════════════════════════════════════════════════════════
+# WEIGHT LOGS
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/-/weight-logs")
+@router.get("/weight-logs")
+@router.get("/{scale_id}/weight-logs")
+async def list_weight_logs(
+    scale_id: str | None = None,
+    limit: int = Query(50, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    target_scale = None if scale_id == "-" else scale_id
+    return await service.list_weight_logs(db, user["company_id"], target_scale, limit, offset)

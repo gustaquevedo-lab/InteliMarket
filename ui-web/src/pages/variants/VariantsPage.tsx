@@ -1,313 +1,508 @@
-import { useState, useEffect } from "react"
+import React, { useState, useEffect, useMemo, useCallback } from "react"
 import {
-  LayoutDashboard, Package, Search, Plus, X, Loader2, RefreshCw,
-  Pencil, Trash2, type LucideIcon, Boxes, Hash,
+  Palette, Plus, Search, Loader2, X, Trash2, Edit, RefreshCw,
+  Package, Tag, Layers, Barcode, DollarSign, CheckCircle2, ShieldAlert,
+  Info, HelpCircle, ArrowRight, BookOpen, Filter, Box, Sparkles, Copy
 } from "lucide-react"
-import { api, type ProductVariant, type Product } from "../../api"
+import { api, type Product, type ProductVariant } from "../../api"
 import { useToast } from "../../context/ToastContext"
-
-type TabKey = "dashboard" | "variants"
-
-const TABS: { key: TabKey; label: string; icon: LucideIcon }[] = [
-  { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { key: "variants",  label: "Variantes por Producto", icon: Package },
-]
+import { useConfirm } from "../../components/ConfirmDialog"
+import { formatPYG } from "../../utils/format"
 
 export default function VariantsPage() {
-  const [tab, setTab] = useState<TabKey>("dashboard")
+  const toast = useToast()
+  const confirm = useConfirm()
 
-  return (
-    <div className="space-y-6 animate-fade-in-up">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Variantes de Producto</h1>
-          <p className="text-sm text-gray-500 mt-1">Gestión de talles, colores y SKUs por producto</p>
-        </div>
-      </div>
-
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
-        <div className="flex gap-1 overflow-x-auto px-4 border-b border-gray-100 dark:border-gray-700">
-          {TABS.map((t) => (
-            <button key={t.key} onClick={() => setTab(t.key)}
-              className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition
-                ${tab === t.key
-                  ? "border-blue-500 text-blue-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-                }`}
-            >
-              <t.icon className="w-4 h-4" />{t.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {tab === "dashboard" && <DashboardTab />}
-      {tab === "variants"  && <VariantsTab />}
-    </div>
-  )
-}
-
-function Spinner() { return <Loader2 className="w-4 h-4 animate-spin" /> }
-
-function KpiCard({ icon: Icon, label, value, sub, color = "blue" }: { icon: LucideIcon; label: string; value?: React.ReactNode; sub?: string; color?: string }) {
-  const colors: Record<string, string> = {
-    blue: "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400",
-    green: "bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400",
-    red: "bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400",
-    yellow: "bg-yellow-50 text-yellow-600 dark:bg-yellow-900/20 dark:text-yellow-400",
-    purple: "bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400",
-    indigo: "bg-indigo-50 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400",
-    pink: "bg-pink-50 text-pink-600 dark:bg-pink-900/20 dark:text-pink-400",
-  }
-  return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-      <div className="flex items-center gap-3">
-        <div className={`p-2.5 rounded-lg ${colors[color] || colors.blue}`}>
-          <Icon className="w-5 h-5" />
-        </div>
-        <div>
-          <p className="text-xs text-gray-500">{label}</p>
-          <p className="text-lg font-bold text-gray-900 dark:text-white">{value ?? "—"}</p>
-          {sub && <p className="text-xs text-gray-400">{sub}</p>}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ==================== DASHBOARD ====================
-function DashboardTab() {
-  const [productCount, setProductCount] = useState(0)
-  const [variantCount, setVariantCount] = useState(0)
+  const [variants, setVariants] = useState<any[]>([])
+  const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState("")
+  const [selectedTipo, setSelectedTipo] = useState<string>("all")
+  const [selectedParentId, setSelectedParentId] = useState<string>("all")
 
-  useEffect(() => {
+  // Modal Alta
+  const [showModal, setShowModal] = useState(false)
+  const [editingVariant, setEditingVariant] = useState<any | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState({
+    product_id: "",
+    tipo: "talle",
+    valor: "",
+    sku_variante: "",
+    codigo_barra: "",
+    precio_extra: 0,
+    stock: 0,
+  })
+
+  // Carga de datos
+  const fetchData = useCallback(async () => {
     setLoading(true)
-    Promise.all([
-      api.products.list().catch(() => [] as Product[]),
-      api.variants.list("").catch(() => [] as ProductVariant[]),
-    ]).then(([products, variants]) => {
-      setProductCount(products.length)
-      setVariantCount(variants.length)
-    }).finally(() => setLoading(false))
+    try {
+      const [vars, prods] = await Promise.all([
+        api.variants.list(),
+        api.products.list({ limit: 500 }),
+      ])
+      setVariants(vars || [])
+      setProducts(prods || [])
+    } catch (e: any) {
+      toast.error("Error al cargar variantes", e.message)
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
-  if (loading) return <div className="flex justify-center py-12"><Spinner /></div>
-
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard icon={Boxes} label="Productos" value={productCount} color="blue" />
-        <KpiCard icon={Hash} label="Variantes" value={variantCount} color="purple" />
-      </div>
-    </div>
-  )
-}
-
-// ==================== VARIANTES POR PRODUCTO ====================
-function VariantsTab() {
-  const [productSearch, setProductSearch] = useState("")
-  const [products, setProducts] = useState<Product[]>([])
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
-  const [variants, setVariants] = useState<ProductVariant[]>([])
-  const [loading, setLoading] = useState(false)
-  const [showModal, setShowModal] = useState(false)
-  const [editVariant, setEditVariant] = useState<ProductVariant | null>(null)
-  const toast = useToast()
-
   useEffect(() => {
-    if (productSearch.length < 2) { setProducts([]); return }
-    const timer = setTimeout(() => {
-      api.products.list({ search: productSearch }).then(setProducts).catch(() => {})
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [productSearch])
+    fetchData()
+  }, [fetchData])
 
-  async function loadVariants(productId: string) {
-    setLoading(true)
-    try {
-      const data = await api.variants.list(productId)
-      setVariants(data)
-    } catch { toast.error("Error", "No se pudieron cargar las variantes") }
-    finally { setLoading(false) }
-  }
+  // Filtrado
+  const filteredVariants = useMemo(() => {
+    return variants.filter(v => {
+      const matchesSearch = !search || 
+        v.product_nombre?.toLowerCase().includes(search.toLowerCase()) ||
+        v.sku_variante?.toLowerCase().includes(search.toLowerCase()) ||
+        v.codigo_barra?.toLowerCase().includes(search.toLowerCase()) ||
+        v.valor?.toLowerCase().includes(search.toLowerCase())
 
-  function selectProduct(p: Product) {
-    setSelectedProduct(p)
-    setProductSearch(`${p.nombre} (${p.sku})`)
-    setProducts([])
-    loadVariants(p.id)
-  }
+      const matchesTipo = selectedTipo === "all" || v.tipo === selectedTipo
+      const matchesParent = selectedParentId === "all" || v.product_id === selectedParentId
 
-  function clearSelection() {
-    setSelectedProduct(null)
-    setProductSearch("")
-    setVariants([])
-  }
+      return matchesSearch && matchesTipo && matchesParent
+    })
+  }, [variants, search, selectedTipo, selectedParentId])
 
-  async function handleDelete(variantId: string) {
-    try {
-      await api.variants.delete(variantId)
-      toast.success("Eliminada", "Variante eliminada correctamente")
-      if (selectedProduct) loadVariants(selectedProduct.id)
-    } catch { toast.error("Error", "No se pudo eliminar la variante") }
-  }
+  // KPIs
+  const totalStockVariantes = variants.reduce((acc, v) => acc + Number(v.stock || 0), 0)
+  const productosConVariantes = new Set(variants.map(v => v.product_id)).size
 
-  return (
-    <div className="space-y-4">
-      <div className="flex gap-3 items-end">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input className="input-field pl-10 w-full" placeholder="Buscar producto..." value={productSearch}
-            onChange={(e) => setProductSearch(e.target.value)} />
-          {products.length > 0 && (
-            <div className="absolute z-10 top-full mt-1 left-0 right-0 bg-white dark:bg-slate-700 border rounded-lg shadow-lg max-h-48 overflow-y-auto">
-              {products.map((p) => (
-                <button key={p.id} type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-slate-600"
-                  onClick={() => selectProduct(p)}>
-                  {p.nombre} — {p.sku}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        {selectedProduct && (
-          <>
-            <button onClick={() => setShowModal(true)} className="btn-primary flex items-center gap-2"><Plus className="w-4 h-4" /> Nueva Variante</button>
-            <button onClick={clearSelection} className="px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg text-sm">Limpiar</button>
-          </>
-        )}
-      </div>
+  // Guardar Variante
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!form.product_id || !form.valor) {
+      toast.error("Datos incompletos", "Seleccione el producto padre y el valor de la variante.")
+      return
+    }
 
-      {selectedProduct ? (
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
-            <div>
-              <p className="font-semibold text-gray-900 dark:text-white">{selectedProduct.nombre}</p>
-              <p className="text-xs text-gray-400">{selectedProduct.sku} — {variants.length} variante(s)</p>
-            </div>
-            <button onClick={() => { setShowModal(true); loadVariants(selectedProduct.id) }} className="btn-ghost p-1"><RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /></button>
-          </div>
-          {loading ? (
-            <div className="flex justify-center py-12"><Spinner /></div>
-          ) : variants.length === 0 ? (
-            <div className="text-center py-12 text-gray-400"><Package className="w-12 h-12 mx-auto mb-3" /><p className="text-sm font-bold">Sin variantes</p></div>
-          ) : (
-            <table className="w-full">
-              <thead className="bg-gray-50 dark:bg-gray-700/50">
-                <tr className="text-xs text-gray-500 uppercase">
-                  <th className="text-left px-4 py-3">SKU</th>
-                  <th className="text-left px-4 py-3">Tipo</th>
-                  <th className="text-left px-4 py-3">Valor</th>
-                  <th className="text-right px-4 py-3">Precio extra</th>
-                  <th className="text-right px-4 py-3">Stock</th>
-                  <th className="text-center px-4 py-3">Activo</th>
-                  <th className="text-right px-4 py-3">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                {variants.map((v) => (
-                  <tr key={v.id} className="text-sm hover:bg-gray-50 dark:hover:bg-gray-700/30">
-                    <td className="px-4 py-3 font-mono font-medium">{v.sku_variante || "—"}</td>
-                    <td className="px-4 py-3 text-gray-500">{v.tipo || "—"}</td>
-                    <td className="px-4 py-3">{v.valor || "—"}</td>
-                    <td className="px-4 py-3 text-right font-mono">{v.precio_extra != null ? `₲ ${v.precio_extra.toLocaleString("es-PY")}` : "—"}</td>
-                    <td className="px-4 py-3 text-right">{v.stock ?? "—"}</td>
-                    <td className="px-4 py-3 text-center">
-                      <span className={`text-xs px-2 py-0.5 rounded ${v.activo !== false ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                        {v.activo !== false ? "Sí" : "No"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <button onClick={() => { setEditVariant(v); setShowModal(true) }} className="btn-ghost p-1"><Pencil className="w-3.5 h-3.5" /></button>
-                      <button onClick={() => handleDelete(v.id)} className="btn-ghost p-1 text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      ) : (
-        <div className="text-center py-16 text-gray-400">
-          <Search className="w-16 h-16 mx-auto mb-4 opacity-30" />
-          <p className="text-lg font-semibold">Buscá un producto</p>
-          <p className="text-sm">Escribí el nombre o SKU del producto para ver sus variantes</p>
-        </div>
-      )}
-
-      {showModal && selectedProduct && (
-        <VariantFormModal productId={selectedProduct.id} variant={editVariant}
-          onClose={() => { setShowModal(false); setEditVariant(null) }}
-          onSaved={() => { setShowModal(false); setEditVariant(null); loadVariants(selectedProduct.id) }} />
-      )}
-    </div>
-  )
-}
-
-function VariantFormModal({ productId, variant, onClose, onSaved }: { productId: string; variant?: ProductVariant | null; onClose: () => void; onSaved: () => void }) {
-  const [form, setForm] = useState({
-    tipo: variant?.tipo || "", valor: variant?.valor || "",
-    sku_variante: variant?.sku_variante || "", codigo_barra: variant?.codigo_barra || "",
-    precio_extra: variant?.precio_extra || 0, stock: variant?.stock || 0, activo: variant?.activo !== false,
-  })
-  const [saving, setSaving] = useState(false)
-  const toast = useToast()
-
-  async function handleSubmit() {
-    if (!form.tipo || !form.valor) { toast.error("Error", "Tipo y valor son requeridos"); return }
     setSaving(true)
     try {
-      const payload = { product_id: productId, ...form }
-      if (variant) {
-        await api.variants.update(variant.id, payload)
-        toast.success("Actualizada", "Variante actualizada correctamente")
+      if (editingVariant) {
+        await api.variants.update(editingVariant.id, form)
+        toast.success("Variante Actualizada", `Variante ${form.valor} guardada correctamente.`)
       } else {
-        await api.variants.create(payload)
-        toast.success("Creada", "Variante creada correctamente")
+        await api.variants.create(form)
+        toast.success("Variante Creada", `Variante ${form.valor} agregada al catálogo.`)
       }
-      onSaved()
-    } catch { toast.error("Error", "No se pudo guardar la variante") }
-    finally { setSaving(false) }
+      setShowModal(false)
+      setEditingVariant(null)
+      setForm({ product_id: "", tipo: "talle", valor: "", sku_variante: "", codigo_barra: "", precio_extra: 0, stock: 0 })
+      fetchData()
+    } catch (e: any) {
+      toast.error("Error al guardar", e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async (v: any) => {
+    const ok = await confirm({
+      title: "Eliminar Variante",
+      message: `¿Desea eliminar la variante "${v.valor}" de ${v.product_nombre}?`,
+      confirmText: "Eliminar",
+    })
+    if (!ok) return
+
+    try {
+      await api.variants.delete(v.id)
+      toast.success("Variante eliminada", "")
+      fetchData()
+    } catch (e: any) {
+      toast.error("Error", e.message)
+    }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
-      <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-md mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-bold text-gray-900 dark:text-white">{variant ? "Editar Variante" : "Nueva Variante"}</h3>
-          <button onClick={onClose} className="btn-ghost"><X className="w-4 h-4" /></button>
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/90 text-white p-7 border border-indigo-500/20 shadow-2xl shadow-indigo-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-500 border border-indigo-400/30 text-white flex items-center justify-center shadow-lg shadow-indigo-500/25">
+                  <Copy className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-indigo-500 border-2 border-slate-950"></span>
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-indigo-400 uppercase bg-indigo-500/10 px-2.5 py-0.5 rounded-md border border-indigo-500/20">
+                    CATÁLOGO DERIVADO · PRESENTACIONES & PACKS
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                    {variants.length} Variantes Registradas
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Variantes & Empaques por Producto
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Gestión de presentaciones, talles, sabores, packs x6/x12 y códigos EAN específicos por variante
+                </p>
+              </div>
+            </div>
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-indigo-300">
+                📦 {productosConVariantes} productos matrices
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                📊 {totalStockVariantes.toLocaleString()} unidades en stock
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={fetchData}
+              disabled={loading}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-indigo-400" : ""}`} />
+              Recargar
+            </button>
+
+            <button
+              onClick={() => {
+                setEditingVariant(null)
+                setForm({ product_id: products[0]?.id || "", tipo: "talle", valor: "", sku_variante: "", codigo_barra: "", precio_extra: 0, stock: 0 })
+                setShowModal(true)
+              }}
+              className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-indigo-600 to-purple-500 hover:from-indigo-500 hover:to-purple-400 transition shadow-lg shadow-indigo-500/25 flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              Nueva Variante
+            </button>
+          </div>
         </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div><label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Tipo *</label>
-            <select className="input-field w-full" value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })}>
-              <option value="">Seleccionar</option>
-              <option value="talle">Talle</option>
-              <option value="color">Color</option>
-              <option value="talla">Talla</option>
-              <option value="volumen">Volumen</option>
-              <option value="presentacion">Presentación</option>
-              <option value="otro">Otro</option>
-            </select></div>
-          <div><label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Valor *</label>
-            <input className="input-field w-full" value={form.valor} onChange={(e) => setForm({ ...form, valor: e.target.value })} /></div>
-          <div><label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">SKU Variante</label>
-            <input className="input-field w-full" value={form.sku_variante} onChange={(e) => setForm({ ...form, sku_variante: e.target.value })} /></div>
-          <div><label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Código Barra</label>
-            <input className="input-field w-full" value={form.codigo_barra} onChange={(e) => setForm({ ...form, codigo_barra: e.target.value })} /></div>
-          <div><label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Precio Extra</label>
-            <input className="input-field w-full" type="number" value={form.precio_extra} onChange={(e) => setForm({ ...form, precio_extra: parseFloat(e.target.value) || 0 })} /></div>
-          <div><label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Stock</label>
-            <input className="input-field w-full" type="number" value={form.stock} onChange={(e) => setForm({ ...form, stock: parseInt(e.target.value) || 0 })} /></div>
-          <div className="col-span-2"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.activo} onChange={(e) => setForm({ ...form, activo: e.target.checked })} className="rounded" />Activo</label></div>
-        </div>
-        <div className="flex gap-3 mt-6">
-          <button onClick={onClose} className="btn-outline flex-1">Cancelar</button>
-          <button onClick={handleSubmit} disabled={saving} className="btn-primary flex-1">
-            {saving ? <Spinner /> : variant ? "Actualizar" : "Crear"}
-          </button>
+
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Variantes Activas</span>
+              <Palette className="w-4 h-4 text-indigo-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-indigo-300">
+              {variants.length.toLocaleString()}
+            </p>
+            <p className="text-[11px] text-slate-400">Opciones configuradas</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Productos Base</span>
+              <Package className="w-4 h-4 text-emerald-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+              {productosConVariantes}
+            </p>
+            <p className="text-[11px] text-slate-400">Artículos matrices en góndola</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Stock en Variantes</span>
+              <Box className="w-4 h-4 text-purple-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-purple-300">
+              {totalStockVariantes.toLocaleString()} <span className="text-xs text-slate-400 font-semibold">un.</span>
+            </p>
+            <p className="text-[11px] text-slate-400">Existencia física acumulada</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Lectura en Cajas</span>
+              <Barcode className="w-4 h-4 text-amber-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-amber-400">
+              100% EAN
+            </p>
+            <p className="text-[11px] text-slate-400">Sincronización POS directa</p>
+          </div>
         </div>
       </div>
+
+      {/* ── TOOLBAR DE FILTROS ── */}
+      <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col lg:flex-row items-center justify-between gap-3">
+        <div className="relative flex-1 w-full">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+          <input
+            type="text"
+            placeholder="Buscar por artículo, SKU variante, código EAN o valor..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-10 pr-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs text-slate-900 dark:text-white outline-none"
+          />
+        </div>
+
+        <div className="flex items-center gap-2.5 w-full lg:w-auto flex-wrap">
+          <select
+            value={selectedTipo}
+            onChange={(e) => setSelectedTipo(e.target.value)}
+            className="px-3 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
+          >
+            <option value="all">Todos los Atributos</option>
+            <option value="talle">Talle / Medida</option>
+            <option value="color">Color / Tono</option>
+            <option value="sabor">Sabor / Fragancia</option>
+            <option value="presentacion">Presentación / Pack</option>
+            <option value="otro">Otro Atributo</option>
+          </select>
+
+          <select
+            value={selectedParentId}
+            onChange={(e) => setSelectedParentId(e.target.value)}
+            className="px-3 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none max-w-[220px] truncate"
+          >
+            <option value="all">Todos los Productos Padres ({products.length})</option>
+            {products.map(p => (
+              <option key={p.id} value={p.id}>{p.nombre}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* ── TABLA DE VARIANTES ── */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-slate-400 border-b border-slate-200 dark:border-slate-800">
+              <tr>
+                <th className="p-4">Producto Padre / Base</th>
+                <th className="p-4">Tipo Atributo</th>
+                <th className="p-4">Valor / Presentación</th>
+                <th className="p-4 font-mono">SKU / EAN Variante</th>
+                <th className="p-4 text-right">Sobreprecio</th>
+                <th className="p-4 text-right">Stock Físico</th>
+                <th className="p-4 text-center">Acciones</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+              {loading ? (
+                <tr>
+                  <td colSpan={7} className="p-12 text-center text-slate-400">
+                    <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-500" />
+                    <span>Cargando variantes...</span>
+                  </td>
+                </tr>
+              ) : filteredVariants.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="p-12 text-center text-slate-400">
+                    No se encontraron variantes con los filtros seleccionados.
+                  </td>
+                </tr>
+              ) : (
+                filteredVariants.map((v) => (
+                  <tr key={v.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                    <td className="p-4">
+                      <p className="font-extrabold text-slate-900 dark:text-white">{v.product_nombre || "Producto Base"}</p>
+                      <span className="text-[10px] text-slate-400 font-mono">ID: {v.product_id?.slice(0, 8)}</span>
+                    </td>
+                    <td className="p-4">
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                        {v.tipo}
+                      </span>
+                    </td>
+                    <td className="p-4">
+                      <span className="font-black text-xs text-indigo-600 dark:text-indigo-400">
+                        {v.valor}
+                      </span>
+                    </td>
+                    <td className="p-4 font-mono text-[11px] text-slate-600 dark:text-slate-300">
+                      <div>{v.sku_variante || "—"}</div>
+                      {v.codigo_barra && <span className="text-[10px] text-slate-400">EAN: {v.codigo_barra}</span>}
+                    </td>
+                    <td className="p-4 text-right font-mono font-bold text-slate-800 dark:text-slate-200">
+                      {v.precio_extra > 0 ? `+${formatPYG(v.precio_extra)}` : "—"}
+                    </td>
+                    <td className="p-4 text-right font-mono font-black text-emerald-600 dark:text-emerald-400">
+                      {v.stock || 0} un.
+                    </td>
+                    <td className="p-4 text-center">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          onClick={() => {
+                            setEditingVariant(v)
+                            setForm({
+                              product_id: v.product_id,
+                              tipo: v.tipo,
+                              valor: v.valor,
+                              sku_variante: v.sku_variante || "",
+                              codigo_barra: v.codigo_barra || "",
+                              precio_extra: v.precio_extra || 0,
+                              stock: v.stock || 0,
+                            })
+                            setShowModal(true)
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-xl transition"
+                          title="Editar"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(v)}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition"
+                          title="Eliminar"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ── MODAL: CREAR / EDITAR VARIANTE ── */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <h3 className="font-extrabold text-base text-slate-900 dark:text-white uppercase flex items-center gap-2">
+                <Palette className="w-5 h-5 text-indigo-600" />
+                {editingVariant ? "Editar Variante" : "Nueva Variante"}
+              </h3>
+              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSave} className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-400 font-bold mb-1">Producto Padre (Base)</label>
+                <select
+                  value={form.product_id}
+                  onChange={(e) => setForm({ ...form, product_id: e.target.value })}
+                  disabled={!!editingVariant}
+                  className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white outline-none font-medium"
+                >
+                  <option value="">Seleccionar artículo...</option>
+                  {products.map(p => (
+                    <option key={p.id} value={p.id}>{p.nombre} ({p.sku || "Sin SKU"})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">Tipo de Atributo</label>
+                  <select
+                    value={form.tipo}
+                    onChange={(e) => setForm({ ...form, tipo: e.target.value })}
+                    className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white outline-none"
+                  >
+                    <option value="talle">Talle / Medida</option>
+                    <option value="color">Color / Tono</option>
+                    <option value="sabor">Sabor / Fragancia</option>
+                    <option value="presentacion">Presentación / Pack</option>
+                    <option value="otro">Otro</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">Valor (ej. XL, Pack x12)</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej. XL o Pack x12"
+                    value={form.valor}
+                    onChange={(e) => setForm({ ...form, valor: e.target.value })}
+                    className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white outline-none font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">SKU Específico Variante</label>
+                  <input
+                    type="text"
+                    placeholder="Ej. REM-BLA-XL"
+                    value={form.sku_variante}
+                    onChange={(e) => setForm({ ...form, sku_variante: e.target.value })}
+                    className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white font-mono outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">Código de Barras EAN</label>
+                  <input
+                    type="text"
+                    placeholder="784..."
+                    value={form.codigo_barra}
+                    onChange={(e) => setForm({ ...form, codigo_barra: e.target.value })}
+                    className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white font-mono outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">Sobreprecio Adicional (₲)</label>
+                  <input
+                    type="number"
+                    value={form.precio_extra}
+                    onChange={(e) => setForm({ ...form, precio_extra: Number(e.target.value) })}
+                    className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white font-mono font-bold outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">Stock Físico Inicial</label>
+                  <input
+                    type="number"
+                    value={form.stock}
+                    onChange={(e) => setForm({ ...form, stock: Number(e.target.value) })}
+                    className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white font-mono font-bold outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs flex-1"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="px-5 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs shadow-md shadow-indigo-500/20 flex-1 transition"
+                >
+                  {saving ? "Guardando..." : "Guardar Variante"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

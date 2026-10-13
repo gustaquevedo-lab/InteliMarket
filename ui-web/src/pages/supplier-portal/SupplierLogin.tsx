@@ -31,7 +31,7 @@ export default function SupplierLogin() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Portal de Proveedores</h1>
+          <h1 className="text-lg sm:text-xl xl:text-xl 2xl:text-2xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">Portal de Proveedores</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">InteliMarket — Accedé a tus órdenes de compra y documentos</p>
         </div>
         <form onSubmit={handleLogin} className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8 space-y-5">

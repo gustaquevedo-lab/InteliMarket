@@ -99,7 +99,7 @@ export default function DynamicMarkdownTab() {
           ].map((s, i) => (
             <div key={i} className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-5 shadow-sm">
               <div className="flex items-center justify-between"><p className="text-sm text-gray-500">{s.label}</p><s.icon className="w-5 h-5 text-gray-400" /></div>
-              <p className="text-3xl font-bold text-gray-800 mt-2">{s.value}</p>
+              <p className="text-lg sm:text-xl xl:text-xl 2xl:text-2xl font-black font-mono tracking-tight truncate text-gray-800 mt-2">{s.value}</p>
             </div>
           ))}
         </div>

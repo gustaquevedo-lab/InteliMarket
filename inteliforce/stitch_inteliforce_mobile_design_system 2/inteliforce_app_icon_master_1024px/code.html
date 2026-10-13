@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- Background Gradient for Vibrant Green -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#22c55e" />
+      <stop offset="100%" stop-color="#16a34a" />
+    </linearGradient>
+    <filter id="badgeShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#0F1F3D" flood-opacity="0.35" />
+    </filter>
+    <filter id="figGlow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.15" />
+    </filter>
+  </defs>
+
+  <!-- iOS / Android App Icon Shape (22.5% corner radius -> 230px on 1024) -->
+  <rect width="1024" height="1024" rx="230" fill="url(#bgGrad)" />
+
+  <!-- Inner Soft Border -->
+  <rect x="16" y="16" width="992" height="992" rx="214" fill="none" stroke="#ffffff" stroke-opacity="0.2" stroke-width="8" />
+
+  <!-- Stylized Inteliforce Figure in Bolder Clean Geometry -->
+  <g filter="url(#figGlow)" transform="translate(512, 545)">
+    <!-- Main Body & Torso Trunk -->
+    <!-- Center vertical trunk/torso -->
+    <path d="M -42,-120 L 42,-120 L 38,180 C 38,212 -38,212 -38,180 Z" fill="#ffffff" />
+    
+    <!-- Left Arm angled up -->
+    <path d="M -28,-60 L -175,-250 C -195,-276 -235,-252 -215,-226 L -70,-30 Z" fill="#ffffff" />
+    
+    <!-- Right Arm angled up -->
+    <path d="M 28,-60 L 175,-250 C 195,-276 235,-252 215,-226 L 70,-30 Z" fill="#ffffff" />
+
+    <!-- Left Leg angled down -->
+    <path d="M -30,60 L -215,285 C -235,310 -270,280 -250,250 L -65,30 Z" fill="#ffffff" />
+
+    <!-- Right Leg angled down -->
+    <path d="M 30,60 L 215,285 C 235,310 270,280 250,250 L 65,30 Z" fill="#ffffff" />
+
+    <!-- Smooth joint overlays / rounded nodes -->
+    <circle cx="0" cy="-55" r="72" fill="#ffffff" />
+    <circle cx="0" cy="50" r="65" fill="#ffffff" />
+
+    <!-- Accent Dots: Deep Blue / InteliMarket Navy Blue & Teal Nodes on Extremities -->
+    <!-- Left Hand Accent Dot -->
+    <circle cx="-195" cy="-240" r="48" fill="#1e40af" stroke="#ffffff" stroke-width="10" />
+    
+    <!-- Right Hand Accent Dot -->
+    <circle cx="195" cy="-240" r="48" fill="#1e40af" stroke="#ffffff" stroke-width="10" />
+
+    <!-- Left Foot Accent Dot -->
+    <circle cx="-235" cy="270" r="54" fill="#1e40af" stroke="#ffffff" stroke-width="10" />
+
+    <!-- Right Foot Accent Dot -->
+    <circle cx="235" cy="270" r="54" fill="#1e40af" stroke="#ffffff" stroke-width="10" />
+    
+    <!-- Central Bottom Tail Dot / Base accent -->
+    <circle cx="0" cy="180" r="38" fill="#ffffff" />
+  </g>
+
+  <!-- Blue Verified Presence Checkmark Badge on Head / Chest Top -->
+  <g filter="url(#badgeShadow)" transform="translate(512, 345)">
+    <!-- Outer crisp white ring -->
+    <circle cx="0" cy="0" r="148" fill="#ffffff" />
+    <!-- Navy Blue InteliMarket Core Circle (#1e40af) -->
+    <circle cx="0" cy="0" r="130" fill="#1e40af" />
+    <!-- White Checkmark Icon -->
+    <path d="M -54,-2 L -18,34 L 54,-38" fill="none" stroke="#ffffff" stroke-width="26" stroke-linecap="round" stroke-linejoin="round" />
+  </g>
+</svg>

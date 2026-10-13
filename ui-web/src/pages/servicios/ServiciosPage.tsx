@@ -36,7 +36,7 @@ export default function ServiciosPage() {
     <div className="space-y-6 animate-fade-in-up">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Servicios Profesionales</h1>
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">Servicios Profesionales</h1>
           <p className="text-sm text-gray-500 mt-1">Centro de operaciones para tecnicos, agenda, ordenes, contratos e inventario movil</p>
         </div>
       </div>
@@ -1041,7 +1041,7 @@ function OrdenesTab() {
                 <div className="flex items-center gap-2 ml-4">
                   {wo.estado === "en_curso" && (
                     activeTimer?.woId === wo.id
-                      ? <button onClick={() => handleStopTimer(activeTimer.timerId)} className="bg-red-500 text-white px-3 py-1.5 rounded-lg text-xs flex items-center gap-1"><Square className="w-3 h-3" />Detener</button>
+                      ? <button onClick={() => handleStopTimer(activeTimer!.timerId)} className="bg-red-500 text-white px-3 py-1.5 rounded-lg text-xs flex items-center gap-1"><Square className="w-3 h-3" />Detener</button>
                       : <button onClick={() => handleStartTimer(wo.id!)} className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs flex items-center gap-1"><Play className="w-3 h-3" />Iniciar</button>
                   )}
                   {wo.estado === "completada" && !wo.invoice_id && (

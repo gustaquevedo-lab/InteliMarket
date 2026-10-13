@@ -492,9 +492,9 @@ def load_items(pg, my, facturas, codigos):
     def gen():
         with mysql_stream() as sc:
             cur = sc.cursor()
-            cur.execute("SELECT IDVENTAS, IDPRODUCTOS, CANTIDAD, PRECVENTA, SUBTOTAL, "
+            cur.execute("SELECT ID, IDVENTAS, IDPRODUCTOS, CANTIDAD, PRECVENTA, SUBTOTAL, "
                         "COSTOPROMEDIO, GRAV10, GRAV5, EXENTAS FROM item_ventas")
-            for (idv, idprod, cant, precv, subt, costo, g10, g5, ex) in cur:
+            for (iid, idv, idprod, cant, precv, subt, costo, g10, g5, ex) in cur:
                 if idv not in facturas:
                     saltados[0] += 1
                     continue
@@ -502,7 +502,11 @@ def load_items(pg, my, facturas, codigos):
                 pid = uuid.uuid5(NS, f"prod:{cod}") if (cod and cod in codigos) else PLACEHOLDER_PROD_ID
                 tasa = iva_tasa(g10, g5, ex)
                 total = money(subt)
-                yield (uuid.uuid4(), uuid.uuid5(NS, f"fac:{idv}"), pid, num3(cant),
+                # uuid5 determinista (antes uuid4 aleatorio) — mismo esquema que
+                # sync_incremental.py::sync_items_ventas. Con uuid4 dos corridas
+                # de este script insertaban cada vez ~11.6M filas nuevas sin
+                # deduplicar nada (nunca colisionaban), duplicando sale_items.
+                yield (uuid.uuid5(NS, f"item:{iid}"), uuid.uuid5(NS, f"fac:{idv}"), pid, num3(cant),
                        money(precv), 0, tasa, iva_monto_incluido(total, tasa),
                        total, money(costo), datetime.now())
 
@@ -550,10 +554,10 @@ def load_items_nc(pg, my, notas, codigos):
     def gen():
         with mysql_stream() as sc:
             cur = sc.cursor()
-            cur.execute("SELECT IDNOTACREDITO, IDPRODUCTOS, CANTIDAD, PRECVENTA, "
+            cur.execute("SELECT ID, IDNOTACREDITO, IDPRODUCTOS, CANTIDAD, PRECVENTA, "
                         "SUBTOTAL, COSTOPROMEDIO, GRAV10, GRAV5, EXENTAS "
                         "FROM itemnotacredito")
-            for (idnc, idprod, cant, precv, subt, costo, g10, g5, ex) in cur:
+            for (iid, idnc, idprod, cant, precv, subt, costo, g10, g5, ex) in cur:
                 if idnc not in notas:
                     saltados[0] += 1
                     continue
@@ -561,7 +565,9 @@ def load_items_nc(pg, my, notas, codigos):
                 pid = uuid.uuid5(NS, f"prod:{cod}") if (cod and cod in codigos) else PLACEHOLDER_PROD_ID
                 tasa = iva_tasa(g10, g5, ex)
                 total = -abs(money(subt))
-                yield (uuid.uuid4(), uuid.uuid5(NS, f"nc:{idnc}"), pid, num3(cant),
+                # uuid5 determinista (antes uuid4 aleatorio) — mismo esquema que
+                # sync_incremental.py::sync_items_notas.
+                yield (uuid.uuid5(NS, f"item_nc:{iid}"), uuid.uuid5(NS, f"nc:{idnc}"), pid, num3(cant),
                        money(precv), 0, tasa, iva_monto_incluido(total, tasa),
                        total, money(costo), datetime.now())
 
@@ -606,16 +612,18 @@ def load_items_compras(pg, my, compras, codigos):
     def gen():
         with mysql_stream() as sc:
             cur = sc.cursor()
-            cur.execute("SELECT IDFACCOMPRAS, IDPRODUCTO, CANTIDAD, PPRECIOCOSTO, "
+            cur.execute("SELECT IDITEMCOMPRAS, IDFACCOMPRAS, IDPRODUCTO, CANTIDAD, PPRECIOCOSTO, "
                         "SUBTOTAL, GRAV10, GRAV5, EXENTAS FROM item_compras")
-            for (idfc, idprod, cant, pcosto, subt, g10, g5, ex) in cur:
+            for (iid, idfc, idprod, cant, pcosto, subt, g10, g5, ex) in cur:
                 if idfc not in compras:
                     saltados[0] += 1
                     continue
                 cod = txt_keep(idprod, 50)
                 pid = uuid.uuid5(NS, f"prod:{cod}") if (cod and cod in codigos) else PLACEHOLDER_PROD_ID
                 tasa = iva_tasa(g10, g5, ex)
-                yield (uuid.uuid4(), uuid.uuid5(NS, f"comp:{idfc}"), pid, num3(cant),
+                # uuid5 determinista (antes uuid4 aleatorio) — mismo esquema que
+                # sync_incremental.py::sync_items_compras.
+                yield (uuid.uuid5(NS, f"item_comp:{iid}"), uuid.uuid5(NS, f"comp:{idfc}"), pid, num3(cant),
                        money(pcosto), tasa, money(subt), datetime.now())
 
     sql = ("COPY purchase_order_items (id, purchase_order_id, product_id, cantidad, "

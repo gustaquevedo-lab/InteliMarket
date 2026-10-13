@@ -12,6 +12,11 @@ from api.src.common.exceptions import AppError
 logger = logging.getLogger("intelimarket")
 
 
+def _mon():
+    from api.src.plataforma import capture
+    return capture
+
+
 class ErrorHandlingMiddleware(BaseHTTPMiddleware):
     """Global error handler — returns consistent JSON for all error types."""
 
@@ -25,12 +30,15 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
             # catch-all de abajo y se devolvia como 500 generico, perdiendo el status y
             # el mensaje real — esto rompia cualquier validacion de negocio (ej. "ya
             # existe una sesion abierta para esta caja") en toda la API, no solo en caja.
+            if exc.status_code >= 500:
+                _mon().capture_http_error_bg(request, exc.status_code, str(exc.detail))
             return self._json(exc.status_code, "HTTP_ERROR", str(exc.detail))
         except IntegrityError as exc:
             logger.warning("IntegrityError: %s", str(exc.orig)[:200])
             return self._json(409, "CONFLICT", "El recurso ya existe o tiene dependencias")
         except SQLAlchemyError as exc:
             logger.error("Database error: %s", str(exc)[:300])
+            _mon().capture_exception_bg(exc, request)
             return self._json(500, "DATABASE_ERROR", "Error en la base de datos")
         except PydanticValidationError as exc:
             errors = exc.errors()
@@ -53,6 +61,7 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
             })
         except Exception as exc:
             logger.exception("Unhandled exception: %s", str(exc)[:500])
+            _mon().capture_exception_bg(exc, request)
             return self._json(500, "INTERNAL_ERROR", "Ocurrió un error interno")
 
     def _json(self, status: int, code: str, message: str, details: dict | None = None):

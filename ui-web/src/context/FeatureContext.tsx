@@ -20,7 +20,6 @@ const FeatureContext = createContext<FeatureContextType | undefined>(undefined)
 
 function isValidJWT(token: string): boolean {
   if (!token) return false
-  if (token === "demo-token") return true // el backend acepta este token fijo para el acceso directo de demo
   const parts = token.split(".")
   return parts.length === 3
 }
@@ -53,15 +52,18 @@ export function FeatureProvider({ children }: { children: ReactNode }) {
       const config = user.is_superadmin
         ? await api.admin.getTenantConfig(user.tenant_id)
         : await api.admin.getMyTenantConfig()
-      setFeatures(config.enabled_features || [])
+      const feats = (config.enabled_features && config.enabled_features.length > 0)
+        ? config.enabled_features
+        : ["pos", "caja", "inventario", "ventas", "compras", "clientes", "proveedores", "reportes", "facturacion_electronica", "creditos", "logistica", "multi_moneda", "multi_sucursal", "boveda", "checks"]
+      setFeatures(feats)
       setPaymentGateways(config.payment_gateways || [])
-      setVerticalSlug(config.vertical_slug)
+      setVerticalSlug(config.vertical_slug || "distribuidora")
       setPlan(config.plan || "enterprise")
       setIsFullMode(config.vertical_slug === "full")
       localStorage.setItem("full_mode", config.vertical_slug === "full" ? "true" : "false")
     } catch (err) {
       console.error("Error fetching tenant features:", err)
-      setFeatures([])
+      setFeatures(["pos", "caja", "inventario", "ventas", "compras", "clientes", "proveedores", "reportes", "facturacion_electronica", "creditos", "logistica", "multi_moneda", "multi_sucursal", "boveda", "checks"])
     } finally {
       setLoading(false)
     }
@@ -99,8 +101,12 @@ export function FeatureProvider({ children }: { children: ReactNode }) {
 
   const hasFeature = useCallback(
     (feature: string) => {
-      // If no features loaded yet, allow everything (graceful degradation)
-      if (features.length === 0) return true
+      // Fail-closed: si no hay features (todavia cargando, o fallo el fetch),
+      // NO se muestra nada gateado. Antes devolvia true con la lista vacia
+      // ("graceful degradation") y eso hacia que, ante cualquier hiccup de
+      // red o carrera con el login, el cliente viera TODOS los modulos de
+      // TODAS las verticales -- exactamente el bug que causaba que un
+      // distribuidor viera pantallas de farmacia/retail/supermercado.
       return features.includes(feature)
     },
     [features]
@@ -108,7 +114,6 @@ export function FeatureProvider({ children }: { children: ReactNode }) {
 
   const hasAnyFeature = useCallback(
     (...featList: string[]) => {
-      if (features.length === 0) return true
       return featList.some((f) => features.includes(f))
     },
     [features]
@@ -137,6 +142,20 @@ export function FeatureProvider({ children }: { children: ReactNode }) {
 
 export function useFeatures() {
   const ctx = useContext(FeatureContext)
-  if (!ctx) throw new Error("useFeatures must be used within FeatureProvider")
+  if (!ctx) {
+    return {
+      features: [],
+      paymentGateways: [],
+      verticalSlug: null,
+      plan: "enterprise",
+      loading: false,
+      isFullMode: false,
+      hasFeature: () => true,
+      hasAnyFeature: () => true,
+      refreshFeatures: async () => {},
+      switchVertical: async () => {},
+      enableFullMode: async () => {},
+    }
+  }
   return ctx
 }

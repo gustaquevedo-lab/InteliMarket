@@ -15,9 +15,7 @@ class PaymentMethod(Base):
     company_id = Column(UUID(as_uuid=True), nullable=False)
     tipo = Column(String(30), nullable=False)
     nombre = Column(String(100), nullable=False)
-    moneda = Column(String(3), default="PYG")
     activo = Column(Boolean, default=True)
-    config = Column(JSON)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

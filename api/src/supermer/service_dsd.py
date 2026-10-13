@@ -4,7 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
-from sqlalchemy import func, and_
+from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from fastapi import HTTPException
@@ -20,16 +20,19 @@ from .models import (
 # ---------------------------------------------------------------------------
 
 async def list_dsd_schedules(company_id: UUID, db: AsyncSession, fecha: Optional[date] = None, proveedor_id: Optional[UUID] = None):
-    q = db.query(DsdReceivingSchedule).filter(DsdReceivingSchedule.company_id == company_id)
+    q = select(DsdReceivingSchedule).where(DsdReceivingSchedule.company_id == company_id)
     if fecha:
-        q = q.filter(DsdReceivingSchedule.fecha_programada == fecha)
+        q = q.where(DsdReceivingSchedule.fecha_programada == fecha)
     if proveedor_id:
-        q = q.filter(DsdReceivingSchedule.proveedor_id == proveedor_id)
-    return q.order_by(DsdReceivingSchedule.ventana_inicio).all()
+        q = q.where(DsdReceivingSchedule.proveedor_id == proveedor_id)
+    q = q.order_by(DsdReceivingSchedule.ventana_inicio)
+    result = await db.execute(q)
+    return result.scalars().all()
 
 
 async def get_dsd_schedule(schedule_id: UUID, db: AsyncSession):
-    s = db.query(DsdReceivingSchedule).get(schedule_id)
+    result = await db.execute(select(DsdReceivingSchedule).where(DsdReceivingSchedule.id == schedule_id))
+    s = result.scalar_one_or_none()
     if not s:
         raise HTTPException(404, "DSD schedule not found")
     return s
@@ -38,8 +41,8 @@ async def get_dsd_schedule(schedule_id: UUID, db: AsyncSession):
 async def create_dsd_schedule(company_id: UUID, data, db: AsyncSession):
     s = DsdReceivingSchedule(company_id=company_id, **data.model_dump(exclude_none=True))
     db.add(s)
-    db.commit()
-    db.refresh(s)
+    await db.commit()
+    await db.refresh(s)
     return s
 
 
@@ -47,8 +50,8 @@ async def update_dsd_schedule(schedule_id: UUID, data, db: AsyncSession):
     s = await get_dsd_schedule(schedule_id, db)
     for k, v in data.model_dump(exclude_none=True).items():
         setattr(s, k, v)
-    db.commit()
-    db.refresh(s)
+    await db.commit()
+    await db.refresh(s)
     return s
 
 
@@ -57,19 +60,24 @@ async def update_dsd_schedule(schedule_id: UUID, data, db: AsyncSession):
 # ---------------------------------------------------------------------------
 
 async def list_dsd_receivings(company_id: UUID, db: AsyncSession, fecha: Optional[date] = None, estado: Optional[str] = None):
-    q = db.query(DsdReceivingLog).filter(DsdReceivingLog.company_id == company_id)
+    q = select(DsdReceivingLog).where(DsdReceivingLog.company_id == company_id)
     if fecha:
-        q = q.filter(func.date(DsdReceivingLog.fecha_recepcion) == fecha)
+        q = q.where(func.date(DsdReceivingLog.fecha_recepcion) == fecha)
     if estado:
-        q = q.filter(DsdReceivingLog.estado == estado)
-    return q.order_by(DsdReceivingLog.fecha_recepcion.desc()).all()
+        q = q.where(DsdReceivingLog.estado == estado)
+    q = q.order_by(DsdReceivingLog.fecha_recepcion.desc())
+    result = await db.execute(q)
+    return result.scalars().all()
 
 
 async def get_dsd_receiving(receiving_id: UUID, db: AsyncSession):
-    r = db.query(DsdReceivingLog).options(
-        selectinload(DsdReceivingLog.items),
-        selectinload(DsdReceivingLog.rechazos),
-    ).get(receiving_id)
+    result = await db.execute(
+        select(DsdReceivingLog).options(
+            selectinload(DsdReceivingLog.items),
+            selectinload(DsdReceivingLog.rechazos),
+        ).where(DsdReceivingLog.id == receiving_id)
+    )
+    r = result.scalar_one_or_none()
     if not r:
         raise HTTPException(404, "DSD receiving not found")
     return r
@@ -78,8 +86,8 @@ async def get_dsd_receiving(receiving_id: UUID, db: AsyncSession):
 async def create_dsd_receiving(company_id: UUID, data, db: AsyncSession):
     r = DsdReceivingLog(company_id=company_id, **data.model_dump(exclude_none=True))
     db.add(r)
-    db.commit()
-    db.refresh(r)
+    await db.commit()
+    await db.refresh(r)
     return await get_dsd_receiving(r.id, db)
 
 
@@ -87,8 +95,8 @@ async def update_dsd_receiving(receiving_id: UUID, data, db: AsyncSession):
     r = await get_dsd_receiving(receiving_id, db)
     for k, v in data.model_dump(exclude_none=True).items():
         setattr(r, k, v)
-    db.commit()
-    db.refresh(r)
+    await db.commit()
+    await db.refresh(r)
     return r
 
 
@@ -97,16 +105,19 @@ async def update_dsd_receiving(receiving_id: UUID, data, db: AsyncSession):
 # ---------------------------------------------------------------------------
 
 async def list_dsd_items(receiving_id: UUID, db: AsyncSession):
-    return db.query(DsdReceivingItem).filter(
-        DsdReceivingItem.receiving_id == receiving_id,
-    ).order_by(DsdReceivingItem.created_at).all()
+    result = await db.execute(
+        select(DsdReceivingItem).where(
+            DsdReceivingItem.receiving_id == receiving_id,
+        ).order_by(DsdReceivingItem.created_at)
+    )
+    return result.scalars().all()
 
 
 async def create_dsd_item(receiving_id: UUID, data, db: AsyncSession):
     item = DsdReceivingItem(receiving_id=receiving_id, **data.model_dump(exclude_none=True))
     db.add(item)
-    db.commit()
-    db.refresh(item)
+    await db.commit()
+    await db.refresh(item)
     return item
 
 
@@ -116,7 +127,7 @@ async def batch_create_dsd_items(receiving_id: UUID, items_data: list, db: Async
         item = DsdReceivingItem(receiving_id=receiving_id, **d.model_dump(exclude_none=True))
         db.add(item)
         items.append(item)
-    db.commit()
+    await db.commit()
     return items
 
 
@@ -125,16 +136,19 @@ async def batch_create_dsd_items(receiving_id: UUID, items_data: list, db: Async
 # ---------------------------------------------------------------------------
 
 async def list_dsd_rejections(receiving_id: UUID, db: AsyncSession):
-    return db.query(DsdReceivingRejection).filter(
-        DsdReceivingRejection.receiving_id == receiving_id,
-    ).order_by(DsdReceivingRejection.created_at.desc()).all()
+    result = await db.execute(
+        select(DsdReceivingRejection).where(
+            DsdReceivingRejection.receiving_id == receiving_id,
+        ).order_by(DsdReceivingRejection.created_at.desc())
+    )
+    return result.scalars().all()
 
 
 async def create_dsd_rejection(company_id: UUID, receiving_id: UUID, data, db: AsyncSession):
     rej = DsdReceivingRejection(company_id=company_id, receiving_id=receiving_id, **data.model_dump(exclude_none=True))
     db.add(rej)
-    db.commit()
-    db.refresh(rej)
+    await db.commit()
+    await db.refresh(rej)
     return rej
 
 
@@ -144,37 +158,48 @@ async def create_dsd_rejection(company_id: UUID, receiving_id: UUID, data, db: A
 
 async def get_dsd_dashboard(company_id: UUID, db: AsyncSession):
     hoy = date.today()
-    programadas = db.query(DsdReceivingSchedule).filter(
-        DsdReceivingSchedule.company_id == company_id,
-        DsdReceivingSchedule.fecha_programada == hoy,
-        DsdReceivingSchedule.estado == "programada",
-    ).count()
+    programadas = (await db.execute(
+        select(func.count()).select_from(DsdReceivingSchedule).where(
+            DsdReceivingSchedule.company_id == company_id,
+            DsdReceivingSchedule.fecha_programada == hoy,
+            DsdReceivingSchedule.estado == "programada",
+        )
+    )).scalar()
 
-    en_curso = db.query(DsdReceivingLog).filter(
-        DsdReceivingLog.company_id == company_id,
-        func.date(DsdReceivingLog.fecha_recepcion) == hoy,
-        DsdReceivingLog.estado == "en_curso",
-    ).count()
+    en_curso = (await db.execute(
+        select(func.count()).select_from(DsdReceivingLog).where(
+            DsdReceivingLog.company_id == company_id,
+            func.date(DsdReceivingLog.fecha_recepcion) == hoy,
+            DsdReceivingLog.estado == "en_curso",
+        )
+    )).scalar()
 
-    completadas = db.query(DsdReceivingLog).filter(
-        DsdReceivingLog.company_id == company_id,
-        func.date(DsdReceivingLog.fecha_recepcion) == hoy,
-        DsdReceivingLog.estado.in_(["completada", "parcial"]),
-    ).count()
+    completadas = (await db.execute(
+        select(func.count()).select_from(DsdReceivingLog).where(
+            DsdReceivingLog.company_id == company_id,
+            func.date(DsdReceivingLog.fecha_recepcion) == hoy,
+            DsdReceivingLog.estado.in_(["completada", "parcial"]),
+        )
+    )).scalar()
 
-    rechazos_temp = db.query(DsdReceivingRejection).join(
-        DsdReceivingLog, DsdReceivingRejection.receiving_id == DsdReceivingLog.id,
-    ).filter(
-        DsdReceivingLog.company_id == company_id,
-        func.date(DsdReceivingLog.fecha_recepcion) == hoy,
-        DsdReceivingRejection.motivo == "temp_fuera_rango",
-    ).count()
+    rechazos_temp = (await db.execute(
+        select(func.count()).select_from(DsdReceivingRejection).join(
+            DsdReceivingLog, DsdReceivingRejection.receiving_id == DsdReceivingLog.id,
+        ).where(
+            DsdReceivingLog.company_id == company_id,
+            func.date(DsdReceivingLog.fecha_recepcion) == hoy,
+            DsdReceivingRejection.motivo == "temp_fuera_rango",
+        )
+    )).scalar()
 
-    proximas = db.query(DsdReceivingSchedule).filter(
-        DsdReceivingSchedule.company_id == company_id,
-        DsdReceivingSchedule.fecha_programada >= hoy,
-        DsdReceivingSchedule.estado == "programada",
-    ).order_by(DsdReceivingSchedule.ventana_inicio).limit(10).all()
+    proximas_result = await db.execute(
+        select(DsdReceivingSchedule).where(
+            DsdReceivingSchedule.company_id == company_id,
+            DsdReceivingSchedule.fecha_programada >= hoy,
+            DsdReceivingSchedule.estado == "programada",
+        ).order_by(DsdReceivingSchedule.ventana_inicio).limit(10)
+    )
+    proximas = proximas_result.scalars().all()
 
     return {
         "hoy_programadas": programadas,

@@ -60,7 +60,7 @@ export default function AdminPage() {
       if (plansData.status === "fulfilled") setPlans(plansData.value)
       if (verticalsData.status === "fulfilled") setVerticals(verticalsData.value)
       if (featuresData.status === "fulfilled") setAllFeatures(featuresData.value)
-      if (tenantsData.status === "rejected") toast.info("Datos demo", "Conectá el backend para ver datos reales")
+      if (tenantsData.status === "rejected") toast.error("Error de conexión", "Conectá el backend para ver datos reales")
     } catch {
       toast.error("Error", "No se pudieron cargar los datos")
     } finally {
@@ -158,7 +158,7 @@ export default function AdminPage() {
       const data = await api.backups.list()
       setBackups(data)
     } catch {
-      toast.info("Datos demo", "Conectá el backend para ver backups")
+      toast.error("Error de conexión", "Conectá el backend para ver backups")
     } finally {
       setBackupsLoading(false)
     }
@@ -173,7 +173,7 @@ export default function AdminPage() {
       const data = await api.backups.getSchedule()
       setSchedule({ ...data, frequency: data.frequency as BackupSchedule["frequency"] })
     } catch {
-      toast.info("Datos demo", "Conectá el backend para ver configuración de backups")
+      toast.error("Error de conexión", "Conectá el backend para ver configuración de backups")
     } finally {
       setScheduleLoading(false)
     }
@@ -257,7 +257,7 @@ export default function AdminPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-2">
             <Shield className="w-6 h-6 text-accent" />
             Administración SaaS
           </h1>
@@ -270,19 +270,19 @@ export default function AdminPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="card p-5">
             <div className="flex items-center gap-3 mb-2"><Users className="w-5 h-5 text-primary" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Total Tenants</span></div>
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">{stats.total_tenants}</p>
+            <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">{stats.total_tenants}</p>
           </div>
           <div className="card p-5">
             <div className="flex items-center gap-3 mb-2"><DollarSign className="w-5 h-5 text-green-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">MRR (USD)</span></div>
-            <p className="text-2xl font-bold text-green-500">${stats.mrr_usd.toLocaleString()}</p>
+            <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-green-500">${stats.mrr_usd.toLocaleString()}</p>
           </div>
           <div className="card p-5">
             <div className="flex items-center gap-3 mb-2"><TrendingUp className="w-5 h-5 text-blue-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Activos</span></div>
-            <p className="text-2xl font-bold text-blue-500">{stats.by_estado?.activo ?? 0}</p>
+            <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-blue-500">{stats.by_estado?.activo ?? 0}</p>
           </div>
           <div className="card p-5">
             <div className="flex items-center gap-3 mb-2"><Shield className="w-5 h-5 text-purple-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Plan Pro</span></div>
-            <p className="text-2xl font-bold text-purple-500">{stats.by_plan?.pro ?? 0}</p>
+            <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-purple-500">{stats.by_plan?.pro ?? 0}</p>
           </div>
         </div>
       )}
@@ -544,15 +544,15 @@ export default function AdminPage() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="card p-5">
               <div className="flex items-center gap-3 mb-2"><Database className="w-5 h-5 text-primary" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Total Backups</span></div>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">{backups.length}</p>
+              <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">{backups.length}</p>
             </div>
             <div className="card p-5">
               <div className="flex items-center gap-3 mb-2"><HardDrive className="w-5 h-5 text-green-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Espacio usado</span></div>
-              <p className="text-2xl font-bold text-green-500">{(backups.reduce((a, b) => a + (b.file_size || 0), 0) / 1024 / 1024).toFixed(1)} MB</p>
+              <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-green-500">{(backups.reduce((a, b) => a + (b.file_size || 0), 0) / 1024 / 1024).toFixed(1)} MB</p>
             </div>
             <div className="card p-5">
               <div className="flex items-center gap-3 mb-2"><Clock className="w-5 h-5 text-amber-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Retención</span></div>
-              <p className="text-2xl font-bold text-amber-500">30 días</p>
+              <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-amber-500">30 días</p>
             </div>
           </div>
 
@@ -620,15 +620,15 @@ export default function AdminPage() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="card p-5">
               <div className="flex items-center gap-3 mb-2"><Calendar className="w-5 h-5 text-primary" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Frecuencia</span></div>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white capitalize">{schedule.frequency}</p>
+              <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white capitalize">{schedule.frequency}</p>
             </div>
             <div className="card p-5">
               <div className="flex items-center gap-3 mb-2"><Clock className="w-5 h-5 text-green-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Horario</span></div>
-              <p className="text-2xl font-bold text-green-500">{String(schedule.hour).padStart(2, "0")}:{String(schedule.minute).padStart(2, "0")}</p>
+              <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-green-500">{String(schedule.hour).padStart(2, "0")}:{String(schedule.minute).padStart(2, "0")}</p>
             </div>
             <div className="card p-5">
               <div className="flex items-center gap-3 mb-2"><HardDrive className="w-5 h-5 text-amber-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Retención</span></div>
-              <p className="text-2xl font-bold text-amber-500">{schedule.retention_days} días</p>
+              <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-amber-500">{schedule.retention_days} días</p>
             </div>
           </div>
 

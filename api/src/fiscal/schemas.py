@@ -11,6 +11,9 @@ class FiscalConfigCreate(BaseModel):
     modo_emision: str = "sifen"  # sifen, preimpreso, autoimpresor
     timbrado_id: Optional[UUID] = None
     punto_emision: str = "001"
+    cert_p12_base64: Optional[str] = None
+    cert_password: Optional[str] = None
+    sifen_env: str = "test"
 
 
 class FiscalConfigResponse(BaseModel):
@@ -21,6 +24,9 @@ class FiscalConfigResponse(BaseModel):
     modo_emision: str
     timbrado_id: Optional[UUID] = None
     punto_emision: str
+    cert_p12_base64: Optional[str] = None
+    cert_password: Optional[str] = None
+    sifen_env: Optional[str] = "test"
     created_at: datetime
 
 
@@ -63,13 +69,44 @@ class TimbradoUsageResponse(BaseModel):
     used_at: datetime
 
 
+class PuntoEmisionSecuenciaCreate(BaseModel):
+    company_id: UUID
+    timbrado_id: UUID
+    establecimiento: str = "001"
+    punto_emision: str
+    tipo_documento: str = "factura"  # factura, nota_credito, nota_remision
+    numero_actual: int
+    numero_final: int
+    activo: bool = True
+
+
+class PuntoEmisionSecuenciaUpdate(BaseModel):
+    numero_actual: Optional[int] = None
+    numero_final: Optional[int] = None
+    activo: Optional[bool] = None
+
+
+class PuntoEmisionSecuenciaResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    company_id: UUID
+    timbrado_id: UUID
+    establecimiento: str
+    punto_emision: str
+    tipo_documento: str
+    numero_actual: int
+    numero_final: int
+    activo: bool
+    created_at: datetime
+
+
 class NotaCreditoDebitoCreate(BaseModel):
     sale_id: UUID
     tipo: str  # credito, debito
     motivo: str
     items: Optional[list[dict]] = None
 
-    # Si se pasa manual
     total: Optional[Decimal] = None
     base_gravada_10: Optional[Decimal] = None
     base_gravada_5: Optional[Decimal] = None

@@ -1,14 +1,23 @@
 """Distribuidora — Business logic for import, supplier/customer agreements, routes, credit, approvals, margins."""
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, cast, Date
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException
 
 from api.src.distribuidora import models as m
+from api.src.config import settings
+
+# Constants for map layers
+_DEPOT_LAT = -25.3235
+_DEPOT_LNG = -57.5641
+_ROUTE_COLORS = [
+    "#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6",
+    "#3b82f6", "#8b5cf6", "#ec4899", "#64748b", "#0ea5e9",
+]
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -445,11 +454,31 @@ async def get_route(db: AsyncSession, route_id: str):
 
 
 async def list_route_customers(db: AsyncSession, route_id: str):
-    result = await db.execute(
-        select(m.RouteCustomer).where(m.RouteCustomer.route_id == UUID(route_id))
+    from api.src.customers.models import Customer
+    q = (
+        select(m.RouteCustomer, Customer)
+        .outerjoin(Customer, Customer.id == m.RouteCustomer.customer_id)
+        .where(m.RouteCustomer.route_id == UUID(route_id))
         .order_by(m.RouteCustomer.orden_visita)
     )
-    return result.scalars().all()
+    result = await db.execute(q)
+    items = []
+    for rc, c in result.all():
+        has_gps = bool(c and c.latitud and c.longitud and (float(c.latitud) != 0 or float(c.longitud) != 0))
+        items.append({
+            "id": str(rc.id),
+            "route_id": str(rc.route_id),
+            "customer_id": str(rc.customer_id),
+            "orden_visita": rc.orden_visita,
+            "dia_semana": rc.dia_semana,
+            "created_at": rc.created_at.isoformat() if rc.created_at else None,
+            "customer_nombre": (c.razon_social or c.nombre) if c else "Cliente desconocido",
+            "customer_direccion": (c.direccion or "") if c else "",
+            "latitud": float(c.latitud) if c and c.latitud is not None else None,
+            "longitud": float(c.longitud) if c and c.longitud is not None else None,
+            "tiene_gps": has_gps,
+        })
+    return items
 
 
 async def add_route_customer(db: AsyncSession, route_id: str, data: dict):
@@ -468,6 +497,125 @@ async def remove_route_customer(db: AsyncSession, rc_id: str):
     await db.delete(obj)
     await db.commit()
     return True
+
+
+async def optimize_route(db: AsyncSession, route_id: str, depot_lat: float = -25.3235, depot_lng: float = -57.5641):
+    """Optimiza el orden de visita de una ruta de venta usando Google Routes API (TSP).
+    Reordena los clientes en la base de datos y envía notificación push FCM al preventista.
+    """
+    import os
+    import httpx
+    from api.src.customers.models import Customer
+    from api.src.sales_targets.models import SalesRep
+    from api.src.inteliforce import notifications
+
+    route = await db.scalar(select(m.SalesRoute).where(m.SalesRoute.id == UUID(route_id)))
+    if not route:
+        raise HTTPException(404, "Ruta no encontrada")
+
+    q = (
+        select(m.RouteCustomer, Customer)
+        .outerjoin(Customer, Customer.id == m.RouteCustomer.customer_id)
+        .where(m.RouteCustomer.route_id == UUID(route_id))
+        .order_by(m.RouteCustomer.orden_visita)
+    )
+    rows = (await db.execute(q)).all()
+    if not rows:
+        raise HTTPException(400, "La ruta no tiene clientes asignados")
+
+    gps_items = []
+    no_gps_items = []
+    for rc, c in rows:
+        lat = float(c.latitud) if c and c.latitud is not None else None
+        lng = float(c.longitud) if c and c.longitud is not None else None
+        has_gps = bool(lat and lng and (lat != 0 or lng != 0))
+        if has_gps:
+            gps_items.append((rc, c, lat, lng))
+        else:
+            no_gps_items.append((rc, c))
+
+    if len(gps_items) < 2:
+        raise HTTPException(
+            400,
+            f"Se requieren al menos 2 clientes con ubicación GPS para calcular el recorrido óptimo. Actualmente solo hay {len(gps_items)} con GPS."
+        )
+
+    api_key = settings.google_maps_api_key
+    url = "https://routes.googleapis.com/directions/v2:computeRoutes"
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": api_key,
+        "X-Goog-FieldMask": "routes.duration,routes.distanceMeters,routes.optimizedIntermediateWaypointIndex",
+    }
+
+    body = {
+        "origin": {"location": {"latLng": {"latitude": depot_lat, "longitude": depot_lng}}},
+        "destination": {"location": {"latLng": {"latitude": depot_lat, "longitude": depot_lng}}},
+        "intermediates": [{"location": {"latLng": {"latitude": item[2], "longitude": item[3]}}} for item in gps_items],
+        "travelMode": "DRIVE",
+        "optimizeWaypointOrder": True,
+    }
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(url, headers=headers, json=body)
+        if resp.status_code != 200:
+            raise HTTPException(502, f"Error de Google Routes API: {resp.status_code} - {resp.text[:200]}")
+        data = resp.json()
+
+    routes_data = data.get("routes", [])
+    if not routes_data:
+        raise HTTPException(502, "Google Routes no retornó ninguna ruta calculada")
+
+    route_calc = routes_data[0]
+    distance_meters = route_calc.get("distanceMeters", 0)
+    duration_str = str(route_calc.get("duration", "0s")).replace("s", "")
+    duration_seconds = int(duration_str) if duration_str.isdigit() else 0
+    distance_km = round(distance_meters / 1000.0, 1)
+    duration_min = round(duration_seconds / 60)
+
+    order_indices = route_calc.get("optimizedIntermediateWaypointIndex", list(range(len(gps_items))))
+    reordered_gps = [gps_items[idx] for idx in order_indices]
+
+    current_order = 1
+    for rc, c, lat, lng in reordered_gps:
+        rc.orden_visita = current_order
+        current_order += 1
+
+    for rc, c in no_gps_items:
+        rc.orden_visita = current_order
+        current_order += 1
+
+    await db.commit()
+
+    # Notificar al preventista/vendedor asignado
+    rep = await db.scalar(
+        select(SalesRep).where(or_(SalesRep.user_id == route.user_id, SalesRep.id == route.user_id))
+    )
+    if rep:
+        try:
+            await notifications.notify_route_optimized(
+                db,
+                rep.id,
+                route.nombre,
+                len(reordered_gps),
+                distance_km=distance_km,
+                duration_min=duration_min,
+            )
+        except Exception as e:
+            pass
+
+    return {
+        "success": True,
+        "route_id": str(route.id),
+        "route_nombre": route.nombre,
+        "stops_optimized": len(reordered_gps),
+        "stops_without_gps": len(no_gps_items),
+        "total_stops": len(rows),
+        "distance_km": distance_km,
+        "duration_min": duration_min,
+        "message": f"Ruta optimizada con éxito: {len(reordered_gps)} paradas secuenciadas ({distance_km} km, ~{duration_min} min). Notificación push enviada al vendedor."
+    }
+
 
 
 async def list_visits(db: AsyncSession, company_id: str, route_id: str | None = None, fecha: str | None = None):
@@ -596,7 +744,7 @@ async def get_product_margins(db: AsyncSession, company_id: str, category_id: st
     cid = UUID(company_id)
     q = select(Product).where(Product.company_id == cid, Product.activo == True)
     if category_id:
-        q = q.where(Product.category_id == UUID(category_id))
+        q = q.where(Product.categoria_id == UUID(category_id))
     q = q.order_by(Product.nombre).limit(200)
     r = await db.execute(q)
     products = r.scalars().all()
@@ -858,3 +1006,370 @@ async def get_dashboard(db: AsyncSession, company_id: str) -> dict:
         "costo_landed_pendiente": costo_pendiente,
         "po_pendientes_aprobacion": po_pendientes,
     }
+
+
+def calculate_truck_load_weight(items: list[dict], max_weight_kg: Decimal | float | int) -> dict:
+    """Calcula el peso consolidado de carga para un camión y evalúa el semáforo de sobrecarga."""
+    total_peso_kg = Decimal("0")
+    for item in items:
+        qty = Decimal(str(item.get("cantidad", 0)))
+        peso = Decimal(str(item.get("peso_kg", 0) or 0))
+        total_peso_kg += qty * peso
+
+    capacidad_maxima_kg = Decimal(str(max_weight_kg))
+    if capacidad_maxima_kg > 0:
+        utilizacion_pct = round(float((total_peso_kg / capacidad_maxima_kg) * 100), 2)
+    else:
+        utilizacion_pct = 0.0
+
+    if utilizacion_pct > 100.0:
+        semaforo = "rojo"
+        aprobado = False
+    elif utilizacion_pct > 85.0:
+        semaforo = "ambar"
+        aprobado = True
+    else:
+        semaforo = "verde"
+        aprobado = True
+
+    sobrecarga_kg = max(Decimal("0"), total_peso_kg - capacidad_maxima_kg)
+
+    return {
+        "total_peso_kg": total_peso_kg,
+        "capacidad_maxima_kg": capacidad_maxima_kg,
+        "utilizacion_pct": utilizacion_pct,
+        "semaforo": semaforo,
+        "sobrecarga_kg": sobrecarga_kg,
+        "aprobado_despacho": aprobado,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+# MAP LAYERS
+# ═══════════════════════════════════════════════════════════════
+
+async def get_map_routes(db: AsyncSession, company_id: str) -> list[dict]:
+    """All active routes for the map layer with today's instance status.
+
+    Returns one dict per route with waypoints (customers with geocoords),
+    assigned color_index (0–9 cycling), and today's RouteStopVisit status
+    per waypoint when a RouteInstance exists for today.
+    """
+    from api.src.customers.models import Customer
+    from api.src.auth.models import User
+    from api.src.distribuidora.tracking_models import RouteInstance, RouteStopVisit
+
+    today = datetime.now(timezone.utc).date()
+
+    q_routes = (
+        select(m.SalesRoute, User.nombre)
+        .outerjoin(User, User.id == m.SalesRoute.user_id)
+        .where(
+            m.SalesRoute.company_id == UUID(company_id),
+            m.SalesRoute.estado == "activo",
+        )
+        .order_by(m.SalesRoute.nombre)
+    )
+    routes_result = await db.execute(q_routes)
+    routes = routes_result.all()
+
+    if not routes:
+        return []
+
+    q_instances = select(RouteInstance).where(
+        RouteInstance.company_id == UUID(company_id),
+        func.date(RouteInstance.fecha) == today,
+    )
+    inst_result = await db.execute(q_instances)
+    instances_by_route: dict[str, object] = {
+        str(inst.route_id): inst for inst in inst_result.scalars().all()
+    }
+
+    output = []
+    for idx, (route, seller_name) in enumerate(routes):
+        instance = instances_by_route.get(str(route.id))
+
+        stops_by_customer: dict[str, str] = {}
+        if instance:
+            q_stops = select(RouteStopVisit).where(RouteStopVisit.instance_id == instance.id)
+            stops_result = await db.execute(q_stops)
+            stops_by_customer = {
+                str(s.customer_id): s.status for s in stops_result.scalars().all()
+            }
+
+        q_customers = (
+            select(m.RouteCustomer, Customer)
+            .outerjoin(Customer, Customer.id == m.RouteCustomer.customer_id)
+            .where(m.RouteCustomer.route_id == route.id)
+            .order_by(m.RouteCustomer.orden_visita)
+        )
+        cust_result = await db.execute(q_customers)
+
+        waypoints = []
+        for rc, c in cust_result.all():
+            if c is None:
+                continue
+            waypoints.append({
+                "customer_id": str(c.id),
+                "razon_social": c.razon_social,
+                "orden_visita": rc.orden_visita,
+                "lat": float(c.lat) if c.lat is not None else None,
+                "lng": float(c.lng) if c.lng is not None else None,
+                "visit_status": stops_by_customer.get(str(c.id), "pending"),
+            })
+
+        output.append({
+            "route_id": str(route.id),
+            "route_name": route.nombre,
+            "seller_id": str(route.user_id),
+            "seller_name": seller_name or "",
+            "color_index": idx % 10,
+            "color": _ROUTE_COLORS[idx % 10],
+            "waypoints": waypoints,
+            "depot_lat": _DEPOT_LAT,
+            "depot_lng": _DEPOT_LNG,
+            "instance_status": instance.status if instance else None,
+        })
+
+    return output
+
+
+async def get_map_customers(db: AsyncSession, company_id: str) -> list[dict]:
+    """All geocoded customers for the unassigned-customers map layer.
+
+    Returns every customer with lat/lng, enriched with their route assignment
+    (color_index) and today's visit status when applicable.
+    """
+    from api.src.customers.models import Customer
+    from api.src.distribuidora.tracking_models import RouteInstance, RouteStopVisit
+
+    today = datetime.now(timezone.utc).date()
+
+    q = (
+        select(Customer, m.RouteCustomer)
+        .outerjoin(
+            m.RouteCustomer,
+            and_(
+                m.RouteCustomer.customer_id == Customer.id,
+            ),
+        )
+        .where(
+            Customer.company_id == UUID(company_id),
+            Customer.lat.isnot(None),
+            Customer.lng.isnot(None),
+        )
+        .order_by(Customer.razon_social)
+    )
+    result = await db.execute(q)
+    rows = result.all()
+
+    if not rows:
+        return []
+
+    route_ids = {str(rc.route_id) for _, rc in rows if rc is not None}
+    route_color_index: dict[str, int] = {}
+    if route_ids:
+        q_routes = (
+            select(m.SalesRoute)
+            .where(
+                m.SalesRoute.company_id == UUID(company_id),
+                m.SalesRoute.estado == "activo",
+            )
+            .order_by(m.SalesRoute.nombre)
+        )
+        r2 = await db.execute(q_routes)
+        for i, route in enumerate(r2.scalars().all()):
+            route_color_index[str(route.id)] = i % 10
+
+    q_instances = select(RouteInstance).where(
+        RouteInstance.company_id == UUID(company_id),
+        func.date(RouteInstance.fecha) == today,
+    )
+    inst_result = await db.execute(q_instances)
+    instance_ids = [inst.id for inst in inst_result.scalars().all()]
+
+    stops_by_customer: dict[str, str] = {}
+    if instance_ids:
+        q_stops = select(RouteStopVisit).where(
+            RouteStopVisit.instance_id.in_(instance_ids)
+        )
+        stops_result = await db.execute(q_stops)
+        stops_by_customer = {
+            str(s.customer_id): s.status for s in stops_result.scalars().all()
+        }
+
+    output = []
+    seen_ids: set[str] = set()
+    for customer, rc in rows:
+        cid = str(customer.id)
+        if cid in seen_ids:
+            continue
+        seen_ids.add(cid)
+
+        route_id = str(rc.route_id) if rc else None
+        color_idx = route_color_index.get(route_id, None) if route_id else None
+
+        output.append({
+            "customer_id": cid,
+            "razon_social": customer.razon_social,
+            "lat": float(customer.lat),
+            "lng": float(customer.lng),
+            "route_id": route_id,
+            "color_index": color_idx,
+            "visit_status": stops_by_customer.get(cid, "pending"),
+            "direccion": customer.direccion,
+            "ciudad": customer.ciudad,
+            "telefono": customer.telefono,
+        })
+
+    return output
+
+
+async def get_seller_performance(
+    db: AsyncSession,
+    company_id: str,
+    fecha_desde: str,
+    fecha_hasta: str,
+    route_id: str | None = None,
+) -> list[dict]:
+    """Performance metrics per seller for the given date range.
+
+    Aggregates RouteInstance + RouteStopVisit data. Returns an empty list
+    when no instances exist. Division by zero always yields 0.0.
+    """
+    from datetime import datetime, timedelta, timezone
+    from api.src.distribuidora.tracking_models import RouteInstance, RouteStopVisit
+    from api.src.auth.models import User
+    from api.src.distribuidora.tracking_models import SellerProfile
+
+    from_dt = datetime.fromisoformat(fecha_desde)
+    to_dt = datetime.fromisoformat(fecha_hasta) + timedelta(days=1)
+
+    q_instances = select(RouteInstance).where(
+        RouteInstance.company_id == UUID(company_id),
+        RouteInstance.fecha >= from_dt,
+        RouteInstance.fecha < to_dt,
+    )
+    if route_id:
+        q_instances = q_instances.where(RouteInstance.route_id == UUID(route_id))
+
+    instances_result = await db.execute(q_instances)
+    instances = instances_result.scalars().all()
+    if not instances:
+        return []
+
+    instance_ids = [inst.id for inst in instances]
+    seller_ids = list({str(inst.seller_id) for inst in instances})
+
+    q_stops = select(RouteStopVisit).where(RouteStopVisit.instance_id.in_(instance_ids))
+    stops_result = await db.execute(q_stops)
+    stops = stops_result.scalars().all()
+
+    seller_uuids = [UUID(s) for s in seller_ids]
+    q_users = select(User).where(User.id.in_(seller_uuids))
+    users_result = await db.execute(q_users)
+    users_by_id = {str(u.id): u for u in users_result.scalars().all()}
+
+    q_profiles = select(SellerProfile).where(SellerProfile.user_id.in_(seller_uuids))
+    profiles_result = await db.execute(q_profiles)
+    profiles_by_user = {str(p.user_id): p for p in profiles_result.scalars().all()}
+
+    instance_to_seller = {str(inst.id): str(inst.seller_id) for inst in instances}
+    stops_by_seller: dict[str, list] = {s: [] for s in seller_ids}
+    for stop in stops:
+        seller = instance_to_seller.get(str(stop.instance_id))
+        if seller:
+            stops_by_seller.setdefault(seller, []).append(stop)
+
+    today = datetime.now(timezone.utc).date()
+    week_ranges = [
+        (today - timedelta(days=(3 - i) * 7 + 7), today - timedelta(days=(3 - i) * 7))
+        for i in range(4)
+    ]
+
+    output = []
+    for seller_id_str in seller_ids:
+        seller_stops = stops_by_seller.get(seller_id_str, [])
+        user = users_by_id.get(seller_id_str)
+        profile = profiles_by_user.get(seller_id_str)
+
+        stops_total = len(seller_stops)
+        completed = [s for s in seller_stops if s.status == "completed"]
+        stops_completed = len(completed)
+
+        coverage_pct = (stops_completed / stops_total * 100.0) if stops_total > 0 else 0.0
+        with_order = [s for s in completed if float(s.order_amount or 0) > 0]
+        conversion_rate = (len(with_order) / stops_completed * 100.0) if stops_completed > 0 else 0.0
+        total_amount = sum(float(s.order_amount or 0) for s in completed)
+        total_collected = sum(float(s.payment_collected or 0) for s in completed)
+        avg_ticket = (total_amount / len(with_order)) if with_order else 0.0
+
+        durations = []
+        for s in completed:
+            if s.actual_arrival and s.actual_departure:
+                try:
+                    delta = (s.actual_departure - s.actual_arrival).total_seconds() / 60.0
+                    if delta > 0:
+                        durations.append(delta)
+                except Exception:
+                    pass
+        avg_visit_minutes = (sum(durations) / len(durations)) if durations else None
+
+        weekly_coverage = _compute_weekly_coverage(seller_id_str, instances, stops_by_seller, week_ranges)
+
+        output.append({
+            "seller_id": seller_id_str,
+            "seller_name": user.nombre if user else seller_id_str,
+            "photo_url": profile.photo_url if profile else None,
+            "coverage_pct": coverage_pct,
+            "conversion_rate": conversion_rate,
+            "avg_ticket": avg_ticket,
+            "total_amount": total_amount,
+            "total_collected": total_collected,
+            "avg_visit_minutes": avg_visit_minutes,
+            "stops_completed": stops_completed,
+            "stops_total": stops_total,
+            "weekly_coverage": weekly_coverage,
+        })
+
+    return output
+
+
+def _compute_weekly_coverage(
+    seller_id_str: str,
+    instances: list,
+    stops_by_seller: dict,
+    week_ranges: list,
+) -> list[float]:
+    """Compute 4-week coverage percentages for one seller."""
+    from datetime import datetime, timezone
+
+    result = []
+    seller_stops = stops_by_seller.get(seller_id_str, [])
+
+    from datetime import date as date_type
+
+    instance_ids_in_week: dict = {}
+    for inst in instances:
+        if str(inst.seller_id) != seller_id_str:
+            continue
+        try:
+            raw = inst.fecha
+            inst_date = raw.date() if callable(getattr(raw, 'date', None)) else raw
+            if not isinstance(inst_date, date_type):
+                continue
+        except Exception:
+            continue
+        instance_ids_in_week[str(inst.id)] = inst_date
+
+    for wk_from, wk_to in week_ranges:
+        wk_instance_ids = {
+            iid for iid, idate in instance_ids_in_week.items()
+            if wk_from <= idate <= wk_to
+        }
+        wk_stops = [s for s in seller_stops if str(s.instance_id) in wk_instance_ids]
+        wk_total = len(wk_stops)
+        wk_completed = sum(1 for s in wk_stops if s.status == "completed")
+        result.append(round((wk_completed / wk_total * 100.0) if wk_total > 0 else 0.0, 2))
+
+    return result

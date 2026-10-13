@@ -1,0 +1,16 @@
+# Sudoers para InteliMarket Distribuidora (minisforum-ia)
+# Permite a intellihouse operar los servicios de la API y nginx SIN password.
+# Agregar con: sudo visudo -f /etc/sudoers.d/intellihouse
+intellihouse ALL=(root) NOPASSWD: /usr/bin/systemctl restart intelimarket-api.service
+intellihouse ALL=(root) NOPASSWD: /usr/bin/systemctl restart intelimarket-api-2.service
+intellihouse ALL=(root) NOPASSWD: /usr/bin/systemctl start intelimarket-api.service
+intellihouse ALL=(root) NOPASSWD: /usr/bin/systemctl start intelimarket-api-2.service
+intellihouse ALL=(root) NOPASSWD: /usr/bin/systemctl stop intelimarket-api.service
+intellihouse ALL=(root) NOPASSWD: /usr/bin/systemctl stop intelimarket-api-2.service
+intellihouse ALL=(root) NOPASSWD: /usr/bin/systemctl status intelimarket-api.service
+intellihouse ALL=(root) NOPASSWD: /usr/bin/systemctl status intelimarket-api-2.service
+intellihouse ALL=(root) NOPASSWD: /usr/bin/systemctl enable intelimarket-api.service
+intellihouse ALL=(root) NOPASSWD: /usr/bin/systemctl enable intelimarket-api-2.service
+intellihouse ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload
+intellihouse ALL=(root) NOPASSWD: /usr/bin/systemctl reload nginx
+intellihouse ALL=(root) NOPASSWD: /usr/bin/nginx -t

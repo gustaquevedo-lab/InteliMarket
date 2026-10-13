@@ -286,6 +286,8 @@ async def receive_remit(
     for item in items:
         product_id = uuid.UUID(item["product_id"])
         cantidad_recibida = int(item["cantidad_recibida"])
+        cantidad_bonificada = int(item.get("cantidad_bonificada", 0))
+        cantidad_total = cantidad_recibida + cantidad_bonificada
 
         # Find matching order item
         result = await db.execute(
@@ -299,10 +301,11 @@ async def receive_remit(
             errores.append(f"Producto {product_id} no está en la orden")
             continue
 
-        # Update received quantity
+        # Update received quantity (la bonificacion no cuenta para "cuanto de lo pedido llego")
         order_item.cantidad_recibida = (order_item.cantidad_recibida or 0) + cantidad_recibida
+        order_item.cantidad_bonificada = (order_item.cantidad_bonificada or 0) + cantidad_bonificada
 
-        # Update stock
+        # Update stock (recibido + bonificado entran los dos al deposito fisico)
         result = await db.execute(
             select(Stock).where(
                 Stock.warehouse_id == orden.warehouse_id if hasattr(orden, "warehouse_id") else True,
@@ -311,12 +314,12 @@ async def receive_remit(
         )
         stock = result.scalar_one_or_none()
         if stock:
-            stock.cantidad = (stock.cantidad or 0) + cantidad_recibida
+            stock.cantidad = (stock.cantidad or 0) + cantidad_total
         else:
             stock = Stock(
                 warehouse_id=uuid.UUID(orden.warehouse_id) if hasattr(orden, "warehouse_id") and orden.warehouse_id else uuid.UUID("00000000-0000-0000-0000-000000000000"),
                 product_id=product_id,
-                cantidad=cantidad_recibida,
+                cantidad=cantidad_total,
             )
             db.add(stock)
 
@@ -333,6 +336,19 @@ async def receive_remit(
             motivo="Recepción desde app móvil",
         )
         db.add(movement)
+
+        if cantidad_bonificada > 0:
+            db.add(InventoryMovement(
+                company_id=uuid.UUID(company_id),
+                warehouse_id=stock.warehouse_id,
+                product_id=product_id,
+                tipo="bonificacion_compra",
+                cantidad=cantidad_bonificada,
+                referencia_type="purchase_order",
+                referencia_id=orden_id,
+                user_id=uuid.UUID(user_id),
+                motivo="Bonificacion por volumen recibida junto con el pedido",
+            ))
 
         # Update StockLot if lote provided
         lote_val = item.get("lote")

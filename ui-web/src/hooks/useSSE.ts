@@ -25,7 +25,8 @@ export function useSSE({ companyId, onEvent, enabled = true }: UseSSEOptions) {
 
     const baseUrl = import.meta.env.VITE_API_URL || ""
     const cleanBase = baseUrl.endsWith("/api") ? baseUrl.slice(0, -4) : baseUrl
-    const url = `${cleanBase}/api/v1/events/stream?company_id=${companyId}`
+    const token = localStorage.getItem("access_token") || ""
+    const url = `${cleanBase}/api/v1/events/stream?company_id=${companyId}&token=${encodeURIComponent(token)}`
 
     const es = new EventSource(url)
     eventSourceRef.current = es

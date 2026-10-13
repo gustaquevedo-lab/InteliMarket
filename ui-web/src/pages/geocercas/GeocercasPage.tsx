@@ -10,7 +10,7 @@ const DAYS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"]
 
 export default function GeocercasPage() {
   const { user } = useAuth()
-  const companyId = user?.company_id || "00000000-0000-0000-0000-000000000010"
+  const companyId = (user as any)?.company_id || "00000000-0000-0000-0000-000000000010" || "00000000-0000-0000-0000-000000000010"
   const [zones, setZones] = useState<any[]>([])
   const [alerts, setAlerts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -76,7 +76,7 @@ export default function GeocercasPage() {
     <div className="p-4 md:p-6 space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Geocercas Inteligentes</h1>
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">Geocercas Inteligentes</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Zonas restringidas, preferidas y de vigilancia</p>
         </div>
         <button onClick={() => { setEditing(null); setForm({ nombre: "", descripcion: "", zone_type: "restricted", geometry_type: "polygon", coordinates: JSON.stringify([[-57.6, -25.28], [-57.58, -25.28], [-57.58, -25.26], [-57.6, -25.26]]), color: "#ef4444", severity: "medium", active_start_time: "00:00", active_end_time: "23:59", active_days: [0, 1, 2, 3, 4, 5, 6], alert_on_entry: true, alert_on_exit: false, notify_supervisor: true }); setShowForm(true) }} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">

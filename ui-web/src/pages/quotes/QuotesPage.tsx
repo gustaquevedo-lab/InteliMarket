@@ -231,7 +231,7 @@ export default function QuotesPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-2">
             <FileText className="w-6 h-6 text-primary" />
             Cotizaciones
           </h1>
@@ -267,35 +267,35 @@ export default function QuotesPage() {
               Total Cotizaciones
             </span>
           </div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">{quotes.length}</p>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">{quotes.length}</p>
         </div>
         <div className="card p-5">
           <div className="flex items-center gap-3 mb-2">
             <Clock className="w-5 h-5 text-green-500" />
             <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Vigentes</span>
           </div>
-          <p className="text-2xl font-bold text-green-500">{vigentes.length}</p>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-green-500">{vigentes.length}</p>
         </div>
         <div className="card p-5">
           <div className="flex items-center gap-3 mb-2">
             <CheckCircle className="w-5 h-5 text-blue-500" />
             <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Aceptadas</span>
           </div>
-          <p className="text-2xl font-bold text-blue-500">{aceptadas.length}</p>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-blue-500">{aceptadas.length}</p>
         </div>
         <div className="card p-5">
           <div className="flex items-center gap-3 mb-2">
             <ShoppingCart className="w-5 h-5 text-amber-500" />
             <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Convertidas</span>
           </div>
-          <p className="text-2xl font-bold text-amber-500">{convertidas.length}</p>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-amber-500">{convertidas.length}</p>
         </div>
         <div className="card p-5">
           <div className="flex items-center gap-3 mb-2">
             <DollarSign className="w-5 h-5 text-emerald-500" />
             <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Monto Total</span>
           </div>
-          <p className="text-2xl font-bold text-emerald-500">{formatPYG(montoTotal)}</p>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-emerald-500">{formatPYG(montoTotal)}</p>
         </div>
       </div>
 

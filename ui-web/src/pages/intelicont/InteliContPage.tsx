@@ -24,24 +24,15 @@ export default function InteliContPage() {
   const [syncing, setSyncing] = useState(false)
   const [search, setSearch] = useState("")
 
-const MOCK_ENTRIES: InteliContEntry[] = [
-  { id: "1", fecha: "2026-05-27", numero: "AS-0002102", concepto: "Ventas Diarias Caja Rápida - Sucursal Centro", monto_debe: 3450000, monto_haber: 3450000, estado: "sincronizado" },
-  { id: "2", fecha: "2026-05-27", numero: "AS-0002103", concepto: "Costo de Ventas - Lote Carnicería desposte", monto_debe: 1800000, monto_haber: 1800000, estado: "sincronizado" },
-  { id: "3", fecha: "2026-05-26", numero: "AS-0002104", concepto: "Reposición de Bóveda - Caja Chica", monto_debe: 500000, monto_haber: 500000, estado: "sincronizado" }
-]
 
-const MOCK_PENDING = [
-  { id: "p1", fecha: "2026-05-27", tipo_asiento: "Ingreso Ventas", descripcion: "Ventas Caja Autoservicio 03 - QR BCP", total_debe: 1250000, sync_status: "pendiente" },
-  { id: "p2", fecha: "2026-05-27", tipo_asiento: "Merma Inventario", descripcion: "Merma Panadería Plan Diario lote #A", total_debe: 18000, sync_status: "pendiente" }
-]
 
   const fetchEntries = async () => {
     setEntriesLoading(true)
     try {
       const data = await api.intelicont.entries()
-      setEntries(Array.isArray(data) && data.length > 0 ? data : MOCK_ENTRIES)
+      setEntries(Array.isArray(data) ? data : [])
     } catch {
-      setEntries(MOCK_ENTRIES)
+      setEntries([])
     } finally {
       setEntriesLoading(false)
     }
@@ -51,9 +42,9 @@ const MOCK_PENDING = [
     setPendingLoading(true)
     try {
       const data = await api.intelicont.pending()
-      setPending(Array.isArray(data) && data.length > 0 ? data : MOCK_PENDING)
+      setPending(Array.isArray(data) ? data : [])
     } catch {
-      setPending(MOCK_PENDING)
+      setPending([])
     } finally {
       setPendingLoading(false)
     }
@@ -132,7 +123,7 @@ const MOCK_PENDING = [
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">InteliCont</h1>
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">InteliCont</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">Contabilidad integrada</p>
         </div>
       </div>
@@ -287,7 +278,7 @@ const MOCK_PENDING = [
               <div className="w-12 h-12 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center"><List className="w-6 h-6 text-blue-600" /></div>
               <div>
                 <p className="text-sm text-gray-500">Total Asientos</p>
-                <p className="text-2xl font-bold">{entries.length}</p>
+                <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate">{entries.length}</p>
               </div>
             </div>
           </div>
@@ -296,7 +287,7 @@ const MOCK_PENDING = [
               <div className="w-12 h-12 rounded-xl bg-yellow-100 dark:bg-yellow-900/30 flex items-center justify-center"><Clock className="w-6 h-6 text-yellow-600" /></div>
               <div>
                 <p className="text-sm text-gray-500">Pendientes</p>
-                <p className="text-2xl font-bold">{pending.length}</p>
+                <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate">{pending.length}</p>
               </div>
             </div>
           </div>
@@ -305,7 +296,7 @@ const MOCK_PENDING = [
               <div className="w-12 h-12 rounded-xl bg-green-100 dark:bg-green-900/30 flex items-center justify-center"><CheckCircle className="w-6 h-6 text-green-600" /></div>
               <div>
                 <p className="text-sm text-gray-500">Sincronizados</p>
-                <p className="text-2xl font-bold">{entries.filter(e => e.estado === "sincronizado" || e.estado === "completado").length}</p>
+                <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate">{entries.filter(e => e.estado === "sincronizado" || e.estado === "completado").length}</p>
               </div>
             </div>
           </div>

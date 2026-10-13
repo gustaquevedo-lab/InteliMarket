@@ -4,7 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
-from sqlalchemy import func, and_
+from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from fastapi import HTTPException
@@ -21,14 +21,21 @@ from .models import (
 # ---------------------------------------------------------------------------
 
 async def list_recipes(company_id: UUID, db: AsyncSession, activa: Optional[bool] = None):
-    q = db.query(RotiseriaRecipe).filter(RotiseriaRecipe.company_id == company_id)
+    q = select(RotiseriaRecipe).where(RotiseriaRecipe.company_id == company_id)
     if activa is not None:
-        q = q.filter(RotiseriaRecipe.activa == activa)
-    return q.order_by(RotiseriaRecipe.nombre).all()
+        q = q.where(RotiseriaRecipe.activa == activa)
+    q = q.order_by(RotiseriaRecipe.nombre)
+    result = await db.execute(q)
+    return result.scalars().all()
 
 
 async def get_recipe(recipe_id: UUID, db: AsyncSession):
-    r = db.query(RotiseriaRecipe).options(selectinload(RotiseriaRecipe.items)).get(recipe_id)
+    result = await db.execute(
+        select(RotiseriaRecipe)
+        .options(selectinload(RotiseriaRecipe.items))
+        .where(RotiseriaRecipe.id == recipe_id)
+    )
+    r = result.scalar_one_or_none()
     if not r:
         raise HTTPException(404, "Recipe not found")
     return r
@@ -40,12 +47,12 @@ async def create_recipe(company_id: UUID, data, db: AsyncSession):
         **data.model_dump(exclude={"items"}, exclude_none=True),
     )
     db.add(r)
-    db.flush()
+    await db.flush()
     for item_data in data.items or []:
         item = RotiseriaRecipeItem(receta_id=r.id, **item_data.model_dump())
         db.add(item)
-    db.commit()
-    db.refresh(r)
+    await db.commit()
+    await db.refresh(r)
     return await get_recipe(r.id, db)
 
 
@@ -55,19 +62,21 @@ async def update_recipe(recipe_id: UUID, data, db: AsyncSession):
         setattr(r, k, v)
     if data.items is not None:
         # Remove old items and replace
-        db.query(RotiseriaRecipeItem).filter(RotiseriaRecipeItem.receta_id == recipe_id).delete()
+        result = await db.execute(select(RotiseriaRecipeItem).where(RotiseriaRecipeItem.receta_id == recipe_id))
+        for old_item in result.scalars().all():
+            await db.delete(old_item)
         for item_data in data.items:
             item = RotiseriaRecipeItem(receta_id=recipe_id, **item_data.model_dump())
             db.add(item)
-    db.commit()
-    db.refresh(r)
+    await db.commit()
+    await db.refresh(r)
     return await get_recipe(r.id, db)
 
 
 async def delete_recipe(recipe_id: UUID, db: AsyncSession):
     r = await get_recipe(recipe_id, db)
-    db.delete(r)
-    db.commit()
+    await db.delete(r)
+    await db.commit()
     return {"ok": True}
 
 
@@ -81,21 +90,28 @@ async def list_plans(
     estado: Optional[str] = None,
 ):
     # Join through recipe to find company-owned plans
-    q = db.query(RotiseriaProductionPlan).join(RotiseriaRecipe).filter(
+    q = select(RotiseriaProductionPlan).join(RotiseriaRecipe).where(
         RotiseriaRecipe.company_id == company_id,
     )
     if fecha:
-        q = q.filter(RotiseriaProductionPlan.fecha == fecha)
+        q = q.where(RotiseriaProductionPlan.fecha == fecha)
     if estado:
-        q = q.filter(RotiseriaProductionPlan.estado == estado)
-    return q.order_by(RotiseriaProductionPlan.fecha.desc()).all()
+        q = q.where(RotiseriaProductionPlan.estado == estado)
+    q = q.order_by(RotiseriaProductionPlan.fecha.desc())
+    result = await db.execute(q)
+    return result.scalars().all()
 
 
 async def get_plan(plan_id: UUID, db: AsyncSession):
-    p = db.query(RotiseriaProductionPlan).options(
-        selectinload(RotiseriaProductionPlan.temperature_logs),
-        selectinload(RotiseriaProductionPlan.labels),
-    ).get(plan_id)
+    result = await db.execute(
+        select(RotiseriaProductionPlan)
+        .options(
+            selectinload(RotiseriaProductionPlan.temperature_logs),
+            selectinload(RotiseriaProductionPlan.labels),
+        )
+        .where(RotiseriaProductionPlan.id == plan_id)
+    )
+    p = result.scalar_one_or_none()
     if not p:
         raise HTTPException(404, "Production plan not found")
     return p
@@ -103,18 +119,21 @@ async def get_plan(plan_id: UUID, db: AsyncSession):
 
 async def create_plan(company_id: UUID, data, db: AsyncSession):
     # Verify recipe exists and belongs to company
-    recipe = db.query(RotiseriaRecipe).filter(
-        RotiseriaRecipe.id == data.receta_id,
-        RotiseriaRecipe.company_id == company_id,
-    ).first()
+    result = await db.execute(
+        select(RotiseriaRecipe).where(
+            RotiseriaRecipe.id == data.receta_id,
+            RotiseriaRecipe.company_id == company_id,
+        )
+    )
+    recipe = result.scalars().first()
     if not recipe:
         raise HTTPException(404, "Recipe not found for this company")
     p = RotiseriaProductionPlan(
         **data.model_dump(exclude_none=True),
     )
     db.add(p)
-    db.commit()
-    db.refresh(p)
+    await db.commit()
+    await db.refresh(p)
     return await get_plan(p.id, db)
 
 
@@ -124,8 +143,8 @@ async def update_plan(plan_id: UUID, data, db: AsyncSession):
         setattr(p, k, v)
     if p.estado == "completado" and not p.hora_fin:
         p.hora_fin = datetime.utcnow()
-    db.commit()
-    db.refresh(p)
+    await db.commit()
+    await db.refresh(p)
     return await get_plan(plan_id, db)
 
 
@@ -135,8 +154,8 @@ async def complete_plan(plan_id: UUID, data: dict, db: AsyncSession):
     p.cantidad_producida = data.get("cantidad_producida", p.cantidad_objetivo)
     p.hora_fin = datetime.utcnow()
     p.notas = data.get("notas", p.notas)
-    db.commit()
-    db.refresh(p)
+    await db.commit()
+    await db.refresh(p)
     return await get_plan(plan_id, db)
 
 
@@ -154,15 +173,18 @@ async def add_temp_log(plan_id: UUID, company_id: UUID, data, db: AsyncSession):
     if log.temp_min_requerida is not None and log.temp_max_requerida is not None:
         log.conforme = log.temp_min_requerida <= log.temperatura <= log.temp_max_requerida
     db.add(log)
-    db.commit()
-    db.refresh(log)
+    await db.commit()
+    await db.refresh(log)
     return log
 
 
 async def list_temp_logs(plan_id: UUID, db: AsyncSession):
-    return db.query(RotiseriaTemperatureLog).filter(
-        RotiseriaTemperatureLog.plan_id == plan_id,
-    ).order_by(RotiseriaTemperatureLog.registrado_at.desc()).all()
+    result = await db.execute(
+        select(RotiseriaTemperatureLog)
+        .where(RotiseriaTemperatureLog.plan_id == plan_id)
+        .order_by(RotiseriaTemperatureLog.registrado_at.desc())
+    )
+    return result.scalars().all()
 
 
 # ---------------------------------------------------------------------------
@@ -185,16 +207,19 @@ async def generate_labels(plan_id: UUID, company_id: UUID, data: dict, db: Async
         )
         db.add(label)
         labels.append(label)
-    db.commit()
+    await db.commit()
     for l in labels:
-        db.refresh(l)
+        await db.refresh(l)
     return labels
 
 
 async def list_labels(plan_id: UUID, db: AsyncSession):
-    return db.query(RotiseriaLabelBatch).filter(
-        RotiseriaLabelBatch.plan_id == plan_id,
-    ).order_by(RotiseriaLabelBatch.created_at.desc()).all()
+    result = await db.execute(
+        select(RotiseriaLabelBatch)
+        .where(RotiseriaLabelBatch.plan_id == plan_id)
+        .order_by(RotiseriaLabelBatch.created_at.desc())
+    )
+    return result.scalars().all()
 
 
 # ---------------------------------------------------------------------------
@@ -205,11 +230,14 @@ async def suggest_markdowns(company_id: UUID, data: dict, db: AsyncSession):
     """Suggest markdowns for rotisería products nearing closing time."""
     now = datetime.utcnow()
     # Find production plans for today that are completed
-    plans = db.query(RotiseriaProductionPlan).join(RotiseriaRecipe).filter(
-        RotiseriaRecipe.company_id == company_id,
-        RotiseriaProductionPlan.fecha == date.today(),
-        RotiseriaProductionPlan.estado == "completado",
-    ).all()
+    result = await db.execute(
+        select(RotiseriaProductionPlan).join(RotiseriaRecipe).where(
+            RotiseriaRecipe.company_id == company_id,
+            RotiseriaProductionPlan.fecha == date.today(),
+            RotiseriaProductionPlan.estado == "completado",
+        )
+    )
+    plans = result.scalars().all()
     results = []
     for p in plans:
         # Check recipe time limit
@@ -237,20 +265,28 @@ async def suggest_markdowns(company_id: UUID, data: dict, db: AsyncSession):
 
 async def rotiseria_dashboard(company_id: UUID, db: AsyncSession):
     today = date.today()
-    orders_today = db.query(RotiseriaProductionPlan).join(RotiseriaRecipe).filter(
-        RotiseriaRecipe.company_id == company_id,
-        RotiseriaProductionPlan.fecha == today,
-    ).count()
-    total_produced = db.query(func.coalesce(func.sum(RotiseriaProductionPlan.cantidad_producida), 0)).join(RotiseriaRecipe).filter(
-        RotiseriaRecipe.company_id == company_id,
-        RotiseriaProductionPlan.fecha == today,
-    ).scalar()
-    active_recipes = db.query(RotiseriaRecipe).filter(
-        RotiseriaRecipe.company_id == company_id, RotiseriaRecipe.activa == True,
-    ).count()
-    temp_alerts = db.query(RotiseriaTemperatureLog).filter(
-        RotiseriaTemperatureLog.conforme == False,
-    ).count()
+    orders_today = (await db.execute(
+        select(func.count()).select_from(RotiseriaProductionPlan).join(RotiseriaRecipe).where(
+            RotiseriaRecipe.company_id == company_id,
+            RotiseriaProductionPlan.fecha == today,
+        )
+    )).scalar()
+    total_produced = (await db.execute(
+        select(func.coalesce(func.sum(RotiseriaProductionPlan.cantidad_producida), 0)).join(RotiseriaRecipe).where(
+            RotiseriaRecipe.company_id == company_id,
+            RotiseriaProductionPlan.fecha == today,
+        )
+    )).scalar()
+    active_recipes = (await db.execute(
+        select(func.count()).select_from(RotiseriaRecipe).where(
+            RotiseriaRecipe.company_id == company_id, RotiseriaRecipe.activa == True,
+        )
+    )).scalar()
+    temp_alerts = (await db.execute(
+        select(func.count()).select_from(RotiseriaTemperatureLog).where(
+            RotiseriaTemperatureLog.conforme == False,
+        )
+    )).scalar()
 
     return {
         "ordenes_hoy": orders_today,

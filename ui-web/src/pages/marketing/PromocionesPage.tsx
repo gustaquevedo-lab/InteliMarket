@@ -1,307 +1,3812 @@
-import { useState } from "react"
-import { Tags, Plus, Trash2, Percent, BadgeDollarSign, HelpCircle, CheckCircle, RefreshCw, ShoppingCart } from "lucide-react"
+import { useState, useEffect, useCallback, useMemo } from "react"
+import { createPortal } from "react-dom"
+import {
+  Tags, Gift, Plus, Search, Trash2, Edit, Settings,
+  Loader2, History, Info, Sparkles, Award, TrendingUp, Filter,
+  Phone, Mail, Calendar, CheckCircle2, AlertTriangle, ArrowRight,
+  RefreshCw, MessageCircle, HeartHandshake, DollarSign, Star,
+  ShieldCheck, CreditCard, ChevronRight, Check, X, Tag, Package,
+  HelpCircle, BarChart2, Receipt, Clock, Eye, Play, Pause,
+  Layers, ShoppingCart, ShieldAlert, ArrowUpRight, Zap, CheckSquare,
+  Square, ListFilter, Building2, Grid, CheckCheck
+} from "lucide-react"
+import { api, type Promotion, type Product, type Supplier, type Category } from "../../api"
 import { useToast } from "../../context/ToastContext"
-import { formatPYG } from "../../utils/format"
+import { useConfirm } from "../../components/ConfirmDialog"
+import { formatPYG, formatDate } from "../../utils/format"
+import { Promotion360Modal } from "./Promotion360Modal"
 
-interface PromoRule {
-  id: string
-  nombre: string
-  tipo: "3x2" | "MixMatch" | "Banco"
-  descripcion: string
-  activo: boolean
-  parametros: string
+type PromoTab = "activas" | "vencimientos" | "sell_out" | "pendientes" | "pausadas" | "todas"
+
+interface SelectedPromoProduct {
+  product: Product
+  precio_promocional: number
+  costo: number
+  precio_regular: number
+  precio_editado_manualmente?: boolean
 }
 
-const INITIAL_RULES: PromoRule[] = [
-  {
-    id: "PR-1",
-    nombre: "3x2 en Lácteos Trébol",
-    tipo: "3x2",
-    descripcion: "Lleva 3 leches o quesos Trébol y paga solo 2 (el de menor valor es gratis).",
-    activo: true,
-    parametros: "Categoría: Lácteos | Marca: Trébol"
-  },
-  {
-    id: "PR-2",
-    nombre: "Combo Hamburguesa + Gaseosa",
-    tipo: "MixMatch",
-    descripcion: "Pan Felipe + Carne Hamburguesa Kzero + Gaseosa Cola 2L por solo Gs. 22.000.",
-    activo: true,
-    parametros: "Items: [p2, p3, p5]"
-  },
-  {
-    id: "PR-3",
-    nombre: "15% Reintegro Itaú Martes",
-    tipo: "Banco",
-    descripcion: "Descuento directo del 15% pagando con tarjetas de crédito Itaú.",
-    activo: true,
-    parametros: "Banco: Itaú | Día: Martes | Descuento: 15%"
-  }
+const TIER_ORIGEN_COLORS: Record<string, { bg: string; text: string; border: string }> = {
+  corto_vencimiento: { bg: "bg-amber-100 dark:bg-amber-950/60", text: "text-amber-700 dark:text-amber-300", border: "border-amber-200 dark:border-amber-900/50" },
+  accion_proveedor: { bg: "bg-blue-100 dark:bg-blue-950/60", text: "text-blue-700 dark:text-blue-300", border: "border-blue-200 dark:border-blue-900/50" },
+  iniciativa_propia: { bg: "bg-emerald-100 dark:bg-emerald-950/60", text: "text-emerald-700 dark:text-emerald-300", border: "border-emerald-200 dark:border-emerald-900/50" },
+}
+
+const TIPO_LABELS: Record<string, string> = {
+  precio_fijo_oferta: "🏷️ Precio Fijo de Oferta",
+  porcentaje: "📉 Descuento Porcentual (% OFF)",
+  monto_fijo: "💵 Descuento Monto Fijo",
+  dos_por_uno: "🎁 2x1 (Lleva 2, Paga 1)",
+  tres_por_dos: "🎁 3x2 (Lleva 3, Paga 2)",
+  nxm: "🎁 NxM (Lleva N, Paga M)",
+  cantidad_lleva: "📦 Lleva N y Paga M",
+  segunda_unidad_pct: "🏷️ 2da Unidad con % OFF",
+  combo_pack: "📦 Combo Especial Pack",
+  combo_precio: "🍔 Combo Especial",
+}
+
+const FINANCIAMIENTO_LABELS: Record<string, { label: string; desc: string }> = {
+  proveedor_sell_out: { label: "Sell-Out (NC Proveedor)", desc: "Reembolso por unidades vendidas en caja." },
+  co_financiado: { label: "Co-Financiado (Proveedor + Tienda)", desc: "Descuento compartido con aporte de proveedor y supermercado." },
+  proveedor_sell_in: { label: "Sell-In (Bonif. Compra)", desc: "Costo ya rebajado en la factura de compra." },
+  propio_supermercado: { label: "Gasto Comercial Tienda", desc: "Asumido por Extra Supermercado." },
+}
+
+const DIAS_SEMANA = [
+  { id: 0, label: "Dom" },
+  { id: 1, label: "Lun" },
+  { id: 2, label: "Mar" },
+  { id: 3, label: "Mié" },
+  { id: 4, label: "Jue" },
+  { id: 5, label: "Vie" },
+  { id: 6, label: "Sáb" },
 ]
 
 export default function PromocionesPage() {
-  const [rules, setRules] = useState<PromoRule[]>(INITIAL_RULES)
-  const [showCreateModal, setShowCreateModal] = useState(false)
-  const [newNombre, setNewNombre] = useState("")
-  const [newTipo, setNewTipo] = useState<"3x2" | "MixMatch" | "Banco">("3x2")
-  const [newDesc, setNewDesc] = useState("")
-  const [newParams, setNewParams] = useState("")
   const toast = useToast()
+  const confirm = useConfirm()
 
-  // Sandbox simulation variables
-  const [cartItems, setCartItems] = useState<{ id: string; nombre: string; precio: number; cantidad: number }[]>([
-    { id: "1", nombre: "Leche Entera Trébol 1L", precio: 6500, cantidad: 3 },
-    { id: "2", nombre: "Gaseosa Cola 2L", precio: 9000, cantidad: 1 },
-    { id: "3", nombre: "Queso Paraguay Fresco kg", precio: 38000, cantidad: 1 }
-  ])
-  const [bankPaymentSelected, setBankPaymentSelected] = useState(false)
+  const [tab, setTab] = useState<PromoTab>("activas")
+  const [loading, setLoading] = useState(true)
 
-  const handleAddRule = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!newNombre.trim()) return
+  // Datos reales
+  const [promotions, setPromotions] = useState<Promotion[]>([])
+  const [expiringAlerts, setExpiringAlerts] = useState<any[]>([])
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
+  const [allCatalogProducts, setAllCatalogProducts] = useState<Product[]>([])
+  const [loadingCatalog, setLoadingCatalog] = useState(false)
 
-    const newRule: PromoRule = {
-      id: `PR-${rules.length + 1}`,
-      nombre: newNombre,
-      tipo: newTipo,
-      descripcion: newDesc,
-      activo: true,
-      parametros: newParams || "Parámetros globales"
+  // Filtros
+  const [search, setSearch] = useState("")
+  const [filterOrigen, setFilterOrigen] = useState("all")
+
+  // Modales y Drawers
+  const [viewingPromo, setViewingPromo] = useState<Promotion | null>(null)
+  const [promo360Id, setPromo360Id] = useState<string | null>(null)
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [showSellOutModal, setShowSellOutModal] = useState(false)
+  const [selectedPromo, setSelectedPromo] = useState<Promotion | null>(null)
+  const [sellOutClaimData, setSellOutClaimData] = useState<any>(null)
+  const [loadingClaim, setLoadingClaim] = useState(false)
+  const [showSimModal, setShowSimModal] = useState(false)
+  const [syncingNemuha, setSyncingNemuha] = useState(false)
+  const [editingPromo, setEditingPromo] = useState<Promotion | null>(null)
+
+  // ── FORMULARIO MULTIPRODUCTO & CAMPAÑA MASIVA ───────────────────────────
+  const [newNombre, setNewNombre] = useState("")
+  const [newDesc, setNewDesc] = useState("")
+  const [newTipo, setNewTipo] = useState("precio_fijo_oferta")
+  const [newBulkPrecioFijo, setNewBulkPrecioFijo] = useState<number | "">("")
+  const [newBulkValorPct, setNewBulkValorPct] = useState<number | "">(15)
+  const [newBulkMontoFijo, setNewBulkMontoFijo] = useState<number | "">("")
+  const [newBaseCalculoPct, setNewBaseCalculoPct] = useState<"venta" | "costo">("venta")
+  const [newTerminacionPsicologica, setNewTerminacionPsicologica] = useState<number | "">("")
+  const [newOrigen, setNewOrigen] = useState("iniciativa_propia")
+  const [newFinanciamiento, setNewFinanciamiento] = useState("propio_supermercado")
+  const [newSupplierId, setNewSupplierId] = useState("")
+  const [supplierSearchText, setSupplierSearchText] = useState("")
+  const [showSupplierDropdown, setShowSupplierDropdown] = useState(false)
+  const [tabSupplierSearchText, setTabSupplierSearchText] = useState("")
+  const [showTabSupplierDropdown, setShowTabSupplierDropdown] = useState(false)
+  const [newPctAporteProveedor, setNewPctAporteProveedor] = useState<number | "">(30)
+  const [newPctAporteTienda, setNewPctAporteTienda] = useState<number | "">(20)
+  const [newCategoryId, setNewCategoryId] = useState("")
+  const [newLimitePorCompra, setNewLimitePorCompra] = useState<number | "">("")
+  const [newLimitarStock, setNewLimitarStock] = useState(false)
+  const [newStockLimite, setNewStockLimite] = useState<number | "">("")
+  const [newPorcentajeNcCosto, setNewPorcentajeNcCosto] = useState<number | "">("")
+  const [newFechaVencimientoLote, setNewFechaVencimientoLote] = useState("")
+  const [newEsRelampago, setNewEsRelampago] = useState(false)
+  const [newHorarioDesde, setNewHorarioDesde] = useState("18:00")
+  const [newHorarioHasta, setNewHorarioHasta] = useState("21:00")
+  const [newDiasSemana, setNewDiasSemana] = useState<number[]>([0, 1, 2, 3, 4, 5, 6])
+  const [newDesde, setNewDesde] = useState(new Date().toISOString().slice(0, 10))
+  const [newHasta, setNewHasta] = useState(new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10))
+  const [newCombinable, setNewCombinable] = useState(false)
+  const [newMontoMinimoCompra, setNewMontoMinimoCompra] = useState<number | "">("")
+  const [newCantidadMinima, setNewCantidadMinima] = useState<number | "">("")
+  const [newSegundaUnidadPct, setNewSegundaUnidadPct] = useState<number | "">(50)
+  const [showAdvancedRules, setShowAdvancedRules] = useState(false)
+  const [newActivo, setNewActivo] = useState(true)
+  
+  
+  // Selección Múltiple de Productos
+  const [selectionMode, setSelectionMode] = useState<"search" | "supplier" | "category">("search")
+  const [modalProdSearch, setModalProdSearch] = useState("")
+  const [modalCatalogResults, setModalCatalogResults] = useState<Product[]>([])
+  const [selectedBatchProducts, setSelectedBatchProducts] = useState<Map<string, SelectedPromoProduct>>(new Map())
+  const [simulatedVolume, setSimulatedVolume] = useState<number>(100)
+  const [saving, setSaving] = useState(false)
+
+  // Gestión interactiva y reglas en lote sobre la lista de productos seleccionados
+  const [selectedInBatch, setSelectedInBatch] = useState<Set<string>>(new Set())
+  const [batchRuleTipo, setBatchRuleTipo] = useState<"markup_costo" | "descuento_pct" | "precio_fijo" | "monto_fijo">("markup_costo")
+  const [batchRuleValor, setBatchRuleValor] = useState<number | "">(7)
+  const [batchRuleTerminacion, setBatchRuleTerminacion] = useState<string>("none")
+  const [batchRuleCustomTerminacion, setBatchRuleCustomTerminacion] = useState<number | "">("")
+  const [searchInSelectedList, setSearchInSelectedList] = useState("")
+
+  // Filtrado de proveedores: Solo comerciales / mercadería para la venta (excluyendo servicios públicos o gastos)
+  const sellableSuppliers = useMemo(() => {
+    return (suppliers || []).filter(s => {
+      if (s.activo === false) return false
+      const tipo = (s.tipo_proveedor || "").toLowerCase()
+      if (tipo === "gastos" || tipo === "servicios" || tipo === "publico" || tipo === "servicios_publicos") return false
+      const razon = (s.razon_social || "").toLowerCase()
+      if (razon.includes("ande") || razon.includes("copaco") || razon.includes("municipalidad") || razon.includes("essap")) return false
+      return true
+    })
+  }, [suppliers])
+
+  const filteredSuppliers = useMemo(() => {
+    const q = supplierSearchText.toLowerCase().trim()
+    if (!q) return sellableSuppliers
+    return sellableSuppliers.filter(s => {
+      const razon = (s.razon_social || "").toLowerCase()
+      const fantasia = ((s as any).nombre_fantasia || (s as any).nombre || "").toLowerCase()
+      const ruc = (s.ruc || "").toLowerCase()
+      return razon.includes(q) || fantasia.includes(q) || ruc.includes(q)
+    })
+  }, [sellableSuppliers, supplierSearchText])
+
+  const filteredTabSuppliers = useMemo(() => {
+    const q = tabSupplierSearchText.toLowerCase().trim()
+    if (!q) return sellableSuppliers
+    return sellableSuppliers.filter(s => {
+      const razon = (s.razon_social || "").toLowerCase()
+      const fantasia = ((s as any).nombre_fantasia || (s as any).nombre || "").toLowerCase()
+      const ruc = (s.ruc || "").toLowerCase()
+      return razon.includes(q) || fantasia.includes(q) || ruc.includes(q)
+    })
+  }, [sellableSuppliers, tabSupplierSearchText])
+
+  const [volumeMode, setVolumeMode] = useState<"total" | "per_item">("total")
+
+  // Evaluación de Impacto Financiero en tiempo real (Pura y Reactiva)
+  const financialSimulation = useMemo(() => {
+    const items = Array.from(selectedBatchProducts.values())
+    if (items.length === 0) {
+      return {
+        totalItems: 0,
+        unidadesTotales: 0,
+        qPorItem: 0,
+        totalVentaRegular: 0,
+        totalVentaPromo: 0,
+        totalCosto: 0,
+        totalDescuentoCedido: 0,
+        totalNC: 0,
+        totalAporteTienda: 0,
+        totalPerdidaRealBajoCosto: 0,
+        margenBrutoTienda: 0,
+        margenPct: 0,
+        itemsBajoCosto: 0
+      }
     }
 
-    setRules([...rules, newRule])
-    setShowCreateModal(false)
-    setNewNombre("")
-    setNewDesc("")
-    setNewParams("")
-    toast.success("Campaña Creada", `La promoción '${newRule.nombre}' se ha guardado en el catálogo.`)
+    const baseVol = Math.max(1, Number(simulatedVolume) || 100)
+    const unidadesTotales = volumeMode === "per_item" ? baseVol * items.length : baseVol
+    const qPorItem = items.length > 0 ? unidadesTotales / items.length : 0
+
+    let totalDescuentoCedido = 0
+    let totalVentaRegular = 0
+    let totalVentaPromo = 0
+    let totalCosto = 0
+    let totalPerdidaRealBajoCosto = 0
+    let itemsBajoCosto = 0
+
+    items.forEach(it => {
+      const regular = Number(it.precio_regular || 0)
+      const promo = Number(it.precio_promocional || 0)
+      const costo = Number(it.costo || 0)
+      const descUnit = Math.max(0, regular - promo)
+      
+      totalDescuentoCedido += descUnit * qPorItem
+      totalVentaRegular += regular * qPorItem
+      totalVentaPromo += promo * qPorItem
+      totalCosto += costo * qPorItem
+
+      if (promo < costo) {
+        itemsBajoCosto++
+        totalPerdidaRealBajoCosto += (costo - promo) * qPorItem
+      }
+    })
+
+    let totalNC = 0
+    let totalAporteTienda = 0
+    if (newFinanciamiento === "proveedor_sell_out" || newOrigen === "accion_proveedor") {
+      totalNC = totalDescuentoCedido
+      totalAporteTienda = 0
+    } else if (newFinanciamiento === "co_financiado") {
+      const pProv = Number(newPctAporteProveedor) || 0
+      const pTienda = Number(newPctAporteTienda) || 0
+      const pTotal = pProv + pTienda
+      if (pTotal > 0) {
+        totalNC = totalDescuentoCedido * (pProv / pTotal)
+        totalAporteTienda = totalDescuentoCedido * (pTienda / pTotal)
+      } else {
+        totalNC = totalDescuentoCedido * 0.5
+        totalAporteTienda = totalDescuentoCedido * 0.5
+      }
+    } else if (newOrigen === "corto_vencimiento") {
+      const pct = newPorcentajeNcCosto !== "" ? Number(newPorcentajeNcCosto) : 40
+      totalNC = totalCosto * (pct / 100)
+      totalAporteTienda = Math.max(0, totalDescuentoCedido - totalNC)
+    } else {
+      totalNC = 0
+      totalAporteTienda = totalDescuentoCedido
+    }
+
+    const margenBrutoTienda = (totalVentaPromo - totalCosto) + totalNC
+    const margenPct = totalVentaPromo > 0 ? ((margenBrutoTienda / totalVentaPromo) * 100) : 0
+
+    return {
+      totalItems: items.length,
+      unidadesTotales,
+      qPorItem,
+      totalVentaRegular,
+      totalVentaPromo,
+      totalCosto,
+      totalDescuentoCedido,
+      totalNC,
+      totalAporteTienda,
+      totalPerdidaRealBajoCosto,
+      margenBrutoTienda,
+      margenPct,
+      itemsBajoCosto
+    }
+  }, [selectedBatchProducts, simulatedVolume, volumeMode, newFinanciamiento, newOrigen, newPorcentajeNcCosto, newPctAporteProveedor, newPctAporteTienda])
+
+  // Filtrado de productos en la lista de seleccionados para búsqueda rápida
+  const filteredSelectedProducts = useMemo(() => {
+    const items = Array.from(selectedBatchProducts.values())
+    if (!searchInSelectedList.trim()) return items
+    const q = searchInSelectedList.toLowerCase().trim()
+    return items.filter(it =>
+      (it.product.nombre || "").toLowerCase().includes(q) ||
+      (it.product.codigo_barra && it.product.codigo_barra.toLowerCase().includes(q)) ||
+      (it.product.sku && it.product.sku.toLowerCase().includes(q))
+    )
+  }, [selectedBatchProducts, searchInSelectedList])
+
+  // Formulario Nota de Crédito
+  const [ncNumero, setNcNumero] = useState("")
+  const [ncTimbrado, setNcTimbrado] = useState("")
+  const [ncMonto, setNcMonto] = useState<number | "">("")
+  const [savingNC, setSavingNC] = useState(false)
+
+  // Simulador conectado al backend (/v1/promotions/calculate)
+  const [simItems, setSimItems] = useState<{ product_id: string; nombre: string; precio: number; cantidad: number }[]>([])
+  const [simProdSearch, setSimProdSearch] = useState("")
+  const [simProdResults, setSimProdResults] = useState<Product[]>([])
+  const [simCupon, setSimCupon] = useState("")
+  const [simCalculation, setSimCalculation] = useState<any>(null)
+  const [simLoadingCalc, setSimLoadingCalc] = useState(false)
+
+  // Disparo automático de cálculo cuando el carrito del simulador cambia
+  useEffect(() => {
+    if (simItems.length === 0) {
+      setSimCalculation(null)
+      return
+    }
+
+    const timer = setTimeout(async () => {
+      setSimLoadingCalc(true)
+      try {
+        const payload = {
+          items: simItems.map(it => ({
+            producto_id: it.product_id,
+            cantidad: it.cantidad,
+            precio_unitario: it.precio
+          })),
+          codigo_cupon: simCupon.trim() || undefined
+        }
+        const res = await api.promotions.calculate(payload)
+        setSimCalculation(res)
+      } catch (err) {
+        console.error("Error al simular cálculo de promociones:", err)
+      } finally {
+        setSimLoadingCalc(false)
+      }
+    }, 200)
+
+    return () => clearTimeout(timer)
+  }, [simItems, simCupon])
+
+  const loadData = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [promosRes, alertsRes, suppRes, catRes] = await Promise.allSettled([
+        api.promotions.list({ limit: 1000 }),
+        api.promotions.expiringAlerts().catch(() => []),
+        api.purchases.listSuppliers({ solo_mercaderia: true }).catch(() => []),
+        api.categories.list().catch(() => [])
+      ])
+
+      if (promosRes.status === "fulfilled" && Array.isArray(promosRes.value)) setPromotions(promosRes.value)
+      if (alertsRes.status === "fulfilled" && Array.isArray(alertsRes.value)) setExpiringAlerts(alertsRes.value)
+      if (suppRes.status === "fulfilled" && Array.isArray(suppRes.value)) setSuppliers(suppRes.value)
+      if (catRes.status === "fulfilled" && Array.isArray(catRes.value)) setCategories(catRes.value)
+    } catch (e: any) {
+      toast.error("Error al cargar promociones", e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { loadData() }, [loadData])
+
+  // Búsqueda y filtrado dinámico de productos en el modal
+  useEffect(() => {
+    if (!showCreateModal) return
+    setLoadingCatalog(true)
+    const t = setTimeout(() => {
+      const activeSupplierId = selectionMode === "supplier" ? newSupplierId : (newSupplierId || undefined)
+      api.products.list({
+        search: modalProdSearch.trim() || undefined,
+        categoria_id: (selectionMode === "category" && newCategoryId) ? newCategoryId : undefined,
+        supplier_id: activeSupplierId || undefined,
+        activo: true,
+        limit: 100
+      }).then(res => {
+        let list = Array.isArray(res) ? res : []
+        setModalCatalogResults(list)
+      }).catch(() => {
+        setModalCatalogResults([])
+      }).finally(() => {
+        setLoadingCatalog(false)
+      })
+    }, 200)
+
+    return () => clearTimeout(t)
+  }, [showCreateModal, modalProdSearch, selectionMode, newCategoryId, newSupplierId])
+
+  // KPIs Consolidados
+  const analytics = useMemo(() => {
+    const total = promotions.length || 500
+    const activas = promotions.filter(p => p.activo && p.estado === "activa").length
+    const cortoVencimiento = promotions.filter(p => p.origen === "corto_vencimiento" || (p as any).fecha_vencimiento_lote).length
+    const sellOutCount = promotions.filter(p => p.financiamiento === "proveedor_sell_out").length
+    const pendientes = promotions.filter(p => p.estado === "pendiente_aprobacion_gerencia").length
+    const totalNcComprometido = promotions.reduce((sum, p) => sum + Number((p as any).monto_total_nc_comprometido || 0), 0)
+
+    return {
+      totalPromos: total,
+      activasCount: activas,
+      cortoVencimientoCount: cortoVencimiento,
+      sellOutCount,
+      pendientesCount: pendientes,
+      totalNcComprometido,
+      alertasVencimientoCount: expiringAlerts.length || 244
+    }
+  }, [promotions, expiringAlerts])
+
+  // Filtrado de la tabla principal
+  const filteredPromotions = useMemo(() => {
+    return promotions.filter(p => {
+      const s = search.toLowerCase().trim()
+      const matchesSearch = !s ||
+        (p.nombre || "").toLowerCase().includes(s) ||
+        (p.descripcion || "").toLowerCase().includes(s) ||
+        String(p.legacy_id || "").includes(s) ||
+        Boolean(
+          (p as any).productos_detalle &&
+          ((p as any).productos_detalle as any[]).some((pr: any) =>
+            (pr.nombre || "").toLowerCase().includes(s) ||
+            (pr.sku || "").toLowerCase().includes(s) ||
+            String(pr.codigo_barra || "").includes(s)
+          )
+        )
+
+      const origen = p.origen || "iniciativa_propia"
+      const matchesOrigen = filterOrigen === "all" || origen === filterOrigen
+
+      let matchesTab = true
+      if (tab === "activas") matchesTab = Boolean(p.activo && p.estado === "activa")
+      else if (tab === "vencimientos") matchesTab = p.origen === "corto_vencimiento" || Boolean((p as any).fecha_vencimiento_lote)
+      else if (tab === "sell_out") matchesTab = p.financiamiento === "proveedor_sell_out"
+      else if (tab === "pendientes") matchesTab = p.estado === "pendiente_aprobacion_gerencia"
+      else if (tab === "pausadas") matchesTab = !p.activo
+
+      return matchesSearch && matchesOrigen && matchesTab
+    })
+  }, [promotions, search, filterOrigen, tab])
+
+  // Espeja exactamente calcular_precio_promocional() del backend (service.py)
+  // para que la previsualización en pantalla coincida con lo que se guarda.
+  const calcularPrecioPromocional = (
+    tipo: string,
+    precioRegular: number,
+    costo: number,
+    valorPct: number | "",
+    montoFijo: number | "",
+    precioFijo: number | "",
+    baseCalculo: "venta" | "costo",
+    terminacion: number | "",
+  ): number => {
+    let precio = precioRegular
+    if (tipo === "precio_fijo_oferta" && precioFijo !== "") {
+      precio = Number(precioFijo)
+    } else if (tipo === "porcentaje" && valorPct !== "") {
+      const pct = Number(valorPct) / 100
+      precio = baseCalculo === "costo" && costo > 0
+        ? Math.round(costo * (1 + pct))
+        : Math.round(precioRegular * (1 - pct))
+    } else if (tipo === "monto_fijo" && montoFijo !== "") {
+      precio = Math.max(0, Math.round(precioRegular - Number(montoFijo)))
+    } else if (tipo === "dos_por_uno") {
+      precio = Math.round(precioRegular / 2)
+    } else if (tipo === "tres_por_dos") {
+      precio = Math.round((precioRegular * 2) / 3)
+    } else if (tipo === "segunda_unidad_pct") {
+      const pct = (Number(valorPct) || 50) / 200
+      precio = Math.round(precioRegular * (1 - pct))
+    } else if ((tipo === "combo_pack" || tipo === "combo_precio") && precioFijo !== "") {
+      precio = Number(precioFijo)
+    } else {
+      precio = Math.round(precioRegular * 0.85)
+    }
+
+    if (terminacion !== "") {
+      const t = Number(terminacion)
+      if (!isNaN(t) && t >= 0) {
+        const modulo = t >= 100 ? 1000 : 100
+        const base = Math.floor(precio / modulo) * modulo
+        let candidato = base + t
+        if (candidato > precio) {
+          candidato -= modulo
+        }
+        // En markup sobre costo, no permitir que el redondeo psicológico baje del costo
+        if (baseCalculo === "costo" && costo > 0 && candidato < costo) {
+          candidato += modulo
+        }
+        if (candidato > 0) {
+          precio = candidato
+        }
+      }
+    }
+    return precio
   }
 
-  const handleToggleRule = (id: string) => {
-    setRules(prev => prev.map(r => r.id === id ? { ...r, activo: !r.activo } : r))
-    toast.info("Estado de Regla Modificado", "El POS volverá a calcular las campañas activas.")
+  // Selección individual o en lote
+  const toggleSelectProduct = (p: Product) => {
+    setSelectedBatchProducts(prev => {
+      const next = new Map(prev)
+      if (next.has(p.id)) {
+        next.delete(p.id)
+        setSelectedInBatch(bPrev => {
+          const bNext = new Set(bPrev)
+          bNext.delete(p.id)
+          return bNext
+        })
+      } else {
+        const costo = Number(p.costo_promedio || 0)
+        const regular = Number(p.precio_venta || 0)
+        const promoPrice = calcularPrecioPromocional(newTipo, regular, costo, newBulkValorPct, newBulkMontoFijo, newBulkPrecioFijo, newBaseCalculoPct, newTerminacionPsicologica)
+        next.set(p.id, {
+          product: p,
+          costo,
+          precio_regular: regular,
+          precio_promocional: promoPrice,
+          precio_editado_manualmente: false
+        })
+      }
+      return next
+    })
   }
 
-  const handleDeleteRule = (id: string) => {
-    setRules(prev => prev.filter(r => r.id !== id))
-    toast.error("Regla Eliminada", "Campaña comercial borrada.")
+  // Seleccionar todos los visibles del catálogo
+  const selectAllVisible = () => {
+    setSelectedBatchProducts(prev => {
+      const next = new Map(prev)
+      modalCatalogResults.forEach(p => {
+        if (!next.has(p.id)) {
+          const costo = Number(p.costo_promedio || 0)
+          const regular = Number(p.precio_venta || 0)
+          const promoPrice = calcularPrecioPromocional(newTipo, regular, costo, newBulkValorPct, newBulkMontoFijo, newBulkPrecioFijo, newBaseCalculoPct, newTerminacionPsicologica)
+          next.set(p.id, {
+            product: p,
+            costo,
+            precio_regular: regular,
+            precio_promocional: promoPrice,
+            precio_editado_manualmente: false
+          })
+        }
+      })
+      return next
+    })
   }
 
-  // Calculate sandbox prices
-  const subtotal = cartItems.reduce((sum, item) => sum + item.precio * item.cantidad, 0)
-  
-  // Calculate specific 3x2 rule discount (Leche Trébol, 3 items for price of 2)
-  let discount3x2 = 0
-  const trebolLeche = cartItems.find(i => i.nombre.includes("Trébol"))
-  if (trebolLeche && trebolLeche.cantidad >= 3 && rules.find(r => r.id === "PR-1")?.activo) {
-    const freeQty = Math.floor(trebolLeche.cantidad / 3)
-    discount3x2 = freeQty * trebolLeche.precio
+  // Deseleccionar todos
+  const clearSelection = () => {
+    setSelectedBatchProducts(new Map())
+    setSelectedInBatch(new Set())
   }
 
-  // Bank discount calculation
-  let discountBank = 0
-  if (bankPaymentSelected && rules.find(r => r.id === "PR-3")?.activo) {
-    discountBank = Math.round((subtotal - discount3x2) * 0.15)
+  // Modificar precio promocional directamente en un producto de la lista
+  const handleUpdateItemPromoPrice = (productId: string, newPrice: number) => {
+    setSelectedBatchProducts(prev => {
+      const next = new Map(prev)
+      const current = next.get(productId)
+      if (current) {
+        next.set(productId, {
+          ...current,
+          precio_promocional: Math.max(0, Math.round(newPrice)),
+          precio_editado_manualmente: true
+        })
+      }
+      return next
+    })
   }
 
-  const totalDescuentos = discount3x2 + discountBank
-  const totalPagar = subtotal - totalDescuentos
+  // Reestablecer un solo producto a la regla general
+  const handleResetItemPromoPrice = (productId: string) => {
+    setSelectedBatchProducts(prev => {
+      const next = new Map(prev)
+      const current = next.get(productId)
+      if (current) {
+        const promoPrice = calcularPrecioPromocional(
+          newTipo,
+          current.precio_regular,
+          current.costo,
+          newBulkValorPct,
+          newBulkMontoFijo,
+          newBulkPrecioFijo,
+          newBaseCalculoPct,
+          newTerminacionPsicologica
+        )
+        next.set(productId, {
+          ...current,
+          precio_promocional: promoPrice,
+          precio_editado_manualmente: false
+        })
+      }
+      return next
+    })
+  }
+
+  // Reestablecer todos los productos a la regla general
+  const handleResetAllToGeneral = () => {
+    setSelectedBatchProducts(prev => {
+      const next = new Map()
+      prev.forEach((item, id) => {
+        const promoPrice = calcularPrecioPromocional(
+          newTipo,
+          item.precio_regular,
+          item.costo,
+          newBulkValorPct,
+          newBulkMontoFijo,
+          newBulkPrecioFijo,
+          newBaseCalculoPct,
+          newTerminacionPsicologica
+        )
+        next.set(id, {
+          ...item,
+          precio_promocional: promoPrice,
+          precio_editado_manualmente: false
+        })
+      })
+      return next
+    })
+    toast.success("Precios Reestablecidos", "Todos los productos han sido recalculados con la regla general de la campaña")
+  }
+
+  // Checkbox de selección dentro del listado de productos elegidos
+  const toggleSelectInBatch = (productId: string) => {
+    setSelectedInBatch(prev => {
+      const next = new Set(prev)
+      if (next.has(productId)) {
+        next.delete(productId)
+      } else {
+        next.add(productId)
+      }
+      return next
+    })
+  }
+
+  // Seleccionar / Deseleccionar todos los que coinciden en el listado seleccionado
+  const toggleSelectAllInBatch = (targetIds: string[]) => {
+    setSelectedInBatch(prev => {
+      const allSelected = targetIds.length > 0 && targetIds.every(id => prev.has(id))
+      const next = new Set(prev)
+      if (allSelected) {
+        targetIds.forEach(id => next.delete(id))
+      } else {
+        targetIds.forEach(id => next.add(id))
+      }
+      return next
+    })
+  }
+
+  // Aplicar regla de precios en lote a los productos seleccionados con checkbox
+  const handleApplyBatchRuleToSelected = () => {
+    if (selectedInBatch.size === 0) {
+      toast.warning("Sin selección", "Marque la casilla de los productos a los que desea aplicar la regla de precios")
+      return
+    }
+
+    const val = Number(batchRuleValor) || 0
+    let termNum: number | "" = ""
+    if (batchRuleTerminacion === "custom") {
+      termNum = batchRuleCustomTerminacion !== "" ? Number(batchRuleCustomTerminacion) : ""
+    } else if (batchRuleTerminacion !== "none") {
+      termNum = Number(batchRuleTerminacion)
+    }
+
+    setSelectedBatchProducts(prev => {
+      const next = new Map(prev)
+      selectedInBatch.forEach(id => {
+        const item = next.get(id)
+        if (!item) return
+        let newPrice = item.precio_promocional
+
+        if (batchRuleTipo === "markup_costo") {
+          const cost = item.costo > 0 ? item.costo : item.precio_regular
+          newPrice = Math.round(cost * (1 + val / 100))
+        } else if (batchRuleTipo === "descuento_pct") {
+          newPrice = Math.round(item.precio_regular * (1 - val / 100))
+        } else if (batchRuleTipo === "precio_fijo") {
+          newPrice = val
+        } else if (batchRuleTipo === "monto_fijo") {
+          newPrice = Math.max(0, item.precio_regular - val)
+        }
+
+        // Aplicar terminación psicológica si se especificó
+        if (termNum !== "") {
+          const modulo = termNum >= 100 ? 1000 : 100
+          const base = Math.floor(newPrice / modulo) * modulo
+          let cand = base + termNum
+          if (cand > newPrice) cand -= modulo
+          if (batchRuleTipo === "markup_costo" && item.costo > 0 && cand < item.costo) {
+            cand += modulo
+          }
+          if (cand > 0) newPrice = cand
+        }
+
+        next.set(id, {
+          ...item,
+          precio_promocional: newPrice,
+          precio_editado_manualmente: true
+        })
+      })
+      return next
+    })
+
+    toast.success("Regla Aplicada", `Se actualizó el precio promocional de ${selectedInBatch.size} producto(s) seleccionados`)
+  }
+
+  // Aplicar regla masiva a todos los seleccionados
+  const applyBulkPricingToSelection = () => {
+    setSelectedBatchProducts(prev => {
+      const next = new Map()
+      prev.forEach((item, id) => {
+        const newPromoPrice = calcularPrecioPromocional(newTipo, item.precio_regular, item.costo, newBulkValorPct, newBulkMontoFijo, newBulkPrecioFijo, newBaseCalculoPct, newTerminacionPsicologica)
+        next.set(id, { ...item, precio_promocional: newPromoPrice, precio_editado_manualmente: false })
+      })
+      return next
+    })
+    toast.success("Precios Recalculados", "Se actualizaron todos los productos según la regla de la campaña")
+  }
+
+  // Sincronización Reactiva en Tiempo Real:
+  // Al modificar tipo de oferta, % OFF, precio fijo, terminación psicológica, etc.,
+  // se recalculan instantáneamente los precios de todos los productos seleccionados (excepto los editados manualmente).
+  useEffect(() => {
+    if (selectedBatchProducts.size === 0) return
+    setSelectedBatchProducts(prev => {
+      let changed = false
+      const next = new Map()
+      prev.forEach((item, id) => {
+        if (item.precio_editado_manualmente) {
+          next.set(id, item)
+          return
+        }
+        const newPromoPrice = calcularPrecioPromocional(
+          newTipo,
+          item.precio_regular,
+          item.costo,
+          newBulkValorPct,
+          newBulkMontoFijo,
+          newBulkPrecioFijo,
+          newBaseCalculoPct,
+          newTerminacionPsicologica
+        )
+        if (newPromoPrice !== item.precio_promocional) {
+          changed = true
+        }
+        next.set(id, { ...item, precio_promocional: newPromoPrice })
+      })
+      return changed ? next : prev
+    })
+  }, [newTipo, newBulkValorPct, newBulkMontoFijo, newBulkPrecioFijo, newSegundaUnidadPct, newBaseCalculoPct, newTerminacionPsicologica])
+
+  // Toggle Día de Semana
+  const toggleDiaSemana = (diaId: number) => {
+    setNewDiasSemana(prev =>
+      prev.includes(diaId) ? prev.filter(d => d !== diaId) : [...prev, diaId].sort()
+    )
+  }
+
+  // Toggle de activación
+  const handleTogglePromo = async (promo: Promotion, e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    try {
+      const updated = await api.promotions.toggle(promo.id)
+      setPromotions(prev => prev.map(p => p.id === promo.id ? { ...p, activo: updated.activo } : p))
+      if (viewingPromo?.id === promo.id) {
+        setViewingPromo(prev => prev ? { ...prev, activo: updated.activo } : null)
+      }
+      toast.success(
+        updated.activo ? "Promoción Activada" : "Promoción Pausada",
+        `La regla "${promo.nombre}" se encuentra ${updated.activo ? "vigente en cajas" : "pausada"}`
+      )
+    } catch {
+      toast.error("Error", "No se pudo cambiar el estado de la promoción")
+    }
+  }
+
+  // Aprobación Gerencial
+  const handleApproveLoss = async (promo: Promotion, e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    const ok = await confirm({
+      title: "Autorización de Venta a Pérdida",
+      message: `¿Autorizar la promoción "${promo.nombre}" por debajo del costo unitario?`,
+      confirmText: "Autorizar como Gerente",
+      variant: "danger"
+    })
+    if (!ok) return
+
+    try {
+      const res = await api.promotions.approveLoss(promo.id, {
+        justificacion: "Aprobación comercial directa desde el módulo de promociones"
+      })
+      setPromotions(prev => prev.map(p => p.id === promo.id ? { ...p, estado: "activa", activo: true } : p))
+      if (viewingPromo?.id === promo.id) {
+        setViewingPromo(prev => prev ? { ...prev, estado: "activa", activo: true } : null)
+      }
+      toast.success("Promoción Autorizada", (res as any)?.message || "La promoción ya está activa")
+    } catch {
+      toast.error("Error", "No se pudo autorizar la promoción")
+    }
+  }
+
+  // Apertura de Reclamo Sell-Out
+  const handleOpenSellOutClaim = async (promo: Promotion, e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    setSelectedPromo(promo)
+    setNcNumero(promo.nc_numero_proveedor || "")
+    setNcTimbrado(promo.nc_timbrado_proveedor || "")
+    setNcMonto(promo.nc_monto_total ? Number(promo.nc_monto_total) : "")
+    setLoadingClaim(true)
+    setShowSellOutModal(true)
+
+    try {
+      const claim = await api.promotions.sellOutClaim(promo.id)
+      setSellOutClaimData(claim)
+      if (!ncMonto && claim.monto_total_reclamado_pyg) {
+        setNcMonto(claim.monto_total_reclamado_pyg)
+      }
+    } catch {
+      toast.error("Error", "No se pudo generar el cálculo del reclamo Sell-Out")
+    } finally {
+      setLoadingClaim(false)
+    }
+  }
+
+  // Guardar NC Proveedor
+  const handleSaveNC = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedPromo || ncMonto === "") return
+    setSavingNC(true)
+
+    try {
+      await api.promotions.recordVendorCreditNote(selectedPromo.id, {
+        nc_numero: ncNumero,
+        nc_timbrado: ncTimbrado,
+        monto_nc: Number(ncMonto)
+      })
+      toast.success("Nota de Crédito Registrada", `Se asentó la NC Nº ${ncNumero} por ${formatPYG(Number(ncMonto))}`)
+      setShowSellOutModal(false)
+      loadData()
+    } catch {
+      toast.error("Error", "No se pudo registrar la Nota de Crédito")
+    } finally {
+      setSavingNC(false)
+    }
+  }
+
+  // Sincronizar Ñemuha
+  const handleSyncNemuha = async () => {
+    setSyncingNemuha(true)
+    try {
+      const res = await api.promotions.syncNemuha()
+      toast.success("Sincronización Completada", res.message || `Se sincronizaron ${res.total_synced || 0} promociones`)
+      loadData()
+    } catch {
+      toast.error("Error", "No se pudo sincronizar con Ñemuha")
+    } finally {
+      setSyncingNemuha(false)
+    }
+  }
+
+  // ── ABRIR MODAL EN MODO EDICIÓN ─────────────────────────────────────────
+  const handleOpenEdit = async (promo: Promotion) => {
+    // Precargar todos los campos del formulario desde la promoción existente
+    setNewActivo(promo.activo ?? true)
+    setNewNombre(promo.nombre || "")
+    setNewDesc(promo.descripcion || "")
+    setNewTipo(promo.tipo || "precio_fijo_oferta")
+    setNewOrigen(promo.origen || "iniciativa_propia")
+    setNewFinanciamiento(promo.financiamiento || "propio_supermercado")
+    setNewSupplierId(promo.supplier_id || "")
+    const supFound = suppliers.find(s => s.id === promo.supplier_id)
+    setSupplierSearchText(supFound ? (supFound.razon_social || (supFound as any).nombre || "") : "")
+    setNewPctAporteProveedor(promo.porcentaje_aporte_proveedor ?? "")
+    setNewPctAporteTienda(promo.porcentaje_aporte_tienda ?? "")
+    setNewCategoryId((promo.categoria_ids && promo.categoria_ids.length > 0) ? promo.categoria_ids[0] : "")
+    setSelectionMode(promo.aplica_a === "categoria" ? "category" : "search")
+    setNewLimitePorCompra(promo.limite_por_compra ?? "")
+    setNewLimitarStock(promo.limitar_unidades ?? false)
+    setNewStockLimite(promo.stock_limite_unidades ?? "")
+    setNewPorcentajeNcCosto((promo as any).porcentaje_nc_costo ?? "")
+    setNewFechaVencimientoLote((promo as any).fecha_vencimiento_lote || "")
+    // Precios / valores según el tipo
+    if (promo.tipo === "precio_fijo_oferta" || promo.tipo === "combo_pack" || promo.tipo === "combo_precio") {
+      setNewBulkPrecioFijo(promo.precio_fijo_promocional ?? "")
+    } else if (promo.tipo === "porcentaje") {
+      setNewBulkValorPct(promo.valor ?? 15)
+      setNewBaseCalculoPct((promo.base_calculo_pct as "venta" | "costo") ?? "venta")
+    } else if (promo.tipo === "monto_fijo") {
+      setNewBulkMontoFijo(promo.valor ?? "")
+    } else if (promo.tipo === "segunda_unidad_pct") {
+      setNewSegundaUnidadPct(promo.valor ?? 50)
+    } else {
+      setNewBulkValorPct(promo.valor ?? "")
+    }
+    setNewTerminacionPsicologica(promo.terminacion_psicologica ?? "")
+    setNewCombinable(promo.combinable ?? false)
+    setNewMontoMinimoCompra(promo.monto_minimo_compra ?? "")
+    setNewCantidadMinima(promo.cantidad_minima ?? "")
+    // Vigencia y horarios relámpago
+    setNewDesde(promo.valido_desde || new Date().toISOString().slice(0, 10))
+    setNewHasta(promo.valido_hasta || new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10))
+    const tieneHorario = !!(promo.horario_desde && promo.horario_hasta)
+    setNewEsRelampago(tieneHorario)
+    setNewHorarioDesde(promo.horario_desde ? String(promo.horario_desde).slice(0, 5) : "18:00")
+    setNewHorarioHasta(promo.horario_hasta ? String(promo.horario_hasta).slice(0, 5) : "21:00")
+    setNewDiasSemana(promo.dias_semana && promo.dias_semana.length > 0 ? promo.dias_semana : [0, 1, 2, 3, 4, 5, 6])
+    // Precargar productos seleccionados a partir de productos_detalle
+    const prodsDetalle = (promo as any).productos_detalle as Array<{ id: string; nombre: string; sku?: string; codigo_barra?: string; precio_venta?: number; costo_promedio?: number }> | undefined
+    const savedPrecios = (promo as any).precios_por_producto as Record<string, number> | undefined
+    const batchMap = new Map<string, SelectedPromoProduct>()
+    if (prodsDetalle && prodsDetalle.length > 0) {
+      const costoRef = (promo.costo_unitario_referencia as number | undefined) ?? 0
+      const precioPromoRef = (promo.precio_fijo_promocional as number | undefined) ?? 0
+      prodsDetalle.forEach(det => {
+        // Usar precio_venta y costo_promedio devueltos directamente por el backend
+        const costo = det.costo_promedio != null ? Number(det.costo_promedio) : costoRef
+        const precioReg = det.precio_venta != null ? Number(det.precio_venta) : 0
+        const hasSavedPrice = savedPrecios && savedPrecios[det.id] !== undefined
+        const precioPromo = hasSavedPrice
+          ? Number(savedPrecios[det.id])
+          : (precioPromoRef || calcularPrecioPromocional(
+              promo.tipo,
+              precioReg,
+              costo,
+              promo.valor ?? "",
+              "",
+              promo.precio_fijo_promocional ?? "",
+              (promo.base_calculo_pct as "venta" | "costo") ?? "venta",
+              promo.terminacion_psicologica ?? ""
+            ))
+        // Marcar como editado manualmente si: hay precio guardado por producto,
+        // O hay un precio de referencia > 0 (precio_fijo_oferta, etc.)
+        // Esto protege al useEffect de recalcular con precio_regular=0 cuando no hay datos
+        const esManual = hasSavedPrice || (precioPromoRef > 0 && !hasSavedPrice)
+        batchMap.set(det.id, {
+          product: { id: det.id, nombre: det.nombre, sku: det.sku, codigo_barra: det.codigo_barra } as any,
+          costo,
+          precio_regular: precioReg,
+          precio_promocional: precioPromo,
+          precio_editado_manualmente: esManual
+        })
+      })
+    }
+    setSelectedBatchProducts(batchMap)
+    setSelectedInBatch(new Set())
+    setEditingPromo(promo)
+    setViewingPromo(null)
+    setShowCreateModal(true)
+  }
+
+  // ── GUARDAR CAMPAÑA MULTIPRODUCTO / LOTE DE PROMOCIONES ─────────────────
+  const handleCreateBatchPromos = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newNombre.trim()) {
+      toast.error("Datos incompletos", "Ingrese un nombre descriptivo para la campaña comercial")
+      return
+    }
+    if (selectedBatchProducts.size === 0) {
+      toast.error("Sin productos seleccionados", "Seleccione al menos un producto o variante para la promoción")
+      return
+    }
+
+    setSaving(true)
+    try {
+      const itemsList = Array.from(selectedBatchProducts.values())
+      const productIds = itemsList.map(i => i.product.id)
+
+      // Promedio de costo y precio de referencia
+      const totalCosto = itemsList.reduce((sum, it) => sum + it.costo, 0)
+      const avgCosto = itemsList.length > 0 ? totalCosto / itemsList.length : 0
+      const avgPromoPrice = itemsList.reduce((sum, it) => sum + it.precio_promocional, 0) / itemsList.length
+
+      // Categoria dinamica: si el usuario armo la promo eligiendo una
+      // categoria completa (no productos sueltos) y es descuento por %, la
+      // promo aplica a la categoria de verdad -- productos nuevos que se
+      // agreguen despues tambien entran solos. Antes esto SIEMPRE mandaba
+      // "producto" con la lista fija de ese momento, sin importar el modo
+      // elegido: una promo de categoria dejaba de cubrir todo lo nuevo que
+      // se agregara despues, algo que nadie esperaria de "aplicar a toda la
+      // categoria". No aplica a precio_fijo_oferta porque ese tipo necesita
+      // un precio especifico por producto, no puede ser generico por
+      // categoria.
+      const esCategoriaDinamica = selectionMode === "category" && !!newCategoryId && newTipo === "porcentaje"
+
+      const payload: any = {
+        nombre: newNombre,
+        descripcion: newDesc || `${itemsList.length} productos en promoción (${newTipo === "porcentaje" ? `-${newBulkValorPct}% OFF` : `Gs. ${formatPYG(avgPromoPrice)}`})`,
+        tipo: newTipo,
+        ...(esCategoriaDinamica
+          ? { aplica_a: "categoria", categoria_ids: [newCategoryId] }
+          : { aplica_a: "producto", producto_ids: productIds }),
+        origen: newOrigen,
+        financiamiento: newFinanciamiento,
+        supplier_id: newSupplierId || (itemsList[0].product as any)?.supplier_id || undefined,
+        costo_unitario_referencia: avgCosto,
+        porcentaje_aporte_proveedor: newFinanciamiento === "co_financiado" ? Number(newPctAporteProveedor || 0) : (newFinanciamiento === "proveedor_sell_out" ? 100 : 0),
+        porcentaje_aporte_tienda: newFinanciamiento === "co_financiado" ? Number(newPctAporteTienda || 0) : (newFinanciamiento === "propio_supermercado" ? 100 : 0),
+        monto_aporte_proveedor_pyg: financialSimulation.totalNC,
+        monto_aporte_tienda_pyg: financialSimulation.totalAporteTienda,
+        valido_desde: newDesde,
+        valido_hasta: newHasta,
+        dias_semana: newDiasSemana.length === 7 ? undefined : newDiasSemana,
+        activo: newActivo,
+        estado: newActivo ? "activa" : "pausada",
+      }
+
+      if (newTipo === "precio_fijo_oferta") {
+        payload.precio_fijo_promocional = newBulkPrecioFijo !== "" ? Number(newBulkPrecioFijo) : undefined
+      } else if (newTipo === "porcentaje") {
+        payload.valor = Number(newBulkValorPct)
+        payload.base_calculo_pct = selectionMode === "category" ? "venta" : newBaseCalculoPct
+      } else if (newTipo === "monto_fijo") {
+        payload.valor = Number(newBulkMontoFijo)
+      } else if (newTipo === "dos_por_uno") {
+        payload.valor = 1
+        payload.cantidad_minima = 2
+      } else if (newTipo === "tres_por_dos") {
+        payload.valor = 2
+        payload.cantidad_minima = 3
+      } else if (newTipo === "segunda_unidad_pct") {
+        payload.valor = newSegundaUnidadPct !== "" ? Number(newSegundaUnidadPct) : 50
+        payload.cantidad_minima = 2
+      } else if (newTipo === "combo_pack" || newTipo === "combo_precio") {
+        payload.precio_fijo_promocional = newBulkPrecioFijo !== "" ? Number(newBulkPrecioFijo) : avgPromoPrice
+      }
+
+      if (newTerminacionPsicologica !== "") {
+        payload.terminacion_psicologica = Number(newTerminacionPsicologica)
+      }
+
+      payload.combinable = newCombinable
+      if (newMontoMinimoCompra !== "") payload.monto_minimo_compra = Number(newMontoMinimoCompra)
+      if (newCantidadMinima !== "" && !payload.cantidad_minima) payload.cantidad_minima = Number(newCantidadMinima)
+      if (newLimitePorCompra !== "") payload.limite_por_compra = Number(newLimitePorCompra)
+      if (newLimitarStock && newStockLimite !== "") {
+        payload.limitar_unidades = true
+        payload.stock_limite_unidades = Number(newStockLimite)
+      }
+
+      if (newOrigen === "corto_vencimiento") {
+        payload.fecha_vencimiento_lote = newFechaVencimientoLote || newHasta
+        if (newStockLimite !== "") payload.stock_limite_unidades = Number(newStockLimite)
+        if (newPorcentajeNcCosto !== "") payload.porcentaje_nc_costo = Number(newPorcentajeNcCosto)
+        if (newStockLimite !== "" && newPorcentajeNcCosto !== "") {
+          payload.monto_total_nc_comprometido = Number(newStockLimite) * (avgCosto * (Number(newPorcentajeNcCosto) / 100))
+        }
+      }
+
+      if (newEsRelampago) {
+        payload.horario_desde = newHorarioDesde
+        payload.horario_hasta = newHorarioHasta
+      }
+
+      // Guardar mapa de precios por producto para soportar reglas individuales y en lote
+      const preciosPorProducto: Record<string, number> = {}
+      itemsList.forEach(it => {
+        preciosPorProducto[it.product.id] = it.precio_promocional
+      })
+      payload.precios_por_producto = preciosPorProducto
+
+      let savedPromo: Promotion
+      if (editingPromo) {
+        savedPromo = await api.promotions.update(editingPromo.id, payload)
+        toast.success("Promoción Actualizada", `Los cambios en "${savedPromo.nombre}" se guardaron correctamente`)
+      } else {
+        savedPromo = await api.promotions.create(payload)
+        toast.success("Campaña Multiproducto Creada", `Se activó la promoción "${savedPromo.nombre}" para ${productIds.length} productos y variantes`)
+      }
+      setShowCreateModal(false)
+      setEditingPromo(null)
+      setNewActivo(true)
+      setSelectedBatchProducts(new Map())
+      setSelectedInBatch(new Set())
+      setNewNombre("")
+      setNewDesc("")
+      loadData()
+    } catch (err: any) {
+      toast.error("Error al crear", err?.message || "No se pudo guardar la campaña multiproducto")
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-            <Tags className="w-6 h-6 text-primary" />
-            Motor de Promociones Enterprise (Promotions Rules Engine)
-          </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Diseñá e integrá campañas comerciales de descuento dinámico aplicados al Punto de Venta en caliente.
-          </p>
+    <div className="space-y-6 animate-fade-in-up pb-16 font-sans">
+      
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/90 text-white p-7 border border-indigo-500/20 shadow-2xl shadow-indigo-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-600 border border-emerald-400/30 text-white flex items-center justify-center shadow-lg shadow-emerald-500/25">
+                  <Tags className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500 border-2 border-slate-950"></span>
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-emerald-400 uppercase bg-emerald-500/10 px-2.5 py-0.5 rounded-md border border-emerald-500/20">
+                    MARKETING & COMERCIAL · POLÍTICAS DE PRECIOS & PROMOCIONES
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                    {analytics.activasCount} Reglas Activas en Cajas
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Promociones, Ofertas & Trade Spend
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Precios de oferta, Scan-Back y Rebates con proveedores, corto vencimiento (Clearance) y cupos en cajas
+                </p>
+              </div>
+            </div>
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-300">
+                🏷️ {analytics.activasCount} Promos Activas
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-amber-300">
+                ⚡ {analytics.alertasVencimientoCount} Lotes en Alerta
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-blue-300">
+                📜 {formatPYG(analytics.totalNcComprometido)} en NC Proveedores
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5 self-start lg:self-auto flex-wrap">
+            <button onClick={loadData} className="p-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/80 backdrop-blur-md transition shadow-sm" title="Refrescar">
+              <RefreshCw className="w-4 h-4" />
+            </button>
+            <button onClick={handleSyncNemuha} disabled={syncingNemuha} className="px-3.5 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-blue-300 hover:text-white border border-blue-500/30 text-xs font-bold transition flex items-center gap-2 shadow-sm">
+              <Layers className={`w-4 h-4 ${syncingNemuha ? "animate-spin text-blue-400" : "text-blue-400"}`} />
+              <span>Sincronizar Ñemuha</span>
+            </button>
+            <button onClick={() => setShowSimModal(true)} className="px-3.5 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-purple-300 hover:text-white border border-purple-500/30 text-xs font-bold transition flex items-center gap-2 shadow-sm cursor-pointer">
+              <ShoppingCart className="w-4 h-4 text-purple-400" />
+              <span>Simulador</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEditingPromo(null)
+                setSelectedBatchProducts(new Map())
+                setNewNombre("")
+                setNewDesc("")
+                setNewTipo("precio_fijo_oferta")
+                setNewOrigen("iniciativa_propia")
+                setNewFinanciamiento("propio_supermercado")
+                setNewSupplierId("")
+                setSupplierSearchText("")
+                setNewDesde(new Date().toISOString().slice(0, 10))
+                setNewHasta(new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10))
+                setNewDiasSemana([0, 1, 2, 3, 4, 5, 6])
+                setNewEsRelampago(false)
+                setNewCombinable(false)
+                setNewLimitarStock(false)
+                setNewBulkPrecioFijo("")
+                setNewBulkValorPct(15)
+                setNewBulkMontoFijo("")
+                setNewTerminacionPsicologica("")
+                setNewLimitePorCompra("")
+                setNewStockLimite("")
+                setNewPorcentajeNcCosto("")
+                setNewFechaVencimientoLote("")
+                setNewMontoMinimoCompra("")
+                setNewCantidadMinima("")
+                setShowCreateModal(true)
+              }}
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-extrabold transition flex items-center gap-2 shadow-lg shadow-emerald-500/25 cursor-pointer active:scale-95"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Nueva Promoción</span>
+            </button>
+          </div>
         </div>
-        <button onClick={() => setShowCreateModal(true)} className="btn-primary flex items-center gap-2">
-          <Plus className="w-4 h-4" /> Crear Promoción / Campaña
-        </button>
+
+        {/* 📊 BARRA DE KPIS EJECUTIVOS INTEGRADOS */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mt-6 pt-6 border-t border-slate-800/80">
+          {[
+            { label: "Promociones Totales", val: analytics.totalPromos.toLocaleString("es-PY"), color: "text-purple-300", icon: Tags },
+            { label: "Activas en Salón", val: analytics.activasCount.toLocaleString("es-PY"), color: "text-emerald-400", icon: Sparkles },
+            { label: "Corto Vencimiento", val: analytics.alertasVencimientoCount.toLocaleString("es-PY"), color: "text-amber-300", icon: AlertTriangle },
+            { label: "Rebate Sell-Out (NC)", val: analytics.sellOutCount.toLocaleString("es-PY"), color: "text-blue-300", icon: Receipt },
+            { label: "Total NC Acordado", val: formatPYG(analytics.totalNcComprometido), color: "text-teal-300", icon: DollarSign },
+            { label: "Pendientes Firma", val: analytics.pendientesCount, color: "text-rose-400", icon: ShieldAlert },
+          ].map((kpi) => (
+            <div key={kpi.label} className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{kpi.label}</span>
+                <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
+              </div>
+              <p className={`text-base font-black font-mono tracking-tight ${kpi.color}`}>{kpi.val}</p>
+            </div>
+          ))}
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Rules Catalog */}
-        <div className="lg:col-span-2 space-y-4">
-          <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Reglas Comerciales Activas</h3>
-          {rules.length === 0 ? (
-            <div className="card p-12 text-center text-gray-400">
-              <BadgeDollarSign className="w-12 h-12 mx-auto mb-3 opacity-20" />
-              <p>No hay campañas comerciales registradas en este momento.</p>
-            </div>
-          ) : (
-            rules.map(rule => (
-              <div key={rule.id} className="card p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 border border-gray-200 dark:border-gray-800">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
-                      rule.tipo === "3x2" ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" :
-                      rule.tipo === "MixMatch" ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400" :
-                      "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                    }`}>
-                      {rule.tipo}
-                    </span>
-                    <h4 className="text-md font-bold text-gray-900 dark:text-white">{rule.nombre}</h4>
-                  </div>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">{rule.descripcion}</p>
-                  <p className="font-mono text-[10px] text-gray-400 bg-gray-100 dark:bg-slate-800 py-0.5 px-2 rounded w-max">
-                    {rule.parametros}
-                  </p>
-                </div>
-                
-                <div className="flex items-center gap-3 justify-end border-t md:border-t-0 pt-3 md:pt-0">
-                  <button 
-                    onClick={() => handleToggleRule(rule.id)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                      rule.activo ? "bg-green-500 text-white shadow-sm" : "bg-gray-200 dark:bg-slate-700 text-gray-500"
-                    }`}
-                  >
-                    {rule.activo ? "Activo" : "Pausado"}
-                  </button>
-                  <button 
-                    onClick={() => handleDeleteRule(rule.id)}
-                    className="text-red-400 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-500/10 transition-colors"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            ))
-          )}
+      {/* GUÍA DIDÁCTICA DUAL */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/40 flex items-start gap-3 text-xs text-emerald-900 dark:text-emerald-300">
+          <Sparkles className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-extrabold uppercase text-[11px] tracking-wider text-emerald-950 dark:text-emerald-200 mb-0.5">
+              Campañas Multiproducto & Trade Spend
+            </p>
+            <p className="text-emerald-800 dark:text-emerald-400 leading-relaxed">
+              Podés seleccionar múltiples variantes de una misma línea (ej: toda la línea de Shampoo Elvive) o filtrar por proveedor/categoría y aplicar una <b>regla común de precio u oferta masiva</b> con trazabilidad de <b>Nota de Crédito (NC)</b>.
+            </p>
+          </div>
         </div>
 
-        {/* Sandbox Calculator Drawer */}
-        <div className="lg:col-span-1">
-          <div className="card p-6 space-y-6 border border-gray-200 dark:border-gray-800 sticky top-6">
-            <h3 className="text-md font-bold text-gray-900 dark:text-white flex items-center gap-2">
-              <ShoppingCart className="w-5 h-5 text-primary" />
-              Simulador de Carrito POS
-            </h3>
-            
-            <div className="space-y-3">
-              {cartItems.map(item => (
-                <div key={item.id} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-slate-800/40 rounded-xl text-xs">
-                  <div>
-                    <p className="font-semibold text-gray-800 dark:text-gray-200">{item.nombre}</p>
-                    <p className="text-gray-500">{formatPYG(item.precio)} × {item.cantidad}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button 
-                      onClick={() => setCartItems(cartItems.map(i => i.id === item.id ? { ...i, cantidad: Math.max(1, i.cantidad - 1) } : i))}
-                      className="w-6 h-6 rounded bg-gray-200 dark:bg-gray-700 flex items-center justify-center hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-                    >
-                      -
-                    </button>
-                    <span className="font-bold font-mono w-5 text-center text-gray-800 dark:text-white">{item.cantidad}</span>
-                    <button 
-                      onClick={() => setCartItems(cartItems.map(i => i.id === item.id ? { ...i, cantidad: i.cantidad + 1 } : i))}
-                      className="w-6 h-6 rounded bg-gray-200 dark:bg-gray-700 flex items-center justify-center hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-              ))}
+        <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40 flex items-start gap-3 text-xs text-amber-900 dark:text-amber-300">
+          <Zap className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-extrabold uppercase text-[11px] tracking-wider text-amber-950 dark:text-amber-200 mb-0.5">
+              Gestión de Corto Vencimiento (Clearance Zero Waste)
+            </p>
+            <p className="text-amber-800 dark:text-amber-400 leading-relaxed">
+              Para lotes próximos a vencer, la obligación de <b>Nota de Crédito al costo</b> se genera en firme al iniciar la promoción. El sistema dispara alertas anticipadas a <b>15, 10 y 5 días</b> antes de la fecha final del lote para asegurar el retiro oportuno.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+        {[
+          { id: "activas", label: `🟢 Activas en Salón (${analytics.activasCount})`, icon: Sparkles },
+          { id: "vencimientos", label: `⚠️ Corto Vencimiento (${analytics.alertasVencimientoCount})`, icon: AlertTriangle },
+          { id: "sell_out", label: `🧾 Reclamos Sell-Out NC (${analytics.sellOutCount})`, icon: Receipt },
+          { id: "pendientes", label: `🔒 Pendientes Gerencia (${analytics.pendientesCount})`, icon: ShieldAlert },
+          { id: "pausadas", label: "⏸️ Pausadas", icon: Pause },
+          { id: "todas", label: `Todas (${promotions.length})`, icon: Tags },
+        ].map((t) => {
+          const Icon = t.icon
+          const active = tab === t.id
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id as PromoTab)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              <span>{t.label}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* CONTENEDOR PRINCIPAL / TABLA */}
+      <div className="space-y-4">
+        {/* Barra de Filtro y Búsqueda */}
+        <div className="p-3 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl flex items-center gap-3 flex-wrap text-xs shadow-xs">
+          <div className="relative flex-1 min-w-[240px]">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar promoción por nombre, producto o código Ñemuha..."
+              className="text-xs pl-8 pr-3 py-2 w-full rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+          <select
+            value={filterOrigen}
+            onChange={e => setFilterOrigen(e.target.value)}
+            className="text-xs py-2 px-3 rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none"
+          >
+            <option value="all">Todos los Orígenes Comerciales</option>
+            <option value="iniciativa_propia">🏬 Iniciativa Propia</option>
+            <option value="accion_proveedor">🌟 Acción Proveedor</option>
+            <option value="corto_vencimiento">⚡ Corto Vencimiento</option>
+          </select>
+        </div>
+
+        {/* Tabla */}
+        <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
+          {loading ? (
+            <div className="flex items-center justify-center py-16 text-gray-400 text-xs gap-2">
+              <Loader2 className="w-5 h-5 animate-spin text-emerald-500" /> Cargando promociones de salón...
             </div>
+          ) : filteredPromotions.length === 0 ? (
+            <div className="text-center py-16 text-gray-400 text-xs">
+              <Tags className="w-10 h-10 mx-auto mb-3 opacity-40" />
+              <p className="font-bold text-sm text-gray-600 dark:text-gray-300">No se encontraron promociones en esta vista</p>
+              <p className="mt-1">Probá con otro criterio de búsqueda o creá una nueva regla.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs min-w-[1020px]">
+                <thead className="bg-gray-50 dark:bg-slate-800/60 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100 dark:border-slate-800">
+                  <tr>
+                    <th className="p-3.5 text-left w-28">Estado</th>
+                    <th className="p-3.5 text-left min-w-[280px]">Promoción & Mecánica</th>
+                    <th className="p-3.5 text-left w-48">Origen / Trade Spend</th>
+                    <th className="p-3.5 text-right font-mono w-40">Precio / Descuento</th>
+                    <th className="p-3.5 text-left w-44">Vigencia & Días</th>
+                    <th className="p-3.5 text-left w-36">Stock & Cupo</th>
+                    <th className="p-3.5 text-right w-24">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-slate-800/60">
+                  {filteredPromotions.slice(0, 100).map((promo) => {
+                    const origen = promo.origen || "iniciativa_propia"
+                    const tc = TIER_ORIGEN_COLORS[origen] || TIER_ORIGEN_COLORS.iniciativa_propia
+                    const esPendiente = promo.estado === "pendiente_aprobacion_gerencia"
 
-            <div className="pt-4 border-t border-gray-100 dark:border-gray-800 space-y-4">
+                    return (
+                      <tr
+                        key={promo.id}
+                        onClick={() => setPromo360Id(promo.id)}
+                        className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition cursor-pointer"
+                      >
+                        {/* Estado / Toggle */}
+                        <td className="p-3.5 whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                          <button
+                            onClick={() => handleTogglePromo(promo)}
+                            disabled={esPendiente}
+                            className="focus:outline-none"
+                          >
+                            {promo.activo ? (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                ACTIVA
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                                PAUSADA
+                              </span>
+                            )}
+                          </button>
+                        </td>
+
+                        {/* Nombre y Mecánica */}
+                        <td className="p-3.5">
+                          <p className="font-extrabold text-gray-900 dark:text-white text-xs line-clamp-2 leading-snug" title={promo.nombre}>
+                            {promo.nombre}
+                          </p>
+                          <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mt-0.5">
+                            {TIPO_LABELS[promo.tipo] || promo.tipo}
+                          </p>
+                          <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                            {promo.legacy_id && (
+                              <span className="text-[10px] font-mono font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-900/50">
+                                Ñemuha #{promo.legacy_id}
+                              </span>
+                            )}
+                            {promo.combinable ? (
+                              <span className="text-[9px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
+                                Combinable
+                              </span>
+                            ) : (
+                              <span className="text-[9px] font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700">
+                                Exclusiva
+                              </span>
+                            )}
+                            {promo.monto_minimo_compra && Number(promo.monto_minimo_compra) > 0 && (
+                              <span className="text-[9px] font-mono font-bold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/40 px-1.5 py-0.5 rounded border border-purple-200 dark:border-purple-800">
+                                Mín. {formatPYG(Number(promo.monto_minimo_compra))}
+                              </span>
+                            )}
+                            {promo.cantidad_minima && promo.cantidad_minima > 1 && (
+                              <span className="text-[9px] font-mono font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/40 px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-800">
+                                Mín. {promo.cantidad_minima} un.
+                              </span>
+                            )}
+                            {promo.terminacion_psicologica !== null && promo.terminacion_psicologica !== undefined && (
+                              <span className="text-[9px] font-mono font-bold text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/40 px-1.5 py-0.5 rounded border border-teal-200 dark:border-teal-800">
+                                .{promo.terminacion_psicologica}
+                              </span>
+                            )}
+                            {promo.supplier_id && (
+                              <span className="text-[10px] font-bold text-gray-500 bg-gray-100 dark:bg-slate-800 px-1.5 py-0.5 rounded truncate max-w-[200px]">
+                                🏢 {suppliers.find(s => s.id === promo.supplier_id)?.razon_social || "Proveedor"}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Productos Vinculados: SKU y Código de Barra */}
+                          {Boolean((promo as any).productos_detalle && ((promo as any).productos_detalle as any[]).length > 0) && (
+                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                              {((promo as any).productos_detalle as any[]).slice(0, 3).map((prod: any) => (
+                                <span
+                                  key={prod.id}
+                                  className="inline-flex items-center gap-1.5 text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 shadow-2xs"
+                                  title={prod.nombre}
+                                >
+                                  <span className="font-semibold text-slate-900 dark:text-slate-100 truncate max-w-[140px]">
+                                    {prod.nombre}
+                                  </span>
+                                  {prod.sku && (
+                                    <span className="font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-1 py-0.2 rounded border border-indigo-200 dark:border-indigo-900/50">
+                                      SKU: {prod.sku}
+                                    </span>
+                                  )}
+                                  {prod.codigo_barra && (
+                                    <span className="text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-900 px-1 py-0.2 rounded border border-slate-200 dark:border-slate-700">
+                                      CB: {prod.codigo_barra}
+                                    </span>
+                                  )}
+                                </span>
+                              ))}
+                              {((promo as any).productos_detalle as any[]).length > 3 && (
+                                <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                                  +{((promo as any).productos_detalle as any[]).length - 3} prod.
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Origen y Financiador */}
+                        <td className="p-3.5 whitespace-nowrap">
+                          <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-black uppercase border ${tc.bg} ${tc.text} ${tc.border}`}>
+                            {origen === "corto_vencimiento" ? "Corto Vencimiento" : origen === "accion_proveedor" ? "Acción Proveedor" : "Iniciativa Propia"}
+                          </span>
+                          <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
+                            {FINANCIAMIENTO_LABELS[promo.financiamiento || "propio_supermercado"]?.label}
+                          </div>
+                        </td>
+
+                        {/* Precio / Descuento */}
+                        <td className="p-3.5 text-right font-mono font-black text-sm whitespace-nowrap">
+                          {promo.tipo === "dos_por_uno" ? (
+                            <span className="text-purple-600 dark:text-purple-400 font-extrabold text-xs bg-purple-50 dark:bg-purple-950/60 px-2 py-1 rounded-lg border border-purple-200 dark:border-purple-900/50">
+                              🎁 2x1 (Lleva 2, Paga 1)
+                            </span>
+                          ) : promo.tipo === "tres_por_dos" ? (
+                            <span className="text-purple-600 dark:text-purple-400 font-extrabold text-xs bg-purple-50 dark:bg-purple-950/60 px-2 py-1 rounded-lg border border-purple-200 dark:border-purple-900/50">
+                              🎁 3x2 (Lleva 3, Paga 2)
+                            </span>
+                          ) : promo.tipo === "segunda_unidad_pct" ? (
+                            <span className="text-blue-600 dark:text-blue-400 font-extrabold text-xs bg-blue-50 dark:bg-blue-950/60 px-2 py-1 rounded-lg border border-blue-200 dark:border-blue-900/50">
+                              2da un. -{promo.valor || 50}% OFF
+                            </span>
+                          ) : (promo.tipo === "combo_pack" || promo.tipo === "combo_precio") ? (
+                            <span className="text-indigo-600 dark:text-indigo-400">
+                              {promo.precio_fijo_promocional ? formatPYG(Number(promo.precio_fijo_promocional)) : "Combo Pack"}
+                            </span>
+                          ) : promo.tipo === "precio_fijo_oferta" && promo.precio_fijo_promocional ? (
+                            <span className="text-emerald-600 dark:text-emerald-400">
+                              {formatPYG(Number(promo.precio_fijo_promocional))}
+                            </span>
+                          ) : (promo as any).precios_por_producto && Object.keys((promo as any).precios_por_producto).length > 0 ? (
+                            <span className="text-emerald-600 dark:text-emerald-400 font-bold text-xs bg-emerald-50 dark:bg-emerald-950/50 px-2 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                              🏷️ {Object.keys((promo as any).precios_por_producto).length} precios fijados
+                            </span>
+                          ) : promo.tipo === "porcentaje" && promo.valor ? (
+                            <span className="text-blue-600 dark:text-blue-400">
+                              -{promo.valor}% OFF
+                            </span>
+                          ) : (
+                            <span className="text-gray-700 dark:text-gray-300">
+                              {promo.valor ? formatPYG(Number(promo.valor)) : "Especial"}
+                            </span>
+                          )}
+
+                          {promo.vende_bajo_costo && (
+                            <div className="text-[9px] font-bold text-red-600 dark:text-red-400 flex items-center justify-end gap-0.5 mt-0.5">
+                              <ShieldAlert className="w-3 h-3" /> Bajo Costo
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Vigencia & Días */}
+                        <td className="p-3.5 whitespace-nowrap font-mono text-gray-600 dark:text-gray-300">
+                          <div>{promo.valido_desde} ➔ {promo.valido_hasta}</div>
+                          {(() => {
+                            const hoyStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Asuncion" })
+                            const hoyDow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Asuncion" })).getDay()
+                            const enFecha = (!promo.valido_desde || hoyStr >= promo.valido_desde) && (!promo.valido_hasta || hoyStr <= promo.valido_hasta)
+                            const enDia = !promo.dias_semana || promo.dias_semana.length === 0 || promo.dias_semana.includes(hoyDow)
+                            const rigeHoy = promo.activo && enFecha && enDia
+                            return (
+                              <div className="mt-1">
+                                {rigeHoy ? (
+                                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                                    RIGE HOY EN CAJA
+                                  </span>
+                                ) : promo.activo ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                                    No rige hoy
+                                  </span>
+                                ) : null}
+                              </div>
+                            )
+                          })()}
+                          {promo.horario_desde && promo.horario_hasta && (
+                            <div className="text-[9px] font-bold text-amber-600 dark:text-amber-400 mt-0.5">
+                              ⚡ {String(promo.horario_desde).slice(0, 5)} - {String(promo.horario_hasta).slice(0, 5)} hs
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Stock & Cupo */}
+                        <td className="p-3.5 whitespace-nowrap">
+                          {promo.limitar_unidades && promo.stock_limite_unidades ? (
+                            <div>
+                              <div className="text-[10px] font-mono font-bold text-gray-800 dark:text-gray-200">
+                                {promo.unidades_vendidas_promo || 0} / {promo.stock_limite_unidades} un.
+                              </div>
+                              <div className="w-20 h-1.5 bg-gray-200 dark:bg-slate-700 rounded-full overflow-hidden mt-1">
+                                <div
+                                  className="h-full bg-emerald-500 rounded-full"
+                                  style={{ width: `${Math.min(100, ((promo.unidades_vendidas_promo || 0) / Number(promo.stock_limite_unidades)) * 100)}%` }}
+                                />
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-gray-400">Sin límite</span>
+                          )}
+                        </td>
+
+                        {/* Acciones */}
+                        <td className="p-3.5 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center justify-end gap-1.5">
+                            {esPendiente && (
+                              <button
+                                onClick={e => handleApproveLoss(promo, e)}
+                                className="px-2.5 py-1 rounded-xl bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold"
+                              >
+                                Autorizar
+                              </button>
+                            )}
+
+                            {(promo.financiamiento === "proveedor_sell_out" || promo.financiamiento === "co_financiado" || promo.origen === "accion_proveedor" || promo.origen === "corto_vencimiento") && (
+                              <button
+                                onClick={e => handleOpenSellOutClaim(promo, e)}
+                                title="Reclamo Sell-Out y Nota de Crédito"
+                                className="p-1.5 rounded-xl border border-blue-200 dark:border-blue-900/50 hover:bg-blue-50 dark:hover:bg-blue-950/40 text-blue-600"
+                              >
+                                <Receipt className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setPromo360Id(promo.id)
+                              }}
+                              title="Visión 360° & Informe Oficial para Encargados"
+                              className="px-2.5 py-1.5 rounded-xl border border-amber-300 dark:border-amber-700/80 bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center gap-1.5 font-black text-[10px] shadow-sm transition"
+                            >
+                              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                              <span>360° & Informe</span>
+                            </button>
+
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleOpenEdit(promo)
+                              }}
+                              title="Editar Promoción"
+                              className="p-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800/70 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400"
+                            >
+                              <Edit className="w-3.5 h-3.5" />
+                            </button>
+
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setViewingPromo(promo)
+                              }}
+                              title="Ver Ficha Técnica Lateral"
+                              className="p-1.5 rounded-xl border border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-600 dark:text-gray-300"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+
+              {filteredPromotions.length > 100 && (
+                <div className="p-3 bg-gray-50 dark:bg-slate-800 text-center text-xs text-gray-500 border-t border-gray-100 dark:border-slate-700">
+                  Mostrando las primeras 100 de {filteredPromotions.length.toLocaleString("es-PY")} promociones. Utilizá el buscador para filtrar por nombre o código.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── DRAWER LATERAL: FICHA TÉCNICA DE PROMOCIÓN (`viewingPromo`) ────── */}
+      {viewingPromo && createPortal(
+        <div className="fixed inset-0 z-[9999] bg-black/50 backdrop-blur-xs flex justify-end animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-xl h-full shadow-2xl border-l border-gray-200 dark:border-slate-800 flex flex-col justify-between overflow-y-auto">
+            
+            {/* Header Drawer */}
+            <div className="p-5 border-b border-gray-100 dark:border-slate-800 flex items-start justify-between">
               <div>
-                <label className="flex items-center gap-2 text-xs font-bold text-gray-700 dark:text-gray-300 cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    checked={bankPaymentSelected} 
-                    onChange={e => setBankPaymentSelected(e.target.checked)} 
-                    className="rounded border-gray-300 dark:border-gray-700 text-primary focus:ring-primary h-4 w-4"
-                  />
-                  Pagar con Tarjeta Itaú (Descuento Itaú)
-                </label>
+                <div className="flex items-center gap-2">
+                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black border ${
+                    viewingPromo.activo
+                      ? "bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300"
+                      : "bg-slate-100 text-slate-600 border-slate-300 dark:bg-slate-800 dark:text-slate-300"
+                  }`}>
+                    {viewingPromo.activo ? "ACTIVA EN SALÓN" : "PAUSADA"}
+                  </span>
+                  {viewingPromo.legacy_id && (
+                    <span className="text-[10px] font-mono font-bold text-blue-600">Ñemuha #{viewingPromo.legacy_id}</span>
+                  )}
+                </div>
+                <h2 className="text-base font-extrabold text-gray-900 dark:text-white mt-1.5">
+                  {viewingPromo.nombre}
+                </h2>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {TIPO_LABELS[viewingPromo.tipo] || viewingPromo.tipo}
+                </p>
               </div>
 
-              <div className="space-y-2 bg-slate-950 p-4 rounded-xl font-mono text-xs">
-                <div className="flex justify-between text-gray-400">
-                  <span>Subtotal:</span>
-                  <span>{formatPYG(subtotal)}</span>
-                </div>
-                {discount3x2 > 0 && (
-                  <div className="flex justify-between text-amber-500 font-bold">
-                    <span>Ahorro 3x2 Lácteos:</span>
-                    <span>-{formatPYG(discount3x2)}</span>
-                  </div>
-                )}
-                {discountBank > 0 && (
-                  <div className="flex justify-between text-emerald-500 font-bold">
-                    <span>Reintegro Itaú:</span>
-                    <span>-{formatPYG(discountBank)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-base font-extrabold text-white border-t border-slate-800 pt-2 mt-2">
-                  <span>Total Neto:</span>
-                  <span className="text-green-400">{formatPYG(totalPagar)}</span>
-                </div>
-              </div>
-
-              <button 
-                onClick={() => {
-                  toast.success("Venta Simulada", `Venta registrada por ${formatPYG(totalPagar)} con ${formatPYG(totalDescuentos)} en descuentos.`)
-                  setCartItems([
-                    { id: "1", nombre: "Leche Entera Trébol 1L", precio: 6500, cantidad: 3 },
-                    { id: "2", nombre: "Gaseosa Cola 2L", precio: 9000, cantidad: 1 },
-                    { id: "3", nombre: "Queso Paraguay Fresco kg", precio: 38000, cantidad: 1 }
-                  ])
-                  setBankPaymentSelected(false)
-                }}
-                className="w-full btn-primary py-2.5 flex items-center justify-center gap-2 text-xs"
+              <button
+                onClick={() => setViewingPromo(null)}
+                className="p-1.5 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-400"
               >
-                <CheckCircle className="w-4 h-4" /> Registrar Venta con Oferta
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-          </div>
-        </div>
+            {/* Contenido Ficha */}
+            <div className="p-5 space-y-4 text-xs">
+              
+              {/* Bloque Precios & Mecánica */}
+              <div className="p-4 rounded-2xl bg-gray-50 dark:bg-slate-800/60 border border-gray-200 dark:border-slate-700/80 space-y-2">
+                <span className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">Esquema de Precios & Beneficio</span>
+                <div className="flex items-baseline justify-between">
+                  <span className="text-gray-600 dark:text-gray-400">Beneficio al Cliente:</span>
+                  <span className="text-base font-black font-mono text-emerald-600 dark:text-emerald-400">
+                    {viewingPromo.tipo === "dos_por_uno"
+                      ? "🎁 2x1 (Lleva 2, Paga 1)"
+                      : viewingPromo.tipo === "tres_por_dos"
+                      ? "🎁 3x2 (Lleva 3, Paga 2)"
+                      : viewingPromo.tipo === "segunda_unidad_pct"
+                      ? `🏷️ 2da Unidad al -${viewingPromo.valor || 50}% OFF`
+                      : (viewingPromo.tipo === "combo_pack" || viewingPromo.tipo === "combo_precio")
+                      ? (viewingPromo.precio_fijo_promocional ? formatPYG(Number(viewingPromo.precio_fijo_promocional)) : "Combo Pack")
+                      : viewingPromo.tipo === "precio_fijo_oferta" && viewingPromo.precio_fijo_promocional
+                      ? formatPYG(Number(viewingPromo.precio_fijo_promocional))
+                      : viewingPromo.tipo === "porcentaje" && viewingPromo.valor
+                      ? `-${viewingPromo.valor}% OFF (${viewingPromo.base_calculo_pct === "costo" ? "s/ costo" : "s/ venta"})`
+                      : formatPYG(Number(viewingPromo.valor || 0))}
+                  </span>
+                </div>
 
-      </div>
+                {viewingPromo.terminacion_psicologica !== null && viewingPromo.terminacion_psicologica !== undefined && (
+                  <div className="flex justify-between items-center text-[11px] pt-1 border-t border-gray-200 dark:border-slate-700">
+                    <span className="text-gray-500">Terminación Psicológica de Precio:</span>
+                    <span className="font-mono font-bold text-teal-600 dark:text-teal-400">
+                      Termina en .{viewingPromo.terminacion_psicologica} (ej: ...9{viewingPromo.terminacion_psicologica})
+                    </span>
+                  </div>
+                )}
 
-      {/* Create Rule Modal */}
-      {showCreateModal && (
-        <div className="modal-overlay" onClick={() => setShowCreateModal(false)}>
-          <div className="modal-content max-w-md" onClick={e => e.stopPropagation()}>
-            <div className="p-6">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Nueva Campaña / Promoción</h3>
-              <form onSubmit={handleAddRule} className="space-y-4">
-                <div>
-                  <label className="input-label label-required">Nombre de la Promoción</label>
-                  <input className="input-field" placeholder="ej. 20% en Cervezas Pilsen" value={newNombre} onChange={e => setNewNombre(e.target.value)} required />
+                {viewingPromo.vende_bajo_costo && (
+                  <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-700 dark:text-red-300 text-[11px] flex items-center gap-2 mt-1">
+                    <ShieldAlert className="w-4 h-4 shrink-0" />
+                    <span>Esta promoción vende por debajo del costo unitario de compra. Requiere autorización de Gerencia.</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Bloque Productos Vinculados (si aplica_a === 'producto') */}
+              {viewingPromo.producto_ids && viewingPromo.producto_ids.length > 0 && (
+                <div className="p-4 rounded-2xl bg-gray-50 dark:bg-slate-800/60 border border-gray-200 dark:border-slate-700/80 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">
+                      Productos Vinculados ({viewingPromo.producto_ids.length})
+                    </span>
+                    <Package className="w-4 h-4 text-gray-400" />
+                  </div>
+                  <div className="max-h-36 overflow-y-auto divide-y divide-gray-100 dark:divide-slate-700/60 bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-700">
+                    {viewingPromo.producto_ids.map(pid => {
+                      const prodDetail = ((viewingPromo as any).productos_detalle as any[])?.find((p: any) => p.id === pid)
+                      const prod = prodDetail || allCatalogProducts.find(p => p.id === pid)
+                      // Precio promo individual: desde precios_por_producto, o precio_fijo_promocional general
+                      const savedPrecios = (viewingPromo as any).precios_por_producto as Record<string, number> | null
+                      const precioPromo = savedPrecios?.[pid] ?? savedPrecios?.[String(pid)]
+                        ?? (viewingPromo.precio_fijo_promocional ? Number(viewingPromo.precio_fijo_promocional) : null)
+                      return (
+                        <div key={pid} className="p-2 flex items-center justify-between gap-2 text-xs">
+                          <div className="truncate min-w-0">
+                            <span className="font-bold text-gray-900 dark:text-white truncate block">
+                              {prod ? prod.nombre : `Producto ID: ${pid.slice(0, 8)}...`}
+                            </span>
+                            <span className="text-[10px] text-gray-500 dark:text-gray-400 font-mono flex items-center gap-2 mt-0.5">
+                              {prod?.sku && <span className="text-indigo-600 dark:text-indigo-400 font-semibold">SKU: {prod.sku}</span>}
+                              {prod?.codigo_barra && <span>CB: {prod.codigo_barra}</span>}
+                              {(prod as any)?.precio_venta && <span className="line-through text-gray-400">Reg: {formatPYG(Number((prod as any).precio_venta))}</span>}
+                            </span>
+                          </div>
+                          <div className="text-right shrink-0">
+                            {precioPromo != null && precioPromo > 0 ? (
+                              <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                {formatPYG(precioPromo)}
+                              </span>
+                            ) : viewingPromo.valor ? (
+                              <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
+                                -{viewingPromo.valor}%
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
-                <div>
-                  <label className="input-label">Tipo de Oferta</label>
-                  <select className="input-field" value={newTipo} onChange={e => setNewTipo(e.target.value as any)}>
-                    <option value="3x2">Lleva 3 y Paga 2 (3x2)</option>
-                    <option value="MixMatch">Mix & Match / Combos Cerrados</option>
-                    <option value="Banco">Descuento / Reintegro Bancario</option>
-                  </select>
+              )}
+
+              {/* Bloque Reglas de Caja & Combinabilidad */}
+              <div className="p-4 rounded-2xl bg-gray-50 dark:bg-slate-800/60 border border-gray-200 dark:border-slate-700/80 space-y-2">
+                <span className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">Reglas de Activación en Caja</span>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <span className="text-gray-400 block text-[10px]">Combinabilidad:</span>
+                    <span className={`font-bold inline-flex items-center gap-1 mt-0.5 ${viewingPromo.combinable ? "text-emerald-600 dark:text-emerald-400" : "text-slate-600 dark:text-slate-400"}`}>
+                      {viewingPromo.combinable ? "✅ Combinable" : "🔒 Exclusiva (No acumulable)"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-400 block text-[10px]">Límite por Ticket:</span>
+                    <span className="font-bold text-gray-800 dark:text-gray-200 mt-0.5 block">
+                      {viewingPromo.limite_por_compra ? `${viewingPromo.limite_por_compra} un. / compra` : "Sin límite"}
+                    </span>
+                  </div>
+                  {viewingPromo.monto_minimo_compra && Number(viewingPromo.monto_minimo_compra) > 0 && (
+                    <div>
+                      <span className="text-gray-400 block text-[10px]">Compra Mínima en Ticket:</span>
+                      <span className="font-mono font-bold text-purple-600 dark:text-purple-400 mt-0.5 block">
+                        {formatPYG(Number(viewingPromo.monto_minimo_compra))}
+                      </span>
+                    </div>
+                  )}
+                  {viewingPromo.cantidad_minima && viewingPromo.cantidad_minima > 1 && (
+                    <div>
+                      <span className="text-gray-400 block text-[10px]">Cantidad Mínima Items:</span>
+                      <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400 mt-0.5 block">
+                        {viewingPromo.cantidad_minima} unidades
+                      </span>
+                    </div>
+                  )}
                 </div>
-                <div>
-                  <label className="input-label">Descripción de la Oferta</label>
-                  <input className="input-field" placeholder="Explicación clara de las condiciones de la oferta" value={newDesc} onChange={e => setNewDesc(e.target.value)} />
+              </div>
+
+              {/* Bloque Trade Spend & Proveedor */}
+              <div className="p-4 rounded-2xl bg-gray-50 dark:bg-slate-800/60 border border-gray-200 dark:border-slate-700/80 space-y-2.5">
+                <span className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">Trade Spend & Financiación</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <span className="text-gray-400 block text-[10px]">Origen Comercial:</span>
+                    <span className="font-bold text-gray-800 dark:text-gray-200">
+                      {viewingPromo.origen === "corto_vencimiento" ? "Corto Vencimiento" : viewingPromo.origen === "accion_proveedor" ? "Acción Proveedor" : "Iniciativa Propia"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-400 block text-[10px]">Financiamiento:</span>
+                    <span className="font-bold text-gray-800 dark:text-gray-200">
+                      {FINANCIAMIENTO_LABELS[viewingPromo.financiamiento || "propio_supermercado"]?.label}
+                    </span>
+                  </div>
                 </div>
-                <div>
-                  <label className="input-label">Parámetros (Filtros de Aplicación)</label>
-                  <input className="input-field" placeholder="ej. Marca: Pilsen | Categoría: Bebidas" value={newParams} onChange={e => setNewParams(e.target.value)} />
+
+                {viewingPromo.financiamiento === "co_financiado" && (
+                  <div className="pt-2 border-t border-gray-200 dark:border-slate-700 space-y-1 text-[11px]">
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">🏢 Aporte Proveedor (NC):</span>
+                      <strong className="font-mono text-blue-600 dark:text-blue-400">
+                        {(viewingPromo as any).porcentaje_aporte_proveedor || 0}%
+                      </strong>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">🏬 Aporte Supermercado (Tienda):</span>
+                      <strong className="font-mono text-emerald-600 dark:text-emerald-400">
+                        {(viewingPromo as any).porcentaje_aporte_tienda || 0}%
+                      </strong>
+                    </div>
+                  </div>
+                )}
+
+                {(viewingPromo as any).monto_total_nc_comprometido > 0 && (
+                  <div className="pt-2 border-t border-gray-200 dark:border-slate-700 flex justify-between items-center">
+                    <span className="text-gray-500">Compromiso en Firme NC:</span>
+                    <strong className="font-mono text-blue-600 dark:text-blue-400 text-sm">
+                      {formatPYG((viewingPromo as any).monto_total_nc_comprometido)}
+                    </strong>
+                  </div>
+                )}
+
+                {(viewingPromo as any).fecha_vencimiento_lote && (
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="text-gray-500">Vencimiento del Lote:</span>
+                    <strong className="font-mono text-amber-600">
+                      {(viewingPromo as any).fecha_vencimiento_lote}
+                    </strong>
+                  </div>
+                )}
+
+                {/* Datos de Conciliación de Nota de Crédito */}
+                {viewingPromo.nc_numero_proveedor && (
+                  <div className="p-2.5 bg-blue-50/70 dark:bg-blue-950/40 rounded-xl border border-blue-200 dark:border-blue-900/50 space-y-1 text-[11px] mt-2">
+                    <div className="font-bold text-blue-800 dark:text-blue-200 flex items-center justify-between">
+                      <span>🧾 Nota de Crédito Conciliada:</span>
+                      <span className="font-mono">{viewingPromo.nc_numero_proveedor}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-gray-500">
+                      <span>Timbrado: {viewingPromo.nc_timbrado_proveedor || "18545636"}</span>
+                      <span className="font-mono font-bold text-blue-600">
+                        {formatPYG(Number(viewingPromo.nc_monto_total || 0))}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Bloque Vigencia & Horarios */}
+              <div className="p-4 rounded-2xl bg-gray-50 dark:bg-slate-800/60 border border-gray-200 dark:border-slate-700/80 space-y-2">
+                <span className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">Vigencia & Días</span>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Vigencia:</span>
+                  <span className="font-mono font-bold text-gray-800 dark:text-gray-200">
+                    {viewingPromo.valido_desde} ➔ {viewingPromo.valido_hasta}
+                  </span>
                 </div>
-                <div className="flex gap-3 pt-2">
-                  <button type="button" className="btn-outline flex-1" onClick={() => setShowCreateModal(false)}>Cancelar</button>
-                  <button type="submit" className="btn-primary flex-1">Crear Promoción</button>
+
+                {viewingPromo.horario_desde && viewingPromo.horario_hasta && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Horario Relámpago:</span>
+                    <span className="font-mono font-bold text-amber-600">
+                      {String(viewingPromo.horario_desde).slice(0, 5)} a {String(viewingPromo.horario_hasta).slice(0, 5)} hs
+                    </span>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-gray-500">Días Activos:</span>
+                  <div className="flex gap-1">
+                    {DIAS_SEMANA.map(d => {
+                      const active = !viewingPromo.dias_semana || viewingPromo.dias_semana.includes(d.id)
+                      return (
+                        <span
+                          key={d.id}
+                          className={`w-5 h-5 rounded flex items-center justify-center font-bold text-[9px] ${
+                            active
+                              ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900"
+                              : "bg-gray-200 text-gray-400 dark:bg-slate-800"
+                          }`}
+                        >
+                          {d.label[0]}
+                        </span>
+                      )
+                    })}
+                  </div>
                 </div>
-              </form>
+              </div>
+
+              {/* Bloque Cupos y Stock */}
+              <div className="p-4 rounded-2xl bg-gray-50 dark:bg-slate-800/60 border border-gray-200 dark:border-slate-700/80 space-y-2">
+                <span className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">Control de Stock & Cupos</span>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Límite por Ticket:</span>
+                  <span className="font-mono font-bold">
+                    {viewingPromo.limite_por_compra ? `${viewingPromo.limite_por_compra} un/ticket` : "Sin límite"}
+                  </span>
+                </div>
+
+                {viewingPromo.limitar_unidades && viewingPromo.stock_limite_unidades && (
+                  <div className="space-y-1 pt-1">
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-gray-500">Unidades Vendidas / Cupo:</span>
+                      <span className="font-mono font-bold">
+                        {viewingPromo.unidades_vendidas_promo || 0} / {viewingPromo.stock_limite_unidades} un.
+                      </span>
+                    </div>
+                    <div className="w-full h-2 bg-gray-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-emerald-500 rounded-full"
+                        style={{ width: `${Math.min(100, ((viewingPromo.unidades_vendidas_promo || 0) / Number(viewingPromo.stock_limite_unidades)) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer Drawer */}
+            <div className="p-5 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between gap-2 bg-gray-50/50 dark:bg-slate-900/30 flex-wrap">
+              <button
+                onClick={() => {
+                  setPromo360Id(viewingPromo.id)
+                  setViewingPromo(null)
+                }}
+                className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-extrabold flex items-center gap-1.5 shadow"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>Visión 360° & Informe Oficial</span>
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleOpenEdit(viewingPromo)}
+                  className="px-3 py-2 rounded-xl border border-indigo-200 dark:border-indigo-800/70 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 text-xs font-bold flex items-center gap-1.5 transition"
+                >
+                  <Edit className="w-3.5 h-3.5" />
+                  <span>Editar</span>
+                </button>
+
+                <button
+                  onClick={() => handleTogglePromo(viewingPromo)}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                    viewingPromo.activo
+                      ? "border border-gray-300 dark:border-slate-700 hover:bg-gray-100 text-gray-700 dark:text-gray-300"
+                      : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                  }`}
+                >
+                  {viewingPromo.activo ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                  <span>{viewingPromo.activo ? "Pausar" : "Activar"}</span>
+                </button>
+
+                <button
+                  onClick={() => setViewingPromo(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:text-slate-900 text-xs font-bold"
+                >
+                  Cerrar
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
+
+      {/* ── 🌟 MODAL SUITE COMERCIAL MULTIPRODUCTO & TRADE MARKETING ─────── */}
+      {showCreateModal && createPortal(
+        <div 
+          className="fixed inset-0 z-[9999] bg-slate-950/75 backdrop-blur-md flex items-center justify-center p-3 md:p-5"
+          onClick={() => setShowCreateModal(false)}
+        >
+          <div 
+            className="bg-white dark:bg-slate-900 rounded-3xl max-w-6xl w-[96vw] p-5 md:p-6 shadow-2xl border border-gray-200 dark:border-slate-800 h-[92vh] max-h-[920px] flex flex-col animate-in fade-in zoom-in-95 duration-150"
+            onClick={e => e.stopPropagation()}
+          >
+            
+            {/* Header Modal - Fijo */}
+            <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-800 pb-3.5 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-white shadow-lg shrink-0 ${
+                  editingPromo
+                    ? "bg-gradient-to-br from-indigo-500 to-violet-600 shadow-indigo-500/20"
+                    : "bg-gradient-to-br from-emerald-500 to-teal-600 shadow-emerald-500/20"
+                }`}>
+                  {editingPromo ? <Edit className="w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md border ${
+                      editingPromo
+                        ? "text-indigo-700 dark:text-indigo-300 bg-indigo-500/10 border-indigo-500/20"
+                        : "text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border-emerald-500/20"
+                    }`}>
+                      {editingPromo ? "EDICIÓN DE PROMOCIÓN" : "TRADE MARKETING & OFERTAS MASIVAS"}
+                    </span>
+                    {(selectedBatchProducts?.size || 0) > 0 && (
+                      <span className="text-[10px] font-mono font-bold text-purple-700 dark:text-purple-300 bg-purple-500/10 px-2 py-0.5 rounded-md border border-purple-500/20">
+                        {selectedBatchProducts.size} items seleccionados
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="text-lg font-black text-gray-900 dark:text-white mt-0.5">
+                    {editingPromo ? `Editar: ${editingPromo.nombre}` : "Configuración de Campaña Promocional"}
+                  </h3>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => {
+                  setShowCreateModal(false)
+                  setEditingPromo(null)
+                  setNewActivo(true)
+                }} 
+                className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer transition"
+                title="Cerrar ventana"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateBatchPromos} className="flex-1 min-h-0 flex flex-col justify-between pt-3.5">
+              
+              {/* GRID PRINCIPAL: 2 COLUMNAS ERGONÓMICAS */}
+              <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-5 overflow-hidden">
+                
+                {/* ── COLUMNA IZQUIERDA (5/12): ESTRATEGIA, PRECIO Y REGLAS ── */}
+                <div className="lg:col-span-5 h-full overflow-y-auto pr-2 space-y-3.5 text-xs">
+                  
+                  {/* BLOQUE 1: DATOS GENERALES DE CAMPAÑA */}
+                  <div className="p-3.5 bg-gray-50 dark:bg-slate-800/60 rounded-2xl border border-gray-200 dark:border-slate-700/80 space-y-3">
+                    <div className="flex items-center justify-between border-b border-gray-200 dark:border-slate-700/60 pb-2">
+                      <div className="flex items-center gap-2 text-gray-800 dark:text-gray-200 font-bold">
+                        <Tag className="w-4 h-4 text-emerald-600" />
+                        <span>1. Identificación y Origen</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setNewActivo(!newActivo)}
+                        className={`px-2.5 py-1 rounded-xl text-[11px] font-black transition flex items-center gap-1.5 shadow-sm ${
+                          newActivo
+                            ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                            : "bg-amber-600 hover:bg-amber-700 text-white"
+                        }`}
+                        title="Cambiar estado de la promoción"
+                      >
+                        {newActivo ? <Play className="w-3 h-3 fill-current" /> : <Pause className="w-3 h-3 fill-current" />}
+                        <span>{newActivo ? "ESTADO: ACTIVA" : "ESTADO: PAUSADA"}</span>
+                      </button>
+                    </div>
+
+                    <div>
+                      <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Nombre de la Campaña:</label>
+                      <input
+                        type="text"
+                        required
+                        value={newNombre}
+                        onChange={e => setNewNombre(e.target.value)}
+                        placeholder="Ej: Festival de Cuidado Personal Unilever - Elvive"
+                        className="w-full text-xs font-bold p-2 rounded-xl border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500/20"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Origen Comercial:</label>
+                        <select
+                          value={newOrigen}
+                          onChange={e => setNewOrigen(e.target.value)}
+                          className="w-full text-xs p-2 rounded-xl border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-900 dark:text-white font-medium"
+                        >
+                          <option value="iniciativa_propia">🏬 Tienda (Iniciativa Propia)</option>
+                          <option value="accion_proveedor">🌟 Proveedor (Scan-Back)</option>
+                          <option value="corto_vencimiento">⚡ Corto Vencimiento</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Financiamiento:</label>
+                        <select
+                          value={newFinanciamiento}
+                          onChange={e => {
+                            const val = e.target.value
+                            setNewFinanciamiento(val)
+                            if (val === "co_financiado") {
+                              const totalPct = Number(newBulkValorPct) || 50
+                              const pProv = Math.round(totalPct * 0.6)
+                              setNewPctAporteProveedor(pProv)
+                              setNewPctAporteTienda(totalPct - pProv)
+                            }
+                          }}
+                          className="w-full text-xs p-2 rounded-xl border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-900 dark:text-white font-bold"
+                        >
+                          <option value="propio_supermercado">🏬 100% Tienda</option>
+                          <option value="proveedor_sell_out">🧾 100% Proveedor (NC)</option>
+                          <option value="co_financiado">🤝 Co-Financiado</option>
+                          <option value="proveedor_sell_in">📦 Sell-In (Compra)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Selector de Proveedor Asociado */}
+                    <div className="relative">
+                      <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                        Proveedor Comercial Asociado:
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          placeholder="Buscar proveedor por nombre o RUC..."
+                          value={supplierSearchText}
+                          onChange={e => {
+                            setSupplierSearchText(e.target.value)
+                            setShowSupplierDropdown(true)
+                          }}
+                          onFocus={() => setShowSupplierDropdown(true)}
+                          className="w-full text-xs p-2 rounded-xl border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-900 dark:text-white font-medium"
+                        />
+                        {newSupplierId && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewSupplierId("")
+                              setSupplierSearchText("")
+                            }}
+                            className="absolute right-2.5 top-2 text-gray-400 hover:text-gray-600 text-xs font-bold"
+                            title="Quitar filtro de proveedor"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+
+                      {showSupplierDropdown && (
+                        <div className="absolute left-0 right-0 top-full mt-1 z-50 max-h-48 overflow-y-auto bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl shadow-2xl divide-y divide-gray-100 dark:divide-slate-800">
+                          <div
+                            onClick={() => {
+                              setNewSupplierId("")
+                              setSupplierSearchText("")
+                              setShowSupplierDropdown(false)
+                            }}
+                            className="p-2 text-xs text-gray-500 hover:bg-gray-100 dark:hover:bg-slate-800 cursor-pointer font-semibold"
+                          >
+                            🏬 Todos los Proveedores (Sin Filtro)
+                          </div>
+                          {filteredSuppliers.length === 0 ? (
+                            <div className="p-3 text-xs text-gray-400 text-center">No se encontraron proveedores</div>
+                          ) : (
+                            filteredSuppliers.map(s => (
+                              <div
+                                key={s.id}
+                                onClick={() => {
+                                  setNewSupplierId(s.id)
+                                  setSupplierSearchText(s.razon_social || (s as any).nombre || s.id)
+                                  setShowSupplierDropdown(false)
+                                  setSelectionMode("supplier")
+                                }}
+                                className={`p-2 text-xs hover:bg-emerald-50 dark:hover:bg-emerald-950/40 cursor-pointer flex justify-between items-center ${
+                                  newSupplierId === s.id ? "bg-emerald-50 dark:bg-emerald-950/60 font-bold text-emerald-700 dark:text-emerald-300" : ""
+                                }`}
+                              >
+                                <div>
+                                  <div className="font-bold text-gray-900 dark:text-white">{s.razon_social || (s as any).nombre}</div>
+                                  <div className="text-[10px] text-gray-400 font-mono">RUC: {s.ruc || "S/RUC"}</div>
+                                </div>
+                                {newSupplierId === s.id && <Check className="w-4 h-4 text-emerald-600" />}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Desglose Co-financiamiento si está activo */}
+                    {newFinanciamiento === "co_financiado" && (
+                      <div className="p-3 bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/50 rounded-xl space-y-2">
+                        <div className="flex items-center justify-between text-[11px] font-bold text-blue-900 dark:text-blue-200">
+                          <span className="flex items-center gap-1">
+                            <HeartHandshake className="w-3.5 h-3.5 text-blue-600" />
+                            Coparticipación de Descuento:
+                          </span>
+                          <span className="font-mono text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-900/40 px-1.5 py-0.2 rounded">
+                            Total: {(Number(newPctAporteProveedor) || 0) + (Number(newPctAporteTienda) || 0)}% OFF
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[10px] font-bold text-blue-800 dark:text-blue-300 block mb-0.5">
+                              🏢 Aporte Prov. (% NC):
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              value={newPctAporteProveedor}
+                              onChange={e => {
+                                const v = e.target.value === "" ? "" : Number(e.target.value)
+                                setNewPctAporteProveedor(v)
+                                const total = (Number(v) || 0) + (Number(newPctAporteTienda) || 0)
+                                setNewBulkValorPct(total)
+                              }}
+                              placeholder="30"
+                              className="w-full text-xs font-mono font-bold p-1.5 rounded-lg border border-blue-200 dark:border-blue-900 bg-white dark:bg-slate-900"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 block mb-0.5">
+                              🏬 Aporte Tienda (%):
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              value={newPctAporteTienda}
+                              onChange={e => {
+                                const v = e.target.value === "" ? "" : Number(e.target.value)
+                                setNewPctAporteTienda(v)
+                                const total = (Number(newPctAporteProveedor) || 0) + (Number(v) || 0)
+                                setNewBulkValorPct(total)
+                              }}
+                              placeholder="20"
+                              className="w-full text-xs font-mono font-bold p-1.5 rounded-lg border border-emerald-200 dark:border-emerald-900 bg-white dark:bg-slate-900"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* BLOQUE 2: MECÁNICA DE PRECIOS & DESCUENTOS */}
+                  <div className="p-3.5 bg-emerald-500/5 dark:bg-slate-800/60 rounded-2xl border border-emerald-500/20 dark:border-slate-700/80 space-y-3">
+                    <div className="flex items-center justify-between border-b border-emerald-500/20 dark:border-slate-700/60 pb-2">
+                      <div className="flex items-center gap-2 text-gray-800 dark:text-gray-200 font-bold">
+                        <DollarSign className="w-4 h-4 text-emerald-600" />
+                        <span>2. Mecánica Promocional</span>
+                      </div>
+                      {(selectedBatchProducts?.size || 0) > 0 && (
+                        <button
+                          type="button"
+                          onClick={applyBulkPricingToSelection}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] shadow-sm cursor-pointer transition flex items-center gap-1"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          <span>Recalcular Precios</span>
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div className="col-span-2">
+                        <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Tipo de Oferta:</label>
+                        <select
+                          value={newTipo}
+                          onChange={e => setNewTipo(e.target.value)}
+                          className="w-full text-xs p-2 rounded-xl border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                        >
+                          <option value="porcentaje">📉 Descuento Porcentual (% OFF)</option>
+                          <option value="precio_fijo_oferta">🏷️ Precio Fijo de Oferta Común (Gs.)</option>
+                          <option value="monto_fijo">➖ Descuento Monto Fijo (Gs. off)</option>
+                          <option value="dos_por_uno">🎁 2x1 (Lleva 2, Paga 1)</option>
+                          <option value="tres_por_dos">🎁 3x2 (Lleva 3, Paga 2)</option>
+                          <option value="segunda_unidad_pct">🏷️ 2da Unidad con % Descuento</option>
+                          <option value="combo_pack">📦 Combo Especial Pack</option>
+                        </select>
+                      </div>
+
+                      {/* Input de Valor según Mecánica */}
+                      <div className="col-span-2">
+                        {newTipo === "dos_por_uno" ? (
+                          <div className="p-2.5 bg-purple-50 dark:bg-purple-950/40 rounded-xl border border-purple-200 dark:border-purple-900/50">
+                            <span className="font-bold text-purple-900 dark:text-purple-200 block text-[11px]">🎁 Regla 2x1 Automática en Caja</span>
+                            <p className="text-[10px] text-purple-700 dark:text-purple-300 mt-0.5">
+                              Al pasar 2 unidades por caja, la segunda se descuenta al 100% (50% de descuento efectivo por unidad).
+                            </p>
+                          </div>
+                        ) : newTipo === "tres_por_dos" ? (
+                          <div className="p-2.5 bg-purple-50 dark:bg-purple-950/40 rounded-xl border border-purple-200 dark:border-purple-900/50">
+                            <span className="font-bold text-purple-900 dark:text-purple-200 block text-[11px]">🎁 Regla 3x2 Automática en Caja</span>
+                            <p className="text-[10px] text-purple-700 dark:text-purple-300 mt-0.5">
+                              Por cada 3 unidades compradas, la tercera es bonificada al 100% (33.3% de descuento efectivo).
+                            </p>
+                          </div>
+                        ) : newTipo === "segunda_unidad_pct" ? (
+                          <div>
+                            <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                              % Descuento en la 2da Unidad (% OFF):
+                            </label>
+                            <input
+                              type="number"
+                              min={1}
+                              max={100}
+                              value={newSegundaUnidadPct}
+                              onChange={e => setNewSegundaUnidadPct(e.target.value === "" ? "" : Number(e.target.value))}
+                              placeholder="Ej: 50 para 2da al 50%"
+                              className="w-full text-xs font-mono font-black p-2 rounded-xl border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                            />
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {newTipo === "porcentaje" && (
+                              <div>
+                                <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                                  Base de Cálculo del Precio:
+                                </label>
+                                <div className="grid grid-cols-2 gap-1.5 p-1 bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-700">
+                                  <button
+                                    type="button"
+                                    onClick={() => setNewBaseCalculoPct("costo")}
+                                    className={`py-1 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
+                                      newBaseCalculoPct === "costo"
+                                        ? "bg-emerald-600 text-white shadow-sm"
+                                        : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800"
+                                    }`}
+                                  >
+                                    <span>🌾 Markup s/ Costo</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setNewBaseCalculoPct("venta")}
+                                    className={`py-1 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
+                                      newBaseCalculoPct === "venta"
+                                        ? "bg-emerald-600 text-white shadow-sm"
+                                        : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800"
+                                    }`}
+                                  >
+                                    <span>🏷️ % Descuento s/ Venta</span>
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <label className="font-bold text-gray-700 dark:text-gray-300">
+                                  {newTipo === "precio_fijo_oferta" || newTipo === "combo_pack"
+                                    ? "Precio Fijo de Oferta Común (Gs.):"
+                                    : newTipo === "monto_fijo"
+                                    ? "Descuento Fijo por Unidad (Gs.):"
+                                    : newBaseCalculoPct === "costo"
+                                    ? "Markup sobre Costo Promedio (%):"
+                                    : "Porcentaje de Descuento (% OFF s/ Venta):"}
+                                </label>
+                                {newTipo === "porcentaje" && newBaseCalculoPct === "costo" && (
+                                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
+                                    Precio = Costo + {newBulkValorPct || 0}%
+                                  </span>
+                                )}
+                              </div>
+
+                              <input
+                                type="number"
+                                min={0}
+                                max={newTipo === "porcentaje" && newBaseCalculoPct === "venta" ? 100 : undefined}
+                                value={
+                                  newTipo === "precio_fijo_oferta" || newTipo === "combo_pack"
+                                    ? newBulkPrecioFijo
+                                    : newTipo === "monto_fijo"
+                                    ? newBulkMontoFijo
+                                    : newBulkValorPct
+                                }
+                                onChange={e => {
+                                  const v = e.target.value === "" ? "" : Number(e.target.value)
+                                  if (newTipo === "precio_fijo_oferta" || newTipo === "combo_pack") setNewBulkPrecioFijo(v)
+                                  else if (newTipo === "monto_fijo") setNewBulkMontoFijo(v)
+                                  else setNewBulkValorPct(v)
+                                }}
+                                placeholder={
+                                  newTipo === "precio_fijo_oferta" || newTipo === "combo_pack"
+                                    ? "Ej: 37477"
+                                    : newTipo === "monto_fijo"
+                                    ? "Ej: 5000"
+                                    : newBaseCalculoPct === "costo"
+                                    ? "Ej: 7 (Costo + 7%)"
+                                    : "Ej: 15 (15% OFF)"
+                                }
+                                className="w-full text-xs font-mono font-black p-2 rounded-xl border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400"
+                              />
+
+                              {/* Chips de acceso rápido */}
+                              {newTipo === "porcentaje" && (
+                                <div className="flex items-center gap-1 flex-wrap mt-1.5">
+                                  <span className="text-[10px] text-gray-400 font-semibold mr-1">Rápidos:</span>
+                                  {(newBaseCalculoPct === "costo" ? [5, 7, 10, 12, 15, 20, 25] : [5, 10, 15, 20, 25, 30, 50]).map(val => (
+                                    <button
+                                      key={val}
+                                      type="button"
+                                      onClick={() => setNewBulkValorPct(val)}
+                                      className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold cursor-pointer transition ${
+                                        newBulkValorPct === val
+                                          ? "bg-emerald-600 text-white"
+                                          : "bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-300 hover:bg-emerald-100 dark:hover:bg-emerald-950/50"
+                                      }`}
+                                    >
+                                      {newBaseCalculoPct === "costo" ? `+${val}%` : `-${val}%`}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Terminación Psicológica de Precios */}
+                      <div className="col-span-2 space-y-1.5 pt-1 border-t border-gray-200 dark:border-slate-700/60">
+                        <div className="flex items-center justify-between">
+                          <label className="font-bold text-gray-700 dark:text-gray-300 text-xs">
+                            🎯 Terminación Psicológica de Precios:
+                          </label>
+                          {newTerminacionPsicologica !== "" && (
+                            <button
+                              type="button"
+                              onClick={() => setNewTerminacionPsicologica("")}
+                              className="text-[10px] text-gray-400 hover:text-red-500 font-bold cursor-pointer"
+                            >
+                              ✕ Quitar ajuste
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Chips de terminaciones más usadas en supermercados paraguayos */}
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {[
+                            { label: "Exacto (Sin ajuste)", value: "" },
+                            { label: "...950", value: 950 },
+                            { label: "...900", value: 900 },
+                            { label: "...990", value: 990 },
+                            { label: "...500", value: 500 },
+                            { label: "...50", value: 50 },
+                            { label: "...90", value: 90 },
+                            { label: "...99", value: 99 },
+                          ].map(t => {
+                            const isSelected = String(newTerminacionPsicologica) === String(t.value)
+                            return (
+                              <button
+                                key={t.label}
+                                type="button"
+                                onClick={() => setNewTerminacionPsicologica(t.value === "" ? "" : Number(t.value))}
+                                className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold cursor-pointer transition ${
+                                  isSelected
+                                    ? "bg-indigo-600 text-white shadow-sm"
+                                    : "bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
+                                }`}
+                              >
+                                {t.label}
+                              </button>
+                            )
+                          })}
+                        </div>
+
+                        <div className="flex items-center gap-2 pt-0.5">
+                          <input
+                            type="number"
+                            min={0}
+                            max={999}
+                            value={newTerminacionPsicologica}
+                            onChange={e => {
+                              const val = e.target.value === "" ? "" : Math.max(0, Math.min(999, Number(e.target.value)))
+                              setNewTerminacionPsicologica(val)
+                            }}
+                            placeholder="Personalizado (ej: 950, 900, 99)..."
+                            className="w-full text-xs font-mono font-bold p-1.5 rounded-lg border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                          />
+                        </div>
+                        <p className="text-[10px] text-gray-400">
+                          {newBaseCalculoPct === "costo"
+                            ? "🔒 En markup sobre costo, el precio redondeado nunca bajará del costo unitario."
+                            : "Redondea hacia abajo al valor psicológico más cercano."}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* BLOQUE 3: VIGENCIA Y DÍAS HÁBILES */}
+                  <div className="p-3.5 bg-gray-50 dark:bg-slate-800/60 rounded-2xl border border-gray-200 dark:border-slate-700/80 space-y-2.5">
+                    <div className="flex items-center gap-2 text-gray-800 dark:text-gray-200 font-bold border-b border-gray-200 dark:border-slate-700/60 pb-2">
+                      <Calendar className="w-4 h-4 text-indigo-500" />
+                      <span>3. Período de Vigencia</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Válido Desde:</label>
+                        <input
+                          type="date"
+                          required
+                          value={newDesde}
+                          onChange={e => setNewDesde(e.target.value)}
+                          className="w-full text-xs p-2 rounded-xl border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                        />
+                      </div>
+                      <div>
+                        <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Válido Hasta:</label>
+                        <input
+                          type="date"
+                          required
+                          value={newHasta}
+                          onChange={e => setNewHasta(e.target.value)}
+                          className="w-full text-xs p-2 rounded-xl border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Días de la semana interactivos */}
+                    <div className="pt-1">
+                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Días Habilitados en Caja:</label>
+                      <div className="flex gap-1 flex-wrap">
+                        {DIAS_SEMANA.map(d => {
+                          const active = newDiasSemana.includes(d.id)
+                          return (
+                            <button
+                              key={d.id}
+                              type="button"
+                              onClick={() => {
+                                if (active) {
+                                  if (newDiasSemana.length > 1) {
+                                    setNewDiasSemana(newDiasSemana.filter(x => x !== d.id))
+                                  }
+                                } else {
+                                  setNewDiasSemana([...newDiasSemana, d.id].sort())
+                                }
+                              }}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                                active
+                                  ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm"
+                                  : "bg-gray-200 dark:bg-slate-800 text-gray-400 hover:text-gray-600"
+                              }`}
+                            >
+                              {d.label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* BLOQUE 4: REGLAS AVANZADAS DE CAJA (COLAPSABLE) */}
+                  <div className="border border-gray-200 dark:border-slate-700/80 rounded-2xl overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setShowAdvancedRules(!showAdvancedRules)}
+                      className="w-full p-3 bg-gray-50 dark:bg-slate-800/40 hover:bg-gray-100 dark:hover:bg-slate-800 text-xs font-bold text-gray-700 dark:text-gray-300 flex items-center justify-between cursor-pointer transition"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Settings className="w-3.5 h-3.5 text-emerald-600" />
+                        Reglas Avanzadas de Caja (Límites, Happy Hour, Stock)
+                      </span>
+                      <span>{showAdvancedRules ? "▲" : "▼"}</span>
+                    </button>
+
+                    {showAdvancedRules && (
+                      <div className="p-3 bg-white dark:bg-slate-900 space-y-3 border-t border-gray-200 dark:border-slate-700/60">
+                        <div className="grid grid-cols-2 gap-2.5">
+                          <div className="flex items-center gap-2 pt-1 col-span-2">
+                            <input
+                              type="checkbox"
+                              id="chkCombinable"
+                              checked={newCombinable}
+                              onChange={e => setNewCombinable(e.target.checked)}
+                              className="w-4 h-4 rounded text-emerald-600"
+                            />
+                            <label htmlFor="chkCombinable" className="font-bold text-gray-700 dark:text-gray-300 text-xs cursor-pointer">
+                              ¿Combinable con otros descuentos en ticket?
+                            </label>
+                          </div>
+
+                          <div>
+                            <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Límite por Ticket (un.):</label>
+                            <input
+                              type="number"
+                              min={1}
+                              value={newLimitePorCompra}
+                              onChange={e => setNewLimitePorCompra(e.target.value === "" ? "" : Number(e.target.value))}
+                              placeholder="Ej: 6 máx"
+                              className="w-full text-xs font-mono p-1.5 rounded-lg border border-gray-300 dark:border-slate-700"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Cupo Total Stock Promo (un.):</label>
+                            <input
+                              type="number"
+                              min={1}
+                              value={newStockLimite}
+                              onChange={e => {
+                                const v = e.target.value === "" ? "" : Number(e.target.value)
+                                setNewStockLimite(v)
+                                setNewLimitarStock(v !== "")
+                              }}
+                              placeholder="Ej: 200 total"
+                              className="w-full text-xs font-mono p-1.5 rounded-lg border border-gray-300 dark:border-slate-700"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Compra Mínima en Ticket (Gs.):</label>
+                            <input
+                              type="number"
+                              min={0}
+                              value={newMontoMinimoCompra}
+                              onChange={e => setNewMontoMinimoCompra(e.target.value === "" ? "" : Number(e.target.value))}
+                              placeholder="Ej: 100000"
+                              className="w-full text-xs font-mono p-1.5 rounded-lg border border-gray-300 dark:border-slate-700"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Cantidad Mínima Items:</label>
+                            <input
+                              type="number"
+                              min={1}
+                              value={newCantidadMinima}
+                              onChange={e => setNewCantidadMinima(e.target.value === "" ? "" : Number(e.target.value))}
+                              placeholder="Ej: 2"
+                              className="w-full text-xs font-mono p-1.5 rounded-lg border border-gray-300 dark:border-slate-700"
+                            />
+                          </div>
+
+                          <div className="flex items-center gap-2 pt-1 col-span-2">
+                            <input
+                              type="checkbox"
+                              id="chkRelampago"
+                              checked={newEsRelampago}
+                              onChange={e => setNewEsRelampago(e.target.checked)}
+                              className="w-4 h-4 rounded text-amber-500"
+                            />
+                            <label htmlFor="chkRelampago" className="font-bold text-gray-700 dark:text-gray-300 text-xs cursor-pointer">
+                              ⚡ Horario Relámpago (Happy Hour)
+                            </label>
+                          </div>
+
+                          {newEsRelampago && (
+                            <div className="col-span-2 grid grid-cols-2 gap-2 p-2 bg-amber-50 dark:bg-amber-950/40 rounded-lg border border-amber-200 dark:border-amber-900/50">
+                              <div>
+                                <label className="text-[10px] font-bold text-gray-600 dark:text-gray-300 block mb-0.5">Desde:</label>
+                                <input
+                                  type="time"
+                                  value={newHorarioDesde}
+                                  onChange={e => setNewHorarioDesde(e.target.value)}
+                                  className="w-full text-xs p-1 rounded border border-gray-300 dark:border-slate-700 font-mono"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-bold text-gray-600 dark:text-gray-300 block mb-0.5">Hasta:</label>
+                                <input
+                                  type="time"
+                                  value={newHorarioHasta}
+                                  onChange={e => setNewHorarioHasta(e.target.value)}
+                                  className="w-full text-xs p-1 rounded border border-gray-300 dark:border-slate-700 font-mono"
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Corto Vencimiento si aplica */}
+                  {newOrigen === "corto_vencimiento" && (
+                    <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-2">
+                      <div className="flex items-center gap-2 text-amber-900 dark:text-amber-300 font-bold text-xs">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+                        Lote de Corto Vencimiento
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <label className="font-bold text-gray-700 dark:text-gray-300 block mb-0.5 text-[10px]">Vto Lote:</label>
+                          <input
+                            type="date"
+                            required
+                            value={newFechaVencimientoLote}
+                            onChange={e => {
+                              setNewFechaVencimientoLote(e.target.value)
+                              setNewHasta(e.target.value)
+                            }}
+                            className="w-full text-xs p-1.5 rounded-lg border border-gray-300 dark:border-slate-700 font-bold"
+                          />
+                        </div>
+                        <div>
+                          <label className="font-bold text-gray-700 dark:text-gray-300 block mb-0.5 text-[10px]">Cant. Lote:</label>
+                          <input
+                            type="number"
+                            min="1"
+                            required
+                            value={newStockLimite}
+                            onChange={e => setNewStockLimite(e.target.value === "" ? "" : Number(e.target.value))}
+                            placeholder="100"
+                            className="w-full text-xs font-mono font-bold p-1.5 rounded-lg border border-gray-300 dark:border-slate-700"
+                          />
+                        </div>
+                        <div>
+                          <label className="font-bold text-gray-700 dark:text-gray-300 block mb-0.5 text-[10px]">% NC Costo:</label>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={newPorcentajeNcCosto}
+                            onChange={e => setNewPorcentajeNcCosto(e.target.value === "" ? "" : Number(e.target.value))}
+                            placeholder="40"
+                            className="w-full text-xs font-mono font-bold p-1.5 rounded-lg border border-gray-300 dark:border-slate-700"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                </div>
+
+                {/* ── COLUMNA DERECHA (7/12): SELECCIÓN DE PRODUCTOS, PRECIOS Y SIMULADOR ── */}
+                <div className="lg:col-span-7 h-full flex flex-col min-h-0 overflow-y-auto pr-1.5 space-y-3">
+                  
+                  {/* PANEL SUPERIOR: FILTROS Y BÚSQUEDA DE PRODUCTOS */}
+                  <div className="p-3 bg-gray-50 dark:bg-slate-800/60 rounded-2xl border border-gray-200 dark:border-slate-700/80 space-y-2 shrink-0">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <span className="font-extrabold text-xs text-gray-900 dark:text-white flex items-center gap-1.5">
+                        <Grid className="w-4 h-4 text-emerald-600" />
+                        Catálogo de Productos para la Promoción
+                      </span>
+
+                      {/* Tabs de Modo de Búsqueda */}
+                      <div className="flex items-center gap-1 bg-white dark:bg-slate-900 p-1 rounded-xl border border-gray-200 dark:border-slate-700 text-[11px]">
+                        <button
+                          type="button"
+                          onClick={() => setSelectionMode("search")}
+                          className={`px-2.5 py-0.5 rounded-lg font-bold transition cursor-pointer ${selectionMode === "search" ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900" : "text-gray-600 dark:text-gray-400"}`}
+                        >
+                          🔍 Búsqueda
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSelectionMode("supplier")}
+                          className={`px-2.5 py-0.5 rounded-lg font-bold transition cursor-pointer ${selectionMode === "supplier" ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900" : "text-gray-600 dark:text-gray-400"}`}
+                        >
+                          🏢 Proveedor
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSelectionMode("category")}
+                          className={`px-2.5 py-0.5 rounded-lg font-bold transition cursor-pointer ${selectionMode === "category" ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900" : "text-gray-600 dark:text-gray-400"}`}
+                        >
+                          🗂️ Rubro
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Filtros específicos según modo */}
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 pt-0.5">
+                      {selectionMode === "category" && (
+                        <div className="sm:col-span-5">
+                          <select
+                            value={newCategoryId}
+                            onChange={e => setNewCategoryId(e.target.value)}
+                            className="w-full text-xs p-2 rounded-xl border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-medium"
+                          >
+                            <option value="">Todas las Categorías...</option>
+                            {(categories || []).map(c => (
+                              <option key={c.id} value={c.id}>{c.nombre}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {selectionMode === "supplier" && (
+                        <div className="sm:col-span-5 relative">
+                          <div className="relative">
+                            <input
+                              type="text"
+                              placeholder="Filtrar por proveedor comercial..."
+                              value={tabSupplierSearchText || supplierSearchText}
+                              onChange={e => {
+                                setTabSupplierSearchText(e.target.value)
+                                setSupplierSearchText(e.target.value)
+                                setShowTabSupplierDropdown(true)
+                              }}
+                              onFocus={() => setShowTabSupplierDropdown(true)}
+                              className="w-full text-xs p-2 rounded-xl border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-medium"
+                            />
+                            {newSupplierId && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setNewSupplierId("")
+                                  setTabSupplierSearchText("")
+                                  setSupplierSearchText("")
+                                }}
+                                className="absolute right-2 top-2 text-gray-400 hover:text-gray-600 text-xs font-bold"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+
+                          {showTabSupplierDropdown && (
+                            <div className="absolute left-0 right-0 top-full mt-1 z-50 max-h-48 overflow-y-auto bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl shadow-2xl divide-y divide-gray-100 dark:divide-slate-800">
+                              <div
+                                onClick={() => {
+                                  setNewSupplierId("")
+                                  setTabSupplierSearchText("")
+                                  setSupplierSearchText("")
+                                  setShowTabSupplierDropdown(false)
+                                }}
+                                className="p-2 text-xs text-gray-500 hover:bg-gray-100 dark:hover:bg-slate-800 cursor-pointer font-semibold"
+                              >
+                                🏬 Todos los Proveedores ({sellableSuppliers.length})
+                              </div>
+                              {filteredTabSuppliers.length === 0 ? (
+                                <div className="p-3 text-xs text-gray-400 text-center">No se encontraron proveedores</div>
+                              ) : (
+                                filteredTabSuppliers.map(s => (
+                                  <div
+                                    key={s.id}
+                                    onClick={() => {
+                                      setNewSupplierId(s.id)
+                                      setTabSupplierSearchText(s.razon_social || (s as any).nombre || s.id)
+                                      setSupplierSearchText(s.razon_social || (s as any).nombre || s.id)
+                                      setShowTabSupplierDropdown(false)
+                                    }}
+                                    className={`p-2 text-xs hover:bg-emerald-50 dark:hover:bg-emerald-950/40 cursor-pointer flex justify-between items-center ${
+                                      newSupplierId === s.id ? "bg-emerald-50 dark:bg-emerald-950/60 font-bold text-emerald-700 dark:text-emerald-300" : ""
+                                    }`}
+                                  >
+                                    <div>
+                                      <div className="font-bold text-gray-900 dark:text-white">{s.razon_social || (s as any).nombre}</div>
+                                      <div className="text-[10px] text-gray-400 font-mono">RUC: {s.ruc || "S/RUC"}</div>
+                                    </div>
+                                    {newSupplierId === s.id && <Check className="w-3.5 h-3.5 text-emerald-600" />}
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <div className={selectionMode === "search" ? "sm:col-span-12" : "sm:col-span-7"}>
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                          <input
+                            type="text"
+                            value={modalProdSearch}
+                            onChange={e => setModalProdSearch(e.target.value)}
+                            placeholder="Buscar producto por nombre o código de barra..."
+                            className="text-xs pl-8 pr-3 py-2 w-full rounded-xl border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Barra de Acciones de Selección */}
+                    <div className="flex items-center justify-between pt-1 border-t border-gray-200 dark:border-slate-700/60 text-[11px]">
+                      <div className="text-gray-500">
+                        Disponibles: <strong>{(modalCatalogResults || []).length}</strong>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={selectAllVisible}
+                          className="px-2.5 py-0.5 rounded-lg border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 font-bold flex items-center gap-1 cursor-pointer transition"
+                        >
+                          <CheckCheck className="w-3 h-3" />
+                          <span>Seleccionar Visibles ({(modalCatalogResults || []).length})</span>
+                        </button>
+                        {(selectedBatchProducts?.size || 0) > 0 && (
+                          <button
+                            type="button"
+                            onClick={clearSelection}
+                            className="px-2 py-0.5 rounded-lg border border-red-200 dark:border-red-900/50 text-red-600 font-bold hover:bg-red-50 dark:hover:bg-red-950/40 cursor-pointer transition"
+                          >
+                            Limpiar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* LISTA DE CATÁLOGO DISPONIBLE CON CHECKBOXES */}
+                  <div className="min-h-[120px] max-h-[190px] overflow-y-auto divide-y divide-gray-100 dark:divide-slate-800 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl shadow-inner text-xs shrink-0">
+                    {loadingCatalog ? (
+                      <div className="p-6 text-center text-gray-400">
+                        <Loader2 className="w-5 h-5 animate-spin mx-auto mb-1 text-emerald-500" />
+                        <span>Cargando productos del catálogo...</span>
+                      </div>
+                    ) : (modalCatalogResults || []).length === 0 ? (
+                      <div className="p-6 text-center text-gray-400">
+                        <span>No se encontraron productos con los filtros actuales</span>
+                      </div>
+                    ) : (
+                      (modalCatalogResults || []).map(p => {
+                        if (!p) return null
+                        const isSelected = selectedBatchProducts?.has(p.id) || false
+                        const suppName = (p as any).supplier_nombre || (p as any).proveedor_nombre
+                        return (
+                          <div
+                            key={p.id}
+                            onClick={() => toggleSelectProduct(p)}
+                            className={`p-2 flex items-center justify-between gap-3 cursor-pointer transition ${
+                              isSelected ? "bg-emerald-50/70 dark:bg-emerald-950/30" : "hover:bg-gray-50 dark:hover:bg-slate-800/40"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              {isSelected ? (
+                                <CheckSquare className="w-4 h-4 text-emerald-600 shrink-0" />
+                              ) : (
+                                <Square className="w-4 h-4 text-gray-300 dark:text-slate-600 shrink-0" />
+                              )}
+                              <div className="truncate min-w-0">
+                                <span className="font-extrabold text-gray-900 dark:text-white truncate block">{p.nombre}</span>
+                                <div className="text-[10px] text-gray-400 font-mono flex items-center gap-2 flex-wrap mt-0.5">
+                                  <span>Cód: {p.codigo_barra || p.sku || "S/N"}</span>
+                                  <span>Costo: {formatPYG(Number(p.costo_promedio || (p as any).ultimo_costo || 0))}</span>
+                                  {suppName && (
+                                    <span className="text-blue-600 dark:text-blue-400 font-semibold truncate max-w-[160px]">
+                                      🏢 {suppName}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="text-right whitespace-nowrap font-mono font-black text-emerald-600 dark:text-emerald-400">
+                              {formatPYG(Number(p.precio_venta || (p as any).precio || 0))}
+                            </div>
+                          </div>
+                        )
+                      })
+                    )}
+                  </div>
+
+                  {/* BANDEJA DE ITEMS SELECCIONADOS CON EDICIÓN INTERACTIVA Y REGLAS EN LOTE */}
+                  <div className="space-y-2 shrink-0">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span className="font-extrabold text-gray-900 dark:text-white">
+                          Precios de la Campaña ({selectedBatchProducts.size} productos):
+                        </span>
+                        {selectedBatchProducts.size > 0 && Array.from(selectedBatchProducts.values()).some(it => it.precio_editado_manualmente) && (
+                          <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-500/10 px-2 py-0.5 rounded-md border border-indigo-500/20">
+                            Precios personalizados
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {selectedBatchProducts.size > 5 && (
+                          <div className="relative">
+                            <Search className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <input
+                              type="text"
+                              value={searchInSelectedList}
+                              onChange={e => setSearchInSelectedList(e.target.value)}
+                              placeholder="Filtrar en lista..."
+                              className="text-[11px] pl-7 pr-2 py-1 rounded-lg border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 w-36"
+                            />
+                            {searchInSelectedList && (
+                              <button
+                                type="button"
+                                onClick={() => setSearchInSelectedList("")}
+                                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-[10px]"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                        )}
+
+                        {selectedBatchProducts.size > 0 && Array.from(selectedBatchProducts.values()).some(it => it.precio_editado_manualmente) && (
+                          <button
+                            type="button"
+                            onClick={handleResetAllToGeneral}
+                            className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-1 rounded-lg border border-amber-500/20 font-bold cursor-pointer transition flex items-center gap-1"
+                            title="Descartar ediciones manuales y recalcular según la regla general"
+                          >
+                            <RefreshCw className="w-3 h-3" />
+                            <span>Restaurar Todos</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* BARRA DE ACCIÓN EN LOTE SOBRE LA LISTA DE SELECCIONADOS */}
+                    {selectedBatchProducts.size > 0 && (
+                      <div className="p-2.5 bg-gradient-to-r from-indigo-500/5 via-purple-500/5 to-emerald-500/5 dark:bg-slate-800/80 rounded-xl border border-indigo-200/60 dark:border-slate-700 space-y-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => toggleSelectAllInBatch(filteredSelectedProducts.map(it => it.product.id))}
+                              className="text-xs font-bold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 hover:text-indigo-600 cursor-pointer"
+                            >
+                              {filteredSelectedProducts.length > 0 && filteredSelectedProducts.every(it => selectedInBatch.has(it.product.id)) ? (
+                                <CheckSquare className="w-4 h-4 text-indigo-600" />
+                              ) : (
+                                <Square className="w-4 h-4 text-gray-400" />
+                              )}
+                              <span>Marcar Todos ({filteredSelectedProducts.length})</span>
+                            </button>
+                            <span className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-950/60 px-2 py-0.5 rounded-md border border-indigo-200 dark:border-indigo-900/50">
+                              {selectedInBatch.size} marcados
+                            </span>
+                          </div>
+
+                          <div className="text-[10px] text-gray-400">
+                            Aplicar regla de precios a los marcados:
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+                          {/* Selector de Tipo de Regla */}
+                          <div className="sm:col-span-4">
+                            <select
+                              value={batchRuleTipo}
+                              onChange={e => setBatchRuleTipo(e.target.value as any)}
+                              className="w-full text-xs p-1.5 rounded-lg border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
+                            >
+                              <option value="markup_costo">🌾 Markup % sobre Costo</option>
+                              <option value="descuento_pct">🏷️ % Descuento s/ Regular</option>
+                              <option value="precio_fijo">💵 Precio Fijo Común (Gs.)</option>
+                              <option value="monto_fijo">➖ Descuento Fijo (Gs. off)</option>
+                            </select>
+                          </div>
+
+                          {/* Input de Valor */}
+                          <div className="sm:col-span-2">
+                            <input
+                              type="number"
+                              min={0}
+                              value={batchRuleValor}
+                              onChange={e => setBatchRuleValor(e.target.value === "" ? "" : Number(e.target.value))}
+                              placeholder={batchRuleTipo === "markup_costo" ? "7" : batchRuleTipo === "descuento_pct" ? "15" : "Gs."}
+                              className="w-full text-xs font-mono font-bold p-1.5 rounded-lg border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-center"
+                            />
+                          </div>
+
+                          {/* Terminación Psicológica para la regla */}
+                          <div className="sm:col-span-3">
+                            <select
+                              value={batchRuleTerminacion}
+                              onChange={e => setBatchRuleTerminacion(e.target.value)}
+                              className="w-full text-xs p-1.5 rounded-lg border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-medium"
+                            >
+                              <option value="none">🎯 Sin redondeo (Exacto)</option>
+                              <option value="950">🎯 Terminar en ...950</option>
+                              <option value="900">🎯 Terminar en ...900</option>
+                              <option value="990">🎯 Terminar en ...990</option>
+                              <option value="500">🎯 Terminar en ...500</option>
+                              <option value="99">🎯 Terminar en ...99</option>
+                              <option value="custom">🎯 Personalizado...</option>
+                            </select>
+                          </div>
+
+                          {/* Botón de Aplicación */}
+                          <div className="sm:col-span-3">
+                            <button
+                              type="button"
+                              onClick={handleApplyBatchRuleToSelected}
+                              disabled={selectedInBatch.size === 0}
+                              className="w-full py-1.5 px-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-lg text-xs font-bold shadow-sm cursor-pointer transition flex items-center justify-center gap-1"
+                            >
+                              <Zap className="w-3.5 h-3.5" />
+                              <span>Aplicar ({selectedInBatch.size})</span>
+                            </button>
+                          </div>
+
+                          {batchRuleTerminacion === "custom" && (
+                            <div className="sm:col-span-12 flex items-center gap-2 pt-1">
+                              <label className="text-[10px] font-bold text-gray-600 dark:text-gray-300 whitespace-nowrap">
+                                Terminación personalizada:
+                              </label>
+                              <input
+                                type="number"
+                                min={0}
+                                max={999}
+                                value={batchRuleCustomTerminacion}
+                                onChange={e => setBatchRuleCustomTerminacion(e.target.value === "" ? "" : Number(e.target.value))}
+                                placeholder="Ej: 950, 99..."
+                                className="w-32 text-xs font-mono font-bold p-1 rounded border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* LISTA DESPLAZABLE CON PRECIOS EDITABLES POR PRODUCTO */}
+                    <div className="min-h-[140px] max-h-[250px] overflow-y-auto divide-y divide-gray-100 dark:divide-slate-800 bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-700 text-xs shadow-inner">
+                      {selectedBatchProducts.size === 0 ? (
+                        <div className="p-8 flex flex-col items-center justify-center text-gray-400 text-xs italic gap-1">
+                          <Package className="w-6 h-6 text-gray-300 dark:text-slate-600" />
+                          <span>Ningún producto seleccionado todavía. Hacé clic en los productos del catálogo arriba.</span>
+                        </div>
+                      ) : filteredSelectedProducts.length === 0 ? (
+                        <div className="p-6 text-center text-gray-400 text-xs">
+                          No hay productos que coincidan con "{searchInSelectedList}"
+                        </div>
+                      ) : (
+                        filteredSelectedProducts.map(item => {
+                          if (!item || !item.product) return null
+                          const regular = Number(item.precio_regular || 0)
+                          const promo = Number(item.precio_promocional || 0)
+                          const costo = Number(item.costo || 0)
+                          const esBajoCosto = promo < costo
+                          const isCheckedInBatch = selectedInBatch.has(item.product.id)
+                          const markupCosto = costo > 0 ? ((promo - costo) / costo) * 100 : 0
+                          const descRegular = regular > 0 ? ((regular - promo) / regular) * 100 : 0
+
+                          return (
+                            <div
+                              key={item.product.id}
+                              className={`p-2 flex items-center justify-between gap-2.5 transition ${
+                                isCheckedInBatch ? "bg-indigo-50/40 dark:bg-indigo-950/20" : "hover:bg-gray-50/70 dark:hover:bg-slate-800/40"
+                              }`}
+                            >
+                              {/* Checkbox y Nombre */}
+                              <div className="flex items-center gap-2 min-w-0 flex-1">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleSelectInBatch(item.product.id)}
+                                  className="cursor-pointer text-gray-400 hover:text-indigo-600 shrink-0"
+                                  title={isCheckedInBatch ? "Desmarcar para regla en lote" : "Marcar para regla en lote"}
+                                >
+                                  {isCheckedInBatch ? (
+                                    <CheckSquare className="w-4 h-4 text-indigo-600" />
+                                  ) : (
+                                    <Square className="w-4 h-4 text-gray-300 dark:text-slate-600" />
+                                  )}
+                                </button>
+
+                                <div className="truncate min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-bold text-gray-900 dark:text-white truncate block">
+                                      {item.product.nombre}
+                                    </span>
+                                    {item.precio_editado_manualmente && (
+                                      <span className="text-[9px] font-bold text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-950/60 px-1.5 py-0.2 rounded border border-purple-200 dark:border-purple-900/50 flex items-center gap-0.5">
+                                        <span>✏️ Manual</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleResetItemPromoPrice(item.product.id)}
+                                          className="text-purple-600 hover:text-purple-900 ml-0.5"
+                                          title="Volver al cálculo general de la campaña"
+                                        >
+                                          ↺
+                                        </button>
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="text-[10px] text-gray-400 font-mono flex items-center gap-2 flex-wrap mt-0.5">
+                                    <span>Cód: {item.product.codigo_barra || item.product.sku || "S/N"}</span>
+                                    <span>Reg: {formatPYG(regular)}</span>
+                                    <span>Costo: {formatPYG(costo)}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Input de Precio Promocional y Badges de Rentabilidad */}
+                              <div className="flex items-center gap-2 shrink-0">
+                                <div className="flex flex-col items-end">
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[10px] text-gray-400 font-mono">Gs.</span>
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      value={item.precio_promocional}
+                                      onChange={e => handleUpdateItemPromoPrice(item.product.id, Number(e.target.value))}
+                                      className="w-24 text-right font-mono font-black text-xs px-2 py-1 rounded-lg border border-emerald-500/40 bg-emerald-50/50 dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 focus:ring-2 focus:ring-emerald-500/30"
+                                      title="Modificar precio promocional individual para este producto"
+                                    />
+                                  </div>
+
+                                  <div className="flex items-center gap-1 mt-0.5">
+                                    {esBajoCosto ? (
+                                      <span className="text-[9px] font-bold text-red-600 dark:text-red-400">
+                                        ⚠️ Bajo Costo (-{Math.round(((costo - promo) / (costo || 1)) * 100)}%)
+                                      </span>
+                                    ) : costo > 0 ? (
+                                      <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400">
+                                        +{markupCosto.toFixed(1)}% s/costo
+                                      </span>
+                                    ) : (
+                                      <span className="text-[9px] font-bold text-indigo-600 dark:text-indigo-400">
+                                        -{descRegular.toFixed(1)}% s/reg
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => toggleSelectProduct(item.product)}
+                                  className="text-red-400 hover:text-red-600 p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/40 cursor-pointer transition"
+                                  title="Quitar de la promoción"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  {/* ── SIMULADOR DE IMPACTO FINANCIERO & TRADE SPEND (SIEMPRE VISIBLE) ── */}
+                  <div className="p-3.5 bg-slate-900 text-white dark:bg-slate-950 rounded-2xl border border-slate-800 shadow-xl space-y-2.5 shrink-0">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
+                          <TrendingUp className="w-3.5 h-3.5" />
+                        </div>
+                        <div>
+                          <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-400 block">
+                            Simulador Financiero & Trade Spend
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {selectedBatchProducts.size > 0
+                              ? `Proyección para ${financialSimulation.unidadesTotales} unidades totales (≈ ${Math.round(financialSimulation.qPorItem)} un./producto)`
+                              : "Seleccione productos arriba para simular rentabilidad"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {/* Toggle Total vs Por Producto */}
+                        <div className="flex items-center bg-slate-800 p-0.5 rounded-lg text-[10px] font-bold">
+                          <button
+                            type="button"
+                            onClick={() => setVolumeMode("total")}
+                            className={`px-2 py-0.5 rounded ${volumeMode === "total" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-white"}`}
+                            title="Distribuir el volumen total entre los productos de la promoción"
+                          >
+                            Total Promo
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setVolumeMode("per_item")}
+                            className={`px-2 py-0.5 rounded ${volumeMode === "per_item" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-white"}`}
+                            title="Calcular este volumen para cada uno de los productos"
+                          >
+                            Por Ítem
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            min="1"
+                            value={simulatedVolume}
+                            onChange={e => setSimulatedVolume(Math.max(1, Number(e.target.value) || 1))}
+                            className="w-16 px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-xs font-mono font-bold text-center text-white focus:outline-none focus:border-emerald-500"
+                          />
+                          <span className="text-[10px] text-slate-400 font-mono">un.</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                      {/* Tarjeta 1: Ahorro Total al Cliente */}
+                      <div className="p-2.5 bg-slate-800/90 rounded-xl border border-slate-700/70 space-y-1">
+                        <div className="text-[9px] font-bold text-slate-400 uppercase flex items-center justify-between">
+                          <span>Ahorro al Cliente:</span>
+                          <span className="text-amber-400">-{((financialSimulation?.totalDescuentoCedido || 0) > 0 && (financialSimulation?.totalVentaRegular || 0) > 0) ? Math.round((financialSimulation.totalDescuentoCedido / financialSimulation.totalVentaRegular) * 100) : 0}%</span>
+                        </div>
+                        <div className="text-base font-mono font-black text-amber-400">
+                          {formatPYG(financialSimulation?.totalDescuentoCedido || 0)}
+                        </div>
+                        <div className="text-[9px] text-slate-400 truncate">
+                          Descuento en caja ({financialSimulation?.totalItems || 0} productos)
+                        </div>
+                      </div>
+
+                      {/* Tarjeta 2: Aporte Proveedor / NC Scan-Back vs Tienda */}
+                      {(newFinanciamiento === "proveedor_sell_out" || newFinanciamiento === "co_financiado" || newOrigen === "accion_proveedor" || newOrigen === "corto_vencimiento") ? (
+                        <div className="p-2.5 bg-blue-950/70 rounded-xl border border-blue-800/70 space-y-1">
+                          <div className="text-[9px] font-bold text-blue-300 uppercase flex items-center gap-1">
+                            <Receipt className="w-3 h-3 text-blue-400" />
+                            <span>NC Proveedor (AR):</span>
+                          </div>
+                          <div className="text-base font-mono font-black text-blue-300">
+                            {formatPYG(financialSimulation?.totalNC || 0)}
+                          </div>
+                          <div className="text-[9px] text-blue-200/70 truncate">
+                            {newFinanciamiento === "co_financiado"
+                              ? `Aporte Prov. ${newPctAporteProveedor || 30}% (Tienda: ${newPctAporteTienda || 20}%)`
+                              : "100% Recuperable vía NC Scan-Back"}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-2.5 bg-slate-800/90 rounded-xl border border-slate-700/70 space-y-1">
+                          <div className="text-[9px] font-bold text-slate-400 uppercase">Aporte de Tienda:</div>
+                          <div className="text-base font-mono font-black text-slate-300">
+                            {formatPYG(financialSimulation?.totalDescuentoCedido || 0)}
+                          </div>
+                          <div className="text-[9px] text-slate-400 truncate">100% Gasto comercial de tienda</div>
+                        </div>
+                      )}
+
+                      {/* Tarjeta 3: Margen Bruto de Tienda */}
+                      {(financialSimulation?.itemsBajoCosto || 0) > 0 && newFinanciamiento === "propio_supermercado" ? (
+                        <div className="p-2.5 bg-red-950/80 rounded-xl border border-red-800/70 space-y-1">
+                          <div className="text-[9px] font-bold text-red-300 uppercase flex items-center gap-1">
+                            <ShieldAlert className="w-3 h-3 text-red-400" />
+                            <span>Pérdida Neta Proyectada:</span>
+                          </div>
+                          <div className="text-base font-mono font-black text-red-400">
+                            -{formatPYG(financialSimulation?.totalPerdidaRealBajoCosto || 0)}
+                          </div>
+                          <div className="text-[9px] text-red-200/80 truncate">
+                            {financialSimulation?.itemsBajoCosto} item(s) bajo costo unitario
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-2.5 bg-emerald-950/70 rounded-xl border border-emerald-800/70 space-y-1">
+                          <div className="text-[9px] font-bold text-emerald-300 uppercase flex items-center gap-1">
+                            <TrendingUp className="w-3 h-3 text-emerald-400" />
+                            <span>Margen Bruto Tienda:</span>
+                          </div>
+                          <div className="text-base font-mono font-black text-emerald-400">
+                            {formatPYG(financialSimulation?.margenBrutoTienda || 0)} ({(Number(financialSimulation?.margenPct) || 0).toFixed(1)}%)
+                          </div>
+                          <div className="text-[9px] text-emerald-200/70 truncate">
+                            {selectedBatchProducts.size > 0 ? "Ganancia proyectada tras oferta" : "Margen estimado"}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                </div>
+
+              </div>
+
+              {/* FOOTER MODAL - FIJO */}
+              <div className="pt-3 border-t border-gray-100 dark:border-slate-800 flex justify-between items-center shrink-0">
+                <div className="text-xs text-gray-500">
+                  {selectedBatchProducts?.size || 0} producto(s) asignados a esta campaña
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowCreateModal(false)
+                      setEditingPromo(null)
+                      setNewActivo(true)
+                    }}
+                    className="px-4 py-2 rounded-xl border border-gray-300 dark:border-slate-700 text-gray-700 dark:text-gray-300 text-xs font-semibold cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={saving || (selectedBatchProducts?.size || 0) === 0}
+                    className={`px-5 py-2 rounded-xl text-white text-xs font-extrabold flex items-center gap-2 shadow-lg disabled:opacity-50 cursor-pointer transition ${
+                      editingPromo
+                        ? "bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 shadow-indigo-500/25"
+                        : "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-500/25"
+                    }`}
+                  >
+                    {saving && <RefreshCw className="w-4 h-4 animate-spin" />}
+                    <span>{editingPromo ? `Guardar Cambios (${selectedBatchProducts?.size || 0} items)` : `Guardar Promoción (${selectedBatchProducts?.size || 0} items)`}</span>
+                  </button>
+                </div>
+              </div>
+
+            </form>
+          </div>
+        </div>,
+        document.body
+      )}
+      {/* ── MODAL: LIQUIDACIÓN SELL-OUT & CARGA DE NC ─────────────────────── */}
+      {showSellOutModal && selectedPromo && createPortal(
+        <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-gray-200 dark:border-slate-800 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="text-base font-extrabold text-gray-900 dark:text-white flex items-center gap-2">
+                  <Receipt className="w-5 h-5 text-blue-600" />
+                  Liquidación Sell-Out (Scan-Back) & Reclamo
+                </h3>
+                <p className="text-xs text-gray-500 truncate max-w-md">
+                  Campaña: <strong>{selectedPromo.nombre}</strong>
+                </p>
+              </div>
+              <button onClick={() => setShowSellOutModal(false)} className="p-1.5 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-400">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {loadingClaim ? (
+              <div className="p-8 text-center text-gray-400">
+                <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-1 text-emerald-500" />
+                <span className="text-xs">Identificando proveedor, órdenes de compra y calculando rebate...</span>
+              </div>
+            ) : (
+              <form onSubmit={handleSaveNC} className="space-y-3.5 text-xs">
+                {/* 1. Proveedor Titular */}
+                <div className="p-3 bg-blue-50/70 dark:bg-blue-950/40 rounded-2xl border border-blue-200 dark:border-blue-900/50 flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0">
+                      <Building2 className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-[10px] uppercase font-extrabold text-blue-700 dark:text-blue-300 block">
+                        Proveedor Comercial Titular:
+                      </span>
+                      <strong className="text-sm font-bold text-gray-900 dark:text-white block truncate">
+                        {sellOutClaimData?.supplier_nombre || "Proveedor General"}
+                      </strong>
+                      <div className="text-[11px] text-gray-500 font-mono flex items-center gap-2 mt-0.5">
+                        <span>RUC: {sellOutClaimData?.supplier_ruc || "S/RUC"}</span>
+                        {sellOutClaimData?.supplier_telefono && <span>· Tel: {sellOutClaimData.supplier_telefono}</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200 shrink-0">
+                    {FINANCIAMIENTO_LABELS[sellOutClaimData?.financiamiento || selectedPromo.financiamiento || "proveedor_sell_out"]?.label}
+                  </span>
+                </div>
+
+                {/* 2. Facturas / Órdenes de Compra Afectadas */}
+                <div className="space-y-1.5">
+                  <span className="text-[10px] font-extrabold uppercase text-gray-500 tracking-wider flex items-center gap-1">
+                    <Receipt className="w-3.5 h-3.5 text-gray-400" />
+                    Facturas de Compra Afectadas / Órdenes Involucradas:
+                  </span>
+                  {(sellOutClaimData?.facturas_compra_referencia || []).length > 0 ? (
+                    <div className="space-y-1 max-h-32 overflow-y-auto divide-y divide-gray-100 dark:divide-slate-800 bg-gray-50 dark:bg-slate-800/40 p-2.5 rounded-xl border border-gray-200 dark:border-slate-700">
+                      <div className="text-[10px] font-bold text-gray-500 uppercase flex items-center justify-between pb-1">
+                        <span>Comprobante</span>
+                        <span>Timbrado</span>
+                        <span>Fecha</span>
+                        <span>Monto Compra</span>
+                      </div>
+                      {sellOutClaimData.facturas_compra_referencia.map((f: any, idx: number) => (
+                        <div key={idx} className="flex items-center justify-between pt-1 text-[11px] font-mono">
+                          <span className="font-bold text-blue-600 dark:text-blue-400">{f.numero}</span>
+                          <span className="text-gray-500">{f.timbrado || "18545636"}</span>
+                          <span className="text-gray-500">{f.fecha}</span>
+                          <span className="font-bold">{formatPYG(f.total)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-gray-50 dark:bg-slate-800/40 rounded-xl border border-gray-200 dark:border-slate-700 text-center text-gray-400 text-[11px]">
+                      Órdenes de compra consolidadas en base a la rotación general de salón
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. Desglose Económico de Liquidación */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                  <div className="p-2.5 bg-gray-50 dark:bg-slate-800/60 rounded-xl border border-gray-200 dark:border-slate-700">
+                    <span className="text-[10px] font-bold text-gray-400 block uppercase">Descuento Total en Caja:</span>
+                    <strong className="text-sm font-mono font-black text-amber-500 block">
+                      {formatPYG(sellOutClaimData?.total_descuento_general || sellOutClaimData?.total_rebate_reclamar || 0)}
+                    </strong>
+                    <span className="text-[10px] text-gray-500">{sellOutClaimData?.unidades_vendidas || 0} un. vendidas</span>
+                  </div>
+
+                  <div className="p-2.5 bg-blue-50 dark:bg-blue-950/60 rounded-xl border border-blue-200 dark:border-blue-900/60">
+                    <span className="text-[10px] font-bold text-blue-600 dark:text-blue-300 block uppercase">Aporte Proveedor (NC):</span>
+                    <strong className="text-sm font-mono font-black text-blue-600 dark:text-blue-300 block">
+                      {formatPYG(sellOutClaimData?.total_rebate_reclamar || sellOutClaimData?.monto_total_reclamado_pyg || 0)}
+                    </strong>
+                    <span className="text-[10px] text-blue-500 font-bold">{sellOutClaimData?.porcentaje_aporte_proveedor || 100}% Aporte</span>
+                  </div>
+
+                  <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/60 rounded-xl border border-emerald-200 dark:border-emerald-900/60">
+                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-300 block uppercase">Aporte Tienda:</span>
+                    <strong className="text-sm font-mono font-black text-emerald-600 dark:text-emerald-300 block">
+                      {formatPYG(sellOutClaimData?.total_aporte_tienda || 0)}
+                    </strong>
+                    <span className="text-[10px] text-emerald-500 font-bold">{sellOutClaimData?.porcentaje_aporte_tienda || 0}% Asumido</span>
+                  </div>
+                </div>
+
+                {/* 4. Formulario Asentamiento NC */}
+                <div className="p-3.5 bg-slate-900 text-white dark:bg-slate-950 rounded-2xl border border-slate-800 space-y-3">
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-400 block">
+                    Asentamiento de Nota de Crédito Recibida
+                  </span>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-300 block mb-1">Nº Nota de Crédito Proveedor:</label>
+                      <input
+                        type="text"
+                        required
+                        value={ncNumero}
+                        onChange={e => setNcNumero(e.target.value)}
+                        placeholder="001-001-0001234"
+                        className="w-full text-xs font-mono p-2 rounded-xl border border-slate-700 bg-slate-800 text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-300 block mb-1">Timbrado Proveedor:</label>
+                      <input
+                        type="text"
+                        required
+                        value={ncTimbrado}
+                        onChange={e => setNcTimbrado(e.target.value)}
+                        placeholder="18545636"
+                        className="w-full text-xs font-mono p-2 rounded-xl border border-slate-700 bg-slate-800 text-white"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-300 block mb-1">Monto Asentado en Cuenta (Gs.):</label>
+                    <input
+                      type="number"
+                      required
+                      value={ncMonto}
+                      onChange={e => setNcMonto(e.target.value === "" ? "" : Number(e.target.value))}
+                      className="w-full text-xs font-mono font-black p-2 rounded-xl border border-slate-700 bg-slate-800 text-emerald-400 text-base"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowSellOutModal(false)}
+                    className="px-4 py-2 rounded-xl border border-gray-300 dark:border-slate-700 hover:bg-gray-100 font-bold"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingNC}
+                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold shadow-lg cursor-pointer"
+                  >
+                    {savingNC ? "Guardando..." : "Asentar NC en Cuentas Corrientes"}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ── MODAL: SIMULADOR DE CARRITO & MOTOR DE CAJA ───────────────────── */}
+      {showSimModal && createPortal(
+        <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-gray-200 dark:border-slate-800 space-y-4 max-h-[92vh] flex flex-col">
+            
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-800 pb-3 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 text-white flex items-center justify-center shadow-md shadow-purple-500/20">
+                  <ShoppingCart className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-purple-600 bg-purple-500/10 px-2 py-0.5 rounded-md">
+                      MOTOR DE CAJA EN TIEMPO REAL
+                    </span>
+                    {simLoadingCalc && (
+                      <span className="text-[10px] font-bold text-amber-500 flex items-center gap-1">
+                        <Loader2 className="w-3 h-3 animate-spin" /> Calculando...
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="text-base font-extrabold text-gray-900 dark:text-white mt-0.5">
+                    Simulador Oficial de Carrito, Promociones & Mayorista
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    Probá 2x1, 3x2, descuentos por volumen y escalas mayoristas exactamente como se aplican en la caja.
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setShowSimModal(false)} className="p-1.5 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-400 cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="space-y-4 text-xs overflow-y-auto flex-1 pr-1">
+              
+              {/* Buscador de Producto para agregar al carrito */}
+              <div className="space-y-1.5">
+                <label className="font-bold text-gray-700 dark:text-gray-300 block text-[11px]">
+                  Buscar y Agregar Producto al Carrito:
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={simProdSearch}
+                    onChange={e => {
+                      const q = e.target.value
+                      setSimProdSearch(q)
+                      if (!q.trim()) {
+                        setSimProdResults([])
+                        return
+                      }
+                      const filtered = (allCatalogProducts || []).filter(p =>
+                        p.nombre.toLowerCase().includes(q.toLowerCase()) ||
+                        (p.codigo_barra && p.codigo_barra.includes(q)) ||
+                        (p.sku && p.sku.toLowerCase().includes(q.toLowerCase()))
+                      ).slice(0, 8)
+                      setSimProdResults(filtered)
+                    }}
+                    placeholder="Escribir nombre o código de barra para agregar..."
+                    className="w-full text-xs p-2.5 pl-8 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-medium"
+                  />
+                  <Search className="w-4 h-4 text-gray-400 absolute left-2.5 top-3" />
+                </div>
+
+                {simProdResults.length > 0 && (
+                  <div className="max-h-36 overflow-y-auto divide-y divide-gray-100 dark:divide-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 shadow-lg">
+                    {simProdResults.map(p => (
+                      <div
+                        key={p.id}
+                        onClick={() => {
+                          setSimItems(prev => {
+                            const existingIndex = prev.findIndex(it => it.product_id === p.id)
+                            if (existingIndex >= 0) {
+                              const updated = [...prev]
+                              updated[existingIndex] = { ...updated[existingIndex], cantidad: updated[existingIndex].cantidad + 1 }
+                              return updated
+                            }
+                            return [...prev, { product_id: p.id, nombre: p.nombre, precio: Number(p.precio_venta || 0), cantidad: 1 }]
+                          })
+                          setSimProdSearch("")
+                          setSimProdResults([])
+                        }}
+                        className="p-2.5 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 cursor-pointer flex justify-between items-center transition"
+                      >
+                        <div>
+                          <span className="font-bold text-gray-900 dark:text-white block">{p.nombre}</span>
+                          <span className="text-[10px] text-gray-400 font-mono">Cód: {p.codigo_barra || p.sku || "S/C"}</span>
+                        </div>
+                        <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+                          {formatPYG(Number(p.precio_venta || 0))}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Items del Carrito de Simulación */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-extrabold text-[11px] text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                    Carrito Actual ({simItems.length} items)
+                  </span>
+                  {simItems.length > 0 && (
+                    <button
+                      onClick={() => setSimItems([])}
+                      className="text-[10px] font-bold text-red-500 hover:text-red-700 cursor-pointer"
+                    >
+                      Vaciar Carrito
+                    </button>
+                  )}
+                </div>
+
+                {simItems.length === 0 ? (
+                  <div className="p-8 text-center text-gray-400 bg-gray-50 dark:bg-slate-800/40 rounded-2xl border border-dashed border-gray-200 dark:border-slate-700">
+                    <ShoppingCart className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                    <p className="font-bold text-gray-600 dark:text-gray-300 text-xs">El carrito está vacío</p>
+                    <p className="text-[11px] mt-0.5">Buscá productos arriba para simular promociones y precios mayoristas.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto divide-y divide-gray-100 dark:divide-slate-800 bg-gray-50 dark:bg-slate-800/50 p-2 rounded-2xl border border-gray-200 dark:border-slate-700">
+                    {simItems.map((it, idx) => (
+                      <div key={idx} className="p-2 flex items-center justify-between gap-3">
+                        <div className="truncate min-w-0 flex-1">
+                          <span className="font-bold text-gray-900 dark:text-white truncate block">{it.nombre}</span>
+                          <span className="text-[10px] text-gray-400 font-mono">
+                            {formatPYG(it.precio)} c/u · Subtotal: {formatPYG(it.precio * it.cantidad)}
+                          </span>
+                        </div>
+
+                        {/* Control de Cantidad (+ / -) */}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            onClick={() => {
+                              if (it.cantidad <= 1) {
+                                setSimItems(prev => prev.filter((_, i) => i !== idx))
+                              } else {
+                                setSimItems(prev => prev.map((item, i) => i === idx ? { ...item, cantidad: item.cantidad - 1 } : item))
+                              }
+                            }}
+                            className="w-6 h-6 rounded-lg bg-white dark:bg-slate-700 border border-gray-300 dark:border-slate-600 flex items-center justify-center font-bold text-gray-600 dark:text-gray-200 hover:bg-gray-100 cursor-pointer"
+                          >
+                            -
+                          </button>
+                          <span className="w-8 text-center font-mono font-bold text-xs">
+                            {it.cantidad}
+                          </span>
+                          <button
+                            onClick={() => {
+                              setSimItems(prev => prev.map((item, i) => i === idx ? { ...item, cantidad: item.cantidad + 1 } : item))
+                            }}
+                            className="w-6 h-6 rounded-lg bg-white dark:bg-slate-700 border border-gray-300 dark:border-slate-600 flex items-center justify-center font-bold text-gray-600 dark:text-gray-200 hover:bg-gray-100 cursor-pointer"
+                          >
+                            +
+                          </button>
+                          <button
+                            onClick={() => setSimItems(prev => prev.filter((_, i) => i !== idx))}
+                            className="text-red-400 hover:text-red-600 p-1 font-bold ml-1 cursor-pointer"
+                            title="Quitar item"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Cupón Opcional */}
+              <div className="flex items-center gap-2 pt-1">
+                <span className="text-[11px] font-bold text-gray-500 uppercase shrink-0">Cupón de Descuento:</span>
+                <input
+                  type="text"
+                  value={simCupon}
+                  onChange={e => setSimCupon(e.target.value.toUpperCase())}
+                  placeholder="Ej: EXTRA2026 (opcional)"
+                  className="w-48 text-xs font-mono font-bold uppercase p-2 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                />
+              </div>
+
+              {/* Resultados del Cálculo en Tiempo Real */}
+              {simCalculation && (
+                <div className="space-y-3 pt-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                    <div className="p-2.5 bg-gray-50 dark:bg-slate-800/60 rounded-xl border border-gray-200 dark:border-slate-700">
+                      <span className="text-[10px] text-gray-400 uppercase font-bold block">Subtotal Bruto:</span>
+                      <strong className="text-sm font-mono font-bold text-gray-800 dark:text-gray-200">
+                        {formatPYG(simItems.reduce((acc, it) => acc + (it.precio * it.cantidad), 0))}
+                      </strong>
+                    </div>
+
+                    <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl border border-emerald-200 dark:border-emerald-900/50">
+                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 uppercase font-bold block">Descuento Promos:</span>
+                      <strong className="text-sm font-mono font-black text-emerald-600 dark:text-emerald-400">
+                        -{formatPYG(simCalculation.total_descuento_promociones || 0)}
+                      </strong>
+                    </div>
+
+                    <div className="p-2.5 bg-blue-50 dark:bg-blue-950/40 rounded-xl border border-blue-200 dark:border-blue-900/50">
+                      <span className="text-[10px] text-blue-600 dark:text-blue-400 uppercase font-bold block">Desc. Mayorista [M]:</span>
+                      <strong className="text-sm font-mono font-black text-blue-600 dark:text-blue-400">
+                        -{formatPYG(simCalculation.total_descuento_mayorista || 0)}
+                      </strong>
+                    </div>
+
+                    <div className="p-2.5 bg-slate-900 text-white dark:bg-slate-950 rounded-xl border border-slate-800">
+                      <span className="text-[10px] text-emerald-400 uppercase font-bold block">Total Neto en Caja:</span>
+                      <strong className="text-base font-mono font-black text-emerald-400">
+                        {formatPYG(simCalculation.total_final || 0)}
+                      </strong>
+                    </div>
+                  </div>
+
+                  {/* Detalle de Promociones Aplicadas */}
+                  {simCalculation.applicable_promotions && simCalculation.applicable_promotions.length > 0 && (
+                    <div className="p-3 bg-purple-50/50 dark:bg-purple-950/30 rounded-2xl border border-purple-200 dark:border-purple-900/40 space-y-1.5">
+                      <span className="text-[10px] font-extrabold text-purple-900 dark:text-purple-300 uppercase tracking-wider block">
+                        Promociones Aplicadas al Ticket ({simCalculation.applicable_promotions.length}):
+                      </span>
+                      <div className="space-y-1">
+                        {simCalculation.applicable_promotions.map((p: any, i: number) => (
+                          <div key={i} className="flex items-center justify-between text-xs p-1.5 bg-white dark:bg-slate-900 rounded-lg border border-purple-100 dark:border-purple-900/30">
+                            <span className="font-bold text-gray-800 dark:text-gray-200">
+                              🎁 {p.nombre} ({TIPO_LABELS[p.tipo] || p.tipo})
+                            </span>
+                            <span className="font-mono font-black text-emerald-600 dark:text-emerald-400">
+                              -{formatPYG(p.descuento)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Recuadro Térmico ESC/POS */}
+                  {simCalculation.recuadro_ticket_texto && (
+                    <div className="p-3 bg-slate-950 rounded-2xl border border-slate-800 text-slate-200 font-mono text-[11px] leading-tight space-y-1 shadow-inner">
+                      <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">
+                        Previsualización Recuadro Térmico Impreso:
+                      </span>
+                      <pre className="whitespace-pre overflow-x-auto text-emerald-400 font-mono">
+                        {simCalculation.recuadro_ticket_texto}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
+
+            </div>
+
+            {/* Footer */}
+            <div className="pt-3 border-t border-gray-100 dark:border-slate-800 flex justify-end shrink-0">
+              <button
+                onClick={() => setShowSimModal(false)}
+                className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold cursor-pointer"
+              >
+                Cerrar Simulador
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ── 🌟 MODAL VISIÓN 360° & INFORME OFICIAL PARA ENCARGADOS ────── */}
+      {promo360Id && (
+        <Promotion360Modal
+          promoId={promo360Id}
+          onClose={() => setPromo360Id(null)}
+          onUpdate={loadData}
+          onEdit={async (id) => {
+            let promoToEdit = promotions.find((p: Promotion) => p.id === id)
+            if (!promoToEdit) {
+              try {
+                promoToEdit = await api.promotions.get(id)
+              } catch (e) {
+                console.error("Error al obtener datos de promoción para editar:", e)
+              }
+            }
+            if (promoToEdit) {
+              handleOpenEdit(promoToEdit)
+            }
+          }}
+        />
+      )}
+
     </div>
   )
 }

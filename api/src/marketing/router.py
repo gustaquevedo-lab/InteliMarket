@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.src.db import get_db
 from api.src.features import require_feature
 from api.src.auth.deps import get_current_user
+from api.src.rbac.deps import require_permission
 from api.src.marketing import service
 
 router = APIRouter(
@@ -46,6 +47,7 @@ async def create_segment(
     data: dict,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
+    _=Depends(require_permission("crm:campaigns")),
 ):
     seg = await service.create_segment(db, user["company_id"], data)
     # Auto-estimate
@@ -60,6 +62,7 @@ async def update_segment(
     seg_id: str, data: dict,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
+    _=Depends(require_permission("crm:campaigns")),
 ):
     seg = await service.update_segment(db, seg_id, user["company_id"], data)
     if not seg:
@@ -114,6 +117,7 @@ async def create_campaign(
     data: dict,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
+    _=Depends(require_permission("crm:campaigns")),
 ):
     camp = await service.create_campaign(db, user["company_id"], user["id"], data)
     return {"id": str(camp.id), "nombre": camp.nombre, "estado": camp.estado}
@@ -153,6 +157,7 @@ async def update_campaign(
     camp_id: str, data: dict,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
+    _=Depends(require_permission("crm:campaigns")),
 ):
     camp = await service.update_campaign(db, camp_id, user["company_id"], data)
     if not camp:
@@ -160,11 +165,14 @@ async def update_campaign(
     return {"ok": True}
 
 
+# Envia de verdad los mensajes (WhatsApp/SMS/email) al segmento -- accion con
+# costo real y riesgo de spam, no solo "guardar un borrador".
 @router.post("/campaigns/{camp_id}/execute")
 async def execute_campaign(
     camp_id: str,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
+    _=Depends(require_permission("crm:campaigns")),
 ):
     try:
         return await service.execute_campaign(db, camp_id, user["company_id"])

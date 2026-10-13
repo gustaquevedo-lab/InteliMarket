@@ -26,7 +26,7 @@ export default function EcommerceLogin() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <Store className="w-12 h-12 text-blue-600 mx-auto mb-2" />
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">InteliMarket</h1>
+          <h1 className="text-lg sm:text-xl xl:text-xl 2xl:text-2xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">InteliMarket</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">Tienda Online B2B — Accedé a tu cuenta</p>
         </div>
         <form onSubmit={handleLogin} className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8 space-y-5">

@@ -15,7 +15,7 @@ export default function OportunidadesPage() {
     <div className="space-y-6 animate-fade-in-up">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Oportunidades Comerciales</h1>
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">Oportunidades Comerciales</h1>
           <p className="text-sm text-gray-500 mt-1">Churn detection, cross-selling, up-selling, productos dormantes, potencial crédito</p>
         </div>
       </div>

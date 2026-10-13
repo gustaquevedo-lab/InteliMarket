@@ -2,10 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.discounts.schemas import DiscountCreate, DiscountUpdate, DiscountResponse
 from api.src.discounts import service
 
-router = APIRouter(prefix="/api/v1", tags=["discounts"])
+router = APIRouter(prefix="/api/v1", tags=["discounts"], dependencies=[Depends(require_auth)])
 
 
 @router.post("/discounts", response_model=DiscountResponse, status_code=status.HTTP_201_CREATED)

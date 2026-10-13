@@ -33,6 +33,43 @@ async def list_payment_methods(db: AsyncSession, company_id: str) -> list[Paymen
     return list(result.scalars().all())
 
 
+async def list_payments(db: AsyncSession, company_id: str, tipo: str | None = None, limit: int = 200) -> list[dict]:
+    # La tabla generica "payments"/"payment_allocations" (pensada para pasarelas)
+    # nunca se uso: 0 filas en toda la base, y su columna "tipo" ni siquiera
+    # existe en la tabla real (esquema desalineado desde el inicio). Los pagos
+    # reales viven en sale_payments (cobros a clientes, 120k+ filas reales) y
+    # supplier_invoice_payments (pagos a proveedores, 5.6k+ filas reales) — se
+    # unifican aca en un solo feed real de "Pagos y Cobros".
+    from sqlalchemy import text
+
+    rows = []
+    if tipo != "pago":
+        r = await db.execute(text("""
+            SELECT id, company_id, 'cobro' AS tipo, forma_pago AS payment_method_id,
+                   moneda, monto, fecha, NULL AS referencia, 'confirmado' AS estado, created_at
+            FROM sale_payments
+            WHERE company_id = :cid
+            ORDER BY fecha DESC
+            LIMIT :lim
+        """), {"cid": company_id, "lim": limit})
+        rows.extend(dict(row._mapping) for row in r.all())
+
+    if tipo != "cobro":
+        r = await db.execute(text("""
+            SELECT sip.id, si.company_id, 'pago' AS tipo, sip.payment_method AS payment_method_id,
+                   sip.moneda, sip.monto, sip.fecha_pago::timestamptz AS fecha, sip.referencia, sip.estado, sip.created_at
+            FROM supplier_invoice_payments sip
+            JOIN supplier_invoices si ON si.id = sip.invoice_id
+            WHERE si.company_id = :cid
+            ORDER BY sip.fecha_pago DESC
+            LIMIT :lim
+        """), {"cid": company_id, "lim": limit})
+        rows.extend(dict(row._mapping) for row in r.all())
+
+    rows.sort(key=lambda r: r["fecha"] or r["created_at"], reverse=True)
+    return rows[:limit]
+
+
 async def create_payment(db: AsyncSession, data: PaymentCreate) -> Payment:
     monto_pyg = None
     if data.moneda != "PYG":

@@ -25,6 +25,20 @@ async def get_dashboard(
     return await service.get_dashboard(db, user["company_id"])
 
 
+@router.get("/profile/{customer_id}")
+async def get_customer_profile(
+    customer_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        return await service.get_customer_profile_360(db, user["company_id"], customer_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al calcular perfil 360: {str(e)}")
+
+
 @router.post("/basket/compute/{customer_id}")
 async def compute_basket(
     customer_id: str,
@@ -187,3 +201,124 @@ async def bulk_compute(
 
     await db.flush()
     return results
+
+
+# ── IA LOCAL QWEN 2.5: PERFILADO Y EDICIÓN INTERACTIVA DE CONDUCTA ──
+
+@router.post("/profile/{customer_id}/reanalyze")
+async def reanalyze_customer_with_qwen(
+    customer_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Re-analiza al cliente invocando el modelo local Qwen 2.5 en Ollama y actualiza su expediente."""
+    from api.src.customer360.qwen_service import profile_customer_with_qwen
+    try:
+        profile_res = await profile_customer_with_qwen(db, customer_id)
+        return profile_res
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error durante el re-análisis con Qwen IA: {str(e)}")
+
+
+@router.patch("/customers/{customer_id}/tags")
+async def update_customer_tags(
+    customer_id: str,
+    data: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Actualiza interactivamente los tags de comportamiento del cliente."""
+    from api.src.customers.models import Customer
+    import uuid
+
+    cid = uuid.UUID(customer_id) if isinstance(customer_id, str) else customer_id
+    res = await db.execute(select(Customer).where(Customer.id == cid))
+    customer = res.scalar_one_or_none()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    new_tags = data.get("tags", [])
+    if not isinstance(new_tags, list):
+        raise HTTPException(status_code=400, detail="'tags' debe ser una lista de strings")
+
+    customer.tags = [str(t).strip() for t in new_tags if str(t).strip()]
+    await db.commit()
+    await db.refresh(customer)
+    return {"customer_id": str(customer.id), "tags": customer.tags}
+
+
+@router.patch("/customers/{customer_id}/archetype")
+async def update_customer_archetype(
+    customer_id: str,
+    data: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Modifica el arquetipo asignado al cliente."""
+    from api.src.customers.models import Customer
+    import uuid
+
+    cid = uuid.UUID(customer_id) if isinstance(customer_id, str) else customer_id
+    res = await db.execute(select(Customer).where(Customer.id == cid))
+    customer = res.scalar_one_or_none()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    new_arch = str(data.get("arquetipo", "")).strip()
+    customer.arquetipo = new_arch
+    await db.commit()
+    await db.refresh(customer)
+    return {"customer_id": str(customer.id), "arquetipo": customer.arquetipo}
+
+
+# ── OFERTAS 1-A-1 CON BLINDAJE DE COSTO "TE EXTRAÑAMOS" ──
+
+@router.post("/offers/create")
+async def create_offer(
+    data: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Crea una oferta dirigida y personalizada para el cliente con validación estricta de costo."""
+    customer_id = data.get("customer_id")
+    product_id = data.get("product_id")
+    titulo = data.get("titulo", "Oferta Especial Personalizada")
+    descripcion = data.get("descripcion", "")
+    tipo = data.get("tipo", "precio_fijo")
+    valor = float(data.get("valor", 0))
+    dias_validez = int(data.get("dias_validez", 7))
+
+    if not customer_id or not product_id or valor <= 0:
+        raise HTTPException(status_code=400, detail="Faltan parámetros requeridos (customer_id, product_id, valor)")
+
+    try:
+        offer = await service.create_personalized_offer(
+            db=db,
+            company_id=str(user["company_id"]),
+            customer_id=customer_id,
+            product_id=product_id,
+            titulo=titulo,
+            descripcion=descripcion,
+            tipo=tipo,
+            valor=valor,
+            dias_validez=dias_validez,
+        )
+        return offer
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creando oferta personalizada: {str(e)}")
+
+
+@router.get("/customers/{customer_id}/offers")
+async def list_customer_offers(
+    customer_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Lista las ofertas personalizadas generadas para un cliente."""
+    try:
+        return await service.get_customer_offers(db, str(user["company_id"]), customer_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener ofertas: {str(e)}")
+

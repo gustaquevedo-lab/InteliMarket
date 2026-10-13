@@ -2,13 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.commissions.schemas import (
     CommissionRuleCreate, CommissionRuleUpdate, CommissionRuleResponse,
     SalesCommissionResponse, CommissionSummary,
 )
 from api.src.commissions import service
 
-router = APIRouter(prefix="/api/v1", tags=["commissions"])
+router = APIRouter(prefix="/api/v1", tags=["commissions"], dependencies=[Depends(require_auth)])
 
 
 @router.post("/commission-rules", response_model=CommissionRuleResponse, status_code=status.HTTP_201_CREATED)
@@ -51,7 +52,7 @@ async def list_commissions(
     company_id: str,
     vendedor_id: str | None = Query(None),
     estado: str | None = Query(None),
-    limit: int = Query(50, le=500),
+    limit: int = Query(200, le=1000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
@@ -69,3 +70,8 @@ async def pay_commission(commission_id: str, db: AsyncSession = Depends(get_db))
 @router.get("/companies/{company_id}/commissions/summary")
 async def commission_summary(company_id: str, db: AsyncSession = Depends(get_db)):
     return await service.get_commission_summary(db, company_id)
+
+
+@router.post("/companies/{company_id}/commissions/calculate-batch")
+async def calculate_batch_commissions(company_id: str, db: AsyncSession = Depends(get_db)):
+    return await service.calculate_batch_commissions(db, company_id)

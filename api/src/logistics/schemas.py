@@ -30,11 +30,11 @@ class DeliveryUpdate(BaseModel):
 
 
 class DeliveryResponse(BaseModel):
-    id: str
-    company_id: str
-    sale_id: Optional[str]
-    customer_id: str
-    branch_id: Optional[str]
+    id: uuid.UUID
+    company_id: uuid.UUID
+    sale_id: Optional[uuid.UUID]
+    customer_id: uuid.UUID
+    branch_id: Optional[uuid.UUID]
     driver_name: Optional[str]
     vehicle_plate: Optional[str]
     direccion_entrega: str
@@ -61,16 +61,21 @@ class RouteCreate(BaseModel):
 
 
 class RouteResponse(BaseModel):
-    id: str
-    company_id: str
+    # id/company_id eran str (no coerciona un UUID de la DB en Pydantic v2 ->
+    # 500 en TODA fila) y total_deliveries/completed_deliveries eran int
+    # obligatorio (los 83.383 viajes migrados de Casa Gonzalito no traen ese
+    # conteo del legacy — no es un dato que exista para reconstruir, no una
+    # falla de sync) -> mismo 500 en toda fila.
+    id: uuid.UUID
+    company_id: uuid.UUID
     nombre: str
     descripcion: Optional[str]
     driver_name: Optional[str]
     vehicle_plate: Optional[str]
     fecha: datetime
     estado: str
-    total_deliveries: int
-    completed_deliveries: int
+    total_deliveries: Optional[int] = 0
+    completed_deliveries: Optional[int] = 0
     created_at: datetime
     updated_at: Optional[datetime]
 

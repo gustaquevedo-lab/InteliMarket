@@ -28,7 +28,7 @@ export default function EcommerceRegister() {
       <div className="w-full max-w-lg">
         <div className="text-center mb-6">
           <Store className="w-10 h-10 text-blue-600 mx-auto mb-2" />
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Crear Cuenta</h1>
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">Crear Cuenta</h1>
           <p className="text-sm text-gray-500 mt-1">Registrate para comprar en InteliMarket</p>
         </div>
         <form onSubmit={handleSubmit} className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8 space-y-4">

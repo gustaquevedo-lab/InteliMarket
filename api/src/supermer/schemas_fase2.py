@@ -4,7 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ============================================================
@@ -207,6 +207,11 @@ class CountSessionResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+class EvidenciaUploadResponse(BaseModel):
+    url: str
+    filename: str
+
+
 class CountItemCreate(BaseModel):
     producto_id: UUID
     codigo_barra: Optional[str] = None
@@ -319,6 +324,12 @@ class ReplenishmentRuleUpdate(BaseModel):
     activa: Optional[bool] = None
 
 class ReplenishmentRuleResponse(BaseModel):
+    # Sin esto, FastAPI intenta validar una instancia ORM (no un dict) contra
+    # un BaseModel plano y el endpoint tira 500 apenas hay una fila real que
+    # devolver -- por eso el motor de reposición nunca había podido listar
+    # nada más allá de una lista vacía.
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     producto_id: UUID
     producto_nombre: Optional[str] = None
@@ -339,6 +350,8 @@ class ReplenishmentRuleResponse(BaseModel):
     updated_at: datetime
 
 class ReplenishmentSuggestionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     producto_id: UUID
     producto_nombre: Optional[str] = None
@@ -349,6 +362,7 @@ class ReplenishmentSuggestionResponse(BaseModel):
     stock_pendiente_recibir: Decimal
     demanda_diaria_avg: Optional[Decimal] = None
     demanda_pronosticada: Optional[Decimal] = None
+    punto_pedido: Optional[Decimal] = None
     cantidad_sugerida: Decimal
     costo_unitario_estimado: Optional[Decimal] = None
     costo_total_estimado: Optional[Decimal] = None

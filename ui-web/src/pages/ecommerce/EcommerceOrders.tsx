@@ -33,7 +33,7 @@ export default function EcommerceOrders() {
   return (
     <EcommerceLayout>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Mis Pedidos</h1>
+        <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">Mis Pedidos</h1>
         <Link to="/tienda" className="text-sm text-blue-600 hover:underline">Ir al Catálogo</Link>
       </div>
 
