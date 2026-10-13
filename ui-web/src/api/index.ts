@@ -1187,6 +1187,42 @@ export interface IntegrationConfig { id: string; company_id?: string; destino?: 
 export interface IntegrationDelivery { id: string; config_id?: string; evento?: string; url?: string; payload?: Record<string, unknown>; payload_size?: number; respuesta_status?: number; respuesta_body?: string; exitoso?: boolean; reintentos?: number; fecha_envio?: string; created_at?: string }
 export interface PriceList { id: string; company_id?: string; nombre?: string; tipo?: string; customer_id?: string | null; grupo?: string | null; activo?: boolean; created_at?: string; updated_at?: string }
 export interface PriceListItem { id: string; price_list_id?: string; product_id?: string; variant_id?: string | null; precio?: number; moneda?: string; notas?: string | null; activo?: boolean; created_at?: string; updated_at?: string }
+export interface PriceVariationItem {
+  id: string
+  company_id: string
+  product_id: string
+  product_nombre?: string | null
+  product_sku?: string | null
+  product_barcode?: string | null
+  categoria_nombre?: string | null
+  tipo: "unitario" | "escala"
+  escala_min_qty?: number | null
+  precio_anterior: number
+  precio_nuevo: number
+  diferencia_monto: number
+  diferencia_pct: number
+  origen?: string | null
+  usuario_id?: string | null
+  usuario_nombre?: string | null
+  motivo?: string | null
+  created_at: string
+}
+export interface PriceVariationsResponse {
+  resumen: {
+    total_modificaciones: number
+    total_subidas: number
+    total_bajadas: number
+    promedio_variacion_pct: number
+  }
+  paginacion: {
+    total: number
+    page: number
+    page_size: number
+    total_pages: number
+  }
+  items: PriceVariationItem[]
+}
+
 export interface PosTerminalTransaction { id: string; company_id?: string; sale_id?: string | null; customer_id?: string | null; tipo_operacion: string; terminal_ip?: string | null; punto_emision?: string | null; factura_nro_provisional?: string | null; bin?: string | null; nsu?: string | null; codigo_autorizacion?: string | null; codigo_comercio?: string | null; issuer_id?: string | null; nombre_tarjeta?: string | null; pan?: string | null; mensaje_display?: string | null; nombre_cliente?: string | null; monto?: number | null; monto_vuelto?: number | null; monto_comision?: number | null; monto_extraccion?: number | null; saldo?: number | null; moneda_alt?: string | null; monto_alt?: number | null; exitosa: boolean; verificado_automaticamente: boolean; error_message?: string | null; raw_response?: any; requiere_conciliacion?: boolean; created_at?: string }
 export interface PaymentIntegrationConfig { id: string; company_id: string; provider: string; environment: string; enabled: boolean; config: Record<string, any>; created_at: string; updated_at: string }
 export interface Kit { id: string; company_id?: string; nombre?: string; descripcion?: string; sku?: string; precio?: number; costo?: number; margen?: number; items?: KitItem[]; activo?: boolean; created_at?: string; updated_at?: string }
@@ -3653,7 +3689,49 @@ export const api = {
     resolvePrice: (customerId: string, productId: string, quantity = 1) => client.get<{ precio: number; price_list_id: string; source: string } | null>("/v1/price-lists/lookup", { customer_id: customerId, product_id: productId, quantity }),
     tiersSummary: () => client.get<{ total_lists: number; active_lists: number; total_tiers: number; total_products_with_tiers: number; breakdown: { min_qty: number; count: number }[] }>("/v1/price-lists/tiers-summary"),
     productsWithTiers: (params?: { search?: string; min_qty?: number; limit?: number; offset?: number }) => client.get<{ total: number; items: any[]; limit: number; offset: number }>("/v1/price-lists/products-with-tiers", params as any),
+    variations: (params?: {
+      fecha_desde?: string
+      fecha_hasta?: string
+      tipo?: string
+      search?: string
+      order_by?: string
+      page?: number
+      page_size?: number
+    }) => client.get<PriceVariationsResponse>("/v1/price-lists/variations", params as any),
+    exportVariationsCsv: (params?: {
+      fecha_desde?: string
+      fecha_hasta?: string
+      tipo?: string
+      search?: string
+      order_by?: string
+    }) => {
+      const q = new URLSearchParams()
+      if (params?.fecha_desde) q.set("fecha_desde", params.fecha_desde)
+      if (params?.fecha_hasta) q.set("fecha_hasta", params.fecha_hasta)
+      if (params?.tipo) q.set("tipo", params.tipo)
+      if (params?.search) q.set("search", params.search)
+      if (params?.order_by) q.set("order_by", params.order_by)
+      const qs = q.toString() ? `?${q.toString()}` : ""
+      return downloadAuthenticated(`/v1/price-lists/variations/export/csv${qs}`, {}, `variaciones_precios_${new Date().toISOString().slice(0, 10)}.csv`)
+    },
+    exportVariationsPdf: (params?: {
+      fecha_desde?: string
+      fecha_hasta?: string
+      tipo?: string
+      search?: string
+      order_by?: string
+    }) => {
+      const q = new URLSearchParams()
+      if (params?.fecha_desde) q.set("fecha_desde", params.fecha_desde)
+      if (params?.fecha_hasta) q.set("fecha_hasta", params.fecha_hasta)
+      if (params?.tipo) q.set("tipo", params.tipo)
+      if (params?.search) q.set("search", params.search)
+      if (params?.order_by) q.set("order_by", params.order_by)
+      const qs = q.toString() ? `?${q.toString()}` : ""
+      return downloadAuthenticated(`/v1/price-lists/variations/export/pdf${qs}`, {}, `reporte_variaciones_precios_${new Date().toISOString().slice(0, 10)}.pdf`)
+    },
   },
+
   posTerminalTransactions: {
     create: (data: Partial<PosTerminalTransaction>) => client.post<PosTerminalTransaction>("/v1/pos-terminal-transactions", data),
     update: (id: string, data: Partial<PosTerminalTransaction>) => client.patch<PosTerminalTransaction>(`/v1/pos-terminal-transactions/${id}`, data),

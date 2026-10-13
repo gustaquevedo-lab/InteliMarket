@@ -1,6 +1,5 @@
-"""Price list router"""
-
-from fastapi import APIRouter, Depends, HTTPException, Query
+from datetime import datetime
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
@@ -10,9 +9,82 @@ from api.src.price_lists import service
 from api.src.price_lists.schemas import (
     PriceListCreate, PriceListUpdate, PriceListResponse,
     PriceListItemCreate, PriceListItemUpdate, PriceListItemResponse,
+    PriceVariationsResponse,
 )
 
 router = APIRouter(prefix="/api/v1/price-lists", tags=["price-lists"])
+
+
+@router.get("/variations", response_model=PriceVariationsResponse)
+async def list_variations(
+    fecha_desde: str | None = Query(None),
+    fecha_hasta: str | None = Query(None),
+    tipo: str | None = Query(None),
+    search: str | None = Query(None),
+    order_by: str = Query("fecha_desc"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.list_price_variations(
+        db, user["company_id"], fecha_desde, fecha_hasta, tipo, search, order_by, page, page_size
+    )
+
+
+@router.get("/variations/export/csv")
+async def export_variations_csv(
+    fecha_desde: str | None = Query(None),
+    fecha_hasta: str | None = Query(None),
+    tipo: str | None = Query(None),
+    search: str | None = Query(None),
+    order_by: str = Query("fecha_desc"),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    items = await service.get_price_variations_for_export(
+        db, user["company_id"], fecha_desde, fecha_hasta, tipo, search, order_by
+    )
+    from api.src.price_lists.pdf_reports import generate_price_variations_csv
+    csv_content = generate_price_variations_csv(items)
+    now_str = datetime.now().strftime("%Y%m%d_%H%M")
+    return Response(
+        content=csv_content.encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="variaciones_precios_{now_str}.csv"'},
+    )
+
+
+@router.get("/variations/export/pdf")
+async def export_variations_pdf(
+    fecha_desde: str | None = Query(None),
+    fecha_hasta: str | None = Query(None),
+    tipo: str | None = Query(None),
+    search: str | None = Query(None),
+    order_by: str = Query("fecha_desc"),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    items = await service.get_price_variations_for_export(
+        db, user["company_id"], fecha_desde, fecha_hasta, tipo, search, order_by
+    )
+    from api.src.price_lists.pdf_reports import generate_price_variations_pdf
+    company = {
+        "nombre": "Extra Supermercado Mayorista",
+        "razon_social": "GRUPO SANTA TERESA E.A.S.",
+        "ruc": "80150377-9",
+    }
+    user_name = user.get("nombre") or user.get("username") or "Administrador"
+    pdf_bytes = generate_price_variations_pdf(
+        company, items, fecha_desde, fecha_hasta, tipo, generated_by=user_name
+    )
+    now_str = datetime.now().strftime("%Y%m%d_%H%M")
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="reporte_variaciones_precios_{now_str}.pdf"'},
+    )
+
 
 
 @router.get("/tiers-summary")
