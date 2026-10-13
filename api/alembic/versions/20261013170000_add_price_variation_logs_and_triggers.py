@@ -70,7 +70,7 @@ def upgrade() -> None:
                 END IF;
 
                 IF NEW.categoria_id IS NOT NULL THEN
-                    SELECT nombre INTO v_cat_nombre FROM categories WHERE id = NEW.categoria_id;
+                    SELECT nombre INTO v_cat_nombre FROM product_categories WHERE id = NEW.categoria_id;
                 END IF;
 
                 INSERT INTO price_variation_logs (
@@ -175,7 +175,7 @@ def upgrade() -> None:
             FROM products p WHERE p.id = v_rec_pid;
 
             IF v_cat_id IS NOT NULL THEN
-                SELECT nombre INTO v_cat_nombre FROM categories WHERE id = v_cat_id;
+                SELECT nombre INTO v_cat_nombre FROM product_categories WHERE id = v_cat_id;
             END IF;
 
             INSERT INTO price_variation_logs (
@@ -260,7 +260,7 @@ def upgrade() -> None:
                     pal.created_at
                 FROM price_audit_log pal
                 JOIN products p ON p.id = pal.product_id
-                LEFT JOIN categories c ON c.id = p.categoria_id
+                LEFT JOIN product_categories c ON c.id = p.categoria_id
                 ON CONFLICT (id) DO NOTHING;
             END IF;
         END $$;
