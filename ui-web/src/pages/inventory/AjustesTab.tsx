@@ -928,16 +928,16 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs min-w-[900px]">
+            <table className="w-full text-left text-xs min-w-[1000px]">
               <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-100 dark:border-slate-800">
                 <tr>
-                  <th className="p-3.5">Código / Fecha</th>
-                  <th className="p-3.5">Depósito</th>
+                  <th className="p-3.5 whitespace-nowrap">Código / Fecha</th>
+                  <th className="p-3.5 whitespace-nowrap">Depósito</th>
                   <th className="p-3.5">Motivo & Riesgo</th>
-                  <th className="p-3.5 text-right">Impacto Gs.</th>
-                  <th className="p-3.5 text-center">Estado Workflow</th>
-                  <th className="p-3.5">Trazabilidad Firmas</th>
-                  <th className="p-3.5 text-center">Acciones</th>
+                  <th className="p-3.5 text-right whitespace-nowrap w-48 min-w-[180px]">Impacto Gs.</th>
+                  <th className="p-3.5 text-center whitespace-nowrap">Estado Workflow</th>
+                  <th className="p-3.5 whitespace-nowrap">Trazabilidad Firmas</th>
+                  <th className="p-3.5 text-center whitespace-nowrap">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 font-medium">
@@ -957,40 +957,40 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                       className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition group"
                     >
                       {/* Código & Fecha */}
-                      <td className="p-3.5 space-y-0.5">
-                        <span className="font-mono font-black text-slate-900 dark:text-white block">
+                      <td className="p-3.5 space-y-0.5 whitespace-nowrap">
+                        <span className="font-mono font-bold text-slate-900 dark:text-white block whitespace-nowrap text-xs">
                           {adj.codigo}
                         </span>
-                        <span className="text-[11px] text-slate-400 flex items-center gap-1">
-                          <Clock className="w-3 h-3 inline" />
+                        <span className="text-[11px] text-slate-400 flex items-center gap-1 whitespace-nowrap">
+                          <Clock className="w-3 h-3 inline shrink-0" />
                           {formatDateTime(adj.created_at)}
                         </span>
                       </td>
 
                       {/* Depósito */}
-                      <td className="p-3.5 font-bold text-slate-700 dark:text-slate-200">
+                      <td className="p-3.5 font-bold text-slate-700 dark:text-slate-200 whitespace-nowrap">
                         {adj.warehouse_nombre || "Depósito Central"}
                       </td>
 
                       {/* Motivo & Riesgo */}
-                      <td className="p-3.5 space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-extrabold text-slate-900 dark:text-white">
+                      <td className="p-3.5 space-y-1 min-w-[170px] max-w-[260px]">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-extrabold text-slate-900 dark:text-white text-xs">
                             {adj.motivo_label || adj.motivo}
                           </span>
                           <span
-                            className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase border ${rCfg.bg}`}
+                            className={`px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase border whitespace-nowrap shrink-0 ${rCfg.bg}`}
                           >
                             {rCfg.label}
                           </span>
                         </div>
                         {adj.motivo_detalle && (
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1 max-w-xs">
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[240px]">
                             {adj.motivo_detalle}
                           </p>
                         )}
                         {adj.evidencia_urls && adj.evidencia_urls.length > 0 && (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-400">
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-400 whitespace-nowrap">
                             <UploadCloud className="w-3 h-3" />
                             {adj.evidencia_urls.length} archivo(s) de evidencia
                           </span>
@@ -998,7 +998,7 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                       </td>
 
                       {/* Impacto Financiero Gs. */}
-                      <td className="p-3.5 text-right font-mono font-black text-sm">
+                      <td className="p-3.5 text-right font-mono font-black text-sm whitespace-nowrap w-48 min-w-[180px]">
                         {(() => {
                           const imp = Number(adj.impacto_financiero_gs || 0)
                           const diffU = Number(adj.diferencia_unidades || 0)
@@ -1007,12 +1007,24 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                           const totalSob = Number(adj.total_sobrantes_gs || 0)
                           const totalFalt = Number(adj.total_faltantes_gs || 0)
 
-                          // Caso Mixto: tiene tanto faltantes como sobrantes
-                          if (nSob > 0 && nFalt > 0) {
+                          // Caso Sin Impacto (monto 0)
+                          if (imp === 0 && totalSob === 0 && totalFalt === 0) {
                             return (
-                              <div className="flex flex-col items-end">
+                              <div className="flex flex-col items-end whitespace-nowrap">
+                                <span className="text-slate-400 font-mono font-bold text-xs whitespace-nowrap">₲ 0</span>
+                                <span className="text-[10px] font-semibold text-slate-400 uppercase whitespace-nowrap mt-0.5">
+                                  Sin impacto
+                                </span>
+                              </div>
+                            )
+                          }
+
+                          // Caso Mixto: tiene tanto faltantes como sobrantes con importes reales
+                          if (nSob > 0 && nFalt > 0 && (totalSob > 0 || totalFalt > 0)) {
+                            return (
+                              <div className="flex flex-col items-end whitespace-nowrap">
                                 <span
-                                  className={`font-black text-sm ${
+                                  className={`font-black text-sm whitespace-nowrap ${
                                     imp >= 0
                                       ? "text-emerald-600 dark:text-emerald-400"
                                       : "text-rose-600 dark:text-rose-400"
@@ -1020,13 +1032,13 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                                 >
                                   {imp >= 0 ? `+${formatPYG(imp)}` : `-${formatPYG(Math.abs(imp))}`}
                                 </span>
-                                <div className="text-[10px] font-bold text-slate-500 flex items-center gap-1">
-                                  <span className="text-emerald-600 dark:text-emerald-400">+{formatPYG(totalSob)}</span>
-                                  <span>/</span>
-                                  <span className="text-rose-600 dark:text-rose-400">-{formatPYG(totalFalt)}</span>
+                                <div className="text-[10px] font-mono font-bold text-slate-400 whitespace-nowrap flex items-center justify-end gap-1 mt-0.5">
+                                  <span className="text-emerald-600 dark:text-emerald-400 font-extrabold whitespace-nowrap">+{formatPYG(totalSob)}</span>
+                                  <span className="text-slate-300 dark:text-slate-600">|</span>
+                                  <span className="text-rose-600 dark:text-rose-400 font-extrabold whitespace-nowrap">-{formatPYG(totalFalt)}</span>
                                 </div>
                                 <span
-                                  className={`inline-flex items-center gap-0.5 text-[9px] font-black px-1.5 py-0.5 rounded-sm uppercase ${
+                                  className={`inline-flex items-center gap-0.5 text-[9px] font-black px-1.5 py-0.5 rounded-sm uppercase whitespace-nowrap mt-0.5 ${
                                     imp >= 0
                                       ? "text-emerald-800 bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-300"
                                       : "text-rose-800 bg-rose-100 dark:bg-rose-950/60 dark:text-rose-300"
@@ -1042,11 +1054,11 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                           if (imp < 0 || (imp > 0 && diffU < 0 && nSob === 0)) {
                             const valPerdida = imp < 0 ? Math.abs(imp) : imp
                             return (
-                              <div className="flex flex-col items-end">
-                                <span className="text-rose-600 dark:text-rose-400 font-black">
+                              <div className="flex flex-col items-end whitespace-nowrap">
+                                <span className="text-rose-600 dark:text-rose-400 font-black whitespace-nowrap">
                                   -{formatPYG(valPerdida)}
                                 </span>
-                                <span className="inline-flex items-center gap-0.5 text-[10px] font-extrabold text-rose-800 bg-rose-100 dark:bg-rose-950/60 dark:text-rose-300 px-1.5 py-0.5 rounded-sm uppercase">
+                                <span className="inline-flex items-center gap-0.5 text-[10px] font-extrabold text-rose-800 bg-rose-100 dark:bg-rose-950/60 dark:text-rose-300 px-1.5 py-0.5 rounded-sm uppercase whitespace-nowrap mt-0.5">
                                   🔴 Pérdida (-)
                                 </span>
                               </div>
@@ -1056,48 +1068,53 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                           // Caso Ganancia pura
                           if (imp > 0) {
                             return (
-                              <div className="flex flex-col items-end">
-                                <span className="text-emerald-600 dark:text-emerald-400 font-black">
+                              <div className="flex flex-col items-end whitespace-nowrap">
+                                <span className="text-emerald-600 dark:text-emerald-400 font-black whitespace-nowrap">
                                   +{formatPYG(imp)}
                                 </span>
-                                <span className="inline-flex items-center gap-0.5 text-[10px] font-extrabold text-emerald-800 bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-300 px-1.5 py-0.5 rounded-sm uppercase">
+                                <span className="inline-flex items-center gap-0.5 text-[10px] font-extrabold text-emerald-800 bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-300 px-1.5 py-0.5 rounded-sm uppercase whitespace-nowrap mt-0.5">
                                   🟢 Ganancia (+)
                                 </span>
                               </div>
                             )
                           }
 
-                          return <span className="text-slate-400 font-medium text-xs">₲ 0</span>
+                          return (
+                            <div className="flex flex-col items-end whitespace-nowrap">
+                              <span className="text-slate-400 font-mono font-medium text-xs whitespace-nowrap">₲ 0</span>
+                              <span className="text-[10px] font-semibold text-slate-400 uppercase whitespace-nowrap mt-0.5">Sin impacto</span>
+                            </div>
+                          )
                         })()}
                       </td>
 
                       {/* Estado Workflow */}
-                      <td className="p-3.5 text-center">
+                      <td className="p-3.5 text-center whitespace-nowrap">
                         <span
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-extrabold border ${estCfg.bg}`}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-extrabold border whitespace-nowrap ${estCfg.bg}`}
                         >
-                          <IconEstado className="w-3.5 h-3.5" />
-                          <span>{estCfg.label}</span>
+                          <IconEstado className="w-3.5 h-3.5 shrink-0" />
+                          <span className="whitespace-nowrap">{estCfg.label}</span>
                         </span>
                       </td>
 
                       {/* Trazabilidad Firmas */}
-                      <td className="p-3.5 text-[11px] space-y-1 text-slate-500">
+                      <td className="p-3.5 text-[11px] space-y-1 text-slate-500 whitespace-nowrap">
                         {adj.estado === "rechazado" ? (
-                          <div className="text-rose-600 dark:text-rose-400">
+                          <div className="text-rose-600 dark:text-rose-400 whitespace-nowrap">
                             <span className="font-bold">Rechazado por:</span>{" "}
                             {adj.rechazado_por_nombre || "Auditor"}
                             {adj.motivo_rechazo && (
-                              <p className="italic text-[10px] text-slate-400 line-clamp-1">
+                              <p className="italic text-[10px] text-slate-400 truncate max-w-[180px]">
                                 "{adj.motivo_rechazo}"
                               </p>
                             )}
                           </div>
                         ) : (
                           <>
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-1 whitespace-nowrap">
                               <span
-                                className={`w-2 h-2 rounded-full ${
+                                className={`w-2 h-2 rounded-full shrink-0 ${
                                   adj.aprobado_por_gerencia_nombre
                                     ? "bg-emerald-500"
                                     : "bg-slate-300 dark:bg-slate-600"
@@ -1112,9 +1129,9 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                                 <span className="italic text-slate-400">Pendiente</span>
                               )}
                             </div>
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-1 whitespace-nowrap">
                               <span
-                                className={`w-2 h-2 rounded-full ${
+                                className={`w-2 h-2 rounded-full shrink-0 ${
                                   adj.aprobado_por_administracion_nombre
                                     ? "bg-emerald-500"
                                     : "bg-slate-300 dark:bg-slate-600"
@@ -1134,8 +1151,8 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                       </td>
 
                       {/* Botones de Acción */}
-                      <td className="p-3.5 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
+                      <td className="p-3.5 text-center whitespace-nowrap">
+                        <div className="flex items-center justify-center gap-1.5 whitespace-nowrap">
                           <button
                             onClick={() => openDetail(adj)}
                             className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-lg transition"
@@ -1150,7 +1167,7 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                               onClick={() =>
                                 setActionTarget({ adjustment: adj, type: "gerencia" })
                               }
-                              className="px-2 py-1 text-[11px] font-bold bg-amber-500 hover:bg-amber-600 text-white rounded-lg shadow-xs transition flex items-center gap-1"
+                              className="px-2 py-1 text-[11px] font-bold bg-amber-500 hover:bg-amber-600 text-white rounded-lg shadow-xs transition flex items-center gap-1 whitespace-nowrap"
                               title="Firmar como Gerencia (Paso 1)"
                             >
                               <Check className="w-3 h-3" />
@@ -1164,7 +1181,7 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                               onClick={() =>
                                 setActionTarget({ adjustment: adj, type: "administracion" })
                               }
-                              className="px-2 py-1 text-[11px] font-bold bg-purple-600 hover:bg-purple-700 text-white rounded-lg shadow-xs transition flex items-center gap-1"
+                              className="px-2 py-1 text-[11px] font-bold bg-purple-600 hover:bg-purple-700 text-white rounded-lg shadow-xs transition flex items-center gap-1 whitespace-nowrap"
                               title="Firmar como Administración y Aplicar Stock (Paso 2)"
                             >
                               <ShieldCheck className="w-3 h-3" />
@@ -1182,7 +1199,7 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                               className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition"
                               title="Rechazar Ajuste"
                             >
-                              <X className="w-4 h-4" />
+                              <X className="w-3 h-3" />
                             </button>
                           )}
                         </div>
@@ -1490,7 +1507,7 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                             <th className="p-2.5 text-right w-28">Conteo Real</th>
                             <th className="p-2.5 text-right">Diferencia</th>
                             <th className="p-2.5 text-right">Costo Unit.</th>
-                            <th className="p-2.5 text-right">Impacto Gs.</th>
+                            <th className="p-2.5 text-right whitespace-nowrap w-36 min-w-[120px]">Impacto Gs.</th>
                             <th className="p-2.5 text-center w-10"></th>
                           </tr>
                         </thead>
@@ -1534,7 +1551,7 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                                 {formatPYG(item.costo_unitario)}
                               </td>
                               <td
-                                className={`p-2.5 text-right font-mono font-extrabold ${
+                                className={`p-2.5 text-right font-mono font-extrabold whitespace-nowrap w-36 min-w-[120px] ${
                                   item.impacto_gs < 0 ? "text-rose-600" : "text-emerald-600"
                                 }`}
                               >
@@ -1889,7 +1906,7 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                           <th className="p-3 text-right">Conteo Físico</th>
                           <th className="p-3 text-right">Diferencia</th>
                           <th className="p-3 text-right">Costo Unit.</th>
-                          <th className="p-3 text-right">Impacto Gs.</th>
+                          <th className="p-3 text-right whitespace-nowrap w-40 min-w-[140px]">Impacto Gs.</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -1931,7 +1948,7 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                             <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-400">
                               {formatPYG(it.costo_unitario)}
                             </td>
-                            <td className="p-3 text-right font-mono font-black whitespace-nowrap">
+                            <td className="p-3 text-right font-mono font-black whitespace-nowrap w-40 min-w-[140px]">
                               {Number(it.diferencia) > 0 ? (
                                 <div className="flex flex-col items-end">
                                   <span className="text-emerald-600 dark:text-emerald-400 font-black text-sm whitespace-nowrap">

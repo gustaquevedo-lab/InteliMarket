@@ -856,37 +856,37 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
         {/* ── PLANILLA DE CONTEO ────────────────────────────────────────────── */}
         <div className="card bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs min-w-[850px]">
+            <table className="w-full text-left text-xs min-w-[1100px]">
               <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-100 dark:border-slate-800">
                 <tr>
-                  <th className="p-3.5">Código / SKU</th>
+                  <th className="p-3.5 whitespace-nowrap">Código / SKU</th>
                   <th className="p-3.5">Producto</th>
 
                   {/* En modo supervisor mostramos stock sistema */}
                   {countMode === "supervisor" && (
-                    <th className="p-3.5 text-right">Stock Sistema</th>
+                    <th className="p-3.5 text-right whitespace-nowrap">Stock Sistema</th>
                   )}
 
                   {/* Modo Contador 1 */}
                   {countMode === "contador1" && (
-                    <th className="p-3.5 text-right w-40">Conteo 1 (Físico)</th>
+                    <th className="p-3.5 text-right w-40 whitespace-nowrap">Conteo 1 (Físico)</th>
                   )}
 
                   {/* Modo Contador 2 */}
                   {countMode === "contador2" && (
-                    <th className="p-3.5 text-right w-40">Conteo 2 (Físico Ciego)</th>
+                    <th className="p-3.5 text-right w-40 whitespace-nowrap">Conteo 2 (Físico Ciego)</th>
                   )}
 
                   {/* Modo Supervisor muestra ambos */}
                   {countMode === "supervisor" && (
                     <>
-                      <th className="p-3.5 text-right">Conteo 1</th>
-                      <th className="p-3.5 text-right">Conteo 2</th>
-                      <th className="p-3.5 text-center">Cotejo Ciego</th>
-                      <th className="p-3.5 text-right">Cantidad Final</th>
-                      <th className="p-3.5 text-right">Diferencia</th>
-                      <th className="p-3.5 text-right">Impacto Gs.</th>
-                      <th className="p-3.5 text-center">Acción</th>
+                      <th className="p-3.5 text-right whitespace-nowrap">Conteo 1</th>
+                      <th className="p-3.5 text-right whitespace-nowrap">Conteo 2</th>
+                      <th className="p-3.5 text-center whitespace-nowrap">Cotejo Ciego</th>
+                      <th className="p-3.5 text-right whitespace-nowrap">Cantidad Final</th>
+                      <th className="p-3.5 text-right whitespace-nowrap">Diferencia</th>
+                      <th className="p-3.5 text-right whitespace-nowrap w-40 min-w-[140px]">Impacto Gs.</th>
+                      <th className="p-3.5 text-center whitespace-nowrap">Acción</th>
                     </>
                   )}
                 </tr>
@@ -1054,11 +1054,11 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                           </td>
 
                           {/* Impacto Financiero Gs. */}
-                          <td className="p-3.5 text-right font-mono font-black">
+                          <td className="p-3.5 text-right font-mono font-black whitespace-nowrap w-40 min-w-[140px]">
                             {item.diferencia != null ? (
                               Number(item.diferencia) > 0 ? (
-                                <div className="flex flex-col items-end">
-                                  <span className="text-emerald-600 dark:text-emerald-400 text-xs sm:text-sm">
+                                <div className="flex flex-col items-end whitespace-nowrap">
+                                  <span className="text-emerald-600 dark:text-emerald-400 text-xs sm:text-sm whitespace-nowrap">
                                     +{formatPYG(
                                       Math.abs(
                                         Number(
@@ -1069,13 +1069,13 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                                       )
                                     )}
                                   </span>
-                                  <span className="text-[10px] font-extrabold text-emerald-600/80 uppercase">
+                                  <span className="text-[10px] font-extrabold text-emerald-600/80 uppercase whitespace-nowrap">
                                     Ganancia (+)
                                   </span>
                                 </div>
                               ) : Number(item.diferencia) < 0 ? (
-                                <div className="flex flex-col items-end">
-                                  <span className="text-rose-600 dark:text-rose-400 text-xs sm:text-sm">
+                                <div className="flex flex-col items-end whitespace-nowrap">
+                                  <span className="text-rose-600 dark:text-rose-400 text-xs sm:text-sm whitespace-nowrap">
                                     -{formatPYG(
                                       Math.abs(
                                         Number(
@@ -1086,15 +1086,15 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                                       )
                                     )}
                                   </span>
-                                  <span className="text-[10px] font-extrabold text-rose-600/80 uppercase">
+                                  <span className="text-[10px] font-extrabold text-rose-600/80 uppercase whitespace-nowrap">
                                     Pérdida (-)
                                   </span>
                                 </div>
                               ) : (
-                                <span className="text-slate-400 font-medium text-xs">₲ 0</span>
+                                <span className="text-slate-400 font-medium text-xs whitespace-nowrap">₲ 0</span>
                               )
                             ) : (
-                              <span className="text-slate-400">—</span>
+                              <span className="text-slate-400 whitespace-nowrap">—</span>
                             )}
                           </td>
 
@@ -1647,18 +1647,18 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs min-w-[950px]">
+            <table className="w-full text-left text-xs min-w-[1050px]">
               <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-100 dark:border-slate-800">
                 <tr>
-                  <th className="p-3.5">Código / Fecha</th>
-                  <th className="p-3.5">Depósito & Tipo</th>
+                  <th className="p-3.5 whitespace-nowrap">Código / Fecha</th>
+                  <th className="p-3.5 whitespace-nowrap">Depósito & Tipo</th>
                   <th className="p-3.5">Alcance (Proveedor / Sector)</th>
                   <th className="p-3.5">Operadores Asignados</th>
-                  <th className="p-3.5 text-right">Total Ítems</th>
-                  <th className="p-3.5 text-right">Discrepancias</th>
-                  <th className="p-3.5 text-right">Impacto Gs.</th>
-                  <th className="p-3.5 text-center">Estado</th>
-                  <th className="p-3.5 text-center">Acción</th>
+                  <th className="p-3.5 text-right whitespace-nowrap">Total Ítems</th>
+                  <th className="p-3.5 text-right whitespace-nowrap">Discrepancias</th>
+                  <th className="p-3.5 text-right whitespace-nowrap w-44 min-w-[160px]">Impacto Gs.</th>
+                  <th className="p-3.5 text-center whitespace-nowrap">Estado</th>
+                  <th className="p-3.5 text-center whitespace-nowrap">Acción</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 font-medium">
@@ -1748,29 +1748,29 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                       </td>
 
                       {/* Impacto Financiero Gs. */}
-                      <td className="p-3.5 text-right font-mono font-black">
+                      <td className="p-3.5 text-right font-mono font-black whitespace-nowrap w-44 min-w-[160px]">
                         {session.diferencia_total_gs != null && Number(session.diferencia_total_gs) !== 0 ? (
                           Number(session.diferencia_total_gs) > 0 ? (
-                            <div className="flex flex-col items-end">
-                              <span className="text-emerald-600 dark:text-emerald-400 text-xs sm:text-sm">
+                            <div className="flex flex-col items-end whitespace-nowrap">
+                              <span className="text-emerald-600 dark:text-emerald-400 text-xs sm:text-sm whitespace-nowrap">
                                 +{formatPYG(session.diferencia_total_gs)}
                               </span>
-                              <span className="text-[10px] font-extrabold text-emerald-600/80 uppercase">
+                              <span className="text-[10px] font-extrabold text-emerald-600/80 uppercase whitespace-nowrap">
                                 Superávit (+)
                               </span>
                             </div>
                           ) : (
-                            <div className="flex flex-col items-end">
-                              <span className="text-rose-600 dark:text-rose-400 text-xs sm:text-sm">
+                            <div className="flex flex-col items-end whitespace-nowrap">
+                              <span className="text-rose-600 dark:text-rose-400 text-xs sm:text-sm whitespace-nowrap">
                                 -{formatPYG(Math.abs(Number(session.diferencia_total_gs)))}
                               </span>
-                              <span className="text-[10px] font-extrabold text-rose-600/80 uppercase">
+                              <span className="text-[10px] font-extrabold text-rose-600/80 uppercase whitespace-nowrap">
                                 Déficit (-)
                               </span>
                             </div>
                           )
                         ) : (
-                          <span className="text-slate-400 font-medium text-xs">₲ 0</span>
+                          <span className="text-slate-400 font-medium text-xs whitespace-nowrap">₲ 0</span>
                         )}
                       </td>
 
