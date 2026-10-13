@@ -8,7 +8,8 @@ import {
   LogOut, Menu, X, Moon, Sun, Monitor, Search, Store, ChevronDown, Building, Scan, QrCode, BookOpen, PiggyBank,
   PieChart, DollarSign, TrendingUp, Bot, Clock, Award, Globe, Repeat, Wrench,
   Copy, Package, Upload, Mail, AlertTriangle, LayoutGrid, Carrot, ChefHat, Radio, Plus, Sparkles, Tag,
-  Ticket, ArrowLeftRight, ClipboardCheck, RefreshCw, Radar, Smartphone
+  Ticket, ArrowLeftRight, ClipboardCheck, RefreshCw, Radar, Smartphone,
+  Map, Navigation, Trophy
 } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
@@ -177,6 +178,14 @@ const navGroups: NavGroup[] = [
       { icon: ShieldCheck, label: "Permisos & Roles (RBAC)", path: "/rbac" },
       { icon: Radar, label: "Consola de Plataforma", path: "/plataforma", superadminOnly: true, keywords: ["incidencias", "errores", "sentry", "integraciones", "cajas", "tenants", "auditoria"] },
       { icon: ShieldCheck, label: "Salud del Sistema", path: "/salud-sistema", superadminOnly: true },
+    ]
+  },
+  {
+    title: "Distribuidora & Preventa",
+    items: [
+      { icon: Navigation, label: "Mapa en Tiempo Real", path: "/mapa-tiempo-real", feature: "distribuidora" },
+      { icon: Map, label: "Planificador de Rutas", path: "/rutas", feature: "distribuidora" },
+      { icon: Trophy, label: "Rendimiento Preventistas", path: "/distribuidora/rendimiento-vendedores", feature: "distribuidora" },
     ]
   },
   {
