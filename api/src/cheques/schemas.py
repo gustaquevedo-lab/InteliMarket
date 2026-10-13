@@ -47,6 +47,31 @@ class ChequeEstadoUpdate(BaseModel):
     notas: Optional[str] = None
 
 
+class ChequeUpdate(BaseModel):
+    numero: Optional[str] = None
+    banco_emisor: Optional[str] = None
+    bank_account_id: Optional[UUID] = None
+    beneficiario: Optional[str] = None
+    supplier_id: Optional[UUID] = None
+    monto: Optional[Decimal] = None
+    moneda: Optional[str] = None
+    fecha_emision: Optional[date] = None
+    fecha_entrega: Optional[date] = None
+    fecha_pago: Optional[date] = None
+    diferido: Optional[bool] = None
+    estado: Optional[str] = None
+    concepto: Optional[str] = None
+    notas: Optional[str] = None
+
+    @field_validator("fecha_entrega", "fecha_pago", "fecha_emision", mode="before")
+    @classmethod
+    def parse_optional_date(cls, v):
+        if v == "" or v is None:
+            return None
+        return v
+
+
+
 class ChequeHistorialResponse(BaseModel):
     id: UUID
     estado_anterior: Optional[str] = None
@@ -76,6 +101,7 @@ class ChequeResponse(BaseModel):
     fecha_pago: Optional[date] = None
     diferido: bool
     estado: str
+    tipo: Optional[str] = None
     invoice_payment_id: Optional[UUID] = None
     concepto: Optional[str] = None
     notas: Optional[str] = None

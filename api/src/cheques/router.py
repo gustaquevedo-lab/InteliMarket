@@ -8,7 +8,7 @@ from api.src.db import get_db
 from api.src.auth.middleware import require_auth
 from api.src.cheques import service
 from api.src.cheques.schemas import (
-    ChequeCreate, ChequeResponse, ChequeEstadoUpdate, ChequeHistorialResponse, ChequeDashboard,
+    ChequeCreate, ChequeUpdate, ChequeResponse, ChequeEstadoUpdate, ChequeHistorialResponse, ChequeDashboard,
 )
 
 router = APIRouter(prefix="/api/v1/cheques", tags=["cheques"])
@@ -112,3 +112,27 @@ async def update_estado(cheque_id: str, data: ChequeEstadoUpdate, db: AsyncSessi
         raise HTTPException(400, str(e))
     enriched = await service._enrich_with_supplier_names(db, [cheque])
     return enriched[0]
+
+
+@router.put("/{cheque_id}", response_model=ChequeResponse)
+async def update_cheque(cheque_id: str, data: ChequeUpdate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    try:
+        cheque = await service.update_cheque(
+            db, cheque_id, data,
+            user.get("id") or user.get("sub"), user.get("user_nombre"),
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    enriched = await service._enrich_with_supplier_names(db, [cheque])
+    return enriched[0]
+
+
+@router.post("/marcar-entregados")
+async def marcar_entregados(data: dict = None, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    ids = (data or {}).get("ids") if isinstance(data, dict) else None
+    count = await service.marcar_cheques_entregados(
+        db, user["company_id"], ids,
+        user.get("id") or user.get("sub"), user.get("user_nombre"),
+    )
+    return {"updated_count": count, "message": f"{count} cheque(s) marcados como entregados"}
+

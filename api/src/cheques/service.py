@@ -6,7 +6,7 @@ from sqlalchemy import select, func as sa_func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.cheques.models import Cheque, ChequeHistorial
-from api.src.cheques.schemas import ChequeCreate, TRANSICIONES_VALIDAS
+from api.src.cheques.schemas import ChequeCreate, ChequeUpdate, TRANSICIONES_VALIDAS
 
 
 async def create_cheque(db: AsyncSession, company_id: str, data: ChequeCreate, user_id: str | None, user_nombre: str | None) -> Cheque:
@@ -156,6 +156,7 @@ async def _enrich_with_supplier_names(db: AsyncSession, cheques: list[Cheque]) -
     out = []
     for c in cheques:
         dias = (c.fecha_pago - today).days if c.fecha_pago else None
+        tipo_val = getattr(c, "tipo_cheque", None) or ("emitido" if (c.bank_account_id or c.supplier_id) else "recibido")
         out.append({
             "id": c.id, "company_id": c.company_id, "numero": c.numero,
             "numero_confiable": c.numero_confiable,
@@ -165,11 +166,129 @@ async def _enrich_with_supplier_names(db: AsyncSession, cheques: list[Cheque]) -
             "monto": float(c.monto), "moneda": c.moneda, "fecha_emision": c.fecha_emision,
             "fecha_entrega": c.fecha_entrega,
             "fecha_pago": c.fecha_pago, "diferido": c.diferido, "estado": c.estado,
+            "tipo": tipo_val,
             "invoice_payment_id": c.invoice_payment_id, "concepto": c.concepto,
             "notas": c.notas, "dias_para_vencer": dias,
             "created_at": c.created_at, "updated_at": c.updated_at,
         })
     return out
+
+
+async def update_cheque(
+    db: AsyncSession,
+    cheque_id: str,
+    data: ChequeUpdate,
+    user_id: str | None,
+    user_nombre: str | None,
+) -> Cheque:
+    cheque = await get_cheque(db, cheque_id)
+    if not cheque:
+        raise ValueError("Cheque no encontrado")
+
+    cambios = []
+    if data.numero is not None and data.numero.strip() != cheque.numero:
+        cambios.append(f"Número: {cheque.numero} -> {data.numero.strip()}")
+        cheque.numero = data.numero.strip()
+    if data.banco_emisor is not None and data.banco_emisor != cheque.banco_emisor:
+        cambios.append(f"Banco: {cheque.banco_emisor} -> {data.banco_emisor}")
+        cheque.banco_emisor = data.banco_emisor
+    if data.bank_account_id is not None:
+        cheque.bank_account_id = data.bank_account_id
+    if data.beneficiario is not None and data.beneficiario.strip() != cheque.beneficiario:
+        cambios.append(f"Beneficiario: {cheque.beneficiario} -> {data.beneficiario.strip()}")
+        cheque.beneficiario = data.beneficiario.strip()
+    if data.supplier_id is not None:
+        cheque.supplier_id = data.supplier_id
+    if data.monto is not None and data.monto != cheque.monto:
+        cambios.append(f"Monto: {cheque.monto} -> {data.monto}")
+        cheque.monto = data.monto
+    if data.fecha_emision is not None and data.fecha_emision != cheque.fecha_emision:
+        cambios.append(f"Emisión: {cheque.fecha_emision} -> {data.fecha_emision}")
+        cheque.fecha_emision = data.fecha_emision
+    if data.fecha_entrega is not None and data.fecha_entrega != cheque.fecha_entrega:
+        cambios.append(f"Entrega: {cheque.fecha_entrega} -> {data.fecha_entrega}")
+        cheque.fecha_entrega = data.fecha_entrega
+    if data.fecha_pago is not None and data.fecha_pago != cheque.fecha_pago:
+        cambios.append(f"Vencimiento/Pago: {cheque.fecha_pago} -> {data.fecha_pago}")
+        cheque.fecha_pago = data.fecha_pago
+    if data.diferido is not None:
+        cheque.diferido = data.diferido
+    if data.concepto is not None:
+        cheque.concepto = data.concepto
+    if data.notas is not None:
+        cheque.notas = data.notas
+
+    # Si cambia el estado
+    if data.estado is not None and data.estado != cheque.estado:
+        estado_ant = cheque.estado
+        cheque.estado = data.estado
+        cheque.estado_updated_by = uuid.UUID(user_id) if user_id else None
+        cheque.estado_updated_at = datetime.now(timezone.utc)
+        db.add(ChequeHistorial(
+            cheque_id=cheque.id,
+            estado_anterior=estado_ant,
+            estado_nuevo=data.estado,
+            user_id=uuid.UUID(user_id) if user_id else None,
+            user_nombre=user_nombre,
+            notas=f"Cambio de estado: {', '.join(cambios)}" if cambios else "Actualización de estado",
+        ))
+    elif cambios:
+        db.add(ChequeHistorial(
+            cheque_id=cheque.id,
+            estado_anterior=cheque.estado,
+            estado_nuevo=cheque.estado,
+            user_id=uuid.UUID(user_id) if user_id else None,
+            user_nombre=user_nombre,
+            notas=f"Edición de datos: {'; '.join(cambios)}",
+        ))
+
+    cheque.updated_at = datetime.now(timezone.utc)
+    await db.flush()
+    await db.refresh(cheque)
+    return cheque
+
+
+async def marcar_cheques_entregados(
+    db: AsyncSession,
+    company_id: str,
+    cheque_ids: list[str] | None,
+    user_id: str | None,
+    user_nombre: str | None,
+) -> int:
+    cid = uuid.UUID(company_id)
+    query = select(Cheque).where(
+        Cheque.company_id == cid,
+        Cheque.estado == "pendiente",
+    )
+    if cheque_ids:
+        query = query.where(Cheque.id.in_([uuid.UUID(i) for i in cheque_ids]))
+
+    result = await db.execute(query)
+    cheques = list(result.scalars().all())
+    now = datetime.now(timezone.utc)
+    today = date.today()
+
+    count = 0
+    for c in cheques:
+        c.estado = "entregado"
+        if not c.fecha_entrega:
+            c.fecha_entrega = today
+        c.estado_updated_by = uuid.UUID(user_id) if user_id else None
+        c.estado_updated_at = now
+        c.updated_at = now
+        db.add(ChequeHistorial(
+            cheque_id=c.id,
+            estado_anterior="pendiente",
+            estado_nuevo="entregado",
+            user_id=uuid.UUID(user_id) if user_id else None,
+            user_nombre=user_nombre,
+            notas="Marcado como entregado masivamente",
+        ))
+        count += 1
+
+    await db.flush()
+    return count
+
 
 
 async def update_estado(db: AsyncSession, cheque_id: str, nuevo_estado: str, notas: str | None, user_id: str | None, user_nombre: str | None) -> Cheque:
