@@ -5689,6 +5689,23 @@ export default function POSPage() {
       }
     }
 
+    // 1.1 ETIQUETA DE BALANZA PARA PRODUCTO POR UNIDAD (no se pesa; la balanza solo lo codifica).
+    // Formato verificado con etiquetas reales del PLU 455: "2000" + PLU(3) + CANTIDAD(5) + verificador.
+    // Ej. 2000455000011 = 1 unidad, 2000455000028 = 2 unidades. Cobra al precio del sistema (el que
+    // cobra la caja), nunca al que tenga guardado la balanza.
+    if (!qtyPrefix && /^2000\d{9}$/.test(code) && !isExactNonPesable) {
+      const baseUnit = code.substring(0, 7)
+      const unidades = parseInt(code.substring(7, 12), 10)
+      const matchUnit = products.find(p => !isPesableProduct(p) && (p.codigo_barra === baseUnit || p.sku === baseUnit))
+      if (matchUnit && unidades > 0 && unidades <= 99) {
+        addToCart(matchUnit, unidades, "etiqueta_plu")
+        setSearch("")
+        searchInputRef.current?.focus()
+        toast.success("Etiqueta de balanza", `${matchUnit.nombre}: ${unidades} un.`)
+        return
+      }
+    }
+
     // 1.5 TARJETA QR / CÓDIGO DE SOCIO EXTRA CLUB (Búsqueda Offline-First en Memoria Local)
     // Acepta el UUID con guiones, sin separadores o con el separador que haya
     // puesto el teclado del lector: lo que importa son los 32 hexadecimales.
