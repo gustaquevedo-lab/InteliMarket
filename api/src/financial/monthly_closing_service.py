@@ -166,7 +166,7 @@ class MonthlyClosingService:
 
     async def _get_opex(self, company_id: str, month: int, year: int) -> Dict[str, Any]:
         """Obtiene y clasifica los gastos operativos reales de la tabla expenses de Septiembre 2026."""
-        ocupacion = 32140000       # Póliza Río Seguros 20M + ANDE 9.69M + Internet FTTH
+        ocupacion = 14140000       # Póliza Río Seguros Cuota 1/10 2M + ANDE 9.69M + Internet FTTH 2.45M
         mantenimiento = 23852755    # Albañilería Camille, cableado piso cajas, cañerías, herrería, cámaras frío
         logistica = 29224328        # Harinas Hilagro/Gonzalito, Bio X, levaduras, bolsas e insumos
         administracion = 42446727   # Cartelería Alan Arias, Publicidad Radio Oasis, folletos Doris Rojas, útiles
@@ -178,7 +178,7 @@ class MonthlyClosingService:
                 "nombre": "Ocupación, Seguros y Servicios Básicos",
                 "total": ocupacion,
                 "detalles": [
-                    {"rubro": "Póliza de Seguros Riesgo Operativo (Río Seguros)", "monto": 20000000},
+                    {"rubro": "Póliza de Seguros Riesgo Operativo (Río Seguros Cuota 1/10)", "monto": 2000000},
                     {"rubro": "Energía Eléctrica (ANDE)", "monto": 9693000},
                     {"rubro": "Servicios de Internet FTTH y Telecomunicaciones", "monto": 2447000}
                 ]
