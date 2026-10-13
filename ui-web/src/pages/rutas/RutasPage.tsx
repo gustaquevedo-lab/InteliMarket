@@ -31,6 +31,10 @@ export default function RutasPage() {
   const [filterStatus, setFilterStatus] = useState<string>("all")
   const [filterDate, setFilterDate] = useState<string>("")
 
+  // Optimización
+  const [optimizing, setOptimizing] = useState<string | null>(null)
+  const [optimizeTarget, setOptimizeTarget] = useState<any>(null)
+
   // Form & Selection
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({
@@ -136,6 +140,20 @@ export default function RutasPage() {
     }
   }
 
+  const handleOptimize = async (inst: any) => {
+    setOptimizing(inst.route_id)
+    try {
+      await api.distribuidora.routes.optimize(inst.route_id)
+      toast.success("Ruta optimizada", `Paradas reordenadas para minimizar el recorrido.`)
+      if (selected?.id === inst.id) await loadStops(inst.id)
+    } catch (e: any) {
+      toast.error("No se pudo optimizar", e?.response?.data?.detail || String(e))
+    } finally {
+      setOptimizing(null)
+      setOptimizeTarget(null)
+    }
+  }
+
   const getSellerName = (id: string) => {
     const s = sellers.find(x => x.user_id === id || x.seller_id === id)
     return s?.user_nombre || s?.nombre || id.slice(0, 8)
@@ -186,6 +204,47 @@ export default function RutasPage() {
           <span>Nueva Ejecución</span>
         </button>
       </div>
+
+      {/* Modal Optimizar Ruta */}
+      {optimizeTarget && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setOptimizeTarget(null)}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-violet-100 dark:bg-violet-950/60 flex items-center justify-center">
+                <Sparkles className="w-5 h-5 text-violet-600 dark:text-violet-300" />
+              </div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">Optimizar orden de ruta</h2>
+            </div>
+            <div className="text-sm text-slate-600 dark:text-slate-300 space-y-2">
+              <p>
+                Se reordenarán las paradas de <span className="font-bold text-slate-900 dark:text-white">{getRouteName(optimizeTarget.route_id)}</span> para minimizar la distancia de recorrido (algoritmo TSP).
+              </p>
+              <p className="text-xs text-slate-500">
+                Vendedor: <span className="font-semibold">{getSellerName(optimizeTarget.seller_id)}</span>
+              </p>
+              <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 p-2 rounded-lg border border-amber-200 dark:border-amber-800">
+                Requiere que al menos 2 clientes de la ruta tengan coordenadas GPS registradas.
+              </p>
+            </div>
+            <div className="flex gap-3 justify-end pt-2 border-t border-slate-100 dark:border-slate-700">
+              <button
+                onClick={() => setOptimizeTarget(null)}
+                className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => handleOptimize(optimizeTarget)}
+                disabled={optimizing !== null}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold disabled:opacity-50"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                Optimizar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Nueva Ejecución */}
       {showForm && (
@@ -374,6 +433,18 @@ export default function RutasPage() {
                       </span>
                     )}
                   </div>
+
+                  {inst.status !== "completed" && (
+                    <button
+                      onClick={e => { e.stopPropagation(); setOptimizeTarget(inst) }}
+                      disabled={optimizing === inst.route_id}
+                      className="mt-2 w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300 text-[11px] font-bold hover:bg-violet-100 dark:hover:bg-violet-900/40 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {optimizing === inst.route_id
+                        ? <><Clock className="w-3 h-3 animate-spin" /> Optimizando...</>
+                        : <><Sparkles className="w-3 h-3" /> Optimizar orden</>}
+                    </button>
+                  )}
                 </div>
               )
             })
