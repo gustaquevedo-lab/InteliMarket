@@ -1043,5 +1043,208 @@ def export_fiscal_rg90_ventas_zip(data: dict) -> tuple[bytes, str]:
     return zip_buffer.getvalue(), zip_filename
 
 
+def export_sales_by_br_suppliers(
+    data: list[dict],
+    fecha_desde: Optional[date] = None,
+    fecha_hasta: Optional[date] = None,
+) -> bytes:
+    """Genera archivo Excel (.xlsx) premium con 3 pestañas:
+    1. Detalle por Ítem de productos BR (con fecha, cliente, producto y medio de pago).
+    2. Resumen acumulado por Proveedor BR.
+    3. Resumen y participación por Medio de Pago del ticket.
+    """
+    wb = Workbook()
 
+    # ── Hoja 1: Detalle Fila por Fila ─────────────────────────────────────
+    ws = wb.active
+    ws.title = "Detalle Ventas BR"
+    _write_title(ws, "Auditoría de Ventas — Productos de Proveedores BR", fecha_desde, fecha_hasta)
 
+    headers = [
+        "#",
+        "Fecha y Hora",
+        "Ticket / Comprobante",
+        "Proveedor BR",
+        "RUC / Doc Proveedor",
+        "SKU",
+        "Código de Barras",
+        "Descripción del Producto",
+        "Cantidad",
+        "Precio Unitario (Gs.)",
+        "Total Venta (Gs.)",
+        "Cliente",
+        "RUC / CI Cliente",
+        "Medio(s) de Pago",
+    ]
+
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws.cell(row=3, column=col_idx, value=h)
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = THIN_BORDER
+
+    tot_unidades = 0.0
+    tot_ventas = 0.0
+
+    for idx, r in enumerate(data, 1):
+        row_num = 3 + idx
+        cant = float(r.get("cantidad") or 0)
+        p_unit = float(r.get("precio_unitario") or 0)
+        total_it = float(r.get("total_item") or 0)
+        tot_unidades += cant
+        tot_ventas += total_it
+
+        row_vals = [
+            idx,
+            r.get("fecha_hora") or "—",
+            r.get("comprobante") or "—",
+            r.get("proveedor_nombre") or "—",
+            r.get("proveedor_ruc") or "—",
+            r.get("sku") or "—",
+            r.get("codigo_barra") or "—",
+            r.get("producto_descripcion") or "—",
+            cant,
+            p_unit,
+            total_it,
+            r.get("cliente_nombre") or "Cliente Ocasional",
+            r.get("cliente_documento") or "—",
+            r.get("medios_pago") or "EFECTIVO",
+        ]
+
+        for col_idx, val in enumerate(row_vals, 1):
+            cell = ws.cell(row=row_num, column=col_idx, value=val)
+            cell.font = DATA_FONT
+            cell.border = THIN_BORDER
+            if col_idx == 9:  # Cantidad
+                cell.number_format = '#,##0.00'
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx in (10, 11):  # Precios / Totales Gs.
+                cell.number_format = CURRENCY_FMT
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx in (1, 2, 4, 5, 6, 7, 13):
+                cell.alignment = Alignment(horizontal="center")
+
+    # Fila totalizadora
+    if data:
+        tot_row = 4 + len(data)
+        ws.cell(row=tot_row, column=8, value="TOTAL GENERAL").font = BOLD_FONT
+        ws.cell(row=tot_row, column=8).alignment = Alignment(horizontal="right")
+
+        c_cant = ws.cell(row=tot_row, column=9, value=tot_unidades)
+        c_cant.font = BOLD_FONT
+        c_cant.number_format = '#,##0.00'
+        c_cant.alignment = Alignment(horizontal="right")
+
+        c_total = ws.cell(row=tot_row, column=11, value=tot_ventas)
+        c_total.font = BOLD_FONT
+        c_total.number_format = CURRENCY_FMT
+        c_total.alignment = Alignment(horizontal="right")
+
+    _auto_width(ws)
+
+    # ── Hoja 2: Resumen por Proveedor BR ──────────────────────────────────
+    ws2 = wb.create_sheet(title="Resumen por Proveedor")
+    _write_title(ws2, "Resumen Consolidado por Proveedor BR", fecha_desde, fecha_hasta)
+    headers2 = ["#", "Proveedor BR", "RUC / Doc", "Unidades Vendidas", "Ventas Totales (Gs.)", "% Participación"]
+    for col_idx, h in enumerate(headers2, 1):
+        cell = ws2.cell(row=3, column=col_idx, value=h)
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = THIN_BORDER
+
+    sup_groups = {}
+    for r in data:
+        s_key = (r.get("proveedor_nombre") or "Sin Proveedor", r.get("proveedor_ruc") or "—")
+        if s_key not in sup_groups:
+            sup_groups[s_key] = {"unidades": 0.0, "total": 0.0}
+        sup_groups[s_key]["unidades"] += float(r.get("cantidad") or 0)
+        sup_groups[s_key]["total"] += float(r.get("total_item") or 0)
+
+    sorted_sups = sorted(sup_groups.items(), key=lambda x: x[1]["total"], reverse=True)
+    for idx, (s_key, s_val) in enumerate(sorted_sups, 1):
+        row_num = 3 + idx
+        pct = (s_val["total"] / max(tot_ventas, 1.0)) * 100
+        vals = [idx, s_key[0], s_key[1], s_val["unidades"], s_val["total"], f"{pct:.1f}%"]
+        for col_idx, val in enumerate(vals, 1):
+            cell = ws2.cell(row=row_num, column=col_idx, value=val)
+            cell.font = DATA_FONT
+            cell.border = THIN_BORDER
+            if col_idx == 4:
+                cell.number_format = '#,##0.00'
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx == 5:
+                cell.number_format = CURRENCY_FMT
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx in (1, 3, 6):
+                cell.alignment = Alignment(horizontal="center")
+
+    if sorted_sups:
+        tot_row2 = 4 + len(sorted_sups)
+        ws2.cell(row=tot_row2, column=2, value="TOTAL CONSOLIDADO").font = BOLD_FONT
+        c_u = ws2.cell(row=tot_row2, column=4, value=tot_unidades)
+        c_u.font = BOLD_FONT
+        c_u.number_format = '#,##0.00'
+        c_t = ws2.cell(row=tot_row2, column=5, value=tot_ventas)
+        c_t.font = BOLD_FONT
+        c_t.number_format = CURRENCY_FMT
+        ws2.cell(row=tot_row2, column=6, value="100.0%").font = BOLD_FONT
+        ws2.cell(row=tot_row2, column=6).alignment = Alignment(horizontal="center")
+
+    _auto_width(ws2)
+
+    # ── Hoja 3: Resumen por Medio de Pago ─────────────────────────────────
+    ws3 = wb.create_sheet(title="Resumen Medios de Pago")
+    _write_title(ws3, "Participación por Medio de Pago en Ventas BR", fecha_desde, fecha_hasta)
+    headers3 = ["#", "Medio(s) de Pago", "Cant. Líneas", "Total Ventas (Gs.)", "% Participación"]
+    for col_idx, h in enumerate(headers3, 1):
+        cell = ws3.cell(row=3, column=col_idx, value=h)
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = THIN_BORDER
+
+    pay_groups = {}
+    for r in data:
+        p_key = r.get("medios_pago") or "EFECTIVO"
+        if p_key not in pay_groups:
+            pay_groups[p_key] = {"count": 0, "total": 0.0}
+        pay_groups[p_key]["count"] += 1
+        pay_groups[p_key]["total"] += float(r.get("total_item") or 0)
+
+    sorted_pays = sorted(pay_groups.items(), key=lambda x: x[1]["total"], reverse=True)
+    for idx, (p_key, p_val) in enumerate(sorted_pays, 1):
+        row_num = 3 + idx
+        pct = (p_val["total"] / max(tot_ventas, 1.0)) * 100
+        vals = [idx, p_key, p_val["count"], p_val["total"], f"{pct:.1f}%"]
+        for col_idx, val in enumerate(vals, 1):
+            cell = ws3.cell(row=row_num, column=col_idx, value=val)
+            cell.font = DATA_FONT
+            cell.border = THIN_BORDER
+            if col_idx == 3:
+                cell.number_format = '#,##0'
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx == 4:
+                cell.number_format = CURRENCY_FMT
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx in (1, 5):
+                cell.alignment = Alignment(horizontal="center")
+
+    if sorted_pays:
+        tot_row3 = 4 + len(sorted_pays)
+        ws3.cell(row=tot_row3, column=2, value="TOTAL").font = BOLD_FONT
+        c_lines = ws3.cell(row=tot_row3, column=3, value=len(data))
+        c_lines.font = BOLD_FONT
+        c_lines.number_format = '#,##0'
+        c_tot = ws3.cell(row=tot_row3, column=4, value=tot_ventas)
+        c_tot.font = BOLD_FONT
+        c_tot.number_format = CURRENCY_FMT
+        ws3.cell(row=tot_row3, column=5, value="100.0%").font = BOLD_FONT
+        ws3.cell(row=tot_row3, column=5).alignment = Alignment(horizontal="center")
+
+    _auto_width(ws3)
+
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()

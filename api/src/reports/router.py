@@ -254,6 +254,22 @@ async def export_sales_by_supplier_xlsx(
     return _excel_response(xlsx, filename)
 
 
+@router.get("/export/sales-br-suppliers.xlsx")
+async def export_sales_br_suppliers_xlsx(
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth)
+):
+    company_id = user["company_id"]
+    f_desde = fecha_desde or date(2026, 8, 1)
+    f_hasta = fecha_hasta or date(2026, 9, 30)
+    data = await service.get_sales_by_br_suppliers(db, company_id, f_desde, f_hasta)
+    xlsx = export_service.export_sales_by_br_suppliers(data, f_desde, f_hasta)
+    filename = f"ventas_proveedores_br_{f_desde}_{f_hasta}.xlsx"
+    return _excel_response(xlsx, filename)
+
+
 @router.get("/export/sales-by-supplier.pdf")
 async def export_sales_by_supplier_pdf(
     fecha_desde: date | None = Query(None),

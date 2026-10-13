@@ -1993,3 +1993,63 @@ async def get_sales_daily_consolidation(
     }
 
 
+async def get_sales_by_br_suppliers(
+    db: AsyncSession,
+    company_id: str,
+    fecha_desde: Optional[date] = None,
+    fecha_hasta: Optional[date] = None,
+) -> list[dict]:
+    """Obtiene el detalle ítem por ítem de productos vendidos pertenecientes a proveedores BR en el rango de fechas."""
+    params: dict = {"company_id": company_id}
+    where = "v.estado <> 'cancelado' AND v.company_id = :company_id"
+    where += _build_tz_filter(fecha_desde, fecha_hasta, params, "v.fecha")
+
+    query = f"""
+        SELECT
+            v.id as sale_id,
+            TO_CHAR(v.fecha AT TIME ZONE 'America/Asuncion', 'DD/MM/YYYY HH24:MI') as fecha_hora,
+            DATE(v.fecha AT TIME ZONE 'America/Asuncion') as fecha_emision,
+            COALESCE(v.numero, v.numero_interno, 'S/N') as comprobante,
+            v.estado,
+            -- Cliente
+            COALESCE(c.razon_social, c.nombre_fantasia, 'Cliente Ocasional') as cliente_nombre,
+            COALESCE(c.ruc, c.ci, '—') as cliente_documento,
+            -- Proveedor
+            sup.id as supplier_id,
+            COALESCE(sup.razon_social, sup.nombre_fantasia, 'Proveedor BR') as proveedor_nombre,
+            COALESCE(sup.ruc, '—') as proveedor_ruc,
+            COALESCE(sup.pais, 'Brasil') as proveedor_pais,
+            COALESCE(sup.tipo_proveedor, 'brasilero') as tipo_proveedor,
+            -- Producto
+            p.id as product_id,
+            COALESCE(p.sku, '—') as sku,
+            COALESCE(p.codigo_barra, '—') as codigo_barra,
+            COALESCE(vi.descripcion, p.nombre) as producto_descripcion,
+            -- Valores ítem
+            vi.cantidad,
+            vi.precio_unitario,
+            vi.total as total_item,
+            -- Medios de pago
+            COALESCE(sp_agg.medios_pago, UPPER(v.condicion), 'EFECTIVO') as medios_pago
+        FROM sales v
+        JOIN sale_items vi ON vi.sale_id = v.id
+        JOIN products p ON p.id = vi.product_id
+        JOIN suppliers sup ON sup.id = p.supplier_id
+        LEFT JOIN customers c ON c.id = v.customer_id
+        LEFT JOIN (
+            SELECT 
+                sale_id,
+                STRING_AGG(DISTINCT UPPER(forma_pago), ' + ') as medios_pago
+            FROM sale_payments
+            GROUP BY sale_id
+        ) sp_agg ON sp_agg.sale_id = v.id
+        WHERE {where}
+          AND (
+              LOWER(COALESCE(sup.tipo_proveedor, '')) IN ('brasilero', 'br')
+              OR LOWER(COALESCE(sup.pais, '')) LIKE '%brasil%'
+              OR UPPER(COALESCE(sup.moneda_default, '')) = 'BRL'
+          )
+        ORDER BY v.fecha ASC, v.numero ASC, vi.id ASC
+    """
+    results = (await _exec(db, query, params)).all()
+    return [dict(r) for r in results]
