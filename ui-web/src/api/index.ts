@@ -3974,18 +3974,18 @@ export const api = {
         routes: (companyId: string) => client.get<MapRouteData[]>(`/v1/distribuidora/map/routes/${companyId}`),
         customers: (companyId: string) => client.get<MapCustomerData[]>(`/v1/distribuidora/map/customers/${companyId}`),
       },
-      pagares: {
-        list: (companyId: string, params?: Record<string, string>) => client.get<Pagare[]>(`/v1/distribuidora/pagares`, { company_id: companyId, ...params } as any),
-        create: (data: object) => client.post<Pagare>(`/v1/distribuidora/pagares`, data),
-        pay: (pagareId: string, data: object) => client.post<Pagare>(`/v1/distribuidora/pagares/${pagareId}/pay`, data),
-        protest: (pagareId: string, data: object) => client.post<Pagare>(`/v1/distribuidora/pagares/${pagareId}/protest`, data),
-      },
-      deliveryNotes: {
-        list: (companyId: string, params?: Record<string, string>) => client.get<DeliveryNote[]>(`/v1/distribuidora/delivery-notes`, { company_id: companyId, ...params } as any),
-        create: (data: object) => client.post<DeliveryNote>(`/v1/distribuidora/delivery-notes`, data),
-        apply: (noteId: string, data: object) => client.post<DeliveryNote>(`/v1/distribuidora/delivery-notes/${noteId}/apply`, data),
-        cancel: (noteId: string) => client.post<DeliveryNote>(`/v1/distribuidora/delivery-notes/${noteId}/cancel`),
-      },
+    },
+    pagares: {
+      list: (companyId: string, params?: Record<string, string>) => client.get<Pagare[]>(`/v1/distribuidora/pagares`, { company_id: companyId, ...params } as any),
+      create: (data: object) => client.post<Pagare>(`/v1/distribuidora/pagares`, data),
+      pay: (pagareId: string, data: object) => client.post<Pagare>(`/v1/distribuidora/pagares/${pagareId}/pay`, data),
+      protest: (pagareId: string, data: object) => client.post<Pagare>(`/v1/distribuidora/pagares/${pagareId}/protest`, data),
+    },
+    deliveryNotes: {
+      list: (companyId: string, params?: Record<string, string>) => client.get<DeliveryNote[]>(`/v1/distribuidora/delivery-notes`, { company_id: companyId, ...params } as any),
+      create: (data: object) => client.post<DeliveryNote>(`/v1/distribuidora/delivery-notes`, data),
+      apply: (noteId: string, data: object) => client.post<DeliveryNote>(`/v1/distribuidora/delivery-notes/${noteId}/apply`, data),
+      cancel: (noteId: string) => client.post<DeliveryNote>(`/v1/distribuidora/delivery-notes/${noteId}/cancel`),
     },
   },
   intellizapp: {

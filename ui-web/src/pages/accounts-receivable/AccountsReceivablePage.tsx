@@ -7,7 +7,7 @@ import {
   Printer, QrCode, ExternalLink, CheckSquare, Square, Building2, Building,
   Users, Send, Landmark, ArrowRight, DownloadCloud, FileCheck, Layers, Filter
 } from "lucide-react"
-import { api, type AccountsReceivable, type Sale, type SaleItem, type CreditAccount } from "../../api"
+import { api, type AccountsReceivable, type Sale, type SaleItem, type CreditAccount, type Pagare, type DeliveryNote, type RouteCobranzaClient } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate, formatPercentage, getTodayAsuncion, getAsuncionDateStr } from "../../utils/format"
@@ -16,7 +16,7 @@ import CustomerSearchInput from "../../components/CustomerSearchInput"
 
 const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
-type TabType = "documentos" | "aging" | "scoring" | "recibos" | "empresas_vinculadas" | "reportes"
+type TabType = "documentos" | "aging" | "scoring" | "recibos" | "empresas_vinculadas" | "reportes" | "pagares" | "notas_credito" | "por_ruta"
 
 const BANCOS_PARAGUAY = [
   "BANCO CONTINENTAL", "BANCO ITAÚ PARAGUAY", "BANCO GNB PARAGUAY",
@@ -106,6 +106,28 @@ export default function AccountsReceivablePage() {
   const companyId = user?.tenant_id || (user as any)?.company_id || COMPANY_ID
 
   const [tab, setTab] = useState<TabType>("documentos")
+
+  // Pagarés
+  const [pagares, setPagares] = useState<Pagare[]>([])
+  const [loadingPagares, setLoadingPagares] = useState(false)
+  const [showEmitirPagareModal, setShowEmitirPagareModal] = useState(false)
+  const [showCobrarPagareModal, setShowCobrarPagareModal] = useState(false)
+  const [selectedPagare, setSelectedPagare] = useState<Pagare | null>(null)
+  const [pagareForm, setPagareForm] = useState({ numero_pagare: "", monto_original: "", fecha_vencimiento: "", motivo: "", customer_id: "" })
+  const [pagarePagForm, setPagarePagForm] = useState({ monto: "", observaciones: "" })
+
+  // Notas de crédito de entrega
+  const [deliveryNotes, setDeliveryNotes] = useState<DeliveryNote[]>([])
+  const [loadingNotes, setLoadingNotes] = useState(false)
+  const [showNoteModal, setShowNoteModal] = useState(false)
+  const [noteForm, setNoteForm] = useState({ numero_nota: "", numero_factura_ref: "", monto: "", concepto: "no_es_su_pedido" as DeliveryNote["concepto"], descripcion: "", customer_id: "" })
+
+  // Por ruta
+  const [rutaClientes, setRutaClientes] = useState<RouteCobranzaClient[]>([])
+  const [loadingRuta, setLoadingRuta] = useState(false)
+  const [rutaFilter, setRutaFilter] = useState("")
+  const [rutaFecha, setRutaFecha] = useState(new Date().toISOString().split("T")[0])
+
   const [docs, setDocs] = useState<AccountsReceivable[]>([])
   const [aging, setAging] = useState<AgingData | null>(null)
   const [summary, setSummary] = useState<SummaryData | null>(null)
@@ -477,6 +499,37 @@ export default function AccountsReceivablePage() {
     return () => clearTimeout(t)
   }, [repCustSearchInput])
 
+  const loadPagares = async () => {
+    setLoadingPagares(true)
+    try {
+      const data = await api.distribuidora.pagares.list(companyId)
+      setPagares(data || [])
+    } catch (e: any) {
+      toast.error("Error", e?.message || "No se pudo cargar pagarés")
+    } finally { setLoadingPagares(false) }
+  }
+
+  const loadDeliveryNotes = async () => {
+    setLoadingNotes(true)
+    try {
+      const data = await api.distribuidora.deliveryNotes.list(companyId)
+      setDeliveryNotes(data || [])
+    } catch (e: any) {
+      toast.error("Error", e?.message || "No se pudo cargar notas de crédito")
+    } finally { setLoadingNotes(false) }
+  }
+
+  const loadRutaClientes = async () => {
+    if (!rutaFilter) return
+    setLoadingRuta(true)
+    try {
+      const data = await api.accountsReceivable.byRoute(companyId, rutaFilter, rutaFecha)
+      setRutaClientes(data || [])
+    } catch (e: any) {
+      toast.error("Error", e?.message || "No se pudo cargar clientes de ruta")
+    } finally { setLoadingRuta(false) }
+  }
+
   // Carga de Convenios y Remisiones al entrar a la pestaña
   const fetchAgreements = async () => {
     setAgreementsLoading(true)
@@ -533,6 +586,8 @@ export default function AccountsReceivablePage() {
       fetchAgreements()
       fetchRemissions()
     }
+    if (tab === "pagares") loadPagares()
+    if (tab === "notas_credito") loadDeliveryNotes()
   }, [tab])
 
   const handleExecuteRemit = async () => {
@@ -1258,6 +1313,9 @@ export default function AccountsReceivablePage() {
           { key: "scoring", label: "Scoring Crediticio & Riesgo", icon: ShieldCheck, count: scores.length },
           { key: "empresas_vinculadas", label: "Convenios & Nóminas", icon: Building2, count: agreements?.length },
           { key: "reportes", label: "Centro de Reportes", icon: Layers },
+          { key: "pagares", label: "Pagarés", icon: FileText },
+          { key: "notas_credito", label: "Notas de Crédito", icon: FileText },
+          { key: "por_ruta", label: "Por Ruta", icon: Phone },
         ].map((t) => {
           const Icon = t.icon
           const active = tab === t.key
@@ -2544,7 +2602,295 @@ export default function AccountsReceivablePage() {
               </div>
             </div>
           )}
+          {/* TAB 6: PAGARÉS */}
+          {tab === "pagares" && (
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <h2 className="font-bold text-slate-800 dark:text-white">Pagarés</h2>
+                <button onClick={() => setShowEmitirPagareModal(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold">
+                  <Plus className="w-3.5 h-3.5" /> Emitir Pagaré
+                </button>
+              </div>
+              {loadingPagares ? (
+                <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+              ) : (
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-700">
+                      <tr>
+                        {["Número", "Cliente", "Monto Orig.", "Saldo", "Vencimiento", "Estado", "Acciones"].map(h => (
+                          <th key={h} className="px-3 py-2.5 text-left text-xs font-bold text-slate-500 uppercase whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {pagares.length === 0 && (
+                        <tr><td colSpan={7} className="text-center py-10 text-slate-400 text-sm">No hay pagarés registrados</td></tr>
+                      )}
+                      {pagares.map(p => (
+                        <tr key={p.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                          <td className="px-3 py-3 font-mono text-xs">{p.numero_pagare}</td>
+                          <td className="px-3 py-3 text-xs text-slate-500 font-mono">{p.customer_id.slice(0, 8)}…</td>
+                          <td className="px-3 py-3 text-right text-xs font-mono">{formatPYG(p.monto_original)}</td>
+                          <td className="px-3 py-3 text-right text-xs font-mono font-bold text-amber-700">{formatPYG(p.saldo_pendiente)}</td>
+                          <td className="px-3 py-3 text-xs">{p.fecha_vencimiento}</td>
+                          <td className="px-3 py-3">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              p.estado === "vigente" ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300" :
+                              p.estado === "pagado" ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300" :
+                              p.estado === "protestado" ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" :
+                              "bg-slate-100 text-slate-500"
+                            }`}>{p.estado}</span>
+                          </td>
+                          <td className="px-3 py-3">
+                            {p.estado === "vigente" && (
+                              <div className="flex gap-1">
+                                <button onClick={() => { setSelectedPagare(p); setShowCobrarPagareModal(true) }} className="px-2 py-1 rounded text-xs bg-emerald-100 text-emerald-700 font-semibold hover:bg-emerald-200">Cobrar</button>
+                                <button onClick={async () => {
+                                  const motivo = window.prompt("Motivo del protesto:")
+                                  if (!motivo) return
+                                  await api.distribuidora.pagares.protest(p.id, { motivo })
+                                  await loadPagares()
+                                  toast.success("Protestado", "Pagaré marcado como protestado")
+                                }} className="px-2 py-1 rounded text-xs bg-red-100 text-red-700 font-semibold hover:bg-red-200">Protestar</button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 7: NOTAS DE CRÉDITO DE ENTREGA */}
+          {tab === "notas_credito" && (
+            <div className="space-y-4">
+              {(() => {
+                const CONCEPTO_LABELS: Record<DeliveryNote["concepto"], string> = {
+                  no_es_su_pedido: "No Es Su Pedido",
+                  faltante_deposito: "Faltante En Depósito",
+                  sin_dinero: "Sin Dinero",
+                  vencimiento_averia: "Vencimiento / Avería",
+                  otro: "Otro",
+                }
+                return (
+                  <>
+                    <div className="flex justify-between items-center">
+                      <h2 className="font-bold text-slate-800 dark:text-white">Notas de Crédito de Entrega</h2>
+                      <button onClick={() => setShowNoteModal(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-600 text-white text-xs font-bold">
+                        <Plus className="w-3.5 h-3.5" /> Registrar NC
+                      </button>
+                    </div>
+                    {loadingNotes ? (
+                      <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+                    ) : (
+                      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-700">
+                            <tr>
+                              {["Número", "Factura Ref.", "Monto", "Concepto", "Estado", "Acciones"].map(h => (
+                                <th key={h} className="px-3 py-2.5 text-left text-xs font-bold text-slate-500 uppercase whitespace-nowrap">{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                            {deliveryNotes.length === 0 && (
+                              <tr><td colSpan={6} className="text-center py-10 text-slate-400 text-sm">No hay notas de crédito registradas</td></tr>
+                            )}
+                            {deliveryNotes.map(n => (
+                              <tr key={n.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                                <td className="px-3 py-3 font-mono text-xs">{n.numero_nota}</td>
+                                <td className="px-3 py-3 text-xs text-slate-500">{n.numero_factura_ref || "—"}</td>
+                                <td className="px-3 py-3 text-right text-xs font-mono font-bold">{formatPYG(n.monto)}</td>
+                                <td className="px-3 py-3 text-xs">{CONCEPTO_LABELS[n.concepto]}</td>
+                                <td className="px-3 py-3">
+                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                    n.estado === "pendiente" ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" :
+                                    n.estado === "aplicada" ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300" :
+                                    "bg-slate-100 text-slate-500"
+                                  }`}>{n.estado}</span>
+                                </td>
+                                <td className="px-3 py-3">
+                                  {n.estado === "pendiente" && (
+                                    <button onClick={async () => {
+                                      await api.distribuidora.deliveryNotes.cancel(n.id)
+                                      await loadDeliveryNotes()
+                                      toast.success("Anulada", "Nota de crédito anulada")
+                                    }} className="px-2 py-1 rounded text-xs bg-slate-100 text-slate-600 font-semibold hover:bg-slate-200">Anular</button>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
+            </div>
+          )}
+
+          {/* TAB 8: POR RUTA */}
+          {tab === "por_ruta" && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-3 p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm items-end">
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">Fecha</label>
+                  <input type="date" value={rutaFecha} onChange={e => setRutaFecha(e.target.value)} className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-sm bg-white dark:bg-slate-900" />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">ID de Ruta</label>
+                  <input type="text" value={rutaFilter} onChange={e => setRutaFilter(e.target.value)} placeholder="UUID de ruta…" className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-sm bg-white dark:bg-slate-900 w-64" />
+                </div>
+                <button onClick={loadRutaClientes} disabled={!rutaFilter} className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold disabled:opacity-50">
+                  {loadingRuta ? <Loader2 className="w-4 h-4 animate-spin" /> : "Cargar"}
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {rutaClientes.map(c => (
+                  <div key={c.customer_id} className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-2">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="font-bold text-sm text-slate-900 dark:text-white">{c.customer_name}</p>
+                        <p className="text-xs text-slate-500">{c.n_docs} doc{c.n_docs !== 1 ? "s" : ""} pendientes</p>
+                      </div>
+                      <span className="text-sm font-black font-mono text-amber-700 dark:text-amber-400">{formatPYG(c.saldo_total)}</span>
+                    </div>
+                    {c.customer_telefono && (
+                      <a href={`tel:${c.customer_telefono}`} className="text-xs text-blue-600 flex items-center gap-1">
+                        <Phone className="w-3 h-3" />{c.customer_telefono}
+                      </a>
+                    )}
+                  </div>
+                ))}
+                {rutaClientes.length === 0 && !loadingRuta && rutaFilter && (
+                  <div className="col-span-full text-center py-10 text-slate-400 text-sm">Sin clientes pendientes en esta ruta para la fecha seleccionada.</div>
+                )}
+                {!rutaFilter && (
+                  <div className="col-span-full text-center py-10 text-slate-400 text-sm">Ingresa un ID de ruta y presiona Cargar para ver los cobros del día.</div>
+                )}
+              </div>
+            </div>
+          )}
+
         </>
+      )}
+
+      {/* MODAL: Emitir Pagaré */}
+      {showEmitirPagareModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-slate-900 dark:text-white">Emitir Pagaré</h3>
+              <button onClick={() => setShowEmitirPagareModal(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="space-y-3">
+              <input placeholder="Número de Pagaré" value={pagareForm.numero_pagare} onChange={e => setPagareForm(f => ({...f, numero_pagare: e.target.value}))} className="input-field" />
+              <input placeholder="Cliente ID (UUID)" value={pagareForm.customer_id} onChange={e => setPagareForm(f => ({...f, customer_id: e.target.value}))} className="input-field" />
+              <input placeholder="Monto original (Gs.)" value={pagareForm.monto_original} onChange={e => setPagareForm(f => ({...f, monto_original: e.target.value}))} className="input-field font-mono" />
+              <input type="date" value={pagareForm.fecha_vencimiento} onChange={e => setPagareForm(f => ({...f, fecha_vencimiento: e.target.value}))} className="input-field" />
+              <input placeholder="Motivo (opcional)" value={pagareForm.motivo} onChange={e => setPagareForm(f => ({...f, motivo: e.target.value}))} className="input-field" />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setShowEmitirPagareModal(false)} className="btn-ghost text-xs">Cancelar</button>
+              <button onClick={async () => {
+                await api.distribuidora.pagares.create({
+                  company_id: companyId,
+                  customer_id: pagareForm.customer_id,
+                  numero_pagare: pagareForm.numero_pagare,
+                  monto_original: parseInt(pagareForm.monto_original) || 0,
+                  fecha_emision: new Date().toISOString().split("T")[0],
+                  fecha_vencimiento: pagareForm.fecha_vencimiento,
+                  motivo: pagareForm.motivo || undefined,
+                })
+                setShowEmitirPagareModal(false)
+                setPagareForm({ numero_pagare: "", monto_original: "", fecha_vencimiento: "", motivo: "", customer_id: "" })
+                await loadPagares()
+                toast.success("Pagaré emitido", pagareForm.numero_pagare)
+              }} className="btn-primary text-xs">Emitir</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Cobrar Pagaré */}
+      {showCobrarPagareModal && selectedPagare && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-slate-900 dark:text-white">Cobrar Pagaré {selectedPagare.numero_pagare}</h3>
+              <button onClick={() => setShowCobrarPagareModal(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+            </div>
+            <p className="text-xs text-slate-500">Saldo: <span className="font-mono font-bold text-amber-700">{formatPYG(selectedPagare.saldo_pendiente)}</span></p>
+            <div className="space-y-3">
+              <input placeholder="Monto a cobrar (Gs.)" value={pagarePagForm.monto} onChange={e => setPagarePagForm(f => ({...f, monto: e.target.value}))} className="input-field font-mono" />
+              <input placeholder="Observaciones" value={pagarePagForm.observaciones} onChange={e => setPagarePagForm(f => ({...f, observaciones: e.target.value}))} className="input-field" />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setShowCobrarPagareModal(false)} className="btn-ghost text-xs">Cancelar</button>
+              <button onClick={async () => {
+                await api.distribuidora.pagares.pay(selectedPagare.id, {
+                  monto: parseInt(pagarePagForm.monto) || 0,
+                  fecha: new Date().toISOString().split("T")[0],
+                  observaciones: pagarePagForm.observaciones || undefined,
+                })
+                setShowCobrarPagareModal(false)
+                setPagarePagForm({ monto: "", observaciones: "" })
+                await loadPagares()
+                toast.success("Cobro registrado", `₲ ${pagarePagForm.monto}`)
+              }} className="btn-primary text-xs bg-emerald-600 hover:bg-emerald-700">Confirmar Cobro</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Registrar Nota de Crédito de Entrega */}
+      {showNoteModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-slate-900 dark:text-white">Registrar Nota de Crédito</h3>
+              <button onClick={() => setShowNoteModal(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="space-y-3">
+              <input placeholder="Cliente ID (UUID)" value={noteForm.customer_id} onChange={e => setNoteForm(f => ({...f, customer_id: e.target.value}))} className="input-field" />
+              <input placeholder="Número de Nota" value={noteForm.numero_nota} onChange={e => setNoteForm(f => ({...f, numero_nota: e.target.value}))} className="input-field" />
+              <input placeholder="Nro. Factura de Referencia (opcional)" value={noteForm.numero_factura_ref} onChange={e => setNoteForm(f => ({...f, numero_factura_ref: e.target.value}))} className="input-field" />
+              <input placeholder="Monto (Gs.)" value={noteForm.monto} onChange={e => setNoteForm(f => ({...f, monto: e.target.value}))} className="input-field font-mono" />
+              <select value={noteForm.concepto} onChange={e => setNoteForm(f => ({...f, concepto: e.target.value as DeliveryNote["concepto"]}))} className="input-field">
+                <option value="no_es_su_pedido">No Es Su Pedido</option>
+                <option value="faltante_deposito">Faltante En Depósito</option>
+                <option value="sin_dinero">Sin Dinero</option>
+                <option value="vencimiento_averia">Vencimiento / Avería</option>
+                <option value="otro">Otro</option>
+              </select>
+              <input placeholder="Descripción libre (opcional)" value={noteForm.descripcion} onChange={e => setNoteForm(f => ({...f, descripcion: e.target.value}))} className="input-field" />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setShowNoteModal(false)} className="btn-ghost text-xs">Cancelar</button>
+              <button onClick={async () => {
+                await api.distribuidora.deliveryNotes.create({
+                  company_id: companyId,
+                  customer_id: noteForm.customer_id,
+                  numero_nota: noteForm.numero_nota,
+                  numero_factura_ref: noteForm.numero_factura_ref || undefined,
+                  fecha: new Date().toISOString().split("T")[0],
+                  monto: parseInt(noteForm.monto) || 0,
+                  concepto: noteForm.concepto,
+                  descripcion: noteForm.descripcion || undefined,
+                })
+                setShowNoteModal(false)
+                setNoteForm({ numero_nota: "", numero_factura_ref: "", monto: "", concepto: "no_es_su_pedido", descripcion: "", customer_id: "" })
+                await loadDeliveryNotes()
+                toast.success("NC registrada", noteForm.numero_nota)
+              }} className="btn-primary text-xs bg-amber-600 hover:bg-amber-700">Registrar NC</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* MODAL: Registrar Cobro Multi-Factura con Cascada FIFO e Imputación a Tesorería */}
