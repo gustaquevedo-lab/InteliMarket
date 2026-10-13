@@ -117,17 +117,21 @@ class MonthlyClosingService:
         }
 
     async def _get_cogs(self, company_id: str, month: int, year: int) -> Dict[str, Any]:
-        """Obtiene el Costo de Mercaderías Vendidas (CMV) del mes calculado por el motor del Dashboard."""
-        # Costo total real calculado desde sale_items * costo_unitario: Gs. 1.020.507.216
+        """Obtiene el Costo de Mercaderías Vendidas (CMV) segregando Reventa y Materia Prima de Producción."""
         cmv_comercial = 1020507216
+        # Materia prima panadería segregada de expenses (Hilagro, Casa Gonzalito, Bio X)
+        cmv_materia_prima_panaderia = 14873000
+        cmv_materia_prima_rotiseria = 0
         mermas_operativas = 0
-        total_cogs = cmv_comercial + mermas_operativas
+        total_cogs = cmv_comercial + cmv_materia_prima_panaderia + cmv_materia_prima_rotiseria + mermas_operativas
 
         return {
             "cmv_mercaderias": cmv_comercial,
+            "cmv_materia_prima_panaderia": cmv_materia_prima_panaderia,
+            "cmv_materia_prima_rotiseria": cmv_materia_prima_rotiseria,
             "mermas_frio_carniceria": mermas_operativas,
             "total_cmv": total_cogs,
-            "pct_sobre_ventas": 82.66
+            "pct_sobre_ventas": round((total_cogs / 1234596102 * 100), 2)
         }
 
     async def _get_payroll(self, company_id: str, month: int, year: int) -> Dict[str, Any]:
@@ -165,13 +169,13 @@ class MonthlyClosingService:
         }
 
     async def _get_opex(self, company_id: str, month: int, year: int) -> Dict[str, Any]:
-        """Obtiene y clasifica los gastos operativos reales de la tabla expenses de Septiembre 2026."""
+        """Obtiene y clasifica los gastos operativos reales puros de Septiembre 2026 (sin materias primas)."""
         ocupacion = 14140000       # Póliza Río Seguros Cuota 1/10 2M + ANDE 9.69M + Internet FTTH 2.45M
         mantenimiento = 23852755    # Albañilería Camille, cableado piso cajas, cañerías, herrería, cámaras frío
-        logistica = 29224328        # Harinas Hilagro/Gonzalito, Bio X, levaduras, bolsas e insumos
+        logistica = 14351328        # Exclusivamente Insumos de Cajas, Bolsas y Bobinas (harinas transferidas a CMV)
         administracion = 42446727   # Cartelería Alan Arias, Publicidad Radio Oasis, folletos Doris Rojas, útiles
 
-        total_no_laboral = ocupacion + mantenimiento + logistica + administracion
+        total_no_laboral = ocupacion + mantenimiento + logistica + administracion  # 94.790.810
 
         return {
             "ocupacion_servicios": {
@@ -194,13 +198,10 @@ class MonthlyClosingService:
                 ]
             },
             "logistica_operacion": {
-                "nombre": "Logística, Operación e Insumos",
+                "nombre": "Logística, Operación e Insumos Salón",
                 "total": logistica,
                 "detalles": [
-                    {"rubro": "Harinas Panadería Uso Interno (Hilagro S.A.)", "monto": 6320000},
-                    {"rubro": "Harinas Panadería (Casa Gonzalito)", "monto": 4661000},
-                    {"rubro": "Insumos Panadería (Bio X / Levaduras)", "monto": 3892000},
-                    {"rubro": "Insumos de Cajas, Bolsas y Bobinas", "monto": 14351328}
+                    {"rubro": "Insumos de Cajas, Bolsas y Bobinas (Consumibles Salón)", "monto": 14351328}
                 ]
             },
             "administracion_tecnologia": {
