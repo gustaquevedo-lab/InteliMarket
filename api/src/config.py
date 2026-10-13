@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     sueldok_api_url: str = "https://api.sueldok.com"
     sueldok_api_key: str = ""
 
+    # Google Maps / Routes API (optimización de rutas, geocodificación)
+    google_maps_api_key: str = ""
+
     # LLM del Gerente Financiero IA — "gemini" (default, más económico) o "anthropic"
     llm_provider: str = "gemini"
     anthropic_api_key: str = ""

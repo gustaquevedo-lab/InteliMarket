@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException
 
 from api.src.distribuidora import models as m
+from api.src.config import settings
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -531,7 +532,7 @@ async def optimize_route(db: AsyncSession, route_id: str, depot_lat: float = -25
             f"Se requieren al menos 2 clientes con ubicación GPS para calcular el recorrido óptimo. Actualmente solo hay {len(gps_items)} con GPS."
         )
 
-    api_key = os.getenv("GOOGLE_MAPS_API_KEY", "AIzaSyAcrqfAFWcq7jNQr8glEnKPsMYwxq5DvLk")
+    api_key = settings.google_maps_api_key
     url = "https://routes.googleapis.com/directions/v2:computeRoutes"
     headers = {
         "Content-Type": "application/json",
