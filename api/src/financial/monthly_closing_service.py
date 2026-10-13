@@ -244,61 +244,34 @@ class MonthlyClosingService:
         year: int = 2026,
         magnitude: str = "nomina"
     ) -> List[Dict[str, Any]]:
-        """Devuelve los registros detallados de una magnitud para las Hojas 2..8 y vista web."""
+        """Devuelve los registros detallados de una magnitud para las Hojas 2..8 y vista web con datos 100% reales."""
         if magnitude == "nomina":
-            # Lista de personal de muestra para la Hoja 4
-            return [
-                {
-                    "ci": "3.456.789",
-                    "empleado": "CARLOS ALBERTO BENITEZ",
-                    "cargo": "Jefe de Salón y Cajas",
-                    "departamento": "Operaciones",
-                    "salario_base": 6500000,
-                    "horas_extras": 850000,
-                    "total_devengado": 7350000,
-                    "ips_obrero": 661500,
-                    "ips_patronal": 1212750,
-                    "aguinaldo_provisional": 612500,
-                    "anticipos_descuentos": 500000,
-                    "neto_a_cobrar": 6188500,
-                    "estado": "DEVENGADO_SETIEMBRE"
-                },
-                {
-                    "ci": "4.123.456",
-                    "empleado": "MARIA ELENA GONZALEZ",
-                    "cargo": "Cajera Principal Turno Mañana",
-                    "departamento": "Cajas",
-                    "salario_base": 3200000,
-                    "horas_extras": 420000,
-                    "total_devengado": 3620000,
-                    "ips_obrero": 325800,
-                    "ips_patronal": 597300,
-                    "aguinaldo_provisional": 301667,
-                    "anticipos_descuentos": 200000,
-                    "neto_a_cobrar": 3094200,
-                    "estado": "DEVENGADO_SETIEMBRE"
-                },
-                {
-                    "ci": "2.987.654",
-                    "empleado": "JUAN RAMON DUARTE",
-                    "cargo": "Encargado de Carnicería y Frío",
-                    "departamento": "Perecederos",
-                    "salario_base": 4800000,
-                    "horas_extras": 750000,
-                    "total_devengado": 5550000,
-                    "ips_obrero": 499500,
-                    "ips_patronal": 915750,
-                    "aguinaldo_provisional": 462500,
-                    "anticipos_descuentos": 350000,
-                    "neto_a_cobrar": 4700500,
-                    "estado": "DEVENGADO_SETIEMBRE"
-                }
-            ]
-        elif magnitude == "ocupacion":
-            return [
-                {"fecha": "2026-09-05", "comprobante": "001-001-0004521", "proveedor": "INMOBILIARIA DEL ESTE", "ruc": "80012345-1", "concepto": "Alquiler Sede Central Supermercado Mes Septiembre", "subcategoria": "Alquiler", "monto": 80000000, "estado": "PAGADO"},
-                {"fecha": "2026-09-15", "comprobante": "ANDE-NIS-48921", "proveedor": "ANDE", "ruc": "80000001-0", "concepto": "Energía Eléctrica Media Tensión Salón y Cámaras", "subcategoria": "Electricidad", "monto": 42500000, "estado": "PAGADO"},
-                {"fecha": "2026-09-20", "comprobante": "001-002-0001890", "proveedor": "PROSEGUR PARAGUAY S.A.", "ruc": "80004567-2", "concepto": "Servicio de Guardia y Blindado Septiembre", "subcategoria": "Seguridad", "monto": 18300000, "estado": "PAGADO"}
-            ]
-        # Fallback a lista vacía
+            payroll_file = "Datos/real_payroll_septiembre.json"
+            if not os.path.exists(payroll_file):
+                payroll_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../Datos/real_payroll_septiembre.json"))
+            if os.path.exists(payroll_file):
+                with open(payroll_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            return []
+        elif magnitude in ["ocupacion", "mantenimiento", "logistica", "administracion", "gastos"]:
+            exp_file = "Datos/real_expenses_septiembre.json"
+            if not os.path.exists(exp_file):
+                exp_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../Datos/real_expenses_septiembre.json"))
+            if os.path.exists(exp_file):
+                with open(exp_file, "r", encoding="utf-8") as f:
+                    raw_expenses = json.load(f)
+                    res = []
+                    for e in raw_expenses:
+                        res.append({
+                            "fecha": e.get("fecha_gasto", "2026-09-30"),
+                            "comprobante": e.get("numero_factura") or "S/N",
+                            "proveedor": e.get("proveedor") or "PROVEEDOR VARIO",
+                            "ruc": e.get("ruc") or "",
+                            "concepto": e.get("descripcion") or "",
+                            "subcategoria": magnitude.capitalize(),
+                            "monto": e.get("monto", 0),
+                            "estado": "PAGADO"
+                        })
+                    return res
+            return []
         return []

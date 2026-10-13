@@ -11,6 +11,8 @@ Construye un libro con 8 hojas:
 8. Administracion y Finanzas
 """
 import io
+import os
+import json
 from typing import Dict, Any, List
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -255,15 +257,32 @@ def generate_closing_excel(data: Dict[str, Any]) -> bytes:
             c.border = THIN_BORDER
         ws.row_dimensions[3].height = 22
 
-        # Rellenar datos de muestra si es nómina
+        # Rellenar datos de nómina real
         if "Nomina" in title:
-            empleados_sample = [
-                ("3.456.789", "CARLOS ALBERTO BENITEZ", "Jefe de Salón y Cajas", "Operaciones", 6500000, 850000, 7350000, 661500, 1212750, 612500, 500000, 6188500),
-                ("4.123.456", "MARIA ELENA GONZALEZ", "Cajera Principal Turno Mañana", "Cajas", 3200000, 420000, 3620000, 325800, 597300, 301667, 200000, 3094200),
-                ("2.987.654", "JUAN RAMON DUARTE", "Encargado de Carnicería y Frío", "Perecederos", 4800000, 750000, 5550000, 499500, 915750, 462500, 350000, 4700500)
-            ]
+            payroll_file = "Datos/real_payroll_septiembre.json"
+            if not os.path.exists(payroll_file):
+                payroll_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../Datos/real_payroll_septiembre.json"))
+            empleados_reales = []
+            if os.path.exists(payroll_file):
+                with open(payroll_file, "r", encoding="utf-8") as pf:
+                    raw_emps = json.load(pf)
+                    for r in raw_emps:
+                        empleados_reales.append((
+                            r.get("ci", ""),
+                            r.get("empleado", ""),
+                            r.get("cargo", ""),
+                            r.get("departamento", "Salón"),
+                            r.get("salario_base", 0),
+                            r.get("horas_extras", 0),
+                            r.get("total_devengado", 0),
+                            r.get("ips_obrero", 0),
+                            r.get("ips_patronal", 0),
+                            r.get("aguinaldo_provisional", 0),
+                            r.get("anticipos_descuentos", 0),
+                            r.get("neto_a_cobrar", 0),
+                        ))
             row_idx = 4
-            for emp in empleados_sample:
+            for emp in empleados_reales:
                 for c_i, val in enumerate(emp, start=1):
                     cell = ws.cell(row=row_idx, column=c_i, value=val)
                     cell.font = REGULAR_FONT
@@ -276,7 +295,7 @@ def generate_closing_excel(data: Dict[str, Any]) -> bytes:
                 row_idx += 1
             
             # Fila totalizadora
-            ws.cell(row=row_idx, column=2, value="TOTALES PARCIALES").font = BOLD_FONT
+            ws.cell(row=row_idx, column=2, value="TOTALES DEVENGADOS").font = BOLD_FONT
             for num_col in range(5, 13):
                 col_let = get_column_letter(num_col)
                 c_tot = ws.cell(row=row_idx, column=num_col, value=f"=SUM({col_let}4:{col_let}{row_idx-1})")

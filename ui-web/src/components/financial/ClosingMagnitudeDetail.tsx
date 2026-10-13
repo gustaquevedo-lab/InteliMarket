@@ -1,5 +1,6 @@
 import React, { useState } from "react"
 import { Search, Download, Users, FileText, ArrowLeft, Filter } from "lucide-react"
+import { REAL_NOMINA, REAL_GASTOS } from "./closingDataReal"
 
 interface ClosingMagnitudeDetailProps {
   magnitude: string
@@ -18,90 +19,9 @@ export function ClosingMagnitudeDetail({
     return (val || 0).toLocaleString("es-PY") + " Gs."
   }
 
-  // Datos representativos para demostración y navegación interactiva
-  const nominaData = [
-    {
-      ci: "3.456.789",
-      nombre: "CARLOS ALBERTO BENITEZ",
-      cargo: "Jefe de Salón y Cajas",
-      dpto: "Operaciones",
-      salario_base: 6500000,
-      horas_extras: 850000,
-      total_devengado: 7350000,
-      ips_obrero: 661500,
-      ips_patronal: 1212750,
-      aguinaldo_provisional: 612500,
-      anticipos: 500000,
-      neto: 6188500
-    },
-    {
-      ci: "4.123.456",
-      nombre: "MARIA ELENA GONZALEZ",
-      cargo: "Cajera Principal Turno Mañana",
-      dpto: "Cajas",
-      salario_base: 3200000,
-      horas_extras: 420000,
-      total_devengado: 3620000,
-      ips_obrero: 325800,
-      ips_patronal: 597300,
-      aguinaldo_provisional: 301667,
-      anticipos: 200000,
-      neto: 3094200
-    },
-    {
-      ci: "2.987.654",
-      nombre: "JUAN RAMON DUARTE",
-      cargo: "Encargado de Carnicería y Frío",
-      dpto: "Perecederos",
-      salario_base: 4800000,
-      horas_extras: 750000,
-      total_devengado: 5550000,
-      ips_obrero: 499500,
-      ips_patronal: 915750,
-      aguinaldo_provisional: 462500,
-      anticipos: 350000,
-      neto: 4700500
-    },
-    {
-      ci: "3.890.123",
-      nombre: "LOURDES BEATRIZ MARTINEZ",
-      cargo: "Supervisora de Cajas Turno Tarde",
-      dpto: "Cajas",
-      salario_base: 3800000,
-      horas_extras: 490000,
-      total_devengado: 4290000,
-      ips_obrero: 386100,
-      ips_patronal: 707850,
-      aguinaldo_provisional: 357500,
-      anticipos: 300000,
-      neto: 3603900
-    },
-    {
-      ci: "4.567.890",
-      nombre: "RODRIGO IVAN ACOSTA",
-      cargo: "Auxiliar de Depósito y Reposición",
-      dpto: "Depósito",
-      salario_base: 2900000,
-      horas_extras: 350000,
-      total_devengado: 3250000,
-      ips_obrero: 292500,
-      ips_patronal: 536250,
-      aguinaldo_provisional: 270833,
-      anticipos: 150000,
-      neto: 2807500
-    }
-  ]
-
-  const gastosGenerales = [
-    { fecha: "2026-09-05", comp: "001-001-0004521", proveedor: "INMOBILIARIA DEL ESTE S.A.", ruc: "80012345-1", concepto: "Alquiler Sede Central Salón Supermercado", monto: 80000000, rubro: "Ocupación" },
-    { fecha: "2026-09-15", comp: "ANDE-NIS-48921", proveedor: "ADMINISTRACION NACIONAL DE ELECTRICIDAD (ANDE)", ruc: "80000001-0", concepto: "Consumo Eléctrico Media Tensión Salón y Cámaras Frío", monto: 42500000, rubro: "Ocupación" },
-    { fecha: "2026-09-20", comp: "001-002-0001890", proveedor: "PROSEGUR PARAGUAY S.A.", ruc: "80004567-2", concepto: "Vigilancia Física 24hs y Custodia de Valores", monto: 18300000, rubro: "Ocupación" },
-    { fecha: "2026-09-18", comp: "001-001-0005852", proveedor: "FRIGOTEC INDUSTRIAL", ruc: "80056789-3", concepto: "Mantenimiento Preventivo y Carga Gas Central Frío R404A", monto: 28000000, rubro: "Mantenimiento" },
-    { fecha: "2026-09-22", comp: "001-001-0003412", proveedor: "METROLOGIA & BALANZAS DEL PARAGUAY", ruc: "80098765-4", concepto: "Calibración Oficial de Balanzas Electrónicas Salón", monto: 8500000, rubro: "Mantenimiento" },
-    { fecha: "2026-09-12", comp: "001-001-0000778", proveedor: "ESPACIO CREATIVO / FACHADAS", ruc: "80034567-5", concepto: "Mantenimiento y Reparación Letras Luminosas Fachada", monto: 17700000, rubro: "Mantenimiento" },
-    { fecha: "2026-09-25", comp: "001-003-0002145", proveedor: "TRANSPORTE & LOGISTICA SAN BLAS", ruc: "80011223-6", concepto: "Fletes Mayoristas Acarreo Mercaderías Central", monto: 45000000, rubro: "Logística" },
-    { fecha: "2026-09-28", comp: "001-001-0009811", proveedor: "PLASTICOS DEL SUR S.A.", ruc: "80088990-7", concepto: "Insumos Cajas: 150.000 Bolsas Biodegradables y Bobinas", monto: 27250000, rubro: "Logística" },
-  ]
+  // 100% Datos Reales de SueldOK (45 colaboradores) y Gastos de Setiembre
+  const nominaData = REAL_NOMINA
+  const gastosGenerales = REAL_GASTOS
 
   const titleMap: Record<string, string> = {
     nomina: "Nómina y Costo Laboral SueldOK (Septiembre 2026)",
