@@ -51,10 +51,12 @@ async def get_current_user(
                     raise HTTPException(status_code=403, detail="Usuario desactivado")
                 u_name = db_user_row[1] or user.get("nombre") or db_user_row[2] or user.get("email") or "Usuario"
                 try:
-                    await db.execute(text("SET LOCAL app.current_user_name = :u"), {"u": u_name})
-                    await db.execute(text("SET LOCAL app.current_user_id = :uid"), {"uid": str(uid)})
+                    await db.execute(
+                        text("SELECT set_config('app.current_user_name', :u, false), set_config('app.current_user_id', :uid, false)"),
+                        {"u": str(u_name), "uid": str(uid)},
+                    )
                 except Exception:
-                    pass
+                    await db.rollback()
 
         return user
 
