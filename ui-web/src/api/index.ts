@@ -1054,6 +1054,10 @@ export interface InventoryAdjustmentRecord {
   total_items: number
   diferencia_unidades: number
   diferencia_valorizada_gs: number
+  total_sobrantes_gs?: number
+  total_faltantes_gs?: number
+  items_sobrantes?: number
+  items_faltantes?: number
   items?: InventoryAdjustmentItemRecord[]
   audit_logs?: AdjustmentAuditLog[]
 }

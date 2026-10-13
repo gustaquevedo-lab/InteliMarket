@@ -705,12 +705,23 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
     const pendientes = adjustments.filter(
       (a) => a.estado === "pendiente_gerencia" || a.estado === "pendiente_administracion"
     )
-    const gananciaPendiente = pendientes
-      .filter((a) => Number(a.impacto_financiero_gs || 0) > 0)
-      .reduce((acc, a) => acc + Number(a.impacto_financiero_gs || 0), 0)
-    const perdidaPendiente = pendientes
-      .filter((a) => Number(a.impacto_financiero_gs || 0) < 0)
-      .reduce((acc, a) => acc + Math.abs(Number(a.impacto_financiero_gs || 0)), 0)
+    let gananciaPendiente = 0
+    let perdidaPendiente = 0
+
+    pendientes.forEach((a) => {
+      const imp = Number(a.impacto_financiero_gs || 0)
+      const diffU = Number(a.diferencia_unidades || 0)
+      const nSob = Number(a.items_sobrantes || 0)
+
+      if (a.total_sobrantes_gs != null || a.total_faltantes_gs != null) {
+        gananciaPendiente += Number(a.total_sobrantes_gs || 0)
+        perdidaPendiente += Number(a.total_faltantes_gs || 0)
+      } else if (imp < 0 || (imp > 0 && diffU < 0 && nSob === 0)) {
+        perdidaPendiente += Math.abs(imp)
+      } else if (imp > 0) {
+        gananciaPendiente += imp
+      }
+    })
     const balanceNetoPendiente = gananciaPendiente - perdidaPendiente
 
     return {
@@ -988,27 +999,76 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
 
                       {/* Impacto Financiero Gs. */}
                       <td className="p-3.5 text-right font-mono font-black text-sm">
-                        {Number(adj.impacto_financiero_gs || 0) > 0 ? (
-                          <div className="flex flex-col items-end">
-                            <span className="text-emerald-600 dark:text-emerald-400 font-black">
-                              +{formatPYG(adj.impacto_financiero_gs)}
-                            </span>
-                            <span className="inline-flex items-center gap-0.5 text-[10px] font-extrabold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-300 px-1.5 py-0.5 rounded-sm uppercase">
-                              Ganancia (+)
-                            </span>
-                          </div>
-                        ) : Number(adj.impacto_financiero_gs || 0) < 0 ? (
-                          <div className="flex flex-col items-end">
-                            <span className="text-rose-600 dark:text-rose-400 font-black">
-                              -{formatPYG(Math.abs(Number(adj.impacto_financiero_gs)))}
-                            </span>
-                            <span className="inline-flex items-center gap-0.5 text-[10px] font-extrabold text-rose-700 bg-rose-50 dark:bg-rose-950/40 dark:text-rose-300 px-1.5 py-0.5 rounded-sm uppercase">
-                              Pérdida (-)
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-slate-400 font-medium text-xs">₲ 0</span>
-                        )}
+                        {(() => {
+                          const imp = Number(adj.impacto_financiero_gs || 0)
+                          const diffU = Number(adj.diferencia_unidades || 0)
+                          const nSob = Number(adj.items_sobrantes || 0)
+                          const nFalt = Number(adj.items_faltantes || 0)
+                          const totalSob = Number(adj.total_sobrantes_gs || 0)
+                          const totalFalt = Number(adj.total_faltantes_gs || 0)
+
+                          // Caso Mixto: tiene tanto faltantes como sobrantes
+                          if (nSob > 0 && nFalt > 0) {
+                            return (
+                              <div className="flex flex-col items-end">
+                                <span
+                                  className={`font-black text-sm ${
+                                    imp >= 0
+                                      ? "text-emerald-600 dark:text-emerald-400"
+                                      : "text-rose-600 dark:text-rose-400"
+                                  }`}
+                                >
+                                  {imp >= 0 ? `+${formatPYG(imp)}` : `-${formatPYG(Math.abs(imp))}`}
+                                </span>
+                                <div className="text-[10px] font-bold text-slate-500 flex items-center gap-1">
+                                  <span className="text-emerald-600 dark:text-emerald-400">+{formatPYG(totalSob)}</span>
+                                  <span>/</span>
+                                  <span className="text-rose-600 dark:text-rose-400">-{formatPYG(totalFalt)}</span>
+                                </div>
+                                <span
+                                  className={`inline-flex items-center gap-0.5 text-[9px] font-black px-1.5 py-0.5 rounded-sm uppercase ${
+                                    imp >= 0
+                                      ? "text-emerald-800 bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-300"
+                                      : "text-rose-800 bg-rose-100 dark:bg-rose-950/60 dark:text-rose-300"
+                                  }`}
+                                >
+                                  {imp >= 0 ? "🟢 Superávit Neto" : "🔴 Déficit Neto"}
+                                </span>
+                              </div>
+                            )
+                          }
+
+                          // Caso Pérdida: valor negativo O (positivo heredado pero con unidades negativas y sin sobrantes)
+                          if (imp < 0 || (imp > 0 && diffU < 0 && nSob === 0)) {
+                            const valPerdida = imp < 0 ? Math.abs(imp) : imp
+                            return (
+                              <div className="flex flex-col items-end">
+                                <span className="text-rose-600 dark:text-rose-400 font-black">
+                                  -{formatPYG(valPerdida)}
+                                </span>
+                                <span className="inline-flex items-center gap-0.5 text-[10px] font-extrabold text-rose-800 bg-rose-100 dark:bg-rose-950/60 dark:text-rose-300 px-1.5 py-0.5 rounded-sm uppercase">
+                                  🔴 Pérdida (-)
+                                </span>
+                              </div>
+                            )
+                          }
+
+                          // Caso Ganancia pura
+                          if (imp > 0) {
+                            return (
+                              <div className="flex flex-col items-end">
+                                <span className="text-emerald-600 dark:text-emerald-400 font-black">
+                                  +{formatPYG(imp)}
+                                </span>
+                                <span className="inline-flex items-center gap-0.5 text-[10px] font-extrabold text-emerald-800 bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-300 px-1.5 py-0.5 rounded-sm uppercase">
+                                  🟢 Ganancia (+)
+                                </span>
+                              </div>
+                            )
+                          }
+
+                          return <span className="text-slate-400 font-medium text-xs">₲ 0</span>
+                        })()}
                       </td>
 
                       {/* Estado Workflow */}
