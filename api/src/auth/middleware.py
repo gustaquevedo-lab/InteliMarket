@@ -38,15 +38,23 @@ async def get_current_user(
         if "tenant_id" not in user or not user["tenant_id"]:
             user["tenant_id"] = "00000000-0000-0000-0000-000000000001"
 
-        # ── VALIDACIÓN DE USUARIO ACTIVO ────────────────────────────────────
+        # ── VALIDACIÓN DE USUARIO ACTIVO Y REGISTRO DE SESIÓN EN DB ─────────
         user_id = user.get("id")
         if user_id:
             import uuid
+            from sqlalchemy import text
             uid = uuid.UUID(str(user_id)) if isinstance(user_id, str) else user_id
-            db_res = await db.execute(select(User.activo).where(User.id == uid))
+            db_res = await db.execute(select(User.activo, User.nombre, User.email).where(User.id == uid))
             db_user_row = db_res.first()
-            if db_user_row and not db_user_row[0]:
-                raise HTTPException(status_code=403, detail="Usuario desactivado")
+            if db_user_row:
+                if not db_user_row[0]:
+                    raise HTTPException(status_code=403, detail="Usuario desactivado")
+                u_name = db_user_row[1] or user.get("nombre") or db_user_row[2] or user.get("email") or "Usuario"
+                try:
+                    await db.execute(text("SET LOCAL app.current_user_name = :u"), {"u": u_name})
+                    await db.execute(text("SET LOCAL app.current_user_id = :uid"), {"uid": str(uid)})
+                except Exception:
+                    pass
 
         return user
 

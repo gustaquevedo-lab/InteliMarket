@@ -1197,6 +1197,10 @@ export interface PriceVariationItem {
   categoria_nombre?: string | null
   tipo: "unitario" | "escala"
   escala_min_qty?: number | null
+  precio_minorista_anterior?: number
+  precio_minorista_nuevo?: number
+  precio_escala_anterior?: number
+  precio_escala_nuevo?: number
   precio_anterior: number
   precio_nuevo: number
   diferencia_monto: number

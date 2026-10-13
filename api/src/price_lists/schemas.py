@@ -78,6 +78,10 @@ class PriceVariationItem(BaseModel):
     categoria_nombre: Optional[str] = None
     tipo: str  # 'unitario' | 'escala'
     escala_min_qty: Optional[int] = None
+    precio_minorista_anterior: float = 0.0
+    precio_minorista_nuevo: float = 0.0
+    precio_escala_anterior: float = 0.0
+    precio_escala_nuevo: float = 0.0
     precio_anterior: float
     precio_nuevo: float
     diferencia_monto: float

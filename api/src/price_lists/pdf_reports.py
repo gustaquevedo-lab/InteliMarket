@@ -104,15 +104,15 @@ def generate_price_variations_pdf(
     # Tabla detallada de variaciones
     # Ancho disponible: 273 mm
     col_widths = [
-        25 * mm,  # Fecha/Hora
-        22 * mm,  # SKU / Barras
-        74 * mm,  # Producto
-        26 * mm,  # Tipo / Escala
-        27 * mm,  # Precio Anterior
-        27 * mm,  # Precio Nuevo
-        24 * mm,  # Dif. Gs.
+        23 * mm,  # Fecha/Hora
+        26 * mm,  # Código de Barras (reemplaza SKU a pedido)
+        60 * mm,  # Producto
+        25 * mm,  # P. Min. Ant.
+        25 * mm,  # P. Min. Nuevo
+        25 * mm,  # P. Escala Ant.
+        25 * mm,  # P. Escala Nuevo
         18 * mm,  # Dif. %
-        30 * mm,  # Usuario / Origen
+        32 * mm,  # Responsable
     ]
 
     header_style = ParagraphStyle("TH", fontName=FONT_BOLD, fontSize=7, textColor=WHITE, alignment=TA_CENTER)
@@ -124,12 +124,12 @@ def generate_price_variations_pdf(
 
     table_rows = [[
         Paragraph("Fecha / Hora", header_style),
-        Paragraph("SKU / Código", header_style),
+        Paragraph("Cód. Barras", header_style),
         Paragraph("Producto", header_style),
-        Paragraph("Tipo / Escala", header_style),
-        Paragraph("Precio Ant. (Gs.)", header_style),
-        Paragraph("Precio Nuevo (Gs.)", header_style),
-        Paragraph("Dif. (Gs.)", header_style),
+        Paragraph("P. Min. Ant.", header_style),
+        Paragraph("P. Min. Nvo.", header_style),
+        Paragraph("P. Esc. Ant.", header_style),
+        Paragraph("P. Esc. Nvo.", header_style),
         Paragraph("Dif. (%)", header_style),
         Paragraph("Responsable", header_style),
     ]]
@@ -145,38 +145,50 @@ def generate_price_variations_pdf(
         else:
             dt_str = str(dt or "")[:16]
 
-        sku_or_code = it.get("product_sku") or it.get("product_barcode") or "-"
+        barcode = it.get("product_barcode") or it.get("product_sku") or "-"
         prod_name = it.get("product_nombre") or "Producto sin nombre"
 
-        tipo_val = it.get("tipo", "unitario")
-        if tipo_val == "escala":
-            mq = it.get("escala_min_qty") or 2
-            tipo_label = f"Escala (≥{mq} un.)"
-        else:
-            tipo_label = "Unitario Regular"
+        # Precios Minoristas
+        p_min_ant = float(it.get("precio_minorista_anterior") or 0)
+        p_min_new = float(it.get("precio_minorista_nuevo") or 0)
+        # Si vienen en 0 (legacy), usar precio_anterior/nuevo si tipo es unitario
+        if p_min_ant == 0 and p_min_new == 0 and it.get("tipo") == "unitario":
+            p_min_ant = float(it.get("precio_anterior") or 0)
+            p_min_new = float(it.get("precio_nuevo") or 0)
 
-        p_ant = _fmt_gs(it.get("precio_anterior", 0))
-        p_new = _fmt_gs(it.get("precio_nuevo", 0))
+        p_min_ant_str = _fmt_gs(p_min_ant) if p_min_ant > 0 else "-"
+        p_min_new_str = _fmt_gs(p_min_new) if p_min_new > 0 else "-"
 
+        # Precios Escala (primera escala)
+        p_esc_ant = float(it.get("precio_escala_anterior") or 0)
+        p_esc_new = float(it.get("precio_escala_nuevo") or 0)
+        if p_esc_ant == 0 and p_esc_new == 0 and it.get("tipo") == "escala":
+            p_esc_ant = float(it.get("precio_anterior") or 0)
+            p_esc_new = float(it.get("precio_nuevo") or 0)
+
+        mq = it.get("escala_min_qty")
+        mq_suffix = f" (x{mq})" if mq and mq > 1 else ""
+        p_esc_ant_str = f"{_fmt_gs(p_esc_ant)}{mq_suffix}" if p_esc_ant > 0 else "-"
+        p_esc_new_str = f"{_fmt_gs(p_esc_new)}{mq_suffix}" if p_esc_new > 0 else "-"
+
+        # Diferencia de la variación principal
         diff_monto = float(it.get("diferencia_monto", 0))
         diff_pct = float(it.get("diferencia_pct", 0))
-        diff_gs_str = f"{'+' if diff_monto > 0 else ''}{_fmt_gs(diff_monto)}"
         diff_pct_str = f"{'+' if diff_pct > 0 else ''}{diff_pct:.1f}%"
-
         pct_style = cell_up if diff_monto > 0 else (cell_down if diff_monto < 0 else cell_num)
 
-        resp = it.get("usuario_nombre") or it.get("origen") or "Sistema"
+        resp = it.get("usuario_nombre") or it.get("origen") or "Administrador"
 
         table_rows.append([
             Paragraph(dt_str, cell_text),
-            Paragraph(sku_or_code, cell_text),
-            Paragraph(prod_name[:45], cell_bold),
-            Paragraph(tipo_label, cell_text),
-            Paragraph(p_ant, cell_num),
-            Paragraph(p_new, cell_num),
-            Paragraph(diff_gs_str, pct_style),
+            Paragraph(barcode, cell_text),
+            Paragraph(prod_name[:42], cell_bold),
+            Paragraph(p_min_ant_str, cell_num),
+            Paragraph(p_min_new_str, cell_num),
+            Paragraph(p_esc_ant_str, cell_num),
+            Paragraph(p_esc_new_str, cell_num),
             Paragraph(diff_pct_str, pct_style),
-            Paragraph(resp[:20], cell_text),
+            Paragraph(resp[:22], cell_text),
         ])
 
     tab = Table(table_rows, colWidths=col_widths, repeatRows=1)
@@ -202,21 +214,22 @@ def generate_price_variations_csv(items: list[dict]) -> str:
     output.write("\ufeff")
     writer = csv.writer(output, delimiter=";", quoting=csv.QUOTE_MINIMAL)
 
-    # Cabeceras
+    # Cabeceras completas
     writer.writerow([
         "Fecha y Hora (Paraguay)",
-        "SKU",
         "Código de Barras",
+        "SKU",
         "Producto",
         "Categoría",
-        "Tipo de Precio",
+        "P. Minorista Anterior (Gs.)",
+        "P. Minorista Nuevo (Gs.)",
+        "P. Escala Anterior (Gs.)",
+        "P. Escala Nuevo (Gs.)",
         "Cant. Mínima Escala",
-        "Precio Anterior (Gs.)",
-        "Precio Nuevo (Gs.)",
         "Diferencia (Gs.)",
         "Diferencia (%)",
-        "Origen",
         "Responsable",
+        "Origen",
         "Motivo",
     ])
 
@@ -230,28 +243,30 @@ def generate_price_variations_csv(items: list[dict]) -> str:
         else:
             dt_str = str(dt or "")
 
-        tipo_val = "Escala Mayorista" if it.get("tipo") == "escala" else "Unitario Regular"
-        min_qty = it.get("escala_min_qty") if it.get("tipo") == "escala" else ""
+        p_min_ant = int(round(float(it.get("precio_minorista_anterior") or (it.get("precio_anterior") if it.get("tipo") == "unitario" else 0))))
+        p_min_new = int(round(float(it.get("precio_minorista_nuevo") or (it.get("precio_nuevo") if it.get("tipo") == "unitario" else 0))))
+        p_esc_ant = int(round(float(it.get("precio_escala_anterior") or (it.get("precio_anterior") if it.get("tipo") == "escala" else 0))))
+        p_esc_new = int(round(float(it.get("precio_escala_nuevo") or (it.get("precio_nuevo") if it.get("tipo") == "escala" else 0))))
 
-        p_ant = int(round(float(it.get("precio_anterior", 0))))
-        p_new = int(round(float(it.get("precio_nuevo", 0))))
+        min_qty = it.get("escala_min_qty") or ""
         d_monto = int(round(float(it.get("diferencia_monto", 0))))
         d_pct = round(float(it.get("diferencia_pct", 0)), 2)
 
         writer.writerow([
             dt_str,
-            it.get("product_sku") or "",
             it.get("product_barcode") or "",
+            it.get("product_sku") or "",
             it.get("product_nombre") or "",
             it.get("categoria_nombre") or "",
-            tipo_val,
+            p_min_ant,
+            p_min_new,
+            p_esc_ant,
+            p_esc_new,
             min_qty,
-            p_ant,
-            p_new,
             d_monto,
             f"{d_pct}%",
+            it.get("usuario_nombre") or "Administrador",
             it.get("origen") or "",
-            it.get("usuario_nombre") or "",
             it.get("motivo") or "",
         ])
 

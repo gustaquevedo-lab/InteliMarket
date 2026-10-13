@@ -48,6 +48,10 @@ class PriceVariationLog(Base):
     categoria_nombre = Column(String(150), nullable=True)
     tipo = Column(String(20), nullable=False)  # 'unitario' | 'escala'
     escala_min_qty = Column(Integer, nullable=True)
+    precio_minorista_anterior = Column(Numeric(15, 2), nullable=False, default=0)
+    precio_minorista_nuevo = Column(Numeric(15, 2), nullable=False, default=0)
+    precio_escala_anterior = Column(Numeric(15, 2), nullable=False, default=0)
+    precio_escala_nuevo = Column(Numeric(15, 2), nullable=False, default=0)
     precio_anterior = Column(Numeric(15, 2), nullable=False, default=0)
     precio_nuevo = Column(Numeric(15, 2), nullable=False, default=0)
     diferencia_monto = Column(Numeric(15, 2), nullable=False, default=0)
