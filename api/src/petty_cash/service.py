@@ -601,6 +601,13 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
         registrado_por=_safe_uuid(user_id),
         estado="pendiente",  # Se carga siempre en pendiente para luego ser aprobado y pagado
         notas=data.notas,
+        # Clasificación Contable Multinaturaleza (Cierre P&L / Balances)
+        naturaleza_economica=str(data.naturaleza_economica.value if hasattr(data.naturaleza_economica, "value") else data.naturaleza_economica) if data.naturaleza_economica else "OPEX_GASTO_OPERATIVO",
+        production_area=str(data.production_area.value if hasattr(data.production_area, "value") else data.production_area) if data.production_area else None,
+        periodo_devengado=data.periodo_devengado,
+        cuota_actual=data.cuota_actual,
+        total_cuotas=data.total_cuotas,
+        requisicion_id=_safe_uuid(data.requisicion_id) if data.requisicion_id else None,
     )
     db.add(exp)
     await db.flush()

@@ -1,8 +1,26 @@
-from pydantic import BaseModel, ConfigDict
+from enum import Enum
+from pydantic import BaseModel, ConfigDict, model_validator
 from typing import Optional
 from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
+
+
+class NaturalezaEconomica(str, Enum):
+    OPEX_GASTO_OPERATIVO = "OPEX_GASTO_OPERATIVO"
+    CMV_REVENTA = "CMV_REVENTA"
+    CMV_MATERIA_PRIMA = "CMV_MATERIA_PRIMA"
+    ANTICIPO_PERSONAL = "ANTICIPO_PERSONAL"
+    PASIVO_PERIODO_ANTERIOR = "PASIVO_PERIODO_ANTERIOR"
+    GASTO_DIFERIDO_CUOTAS = "GASTO_DIFERIDO_CUOTAS"
+
+
+class ProductionArea(str, Enum):
+    PANADERIA = "panaderia"
+    ROTISERIA = "rotiseria"
+    CARNICERIA = "carniceria"
+    VERDULERIA = "verduleria"
+    SALON_GENERAL = "salon_general"
 
 
 class ExpenseCategoryCreate(BaseModel):
@@ -142,8 +160,29 @@ class ExpenseCreate(BaseModel):
     employee_ci: Optional[str] = None
     periodo_nomina: Optional[str] = None
     cuotas_anticipo: Optional[int] = 1
-    monto_brl: Optional[Decimal] = None
+    # Clasificación Contable Multinaturaleza (Cierre P&L / Balances)
+    naturaleza_economica: NaturalezaEconomica = NaturalezaEconomica.OPEX_GASTO_OPERATIVO
+    production_area: Optional[ProductionArea] = None
+    periodo_devengado: Optional[str] = None  # YYYY-MM para pasivos de meses anteriores
+    cuota_actual: Optional[int] = None
+    total_cuotas: Optional[int] = None
+    requisicion_id: Optional[str] = None
     notas: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_conditional_fields(self):
+        if self.naturaleza_economica == NaturalezaEconomica.CMV_MATERIA_PRIMA and not self.production_area:
+            raise ValueError("production_area es obligatorio para CMV_MATERIA_PRIMA (panaderia, rotiseria, carniceria, verduleria)")
+        if self.naturaleza_economica == NaturalezaEconomica.GASTO_DIFERIDO_CUOTAS:
+            if not self.cuota_actual or not self.total_cuotas:
+                raise ValueError("cuota_actual y total_cuotas son obligatorios para GASTO_DIFERIDO_CUOTAS")
+            if self.cuota_actual > self.total_cuotas:
+                raise ValueError("cuota_actual no puede ser mayor a total_cuotas")
+        if self.naturaleza_economica == NaturalezaEconomica.PASIVO_PERIODO_ANTERIOR and not self.periodo_devengado:
+            raise ValueError("periodo_devengado es obligatorio para PASIVO_PERIODO_ANTERIOR (formato YYYY-MM)")
+        if self.naturaleza_economica == NaturalezaEconomica.ANTICIPO_PERSONAL and not self.employee_id:
+            raise ValueError("employee_id es obligatorio para ANTICIPO_PERSONAL")
+        return self
 
 
 class ExpenseUpdate(BaseModel):
@@ -186,6 +225,13 @@ class ExpenseUpdate(BaseModel):
     cuotas_anticipo: Optional[int] = None
     monto_brl: Optional[Decimal] = None
     fecha_gasto: Optional[date] = None
+    # Clasificación Contable Multinaturaleza
+    naturaleza_economica: Optional[NaturalezaEconomica] = None
+    production_area: Optional[ProductionArea] = None
+    periodo_devengado: Optional[str] = None
+    cuota_actual: Optional[int] = None
+    total_cuotas: Optional[int] = None
+    requisicion_id: Optional[str] = None
     notas: Optional[str] = None
 
 
@@ -328,6 +374,13 @@ class ExpenseResponse(BaseModel):
     pagado_por: Optional[UUID] = None
     pagado_at: Optional[datetime] = None
     forma_pago_resumen: Optional[str] = None
+    # Clasificación Contable Multinaturaleza
+    naturaleza_economica: Optional[NaturalezaEconomica] = NaturalezaEconomica.OPEX_GASTO_OPERATIVO
+    production_area: Optional[ProductionArea] = None
+    periodo_devengado: Optional[str] = None
+    cuota_actual: Optional[int] = None
+    total_cuotas: Optional[int] = None
+    requisicion_id: Optional[UUID] = None
     disbursements: Optional[list["ExpenseDisbursementResponse"]] = None
     created_at: Optional[datetime] = None
 

@@ -238,6 +238,14 @@ class Expense(Base):
     pagado_at = Column(DateTime(timezone=True))
     forma_pago_resumen = Column(String(100))
 
+    # Clasificación Contable Multinaturaleza (Cierre P&L / Balances)
+    naturaleza_economica = Column(String(50), nullable=False, server_default="OPEX_GASTO_OPERATIVO", index=True)
+    production_area = Column(String(50), index=True)  # panaderia | rotiseria | carniceria | verduleria | salon_general
+    periodo_devengado = Column(String(7), index=True)  # YYYY-MM para pasivos de meses anteriores
+    cuota_actual = Column(Integer)
+    total_cuotas = Column(Integer)
+    requisicion_id = Column(UUID(as_uuid=True), index=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
