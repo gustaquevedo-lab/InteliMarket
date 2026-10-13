@@ -1699,8 +1699,10 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                     </span>
                   </div>
                   <p className="text-xs text-slate-400">
-                    Depósito: {detailAdjustment.warehouse_nombre} | Creado:{" "}
-                    {formatDateTime(detailAdjustment.created_at)}
+                    {detailAdjustment.warehouse_nombre
+                      ? `Depósito: ${detailAdjustment.warehouse_nombre} • `
+                      : ""}
+                    Creado: {formatDateTime(detailAdjustment.created_at)}
                   </p>
                 </div>
                 <button
@@ -1713,16 +1715,16 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
 
               <div className="p-6 space-y-6 max-h-[75vh] overflow-y-auto">
                 {/* Datos generales */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl">
-                  <div>
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl items-center">
+                  <div className="md:col-span-4 min-w-0">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
                       Motivo Oficial
                     </span>
-                    <span className="font-extrabold text-sm text-slate-900 dark:text-white">
+                    <span className="font-extrabold text-sm text-slate-900 dark:text-white truncate block">
                       {detailAdjustment.motivo_label || detailAdjustment.motivo}
                     </span>
                   </div>
-                  <div>
+                  <div className="md:col-span-2 min-w-0">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
                       Nivel de Riesgo
                     </span>
@@ -1737,7 +1739,7 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                     </span>
                   </div>
                   <div
-                    className={`p-3 rounded-2xl border transition ${
+                    className={`md:col-span-6 min-w-0 p-3.5 rounded-2xl border transition ${
                       detailSummary.esPerdida
                         ? "bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-400"
                         : detailSummary.esGanancia
@@ -1745,27 +1747,12 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                         : "bg-slate-100 dark:bg-slate-800/50 border-slate-200 dark:border-slate-800"
                     }`}
                   >
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                      Balance Financiero Total
-                    </span>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span
-                        className={`font-mono font-black text-base ${
-                          detailSummary.esPerdida
-                            ? "text-rose-600 dark:text-rose-400"
-                            : detailSummary.esGanancia
-                            ? "text-emerald-600 dark:text-emerald-400"
-                            : "text-slate-900 dark:text-white"
-                        }`}
-                      >
-                        {detailSummary.esPerdida
-                          ? `-${formatPYG(Math.abs(detailSummary.netoGs))}`
-                          : detailSummary.esGanancia
-                          ? `+${formatPYG(detailSummary.netoGs)}`
-                          : "₲ 0"}
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Balance Financiero Total
                       </span>
                       <span
-                        className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase border ${
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase border whitespace-nowrap shrink-0 ${
                           detailSummary.esPerdida
                             ? "bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800"
                             : detailSummary.esGanancia
@@ -1780,13 +1767,30 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                           : "Cuadrado"}
                       </span>
                     </div>
+                    <div className="mt-1">
+                      <span
+                        className={`font-mono font-black text-xl whitespace-nowrap inline-block ${
+                          detailSummary.esPerdida
+                            ? "text-rose-600 dark:text-rose-400"
+                            : detailSummary.esGanancia
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : "text-slate-900 dark:text-white"
+                        }`}
+                      >
+                        {detailSummary.esPerdida
+                          ? `-${formatPYG(Math.abs(detailSummary.netoGs))}`
+                          : detailSummary.esGanancia
+                          ? `+${formatPYG(detailSummary.netoGs)}`
+                          : "₲ 0"}
+                      </span>
+                    </div>
                     {detailSummary.esMixto && (
-                      <div className="flex items-center gap-2 text-[10px] font-bold mt-1">
-                        <span className="text-emerald-600">
+                      <div className="flex items-center gap-2 text-[10px] font-bold mt-1.5 whitespace-nowrap">
+                        <span className="text-emerald-600 dark:text-emerald-400 font-extrabold">
                           Sob: +{formatPYG(detailSummary.sobrantesGs)}
                         </span>
-                        <span>•</span>
-                        <span className="text-rose-600">
+                        <span className="text-slate-400">•</span>
+                        <span className="text-rose-600 dark:text-rose-400 font-extrabold">
                           Falt: -{formatPYG(detailSummary.faltantesGs)}
                         </span>
                       </div>
@@ -1927,10 +1931,10 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                             <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-400">
                               {formatPYG(it.costo_unitario)}
                             </td>
-                            <td className="p-3 text-right font-mono font-black">
+                            <td className="p-3 text-right font-mono font-black whitespace-nowrap">
                               {Number(it.diferencia) > 0 ? (
                                 <div className="flex flex-col items-end">
-                                  <span className="text-emerald-600 dark:text-emerald-400 font-black text-sm">
+                                  <span className="text-emerald-600 dark:text-emerald-400 font-black text-sm whitespace-nowrap">
                                     +{formatPYG(
                                       Math.abs(
                                         Number(
@@ -1941,13 +1945,13 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                                       )
                                     )}
                                   </span>
-                                  <span className="inline-flex items-center gap-0.5 text-[9px] font-extrabold uppercase text-emerald-700 bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 px-1.5 py-0.5 rounded-sm">
+                                  <span className="inline-flex items-center gap-0.5 text-[9px] font-extrabold uppercase text-emerald-700 bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 px-1.5 py-0.5 rounded-sm whitespace-nowrap">
                                     🟢 Ganancia
                                   </span>
                                 </div>
                               ) : Number(it.diferencia) < 0 ? (
                                 <div className="flex flex-col items-end">
-                                  <span className="text-rose-600 dark:text-rose-400 font-black text-sm">
+                                  <span className="text-rose-600 dark:text-rose-400 font-black text-sm whitespace-nowrap">
                                     -{formatPYG(
                                       Math.abs(
                                         Number(
@@ -1958,7 +1962,7 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                                       )
                                     )}
                                   </span>
-                                  <span className="inline-flex items-center gap-0.5 text-[9px] font-extrabold uppercase text-rose-700 bg-rose-100 dark:bg-rose-950/40 dark:text-rose-300 px-1.5 py-0.5 rounded-sm">
+                                  <span className="inline-flex items-center gap-0.5 text-[9px] font-extrabold uppercase text-rose-700 bg-rose-100 dark:bg-rose-950/40 dark:text-rose-300 px-1.5 py-0.5 rounded-sm whitespace-nowrap">
                                     🔴 Pérdida
                                   </span>
                                 </div>
