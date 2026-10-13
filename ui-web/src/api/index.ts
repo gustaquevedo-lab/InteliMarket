@@ -1467,8 +1467,14 @@ export interface Expense {
   notas?: string;
   fecha_pago?: string;
   pagado_por?: string;
-  pagado_at?: string;
   forma_pago_resumen?: string;
+  // Clasificación Contable Multinaturaleza (Cierre P&L / Balances)
+  naturaleza_economica?: "OPEX_GASTO_OPERATIVO" | "CMV_REVENTA" | "CMV_MATERIA_PRIMA" | "ANTICIPO_PERSONAL" | "PASIVO_PERIODO_ANTERIOR" | "GASTO_DIFERIDO_CUOTAS";
+  production_area?: "panaderia" | "rotiseria" | "carniceria" | "verduleria" | "salon_general" | null;
+  periodo_devengado?: string | null;
+  cuota_actual?: number | null;
+  total_cuotas?: number | null;
+  requisicion_id?: string | null;
   disbursements?: any[];
   created_at?: string;
 }
@@ -3555,7 +3561,7 @@ export const api = {
     pendingForCustomer: (customerId: string) => client.get<{ id: string; numero_documento: string; fecha_emision: string; fecha_vencimiento: string | null; moneda: string; monto_original: number; saldo_pendiente: number; dias_mora: number }[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/customers/${customerId}/pending`),
     registerPayment: (data: { customer_id: string; monto_total: number; moneda?: string; forma_pago?: string; referencia?: string; fecha?: string; observaciones?: string; aplica_retencion?: boolean; monto_retencion?: number; retencion_numero_comprobante?: string; retencion_fecha?: string; retencion_porcentaje?: number; monto_efectivo_recibido?: number; monto_pyg?: number; monto_brl?: number; monto_usd?: number; monto_transferencia?: number; fecha_transferencia?: string; referencia_transferencia?: string; monto_cheque?: number; tasa_brl?: number; tasa_usd?: number; monto_facturas_canceladas?: number; diferencia_monto?: number; tipo_diferencia?: string; allocations: { accounts_receivable_id: string; monto: number }[] }) =>
       client.post<{ id: string; monto_total: number; allocations: { accounts_receivable_id: string; monto: number; nuevo_saldo: number; nuevo_estado: string }[] }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/payments`, data),
-    applyGlobalPayment: (data: { customer_id: string; monto_total: number; moneda?: string; forma_pago?: string; referencia?: string; fecha?: string; observaciones?: string; accounts_receivable_ids?: string[]; bank_account_id?: string; destino_fondos?: string; caja_session_id?: string; cheque_numero?: string; cheque_banco?: string; cheque_librador?: string; cheque_ruc?: string; cheque_fecha_emision?: string; cheque_fecha_cobro?: string; aplica_retencion?: boolean; monto_retencion?: number; retencion_numero_comprobante?: string; retencion_fecha?: string; retencion_porcentaje?: number; monto_efectivo_recibido?: number; monto_pyg?: number; monto_brl?: number; monto_usd?: number; monto_transferencia?: number; fecha_transferencia?: string; referencia_transferencia?: string; monto_cheque?: number; tasa_brl?: number; tasa_usd?: number; monto_facturas_canceladas?: number; diferencia_monto?: number; tipo_diferencia?: string; category_id?: string; cost_center_id?: string }) =>
+    applyGlobalPayment: (data: { customer_id: string; monto_total: number; moneda?: string; forma_pago?: string; referencia?: string; fecha?: string; observaciones?: string; accounts_receivable_ids?: string[]; bank_account_id?: string; destino_fondos?: string; caja_session_id?: string; cheque_numero?: string; cheque_banco?: string; cheque_librador?: string; cheque_ruc?: string; cheque_fecha_emision?: string; cheque_fecha_cobro?: string; aplica_retencion?: boolean; monto_retencion?: number; retencion_numero_comprobante?: string; retencion_fecha?: string; retencion_porcentaje?: number; monto_efectivo_recibido?: number; monto_pyg?: number; monto_brl?: number; monto_usd?: number; monto_transferencia?: number; fecha_transferencia?: string; referencia_transferencia?: string; monto_cheque?: number; tasa_brl?: number; tasa_usd?: number; monto_facturas_canceladas?: number; diferencia_monto?: number; tipo_diferencia?: string; category_id?: string; cost_center_id?: string; requisicion_id?: string; production_area?: string }) =>
       client.post<{ id: string; payment_id: string; numero_recibo: string; monto_total: number; documentos_afectados: number; allocations: any[]; treasury?: any }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/payments/apply-global`, data),
     compensateInternalConsumption: (data: { customer_id: string; accounts_receivable_ids: string[]; category_id: string; cost_center_id?: string; fecha?: string; observaciones?: string }) =>
       client.post<{ success: boolean; payment_id: string; numero_recibo: string; monto_total: number; facturas_canceladas: number; gastos_registrados: number }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/compensate-internal-consumption`, data),
@@ -3994,6 +4000,14 @@ export const api = {
       list: (params?: { categoria?: string }) => client.get<SupermerPerishableConfig[]>("/v1/supermer/perishable-configs", params as any),
       upsert: (data: any) => client.put<SupermerPerishableConfig>("/v1/supermer/perishable-configs", data),
     },
+    requisitions: {
+      list: (params?: { estado?: string; area_destino?: string; branch_id?: string; limit?: number; offset?: number }) => client.get<any[]>("/v1/supermer/requisitions", params as any),
+      get: (id: string) => client.get<any>(`/v1/supermer/requisitions/${id}`),
+      create: (data: any) => client.post<any>("/v1/supermer/requisitions", data),
+      approve: (id: string, approver_name?: string) => client.put<{ success: boolean; requisition: any; ticket_text: string }>(`/v1/supermer/requisitions/${id}/approve`, { approver_name }),
+      getTicket: (id: string) => client.get<{ numero_requisicion: string; ticket_text: string }>(`/v1/supermer/requisitions/${id}/ticket`),
+      linkSale: (id: string, data: { sale_id: string; numero_factura: string }) => client.put<any>(`/v1/supermer/requisitions/${id}/link-sale`, data),
+    },
     markdowns: {
       list: () => client.get<SupermerMarkdown[]>("/v1/supermer/markdowns"),
       create: (data: any) => client.post<SupermerMarkdown>("/v1/supermer/markdowns", data),
@@ -4376,7 +4390,9 @@ export const api = {
     list: (params?: { estado?: string; supplier_id?: string; vencidos?: boolean; fecha_desde?: string; fecha_hasta?: string; limit?: number }) => client.get<any[]>("/v1/cheques", params as any),
     dashboard: () => client.get<any>("/v1/cheques/dashboard"),
     create: (data: any) => client.post<any>("/v1/cheques", data),
+    update: (id: string, data: any) => client.put<any>(`/v1/cheques/${id}`, data),
     updateEstado: (id: string, data: { estado: string; notas?: string }) => client.patch<any>(`/v1/cheques/${id}/estado`, data),
+    marcarTodosEntregados: (ids?: string[]) => client.post<any>("/v1/cheques/marcar-entregados", { ids }),
     historial: (id: string) => client.get<any[]>(`/v1/cheques/${id}/historial`),
     downloadExcel: (params?: { estado?: string; fecha_desde?: string; fecha_hasta?: string }) => downloadAuthenticated("/v1/cheques/export/excel", params as any, "cheques.xlsx"),
     downloadPdf: (params?: { estado?: string; fecha_desde?: string; fecha_hasta?: string }) => downloadAuthenticated("/v1/cheques/export/pdf", params as any, "cheques.pdf"),

@@ -6,7 +6,7 @@ import {
   User, Check, Phone, ArrowUpRight, ShieldCheck, ShieldAlert, RefreshCw, BarChart2,
   Printer, QrCode, ExternalLink, CheckSquare, Square, Building2, Building,
   Users, Send, Landmark, ArrowRight, DownloadCloud, FileCheck, Layers, Filter,
-  Banknote, RotateCcw, Ban, Trash2
+  Banknote, RotateCcw, Ban, Trash2, Warehouse
 } from "lucide-react"
 import { api, type AccountsReceivable, type Sale, type SaleItem, type CreditAccount } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -209,6 +209,9 @@ export default function AccountsReceivablePage() {
   const [costCenters, setCostCenters] = useState<{ id: string; nombre: string }[]>([])
   const [payCategoryId, setPayCategoryId] = useState("")
   const [payCostCenterId, setPayCostCenterId] = useState("")
+  const [availableRequisitions, setAvailableRequisitions] = useState<any[]>([])
+  const [payRequisicionId, setPayRequisicionId] = useState("")
+  const [payProductionArea, setPayProductionArea] = useState("")
 
   // ⚡ Modal de Inicio Rápido de Cobro (Cabecera)
   const [showQuickCobroModal, setShowQuickCobroModal] = useState(false)
@@ -1011,6 +1014,8 @@ export default function AccountsReceivablePage() {
     setPayChequeFechaCobro(getTodayAsuncion())
     setPayCategoryId("")
     setPayCostCenterId("")
+    setPayRequisicionId("")
+    setPayProductionArea("")
 
     setPendingLoading(true)
     try {
@@ -1036,6 +1041,11 @@ export default function AccountsReceivablePage() {
   ) => {
     await openPaymentModal(customerId, custInfo, targetDoc)
     setPayFormaPago("compensacion_interna")
+    api.supermer.requisitions.list({ limit: 50 }).then(res => {
+      if (Array.isArray(res)) {
+        setAvailableRequisitions(res.filter((r: any) => r.estado !== "COMPENSADA" && r.estado !== "ANULADA"))
+      }
+    }).catch(() => {})
   }
 
   const montoTotalPago = Object.values(allocations).reduce((sum, v) => sum + (parseFloat(v) || 0), 0)
@@ -1267,6 +1277,8 @@ export default function AccountsReceivablePage() {
         tipo_diferencia: tipoDiferenciaCompensacion,
         category_id: payFormaPago === "compensacion_interna" ? payCategoryId : undefined,
         cost_center_id: payFormaPago === "compensacion_interna" && payCostCenterId ? payCostCenterId : undefined,
+        requisicion_id: payFormaPago === "compensacion_interna" && payRequisicionId ? payRequisicionId : undefined,
+        production_area: payFormaPago === "compensacion_interna" && payProductionArea ? payProductionArea : undefined,
         cheque_numero: (payFormaPago === "cheque" || payFormaPago === "mixto") ? (payChequeNumero || undefined) : undefined,
         cheque_banco: (payFormaPago === "cheque" || payFormaPago === "mixto") ? (payChequeBanco || undefined) : undefined,
         cheque_librador: (payFormaPago === "cheque" || payFormaPago === "mixto") ? (payChequeLibrador || undefined) : undefined,
@@ -3471,6 +3483,48 @@ export default function AccountsReceivablePage() {
                         Las facturas seleccionadas se saldarán en Cuentas por Cobrar y se liberará la línea de crédito de la empresa. El importe total se registrará automáticamente en el <b>Módulo de Gastos</b> bajo el rubro y centro de costo elegidos. No afectará Bóveda ni Bancos.
                       </p>
                     </div>
+                  </div>
+
+                  {/* Selector de Requisición de Producción Vinculada */}
+                  <div className="p-2.5 rounded-lg bg-white/70 dark:bg-slate-800/80 border border-purple-200 dark:border-purple-800/60 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-purple-900 dark:text-purple-200 flex items-center gap-1.5">
+                        <Warehouse className="w-3.5 h-3.5 text-purple-600" />
+                        Vale de Requisición de Salón (Producción Propia):
+                      </label>
+                      <span className="text-[10px] text-purple-600 dark:text-purple-400 font-medium">
+                        Opcional / Imputa a CMV Materia Prima
+                      </span>
+                    </div>
+                    <select
+                      className="input-field text-xs w-full font-mono"
+                      value={payRequisicionId}
+                      onChange={e => {
+                        const rId = e.target.value
+                        setPayRequisicionId(rId)
+                        const req = availableRequisitions.find(r => r.id === rId)
+                        if (req) {
+                          setPayProductionArea(req.area_destino || "panaderia")
+                          if (!payReferencia) setPayReferencia(`Compensación Vale ${req.numero_requisicion}`)
+                        } else {
+                          setPayProductionArea("")
+                        }
+                      }}
+                    >
+                      <option value="">-- Sin Vale Específico (Gasto Operativo General) --</option>
+                      {availableRequisitions.map(r => (
+                        <option key={r.id} value={r.id}>
+                          {r.numero_requisicion} • {r.area_destino?.toUpperCase()} • {r.solicitante_nombre} ({formatPYG(r.total_costo_estimado || 0)})
+                        </option>
+                      ))}
+                    </select>
+
+                    {payRequisicionId && (
+                      <div className="flex items-center gap-2 pt-1 text-[11px] text-emerald-700 dark:text-emerald-300 font-semibold">
+                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                        Se imputará al Costo de Ventas (CMV Materia Prima - {payProductionArea.toUpperCase()}) y el vale quedará COMPENSADO.
+                      </div>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">

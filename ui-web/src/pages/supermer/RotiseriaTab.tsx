@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react"
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
-import { ChefHat, Thermometer, Tag, PackageOpen, Sparkles, Plus, Search, Loader2, X, Check, AlertTriangle, Trash2, ClipboardList, CheckCircle, Clock, Gauge, Printer } from "lucide-react"
+import { ChefHat, Thermometer, Tag, PackageOpen, Sparkles, Plus, Search, Loader2, X, Check, AlertTriangle, Trash2, ClipboardList, CheckCircle, Clock, Gauge, Printer, Warehouse } from "lucide-react"
 import { formatPYG, formatDate, formatDateTime, formatTime } from "../../utils/format"
+import RequisitionsSubTab from "./RequisitionsSubTab"
 
-type SubTab = "recipes" | "plans" | "tempLogs" | "labels" | "markdown"
+type SubTab = "recipes" | "plans" | "tempLogs" | "labels" | "markdown" | "requisitions"
 
 export default function RotiseriaTab() {
   const [subTab, setSubTab] = useState<SubTab>("recipes")
@@ -68,6 +69,7 @@ export default function RotiseriaTab() {
   const subTabs: { k: SubTab; l: string; i: any }[] = [
     { k: "recipes", l: "Recetas", i: ChefHat },
     { k: "plans", l: "Planes", i: ClipboardList },
+    { k: "requisitions", l: "Requisiciones de Salón", i: Warehouse },
     { k: "tempLogs", l: "Temperaturas", i: Thermometer },
     { k: "labels", l: "Etiquetas", i: Tag },
     { k: "markdown", l: "Markdown", i: Sparkles },
@@ -145,6 +147,7 @@ export default function RotiseriaTab() {
               fetchAll={fetchAll}
             />
           )}
+          {subTab === "requisitions" && <RequisitionsSubTab />}
         </>
       )}
     </div>

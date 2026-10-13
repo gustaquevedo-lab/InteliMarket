@@ -12,8 +12,9 @@ import WasteControlPanel from "../../components/operations/WasteControlPanel"
 import RecipeBuilderModal from "../../components/operations/RecipeBuilderModal"
 import ProduceBatchModal from "../../components/operations/ProduceBatchModal"
 import { formatPYG, formatDate } from "../../utils/format"
+import RequisitionsSubTab from "../supermer/RequisitionsSubTab"
 
-type Tab = "dashboard" | "recetas" | "planes" | "rotiseria" | "calculadora" | "mermas"
+type Tab = "dashboard" | "recetas" | "planes" | "rotiseria" | "calculadora" | "mermas" | "requisiciones"
 
 const AREA_FILTERS = [
   { id: "todas", label: "Todas las Fórmulas", icon: "📋" },
@@ -345,6 +346,7 @@ export default function PanaderiaRotiseriaPage() {
           { id: "recetas", label: "Fórmulas & Recetas (BOM)", count: allRecipes.length, icon: Layers },
           { id: "planes", label: "Producción & Hornadas", count: completedOrders.length, icon: Flame },
           { id: "rotiseria", label: "Cocción Rotisería", count: rotiseriaPlanes.length, icon: UtensilsCrossed },
+          { id: "requisiciones", label: "Requisiciones de Salón", icon: WarehouseIcon },
           { id: "calculadora", label: "Calculadora Panadero", icon: Calculator },
           { id: "mermas", label: "Mermas y Pérdidas", icon: AlertTriangle },
         ].map((t) => {
@@ -937,6 +939,11 @@ export default function PanaderiaRotiseriaPage() {
           { value: "rotiseria", label: "Rotisería" },
           { value: "carniceria", label: "Carnicería" },
         ]} />
+      )}
+
+      {/* ══════════════════════ TAB 7: REQUISICIONES DE SALÓN A PRODUCCIÓN ══════════════════════ */}
+      {tab === "requisiciones" && (
+        <RequisitionsSubTab />
       )}
 
       {/* ── MODAL CONSTRUCTOR DE RECETAS INDUSTRIAL (BOM) ── */}
