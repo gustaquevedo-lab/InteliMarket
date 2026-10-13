@@ -539,3 +539,46 @@ async def pay_corporate_remission_endpoint(
     return result
 
 
+
+
+@router.get("/companies/{company_id}/accounts-receivable/by-route")
+async def cobranzas_by_route(
+    company_id: str,
+    route_id: str = Query(...),
+    fecha: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Vista de cobranza diaria por ruta: clientes con saldo pendiente > 0."""
+    from api.src.accounts_receivable.service import AccountsReceivableService
+    svc = AccountsReceivableService(db)
+    return await svc.get_by_route(company_id, route_id, fecha)
+
+
+@router.post("/companies/{company_id}/accounts-receivable/cheques/{cheque_id}/bounce")
+async def bounce_cheque(
+    company_id: str,
+    cheque_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Marca un cheque como devuelto y revierte el cobro asociado."""
+    from sqlalchemy import text as sa_text, update as sa_update
+    from api.src.accounts_receivable.models import ReceivablePayment
+    motivo = body.get("motivo", "")
+    # Marcar el cheque como devuelto
+    await db.execute(
+        sa_text("UPDATE cheques SET estado = 'devuelto', motivo_rechazo = :motivo WHERE id = :id AND company_id = :company_id"),
+        {"motivo": motivo, "id": cheque_id, "company_id": company_id},
+    )
+    # Revertir el pago asociado si existe
+    await db.execute(
+        sa_text("""
+            UPDATE receivable_payments SET observaciones = CONCAT('REVERTIDO - Cheque devuelto: ', :motivo)
+            WHERE cheque_id = :cheque_id AND company_id = :company_id
+        """),
+        {"motivo": motivo, "cheque_id": cheque_id, "company_id": company_id},
+    )
+    await db.commit()
+    return {"ok": True}

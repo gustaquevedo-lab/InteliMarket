@@ -1780,3 +1780,109 @@ async def pay_corporate_remission(db: AsyncSession, company_id: str, remission_i
     }
 
 
+
+
+class AccountsReceivableService:
+    """Thin class wrapper for new AR methods added in crédito y cobranzas distribuidora."""
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def register_payment_with_nc(
+        self,
+        company_id: str,
+        customer_id: str,
+        monto_total: Decimal,
+        fecha: date,
+        created_by: str,
+        delivery_note_id: str | None = None,
+        delivery_note_monto: Decimal | None = None,
+        cobrador_id: str | None = None,
+    ) -> dict:
+        """Registra un cobro; si viene con NC valida que monto_nc <= saldo_pendiente del cliente."""
+        if delivery_note_id and delivery_note_monto is not None:
+            # Obtener saldo total pendiente del cliente
+            from sqlalchemy import select as sa_select
+            from api.src.accounts_receivable.models import Account
+            stmt = sa_select(Account).where(
+                Account.company_id == uuid.UUID(company_id),
+                Account.customer_id == uuid.UUID(customer_id),
+                Account.estado == "pendiente",
+            )
+            result = await self.db.execute(stmt)
+            docs = result.scalars().all()
+            saldo_total = sum(d.saldo_pendiente for d in docs)
+            if delivery_note_monto > saldo_total:
+                from fastapi import HTTPException
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"El monto de la nota de crédito ({delivery_note_monto}) supera el saldo pendiente del cliente ({saldo_total})",
+                )
+        # Delegate to existing function
+        from dataclasses import dataclass
+
+        @dataclass
+        class _PaymentData:
+            monto_total: Decimal
+            forma_pago: str = "efectivo"
+            fecha: date = fecha
+            cobrador_id: str | None = cobrador_id
+            delivery_note_id: str | None = delivery_note_id
+            delivery_note_monto: Decimal | None = delivery_note_monto
+            observaciones: str | None = None
+            referencia: str | None = None
+            bank_account_id: str | None = None
+            cheque_id: str | None = None
+            caja_session_id: str | None = None
+            vault_entry_id: str | None = None
+            destino_fondos: str | None = None
+            numero_recibo: str | None = None
+            aplica_retencion: bool = False
+            monto_retencion: Decimal = Decimal("0")
+            retencion_numero_comprobante: str | None = None
+            retencion_fecha: date | None = None
+            retencion_porcentaje: Decimal = Decimal("30.00")
+            monto_efectivo_recibido: Decimal = Decimal("0")
+
+        data = _PaymentData(monto_total=monto_total)
+        return await create_receivable_payment(self.db, company_id, data, created_by)
+
+    async def get_by_route(
+        self,
+        company_id: str,
+        route_id: str,
+        fecha: date,
+    ) -> list[dict]:
+        """Retorna clientes con saldo pendiente en una ruta para una fecha dada."""
+        query = text("""
+            SELECT
+                ar.customer_id::text,
+                COALESCE(c.razon_social, c.nombre_fantasia, c.ruc, 'Cliente') as customer_name,
+                c.telefono as customer_telefono,
+                SUM(ar.saldo_pendiente) as saldo_total,
+                COUNT(*) as n_docs,
+                MAX(rp.fecha::text) as ultimo_cobro
+            FROM accounts_receivable ar
+            LEFT JOIN customers c ON c.id = ar.customer_id
+            LEFT JOIN receivable_payments rp ON rp.customer_id = ar.customer_id
+                AND rp.company_id = ar.company_id
+            WHERE ar.company_id = :company_id
+            AND ar.route_id = :route_id
+            AND ar.estado = 'pendiente'
+            GROUP BY ar.customer_id, c.razon_social, c.nombre_fantasia, c.ruc, c.telefono
+            HAVING SUM(ar.saldo_pendiente) > 0
+            ORDER BY saldo_total DESC
+        """)
+        result = await self.db.execute(query, {"company_id": company_id, "route_id": route_id})
+        rows = result.all()
+        return [
+            {
+                "customer_id": str(r.customer_id),
+                "customer_name": r.customer_name,
+                "customer_telefono": r.customer_telefono,
+                "saldo_total": float(r.saldo_total),
+                "n_docs": int(r.n_docs),
+                "ultimo_cobro": r.ultimo_cobro,
+            }
+            for r in rows
+        ]

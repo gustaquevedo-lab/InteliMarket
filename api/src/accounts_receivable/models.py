@@ -26,6 +26,8 @@ class Account(Base):
     ultimo_pago = Column(DateTime(timezone=True))
     notas_cobranza = Column(Text)
     user_id = Column(UUID(as_uuid=True))
+    cobrador_id = Column(UUID(as_uuid=True), nullable=True)
+    route_id = Column(UUID(as_uuid=True), nullable=True)
     corporate_remission_id = Column(UUID(as_uuid=True), ForeignKey("ar_corporate_remissions.id"))
     remitido_empresa_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -101,6 +103,9 @@ class ReceivablePayment(Base):
     retencion_fecha = Column(Date)
     retencion_porcentaje = Column(Numeric(5, 2), default=30.00)
     monto_efectivo_recibido = Column(Numeric(15, 0), default=0)
+    cobrador_id = Column(UUID(as_uuid=True), nullable=True)
+    delivery_note_id = Column(UUID(as_uuid=True), nullable=True)
+    delivery_note_monto = Column(Numeric(15, 0), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
