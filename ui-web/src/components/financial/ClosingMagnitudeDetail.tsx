@@ -87,14 +87,14 @@ export function ClosingMagnitudeDetail({
               <tr>
                 <th className="py-2.5 px-3">C.I. Nº</th>
                 <th className="py-2.5 px-3">Colaborador</th>
-                <th className="py-2.5 px-3">Cargo / Área</th>
+                <th className="py-2.5 px-3">Cargo / Sector</th>
                 <th className="py-2.5 px-3 text-right">Salario Base</th>
-                <th className="py-2.5 px-3 text-right">H. Extras</th>
                 <th className="py-2.5 px-3 text-right font-bold text-slate-900 dark:text-slate-100">Devengado Bruto</th>
                 <th className="py-2.5 px-3 text-right text-rose-600">IPS Obrero (9%)</th>
+                <th className="py-2.5 px-3 text-right text-amber-700 dark:text-amber-500">Anticipos / Vales</th>
+                <th className="py-2.5 px-3 text-right text-emerald-700 dark:text-emerald-400 font-bold">Neto a Cobrar</th>
                 <th className="py-2.5 px-3 text-right font-bold text-amber-600">IPS Patronal (16.5%)</th>
                 <th className="py-2.5 px-3 text-right text-indigo-600">Aguinaldo (1/12)</th>
-                <th className="py-2.5 px-3 text-right text-emerald-700 dark:text-emerald-400 font-bold">Neto a Percibir</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -104,14 +104,17 @@ export function ClosingMagnitudeDetail({
                   <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                     <td className="py-2.5 px-3 text-slate-500 font-mono">{emp.ci}</td>
                     <td className="py-2.5 px-3 font-semibold text-slate-900 dark:text-slate-100">{emp.nombre}</td>
-                    <td className="py-2.5 px-3 text-slate-600 dark:text-slate-400">{emp.cargo} ({emp.dpto})</td>
+                    <td className="py-2.5 px-3 text-slate-600 dark:text-slate-400">
+                      <span className="font-medium text-slate-800 dark:text-slate-200">{emp.cargo}</span>
+                      <span className="text-[11px] text-slate-400 block">{emp.dpto}</span>
+                    </td>
                     <td className="py-2.5 px-3 text-right">{formatGs(emp.salario_base)}</td>
-                    <td className="py-2.5 px-3 text-right">{formatGs(emp.horas_extras)}</td>
                     <td className="py-2.5 px-3 text-right font-bold">{formatGs(emp.total_devengado)}</td>
-                    <td className="py-2.5 px-3 text-right text-rose-600">-{formatGs(emp.ips_obrero)}</td>
+                    <td className="py-2.5 px-3 text-right text-rose-600">{emp.ips_obrero > 0 ? `-${formatGs(emp.ips_obrero)}` : "Gs. 0"}</td>
+                    <td className="py-2.5 px-3 text-right text-amber-700 dark:text-amber-500">{emp.anticipos > 0 ? `-${formatGs(emp.anticipos)}` : "Gs. 0"}</td>
+                    <td className="py-2.5 px-3 text-right font-bold text-emerald-700 dark:text-emerald-400">{formatGs(emp.neto)}</td>
                     <td className="py-2.5 px-3 text-right font-bold text-amber-600">{formatGs(emp.ips_patronal)}</td>
                     <td className="py-2.5 px-3 text-right text-indigo-600">{formatGs(emp.aguinaldo_provisional)}</td>
-                    <td className="py-2.5 px-3 text-right font-bold text-emerald-700 dark:text-emerald-400">{formatGs(emp.neto)}</td>
                   </tr>
                 ))}
             </tbody>
