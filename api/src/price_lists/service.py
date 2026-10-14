@@ -339,17 +339,144 @@ def _build_variations_filters(
     return conditions
 
 
-def _build_variations_order(order_by: str = "fecha_desc", target=None) -> list:
-    col_created = target.c.created_at if hasattr(target, "c") else getattr(target, "created_at", PriceVariationLog.created_at)
-    col_nombre = target.c.product_nombre if hasattr(target, "c") else getattr(target, "product_nombre", PriceVariationLog.product_nombre)
+def _build_variations_sql_parts(
+    company_id: str,
+    fecha_desde: Optional[str] = None,
+    fecha_hasta: Optional[str] = None,
+    tipo: Optional[str] = None,
+    search: Optional[str] = None,
+    order_by: str = "fecha_desc",
+):
+    params: dict = {"cid": uuid.UUID(company_id)}
+    where_parts = ["company_id = :cid"]
+
+    if fecha_desde and fecha_desde.strip():
+        try:
+            d_start = datetime.strptime(fecha_desde.strip(), "%Y-%m-%d").date()
+            start_dt = datetime.combine(d_start, time.min, tzinfo=PY_TZ)
+            where_parts.append("created_at >= :start_dt")
+            params["start_dt"] = start_dt
+        except Exception:
+            pass
+
+    if fecha_hasta and fecha_hasta.strip():
+        try:
+            d_end = datetime.strptime(fecha_hasta.strip(), "%Y-%m-%d").date()
+            end_dt = datetime.combine(d_end, time.max, tzinfo=PY_TZ)
+            where_parts.append("created_at <= :end_dt")
+            params["end_dt"] = end_dt
+        except Exception:
+            pass
+
+    if search and search.strip():
+        where_parts.append("""(
+            product_nombre ILIKE :search
+            OR product_sku ILIKE :search
+            OR product_barcode ILIKE :search
+            OR categoria_nombre ILIKE :search
+        )""")
+        params["search"] = f"%{search.strip()}%"
+
+    where_clause = " AND ".join(where_parts)
+
+    tipo_filter = ""
+    if tipo and tipo.strip() in ("unitario", "escala"):
+        t_clean = tipo.strip().lower()
+        if t_clean == "unitario":
+            tipo_filter = "WHERE cambio_unitario = true"
+        elif t_clean == "escala":
+            tipo_filter = "WHERE cambio_escala = true"
 
     if order_by == "fecha_asc":
-        return [col_created.asc()]
+        order_clause = "ORDER BY created_at ASC"
     elif order_by == "nombre_asc":
-        return [col_nombre.asc().nulls_last(), col_created.desc()]
+        order_clause = "ORDER BY product_nombre ASC NULLS LAST, created_at DESC"
     elif order_by == "nombre_desc":
-        return [col_nombre.desc().nulls_last(), col_created.desc()]
-    return [col_created.desc()]
+        order_clause = "ORDER BY product_nombre DESC NULLS LAST, created_at DESC"
+    else:
+        order_clause = "ORDER BY created_at DESC"
+
+    cte_sql = f"""
+        WITH filtered AS (
+            SELECT * 
+            FROM price_variation_logs
+            WHERE {where_clause}
+        ),
+        agg AS (
+            SELECT 
+                product_id,
+                MAX(product_nombre) as product_nombre,
+                MAX(product_sku) as product_sku,
+                MAX(product_barcode) as product_barcode,
+                MAX(categoria_nombre) as categoria_nombre,
+                (ARRAY_AGG(id ORDER BY created_at DESC))[1] as id,
+                (ARRAY_AGG(company_id ORDER BY created_at DESC))[1] as company_id,
+                (ARRAY_AGG(usuario_id ORDER BY created_at DESC))[1] as usuario_id,
+                (ARRAY_AGG(usuario_nombre ORDER BY created_at DESC))[1] as usuario_nombre,
+                (ARRAY_AGG(origen ORDER BY created_at DESC))[1] as origen,
+                (ARRAY_AGG(motivo ORDER BY created_at DESC))[1] as motivo,
+                MAX(created_at) as created_at,
+                BOOL_OR(tipo = 'unitario') as cambio_unitario,
+                BOOL_OR(tipo = 'escala') as cambio_escala,
+                COALESCE(
+                    (ARRAY_AGG(precio_minorista_anterior ORDER BY created_at ASC) FILTER (WHERE tipo = 'unitario'))[1],
+                    (ARRAY_AGG(precio_minorista_anterior ORDER BY created_at ASC))[1],
+                    0
+                ) as precio_minorista_anterior,
+                COALESCE(
+                    (ARRAY_AGG(precio_minorista_nuevo ORDER BY created_at DESC) FILTER (WHERE tipo = 'unitario'))[1],
+                    (ARRAY_AGG(precio_minorista_nuevo ORDER BY created_at DESC))[1],
+                    0
+                ) as precio_minorista_nuevo,
+                COALESCE(
+                    (ARRAY_AGG(precio_escala_anterior ORDER BY created_at ASC) FILTER (WHERE tipo = 'escala'))[1],
+                    (ARRAY_AGG(precio_escala_anterior ORDER BY created_at ASC))[1],
+                    0
+                ) as precio_escala_anterior,
+                COALESCE(
+                    (ARRAY_AGG(precio_escala_nuevo ORDER BY created_at DESC) FILTER (WHERE tipo = 'escala'))[1],
+                    (ARRAY_AGG(precio_escala_nuevo ORDER BY created_at DESC))[1],
+                    0
+                ) as precio_escala_nuevo,
+                COALESCE(
+                    (ARRAY_AGG(escala_min_qty ORDER BY created_at DESC) FILTER (WHERE tipo = 'escala'))[1],
+                    (ARRAY_AGG(escala_min_qty ORDER BY created_at DESC))[1]
+                ) as escala_min_qty
+            FROM filtered
+            GROUP BY product_id
+        ),
+        calculated AS (
+            SELECT 
+                *,
+                CASE 
+                    WHEN cambio_unitario AND NOT cambio_escala THEN 'unitario'
+                    WHEN cambio_escala AND NOT cambio_unitario THEN 'escala'
+                    ELSE 'ambos'
+                END as tipo,
+                CASE 
+                    WHEN cambio_unitario THEN precio_minorista_anterior
+                    ELSE precio_escala_anterior
+                END as precio_anterior,
+                CASE 
+                    WHEN cambio_unitario THEN precio_minorista_nuevo
+                    ELSE precio_escala_nuevo
+                END as precio_nuevo,
+                CASE 
+                    WHEN cambio_unitario THEN (precio_minorista_nuevo - precio_minorista_anterior)
+                    ELSE (precio_escala_nuevo - precio_escala_anterior)
+                END as diferencia_monto,
+                CASE 
+                    WHEN cambio_unitario AND precio_minorista_anterior > 0 
+                        THEN ROUND(((precio_minorista_nuevo - precio_minorista_anterior) / precio_minorista_anterior) * 100, 2)
+                    WHEN NOT cambio_unitario AND cambio_escala AND precio_escala_anterior > 0 
+                        THEN ROUND(((precio_escala_nuevo - precio_escala_anterior) / precio_escala_anterior) * 100, 2)
+                    ELSE 0
+                END as diferencia_pct
+            FROM agg
+            {tipo_filter}
+        )
+    """
+    return cte_sql, order_clause, params
 
 
 async def list_price_variations(
@@ -363,51 +490,39 @@ async def list_price_variations(
     page: int = 1,
     page_size: int = 25,
 ) -> dict:
-    conditions = _build_variations_filters(company_id, fecha_desde, fecha_hasta, tipo, search)
-
-    # Subquery: Particionar por (product_id, tipo) para obtener sólo la última y vigente modificación
-    subq = (
-        select(
-            PriceVariationLog,
-            sa_func.row_number().over(
-                partition_by=(PriceVariationLog.product_id, PriceVariationLog.tipo),
-                order_by=PriceVariationLog.created_at.desc(),
-            ).label("rn"),
-        )
-        .where(*conditions)
-        .subquery()
+    cte_sql, order_clause, params = _build_variations_sql_parts(
+        company_id, fecha_desde, fecha_hasta, tipo, search, order_by
     )
 
-    # 1. Resumen estadístico sobre las modificaciones vigentes
-    summary_q = select(
-        sa_func.count(subq.c.id).label("total"),
-        sa_func.count(subq.c.id).filter(subq.c.diferencia_monto > 0).label("subidas"),
-        sa_func.count(subq.c.id).filter(subq.c.diferencia_monto < 0).label("bajadas"),
-        sa_func.avg(subq.c.diferencia_pct).label("promedio_pct"),
-    ).where(subq.c.rn == 1)
+    # 1. Resumen estadístico
+    summary_sql = f"""
+        {cte_sql}
+        SELECT 
+            count(*)::int as total,
+            count(*) filter (where diferencia_monto > 0)::int as subidas,
+            count(*) filter (where diferencia_monto < 0)::int as bajadas,
+            coalesce(round(avg(diferencia_pct)::numeric, 2), 0)::float as promedio_pct
+        FROM calculated;
+    """
+    summary_res = (await db.execute(text(summary_sql), params)).mappings().first()
+    total = summary_res["total"] if summary_res else 0
+    subidas = summary_res["subidas"] if summary_res else 0
+    bajadas = summary_res["bajadas"] if summary_res else 0
+    promedio_pct = float(summary_res["promedio_pct"] or 0.0) if summary_res else 0.0
 
-    summary_res = (await db.execute(summary_q)).fetchone()
-    total = summary_res.total if summary_res else 0
-    subidas = summary_res.subidas if summary_res else 0
-    bajadas = summary_res.bajadas if summary_res else 0
-    promedio_pct = round(float(summary_res.promedio_pct or 0.0), 2) if summary_res else 0.0
-
-    # 2. Ordenamiento
-    order_clause = _build_variations_order(order_by, target=subq)
-
-    # 3. Registros paginados
+    # 2. Registros paginados
     safe_page = max(1, page)
     safe_page_size = max(1, min(page_size, 500))
     offset = (safe_page - 1) * safe_page_size
 
-    data_q = (
-        select(subq)
-        .where(subq.c.rn == 1)
-        .order_by(*order_clause)
-        .offset(offset)
-        .limit(safe_page_size)
-    )
-    result = await db.execute(data_q)
+    data_params = {**params, "limit": safe_page_size, "offset": offset}
+    data_sql = f"""
+        {cte_sql}
+        SELECT * FROM calculated
+        {order_clause}
+        LIMIT :limit OFFSET :offset;
+    """
+    result = await db.execute(text(data_sql), data_params)
     rows = result.mappings().all()
 
     items = []
@@ -421,6 +536,8 @@ async def list_price_variations(
             "product_barcode": r["product_barcode"],
             "categoria_nombre": r["categoria_nombre"],
             "tipo": r["tipo"],
+            "cambio_unitario": bool(r["cambio_unitario"]),
+            "cambio_escala": bool(r["cambio_escala"]),
             "escala_min_qty": r["escala_min_qty"],
             "precio_minorista_anterior": float(r["precio_minorista_anterior"] or 0),
             "precio_minorista_nuevo": float(r["precio_minorista_nuevo"] or 0),
@@ -466,29 +583,18 @@ async def get_price_variations_for_export(
     order_by: str = "fecha_desc",
     max_records: int = 5000,
 ) -> list[dict]:
-    conditions = _build_variations_filters(company_id, fecha_desde, fecha_hasta, tipo, search)
-
-    subq = (
-        select(
-            PriceVariationLog,
-            sa_func.row_number().over(
-                partition_by=(PriceVariationLog.product_id, PriceVariationLog.tipo),
-                order_by=PriceVariationLog.created_at.desc(),
-            ).label("rn"),
-        )
-        .where(*conditions)
-        .subquery()
+    cte_sql, order_clause, params = _build_variations_sql_parts(
+        company_id, fecha_desde, fecha_hasta, tipo, search, order_by
     )
 
-    order_clause = _build_variations_order(order_by, target=subq)
-
-    data_q = (
-        select(subq)
-        .where(subq.c.rn == 1)
-        .order_by(*order_clause)
-        .limit(max_records)
-    )
-    result = await db.execute(data_q)
+    data_params = {**params, "limit": max_records}
+    data_sql = f"""
+        {cte_sql}
+        SELECT * FROM calculated
+        {order_clause}
+        LIMIT :limit;
+    """
+    result = await db.execute(text(data_sql), data_params)
     rows = result.mappings().all()
 
     items = []
@@ -502,6 +608,8 @@ async def get_price_variations_for_export(
             "product_barcode": r["product_barcode"],
             "categoria_nombre": r["categoria_nombre"],
             "tipo": r["tipo"],
+            "cambio_unitario": bool(r["cambio_unitario"]),
+            "cambio_escala": bool(r["cambio_escala"]),
             "escala_min_qty": r["escala_min_qty"],
             "precio_minorista_anterior": float(r["precio_minorista_anterior"] or 0),
             "precio_minorista_nuevo": float(r["precio_minorista_nuevo"] or 0),

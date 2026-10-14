@@ -436,12 +436,12 @@ export default function PriceVariationsTab() {
                   })
 
                   // Precios Minoristas
-                  const pMinAnt = it.precio_minorista_anterior ?? (it.tipo === "unitario" ? it.precio_anterior : 0)
-                  const pMinNew = it.precio_minorista_nuevo ?? (it.tipo === "unitario" ? it.precio_nuevo : 0)
+                  const pMinAnt = it.cambio_unitario === false ? 0 : (it.precio_minorista_anterior || 0)
+                  const pMinNew = it.precio_minorista_nuevo || 0
 
                   // Precios Escala (primera escala)
-                  const pEscAnt = it.precio_escala_anterior ?? (it.tipo === "escala" ? it.precio_anterior : 0)
-                  const pEscNew = it.precio_escala_nuevo ?? (it.tipo === "escala" ? it.precio_nuevo : 0)
+                  const pEscAnt = it.cambio_escala === false ? 0 : (it.precio_escala_anterior || 0)
+                  const pEscNew = it.precio_escala_nuevo || 0
 
                   return (
                     <tr key={it.id} className="hover:bg-slate-800/50 transition">
@@ -459,7 +459,7 @@ export default function PriceVariationsTab() {
                         <div className="font-bold text-slate-100 hover:text-sky-300 transition line-clamp-1">
                           {it.product_nombre || "Producto sin nombre"}
                         </div>
-                        <div className="text-[11px] text-slate-400 font-mono flex items-center gap-2 mt-0.5">
+                        <div className="text-[11px] text-slate-400 font-mono flex items-center gap-2 mt-0.5 flex-wrap">
                           {it.product_barcode ? (
                             <span className="bg-sky-950/60 text-sky-300 px-1.5 py-0.2 rounded font-semibold border border-sky-800/50">
                               CB: {it.product_barcode}
@@ -467,9 +467,17 @@ export default function PriceVariationsTab() {
                           ) : it.product_sku ? (
                             <span>SKU: {it.product_sku}</span>
                           ) : null}
-                          {it.tipo === "escala" && (
-                            <span className="text-[10px] text-purple-300 font-bold">
-                              [Escala {it.escala_min_qty ? `≥${it.escala_min_qty}` : ""}]
+                          {it.tipo === "ambos" ? (
+                            <span className="text-[10px] text-amber-300 font-bold bg-amber-950/60 px-1.5 py-0.2 rounded border border-amber-800/50">
+                              Unitario + Escala {it.escala_min_qty ? `x${it.escala_min_qty}` : ""}
+                            </span>
+                          ) : it.tipo === "escala" ? (
+                            <span className="text-[10px] text-purple-300 font-bold bg-purple-950/60 px-1.5 py-0.2 rounded border border-purple-800/50">
+                              Escala {it.escala_min_qty ? `x${it.escala_min_qty}` : ""}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-sky-300 font-bold bg-sky-950/60 px-1.5 py-0.2 rounded border border-sky-800/50">
+                              Unitario
                             </span>
                           )}
                         </div>

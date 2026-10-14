@@ -151,25 +151,24 @@ def generate_price_variations_pdf(
         # Precios Minoristas
         p_min_ant = float(it.get("precio_minorista_anterior") or 0)
         p_min_new = float(it.get("precio_minorista_nuevo") or 0)
-        # Si vienen en 0 (legacy), usar precio_anterior/nuevo si tipo es unitario
-        if p_min_ant == 0 and p_min_new == 0 and it.get("tipo") == "unitario":
-            p_min_ant = float(it.get("precio_anterior") or 0)
-            p_min_new = float(it.get("precio_nuevo") or 0)
-
-        p_min_ant_str = _fmt_gs(p_min_ant) if p_min_ant > 0 else "-"
+        if it.get("cambio_unitario") is False:
+            p_min_ant_str = "-"
+        else:
+            p_min_ant_str = _fmt_gs(p_min_ant) if p_min_ant > 0 else "-"
         p_min_new_str = _fmt_gs(p_min_new) if p_min_new > 0 else "-"
 
         # Precios Escala (primera escala)
         p_esc_ant = float(it.get("precio_escala_anterior") or 0)
         p_esc_new = float(it.get("precio_escala_nuevo") or 0)
-        if p_esc_ant == 0 and p_esc_new == 0 and it.get("tipo") == "escala":
-            p_esc_ant = float(it.get("precio_anterior") or 0)
-            p_esc_new = float(it.get("precio_nuevo") or 0)
-
         mq = it.get("escala_min_qty")
         mq_suffix = f" (x{mq})" if mq and mq > 1 else ""
-        p_esc_ant_str = f"{_fmt_gs(p_esc_ant)}{mq_suffix}" if p_esc_ant > 0 else "-"
-        p_esc_new_str = f"{_fmt_gs(p_esc_new)}{mq_suffix}" if p_esc_new > 0 else "-"
+
+        if it.get("cambio_escala") is False:
+            p_esc_ant_str = "-"
+            p_esc_new_str = f"{_fmt_gs(p_esc_new)}{mq_suffix}" if p_esc_new > 0 else "-"
+        else:
+            p_esc_ant_str = f"{_fmt_gs(p_esc_ant)}{mq_suffix}" if p_esc_ant > 0 else ("0" if p_esc_ant == 0 and p_esc_new > 0 else "-")
+            p_esc_new_str = f"{_fmt_gs(p_esc_new)}{mq_suffix}" if p_esc_new > 0 else "-"
 
         # Diferencia de la variación principal
         diff_monto = float(it.get("diferencia_monto", 0))

@@ -1195,7 +1195,9 @@ export interface PriceVariationItem {
   product_sku?: string | null
   product_barcode?: string | null
   categoria_nombre?: string | null
-  tipo: "unitario" | "escala"
+  tipo: "unitario" | "escala" | "ambos"
+  cambio_unitario?: boolean
+  cambio_escala?: boolean
   escala_min_qty?: number | null
   precio_minorista_anterior?: number
   precio_minorista_nuevo?: number
