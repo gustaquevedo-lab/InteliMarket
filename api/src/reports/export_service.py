@@ -1049,7 +1049,8 @@ def _write_sales_detail_sheet(ws, titulo: str, fecha_desde: Optional[date], fech
         "#",
         "Fecha y Hora",
         "Ticket / Comprobante",
-        "Proveedor BR",
+        "Proveedor",
+        "Origen / País",
         "RUC / Doc Proveedor",
         "SKU",
         "Código de Barras",
@@ -1080,12 +1081,21 @@ def _write_sales_detail_sheet(ws, titulo: str, fecha_desde: Optional[date], fech
         tot_unidades += cant
         tot_ventas += total_it
 
+        pais = r.get("proveedor_pais") or "Paraguay"
+        if r.get("tipo_proveedor") == "nacional_sin_ruc":
+            pais_label = "Paraguay (Sin RUC)"
+        elif pais.lower() == "brasil" or r.get("tipo_proveedor") == "brasilero":
+            pais_label = "Brasil"
+        else:
+            pais_label = pais
+
         row_vals = [
             idx,
             r.get("fecha_hora") or "—",
             r.get("comprobante") or "—",
             r.get("proveedor_nombre") or "—",
-            r.get("proveedor_ruc") or "—",
+            pais_label,
+            r.get("proveedor_ruc") or "SIN RUC",
             r.get("sku") or "—",
             r.get("codigo_barra") or "—",
             r.get("producto_descripcion") or "—",
@@ -1101,26 +1111,26 @@ def _write_sales_detail_sheet(ws, titulo: str, fecha_desde: Optional[date], fech
             cell = ws.cell(row=row_num, column=col_idx, value=val)
             cell.font = DATA_FONT
             cell.border = THIN_BORDER
-            if col_idx == 9:  # Cantidad
+            if col_idx == 10:  # Cantidad
                 cell.number_format = '#,##0.00'
                 cell.alignment = Alignment(horizontal="right")
-            elif col_idx in (10, 11):  # Precios / Totales Gs.
+            elif col_idx in (11, 12):  # Precios / Totales Gs.
                 cell.number_format = CURRENCY_FMT
                 cell.alignment = Alignment(horizontal="right")
-            elif col_idx in (1, 2, 4, 5, 6, 7, 13):
+            elif col_idx in (1, 2, 5, 6, 7, 8, 14):
                 cell.alignment = Alignment(horizontal="center")
 
     if items:
         tot_row = 4 + len(items)
-        ws.cell(row=tot_row, column=8, value="TOTAL GENERAL").font = BOLD_FONT
-        ws.cell(row=tot_row, column=8).alignment = Alignment(horizontal="right")
+        ws.cell(row=tot_row, column=9, value="TOTAL GENERAL").font = BOLD_FONT
+        ws.cell(row=tot_row, column=9).alignment = Alignment(horizontal="right")
 
-        c_cant = ws.cell(row=tot_row, column=9, value=tot_unidades)
+        c_cant = ws.cell(row=tot_row, column=10, value=tot_unidades)
         c_cant.font = BOLD_FONT
         c_cant.number_format = '#,##0.00'
         c_cant.alignment = Alignment(horizontal="right")
 
-        c_total = ws.cell(row=tot_row, column=11, value=tot_ventas)
+        c_total = ws.cell(row=tot_row, column=12, value=tot_ventas)
         c_total.font = BOLD_FONT
         c_total.number_format = CURRENCY_FMT
         c_total.alignment = Alignment(horizontal="right")
@@ -1139,7 +1149,7 @@ def export_sales_by_br_suppliers(
     """Genera archivo Excel (.xlsx) premium con pestañas divididas:
     1. Hoja 1: Ventas Agosto 2026 (Consumidor Final)
     2. Hoja 2: Ventas Setiembre 2026 (Consumidor Final)
-    3. Hoja 3: Resumen acumulado por Proveedor BR
+    3. Hoja 3: Resumen acumulado por Proveedor
     4. Hoja 4: Resumen y participación por Medio de Pago
     """
     wb = Workbook()
@@ -1168,7 +1178,7 @@ def export_sales_by_br_suppliers(
         ws1.title = "Agosto 2026"
         _write_sales_detail_sheet(
             ws1,
-            f"Ventas Proveedores BR — {tag} (Agosto 2026)",
+            f"Ventas Proveedores BR y Locales Sin RUC — {tag} (Agosto 2026)",
             date(2026, 8, 1),
             date(2026, 8, 31),
             data_agosto,
@@ -1178,26 +1188,26 @@ def export_sales_by_br_suppliers(
         ws2 = wb.create_sheet(title="Setiembre 2026")
         _write_sales_detail_sheet(
             ws2,
-            f"Ventas Proveedores BR — {tag} (Setiembre 2026)",
+            f"Ventas Proveedores BR y Locales Sin RUC — {tag} (Setiembre 2026)",
             date(2026, 9, 1),
             date(2026, 9, 30),
             data_setiembre,
         )
     else:
         ws1 = wb.active
-        ws1.title = "Detalle Ventas BR"
+        ws1.title = "Detalle Ventas"
         _write_sales_detail_sheet(
             ws1,
-            f"Ventas Proveedores BR — {tag}",
+            f"Ventas Proveedores BR y Locales Sin RUC — {tag}",
             fecha_desde,
             fecha_hasta,
             data,
         )
 
-    # ── Hoja 3: Resumen por Proveedor BR ──────────────────────────────────
+    # ── Hoja 3: Resumen por Proveedor ──────────────────────────────────
     ws_prov = wb.create_sheet(title="Resumen por Proveedor")
-    _write_title(ws_prov, f"Resumen Consolidado por Proveedor BR — {tag}", fecha_desde, fecha_hasta)
-    headers2 = ["#", "Proveedor BR", "RUC / Doc", "Unidades Vendidas", "Ventas Totales (Gs.)", "% Participación"]
+    _write_title(ws_prov, f"Resumen Consolidado por Proveedor — {tag}", fecha_desde, fecha_hasta)
+    headers2 = ["#", "Proveedor", "Origen / País", "RUC / Doc", "Unidades Vendidas", "Ventas Totales (Gs.)", "% Participación"]
     for col_idx, h in enumerate(headers2, 1):
         cell = ws_prov.cell(row=3, column=col_idx, value=h)
         cell.font = HEADER_FONT
@@ -1207,7 +1217,15 @@ def export_sales_by_br_suppliers(
 
     sup_groups = {}
     for r in data:
-        s_key = (r.get("proveedor_nombre") or "Sin Proveedor", r.get("proveedor_ruc") or "—")
+        pais = r.get("proveedor_pais") or "Paraguay"
+        if r.get("tipo_proveedor") == "nacional_sin_ruc":
+            pais_label = "Paraguay (Sin RUC)"
+        elif pais.lower() == "brasil" or r.get("tipo_proveedor") == "brasilero":
+            pais_label = "Brasil"
+        else:
+            pais_label = pais
+
+        s_key = (r.get("proveedor_nombre") or "Sin Proveedor", pais_label, r.get("proveedor_ruc") or "SIN RUC")
         if s_key not in sup_groups:
             sup_groups[s_key] = {"unidades": 0.0, "total": 0.0}
         sup_groups[s_key]["unidades"] += float(r.get("cantidad") or 0)
@@ -1217,31 +1235,31 @@ def export_sales_by_br_suppliers(
     for idx, (s_key, s_val) in enumerate(sorted_sups, 1):
         row_num = 3 + idx
         pct = (s_val["total"] / max(tot_ventas_global, 1.0)) * 100
-        vals = [idx, s_key[0], s_key[1], s_val["unidades"], s_val["total"], f"{pct:.1f}%"]
+        vals = [idx, s_key[0], s_key[1], s_key[2], s_val["unidades"], s_val["total"], f"{pct:.1f}%"]
         for col_idx, val in enumerate(vals, 1):
             cell = ws_prov.cell(row=row_num, column=col_idx, value=val)
             cell.font = DATA_FONT
             cell.border = THIN_BORDER
-            if col_idx == 4:
+            if col_idx == 5:
                 cell.number_format = '#,##0.00'
                 cell.alignment = Alignment(horizontal="right")
-            elif col_idx == 5:
+            elif col_idx == 6:
                 cell.number_format = CURRENCY_FMT
                 cell.alignment = Alignment(horizontal="right")
-            elif col_idx in (1, 3, 6):
+            elif col_idx in (1, 3, 4, 7):
                 cell.alignment = Alignment(horizontal="center")
 
     if sorted_sups:
         tot_row2 = 4 + len(sorted_sups)
         ws_prov.cell(row=tot_row2, column=2, value="TOTAL CONSOLIDADO").font = BOLD_FONT
-        c_u = ws_prov.cell(row=tot_row2, column=4, value=tot_unidades_global)
+        c_u = ws_prov.cell(row=tot_row2, column=5, value=tot_unidades_global)
         c_u.font = BOLD_FONT
         c_u.number_format = '#,##0.00'
-        c_t = ws_prov.cell(row=tot_row2, column=5, value=tot_ventas_global)
+        c_t = ws_prov.cell(row=tot_row2, column=6, value=tot_ventas_global)
         c_t.font = BOLD_FONT
         c_t.number_format = CURRENCY_FMT
-        ws_prov.cell(row=tot_row2, column=6, value="100.0%").font = BOLD_FONT
-        ws_prov.cell(row=tot_row2, column=6).alignment = Alignment(horizontal="center")
+        ws_prov.cell(row=tot_row2, column=7, value="100.0%").font = BOLD_FONT
+        ws_prov.cell(row=tot_row2, column=7).alignment = Alignment(horizontal="center")
 
     _auto_width(ws_prov)
 

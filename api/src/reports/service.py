@@ -2024,10 +2024,18 @@ async def get_sales_by_br_suppliers(
             COALESCE(c.ruc, c.ci, '—') as cliente_documento,
             -- Proveedor
             sup.id as supplier_id,
-            COALESCE(sup.razon_social, sup.nombre_fantasia, 'Proveedor BR') as proveedor_nombre,
-            COALESCE(sup.ruc, '—') as proveedor_ruc,
-            COALESCE(sup.pais, 'Brasil') as proveedor_pais,
-            COALESCE(sup.tipo_proveedor, 'brasilero') as tipo_proveedor,
+            COALESCE(sup.razon_social, sup.nombre_fantasia, 'Proveedor Sin RUC') as proveedor_nombre,
+            COALESCE(NULLIF(TRIM(sup.ruc), ''), 'SIN RUC') as proveedor_ruc,
+            CASE 
+                WHEN sup.razon_social ILIKE '%LOPES COSMETICOS%' OR sup.razon_social ILIKE '%BOCCHI ATACADO%' THEN 'Brasil'
+                WHEN LOWER(COALESCE(sup.tipo_proveedor, '')) IN ('brasilero', 'br') OR LOWER(COALESCE(sup.pais, '')) LIKE '%brasil%' OR UPPER(COALESCE(sup.moneda_default, '')) = 'BRL' THEN 'Brasil'
+                ELSE COALESCE(sup.pais, 'Paraguay')
+            END as proveedor_pais,
+            CASE 
+                WHEN sup.razon_social ILIKE '%LOPES COSMETICOS%' OR sup.razon_social ILIKE '%BOCCHI ATACADO%' THEN 'brasilero'
+                WHEN LOWER(COALESCE(sup.tipo_proveedor, '')) IN ('brasilero', 'br') OR LOWER(COALESCE(sup.pais, '')) LIKE '%brasil%' OR UPPER(COALESCE(sup.moneda_default, '')) = 'BRL' THEN 'brasilero'
+                ELSE 'nacional_sin_ruc'
+            END as tipo_proveedor,
             -- Producto
             p.id as product_id,
             COALESCE(p.sku, '—') as sku,
@@ -2056,6 +2064,12 @@ async def get_sales_by_br_suppliers(
               LOWER(COALESCE(sup.tipo_proveedor, '')) IN ('brasilero', 'br')
               OR LOWER(COALESCE(sup.pais, '')) LIKE '%brasil%'
               OR UPPER(COALESCE(sup.moneda_default, '')) = 'BRL'
+              OR sup.razon_social ILIKE '%LOPES COSMETICOS%'
+              OR sup.razon_social ILIKE '%BOCCHI ATACADO%'
+              OR (
+                  (sup.ruc IS NULL OR TRIM(sup.ruc) IN ('', 'N/A', '0', '—', 'None') OR LENGTH(TRIM(sup.ruc)) < 5)
+                  AND (sup.pais = 'Paraguay' OR sup.tipo_proveedor = 'nacional')
+              )
           )
         ORDER BY v.fecha ASC, v.numero ASC, vi.id ASC
     """
