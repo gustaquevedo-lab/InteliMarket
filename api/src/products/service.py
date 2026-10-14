@@ -1186,6 +1186,21 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
     )
     codigos_alternativos = [dict(r._mapping) for r in pack_rows]
 
+    # 9b. Información de Fraccionamiento (Display / Unidad)
+    try:
+        from api.src.fractionations.service import get_fractionation_for_product
+        frac_res = await get_fractionation_for_product(db, product.company_id, p_uuid)
+        fractionation_info = frac_res.model_dump()
+    except Exception:
+        fractionation_info = {
+            "es_display": False,
+            "es_unidad_fraccionada": False,
+            "relacion_id": None,
+            "factor_conversion": None,
+            "display_parent": None,
+            "unidad_child": None,
+        }
+
     # 10. Info del Proveedor vinculado al producto
     supplier_info = None
     if product.supplier_id:
@@ -1425,6 +1440,7 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
         "historial_costos_mensual": historial_costos,
         "promociones": promociones,
         "codigos_alternativos": codigos_alternativos,
+        "fractionation_info": fractionation_info,
         "supplier_info": supplier_info,
         "ultimas_compras": purchases,
         "ultimas_ventas": sales,
