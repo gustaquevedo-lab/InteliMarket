@@ -1113,7 +1113,7 @@ export default function IntegrationsPage() {
                   </label>
                 </div>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Terminal Ingenico AXIUM DX8000 conectado por WiFi a la red de la caja (protocolo TCP directo, puerto 9600). Se carga acá la IP asignada por caja -- sin IP configurada, el POS sigue usando el cupón manual como respaldo.
+                  Terminal Dinelco conectado por WiFi a la red de la caja: POS Feitian por API REST (puerto 9000). Se carga acá la IP asignada por caja -- sin IP configurada, el POS sigue usando el cupón manual como respaldo.
                 </p>
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs text-left">

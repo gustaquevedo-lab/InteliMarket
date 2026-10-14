@@ -75,9 +75,9 @@ PROVIDERS: dict[str, Provider] = {p.id: p for p in [
     ),
     Provider(
         id="dinelco", label="Dinelco POS (terminal Ingenico)", group="Terminales físicos",
-        description="Terminal Dinelco conectado por red a cada caja. Las IPs se administran en 'Cajas y terminales'.",
-        fields=[], terminals_port=9600, check_label="Probar terminales",
-        check_warning="No pruebes durante una venta: el terminal Dinelco atiende una sola conexión a la vez.",
+        description="Terminal Dinelco conectado por red a cada caja (POS Feitian, API REST en el puerto 9000). Las IPs se administran en 'Cajas y terminales'.",
+        fields=[], terminals_port=9000, check_label="Probar terminales",
+        check_warning="No pruebes durante una venta: abre una conexión corta con cada terminal y el equipo puede atender una sola a la vez.",
     ),
 ]}
 
@@ -199,7 +199,7 @@ async def run_check(provider: Provider, db, company_id: str) -> dict:
             targets = activos
             if not targets:
                 return {"ok": False, "latency_ms": ms(), "detail": "No hay ninguna caja con terminal configurado y actividad reciente.", "meta": {"terminales": [], "sin_uso": sin_uso}}
-            res = await asyncio.gather(*[tcp_probe(ip, provider.terminals_port, greet=provider.id == "dinelco") for _, _, ip in targets])
+            res = await asyncio.gather(*[tcp_probe(ip, provider.terminals_port) for _, _, ip in targets])
             det = [{"caja": n, "punto": p, "ip": ip, **r} for (n, p, ip), r in zip(targets, res)]
             up = sum(1 for d in det if d["ok"])
             caidos = ", ".join(f"{d['caja']} ({d['ip']})" for d in det if not d["ok"])

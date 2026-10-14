@@ -27,6 +27,7 @@ import { verifySupervisorPinLocal, syncSupervisorPins } from "../../utils/localA
 import QRCode from "qrcode"
 import { imDinelco, imBancard } from "../../monitor/integrations"
 import { captureMessage } from "../../monitor"
+import { dinelcoApi, dinelcoDisponible } from "../../utils/dinelcoTerminal"
 import { validarCierre, totalConfirmadoPyg, type LineaCobro, type ContextoCierre } from "./validarCierre"
 import { terminalLock } from "./terminalLock"
 import { useTerminalBusy } from "./useTerminalBusy"
@@ -1715,7 +1716,7 @@ export default function POSPage() {
     // ("esperando informacion de caja" en su pantalla) y bloquea el siguiente
     // cobro en esa misma caja.
     if (dinelcoSessionId) {
-      (window as any).electronAPI?.dinelcoCancel?.(dinelcoSessionId).catch(() => {})
+      dinelcoApi.dinelcoCancel(dinelcoSessionId).catch(() => {})
     }
     setDinelcoTxnState("idle"); setDinelcoTxnResult(null); setDinelcoTxnError(""); setDinelcoTxnLogId(null); setDinelcoSessionId(null); setDinelcoCuotas(1); setShowDinelcoManualFallback(false)
     setDinelcoQrState("idle"); setDinelcoQrError(""); setDinelcoQrMode("qr"); setDinelcoPixCpf(""); setDinelcoQrLogId(null)
@@ -2179,8 +2180,8 @@ export default function POSPage() {
       toast.warning("Monto inválido", "Cargá el monto a cobrar por Dinelco antes de continuar.")
       return
     }
-    const electronAPI = (window as any).electronAPI
-    if (!electronAPI?.dinelcoCall) {
+    const electronAPI = dinelcoApi
+    if (!dinelcoDisponible()) {
       setDinelcoTxnState("error_conexion")
       setDinelcoTxnError("Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá.")
       setShowDinelcoManualFallback(true)
@@ -2195,7 +2196,7 @@ export default function POSPage() {
       setDinelcoTxnResult(null)
       setShowDinelcoManualFallback(false)
 
-      const res1 = await imDinelco(electronAPI, ip, "venta_inicio", { op: "01", monto: montoDinelco }, null, 90000)
+      const res1 = await imDinelco(electronAPI, ip, "venta_inicio", { op: "01", monto: montoDinelco, cuotas: dinelcoCardType === "credito" && dinelcoCuotas > 1 ? dinelcoCuotas : 0 }, null, 90000)
 
       if (!res1.ok) {
         setDinelcoTxnState(res1.error ? "error_conexion" : "error_rechazo")
@@ -2290,8 +2291,8 @@ export default function POSPage() {
       toast.warning("CPF inválido", "El CPF del comprador debe tener 11 dígitos para procesar PIX.")
       return
     }
-    const electronAPI = (window as any).electronAPI
-    if (!electronAPI?.dinelcoCall) {
+    const electronAPI = dinelcoApi
+    if (!dinelcoDisponible()) {
       setDinelcoQrState("error_conexion")
       setDinelcoQrError("Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá.")
       return
@@ -2348,8 +2349,8 @@ export default function POSPage() {
       toast.warning("Monto inválido", "Cargá el monto a cobrar por Dinelco antes de continuar.")
       return
     }
-    const electronAPI = (window as any).electronAPI
-    if (!electronAPI?.dinelcoCall) {
+    const electronAPI = dinelcoApi
+    if (!dinelcoDisponible()) {
       updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: "Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá.", showManualFallback: true })
       return
     }
@@ -2358,7 +2359,7 @@ export default function POSPage() {
       updateExtraLeg(leg.id, { txnState: "esperando", txnError: "", txnResult: null, showManualFallback: false })
 
       const tipoOperacion = leg.cardType === "credito" && leg.cardCuotas > 1 ? `dinelco_venta_credito_${leg.cardCuotas}cuotas` : `dinelco_venta_${leg.cardType}`
-      const res1 = await imDinelco(electronAPI, ip, "venta_inicio", { op: "01", monto: montoDinelco }, null, 90000)
+      const res1 = await imDinelco(electronAPI, ip, "venta_inicio", { op: "01", monto: montoDinelco, cuotas: leg.cardType === "credito" && leg.cardCuotas > 1 ? leg.cardCuotas : 0 }, null, 90000)
 
       if (!res1.ok) {
         updateExtraLeg(leg.id, {
@@ -2436,8 +2437,8 @@ export default function POSPage() {
       toast.warning("CPF inválido", "El CPF del comprador debe tener 11 dígitos para procesar PIX.")
       return
     }
-    const electronAPI = (window as any).electronAPI
-    if (!electronAPI?.dinelcoCall) {
+    const electronAPI = dinelcoApi
+    if (!dinelcoDisponible()) {
       updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: "Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá." })
       return
     }

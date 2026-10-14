@@ -263,5 +263,5 @@ async def ping_caja(caja_id: str, body: PingBody, user=Depends(require_superadmi
         port = PROVIDERS[body.target].terminals_port
     if not ip:
         raise HTTPException(400, "No hay IP configurada para ese equipo")
-    r = await tcp_probe(ip, port, greet=body.target == "dinelco")
+    r = await tcp_probe(ip, port)
     return {"ip": ip, "port": port, **r}
