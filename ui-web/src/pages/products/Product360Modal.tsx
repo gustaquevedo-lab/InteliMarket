@@ -212,6 +212,7 @@ export default function Product360Modal({ data: initialData, onClose, onPriceUpd
   const [quickChildPrice, setQuickChildPrice] = useState<number>(0)
   const [existingChildId, setExistingChildId] = useState("")
   const [existingFactor, setExistingFactor] = useState<number>(24)
+  const [linkInitialFractionateBoxes, setLinkInitialFractionateBoxes] = useState<number>(1)
   const [savingLink, setSavingLink] = useState(false)
   const [unlinkingFrac, setUnlinkingFrac] = useState(false)
 
@@ -252,9 +253,10 @@ export default function Product360Modal({ data: initialData, onClose, onPriceUpd
     setQuickChildPrice(pSugerido)
     setExistingChildId("")
     setExistingFactor(f)
+    setLinkInitialFractionateBoxes(s.total_fisico > 0 ? 1 : 0)
     setLinkMode("quick_create")
     setShowLinkModal(true)
-  }, [p.nombre, p.costo_promedio, p.precio_venta, m.costo_promedio, m.costo_unitario, m.precio_venta])
+  }, [p.nombre, p.costo_promedio, p.precio_venta, m.costo_promedio, m.costo_unitario, m.precio_venta, s.total_fisico])
 
   const handleCreateAltCode = useCallback(async (e?: React.FormEvent, keepOpen = false) => {
     if (e) e.preventDefault()
@@ -383,6 +385,25 @@ export default function Product360Modal({ data: initialData, onClose, onPriceUpd
         })
         toast.success("Fraccionamiento vinculado", "El display se vinculó exitosamente a la unidad individual.")
       }
+
+      // Si se definió desarmar cajas iniciales para inventario
+      if (linkInitialFractionateBoxes > 0) {
+        try {
+          const factorUsado = linkMode === "quick_create" ? quickChildFactor : existingFactor
+          await api.products.fractionation.executeStock(p.id, {
+            cantidad_displays: linkInitialFractionateBoxes,
+            motivo: "Apertura inicial de displays para góndola",
+          })
+          const unidadesCreadas = linkInitialFractionateBoxes * factorUsado
+          toast.success(
+            "Inventario dividido",
+            `Se desarmaron ${linkInitialFractionateBoxes} display(s) (${unidadesCreadas} unidades a góndola). El resto quedó como display cerrado para inventario.`
+          )
+        } catch (stkErr: any) {
+          toast.error("Advertencia de stock", `Display vinculado pero no se pudo mover el stock inicial: ${stkErr.message}`)
+        }
+      }
+
       setShowLinkModal(false)
       const fresh360 = await api.products.get360(p.id)
       if (fresh360) setData(fresh360)
@@ -391,7 +412,7 @@ export default function Product360Modal({ data: initialData, onClose, onPriceUpd
     } finally {
       setSavingLink(false)
     }
-  }, [linkMode, quickChildName, quickChildBarcode, quickChildFactor, quickChildPrice, existingChildId, existingFactor, p.id, toast])
+  }, [linkMode, quickChildName, quickChildBarcode, quickChildFactor, quickChildPrice, existingChildId, existingFactor, linkInitialFractionateBoxes, p.id, toast])
 
   const handleUnlinkFractionation = useCallback(async (relacionId: string) => {
     if (!confirm("¿Está seguro de eliminar la relación de fraccionamiento entre este display y su unidad?")) return
@@ -2932,6 +2953,54 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                           </div>
                         </div>
                       )}
+
+                      {/* ── SECCIÓN: DESARME INICIAL DE DISPLAYS PARA GÓNDOLA (INVENTARIO) ── */}
+                      <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 text-xs font-black text-amber-800 dark:text-amber-300">
+                            <Boxes className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                            Apertura Inicial de Displays para Góndola (Separación de Inventario)
+                          </div>
+                          <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/60 px-2 py-0.5 rounded-full">
+                            Stock Actual: {s.total_fisico} cajas
+                          </span>
+                        </div>
+
+                        <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                          Indique cuántas cajas cerradas abrirá ahora para colocar en góndola. Las restantes quedarán como <strong>displays cerrados</strong> para contar en inventario por caja.
+                        </p>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+                          <div>
+                            <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                              Displays a desarmar ahora:
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              max={Math.max(0, s.total_fisico)}
+                              value={linkInitialFractionateBoxes}
+                              onChange={(e) => setLinkInitialFractionateBoxes(Math.max(0, parseInt(e.target.value) || 0))}
+                              className="w-full px-3 py-2 rounded-xl border border-amber-300 dark:border-amber-700/60 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold text-sm focus:ring-2 focus:ring-amber-500"
+                            />
+                          </div>
+
+                          <div className="p-2.5 rounded-lg bg-white/70 dark:bg-slate-800/80 border border-amber-200 dark:border-amber-800/50 text-[11px] space-y-1">
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">Displays cerrados restantes:</span>
+                              <strong className="font-mono text-slate-900 dark:text-white">
+                                {Math.max(0, s.total_fisico - linkInitialFractionateBoxes)} cajas
+                              </strong>
+                            </div>
+                            <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-bold">
+                              <span>Unidades iniciales en góndola:</span>
+                              <strong className="font-mono">
+                                +{linkInitialFractionateBoxes * (linkMode === "quick_create" ? quickChildFactor : existingFactor)} unid.
+                              </strong>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
 
                       <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                         <button
