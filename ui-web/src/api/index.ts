@@ -608,6 +608,8 @@ export interface SalesOrder { id: string; company_id?: string; customer_id?: str
 export interface SalesOrderItem { id?: string; pedido_id?: string; producto_id?: string; producto?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; descuento?: number; total?: number; entregado?: number; pendiente?: number; created_at?: string }
 export interface ProductVariant { id: string; product_id?: string; producto?: Product; tipo?: string; valor?: string; sku_variante?: string; codigo_barra?: string; precio_extra?: number; stock?: number; activo?: boolean; created_at?: string }
 export interface PackBarcode { id: string; product_id: string; company_id: string; codigo_barra: string; etiqueta: string; unidades_por_paquete: number; activo: boolean; created_at?: string; updated_at?: string; product_nombre?: string; product_sku?: string }
+export interface FractionationSummaryProduct { id: string; codigo_barra?: string | null; nombre: string; costo_promedio?: number | null; precio_promedio?: number | null; stock_actual?: number | null }
+export interface FractionationInfoResponse { es_display: boolean; es_unidad_fraccionada: boolean; relacion_id?: string | null; factor_conversion?: number | null; display_parent?: FractionationSummaryProduct | null; unidad_child?: FractionationSummaryProduct | null }
 export interface SupermerRecipe {
   id: string;
   area?: string;
@@ -2161,6 +2163,46 @@ export const api = {
       update: (productId: string, packId: string, data: Partial<{ codigo_barra: string; etiqueta: string; unidades_por_paquete: number; activo: boolean }>) =>
         client.patch<PackBarcode>(`/v1/products/${productId}/pack-barcodes/${packId}`, data),
       delete: (productId: string, packId: string) => client.delete<void>(`/v1/products/${productId}/pack-barcodes/${packId}`),
+    },
+    fractionation: {
+      get: (productId: string) =>
+        client.get<FractionationInfoResponse>(`/v1/products/${productId}/fractionation`),
+      link: (productId: string, data: { child_product_id: string; factor_conversion: number }) =>
+        client.post<{ success: boolean; message: string; fractionation_id: string; factor_conversion: number }>(
+          `/v1/products/${productId}/fractionation/link`,
+          data
+        ),
+      quickCreate: (
+        productId: string,
+        data: { nombre: string; codigo_barra: string; factor_conversion: number; precio_unitario?: number }
+      ) =>
+        client.post<{
+          relacion_id: string;
+          factor_conversion: number;
+          child_product: {
+            id: string;
+            sku: string;
+            nombre: string;
+            codigo_barra: string;
+            costo_promedio: number;
+            precio_venta: number;
+          };
+        }>(`/v1/products/${productId}/fractionation/quick-create`, data),
+      executeStock: (
+        productId: string,
+        data: { cantidad_displays: number; sucursal_id?: string; motivo?: string }
+      ) =>
+        client.post<{
+          success: boolean;
+          displays_fraccionados: number;
+          unidades_ingresadas: number;
+          factor_conversion: number;
+          deposito: string;
+          nuevo_stock_display: number;
+          nuevo_stock_unidad: number;
+        }>(`/v1/products/${productId}/fractionation/execute-stock`, data),
+      unlink: (fractionationId: string) =>
+        client.delete<{ message: string }>(`/v1/fractionations/${fractionationId}`),
     },
   },
   inventory: {

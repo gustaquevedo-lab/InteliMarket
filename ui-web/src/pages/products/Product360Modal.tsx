@@ -7,7 +7,7 @@ import {
   Zap, BarChart3, Activity, ArrowUpRight, ArrowDownRight, Box,
   Percent, Gift, Calendar, Scale, Loader2, ChevronRight, FileText,
   RefreshCw, Eye, Hash, Filter, ArrowRight, ShieldCheck, Check, Calculator, User,
-  Plus, Pencil, Trash2
+  Plus, Pencil, Trash2, Boxes, Split, Link2, Unlink
 } from "lucide-react"
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, XAxis, YAxis,
@@ -64,7 +64,7 @@ const TAB_LIST = [
   { key: "promociones", label: "Promociones", icon: Gift },
   { key: "compras", label: "Compras", icon: ShoppingCart },
   { key: "ventas", label: "Ventas", icon: TrendingUp },
-  { key: "codigos", label: "Códigos Alt.", icon: Barcode },
+  { key: "codigos", label: "Códigos & Presentaciones", icon: Barcode },
 ] as const
 
 type TabKey = typeof TAB_LIST[number]["key"]
@@ -167,6 +167,191 @@ export default function Product360Modal({ data: initialData, onClose, onPriceUpd
     }
     setNewPrice(String(pU))
   }, [data])
+
+  // ── ESTADOS PARA CÓDIGOS ALTERNATIVOS Y FRACCIONAMIENTO ──
+  const [altCodes, setAltCodes] = useState<any[]>(() => (data.codigos_alternativos as any[]) || [])
+  const [fracInfo, setFracInfo] = useState<any>(() => (data as any).fractionation_info || null)
+  useEffect(() => {
+    setAltCodes((data.codigos_alternativos as any[]) || [])
+    setFracInfo((data as any).fractionation_info || null)
+  }, [data])
+
+  // Modal Nuevo Código Alternativo / Pack
+  const [showAddAltCodeModal, setShowAddAltCodeModal] = useState(false)
+  const [newAltBarcode, setNewAltBarcode] = useState("")
+  const [newAltLabel, setNewAltLabel] = useState("")
+  const [newAltType, setNewAltType] = useState<"synonym" | "pack">("synonym")
+  const [newAltUnits, setNewAltUnits] = useState<number>(1)
+  const [savingAltCode, setSavingAltCode] = useState(false)
+
+  // Modal Fraccionar Displays a Góndola
+  const [showFractionateModal, setShowFractionateModal] = useState(false)
+  const [fractionateQty, setFractionateQty] = useState<number>(1)
+  const [executingFractionate, setExecutingFractionate] = useState(false)
+
+  // Modal Vincular Fraccionamiento (Display -> Unidad)
+  const [showLinkModal, setShowLinkModal] = useState(false)
+  const [linkMode, setLinkMode] = useState<"quick_create" | "existing">("quick_create")
+  const [quickChildName, setQuickChildName] = useState("")
+  const [quickChildBarcode, setQuickChildBarcode] = useState("")
+  const [quickChildFactor, setQuickChildFactor] = useState<number>(24)
+  const [quickChildPrice, setQuickChildPrice] = useState<number>(0)
+  const [existingChildId, setExistingChildId] = useState("")
+  const [existingFactor, setExistingFactor] = useState<number>(24)
+  const [savingLink, setSavingLink] = useState(false)
+  const [unlinkingFrac, setUnlinkingFrac] = useState(false)
+
+  const handleOpenLinkModal = useCallback(() => {
+    setQuickChildName(`${p.nombre} (Unidad)`)
+    setQuickChildBarcode("")
+    setQuickChildFactor(24)
+    const pDisplay = Number(m.precio_venta || p.precio_venta || 0)
+    setQuickChildPrice(pDisplay > 0 ? Math.round(pDisplay / 24) : 0)
+    setExistingChildId("")
+    setExistingFactor(24)
+    setLinkMode("quick_create")
+    setShowLinkModal(true)
+  }, [p.nombre, p.precio_venta, m.precio_venta])
+
+  const handleCreateAltCode = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newAltBarcode.trim()) {
+      toast.error("Código requerido", "Ingrese el código de barras.")
+      return
+    }
+    const units = newAltType === "synonym" ? 1 : Number(newAltUnits)
+    if (units <= 0) {
+      toast.error("Unidades inválidas", "Las unidades deben ser mayores a 0.")
+      return
+    }
+    setSavingAltCode(true)
+    try {
+      await api.products.packBarcodes.create(p.id, {
+        codigo_barra: newAltBarcode.trim(),
+        etiqueta: newAltLabel.trim() || (newAltType === "synonym" ? "Código Secundario (Multiorigen)" : `Pack x${units}`),
+        unidades_por_paquete: units,
+      })
+      toast.success("Código registrado", `Código ${newAltBarcode.trim()} agregado con éxito.`)
+      setShowAddAltCodeModal(false)
+      setNewAltBarcode("")
+      setNewAltLabel("")
+      setNewAltType("synonym")
+      setNewAltUnits(1)
+      const fresh360 = await api.products.get360(p.id)
+      if (fresh360) setData(fresh360)
+    } catch (err: any) {
+      toast.error("Error al registrar código", err.message)
+    } finally {
+      setSavingAltCode(false)
+    }
+  }, [newAltBarcode, newAltLabel, newAltType, newAltUnits, p.id, toast])
+
+  const handleDeleteAltCode = useCallback(async (packId: string) => {
+    if (!confirm("¿Está seguro de eliminar este código alternativo / pack?")) return
+    try {
+      await api.products.packBarcodes.delete(p.id, packId)
+      toast.success("Código eliminado", "El código fue eliminado exitosamente.")
+      const fresh360 = await api.products.get360(p.id)
+      if (fresh360) setData(fresh360)
+    } catch (err: any) {
+      toast.error("Error al eliminar", err.message)
+    }
+  }, [p.id, toast])
+
+  const handleExecuteFractionate = useCallback(async () => {
+    if (fractionateQty <= 0) {
+      toast.error("Cantidad inválida", "Ingrese al menos 1 display a fraccionar.")
+      return
+    }
+    setExecutingFractionate(true)
+    try {
+      const res = await api.products.fractionation.executeStock(p.id, {
+        cantidad_displays: fractionateQty,
+        motivo: "Apertura y fraccionamiento de display para góndola",
+      })
+      toast.success(
+        "Fraccionamiento exitoso",
+        `Se abrieron ${res.displays_fraccionados} display(s). Se sumaron ${res.unidades_ingresadas} unidades al stock de góndola.`
+      )
+      setShowFractionateModal(false)
+      setFractionateQty(1)
+      const fresh360 = await api.products.get360(p.id)
+      if (fresh360) setData(fresh360)
+    } catch (err: any) {
+      toast.error("Error al fraccionar", err.message)
+    } finally {
+      setExecutingFractionate(false)
+    }
+  }, [fractionateQty, p.id, toast])
+
+  const handleSaveLink = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSavingLink(true)
+    try {
+      if (linkMode === "quick_create") {
+        if (!quickChildName.trim()) {
+          toast.error("Nombre requerido", "Ingrese el nombre de la unidad individual.")
+          setSavingLink(false)
+          return
+        }
+        if (!quickChildBarcode.trim()) {
+          toast.error("Código requerido", "Ingrese el código de barras de la unidad individual.")
+          setSavingLink(false)
+          return
+        }
+        if (quickChildFactor <= 1) {
+          toast.error("Factor inválido", "El factor de conversión debe ser mayor a 1 unidad.")
+          setSavingLink(false)
+          return
+        }
+        await api.products.fractionation.quickCreate(p.id, {
+          nombre: quickChildName.trim(),
+          codigo_barra: quickChildBarcode.trim(),
+          factor_conversion: quickChildFactor,
+          precio_unitario: quickChildPrice > 0 ? quickChildPrice : undefined,
+        })
+        toast.success("Unidad creada y vinculada", "El producto unitario fue dado de alta y vinculado al display.")
+      } else {
+        if (!existingChildId.trim()) {
+          toast.error("Producto requerido", "Seleccione o ingrese el ID del producto unitario.")
+          setSavingLink(false)
+          return
+        }
+        if (existingFactor <= 1) {
+          toast.error("Factor inválido", "El factor de conversión debe ser mayor a 1 unidad.")
+          setSavingLink(false)
+          return
+        }
+        await api.products.fractionation.link(p.id, {
+          child_product_id: existingChildId.trim(),
+          factor_conversion: existingFactor,
+        })
+        toast.success("Fraccionamiento vinculado", "El display se vinculó exitosamente a la unidad individual.")
+      }
+      setShowLinkModal(false)
+      const fresh360 = await api.products.get360(p.id)
+      if (fresh360) setData(fresh360)
+    } catch (err: any) {
+      toast.error("Error al vincular", err.message)
+    } finally {
+      setSavingLink(false)
+    }
+  }, [linkMode, quickChildName, quickChildBarcode, quickChildFactor, quickChildPrice, existingChildId, existingFactor, p.id, toast])
+
+  const handleUnlinkFractionation = useCallback(async (relacionId: string) => {
+    if (!confirm("¿Está seguro de eliminar la relación de fraccionamiento entre este display y su unidad?")) return
+    setUnlinkingFrac(true)
+    try {
+      await api.products.fractionation.unlink(relacionId)
+      toast.success("Desvinculado", "La relación de fraccionamiento fue eliminada.")
+      const fresh360 = await api.products.get360(p.id)
+      if (fresh360) setData(fresh360)
+    } catch (err: any) {
+      toast.error("Error al desvincular", err.message)
+    } finally {
+      setUnlinkingFrac(false)
+    }
+  }, [p.id, toast])
 
   const escalas = localEscalas
 
@@ -1843,47 +2028,675 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
           )}
 
           {/* ════════════════════════════════════════════════════════════════════════
-              TAB: CÓDIGOS ALTERNATIVOS & PACKS
+              TAB: CÓDIGOS ALTERNATIVOS & FRACCIONAMIENTO DE DISPLAY
              ════════════════════════════════════════════════════════════════════════ */}
           {tab === "codigos" && (
-            <div className="space-y-4">
+            <div className="space-y-6">
+              {/* Tarjetas Superiores de Identificación */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* EAN Principal */}
                 <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4">
-                  <h4 className="text-xs font-black text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-2"><Barcode className="w-4 h-4 text-indigo-500" /> Código EAN Principal</h4>
-                  <div className="flex items-center gap-3">
-                    <p className="text-xl font-mono font-black text-slate-900 dark:text-white">{p.codigo_barra || "—"}</p>
-                    <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">Principal</span>
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-xs font-black text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                      <Barcode className="w-4 h-4 text-indigo-500" /> Código EAN Principal
+                    </h4>
+                    <span className="text-[10px] font-bold bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-400 px-2 py-0.5 rounded-full">
+                      Base / Góndola
+                    </span>
                   </div>
+                  <div className="flex items-center gap-3">
+                    <p className="text-2xl font-mono font-black text-slate-900 dark:text-white tracking-wider">
+                      {p.codigo_barra || "—"}
+                    </p>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">Identificador primario de venta y escaneo en cajas.</p>
                   {p.plu_balanza && (
                     <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center gap-2">
                       <Scale className="w-4 h-4 text-amber-500" />
-                      <span className="text-xs text-slate-600 dark:text-slate-400">PLU Balanza: <strong className="font-mono font-bold text-slate-900 dark:text-white">{p.plu_balanza}</strong></span>
+                      <span className="text-xs text-slate-600 dark:text-slate-400">
+                        PLU Balanza: <strong className="font-mono font-bold text-slate-900 dark:text-white">{p.plu_balanza}</strong>
+                      </span>
                     </div>
                   )}
                 </div>
 
-                <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4">
-                  <h4 className="text-xs font-black text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-2"><Package className="w-4 h-4 text-violet-500" /> Packs y Bultos Registrados</h4>
-                  {((data.codigos_alternativos as any[]) || []).length === 0 ? (
-                    <p className="text-xs text-slate-400 italic">No hay códigos alternativos de caja o pack registrados.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {((data.codigos_alternativos as any[]) || []).map((pack: any) => (
-                        <div key={pack.id} className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-                          <div>
-                            <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">{pack.etiqueta}</span>
-                            <span className="text-[10px] font-mono text-slate-400">{pack.codigo_barra}</span>
-                          </div>
-                          <div className="text-right">
-                            <span className="text-xs font-mono font-bold text-indigo-600 block">{pack.unidades_por_paquete} unidades</span>
-                            <span className="text-[9px] text-slate-400">{formatPYG(pack.unidades_por_paquete * m.precio_venta)} pack</span>
+                {/* Estado de Presentación / Fraccionamiento */}
+                <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex flex-col justify-between">
+                  <div>
+                    <h4 className="text-xs font-black text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+                      <Boxes className="w-4 h-4 text-violet-500" /> Estado de Presentación
+                    </h4>
+                    {fracInfo?.es_display ? (
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs font-black px-2.5 py-1 rounded-lg bg-violet-100 text-violet-800 dark:bg-violet-950/70 dark:text-violet-300 flex items-center gap-1.5">
+                            <Box className="w-3.5 h-3.5" /> Display de Compra (Caja Cerrada)
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                          Contiene <strong className="text-slate-900 dark:text-white font-bold">{fracInfo.factor_conversion} unidades</strong> de venta individual.
+                        </p>
+                      </div>
+                    ) : fracInfo?.es_unidad_fraccionada ? (
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs font-black px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 flex items-center gap-1.5">
+                            <Tag className="w-3.5 h-3.5" /> Unidad Individual Fraccionada
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                          Viene desglosada del display: <strong className="text-slate-900 dark:text-white font-bold">{fracInfo.display_parent?.nombre}</strong>
+                        </p>
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                            Presentación Estándar
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-1">
+                          Este artículo no está configurado como Display fraccionable ni como unidad desglosada.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-2 text-right">
+                    <span className="text-[11px] text-slate-400">
+                      Stock total registrado: <strong className="text-slate-700 dark:text-slate-200 font-bold">{s.total_fisico}</strong> {p.unidad_medida || "UN"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── SECCIÓN 1: FRACCIONAMIENTO DE DISPLAY (CAJA -> GÓNDOLA) ── */}
+              <div className="border border-slate-200 dark:border-slate-800 rounded-2xl bg-white dark:bg-slate-900 overflow-hidden shadow-sm">
+                <div className="px-5 py-3.5 bg-slate-50/70 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Split className="w-4 h-4 text-violet-600 dark:text-violet-400" />
+                    <h3 className="text-sm font-black text-slate-800 dark:text-slate-200">
+                      Fraccionamiento de Displays (Caja Cerrada a Góndola)
+                    </h3>
+                  </div>
+                  {fracInfo?.es_display && (
+                    <button
+                      type="button"
+                      onClick={() => setShowFractionateModal(true)}
+                      className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white text-xs font-bold shadow-sm shadow-violet-500/20 flex items-center gap-1.5 transition-all"
+                    >
+                      <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300" />
+                      ⚡ Fraccionar Displays a Góndola
+                    </button>
+                  )}
+                </div>
+
+                <div className="p-5">
+                  {fracInfo?.es_display ? (
+                    <div className="space-y-4">
+                      <div className="p-4 rounded-xl bg-violet-50/50 dark:bg-violet-950/20 border border-violet-100 dark:border-violet-900/40 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-violet-600 dark:text-violet-400">
+                            Unidad Individual en Góndola
+                          </span>
+                          <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                            {fracInfo.unidad_child?.nombre || "Unidad Vinculada"}
+                          </h4>
+                          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600 dark:text-slate-400">
+                            <span>EAN Unitario: <strong className="font-mono text-slate-800 dark:text-slate-200">{fracInfo.unidad_child?.codigo_barra || "—"}</strong></span>
+                            <span>•</span>
+                            <span>Costo Prorrateado: <strong className="text-slate-800 dark:text-slate-200">{formatPYG(fracInfo.unidad_child?.costo_promedio || 0)}</strong></span>
+                            <span>•</span>
+                            <span>Precio Góndola: <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{formatPYG(fracInfo.unidad_child?.precio_promedio || 0)}</strong></span>
                           </div>
                         </div>
-                      ))}
+
+                        <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-3 md:pt-0 border-violet-200/60 dark:border-violet-900/40">
+                          <div className="text-right">
+                            <span className="text-[10px] uppercase font-bold text-slate-400 block">Stock en Góndola</span>
+                            <span className="text-lg font-mono font-black text-slate-900 dark:text-white">
+                              {fracInfo.unidad_child?.stock_actual || 0} <span className="text-xs font-normal text-slate-500">unid.</span>
+                            </span>
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={unlinkingFrac}
+                            onClick={() => fracInfo.relacion_id && handleUnlinkFractionation(fracInfo.relacion_id)}
+                            className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                            title="Desvincular relación de fraccionamiento"
+                          >
+                            <Unlink className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs text-slate-500 px-1">
+                        <span>Factor de conversión: <strong>1 display = {fracInfo.factor_conversion} unidades</strong></span>
+                        <span>Displays disponibles en depósito: <strong>{s.total_fisico}</strong> cajas</span>
+                      </div>
+                    </div>
+                  ) : fracInfo?.es_unidad_fraccionada ? (
+                    <div className="p-4 rounded-xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                          Display / Caja Padre Registrada
+                        </span>
+                        <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                          {fracInfo.display_parent?.nombre || "Display Padre"}
+                        </h4>
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600 dark:text-slate-400">
+                          <span>EAN Caja: <strong className="font-mono text-slate-800 dark:text-slate-200">{fracInfo.display_parent?.codigo_barra || "—"}</strong></span>
+                          <span>•</span>
+                          <span>Costo Display: <strong className="text-slate-800 dark:text-slate-200">{formatPYG(fracInfo.display_parent?.costo_promedio || 0)}</strong></span>
+                          <span>•</span>
+                          <span>Factor: <strong className="text-slate-800 dark:text-slate-200">{fracInfo.factor_conversion} unidades por caja</strong></span>
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block">Displays en Depósito</span>
+                        <span className="text-lg font-mono font-black text-slate-900 dark:text-white">
+                          {fracInfo.display_parent?.stock_actual || 0} <span className="text-xs font-normal text-slate-500">cajas</span>
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-6 px-4 space-y-3">
+                      <div className="w-12 h-12 rounded-2xl bg-violet-100 dark:bg-violet-950/60 text-violet-600 dark:text-violet-400 flex items-center justify-center mx-auto">
+                        <Split className="w-6 h-6" />
+                      </div>
+                      <div className="max-w-md mx-auto">
+                        <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                          ¿Este producto se adquiere en Display/Caja y se vende fraccionado?
+                        </h4>
+                        <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                          Ideal para golosinas, chocolates, galletitas o packs recibidos en bulto que contienen artículos con código de barra propio para la venta individual en góndola.
+                        </p>
+                      </div>
+                      <div>
+                        <button
+                          type="button"
+                          onClick={handleOpenLinkModal}
+                          className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold shadow-sm shadow-violet-500/20 inline-flex items-center gap-2 transition-all"
+                        >
+                          <Link2 className="w-4 h-4" /> Configurar como Display Fraccionable
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
               </div>
+
+              {/* ── SECCIÓN 2: CÓDIGOS DE BARRA ALTERNATIVOS (1:1 MULTIORIGEN) Y PACKS ── */}
+              <div className="border border-slate-200 dark:border-slate-800 rounded-2xl bg-white dark:bg-slate-900 overflow-hidden shadow-sm">
+                <div className="px-5 py-3.5 bg-slate-50/70 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-black text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                      <Barcode className="w-4 h-4 text-indigo-500" /> Códigos Secundarios & Packs
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      Códigos 1:1 para productos multiorigen (Brasil/Argentina/Paraguay) y bultos por cantidad.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewAltBarcode("")
+                      setNewAltLabel("")
+                      setNewAltType("synonym")
+                      setNewAltUnits(1)
+                      setShowAddAltCodeModal(true)
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-xs font-bold flex items-center gap-1.5 transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> + Registrar Código
+                  </button>
+                </div>
+
+                <div className="p-5">
+                  {altCodes.length === 0 ? (
+                    <div className="text-center py-6 text-slate-400 text-xs italic">
+                      No hay códigos de barra alternativos ni packs registrados para este producto.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {altCodes.map((pack: any) => {
+                        const isSynonym = Number(pack.unidades_por_paquete) === 1
+                        return (
+                          <div
+                            key={pack.id}
+                            className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex items-center justify-between gap-3 hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
+                          >
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                                    isSynonym
+                                      ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300"
+                                      : "bg-violet-100 text-violet-800 dark:bg-violet-950/70 dark:text-violet-300"
+                                  }`}
+                                >
+                                  {isSynonym ? "Sinónimo 1:1 Multiorigen" : `Pack x${pack.unidades_por_paquete}`}
+                                </span>
+                              </div>
+                              <p className="text-sm font-mono font-bold text-slate-900 dark:text-white">
+                                {pack.codigo_barra}
+                              </p>
+                              <p className="text-xs text-slate-600 dark:text-slate-400">
+                                {pack.etiqueta || (isSynonym ? "Multiorigen" : "Pack cerrado")}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                              {!isSynonym && (
+                                <div className="text-right">
+                                  <span className="text-xs font-mono font-bold text-indigo-600 dark:text-indigo-400 block">
+                                    {formatPYG(pack.unidades_por_paquete * m.precio_venta)}
+                                  </span>
+                                  <span className="text-[10px] text-slate-400">por pack</span>
+                                </div>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteAltCode(pack.id)}
+                                className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                                title="Eliminar código alternativo"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ── MODAL: REGISTRAR CÓDIGO ALTERNATIVO O PACK ── */}
+              {showAddAltCodeModal && (
+                <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md p-5 shadow-2xl space-y-4">
+                    <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                      <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                        <Barcode className="w-4 h-4 text-indigo-500" /> Registrar Código de Barras
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => setShowAddAltCodeModal(false)}
+                        className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <form onSubmit={handleCreateAltCode} className="space-y-4">
+                      {/* Selector Tipo */}
+                      <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewAltType("synonym")
+                            setNewAltUnits(1)
+                          }}
+                          className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
+                            newAltType === "synonym"
+                              ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
+                              : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                          }`}
+                        >
+                          🏷️ Sinónimo 1:1 (Multiorigen)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewAltType("pack")
+                            if (newAltUnits <= 1) setNewAltUnits(6)
+                          }}
+                          className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
+                            newAltType === "pack"
+                              ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
+                              : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                          }`}
+                        >
+                          📦 Pack / Bulto Cerrado
+                        </button>
+                      </div>
+
+                      {/* Input Código */}
+                      <div>
+                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                          Código de Barras <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          autoFocus
+                          value={newAltBarcode}
+                          onChange={(e) => setNewAltBarcode(e.target.value)}
+                          placeholder="Escanee o escriba el código..."
+                          className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+
+                      {/* Input Etiqueta */}
+                      <div>
+                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                          Etiqueta / Descripción
+                        </label>
+                        <input
+                          type="text"
+                          value={newAltLabel}
+                          onChange={(e) => setNewAltLabel(e.target.value)}
+                          placeholder={newAltType === "synonym" ? "Ej: Origen Brasil / Argentina" : "Ej: Pack x6 Ahorro"}
+                          className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+
+                      {/* Si es pack: Unidades */}
+                      {newAltType === "pack" && (
+                        <div>
+                          <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                            Unidades en el Pack <span className="text-rose-500">*</span>
+                          </label>
+                          <input
+                            type="number"
+                            min="2"
+                            step="1"
+                            value={newAltUnits}
+                            onChange={(e) => setNewAltUnits(Math.max(2, parseInt(e.target.value) || 2))}
+                            className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500"
+                          />
+                          <p className="text-[11px] text-slate-400 mt-1">
+                            Precio resultante del pack: <strong>{formatPYG(newAltUnits * m.precio_venta)}</strong>
+                          </p>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => setShowAddAltCodeModal(false)}
+                          className="px-3 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={savingAltCode || !newAltBarcode.trim()}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors"
+                        >
+                          {savingAltCode ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                          Guardar Código
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
+
+              {/* ── MODAL: FRACCIONAR DISPLAYS A GÓNDOLA ── */}
+              {showFractionateModal && (
+                <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md p-5 shadow-2xl space-y-4">
+                    <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                      <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                        <Zap className="w-4 h-4 text-amber-500 fill-amber-500" /> Desarmar Displays para Góndola
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => setShowFractionateModal(false)}
+                        className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="p-3.5 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-slate-500">Display (Caja cerrada):</span>
+                          <strong className="text-slate-900 dark:text-white">{p.nombre}</strong>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-slate-500">Unidad de Góndola:</span>
+                          <strong className="text-slate-900 dark:text-white">{fracInfo?.unidad_child?.nombre || "Unidad"}</strong>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-slate-500">Factor de Conversión:</span>
+                          <strong className="text-violet-600 dark:text-violet-400">{fracInfo?.factor_conversion} unidades por display</strong>
+                        </div>
+                        <div className="flex justify-between text-xs pt-1 border-t border-slate-200 dark:border-slate-700">
+                          <span className="text-slate-500">Stock disponible de displays:</span>
+                          <strong className="font-mono text-slate-900 dark:text-white">{s.total_fisico} cajas</strong>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                          Cantidad de Displays a abrir y fraccionar
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          max={Math.max(1, s.total_fisico)}
+                          value={fractionateQty}
+                          onChange={(e) => setFractionateQty(Math.max(1, parseInt(e.target.value) || 1))}
+                          className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-base font-bold focus:ring-2 focus:ring-violet-500"
+                        />
+                      </div>
+
+                      {/* Resumen de Impacto en Stock */}
+                      <div className="p-3.5 rounded-xl bg-violet-50/70 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-900/50 space-y-1.5 text-xs">
+                        <div className="flex justify-between text-rose-600 dark:text-rose-400 font-medium">
+                          <span>Salida de Displays:</span>
+                          <strong className="font-mono">-{fractionateQty} caja(s)</strong>
+                        </div>
+                        <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-bold">
+                          <span>Ingreso a Góndola:</span>
+                          <strong className="font-mono">+{fractionateQty * (fracInfo?.factor_conversion || 1)} unidades</strong>
+                        </div>
+                        <div className="flex justify-between text-slate-500 pt-1 border-t border-violet-200/60 dark:border-violet-900/40 text-[11px]">
+                          <span>Nuevo stock de displays:</span>
+                          <strong className="font-mono text-slate-700 dark:text-slate-300">{Math.max(0, s.total_fisico - fractionateQty)} cajas</strong>
+                        </div>
+                        <div className="flex justify-between text-slate-500 text-[11px]">
+                          <span>Nuevo stock en góndola:</span>
+                          <strong className="font-mono text-slate-700 dark:text-slate-300">
+                            {Number(fracInfo?.unidad_child?.stock_actual || 0) + (fractionateQty * (fracInfo?.factor_conversion || 1))} unid.
+                          </strong>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => setShowFractionateModal(false)}
+                          className="px-3 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          disabled={executingFractionate || fractionateQty <= 0 || (s.total_fisico > 0 && fractionateQty > s.total_fisico)}
+                          onClick={handleExecuteFractionate}
+                          className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm shadow-violet-500/20 transition-colors"
+                        >
+                          {executingFractionate ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                          Confirmar Fraccionamiento
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── MODAL: CONFIGURAR DISPLAY FRACCIONABLE (VINCULAR / CREAR) ── */}
+              {showLinkModal && (
+                <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-lg p-5 shadow-2xl space-y-4">
+                    <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                      <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                        <Link2 className="w-4 h-4 text-violet-500" /> Configurar Relación Display &rarr; Unidad
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => setShowLinkModal(false)}
+                        className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <form onSubmit={handleSaveLink} className="space-y-4">
+                      {/* Modo */}
+                      <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl">
+                        <button
+                          type="button"
+                          onClick={() => setLinkMode("quick_create")}
+                          className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
+                            linkMode === "quick_create"
+                              ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
+                              : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                          }`}
+                        >
+                          ✨ Crear Unidad Nueva
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLinkMode("existing")}
+                          className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
+                            linkMode === "existing"
+                              ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
+                              : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                          }`}
+                        >
+                          🔗 Vincular Existente
+                        </button>
+                      </div>
+
+                      {linkMode === "quick_create" ? (
+                        <div className="space-y-3">
+                          <div>
+                            <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                              Nombre de la Unidad en Góndola <span className="text-rose-500">*</span>
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              value={quickChildName}
+                              onChange={(e) => setQuickChildName(e.target.value)}
+                              placeholder="Ej: Oblea Nik Chocolate 30g"
+                              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-violet-500"
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div>
+                              <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                                Código de Barras Unitario <span className="text-rose-500">*</span>
+                              </label>
+                              <input
+                                type="text"
+                                required
+                                value={quickChildBarcode}
+                                onChange={(e) => setQuickChildBarcode(e.target.value)}
+                                placeholder="Escanee la unidad..."
+                                className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-violet-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                                Factor (Unidades por display) <span className="text-rose-500">*</span>
+                              </label>
+                              <input
+                                type="number"
+                                min="2"
+                                step="1"
+                                required
+                                value={quickChildFactor}
+                                onChange={(e) => {
+                                  const f = Math.max(2, parseInt(e.target.value) || 2)
+                                  setQuickChildFactor(f)
+                                  const pD = Number(m.precio_venta || p.precio_venta || 0)
+                                  if (pD > 0) setQuickChildPrice(Math.round(pD / f))
+                                }}
+                                className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-violet-500"
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                              Precio Unitario Minorista (PYG)
+                            </label>
+                            <CurrencyInput
+                              value={quickChildPrice}
+                              onChangeValue={(val) => setQuickChildPrice(val || 0)}
+                              placeholder="0"
+                              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold text-sm focus:ring-2 focus:ring-violet-500"
+                            />
+                            <p className="text-[11px] text-slate-400 mt-1">
+                              Costo display: <strong>{formatPYG(m.costo_promedio || p.costo_promedio || 0)}</strong> &rarr; Costo unitario sugerido: <strong>{formatPYG(Math.round(Number(m.costo_promedio || p.costo_promedio || 0) / quickChildFactor))}</strong>
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          <div>
+                            <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                              ID o UUID del Producto Unitario <span className="text-rose-500">*</span>
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              value={existingChildId}
+                              onChange={(e) => setExistingChildId(e.target.value)}
+                              placeholder="Pegue el ID del producto unitario..."
+                              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-violet-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                              Factor de Conversión (Unidades por display) <span className="text-rose-500">*</span>
+                            </label>
+                            <input
+                              type="number"
+                              min="2"
+                              step="1"
+                              required
+                              value={existingFactor}
+                              onChange={(e) => setExistingFactor(Math.max(2, parseInt(e.target.value) || 2))}
+                              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-violet-500"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => setShowLinkModal(false)}
+                          className="px-3 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={savingLink}
+                          className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm shadow-violet-500/20 transition-colors"
+                        >
+                          {savingLink ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                          Vincular Display
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
