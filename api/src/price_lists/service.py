@@ -339,14 +339,17 @@ def _build_variations_filters(
     return conditions
 
 
-def _build_variations_order(order_by: str = "fecha_desc") -> list:
+def _build_variations_order(order_by: str = "fecha_desc", target=None) -> list:
+    col_created = target.c.created_at if hasattr(target, "c") else getattr(target, "created_at", PriceVariationLog.created_at)
+    col_nombre = target.c.product_nombre if hasattr(target, "c") else getattr(target, "product_nombre", PriceVariationLog.product_nombre)
+
     if order_by == "fecha_asc":
-        return [PriceVariationLog.created_at.asc()]
+        return [col_created.asc()]
     elif order_by == "nombre_asc":
-        return [PriceVariationLog.product_nombre.asc().nulls_last(), PriceVariationLog.created_at.desc()]
+        return [col_nombre.asc().nulls_last(), col_created.desc()]
     elif order_by == "nombre_desc":
-        return [PriceVariationLog.product_nombre.desc().nulls_last(), PriceVariationLog.created_at.desc()]
-    return [PriceVariationLog.created_at.desc()]
+        return [col_nombre.desc().nulls_last(), col_created.desc()]
+    return [col_created.desc()]
 
 
 async def list_price_variations(
@@ -361,15 +364,27 @@ async def list_price_variations(
     page_size: int = 25,
 ) -> dict:
     conditions = _build_variations_filters(company_id, fecha_desde, fecha_hasta, tipo, search)
-    order_clause = _build_variations_order(order_by)
 
-    # 1. Resumen estadístico
+    # Subquery: Particionar por (product_id, tipo) para obtener sólo la última y vigente modificación
+    subq = (
+        select(
+            PriceVariationLog,
+            sa_func.row_number().over(
+                partition_by=(PriceVariationLog.product_id, PriceVariationLog.tipo),
+                order_by=PriceVariationLog.created_at.desc(),
+            ).label("rn"),
+        )
+        .where(*conditions)
+        .subquery()
+    )
+
+    # 1. Resumen estadístico sobre las modificaciones vigentes
     summary_q = select(
-        sa_func.count(PriceVariationLog.id).label("total"),
-        sa_func.count(PriceVariationLog.id).filter(PriceVariationLog.diferencia_monto > 0).label("subidas"),
-        sa_func.count(PriceVariationLog.id).filter(PriceVariationLog.diferencia_monto < 0).label("bajadas"),
-        sa_func.avg(PriceVariationLog.diferencia_pct).label("promedio_pct"),
-    ).where(*conditions)
+        sa_func.count(subq.c.id).label("total"),
+        sa_func.count(subq.c.id).filter(subq.c.diferencia_monto > 0).label("subidas"),
+        sa_func.count(subq.c.id).filter(subq.c.diferencia_monto < 0).label("bajadas"),
+        sa_func.avg(subq.c.diferencia_pct).label("promedio_pct"),
+    ).where(subq.c.rn == 1)
 
     summary_res = (await db.execute(summary_q)).fetchone()
     total = summary_res.total if summary_res else 0
@@ -377,46 +392,49 @@ async def list_price_variations(
     bajadas = summary_res.bajadas if summary_res else 0
     promedio_pct = round(float(summary_res.promedio_pct or 0.0), 2) if summary_res else 0.0
 
-    # 2. Registros paginados
+    # 2. Ordenamiento
+    order_clause = _build_variations_order(order_by, target=subq)
+
+    # 3. Registros paginados
     safe_page = max(1, page)
     safe_page_size = max(1, min(page_size, 500))
     offset = (safe_page - 1) * safe_page_size
 
     data_q = (
-        select(PriceVariationLog)
-        .where(*conditions)
+        select(subq)
+        .where(subq.c.rn == 1)
         .order_by(*order_clause)
         .offset(offset)
         .limit(safe_page_size)
     )
     result = await db.execute(data_q)
-    rows = result.scalars().all()
+    rows = result.mappings().all()
 
     items = []
     for r in rows:
         items.append({
-            "id": r.id,
-            "company_id": r.company_id,
-            "product_id": r.product_id,
-            "product_nombre": r.product_nombre,
-            "product_sku": r.product_sku,
-            "product_barcode": r.product_barcode,
-            "categoria_nombre": r.categoria_nombre,
-            "tipo": r.tipo,
-            "escala_min_qty": r.escala_min_qty,
-            "precio_minorista_anterior": float(r.precio_minorista_anterior or 0),
-            "precio_minorista_nuevo": float(r.precio_minorista_nuevo or 0),
-            "precio_escala_anterior": float(r.precio_escala_anterior or 0),
-            "precio_escala_nuevo": float(r.precio_escala_nuevo or 0),
-            "precio_anterior": float(r.precio_anterior or 0),
-            "precio_nuevo": float(r.precio_nuevo or 0),
-            "diferencia_monto": float(r.diferencia_monto or 0),
-            "diferencia_pct": float(r.diferencia_pct or 0),
-            "origen": r.origen,
-            "usuario_id": r.usuario_id,
-            "usuario_nombre": r.usuario_nombre,
-            "motivo": r.motivo,
-            "created_at": r.created_at,
+            "id": r["id"],
+            "company_id": r["company_id"],
+            "product_id": r["product_id"],
+            "product_nombre": r["product_nombre"],
+            "product_sku": r["product_sku"],
+            "product_barcode": r["product_barcode"],
+            "categoria_nombre": r["categoria_nombre"],
+            "tipo": r["tipo"],
+            "escala_min_qty": r["escala_min_qty"],
+            "precio_minorista_anterior": float(r["precio_minorista_anterior"] or 0),
+            "precio_minorista_nuevo": float(r["precio_minorista_nuevo"] or 0),
+            "precio_escala_anterior": float(r["precio_escala_anterior"] or 0),
+            "precio_escala_nuevo": float(r["precio_escala_nuevo"] or 0),
+            "precio_anterior": float(r["precio_anterior"] or 0),
+            "precio_nuevo": float(r["precio_nuevo"] or 0),
+            "diferencia_monto": float(r["diferencia_monto"] or 0),
+            "diferencia_pct": float(r["diferencia_pct"] or 0),
+            "origen": r["origen"],
+            "usuario_id": r["usuario_id"],
+            "usuario_nombre": r["usuario_nombre"],
+            "motivo": r["motivo"],
+            "created_at": r["created_at"],
         })
 
     total_pages = max(1, (total + safe_page_size - 1) // safe_page_size) if total > 0 else 1
@@ -449,42 +467,55 @@ async def get_price_variations_for_export(
     max_records: int = 5000,
 ) -> list[dict]:
     conditions = _build_variations_filters(company_id, fecha_desde, fecha_hasta, tipo, search)
-    order_clause = _build_variations_order(order_by)
+
+    subq = (
+        select(
+            PriceVariationLog,
+            sa_func.row_number().over(
+                partition_by=(PriceVariationLog.product_id, PriceVariationLog.tipo),
+                order_by=PriceVariationLog.created_at.desc(),
+            ).label("rn"),
+        )
+        .where(*conditions)
+        .subquery()
+    )
+
+    order_clause = _build_variations_order(order_by, target=subq)
 
     data_q = (
-        select(PriceVariationLog)
-        .where(*conditions)
+        select(subq)
+        .where(subq.c.rn == 1)
         .order_by(*order_clause)
         .limit(max_records)
     )
     result = await db.execute(data_q)
-    rows = result.scalars().all()
+    rows = result.mappings().all()
 
     items = []
     for r in rows:
         items.append({
-            "id": r.id,
-            "company_id": r.company_id,
-            "product_id": r.product_id,
-            "product_nombre": r.product_nombre,
-            "product_sku": r.product_sku,
-            "product_barcode": r.product_barcode,
-            "categoria_nombre": r.categoria_nombre,
-            "tipo": r.tipo,
-            "escala_min_qty": r.escala_min_qty,
-            "precio_minorista_anterior": float(r.precio_minorista_anterior or 0),
-            "precio_minorista_nuevo": float(r.precio_minorista_nuevo or 0),
-            "precio_escala_anterior": float(r.precio_escala_anterior or 0),
-            "precio_escala_nuevo": float(r.precio_escala_nuevo or 0),
-            "precio_anterior": float(r.precio_anterior or 0),
-            "precio_nuevo": float(r.precio_nuevo or 0),
-            "diferencia_monto": float(r.diferencia_monto or 0),
-            "diferencia_pct": float(r.diferencia_pct or 0),
-            "origen": r.origen,
-            "usuario_id": r.usuario_id,
-            "usuario_nombre": r.usuario_nombre,
-            "motivo": r.motivo,
-            "created_at": r.created_at,
+            "id": r["id"],
+            "company_id": r["company_id"],
+            "product_id": r["product_id"],
+            "product_nombre": r["product_nombre"],
+            "product_sku": r["product_sku"],
+            "product_barcode": r["product_barcode"],
+            "categoria_nombre": r["categoria_nombre"],
+            "tipo": r["tipo"],
+            "escala_min_qty": r["escala_min_qty"],
+            "precio_minorista_anterior": float(r["precio_minorista_anterior"] or 0),
+            "precio_minorista_nuevo": float(r["precio_minorista_nuevo"] or 0),
+            "precio_escala_anterior": float(r["precio_escala_anterior"] or 0),
+            "precio_escala_nuevo": float(r["precio_escala_nuevo"] or 0),
+            "precio_anterior": float(r["precio_anterior"] or 0),
+            "precio_nuevo": float(r["precio_nuevo"] or 0),
+            "diferencia_monto": float(r["diferencia_monto"] or 0),
+            "diferencia_pct": float(r["diferencia_pct"] or 0),
+            "origen": r["origen"],
+            "usuario_id": r["usuario_id"],
+            "usuario_nombre": r["usuario_nombre"],
+            "motivo": r["motivo"],
+            "created_at": r["created_at"],
         })
     return items
 

@@ -317,7 +317,7 @@ export default function PriceVariationsTab() {
           <p className="text-2xl font-black font-mono tracking-tight text-white">
             {resumen.total_modificaciones.toLocaleString()}
           </p>
-          <p className="text-[11px] text-slate-400">Total de eventos en el período</p>
+          <p className="text-[11px] text-slate-400">Precios vigentes modificados</p>
         </div>
 
         <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-800/80 shadow-lg space-y-1">
@@ -328,7 +328,7 @@ export default function PriceVariationsTab() {
           <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
             {resumen.total_subidas.toLocaleString()}
           </p>
-          <p className="text-[11px] text-slate-400">Precios ajustados hacia arriba</p>
+          <p className="text-[11px] text-slate-400">Precios vigentes con aumento</p>
         </div>
 
         <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-800/80 shadow-lg space-y-1">
@@ -339,7 +339,7 @@ export default function PriceVariationsTab() {
           <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
             {resumen.total_bajadas.toLocaleString()}
           </p>
-          <p className="text-[11px] text-slate-400">Precios con descuento o baja</p>
+          <p className="text-[11px] text-slate-400">Precios vigentes con rebaja</p>
         </div>
 
         <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-800/80 shadow-lg space-y-1">
@@ -357,7 +357,7 @@ export default function PriceVariationsTab() {
             {resumen.promedio_variacion_pct > 0 ? "+" : ""}
             {resumen.promedio_variacion_pct.toFixed(2)}%
           </p>
-          <p className="text-[11px] text-slate-400">Promedio porcentual general</p>
+          <p className="text-[11px] text-slate-400">Promedio porcentual vigente</p>
         </div>
       </div>
 
@@ -367,10 +367,10 @@ export default function PriceVariationsTab() {
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-sky-400 animate-pulse" />
             <h3 className="text-sm font-extrabold text-white uppercase tracking-wider">
-              Bitácora Cronológica de Precios Regulares
+              Última y Vigente Modificación de Precios
             </h3>
             <span className="text-xs text-slate-400 font-mono">
-              ({paginacion.total.toLocaleString()} registros encontrados)
+              ({paginacion.total.toLocaleString()} precios vigentes)
             </span>
           </div>
 

@@ -10,6 +10,7 @@ except Exception:
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -209,6 +210,7 @@ como parámetro en los endpoints correspondientes.
 
 register_exception_handlers(app)
 app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # CORSMiddleware se registra al final a propósito: en Starlette, el último
 # middleware agregado queda más "afuera" (envuelve a los demás). Si CORS
