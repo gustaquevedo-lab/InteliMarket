@@ -1705,6 +1705,10 @@ export interface Supplier360Response {
     dias_1_30: number
     dias_31_60: number
     dias_mas_60: number
+    al_dia?: number
+    vencido_1_30?: number
+    vencido_31_60?: number
+    vencido_mas_60?: number
   }
   facturas: Array<{
     id: string

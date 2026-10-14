@@ -224,10 +224,10 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
     facturas_pendientes_count = 0
     facturas_vencidas_count = 0
 
-    aging_vencido = 0.0
-    aging_1_30 = 0.0
-    aging_31_60 = 0.0
-    aging_mas_60 = 0.0
+    aging_al_dia = 0.0
+    aging_vencido_1_30 = 0.0
+    aging_vencido_31_60 = 0.0
+    aging_vencido_mas_60 = 0.0
 
     invoices_list = []
     for inv in invoices:
@@ -238,11 +238,12 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
         dias_vencido = (today - f_venc).days if f_venc else 0
         es_vencida = dias_vencido > 0 and saldo > 0 and not es_cancelada
 
-        # NCs vinculadas a esta factura
+        # NCs vinculadas a esta factura y retenciones
         inv_apps = apps_by_invoice.get(inv.id, [])
         monto_nc_aplicado = sum(a["monto_aplicado"] for a in inv_apps)
-        tiene_nc_vinculada = len(inv_apps) > 0 or bool(inv.requiere_nc) or (_dec_to_float(inv.monto_retenido_nc) > 0)
-        saldo_neto_real = max(0.0, saldo)
+        monto_retenido = _dec_to_float(inv.monto_retenido_nc)
+        tiene_nc_vinculada = len(inv_apps) > 0 or bool(inv.requiere_nc) or (monto_retenido > 0)
+        saldo_neto_real = max(0.0, saldo - monto_retenido)
 
         # Lote de pago
         lote_info = p_run_by_invoice.get(inv.id)
@@ -257,7 +258,7 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
             fase_pago = "liquidada"
             fase_pago_label = "Fase 4: Liquidada / Cancelada 100%"
             fase_pago_color = "emerald"
-        elif inv.bloqueada_para_pago or inv.requiere_nc or (_dec_to_float(inv.monto_retenido_nc) > 0):
+        elif inv.bloqueada_para_pago or inv.requiere_nc or (monto_retenido > 0):
             fase_pago = "bloqueada_nc"
             fase_pago_label = "Fase 1: Retenida por NC / Reclamo en Trámite"
             fase_pago_color = "purple"
@@ -280,16 +281,15 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
             if es_vencida:
                 deuda_vencida += saldo
                 facturas_vencidas_count += 1
-                aging_vencido += saldo
+                if dias_vencido <= 30:
+                    aging_vencido_1_30 += saldo
+                elif dias_vencido <= 60:
+                    aging_vencido_31_60 += saldo
+                else:
+                    aging_vencido_mas_60 += saldo
             else:
                 deuda_al_dia += saldo
-                dias_rest = abs(dias_vencido)
-                if dias_rest <= 30:
-                    aging_1_30 += saldo
-                elif dias_rest <= 60:
-                    aging_31_60 += saldo
-                else:
-                    aging_mas_60 += saldo
+                aging_al_dia += saldo
 
         invoices_list.append({
             "id": str(inv.id),
@@ -505,8 +505,8 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
 
     pagos_list = []
     total_pagado_acumulado = 0.0
-    dias_pago_acum = 0
-    dias_pago_count = 0
+    dias_pago_ponderado_acum = 0.0
+    total_monto_con_dias = 0.0
 
     for payment, num_fac, f_emision in pagos_rows:
         monto = _dec_to_float(payment.monto)
@@ -515,8 +515,8 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
         if f_emision and payment.fecha_pago:
             delta = (payment.fecha_pago - f_emision).days
             if delta >= 0:
-                dias_pago_acum += delta
-                dias_pago_count += 1
+                dias_pago_ponderado_acum += delta * monto
+                total_monto_con_dias += monto
 
         pagos_list.append({
             "id": str(payment.id),
@@ -530,7 +530,8 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
             "estado": payment.estado or "completado",
         })
 
-    dpo_promedio_dias = round(dias_pago_acum / dias_pago_count, 1) if dias_pago_count > 0 else (supplier.plazo_pago_dias or 30)
+    # DPO financiero ponderado por volumen de desembolso
+    dpo_promedio_dias = round(dias_pago_ponderado_acum / total_monto_con_dias, 1) if total_monto_con_dias > 0 else (supplier.plazo_pago_dias or 30)
 
     # 7. Órdenes de Compra (PurchaseOrders)
     q_oc = select(PurchaseOrder).where(
@@ -544,7 +545,12 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
     total_gastado_oc = sum(_dec_to_float(o.total) for o in ocs)
     ordenes_completadas = sum(1 for o in ocs if (o.estado or "").lower() in ("completado", "recibido", "aprobado"))
     entregas_a_tiempo = sum(1 for o in ocs if o.fecha_envio and o.fecha_entrega_estimada and o.fecha_envio.date() <= o.fecha_entrega_estimada)
-    otif_rate = round((entregas_a_tiempo / ordenes_completadas * 100), 1) if ordenes_completadas > 0 else 94.5
+    if ordenes_completadas > 0 and any(o.fecha_envio for o in ocs):
+        otif_rate = round((entregas_a_tiempo / ordenes_completadas * 100), 1)
+    elif ordenes_completadas > 0:
+        otif_rate = 100.0
+    else:
+        otif_rate = 100.0 if len(receipts) > 0 else 0.0
 
     ocs_list = []
     for o in ocs[:30]:
@@ -724,12 +730,16 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
     products_list.sort(key=lambda x: x["ventas_gs"], reverse=True)
     top_vendidos = products_list[:5]
 
-    # 10. Evolución mensual (Últimos 12 meses)
+    # 10. Evolución mensual (Últimos 12 meses del calendario exactos)
     evolucion_mensual = []
     for i in range(11, -1, -1):
-        ref_date = today.replace(day=1) - timedelta(days=i * 30)
-        y, m = ref_date.year, ref_date.month
-        m_str = f"{y:04d}-{m:02d}"
+        year = today.year
+        month = today.month - i
+        while month <= 0:
+            month += 12
+            year -= 1
+        m_str = f"{year:04d}-{month:02d}"
+        ref_date = date(year, month, 1)
         m_label = ref_date.strftime("%b %y").capitalize()
 
         c_m = sum(inv["total"] for inv in invoices_list if inv["fecha_emision"].startswith(m_str))
@@ -811,10 +821,14 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
             "reclamos": reclamos_enriquecidos,
         },
         "aging_buckets": {
-            "vencido": aging_vencido,
-            "dias_1_30": aging_1_30,
-            "dias_31_60": aging_31_60,
-            "dias_mas_60": aging_mas_60,
+            "al_dia": aging_al_dia,
+            "vencido": deuda_vencida,
+            "dias_1_30": aging_vencido_1_30,
+            "dias_31_60": aging_vencido_31_60,
+            "dias_mas_60": aging_vencido_mas_60,
+            "vencido_1_30": aging_vencido_1_30,
+            "vencido_31_60": aging_vencido_31_60,
+            "vencido_mas_60": aging_vencido_mas_60,
         },
         "facturas": invoices_list,
         "cheques": cheques_list,

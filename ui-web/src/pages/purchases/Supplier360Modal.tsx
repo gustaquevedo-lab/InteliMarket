@@ -58,6 +58,7 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
 
   // Filtros internos de Facturas (Deudas)
   const [searchFactura, setSearchFactura] = useState("")
+  const [filterEstadoSaldo, setFilterEstadoSaldo] = useState<"pendientes" | "todos" | "pagadas">("pendientes")
   const [filterVencimiento, setFilterVencimiento] = useState("all")
   const [filterNcFactura, setFilterNcFactura] = useState("all")
   const [filterFaseFactura, setFilterFaseFactura] = useState("all")
@@ -69,7 +70,7 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
   const [downloadingStatementPdf, setDownloadingStatementPdf] = useState(false)
   const [statementFechaDesde, setStatementFechaDesde] = useState("")
   const [statementFechaHasta, setStatementFechaHasta] = useState("")
-  const [statementSoloPendientes, setStatementSoloPendientes] = useState(false)
+  const [statementSoloPendientes, setStatementSoloPendientes] = useState(true)
   const [punteadosLocal, setPunteadosLocal] = useState<Record<string, boolean>>({})
   const [searchMovimiento, setSearchMovimiento] = useState("")
 
@@ -137,13 +138,21 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
   }
 
   // Carga del Extracto de Cuenta Corriente para Punteo
-  const loadStatement = async () => {
+  const loadStatement = async (overrideParams?: {
+    fecha_desde?: string
+    fecha_hasta?: string
+    solo_pendientes?: boolean
+  }) => {
     setLoadingStatement(true)
     try {
+      const pDesde = overrideParams?.fecha_desde !== undefined ? overrideParams.fecha_desde : statementFechaDesde
+      const pHasta = overrideParams?.fecha_hasta !== undefined ? overrideParams.fecha_hasta : statementFechaHasta
+      const pPendientes = overrideParams?.solo_pendientes !== undefined ? overrideParams.solo_pendientes : statementSoloPendientes
+
       const res = await api.purchases.getSupplierAccountStatement(supplierId, {
-        fecha_desde: statementFechaDesde || undefined,
-        fecha_hasta: statementFechaHasta || undefined,
-        solo_pendientes: statementSoloPendientes,
+        fecha_desde: pDesde || undefined,
+        fecha_hasta: pHasta || undefined,
+        solo_pendientes: pPendientes,
       })
       setStatementData(res)
     } catch (err: any) {
@@ -153,21 +162,24 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
     }
   }
 
-  const handleDownloadStatementPdf = async () => {
+  const handleDownloadStatementPdf = async (soloPendientesOverride?: boolean) => {
     setDownloadingStatementPdf(true)
     try {
+      const isSoloPendientes = soloPendientesOverride !== undefined ? soloPendientesOverride : statementSoloPendientes
       await api.purchases.downloadSupplierAccountStatementPdf(
         supplierId,
         data?.supplier?.razon_social || supplierNombre || "proveedor",
         {
           fecha_desde: statementFechaDesde || undefined,
           fecha_hasta: statementFechaHasta || undefined,
-          solo_pendientes: statementSoloPendientes,
+          solo_pendientes: isSoloPendientes,
         }
       )
       toast.success(
-        "Extracto Descargado Exitosamente",
-        "Se descargó el Extracto de Cuenta Corriente A4 para punteo físico de deudas."
+        isSoloPendientes ? "Consolidado de Punteo Descargado" : "Extracto Descargado Exitosamente",
+        isSoloPendientes
+          ? "Se descargó el consolidado A4 exclusivo de facturas y NCs pendientes con casillas de verificación."
+          : "Se descargó el Extracto de Cuenta Corriente A4 para punteo físico de deudas."
       )
     } catch (err: any) {
       toast.error("Error al generar Extracto PDF", err.message)
@@ -179,7 +191,7 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
   // Carga automática al cambiar a vista extracto
   useEffect(() => {
     if (subVistaDeudas === "extracto" && !statementData && !loadingStatement) {
-      loadStatement()
+      loadStatement({ solo_pendientes: statementSoloPendientes })
     }
   }, [subVistaDeudas])
 
@@ -192,11 +204,17 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
         f.numero_factura.toLowerCase().includes(searchFactura.toLowerCase()) ||
         (f.timbrado || "").includes(searchFactura)
 
+      // Filtro de Estado de Saldo
+      const tieneSaldo = (f.saldo_neto_real ?? 0) > 0 || (f.saldo_pendiente ?? 0) > 0
+      const matchSaldo =
+        filterEstadoSaldo === "todos" ||
+        (filterEstadoSaldo === "pendientes" && tieneSaldo) ||
+        (filterEstadoSaldo === "pagadas" && !tieneSaldo)
+
       const matchVenc =
         filterVencimiento === "all" ||
         (filterVencimiento === "vencidas" && f.es_vencida) ||
-        (filterVencimiento === "al_dia" && !f.es_vencida) ||
-        (filterVencimiento === "pendientes" && f.saldo_pendiente > 0)
+        (filterVencimiento === "al_dia" && !f.es_vencida)
 
       const matchNc =
         filterNcFactura === "all" ||
@@ -208,9 +226,13 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
         filterFaseFactura === "all" ||
         f.fase_pago === filterFaseFactura
 
-      return matchText && matchVenc && matchNc && matchFase
+      return matchText && matchSaldo && matchVenc && matchNc && matchFase
     })
-  }, [data?.facturas, searchFactura, filterVencimiento, filterNcFactura, filterFaseFactura])
+  }, [data?.facturas, searchFactura, filterEstadoSaldo, filterVencimiento, filterNcFactura, filterFaseFactura])
+
+  const totalSaldoFiltradas = useMemo(() => {
+    return facturasFiltradas.reduce((acc, f) => acc + (f.saldo_neto_real ?? f.saldo_pendiente ?? 0), 0)
+  }, [facturasFiltradas])
 
   // Filtrado de NCs en Monedero
   const monederoItemsFiltrados = useMemo(() => {
@@ -299,10 +321,10 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
   const agingChartData = useMemo(() => {
     if (!aging) return []
     return [
-      { name: "Vencido", value: aging.vencido, color: "#ef4444" },
-      { name: "1 a 30 Días", value: aging.dias_1_30, color: "#f59e0b" },
-      { name: "31 a 60 Días", value: aging.dias_31_60, color: "#3b82f6" },
-      { name: "+60 Días", value: aging.dias_mas_60, color: "#64748b" },
+      { name: "Al Día (Vigente)", value: aging.al_dia || 0, color: "#10b981" },
+      { name: "Vencido 1 a 30 Días", value: aging.vencido_1_30 ?? aging.dias_1_30 ?? 0, color: "#f59e0b" },
+      { name: "Vencido 31 a 60 Días", value: aging.vencido_31_60 ?? aging.dias_31_60 ?? 0, color: "#3b82f6" },
+      { name: "Vencido +60 Días", value: aging.vencido_mas_60 ?? aging.dias_mas_60 ?? 0, color: "#ef4444" },
     ].filter(x => x.value > 0)
   }, [aging])
 
@@ -377,31 +399,13 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
             {/* Acciones Superiores */}
             <div className="flex items-center gap-2 print:hidden">
               <button
-                onClick={() => handleDownloadStatementPdf()}
-                disabled={downloadingStatementPdf}
-                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 font-bold text-xs flex items-center gap-2 shadow-sm transition disabled:opacity-50"
-                title="Descargar Extracto de Cuenta Corriente y Punteo Físico (PDF A4 Landscape)"
-              >
-                <FileCheck className={`w-4 h-4 text-emerald-400 ${downloadingStatementPdf ? "animate-spin" : ""}`} />
-                <span>{downloadingStatementPdf ? "Generando..." : "Extracto Cta. Cte. / Punteo (PDF)"}</span>
-              </button>
-
-              <button
                 onClick={() => handleDownloadPdf()}
                 disabled={downloadingPdfTab !== null}
                 className="px-4 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 text-white font-black text-xs flex items-center gap-2 shadow-lg shadow-rose-600/30 hover:shadow-rose-600/50 transition disabled:opacity-50"
-                title="Descargar Informe Completo en PDF (4 Páginas)"
+                title="Descargar Informe Ejecutivo 360 en PDF"
               >
                 <Download className={`w-4 h-4 ${downloadingPdfTab === "general" ? "animate-bounce" : ""}`} />
                 <span>{downloadingPdfTab === "general" ? "Generando..." : "Informe Completo (PDF)"}</span>
-              </button>
-
-              <button
-                onClick={handlePrint}
-                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition"
-                title="Imprimir Pantalla"
-              >
-                <Printer className="w-4 h-4" />
               </button>
 
               <button
@@ -671,16 +675,16 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                       </div>
                       <div className="grid grid-cols-2 gap-2 text-[10px] mt-2 pt-2 border-t border-slate-200 dark:border-slate-700 font-mono">
                         <div>
-                          <span className="text-red-500 font-bold">● Vencido:</span> {formatPYG(aging?.vencido || 0)}
+                          <span className="text-emerald-500 font-bold">● Al Día:</span> {formatPYG(aging?.al_dia || 0)}
                         </div>
                         <div>
-                          <span className="text-amber-500 font-bold">● 1 a 30d:</span> {formatPYG(aging?.dias_1_30 || 0)}
+                          <span className="text-amber-500 font-bold">● Venc. 1-30d:</span> {formatPYG(aging?.vencido_1_30 ?? aging?.dias_1_30 ?? 0)}
                         </div>
                         <div>
-                          <span className="text-blue-500 font-bold">● 31 a 60d:</span> {formatPYG(aging?.dias_31_60 || 0)}
+                          <span className="text-blue-500 font-bold">● Venc. 31-60d:</span> {formatPYG(aging?.vencido_31_60 ?? aging?.dias_31_60 ?? 0)}
                         </div>
                         <div>
-                          <span className="text-slate-500 font-bold">● +60d:</span> {formatPYG(aging?.dias_mas_60 || 0)}
+                          <span className="text-red-500 font-bold">● Venc. +60d:</span> {formatPYG(aging?.vencido_mas_60 ?? aging?.dias_mas_60 ?? 0)}
                         </div>
                       </div>
                     </div>
@@ -742,46 +746,37 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {subVistaDeudas === "extracto" ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={handleDownloadStatementPdf}
-                            disabled={downloadingStatementPdf}
-                            className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition disabled:opacity-50"
-                            title="Descargar Extracto A4 Landscape para punteo físico con bolígrafo"
-                          >
-                            <FileCheck className={`w-3.5 h-3.5 ${downloadingStatementPdf ? "animate-spin" : ""}`} />
-                            <span>{downloadingStatementPdf ? "Generando..." : "Descargar PDF para Punteo"}</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handlePrint}
-                            className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1.5 transition"
-                          >
-                            <Printer className="w-3.5 h-3.5" />
-                            <span>Imprimir</span>
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            onClick={() => handleDownloadPdf("deudas")}
-                            disabled={downloadingPdfTab !== null}
-                            className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1.5 transition"
-                          >
-                            <Download className="w-3.5 h-3.5 text-rose-500" />
-                            <span>Exportar PDF (Deudas)</span>
-                          </button>
-                          <button
-                            onClick={handlePrint}
-                            className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1.5 transition"
-                          >
-                            <Printer className="w-3.5 h-3.5" />
-                            <span>Imprimir</span>
-                          </button>
-                        </>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadStatementPdf(true)}
+                        disabled={downloadingStatementPdf}
+                        className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition disabled:opacity-50"
+                        title="Descargar PDF A4 exclusivo con todas las facturas y NC pendientes con saldo para punteo físico con bolígrafo"
+                      >
+                        <FileCheck className={`w-3.5 h-3.5 ${downloadingStatementPdf ? "animate-spin" : ""}`} />
+                        <span>{downloadingStatementPdf ? "Generando..." : "Punteo A4 (Solo Pendientes)"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => subVistaDeudas === "extracto" ? handleDownloadStatementPdf(false) : handleDownloadPdf("deudas")}
+                        disabled={downloadingPdfTab !== null || downloadingStatementPdf}
+                        className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1.5 transition"
+                        title="Exportar informe en PDF"
+                      >
+                        <Download className="w-3.5 h-3.5 text-rose-500" />
+                        <span>Exportar PDF Completo</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handlePrint}
+                        className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1.5 transition"
+                        title="Imprimir esta vista"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                        <span>Imprimir</span>
+                      </button>
                     </div>
                   </div>
 
@@ -789,52 +784,73 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                     <div className="space-y-4">
                       {/* Filtros de Facturas */}
                       <div className="flex flex-wrap items-center gap-2 bg-slate-50 dark:bg-slate-800/40 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs">
-                    <div className="relative min-w-[200px] flex-1">
-                      <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
-                      <input
-                        type="text"
-                        placeholder="Buscar por N° Factura o Timbrado..."
-                        value={searchFactura}
-                        onChange={e => setSearchFactura(e.target.value)}
-                        className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs focus:outline-none focus:ring-2 focus:ring-rose-500"
-                      />
-                    </div>
+                        <div className="relative min-w-[200px] flex-1">
+                          <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                          <input
+                            type="text"
+                            placeholder="Buscar por N° Factura o Timbrado..."
+                            value={searchFactura}
+                            onChange={e => setSearchFactura(e.target.value)}
+                            className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs focus:outline-none focus:ring-2 focus:ring-rose-500"
+                          />
+                        </div>
 
-                    <select
-                      value={filterVencimiento}
-                      onChange={e => setFilterVencimiento(e.target.value)}
-                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold"
-                    >
-                      <option value="all">Vencimiento: Todos</option>
-                      <option value="vencidas">Solo Vencidas ({kpis?.facturas_vencidas_count})</option>
-                      <option value="al_dia">Al día</option>
-                      <option value="pendientes">Con Saldo Pendiente</option>
-                    </select>
+                        {/* FILTRO PRINCIPAL: ESTADO DE SALDO */}
+                        <select
+                          value={filterEstadoSaldo}
+                          onChange={e => setFilterEstadoSaldo(e.target.value as any)}
+                          className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-rose-300 dark:border-rose-800 text-xs font-bold text-rose-600 dark:text-rose-400 focus:ring-2 focus:ring-rose-500"
+                        >
+                          <option value="pendientes">Estado: Solo Pendientes con Saldo ({kpis?.facturas_pendientes_count})</option>
+                          <option value="todos">Estado: Todas las Facturas ({data?.facturas?.length})</option>
+                          <option value="pagadas">Estado: Solo Pagadas / Liquidadas</option>
+                        </select>
 
-                    <select
-                      value={filterNcFactura}
-                      onChange={e => setFilterNcFactura(e.target.value)}
-                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold"
-                    >
-                      <option value="all">Notas de Crédito: Todas</option>
-                      <option value="con_nc">Con NC Aplicada / Deducción</option>
-                      <option value="retenida">Retenida por NC en Trámite</option>
-                      <option value="sin_nc">Sin NC Vinculada</option>
-                    </select>
+                        <select
+                          value={filterVencimiento}
+                          onChange={e => setFilterVencimiento(e.target.value)}
+                          className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold"
+                        >
+                          <option value="all">Vencimiento: Todos</option>
+                          <option value="vencidas">Solo Vencidas ({kpis?.facturas_vencidas_count})</option>
+                          <option value="al_dia">Solo Al Día (Vigentes)</option>
+                        </select>
 
-                    <select
-                      value={filterFaseFactura}
-                      onChange={e => setFilterFaseFactura(e.target.value)}
-                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold"
-                    >
-                      <option value="all">Fase de Pago: Todas</option>
-                      <option value="liquidada">Fase 4: Liquidada 100%</option>
-                      <option value="en_lote">Fase 2: En Lote SIPAP</option>
-                      <option value="bloqueada_nc">Fase 1: Retenida por NC</option>
-                      <option value="vencida">Fase 1: Vencida</option>
-                      <option value="al_dia">Fase 1: Al Día</option>
-                    </select>
-                  </div>
+                        <select
+                          value={filterNcFactura}
+                          onChange={e => setFilterNcFactura(e.target.value)}
+                          className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold"
+                        >
+                          <option value="all">Notas de Crédito: Todas</option>
+                          <option value="con_nc">Con NC Aplicada / Deducción</option>
+                          <option value="retenida">Retenida por NC en Trámite</option>
+                          <option value="sin_nc">Sin NC Vinculada</option>
+                        </select>
+
+                        <select
+                          value={filterFaseFactura}
+                          onChange={e => setFilterFaseFactura(e.target.value)}
+                          className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold"
+                        >
+                          <option value="all">Fase de Pago: Todas</option>
+                          <option value="liquidada">Fase 4: Liquidada 100%</option>
+                          <option value="en_lote">Fase 2: En Lote SIPAP</option>
+                          <option value="bloqueada_nc">Fase 1: Retenida por NC</option>
+                          <option value="vencida">Fase 1: Vencida</option>
+                          <option value="al_dia">Fase 1: Al Día</option>
+                        </select>
+                      </div>
+
+                      {/* Barra de Resumen de Facturas Filtradas */}
+                      <div className="flex flex-wrap items-center justify-between px-2 text-xs text-slate-500 font-medium">
+                        <div>
+                          Mostrando <strong className="text-slate-800 dark:text-slate-200">{facturasFiltradas.length}</strong> facturas
+                          {filterEstadoSaldo === "pendientes" ? " pendientes con saldo de pago" : ""}
+                        </div>
+                        <div>
+                          Total Saldo a Pagar: <strong className="text-rose-600 dark:text-rose-400 font-bold font-mono text-sm">{formatPYG(totalSaldoFiltradas)}</strong>
+                        </div>
+                      </div>
 
                   {/* Tabla de Facturas */}
                   <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
@@ -955,7 +971,11 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                           <input
                             type="date"
                             value={statementFechaDesde}
-                            onChange={e => setStatementFechaDesde(e.target.value)}
+                            onChange={e => {
+                              const val = e.target.value
+                              setStatementFechaDesde(val)
+                              loadStatement({ fecha_desde: val })
+                            }}
                             className="px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs focus:ring-2 focus:ring-emerald-500 font-mono"
                           />
                         </div>
@@ -965,7 +985,11 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                           <input
                             type="date"
                             value={statementFechaHasta}
-                            onChange={e => setStatementFechaHasta(e.target.value)}
+                            onChange={e => {
+                              const val = e.target.value
+                              setStatementFechaHasta(val)
+                              loadStatement({ fecha_hasta: val })
+                            }}
                             className="px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs focus:ring-2 focus:ring-emerald-500 font-mono"
                           />
                         </div>
@@ -974,7 +998,11 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                           <input
                             type="checkbox"
                             checked={statementSoloPendientes}
-                            onChange={e => setStatementSoloPendientes(e.target.checked)}
+                            onChange={e => {
+                              const val = e.target.checked
+                              setStatementSoloPendientes(val)
+                              loadStatement({ solo_pendientes: val })
+                            }}
                             className="w-3.5 h-3.5 rounded text-emerald-600 focus:ring-emerald-500"
                           />
                           <span>Solo Pendientes / Con Saldo</span>

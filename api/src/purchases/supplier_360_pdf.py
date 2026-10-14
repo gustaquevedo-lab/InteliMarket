@@ -340,12 +340,12 @@ def generate_supplier_360_pdf(company: dict, data: dict, generated_by: str = "",
         # Aging Matrix
         elements.append(Paragraph("Matriz de Aging de Pasivos (Vencimiento Cronológico):", BODY_BOLD))
         aging_row = [
-            [Paragraph("<b>Vencido</b>", KPI_LABEL), Paragraph("<b>1 a 30 Días</b>", KPI_LABEL), Paragraph("<b>31 a 60 Días</b>", KPI_LABEL), Paragraph("<b>+60 Días</b>", KPI_LABEL), Paragraph("<b>Total Deuda Bruta</b>", KPI_LABEL)],
+            [Paragraph("<b>Al Día (Vigente)</b>", KPI_LABEL), Paragraph("<b>Vencido 1 a 30d</b>", KPI_LABEL), Paragraph("<b>Vencido 31 a 60d</b>", KPI_LABEL), Paragraph("<b>Vencido +60d</b>", KPI_LABEL), Paragraph("<b>Total Deuda Bruta</b>", KPI_LABEL)],
             [
-                Paragraph(_fmt_gs(aging.get("vencido", 0)), ParagraphStyle("AgV", parent=NUM_STYLE_BOLD, textColor=RED)),
-                Paragraph(_fmt_gs(aging.get("dias_1_30", 0)), ParagraphStyle("Ag1", parent=NUM_STYLE_BOLD, textColor=HexColor("#D97706"))),
-                Paragraph(_fmt_gs(aging.get("dias_31_60", 0)), ParagraphStyle("Ag2", parent=NUM_STYLE_BOLD, textColor=PRIMARY_COLOR)),
-                Paragraph(_fmt_gs(aging.get("dias_mas_60", 0)), ParagraphStyle("Ag3", parent=NUM_STYLE_BOLD, textColor=GRAY_MEDIUM)),
+                Paragraph(_fmt_gs(aging.get("al_dia", 0)), ParagraphStyle("AgA", parent=NUM_STYLE_BOLD, textColor=GREEN)),
+                Paragraph(_fmt_gs(aging.get("vencido_1_30", aging.get("dias_1_30", 0))), ParagraphStyle("Ag1", parent=NUM_STYLE_BOLD, textColor=HexColor("#D97706"))),
+                Paragraph(_fmt_gs(aging.get("vencido_31_60", aging.get("dias_31_60", 0))), ParagraphStyle("Ag2", parent=NUM_STYLE_BOLD, textColor=PRIMARY_COLOR)),
+                Paragraph(_fmt_gs(aging.get("vencido_mas_60", aging.get("dias_mas_60", 0))), ParagraphStyle("Ag3", parent=NUM_STYLE_BOLD, textColor=RED)),
                 Paragraph(_fmt_gs(kpis.get("deuda_total_facturas", 0)), ParagraphStyle("AgT", parent=NUM_STYLE_BOLD, textColor=PRIMARY_COLOR)),
             ]
         ]
@@ -366,7 +366,8 @@ def generate_supplier_360_pdf(company: dict, data: dict, generated_by: str = "",
         elements.append(Paragraph("Detalle de Facturas Comerciales, Deducciones de NC y Fases de Pago:", TITLE_SEC))
         fac_table_data = [["N° Factura", "Timbrado", "Emisión", "Vencimiento", "Total Gs.", "NCs Vinculadas", "Saldo Neto", "Fase de Pago"]]
         pend_facs = [f for f in facturas if f.get("saldo_pendiente", 0) > 0]
-        for f in (pend_facs[:30] if pend_facs else facturas[:20]):
+        facturas_listado = pend_facs if pend_facs else facturas
+        for f in facturas_listado:
             es_v = f.get("es_vencida", False)
             v_color = RED if es_v else HexColor("#059669")
             m_nc = f.get("monto_nc_aplicado", 0)
@@ -393,7 +394,7 @@ def generate_supplier_360_pdf(company: dict, data: dict, generated_by: str = "",
         if cheques:
             elements.append(Paragraph("Cheques Diferidos Emitidos al Proveedor (Valores en Tránsito):", BODY_BOLD))
             chq_table_data = [["N° Cheque", "Banco", "Emisión", "Cobro Diferido", "Días Rest.", "Monto Gs.", "Estado"]]
-            for ch in cheques[:15]:
+            for ch in cheques:
                 d_rest = ch.get("dias_restantes", 0)
                 chq_table_data.append([
                     _c(ch.get("numero"), bold=True),

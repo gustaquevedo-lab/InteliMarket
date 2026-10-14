@@ -293,34 +293,65 @@ async def get_supplier_account_statement(
     saldo_acumulado = saldo_anterior
     final_movements = []
 
-    tot_debito = 0.0
-    tot_nc = 0.0
-    tot_pago = 0.0
+    if solo_pendientes:
+        # En modo "Solo Pendientes", filtramos exclusivamente los documentos con saldo vivo exigible/aplicable:
+        # 1. Facturas comerciales con saldo pendiente > 0 (débito exigible = saldo vivo de la factura)
+        # 2. Notas de crédito con saldo a favor disponible > 0 (crédito aplicable = saldo a favor disponible)
+        # Excluimos pagos históricos ya imputados y documentos totalmente cancelados/liquidados al 100%.
+        pendientes_list = []
+        tot_debito_pend = 0.0
+        tot_nc_pend = 0.0
+        saldo_running = 0.0
 
-    for m in filtrados:
-        d = m["debito"]
-        c = m["credito"]
-        saldo_acumulado += (d - c)
+        for m in filtrados:
+            if m["tipo"] == "FACTURA" and m["saldo_documento"] > 0:
+                saldo_doc = m["saldo_documento"]
+                saldo_running += saldo_doc
+                tot_debito_pend += saldo_doc
+                m_copy = dict(m)
+                m_copy["debito"] = saldo_doc
+                m_copy["credito"] = 0.0
+                m_copy["saldo_progresivo"] = saldo_running
+                m_copy["punteado"] = False
+                pendientes_list.append(m_copy)
+            elif m["tipo"] == "NOTA_CREDITO" and m["saldo_documento"] > 0:
+                saldo_nc = m["saldo_documento"]
+                saldo_running -= saldo_nc
+                tot_nc_pend += saldo_nc
+                m_copy = dict(m)
+                m_copy["debito"] = 0.0
+                m_copy["credito"] = saldo_nc
+                m_copy["saldo_progresivo"] = saldo_running
+                m_copy["punteado"] = False
+                pendientes_list.append(m_copy)
 
-        if m["tipo"] == "FACTURA":
-            tot_debito += d
-        elif m["tipo"] == "NOTA_CREDITO":
-            tot_nc += c
-        elif m["tipo"] == "PAGO":
-            tot_pago += c
+        final_movements = pendientes_list
+        saldo_deudor_final = max(0.0, saldo_running)
+        tot_debito = tot_debito_pend
+        tot_nc = tot_nc_pend
+        tot_pago = 0.0
+        tot_credito = tot_nc
+    else:
+        for m in filtrados:
+            d = m["debito"]
+            c = m["credito"]
+            saldo_acumulado += (d - c)
 
-        m_copy = dict(m)
-        m_copy["saldo_progresivo"] = saldo_acumulado
-        m_copy["punteado"] = False  # casilla desmarcada por defecto
+            if m["tipo"] == "FACTURA":
+                tot_debito += d
+            elif m["tipo"] == "NOTA_CREDITO":
+                tot_nc += c
+            elif m["tipo"] == "PAGO":
+                tot_pago += c
 
-        # Si solo_pendientes es True, incluimos solo facturas con saldo, NCs con saldo o movimientos recientes
-        if solo_pendientes and m["tipo"] == "FACTURA" and m["saldo_documento"] <= 0:
-            continue
+            m_copy = dict(m)
+            m_copy["saldo_progresivo"] = saldo_acumulado
+            m_copy["punteado"] = False
 
-        final_movements.append(m_copy)
+            final_movements.append(m_copy)
 
-    tot_credito = tot_nc + tot_pago
-    saldo_deudor_final = saldo_acumulado
+        tot_credito = tot_nc + tot_pago
+        saldo_deudor_final = saldo_acumulado
     saldo_neto_con_cheques = saldo_deudor_final - cheques_diferidos_transito_monto
 
     return {
