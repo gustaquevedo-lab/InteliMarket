@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 from uuid import UUID
 from decimal import Decimal
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.intelientregas.models import Delivery, Driver, Vehicle, Route, RouteStop, DeliveryZone, DeliveryStatus
@@ -29,17 +29,13 @@ async def get_profitability_summary(db: AsyncSession, company_id: str, days: int
     total_deliveries = row[0]
     total_revenue = float(row[1])
 
-    r = await db.execute(
-        select(
-            func.coalesce(func.sum(VehicleFuelEntry.costo_total), 0),
-            func.coalesce(func.sum(VehicleExpense.monto), 0),
-        ).where(
-            VehicleFuelEntry.fecha >= since,
-        )
-    )
-    fuel_row = r.one()
-    fuel_cost = float(fuel_row[0])
-    expense_cost = float(fuel_row[1])
+    fuel_cost = float((await db.execute(
+        select(func.coalesce(func.sum(VehicleFuelEntry.costo_total), 0)).where(VehicleFuelEntry.fecha >= since)
+    )).scalar() or 0)
+
+    expense_cost = float((await db.execute(
+        select(func.coalesce(func.sum(VehicleExpense.monto), 0)).where(VehicleExpense.fecha >= since)
+    )).scalar() or 0)
 
     r = await db.execute(
         select(func.coalesce(func.sum(VehicleMaintenance.costo), 0)).where(
@@ -307,8 +303,8 @@ async def get_delivery_performance_kpi(db: AsyncSession, company_id: str, days: 
     r = await db.execute(
         select(
             func.count(Delivery.id),
-            func.sum(func.cast(Delivery.estado == "delivered", func.INT)),
-            func.sum(func.cast(Delivery.estado == "failed", func.INT)),
+            func.sum(case((Delivery.estado == "delivered", 1), else_=0)),
+            func.sum(case((Delivery.estado == "failed", 1), else_=0)),
             func.avg(Delivery.costo_delivery),
         ).where(
             Delivery.company_id == company_id,
