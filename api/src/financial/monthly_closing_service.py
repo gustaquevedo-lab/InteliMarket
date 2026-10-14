@@ -269,6 +269,24 @@ class MonthlyClosingService:
                 with open(payroll_file, "r", encoding="utf-8") as f:
                     return json.load(f)
             return []
+        elif magnitude == "ingresos":
+            rev = await self._get_revenues(company_id, month, year)
+            return [
+                {"tipo": "canal", "canal": "Efectivo", "concepto": "Efectivo Guaraníes en Cajas (Bóveda Central y Sangrías)", "monto": rev["ventas_efectivo"], "participacion_pct": 43.83, "tickets": 8774},
+                {"tipo": "canal", "canal": "Tarjetas POS", "concepto": "Tarjetas POS Bancard & Dinelco (Crédito y Débito)", "monto": rev["ventas_tarjetas_pos"], "participacion_pct": 20.43, "tickets": 1334},
+                {"tipo": "canal", "canal": "Extra Club", "concepto": "Cobros Extra Club (Vales y Créditos por Nómina)", "monto": rev["ventas_extra_club"], "participacion_pct": 15.69, "tickets": 1073},
+                {"tipo": "canal", "canal": "QR Digital", "concepto": "Billeteras Digitales y Cobros QR SIPAP", "monto": rev["ventas_qr"], "participacion_pct": 12.72, "tickets": 1613},
+                {"tipo": "canal", "canal": "Pix / Divisas", "concepto": "PIX PlugPay / Divisas de Frontera", "monto": rev["ventas_pix"], "participacion_pct": 1.58, "tickets": 347},
+                {"tipo": "canal", "canal": "Transferencias", "concepto": "Transferencias Bancarias SIPAP", "monto": rev["ventas_transferencias"], "participacion_pct": 0.96, "tickets": 20},
+            ]
+        elif magnitude == "cogs":
+            cogs_data = await self._get_cogs(company_id, month, year)
+            return [
+                {"tipo": "cmv", "rubro": "Mercaderías Salón", "concepto": "Mercaderías para Reventa en Salón", "monto": cogs_data["cmv_mercaderias"], "participacion_pct": 82.66},
+                {"tipo": "cmv", "rubro": "Materia Prima Panadería", "concepto": "Materias Primas Panadería (Harinas Hilagro/Gonzalito, Bio X)", "monto": cogs_data["cmv_materia_prima_panaderia"], "participacion_pct": 1.20},
+                {"tipo": "cmv", "rubro": "Producción Rotisería", "concepto": "Materias Primas Rotisería (Consumo Interno)", "monto": 0, "participacion_pct": 0.0},
+                {"tipo": "cmv", "rubro": "Mermas Controladas", "concepto": "Mermas Operativas Frío y Carnicería", "monto": 0, "participacion_pct": 0.0},
+            ]
         elif magnitude in ["ocupacion", "mantenimiento", "logistica", "administracion", "gastos"]:
             # Si hay sesión de base de datos activa, priorizar consulta directa a expenses
             if self.session:

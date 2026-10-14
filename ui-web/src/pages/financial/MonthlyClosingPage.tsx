@@ -355,7 +355,9 @@ export default function MonthlyClosingPage() {
         />
       ) : (
         <ClosingMagnitudeDetail
+          key={activeTab}
           magnitude={activeTab}
+          closingData={data}
           onBackToPnl={() => setActiveTab("resumen")}
           onExportExcel={handleDownloadExcel}
         />
