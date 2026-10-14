@@ -351,12 +351,27 @@ async def execute_stock_fractionation(
             )
         )
     else:
+        # Priorizar depósito donde el display padre tenga stock positivo disponible
         warehouse = await db.scalar(
-            select(Warehouse).where(
+            select(Warehouse)
+            .join(Stock, Stock.warehouse_id == Warehouse.id)
+            .where(
                 Warehouse.company_id == c_uuid,
                 Warehouse.activo == True,
-            ).order_by(Warehouse.tipo == "principal", Warehouse.created_at.asc())
+                Stock.product_id == parent_uuid,
+                Stock.cantidad > 0,
+            )
+            .order_by(Stock.cantidad.desc())
         )
+        if not warehouse:
+            warehouse = await db.scalar(
+                select(Warehouse)
+                .where(
+                    Warehouse.company_id == c_uuid,
+                    Warehouse.activo == True,
+                )
+                .order_by((Warehouse.tipo == "principal").desc(), Warehouse.created_at.asc())
+            )
 
     if not warehouse:
         raise HTTPException(status_code=400, detail="No se encontró un depósito activo en la empresa.")
