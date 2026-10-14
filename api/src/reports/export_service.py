@@ -1043,23 +1043,8 @@ def export_fiscal_rg90_ventas_zip(data: dict) -> tuple[bytes, str]:
     return zip_buffer.getvalue(), zip_filename
 
 
-def export_sales_by_br_suppliers(
-    data: list[dict],
-    fecha_desde: Optional[date] = None,
-    fecha_hasta: Optional[date] = None,
-) -> bytes:
-    """Genera archivo Excel (.xlsx) premium con 3 pestañas:
-    1. Detalle por Ítem de productos BR (con fecha, cliente, producto y medio de pago).
-    2. Resumen acumulado por Proveedor BR.
-    3. Resumen y participación por Medio de Pago del ticket.
-    """
-    wb = Workbook()
-
-    # ── Hoja 1: Detalle Fila por Fila ─────────────────────────────────────
-    ws = wb.active
-    ws.title = "Detalle Ventas BR"
-    _write_title(ws, "Auditoría de Ventas — Productos de Proveedores BR", fecha_desde, fecha_hasta)
-
+def _write_sales_detail_sheet(ws, titulo: str, fecha_desde: Optional[date], fecha_hasta: Optional[date], items: list[dict]):
+    _write_title(ws, titulo, fecha_desde, fecha_hasta)
     headers = [
         "#",
         "Fecha y Hora",
@@ -1087,7 +1072,7 @@ def export_sales_by_br_suppliers(
     tot_unidades = 0.0
     tot_ventas = 0.0
 
-    for idx, r in enumerate(data, 1):
+    for idx, r in enumerate(items, 1):
         row_num = 3 + idx
         cant = float(r.get("cantidad") or 0)
         p_unit = float(r.get("precio_unitario") or 0)
@@ -1107,7 +1092,7 @@ def export_sales_by_br_suppliers(
             cant,
             p_unit,
             total_it,
-            r.get("cliente_nombre") or "Cliente Ocasional",
+            r.get("cliente_nombre") or "CONSUMIDOR FINAL",
             r.get("cliente_documento") or "—",
             r.get("medios_pago") or "EFECTIVO",
         ]
@@ -1125,9 +1110,8 @@ def export_sales_by_br_suppliers(
             elif col_idx in (1, 2, 4, 5, 6, 7, 13):
                 cell.alignment = Alignment(horizontal="center")
 
-    # Fila totalizadora
-    if data:
-        tot_row = 4 + len(data)
+    if items:
+        tot_row = 4 + len(items)
         ws.cell(row=tot_row, column=8, value="TOTAL GENERAL").font = BOLD_FONT
         ws.cell(row=tot_row, column=8).alignment = Alignment(horizontal="right")
 
@@ -1142,13 +1126,80 @@ def export_sales_by_br_suppliers(
         c_total.alignment = Alignment(horizontal="right")
 
     _auto_width(ws)
+    return tot_unidades, tot_ventas
 
-    # ── Hoja 2: Resumen por Proveedor BR ──────────────────────────────────
-    ws2 = wb.create_sheet(title="Resumen por Proveedor")
-    _write_title(ws2, "Resumen Consolidado por Proveedor BR", fecha_desde, fecha_hasta)
+
+def export_sales_by_br_suppliers(
+    data: list[dict],
+    fecha_desde: Optional[date] = None,
+    fecha_hasta: Optional[date] = None,
+    split_by_month: bool = True,
+    es_consumidor_final: bool = True,
+) -> bytes:
+    """Genera archivo Excel (.xlsx) premium con pestañas divididas:
+    1. Hoja 1: Ventas Agosto 2026 (Consumidor Final)
+    2. Hoja 2: Ventas Setiembre 2026 (Consumidor Final)
+    3. Hoja 3: Resumen acumulado por Proveedor BR
+    4. Hoja 4: Resumen y participación por Medio de Pago
+    """
+    wb = Workbook()
+
+    def _get_mes(r: dict) -> int:
+        fe = r.get("fecha_emision")
+        if hasattr(fe, "month"):
+            return fe.month
+        fh = str(r.get("fecha_hora") or "")
+        parts = fh.split(" ")[0].split("/")
+        if len(parts) >= 2 and parts[1].isdigit():
+            return int(parts[1])
+        return 8
+
+    tag = "Consumidor Final" if es_consumidor_final else "Todos los Clientes"
+
+    tot_unidades_global = sum(float(r.get("cantidad") or 0) for r in data)
+    tot_ventas_global = sum(float(r.get("total_item") or 0) for r in data)
+
+    if split_by_month:
+        data_agosto = [r for r in data if _get_mes(r) == 8]
+        data_setiembre = [r for r in data if _get_mes(r) == 9]
+
+        # ── Hoja 1: Agosto 2026 ───────────────────────────────────────────
+        ws1 = wb.active
+        ws1.title = "Agosto 2026"
+        _write_sales_detail_sheet(
+            ws1,
+            f"Ventas Proveedores BR — {tag} (Agosto 2026)",
+            date(2026, 8, 1),
+            date(2026, 8, 31),
+            data_agosto,
+        )
+
+        # ── Hoja 2: Setiembre 2026 ────────────────────────────────────────
+        ws2 = wb.create_sheet(title="Setiembre 2026")
+        _write_sales_detail_sheet(
+            ws2,
+            f"Ventas Proveedores BR — {tag} (Setiembre 2026)",
+            date(2026, 9, 1),
+            date(2026, 9, 30),
+            data_setiembre,
+        )
+    else:
+        ws1 = wb.active
+        ws1.title = "Detalle Ventas BR"
+        _write_sales_detail_sheet(
+            ws1,
+            f"Ventas Proveedores BR — {tag}",
+            fecha_desde,
+            fecha_hasta,
+            data,
+        )
+
+    # ── Hoja 3: Resumen por Proveedor BR ──────────────────────────────────
+    ws_prov = wb.create_sheet(title="Resumen por Proveedor")
+    _write_title(ws_prov, f"Resumen Consolidado por Proveedor BR — {tag}", fecha_desde, fecha_hasta)
     headers2 = ["#", "Proveedor BR", "RUC / Doc", "Unidades Vendidas", "Ventas Totales (Gs.)", "% Participación"]
     for col_idx, h in enumerate(headers2, 1):
-        cell = ws2.cell(row=3, column=col_idx, value=h)
+        cell = ws_prov.cell(row=3, column=col_idx, value=h)
         cell.font = HEADER_FONT
         cell.fill = HEADER_FILL
         cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -1165,10 +1216,10 @@ def export_sales_by_br_suppliers(
     sorted_sups = sorted(sup_groups.items(), key=lambda x: x[1]["total"], reverse=True)
     for idx, (s_key, s_val) in enumerate(sorted_sups, 1):
         row_num = 3 + idx
-        pct = (s_val["total"] / max(tot_ventas, 1.0)) * 100
+        pct = (s_val["total"] / max(tot_ventas_global, 1.0)) * 100
         vals = [idx, s_key[0], s_key[1], s_val["unidades"], s_val["total"], f"{pct:.1f}%"]
         for col_idx, val in enumerate(vals, 1):
-            cell = ws2.cell(row=row_num, column=col_idx, value=val)
+            cell = ws_prov.cell(row=row_num, column=col_idx, value=val)
             cell.font = DATA_FONT
             cell.border = THIN_BORDER
             if col_idx == 4:
@@ -1182,24 +1233,24 @@ def export_sales_by_br_suppliers(
 
     if sorted_sups:
         tot_row2 = 4 + len(sorted_sups)
-        ws2.cell(row=tot_row2, column=2, value="TOTAL CONSOLIDADO").font = BOLD_FONT
-        c_u = ws2.cell(row=tot_row2, column=4, value=tot_unidades)
+        ws_prov.cell(row=tot_row2, column=2, value="TOTAL CONSOLIDADO").font = BOLD_FONT
+        c_u = ws_prov.cell(row=tot_row2, column=4, value=tot_unidades_global)
         c_u.font = BOLD_FONT
         c_u.number_format = '#,##0.00'
-        c_t = ws2.cell(row=tot_row2, column=5, value=tot_ventas)
+        c_t = ws_prov.cell(row=tot_row2, column=5, value=tot_ventas_global)
         c_t.font = BOLD_FONT
         c_t.number_format = CURRENCY_FMT
-        ws2.cell(row=tot_row2, column=6, value="100.0%").font = BOLD_FONT
-        ws2.cell(row=tot_row2, column=6).alignment = Alignment(horizontal="center")
+        ws_prov.cell(row=tot_row2, column=6, value="100.0%").font = BOLD_FONT
+        ws_prov.cell(row=tot_row2, column=6).alignment = Alignment(horizontal="center")
 
-    _auto_width(ws2)
+    _auto_width(ws_prov)
 
-    # ── Hoja 3: Resumen por Medio de Pago ─────────────────────────────────
-    ws3 = wb.create_sheet(title="Resumen Medios de Pago")
-    _write_title(ws3, "Participación por Medio de Pago en Ventas BR", fecha_desde, fecha_hasta)
+    # ── Hoja 4: Resumen por Medio de Pago ─────────────────────────────────
+    ws_pay = wb.create_sheet(title="Resumen Medios de Pago")
+    _write_title(ws_pay, f"Participación por Medio de Pago — {tag}", fecha_desde, fecha_hasta)
     headers3 = ["#", "Medio(s) de Pago", "Cant. Líneas", "Total Ventas (Gs.)", "% Participación"]
     for col_idx, h in enumerate(headers3, 1):
-        cell = ws3.cell(row=3, column=col_idx, value=h)
+        cell = ws_pay.cell(row=3, column=col_idx, value=h)
         cell.font = HEADER_FONT
         cell.fill = HEADER_FILL
         cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -1216,10 +1267,10 @@ def export_sales_by_br_suppliers(
     sorted_pays = sorted(pay_groups.items(), key=lambda x: x[1]["total"], reverse=True)
     for idx, (p_key, p_val) in enumerate(sorted_pays, 1):
         row_num = 3 + idx
-        pct = (p_val["total"] / max(tot_ventas, 1.0)) * 100
+        pct = (p_val["total"] / max(tot_ventas_global, 1.0)) * 100
         vals = [idx, p_key, p_val["count"], p_val["total"], f"{pct:.1f}%"]
         for col_idx, val in enumerate(vals, 1):
-            cell = ws3.cell(row=row_num, column=col_idx, value=val)
+            cell = ws_pay.cell(row=row_num, column=col_idx, value=val)
             cell.font = DATA_FONT
             cell.border = THIN_BORDER
             if col_idx == 3:
@@ -1233,18 +1284,19 @@ def export_sales_by_br_suppliers(
 
     if sorted_pays:
         tot_row3 = 4 + len(sorted_pays)
-        ws3.cell(row=tot_row3, column=2, value="TOTAL").font = BOLD_FONT
-        c_lines = ws3.cell(row=tot_row3, column=3, value=len(data))
+        ws_pay.cell(row=tot_row3, column=2, value="TOTAL").font = BOLD_FONT
+        c_lines = ws_pay.cell(row=tot_row3, column=3, value=len(data))
         c_lines.font = BOLD_FONT
         c_lines.number_format = '#,##0'
-        c_tot = ws3.cell(row=tot_row3, column=4, value=tot_ventas)
+        c_tot = ws_pay.cell(row=tot_row3, column=4, value=tot_ventas_global)
         c_tot.font = BOLD_FONT
         c_tot.number_format = CURRENCY_FMT
-        ws3.cell(row=tot_row3, column=5, value="100.0%").font = BOLD_FONT
-        ws3.cell(row=tot_row3, column=5).alignment = Alignment(horizontal="center")
+        ws_pay.cell(row=tot_row3, column=5, value="100.0%").font = BOLD_FONT
+        ws_pay.cell(row=tot_row3, column=5).alignment = Alignment(horizontal="center")
 
-    _auto_width(ws3)
+    _auto_width(ws_pay)
 
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue()
+

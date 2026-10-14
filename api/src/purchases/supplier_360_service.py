@@ -174,12 +174,17 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
             logger.warning(f"Error fetching payment run items for supplier 360: {e}")
 
     # 2.4 Cheques Diferidos & Emitidos
-    q_cheques = select(Cheque).where(
-        Cheque.company_id == company_id,
-        Cheque.supplier_id == supplier_id,
-    ).order_by(Cheque.fecha_pago.asc(), Cheque.fecha_emision.desc())
+    q_cheques = (
+        select(Cheque, BankAccount.banco, BankAccount.numero_cuenta)
+        .outerjoin(BankAccount, Cheque.bank_account_id == BankAccount.id)
+        .where(
+            Cheque.company_id == company_id,
+            Cheque.supplier_id == supplier_id,
+        )
+        .order_by(Cheque.fecha_pago.asc(), Cheque.fecha_emision.desc())
+    )
     chq_res = await db.execute(q_cheques)
-    cheques_db = chq_res.scalars().all()
+    cheques_rows = chq_res.all()
 
     cheques_diferidos_pendientes_monto = 0.0
     cheques_diferidos_pendientes_count = 0
@@ -187,13 +192,19 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
     cheques_total_monto = 0.0
 
     cheques_list = []
-    for c in cheques_db:
+    for c, b_nombre, b_cta in cheques_rows:
         monto = _dec_to_float(c.monto)
         cheques_total_monto += monto
         f_pago = c.fecha_pago or c.fecha_emision
         dias_rest = (f_pago - today).days if f_pago else 0
         is_diferido = bool(c.diferido)
         estado = (c.estado or "pendiente").lower()
+
+        banco_str = b_nombre or c.banco_emisor or "BANCO CONTINENTAL"
+        if banco_str.lower() == "banco":
+            banco_str = "BANCO CONTINENTAL"
+        if b_cta:
+            banco_str += f" ({b_cta})"
 
         if is_diferido and estado in ("pendiente", "entregado"):
             cheques_diferidos_pendientes_monto += monto
@@ -204,7 +215,7 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
         cheques_list.append({
             "id": str(c.id),
             "numero": c.numero or "S/N",
-            "banco_emisor": c.banco_emisor or "",
+            "banco_emisor": banco_str,
             "beneficiario": c.beneficiario or "",
             "monto": monto,
             "moneda": c.moneda or "PYG",

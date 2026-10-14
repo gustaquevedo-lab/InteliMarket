@@ -1057,27 +1057,27 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                         </div>
 
                         <div className="bg-rose-50/60 dark:bg-rose-950/30 p-3 rounded-2xl border border-rose-300 dark:border-rose-800/60">
-                          <div className="text-[10px] font-black uppercase text-rose-700 dark:text-rose-400">4. Saldo Exigible (1-2-3)</div>
+                          <div className="text-[10px] font-black uppercase text-rose-700 dark:text-rose-400">4. Facturas Abiertas Sin Cheque</div>
                           <div className="text-sm font-black text-rose-600 dark:text-rose-400 mt-1">
                             {formatPYG(statementData?.totales.saldo_deudor_final || 0)}
                           </div>
-                          <div className="text-[10px] text-rose-600/70 mt-0.5">Deuda neta actual</div>
+                          <div className="text-[10px] text-rose-600/70 mt-0.5">Pendientes de cancelar o emitir valor</div>
                         </div>
 
                         <div className="bg-amber-50/50 dark:bg-amber-950/20 p-3 rounded-2xl border border-amber-200 dark:border-amber-800/40">
-                          <div className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-400">5. Cheques en Tránsito</div>
+                          <div className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-400">5. Cheques Entregados en Tránsito</div>
                           <div className="text-sm font-black text-amber-600 dark:text-amber-400 mt-1">
                             {formatPYG(statementData?.totales.cheques_diferidos_transito_monto || 0)}
                           </div>
-                          <div className="text-[10px] text-amber-600/70 mt-0.5">{statementData?.totales.cheques_diferidos_count || 0} cheques diferidos</div>
+                          <div className="text-[10px] text-amber-600/70 mt-0.5">{statementData?.totales.cheques_diferidos_count || 0} cheques diferidos a efectivizar</div>
                         </div>
 
                         <div className="bg-purple-50/50 dark:bg-purple-950/20 p-3 rounded-2xl border border-purple-200 dark:border-purple-800/40">
-                          <div className="text-[10px] font-black uppercase text-purple-700 dark:text-purple-400">6. Saldo Neto Proyectado</div>
+                          <div className="text-[10px] font-black uppercase text-purple-700 dark:text-purple-400">6. Compromiso Financiero Total</div>
                           <div className="text-sm font-black text-purple-600 dark:text-purple-400 mt-1">
-                            {formatPYG(statementData?.totales.saldo_neto_con_cheques || 0)}
+                            {formatPYG((statementData?.totales.compromiso_total_con_cheques) || ((statementData?.totales.saldo_deudor_final || 0) + (statementData?.totales.cheques_diferidos_transito_monto || 0)))}
                           </div>
-                          <div className="text-[10px] text-purple-600/70 mt-0.5">Tras débito de cheques</div>
+                          <div className="text-[10px] text-purple-600/70 mt-0.5">Facturas abiertas + Cheques en tránsito</div>
                         </div>
                       </div>
 

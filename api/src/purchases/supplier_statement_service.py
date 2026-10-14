@@ -17,7 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.src.purchases.models import Supplier
 from api.src.financial.models import (
     SupplierInvoice, SupplierInvoicePayment,
-    SupplierCreditNote, SupplierCreditNoteApplication
+    SupplierCreditNote, SupplierCreditNoteApplication,
+    BankAccount
 )
 from api.src.cheques.models import Cheque
 
@@ -115,21 +116,32 @@ async def get_supplier_account_statement(
         payments = pay_res.scalars().all()
 
     # 5. Cheques emitidos al proveedor (para sección de valores en tránsito)
-    q_chq = select(Cheque).where(
-        Cheque.company_id == company_id,
-        Cheque.supplier_id == supplier_id,
-    ).order_by(Cheque.fecha_pago.asc(), Cheque.fecha_emision.desc())
+    q_chq = (
+        select(Cheque, BankAccount.banco, BankAccount.numero_cuenta)
+        .outerjoin(BankAccount, Cheque.bank_account_id == BankAccount.id)
+        .where(
+            Cheque.company_id == company_id,
+            Cheque.supplier_id == supplier_id,
+        )
+        .order_by(Cheque.fecha_pago.asc(), Cheque.fecha_emision.desc())
+    )
     chq_res = await db.execute(q_chq)
-    cheques_db = chq_res.scalars().all()
+    cheques_rows = chq_res.all()
 
     cheques_transito = []
     cheques_diferidos_transito_monto = 0.0
-    for c in cheques_db:
+    for c, b_nombre, b_cta in cheques_rows:
         monto_ch = _dec_to_float(c.monto)
         is_diferido = bool(c.diferido)
         estado_ch = (c.estado or "pendiente").lower()
         f_pago = c.fecha_pago or c.fecha_emision
         dias_rest = (f_pago - today).days if f_pago else 0
+
+        banco_str = b_nombre or c.banco_emisor or "BANCO CONTINENTAL"
+        if banco_str.lower() == "banco":
+            banco_str = "BANCO CONTINENTAL"
+        if b_cta:
+            banco_str += f" ({b_cta})"
 
         # Cheques diferidos entregados aún pendientes de compensación
         if is_diferido and estado_ch in ("pendiente", "entregado"):
@@ -137,7 +149,7 @@ async def get_supplier_account_statement(
             cheques_transito.append({
                 "id": str(c.id),
                 "numero": c.numero or "S/N",
-                "banco_emisor": c.banco_emisor or "",
+                "banco_emisor": banco_str,
                 "monto": monto_ch,
                 "moneda": c.moneda or "PYG",
                 "fecha_emision": _date_str(c.fecha_emision),
@@ -352,7 +364,7 @@ async def get_supplier_account_statement(
 
         tot_credito = tot_nc + tot_pago
         saldo_deudor_final = saldo_acumulado
-    saldo_neto_con_cheques = saldo_deudor_final - cheques_diferidos_transito_monto
+    compromiso_total_con_cheques = saldo_deudor_final + cheques_diferidos_transito_monto
 
     return {
         "supplier": supplier_info,
@@ -372,7 +384,8 @@ async def get_supplier_account_statement(
             "saldo_deudor_final": saldo_deudor_final,
             "cheques_diferidos_transito_monto": cheques_diferidos_transito_monto,
             "cheques_diferidos_count": len(cheques_transito),
-            "saldo_neto_con_cheques": saldo_neto_con_cheques,
+            "compromiso_total_con_cheques": compromiso_total_con_cheques,
+            "saldo_neto_con_cheques": saldo_deudor_final,
         },
         "cheques_diferidos": cheques_transito,
         "resumen_items": {

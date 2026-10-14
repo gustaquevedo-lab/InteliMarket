@@ -1995,6 +1995,7 @@ export interface SupplierAccountStatementResponse {
     cheques_diferidos_transito_monto: number
     cheques_diferidos_count: number
     saldo_neto_con_cheques: number
+    compromiso_total_con_cheques?: number
   }
   cheques_diferidos: Array<{
     id: string

@@ -1998,11 +1998,19 @@ async def get_sales_by_br_suppliers(
     company_id: str,
     fecha_desde: Optional[date] = None,
     fecha_hasta: Optional[date] = None,
+    solo_consumidor_final: bool = False,
 ) -> list[dict]:
     """Obtiene el detalle ítem por ítem de productos vendidos pertenecientes a proveedores BR en el rango de fechas."""
     params: dict = {"company_id": company_id}
     where = "v.estado <> 'cancelado' AND v.company_id = :company_id"
     where += _build_tz_filter(fecha_desde, fecha_hasta, params, "v.fecha")
+
+    if solo_consumidor_final:
+        where += """ AND (
+            c.id IS NULL
+            OR UPPER(TRIM(c.razon_social)) IN ('CONSUMIDOR FINAL', 'CLIENTE OCASIONAL', 'SIN NOMBRE', 'CLIENTE')
+            OR c.ruc IN ('4444444-3', '44444401-5', '4444444', '44444401')
+        )"""
 
     query = f"""
         SELECT

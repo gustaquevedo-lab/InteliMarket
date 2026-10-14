@@ -4192,11 +4192,19 @@ async def _execute_disbursements_internal(
                 # Monto nominal del cheque: si se especificó monto_total_cheque (para cheque matriz compartido)
                 monto_cheque = Decimal(str(d.monto_total_cheque)) if (d.monto_total_cheque and Decimal(str(d.monto_total_cheque)) >= m_pyg) else m_pyg
 
+                banco_resuelto = d.banco_cheque
+                if (not banco_resuelto or banco_resuelto == "Banco") and d.bank_account_id:
+                    ba_obj = await db.get(BankAccount, d.bank_account_id)
+                    if ba_obj:
+                        banco_resuelto = ba_obj.banco
+                if not banco_resuelto:
+                    banco_resuelto = "BANCO CONTINENTAL"
+
                 cheque = Cheque(
                     company_id=cid,
                     numero=d.numero_cheque,
                     numero_confiable=True,
-                    banco_emisor=d.banco_cheque or "Banco",
+                    banco_emisor=banco_resuelto,
                     bank_account_id=d.bank_account_id,
                     beneficiario=d.titular_cheque or contraparte_str,
                     supplier_id=supplier.id if supplier else None,
@@ -5134,12 +5142,21 @@ async def create_multi_supplier_payment_batch(
                 fecha_venc = ch_item.fecha_cheque_vencimiento or fecha_em
                 es_dif = bool(ch_item.es_cheque_diferido or (fecha_venc > fecha_em))
 
+                banco_resuelto = ch_item.banco_cheque
+                b_acct_id = ch_item.bank_account_id or payload.bank_account_id
+                if (not banco_resuelto or banco_resuelto == "Banco") and b_acct_id:
+                    ba_obj = await db.get(BankAccount, b_acct_id)
+                    if ba_obj:
+                        banco_resuelto = ba_obj.banco
+                if not banco_resuelto:
+                    banco_resuelto = "BANCO CONTINENTAL"
+
                 c_obj = Cheque(
                     company_id=cid,
                     numero=ch_item.numero_cheque,
                     numero_confiable=True,
-                    banco_emisor=ch_item.banco_cheque or "Banco",
-                    bank_account_id=ch_item.bank_account_id or payload.bank_account_id,
+                    banco_emisor=banco_resuelto,
+                    bank_account_id=b_acct_id,
                     beneficiario=ch_item.titular_cheque or payload.titular_cheque or f"Lote Brasil ({len(payload.items)} proveedores)",
                     tipo_cheque="emitido",
                     monto=Decimal(str(ch_item.monto)),
