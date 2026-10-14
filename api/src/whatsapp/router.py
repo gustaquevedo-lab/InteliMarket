@@ -7,7 +7,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Header, UploadFile, File, Form
-from sqlalchemy import select, delete, func, or_
+from sqlalchemy import select, delete, func, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db

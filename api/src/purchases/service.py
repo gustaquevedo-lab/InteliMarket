@@ -780,8 +780,9 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         if po_price and po_price > 0:
             desvio = abs(cost - po_price) / po_price
             if desvio > RECEIPT_PRICE_TOLERANCE:
+                desvio_pct = (Decimal(str(desvio)) * 100).quantize(Decimal('0.1'))
                 review_reasons.append(
-                    f"Precio de {item_data.product_id} recibido a {cost} vs {po_price} pactado en la OC ({(desvio * 100).quantize(Decimal('0.1'))}% de desvio)"
+                    f"Precio de {item_data.product_id} recibido a {cost} vs {po_price} pactado en la OC ({desvio_pct}% de desvio)"
                 )
         if item_data.cantidad_rechazada:
             review_reasons.append(f"Rechazo parcial de {item_data.cantidad_rechazada} unidades de {item_data.product_id}: {item_data.motivo_rechazo or 'sin motivo especificado'}")
@@ -799,7 +800,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
             cantidad_recibida=item_data.cantidad_recibida,
             precio_unitario=cost,
             costo_unitario=cost,
-            total=(cost * item_data.cantidad_recibida).quantize(Decimal("1")),
+            total=(Decimal(str(cost)) * Decimal(str(item_data.cantidad_recibida))).quantize(Decimal("1")),
             batch_id=getattr(item_data, "batch_id", None),
             cantidad_rechazada=item_data.cantidad_rechazada,
             motivo_rechazo=item_data.motivo_rechazo,
@@ -828,11 +829,13 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
             db.add(stock_obj)
             await db.flush()
 
-        old_cost = stock_obj.costo_unitario or Decimal("0")
-        old_qty = stock_obj.cantidad
-        stock_obj.cantidad += qty
-        if old_qty + qty > 0:
-            stock_obj.costo_unitario = ((old_cost * old_qty + cost * qty) / (old_qty + qty)).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+        old_cost = Decimal(str(stock_obj.costo_unitario or 0))
+        old_qty = Decimal(str(stock_obj.cantidad or 0))
+        d_cost = Decimal(str(cost or 0))
+        d_qty = Decimal(str(qty or 0))
+        stock_obj.cantidad = float(old_qty + d_qty)
+        if old_qty + d_qty > 0:
+            stock_obj.costo_unitario = ((old_cost * old_qty + d_cost * d_qty) / (old_qty + d_qty)).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
         stock_obj.updated_at = datetime.now(timezone.utc)
 
         ref_lote = f"REM:{data.numero_remision} - {receipt.numero}" if getattr(data, "numero_remision", None) else (
@@ -3685,7 +3688,7 @@ async def list_consignment_settlements(
     company_id: str,
     supplier_id: str | None = None,
 ) -> list[ConsignmentSettlement]:
-    from .models import ConsignmentSettlement
+    from .models import ConsignmentSettlement, ConsignmentSettlementItem
     c_uuid = UUID(company_id)
     stmt = (
         select(ConsignmentSettlement)
@@ -3706,7 +3709,7 @@ async def get_consignment_settlement(
     db: AsyncSession,
     settlement_id: str,
 ) -> ConsignmentSettlement | None:
-    from .models import ConsignmentSettlement
+    from .models import ConsignmentSettlement, ConsignmentSettlementItem
     stmt = (
         select(ConsignmentSettlement)
         .options(
