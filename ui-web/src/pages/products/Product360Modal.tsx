@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useEffect } from "react"
+import React, { useState, useCallback, useMemo, useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
 import {
   X, Sparkles, Package, Tag, Barcode, DollarSign, TrendingUp, TrendingDown,
@@ -18,6 +18,18 @@ import { formatPYG } from "../../utils/format"
 import { useToast } from "../../context/ToastContext"
 import { usePermissions } from "../../context/PermissionsContext"
 import CurrencyInput from "../../components/CurrencyInput"
+
+const PACK_PRESETS_360 = [
+  { label: "Pack x6", unidades: 6, tag: "Pack x6" },
+  { label: "Pack x12", unidades: 12, tag: "Pack x12" },
+  { label: "Fardo x12", unidades: 12, tag: "Fardo x12" },
+  { label: "Caja x24", unidades: 24, tag: "Caja x24" },
+  { label: "Caja x48", unidades: 48, tag: "Caja x48" },
+  { label: "Display x12", unidades: 12, tag: "Display x12" },
+  { label: "Six-Pack", unidades: 6, tag: "Six-Pack" },
+  { label: "Pack x4", unidades: 4, tag: "Pack x4" },
+  { label: "🏷️ Sinónimo 1:1", unidades: 1, tag: "Sinónimo Multiorigen" },
+]
 
 function formatDatePY(iso: string) {
   if (!iso) return "—"
@@ -180,9 +192,11 @@ export default function Product360Modal({ data: initialData, onClose, onPriceUpd
   const [showAddAltCodeModal, setShowAddAltCodeModal] = useState(false)
   const [newAltBarcode, setNewAltBarcode] = useState("")
   const [newAltLabel, setNewAltLabel] = useState("")
-  const [newAltType, setNewAltType] = useState<"synonym" | "pack">("synonym")
-  const [newAltUnits, setNewAltUnits] = useState<number>(1)
+  const [newAltType, setNewAltType] = useState<"synonym" | "pack">("pack")
+  const [newAltUnits, setNewAltUnits] = useState<number>(6)
   const [savingAltCode, setSavingAltCode] = useState(false)
+  const altBarcodeInputRef = useRef<HTMLInputElement>(null)
+  const altEtiquetaInputRef = useRef<HTMLInputElement>(null)
 
   // Modal Fraccionar Displays a Góndola
   const [showFractionateModal, setShowFractionateModal] = useState(false)
@@ -242,38 +256,50 @@ export default function Product360Modal({ data: initialData, onClose, onPriceUpd
     setShowLinkModal(true)
   }, [p.nombre, p.costo_promedio, p.precio_venta, m.costo_promedio, m.costo_unitario, m.precio_venta])
 
-  const handleCreateAltCode = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleCreateAltCode = useCallback(async (e?: React.FormEvent, keepOpen = false) => {
+    if (e) e.preventDefault()
     if (!newAltBarcode.trim()) {
       toast.error("Código requerido", "Ingrese el código de barras.")
+      altBarcodeInputRef.current?.focus()
       return
     }
-    const units = newAltType === "synonym" ? 1 : Number(newAltUnits)
+    const units = Number(newAltUnits) || 1
     if (units <= 0) {
       toast.error("Unidades inválidas", "Las unidades deben ser mayores a 0.")
       return
     }
+    const label = newAltLabel.trim() || (units === 1 ? "Código Secundario (Multiorigen)" : `Pack x${units}`)
     setSavingAltCode(true)
     try {
       await api.products.packBarcodes.create(p.id, {
         codigo_barra: newAltBarcode.trim(),
-        etiqueta: newAltLabel.trim() || (newAltType === "synonym" ? "Código Secundario (Multiorigen)" : `Pack x${units}`),
+        etiqueta: label,
         unidades_por_paquete: units,
       })
-      toast.success("Código registrado", `Código ${newAltBarcode.trim()} agregado con éxito.`)
-      setShowAddAltCodeModal(false)
+      toast.success("Código registrado", `Código ${newAltBarcode.trim()} (${label}) agregado con éxito.`)
+      
+      const fresh360 = await api.products.get360(p.id)
+      if (fresh360) {
+        setData(fresh360)
+        setAltCodes((fresh360.codigos_alternativos as any[]) || [])
+      }
+
       setNewAltBarcode("")
       setNewAltLabel("")
-      setNewAltType("synonym")
-      setNewAltUnits(1)
-      const fresh360 = await api.products.get360(p.id)
-      if (fresh360) setData(fresh360)
+      setNewAltUnits(6)
+      setNewAltType("pack")
+
+      if (keepOpen) {
+        setTimeout(() => altBarcodeInputRef.current?.focus(), 80)
+      } else {
+        setShowAddAltCodeModal(false)
+      }
     } catch (err: any) {
       toast.error("Error al registrar código", err.message)
     } finally {
       setSavingAltCode(false)
     }
-  }, [newAltBarcode, newAltLabel, newAltType, newAltUnits, p.id, toast])
+  }, [newAltBarcode, newAltLabel, newAltUnits, p.id, toast])
 
   const handleDeleteAltCode = useCallback(async (packId: string) => {
     if (!confirm("¿Está seguro de eliminar este código alternativo / pack?")) return
@@ -2272,10 +2298,11 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                     type="button"
                     onClick={() => {
                       setNewAltBarcode("")
-                      setNewAltLabel("")
-                      setNewAltType("synonym")
-                      setNewAltUnits(1)
+                      setNewAltLabel("Pack x6")
+                      setNewAltType("pack")
+                      setNewAltUnits(6)
                       setShowAddAltCodeModal(true)
+                      setTimeout(() => altBarcodeInputRef.current?.focus(), 80)
                     }}
                     className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-xs font-bold flex items-center gap-1.5 transition-colors"
                   >
@@ -2343,122 +2370,197 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                 </div>
               </div>
 
-              {/* ── MODAL: REGISTRAR CÓDIGO ALTERNATIVO O PACK ── */}
+              {/* ── MODAL: REGISTRAR CÓDIGO ALTERNATIVO O PACK (CANONICAL PACKS DESIGN) ── */}
               {showAddAltCodeModal && (
-                <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md p-5 shadow-2xl space-y-4">
-                    <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-                      <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
-                        <Barcode className="w-4 h-4 text-indigo-500" /> Registrar Código de Barras
-                      </h3>
+                <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl max-w-xl w-full flex flex-col my-8">
+                    {/* Header */}
+                    <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-amber-50/50 dark:bg-amber-950/20 rounded-t-3xl">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-2xl bg-amber-600 text-white flex items-center justify-center shadow-md">
+                          <Box className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h3 className="text-base font-black text-slate-900 dark:text-white">
+                            Nuevo Código de Pack / Caja
+                          </h3>
+                          <p className="text-xs text-slate-500">
+                            Asignar código de barra a una presentación por cantidad (ej. Six-Pack, Caja x24)
+                          </p>
+                        </div>
+                      </div>
                       <button
                         type="button"
                         onClick={() => setShowAddAltCodeModal(false)}
-                        className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                        className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                       >
-                        <X className="w-4 h-4" />
+                        <X className="w-5 h-5" />
                       </button>
                     </div>
 
-                    <form onSubmit={handleCreateAltCode} className="space-y-4">
-                      {/* Selector Tipo */}
-                      <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setNewAltType("synonym")
-                            setNewAltUnits(1)
-                          }}
-                          className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
-                            newAltType === "synonym"
-                              ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
-                              : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-                          }`}
-                        >
-                          🏷️ Sinónimo 1:1 (Multiorigen)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setNewAltType("pack")
-                            if (newAltUnits <= 1) setNewAltUnits(6)
-                          }}
-                          className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
-                            newAltType === "pack"
-                              ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
-                              : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-                          }`}
-                        >
-                          📦 Pack / Bulto Cerrado
-                        </button>
-                      </div>
-
-                      {/* Input Código */}
+                    <form onSubmit={(e) => handleCreateAltCode(e, false)} className="p-6 space-y-5">
+                      {/* Ficha del Producto Base Fijo */}
                       <div>
-                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                          Código de Barras <span className="text-rose-500">*</span>
+                        <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
+                          Producto Base *
                         </label>
-                        <input
-                          type="text"
-                          required
-                          autoFocus
-                          value={newAltBarcode}
-                          onChange={(e) => setNewAltBarcode(e.target.value)}
-                          placeholder="Escanee o escriba el código..."
-                          className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-indigo-500"
-                        />
+                        <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 flex items-center justify-center shrink-0 font-bold text-xs">
+                              <Package className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-black text-slate-900 dark:text-white truncate">
+                                {p.nombre}
+                              </p>
+                              <div className="flex flex-wrap items-center gap-3 text-[10px] font-mono text-slate-400 mt-0.5">
+                                {p.codigo_barra && (
+                                  <span>
+                                    Cod: <strong className="text-slate-600 dark:text-slate-300">{p.codigo_barra}</strong>
+                                  </span>
+                                )}
+                                {p.sku && <span>SKU: {p.sku}</span>}
+                                <span>PVP Unitario: <strong className="text-emerald-600 dark:text-emerald-400">{formatPYG(m.precio_venta || p.precio_venta || 0)}</strong></span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                       </div>
 
-                      {/* Input Etiqueta */}
+                      {/* Presets Rápidos */}
+                      <div className="bg-amber-50/40 dark:bg-amber-950/20 p-3.5 rounded-2xl border border-amber-200/50 dark:border-amber-900/40 space-y-2">
+                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-800 dark:text-amber-300">
+                          <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500" /> Atajos de Presentación Frecuentes:
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {PACK_PRESETS_360.map((pr) => (
+                            <button
+                              key={pr.label}
+                              type="button"
+                              onClick={() => {
+                                setNewAltLabel(pr.tag)
+                                setNewAltUnits(pr.unidades)
+                                setNewAltType(pr.unidades === 1 ? "synonym" : "pack")
+                                altBarcodeInputRef.current?.focus()
+                              }}
+                              className="px-2.5 py-1 text-[11px] font-bold bg-white dark:bg-slate-800 hover:bg-amber-500 hover:text-white dark:hover:bg-amber-600 text-slate-700 dark:text-slate-200 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm transition-all"
+                            >
+                              {pr.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Código de Barras de la Caja */}
                       <div>
-                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                          Etiqueta / Descripción
+                        <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                          Código de Barras de la Caja/Pack *
                         </label>
-                        <input
-                          type="text"
-                          value={newAltLabel}
-                          onChange={(e) => setNewAltLabel(e.target.value)}
-                          placeholder={newAltType === "synonym" ? "Ej: Origen Brasil / Argentina" : "Ej: Pack x6 Ahorro"}
-                          className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500"
-                        />
+                        <div className="relative">
+                          <Barcode className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input
+                            ref={altBarcodeInputRef}
+                            type="text"
+                            required
+                            autoFocus
+                            placeholder="Escaneá con la lectora o tipeá el código impreso en la caja"
+                            value={newAltBarcode}
+                            onChange={(e) => setNewAltBarcode(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                if (!newAltLabel.trim()) {
+                                  e.preventDefault()
+                                  altEtiquetaInputRef.current?.focus()
+                                }
+                              }
+                            }}
+                            className="w-full text-xs font-mono font-bold pl-9 pr-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500"
+                          />
+                        </div>
                       </div>
 
-                      {/* Si es pack: Unidades */}
-                      {newAltType === "pack" && (
+                      {/* Etiqueta y Unidades */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
-                          <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                            Unidades en el Pack <span className="text-rose-500">*</span>
+                          <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                            Etiqueta Descriptiva *
                           </label>
                           <input
-                            type="number"
-                            min="2"
-                            step="1"
-                            value={newAltUnits}
-                            onChange={(e) => setNewAltUnits(Math.max(2, parseInt(e.target.value) || 2))}
-                            className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500"
+                            ref={altEtiquetaInputRef}
+                            type="text"
+                            required
+                            placeholder="Ej. Caja x24, Six-Pack, Fardo x12"
+                            value={newAltLabel}
+                            onChange={(e) => setNewAltLabel(e.target.value)}
+                            className="w-full text-xs font-bold px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500"
                           />
-                          <p className="text-[11px] text-slate-400 mt-1">
-                            Precio resultante del pack: <strong>{formatPYG(newAltUnits * m.precio_venta)}</strong>
-                          </p>
+                        </div>
+
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                            Unidades sueltas contenidas *
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="number"
+                              required
+                              min="1"
+                              step="1"
+                              value={newAltUnits}
+                              onChange={(e) => {
+                                const val = Math.max(1, parseInt(e.target.value) || 1)
+                                setNewAltUnits(val)
+                                setNewAltType(val === 1 ? "synonym" : "pack")
+                              }}
+                              className="w-full text-xs font-mono font-black text-amber-600 dark:text-amber-400 text-right pr-14 pl-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 focus:ring-2 focus:ring-amber-500"
+                            />
+                            <span className="text-[10px] font-bold text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                              unidades
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Resumen precio resultante */}
+                      {newAltUnits > 1 && (
+                        <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center justify-between text-xs">
+                          <span className="text-amber-800 dark:text-amber-300 font-medium">Precio resultante del pack:</span>
+                          <span className="font-mono font-black text-amber-600 dark:text-amber-400 text-sm">
+                            {formatPYG(newAltUnits * (m.precio_venta || p.precio_venta || 0))}
+                          </span>
                         </div>
                       )}
 
-                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                      {/* Botonera de Acciones */}
+                      <div className="flex flex-col-reverse sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
                         <button
                           type="button"
                           onClick={() => setShowAddAltCodeModal(false)}
-                          className="px-3 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"
+                          className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                         >
                           Cancelar
                         </button>
-                        <button
-                          type="submit"
-                          disabled={savingAltCode || !newAltBarcode.trim()}
-                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors"
-                        >
-                          {savingAltCode ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                          Guardar Código
-                        </button>
+
+                        <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                          <button
+                            type="button"
+                            disabled={savingAltCode || !newAltBarcode.trim() || !newAltLabel.trim()}
+                            onClick={() => handleCreateAltCode(undefined, true)}
+                            className="px-4 py-2.5 rounded-xl text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/50 dark:text-amber-300 dark:hover:bg-amber-900/60 border border-amber-200 dark:border-amber-800 transition-colors flex items-center gap-1.5 shadow-sm disabled:opacity-60"
+                            title="Guarda este pack y deja el formulario listo para agregar la siguiente presentación"
+                          >
+                            {savingAltCode ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                            Guardar y agregar otro pack
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={savingAltCode || !newAltBarcode.trim() || !newAltLabel.trim()}
+                            className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500 flex items-center gap-1.5 shadow-md disabled:opacity-60 transition-colors"
+                          >
+                            {savingAltCode ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                            Guardar y Cerrar
+                          </button>
+                        </div>
                       </div>
                     </form>
                   </div>
