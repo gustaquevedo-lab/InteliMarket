@@ -304,6 +304,9 @@ async def get_supplier_account_statement(
     # Iniciar saldo acumulado con el saldo anterior
     saldo_acumulado = saldo_anterior
     final_movements = []
+    tot_debito = 0.0
+    tot_nc = 0.0
+    tot_pago = 0.0
 
     if solo_pendientes:
         # En modo "Solo Pendientes", filtramos exclusivamente los documentos con saldo vivo exigible/aplicable:
