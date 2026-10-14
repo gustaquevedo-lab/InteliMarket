@@ -160,6 +160,8 @@ class ExpenseCreate(BaseModel):
     employee_ci: Optional[str] = None
     periodo_nomina: Optional[str] = None
     cuotas_anticipo: Optional[int] = 1
+    monto_brl: Optional[Decimal] = None
+    sueldok_sync_id: Optional[str] = None
     # Clasificación Contable Multinaturaleza (Cierre P&L / Balances)
     naturaleza_economica: NaturalezaEconomica = NaturalezaEconomica.OPEX_GASTO_OPERATIVO
     production_area: Optional[ProductionArea] = None
