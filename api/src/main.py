@@ -154,6 +154,7 @@ from api.src.servicios.router import router as servicios_router
 from api.src.cupones.router import router as cupones_router
 from api.src.donaciones.router import router as donaciones_router
 from api.src.vouchers.router import router as vouchers_router
+from api.src.fractionations.router import router as fractionations_router, general_router as fractionations_general_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -406,6 +407,8 @@ app.include_router(email_router)
 app.include_router(variants_router)
 app.include_router(pack_barcodes_router)
 app.include_router(pack_barcodes_company_router)
+app.include_router(fractionations_router)
+app.include_router(fractionations_general_router)
 app.include_router(verticals_router)
 app.include_router(crm_router)
 app.include_router(price_lists_router)
