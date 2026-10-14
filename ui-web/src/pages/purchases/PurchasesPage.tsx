@@ -236,6 +236,10 @@ export default function PurchasesPage() {
     observaciones?: string
   }[]>([])
   const [ncNumberInput, setNcNumberInput] = useState("")
+  const [enviarAPerdida, setEnviarAPerdida] = useState(false)
+  const [motivoPerdida, setMotivoPerdida] = useState("Merma por vencimiento no reconocida por proveedor")
+  const [enviarAPerdidaPosterior, setEnviarAPerdidaPosterior] = useState(false)
+  const [motivoPerdidaPosterior, setMotivoPerdidaPosterior] = useState("Merma por vencimiento no reconocida por proveedor")
   const [processingReturnAction, setProcessingReturnAction] = useState(false)
   const [printingReturnDoc, setPrintingReturnDoc] = useState<any | null>(null)
   const [downloadingReturnPdfId, setDownloadingReturnPdfId] = useState<string | null>(null)
@@ -2964,9 +2968,16 @@ export default function PurchasesPage() {
     const raw = item.raw || item
     setCompletingReturnId(item.id)
     setCompletingReturnItem(raw)
+    setEnviarAPerdida(false)
+    setMotivoPerdida("Merma por vencimiento no reconocida por proveedor")
 
     const provId = raw.proveedor_id || raw.supplier_id
     if (provId) {
+      api.financial.creditNotes({ supplier_id: provId })
+        .then(res => {
+          if (res && Array.isArray(res)) setSupplierCreditNotes(res)
+        })
+        .catch(() => {})
       api.financial.invoices.list({ supplier_id: provId, limit: 100 })
         .then(res => {
           if (res && Array.isArray(res) && res.length > 0) {
@@ -3062,20 +3073,29 @@ export default function PurchasesPage() {
         }))
 
       const ncNumStr = validNcs.map(n => n.numero).filter(Boolean).join(", ") || ncNumberInput || undefined
+      const estTotal = Number(completingReturnItem?.valor_total_estimado || completingReturnItem?.monto || 0)
+      const sumNcs = validNcs.reduce((acc, n) => acc + (Number(n.monto) || 0), 0)
+      const diffRestante = Math.max(0, estTotal - sumNcs)
 
       await api.purchases.returns.complete(
         returnId,
         ncNumStr,
-        validNcs.length > 0 ? validNcs : undefined
+        validNcs.length > 0 ? validNcs : undefined,
+        enviarAPerdida ? {
+          enviar_a_perdida: true,
+          monto_perdida: diffRestante,
+          motivo_perdida: motivoPerdida.trim() || undefined,
+        } : undefined
       )
       toast.success(
-        "Devolución Completada",
-        `Salida física registrada con éxito.${validNcs.length > 0 ? ` Se registraron e impactaron ${validNcs.length} Nota(s) de Crédito formalmente.` : ""}`
+        "Devolución Completada y Conciliada",
+        `Salida física registrada con éxito.${validNcs.length > 0 ? ` Se afectaron ${validNcs.length} Nota(s) de Crédito formalmente.` : ""}${enviarAPerdida ? ` Saldo de ${formatPYG(diffRestante)} asentado a Pérdida.` : ""}`
       )
       setCompletingReturnId(null)
       setCompletingReturnItem(null)
       setCompletingReturnNcs([])
       setNcNumberInput("")
+      setEnviarAPerdida(false)
       const [updatedReturns, updatedInvoices, updatedCreditNotes] = await Promise.all([
         api.purchases.returns.list(),
         api.financial.invoices.list({ order_by: "newest" }),
@@ -3100,9 +3120,16 @@ export default function PurchasesPage() {
   const handleOpenManageNcs = (rawItem: any) => {
     const raw = rawItem.raw || rawItem
     setManagingNcsReturn(raw)
+    setEnviarAPerdidaPosterior(Boolean(raw.enviado_a_perdida))
+    setMotivoPerdidaPosterior(raw.motivo_perdida || "Merma por vencimiento no reconocida por proveedor")
 
     const provId = raw.proveedor_id || raw.supplier_id
     if (provId) {
+      api.financial.creditNotes({ supplier_id: provId })
+        .then(res => {
+          if (res && Array.isArray(res)) setSupplierCreditNotes(res)
+        })
+        .catch(() => {})
       api.financial.invoices.list({ supplier_id: provId, limit: 100 })
         .then(res => {
           if (res && Array.isArray(res) && res.length > 0) {
@@ -3196,20 +3223,34 @@ export default function PurchasesPage() {
         observaciones: nc.observaciones || undefined,
       }))
 
-    if (validNcs.length === 0) {
-      toast.error("Atención", "Ingrese al menos el número y monto de la Nota de Crédito.")
+    if (validNcs.length === 0 && !enviarAPerdidaPosterior) {
+      toast.error("Atención", "Ingrese al menos una Nota de Crédito o marque el envío a pérdida.")
       return
     }
 
     setProcessingReturnAction(true)
     try {
-      await api.purchases.returns.addCreditNotes(managingNcsReturn.id, validNcs)
+      const estTotal = Number(managingNcsReturn?.valor_total_estimado || managingNcsReturn?.monto || 0)
+      const prevNcsTotal = (managingNcsReturn.notas_credito || []).reduce((acc: number, n: any) => acc + (Number(n.monto) || 0), 0) + (managingNcsReturn.nota_credito_monto && (!managingNcsReturn.notas_credito || managingNcsReturn.notas_credito.length === 0) ? Number(managingNcsReturn.nota_credito_monto) : 0)
+      const sumNcs = prevNcsTotal + validNcs.reduce((acc, n) => acc + (Number(n.monto) || 0), 0)
+      const diffRestante = Math.max(0, estTotal - sumNcs)
+
+      await api.purchases.returns.addCreditNotes(
+        managingNcsReturn.id,
+        validNcs,
+        enviarAPerdidaPosterior ? {
+          enviar_a_perdida: true,
+          monto_perdida: diffRestante,
+          motivo_perdida: motivoPerdidaPosterior.trim() || undefined,
+        } : undefined
+      )
       toast.success(
-        "Notas de Crédito Registradas",
-        `Se vincularon ${validNcs.length} NC(s) a la devolución ${managingNcsReturn.codigo}.`
+        "Devolución Conciliada",
+        `Se vincularon ${validNcs.length} NC(s) a la devolución ${managingNcsReturn.codigo}.${enviarAPerdidaPosterior ? ` Saldo de ${formatPYG(diffRestante)} enviado a pérdida.` : ""}`
       )
       setManagingNcsReturn(null)
       setManagingNcsList([])
+      setEnviarAPerdidaPosterior(false)
       const [updatedReturns, updatedInvoices, updatedCreditNotes] = await Promise.all([
         api.purchases.returns.list(),
         api.financial.invoices.list({ order_by: "newest" }),
@@ -5605,6 +5646,11 @@ export default function PurchasesPage() {
                               {item.raw?.notas_credito && item.raw.notas_credito.length > 1 && (
                                 <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
                                   {item.raw.notas_credito.length} NCs
+                                </span>
+                              )}
+                              {Boolean(item.raw?.enviado_a_perdida || Number(item.raw?.monto_perdida || 0) > 0) && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700" title={item.raw.motivo_perdida ? `Pérdida: ${formatPYG(item.raw.monto_perdida)} - ${item.raw.motivo_perdida}` : undefined}>
+                                  Pérdida: {formatPYG(item.raw.monto_perdida || 0)}
                                 </span>
                               )}
                             </div>
@@ -10489,21 +10535,69 @@ export default function PurchasesPage() {
 
               {/* Sección de Carga de NCs */}
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-2">
                     <Receipt className="w-4 h-4 text-purple-600 dark:text-purple-400" />
                     <span className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
                       Notas de Crédito del Proveedor ({completingReturnNcs.length})
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleAddNcRow}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-purple-50 hover:bg-purple-100 text-purple-700 dark:bg-purple-950/50 dark:hover:bg-purple-900/50 dark:text-purple-300 border border-purple-200 dark:border-purple-800 transition"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>+ Agregar otra NC</span>
-                  </button>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {(() => {
+                      const provId = completingReturnItem?.proveedor_id || completingReturnItem?.supplier_id
+                      const currentLoadedNums = new Set(completingReturnNcs.map(n => (n.numero || "").trim().toLowerCase()).filter(Boolean))
+                      const unappliedNcs = (supplierCreditNotes || []).filter((cn: any) => {
+                        const isProv = String(cn.supplier_id) === String(provId)
+                        const saldo = Number(cn.saldo_disponible !== undefined ? cn.saldo_disponible : cn.monto || 0)
+                        const notLoaded = !currentLoadedNums.has((cn.numero || "").trim().toLowerCase())
+                        return isProv && saldo > 0 && notLoaded
+                      })
+
+                      if (unappliedNcs.length === 0) return null
+
+                      return (
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            const found = unappliedNcs.find(cn => String(cn.id) === e.target.value)
+                            if (found) {
+                              const saldo = Number(found.saldo_disponible !== undefined ? found.saldo_disponible : found.monto || 0)
+                              setCompletingReturnNcs(prev => [
+                                ...prev,
+                                {
+                                  id: String(found.id),
+                                  numero: found.numero || "",
+                                  timbrado: found.timbrado || "",
+                                  fecha: found.fecha || new Date().toISOString().slice(0, 10),
+                                  monto: saldo,
+                                  factura_id: "",
+                                  factura_numero: "",
+                                  motivo: found.motivo || found.observaciones || "Acción comercial / NC existente",
+                                  observaciones: found.observaciones || "",
+                                }
+                              ])
+                            }
+                          }}
+                          className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition cursor-pointer max-w-[260px]"
+                        >
+                          <option value="" disabled>+ Vincular NC registrada ({unappliedNcs.length})...</option>
+                          {unappliedNcs.map(cn => (
+                            <option key={cn.id} value={cn.id}>
+                              NC {cn.numero} — Saldo: {formatPYG(cn.saldo_disponible !== undefined ? cn.saldo_disponible : cn.monto)} ({cn.motivo || "NC"})
+                            </option>
+                          ))}
+                        </select>
+                      )
+                    })()}
+                    <button
+                      type="button"
+                      onClick={handleAddNcRow}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-purple-50 hover:bg-purple-100 text-purple-700 dark:bg-purple-950/50 dark:hover:bg-purple-900/50 dark:text-purple-300 border border-purple-200 dark:border-purple-800 transition"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ Agregar otra NC</span>
+                    </button>
+                  </div>
                 </div>
 
                 {completingReturnNcs.length === 0 ? (
@@ -10684,12 +10778,48 @@ export default function PurchasesPage() {
                     const cargado = completingReturnNcs.reduce((acc, n) => acc + (Number(n.monto) || 0), 0)
                     const diff = est - cargado
                     return (
-                      <div className="flex items-center justify-between font-mono text-[11px] pt-1 border-t border-dashed border-slate-200 dark:border-slate-700">
-                        <span className="text-slate-500">Diferencia / Pendiente de Emisión:</span>
-                        <span className={`font-bold ${diff === 0 ? "text-emerald-600" : diff > 0 ? "text-amber-600" : "text-blue-600"}`}>
-                          {diff === 0 ? "✓ Coincide 100%" : `${formatPYG(diff)}`}
-                        </span>
-                      </div>
+                      <>
+                        <div className="flex items-center justify-between font-mono text-[11px] pt-1 border-t border-dashed border-slate-200 dark:border-slate-700">
+                          <span className="text-slate-500">Diferencia / Pendiente de Emisión:</span>
+                          <span className={`font-bold ${diff === 0 ? "text-emerald-600" : diff > 0 ? "text-amber-600" : "text-blue-600"}`}>
+                            {diff === 0 ? "✓ Coincide 100%" : `${formatPYG(diff)}`}
+                          </span>
+                        </div>
+                        {diff > 0 && (
+                          <div className="bg-amber-50/90 dark:bg-amber-950/40 border border-amber-300/80 dark:border-amber-700/60 rounded-2xl p-3 space-y-2 mt-2">
+                            <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                              <input
+                                type="checkbox"
+                                checked={enviarAPerdida}
+                                onChange={(e) => setEnviarAPerdida(e.target.checked)}
+                                className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 mt-0.5 border-slate-300 dark:border-slate-600"
+                              />
+                              <div>
+                                <div className="font-bold text-xs flex items-center gap-1.5 text-amber-900 dark:text-amber-200">
+                                  <span>Enviar diferencia de {formatPYG(diff)} a Pérdida / Merma Asumida</span>
+                                  <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-amber-200/80 text-amber-900 dark:bg-amber-900 dark:text-amber-200">
+                                    Cierre de Círculo
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-amber-800/80 dark:text-amber-300/80 leading-relaxed mt-0.5">
+                                  El proveedor no emitirá Nota de Crédito por este saldo restante. Al marcar esta opción se asienta como pérdida por vencimiento y la devolución queda 100% conciliada y completada.
+                                </p>
+                              </div>
+                            </label>
+                            {enviarAPerdida && (
+                              <div className="pt-1">
+                                <input
+                                  type="text"
+                                  value={motivoPerdida}
+                                  onChange={(e) => setMotivoPerdida(e.target.value)}
+                                  placeholder="Motivo de la pérdida (ej: Vencimiento asumido por la empresa / Sin reposición)"
+                                  className="w-full px-3 py-1.5 text-xs rounded-xl border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                                />
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
                     )
                   })()}
                 </div>
@@ -10828,21 +10958,69 @@ export default function PurchasesPage() {
 
               {/* Formulario para Cargar Nuevas NCs */}
               <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-2">
                     <Plus className="w-4 h-4 text-indigo-600" />
                     <span className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
                       Cargar Nuevas Notas de Crédito a esta Operación
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleAddManagingNcRow}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>+ Agregar otra NC</span>
-                  </button>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {(() => {
+                      const provId = managingNcsReturn?.proveedor_id || managingNcsReturn?.supplier_id
+                      const currentLoadedNums = new Set(managingNcsList.map(n => (n.numero || "").trim().toLowerCase()).filter(Boolean))
+                      const unappliedNcs = (supplierCreditNotes || []).filter((cn: any) => {
+                        const isProv = String(cn.supplier_id) === String(provId)
+                        const saldo = Number(cn.saldo_disponible !== undefined ? cn.saldo_disponible : cn.monto || 0)
+                        const notLoaded = !currentLoadedNums.has((cn.numero || "").trim().toLowerCase())
+                        return isProv && saldo > 0 && notLoaded
+                      })
+
+                      if (unappliedNcs.length === 0) return null
+
+                      return (
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            const found = unappliedNcs.find(cn => String(cn.id) === e.target.value)
+                            if (found) {
+                              const saldo = Number(found.saldo_disponible !== undefined ? found.saldo_disponible : found.monto || 0)
+                              setManagingNcsList(prev => [
+                                ...prev,
+                                {
+                                  id: String(found.id),
+                                  numero: found.numero || "",
+                                  timbrado: found.timbrado || "",
+                                  fecha: found.fecha || new Date().toISOString().slice(0, 10),
+                                  monto: saldo,
+                                  factura_id: "",
+                                  factura_numero: "",
+                                  motivo: found.motivo || found.observaciones || "Acción comercial / NC existente",
+                                  observaciones: found.observaciones || "",
+                                }
+                              ])
+                            }
+                          }}
+                          className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition cursor-pointer max-w-[260px]"
+                        >
+                          <option value="" disabled>+ Vincular NC registrada ({unappliedNcs.length})...</option>
+                          {unappliedNcs.map(cn => (
+                            <option key={cn.id} value={cn.id}>
+                              NC {cn.numero} — Saldo: {formatPYG(cn.saldo_disponible !== undefined ? cn.saldo_disponible : cn.monto)} ({cn.motivo || "NC"})
+                            </option>
+                          ))}
+                        </select>
+                      )
+                    })()}
+                    <button
+                      type="button"
+                      onClick={handleAddManagingNcRow}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ Agregar otra NC</span>
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-3">
@@ -10995,6 +11173,75 @@ export default function PurchasesPage() {
                   })}
                 </div>
               </div>
+
+              {/* Panel de Resumen y Conciliación de Montos en Gestión Posterior */}
+              {managingNcsReturn && (
+                <div className="bg-slate-100/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 rounded-2xl p-3.5 space-y-2 text-xs">
+                  <div className="flex items-center justify-between font-mono">
+                    <span className="text-slate-500">Valor Total Estimado de Devolución:</span>
+                    <span className="font-extrabold text-slate-900 dark:text-white">
+                      {formatPYG(managingNcsReturn?.valor_total_estimado || managingNcsReturn?.monto || 0)}
+                    </span>
+                  </div>
+                  {(() => {
+                    const est = Number(managingNcsReturn?.valor_total_estimado || managingNcsReturn?.monto || 0)
+                    const prevNcsTotal = (managingNcsReturn.notas_credito || []).reduce((acc: number, n: any) => acc + (Number(n.monto) || 0), 0) + (managingNcsReturn.nota_credito_monto && (!managingNcsReturn.notas_credito || managingNcsReturn.notas_credito.length === 0) ? Number(managingNcsReturn.nota_credito_monto) : 0)
+                    const newNcsTotal = managingNcsList.reduce((acc, n) => acc + (Number(n.monto) || 0), 0)
+                    const totalCargado = prevNcsTotal + newNcsTotal
+                    const diff = est - totalCargado
+                    return (
+                      <>
+                        <div className="flex items-center justify-between font-mono border-t border-slate-200 dark:border-slate-700 pt-1.5">
+                          <span className="text-indigo-700 dark:text-indigo-300 font-bold">Total NCs (Previas + Nuevas):</span>
+                          <span className="font-extrabold text-indigo-700 dark:text-indigo-300">
+                            {formatPYG(totalCargado)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between font-mono text-[11px] pt-1 border-t border-dashed border-slate-200 dark:border-slate-700">
+                          <span className="text-slate-500">Diferencia / Pendiente de Emisión:</span>
+                          <span className={`font-bold ${diff === 0 ? "text-emerald-600" : diff > 0 ? "text-amber-600" : "text-blue-600"}`}>
+                            {diff === 0 ? "✓ Coincide 100%" : `${formatPYG(diff)}`}
+                          </span>
+                        </div>
+                        {diff > 0 && (
+                          <div className="bg-amber-50/90 dark:bg-amber-950/40 border border-amber-300/80 dark:border-amber-700/60 rounded-2xl p-3 space-y-2 mt-2">
+                            <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                              <input
+                                type="checkbox"
+                                checked={enviarAPerdidaPosterior}
+                                onChange={(e) => setEnviarAPerdidaPosterior(e.target.checked)}
+                                className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 mt-0.5 border-slate-300 dark:border-slate-600"
+                              />
+                              <div>
+                                <div className="font-bold text-xs flex items-center gap-1.5 text-amber-900 dark:text-amber-200">
+                                  <span>Enviar diferencia de {formatPYG(diff)} a Pérdida / Merma Asumida</span>
+                                  <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-amber-200/80 text-amber-900 dark:bg-amber-900 dark:text-amber-200">
+                                    Cierre de Círculo
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-amber-800/80 dark:text-amber-300/80 leading-relaxed mt-0.5">
+                                  El proveedor no emitirá Nota de Crédito por este saldo restante. Al marcar esta opción se asienta como pérdida por vencimiento y la devolución queda 100% conciliada y completada.
+                                </p>
+                              </div>
+                            </label>
+                            {enviarAPerdidaPosterior && (
+                              <div className="pt-1">
+                                <input
+                                  type="text"
+                                  value={motivoPerdidaPosterior}
+                                  onChange={(e) => setMotivoPerdidaPosterior(e.target.value)}
+                                  placeholder="Motivo de la pérdida (ej: Vencimiento asumido por la empresa / Sin reposición)"
+                                  className="w-full px-3 py-1.5 text-xs rounded-xl border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                />
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )
+                  })()}
+                </div>
+              )}
             </div>
 
             {/* Footer Buttons */}
@@ -11010,7 +11257,7 @@ export default function PurchasesPage() {
               <button
                 type="button"
                 onClick={handleSaveManagingNcs}
-                disabled={processingReturnAction || managingNcsList.every(n => !n.numero.trim() && Number(n.monto) <= 0)}
+                disabled={processingReturnAction || (managingNcsList.every(n => !n.numero.trim() && Number(n.monto) <= 0) && !enviarAPerdidaPosterior)}
                 className="px-5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 shadow-md shadow-indigo-600/20 disabled:opacity-50 transition-colors"
               >
                 {processingReturnAction ? (

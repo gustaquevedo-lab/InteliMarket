@@ -1222,7 +1222,13 @@ async def complete_purchase_supplier_return(
     uid = uuid.UUID(str(user.get("id")))
     nc_num = body.nota_credito_numero if body else None
     ncs = [nc.model_dump() for nc in body.notas_credito] if (body and body.notas_credito) else None
-    return await returns_service.complete_supplier_return(db, cid, uuid.UUID(return_id), uid, nc_num, ncs)
+    enviar_a_perdida = bool(body.enviar_a_perdida) if body else False
+    monto_perdida = body.monto_perdida if body else None
+    motivo_perdida = body.motivo_perdida if body else None
+    return await returns_service.complete_supplier_return(
+        db, cid, uuid.UUID(return_id), uid, nc_num, ncs,
+        enviar_a_perdida=enviar_a_perdida, monto_perdida=monto_perdida, motivo_perdida=motivo_perdida
+    )
 
 
 @router.post("/purchases/returns/{return_id}/credit-notes")
@@ -1240,7 +1246,13 @@ async def add_credit_notes_to_supplier_return_endpoint(
     cid = uuid.UUID(user.get("company_id") or company_id)
     uid = uuid.UUID(str(user.get("id")))
     ncs = [nc.model_dump() for nc in body.notas_credito]
-    return await returns_service.add_nc_to_supplier_return(db, cid, uuid.UUID(return_id), uid, ncs)
+    enviar_a_perdida = bool(body.enviar_a_perdida)
+    monto_perdida = body.monto_perdida
+    motivo_perdida = body.motivo_perdida
+    return await returns_service.add_nc_to_supplier_return(
+        db, cid, uuid.UUID(return_id), uid, ncs,
+        enviar_a_perdida=enviar_a_perdida, monto_perdida=monto_perdida, motivo_perdida=motivo_perdida
+    )
 
 
 @router.get("/purchases/returns/{return_id}")

@@ -1376,10 +1376,16 @@ class SupplierReturnNCItem(BaseModel):
 class SupplierReturnCompleteInput(BaseModel):
     nota_credito_numero: Optional[str] = None
     notas_credito: Optional[List[SupplierReturnNCItem]] = None
+    enviar_a_perdida: Optional[bool] = False
+    monto_perdida: Optional[Decimal] = None
+    motivo_perdida: Optional[str] = None
 
 
 class SupplierReturnAddNCInput(BaseModel):
     notas_credito: List[SupplierReturnNCItem]
+    enviar_a_perdida: Optional[bool] = False
+    monto_perdida: Optional[Decimal] = None
+    motivo_perdida: Optional[str] = None
 
 
 SupplierReturnItemInput.model_rebuild()

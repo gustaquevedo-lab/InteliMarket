@@ -3005,10 +3005,10 @@ export const api = {
         client.post<any>(`/v1/purchases/returns/${returnId}/approve`),
       reject: (returnId: string, motivo_rechazo: string) =>
         client.post<any>(`/v1/purchases/returns/${returnId}/reject`, { motivo_rechazo }),
-      complete: (returnId: string, nota_credito_numero?: string, notas_credito?: any[]) =>
-        client.post<any>(`/v1/purchases/returns/${returnId}/complete`, { nota_credito_numero, notas_credito }),
-      addCreditNotes: (returnId: string, notas_credito: any[]) =>
-        client.post<any>(`/v1/purchases/returns/${returnId}/credit-notes`, { notas_credito }),
+      complete: (returnId: string, nota_credito_numero?: string, notas_credito?: any[], options?: { enviar_a_perdida?: boolean; monto_perdida?: number; motivo_perdida?: string }) =>
+        client.post<any>(`/v1/purchases/returns/${returnId}/complete`, { nota_credito_numero, notas_credito, ...options }),
+      addCreditNotes: (returnId: string, notas_credito: any[], options?: { enviar_a_perdida?: boolean; monto_perdida?: number; motivo_perdida?: string }) =>
+        client.post<any>(`/v1/purchases/returns/${returnId}/credit-notes`, { notas_credito, ...options }),
       get: (returnId: string) =>
         client.get<any>(`/v1/purchases/returns/${returnId}`),
       downloadPdf: (returnId: string, codigo?: string) => {

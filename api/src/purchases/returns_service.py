@@ -250,6 +250,9 @@ async def list_supplier_returns(
             "completado_at": r.completado_at.isoformat() if r.completado_at else None,
             "rechazado_por": str(r.rechazado_por) if r.rechazado_por else None,
             "rechazado_at": r.rechazado_at.isoformat() if r.rechazado_at else None,
+            "monto_perdida": float(r.monto_perdida or 0) if getattr(r, "monto_perdida", None) else 0.0,
+            "motivo_perdida": getattr(r, "motivo_perdida", None),
+            "enviado_a_perdida": bool(getattr(r, "enviado_a_perdida", False)),
             "motivo_rechazo": r.motivo_rechazo,
             "observaciones": r.observaciones,
             "items": items_detail,
@@ -447,6 +450,9 @@ async def get_supplier_return(
         "rechazado_por": str(r.rechazado_por) if r.rechazado_por else None,
         "rechazado_por_nombre": user_names.get(r.rechazado_por),
         "rechazado_at": r.rechazado_at.isoformat() if r.rechazado_at else None,
+        "monto_perdida": float(r.monto_perdida or 0) if getattr(r, "monto_perdida", None) else 0.0,
+        "motivo_perdida": getattr(r, "motivo_perdida", None),
+        "enviado_a_perdida": bool(getattr(r, "enviado_a_perdida", False)),
         "motivo_rechazo": r.motivo_rechazo,
         "observaciones": r.observaciones,
         "items": items_detail,
@@ -733,6 +739,9 @@ async def complete_supplier_return(
     user_id: uuid.UUID,
     nota_credito_numero: Optional[str] = None,
     notas_credito: Optional[List[Dict[str, Any]]] = None,
+    enviar_a_perdida: bool = False,
+    monto_perdida: Optional[Decimal] = None,
+    motivo_perdida: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Completa la devolución:
@@ -870,26 +879,47 @@ async def complete_supplier_return(
         elif len(facturas_items) == 1:
             target_inv_id = list(facturas_items.keys())[0]
 
-        # Crear registro formal SupplierCreditNote
-        scn = SupplierCreditNote(
-            company_id=company_id,
-            supplier_id=sr.proveedor_id,
-            numero=num_nc or f"NC-{sr.codigo}",
-            numero_factura_origen=target_inv_num or (", ".join(filter(None, {item.factura_numero for item in sr.items})) or None),
-            timbrado=nc_data.get("timbrado"),
-            fecha=f_fecha_date,
-            fecha_recepcion=f_fecha_date,
-            motivo=nc_data.get("motivo") or f"Devolución de mercadería {sr.codigo}",
-            motivo_categoria="devolucion_rotura",
-            impacto_contable="otros_ingresos",
-            monto=monto_nc,
-            saldo_disponible=monto_nc,
-            moneda="PYG",
-            observaciones=nc_data.get("observaciones") or f"Emitida por devolución {sr.codigo}",
-            cancelado=False,
-        )
-        db.add(scn)
-        await db.flush()
+        # Buscar si ya existe la Nota de Crédito en el sistema (ej: registrada en legacy o finanzas previamente)
+        scn = None
+        if num_nc:
+            existing_cn_res = await db.execute(
+                select(SupplierCreditNote).where(
+                    SupplierCreditNote.company_id == company_id,
+                    SupplierCreditNote.supplier_id == sr.proveedor_id,
+                    SupplierCreditNote.numero == num_nc,
+                    SupplierCreditNote.cancelado == False,
+                )
+            )
+            scn = existing_cn_res.scalar_one_or_none()
+
+        if scn:
+            if target_inv_num and not scn.numero_factura_origen:
+                scn.numero_factura_origen = target_inv_num
+            if nc_data.get("timbrado") and not scn.timbrado:
+                scn.timbrado = nc_data.get("timbrado")
+            if scn.saldo_disponible is None or scn.saldo_disponible <= 0:
+                scn.saldo_disponible = monto_nc
+        else:
+            # Crear registro formal SupplierCreditNote
+            scn = SupplierCreditNote(
+                company_id=company_id,
+                supplier_id=sr.proveedor_id,
+                numero=num_nc or f"NC-{sr.codigo}",
+                numero_factura_origen=target_inv_num or (", ".join(filter(None, {item.factura_numero for item in sr.items})) or None),
+                timbrado=nc_data.get("timbrado"),
+                fecha=f_fecha_date,
+                fecha_recepcion=f_fecha_date,
+                motivo=nc_data.get("motivo") or f"Devolución de mercadería {sr.codigo}",
+                motivo_categoria="devolucion_rotura",
+                impacto_contable="otros_ingresos",
+                monto=monto_nc,
+                saldo_disponible=monto_nc,
+                moneda="PYG",
+                observaciones=nc_data.get("observaciones") or f"Emitida por devolución {sr.codigo}",
+                cancelado=False,
+            )
+            db.add(scn)
+            await db.flush()
 
         # Aplicar contra factura de compra si corresponde
         if target_inv_id:
@@ -924,12 +954,12 @@ async def complete_supplier_return(
         saved_ncs.append({
             "id": str(scn.id),
             "numero": num_nc,
-            "timbrado": nc_data.get("timbrado"),
+            "timbrado": nc_data.get("timbrado") or scn.timbrado,
             "fecha": f_fecha_date.isoformat(),
             "monto": float(monto_nc),
             "factura_id": str(target_inv_id) if target_inv_id else None,
             "factura_numero": target_inv_num,
-            "motivo": nc_data.get("motivo"),
+            "motivo": nc_data.get("motivo") or scn.motivo,
             "observaciones": nc_data.get("observaciones"),
         })
 
@@ -955,6 +985,13 @@ async def complete_supplier_return(
     elif sr.valor_total_estimado:
         sr.nota_credito_monto = sr.valor_total_estimado
 
+    # Gestión de Pérdida / Merma no reconocida (Cierre de círculo)
+    if enviar_a_perdida or monto_perdida is not None:
+        p_monto = Decimal(str(monto_perdida)) if monto_perdida is not None else max(Decimal(0), (sr.valor_total_estimado or Decimal(0)) - total_nc_monto)
+        sr.monto_perdida = p_monto
+        sr.motivo_perdida = motivo_perdida or f"Merma asumida por vencimiento / No reconocida por proveedor ({sr.codigo})"
+        sr.enviado_a_perdida = True
+
     # 3. IMPACTO FINANCIERO Y LEGAL:
     # La devolución física (DEV) es el acto administrativo de baja de inventario / Kardex en depósito.
     # El impacto financiero en deuda lo formaliza legalmente la Nota de Crédito (SupplierCreditNote)
@@ -974,10 +1011,13 @@ async def add_nc_to_supplier_return(
     return_id: uuid.UUID,
     user_id: uuid.UUID,
     notas_credito: List[Dict[str, Any]],
+    enviar_a_perdida: bool = False,
+    monto_perdida: Optional[Decimal] = None,
+    motivo_perdida: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Permite registrar una o más Notas de Crédito a una devolución (incluso si ya fue completada previamente).
-    Crea las entidades formales SupplierCreditNote y las aplicaciones contra factura.
+    Crea o reutiliza las entidades formales SupplierCreditNote y las aplicaciones contra factura.
     """
     q = select(SupplierReturn).options(selectinload(SupplierReturn.items)).where(
         SupplierReturn.id == return_id,
@@ -1015,25 +1055,45 @@ async def add_nc_to_supplier_return(
             except Exception:
                 target_inv_id = None
 
-        scn = SupplierCreditNote(
-            company_id=company_id,
-            supplier_id=sr.proveedor_id,
-            numero=num or f"NC-{sr.codigo}",
-            numero_factura_origen=target_inv_num or (", ".join(filter(None, {item.factura_numero for item in sr.items})) or None),
-            timbrado=(nc_data.get("timbrado") or "").strip() or None,
-            fecha=f_fecha_date,
-            fecha_recepcion=f_fecha_date,
-            motivo=nc_data.get("motivo") or f"Devolución de mercadería {sr.codigo}",
-            motivo_categoria="devolucion_rotura",
-            impacto_contable="otros_ingresos",
-            monto=monto,
-            saldo_disponible=monto,
-            moneda="PYG",
-            observaciones=nc_data.get("observaciones") or f"NC agregada a devolución {sr.codigo}",
-            cancelado=False,
-        )
-        db.add(scn)
-        await db.flush()
+        scn = None
+        if num:
+            existing_cn_res = await db.execute(
+                select(SupplierCreditNote).where(
+                    SupplierCreditNote.company_id == company_id,
+                    SupplierCreditNote.supplier_id == sr.proveedor_id,
+                    SupplierCreditNote.numero == num,
+                    SupplierCreditNote.cancelado == False,
+                )
+            )
+            scn = existing_cn_res.scalar_one_or_none()
+
+        if scn:
+            if target_inv_num and not scn.numero_factura_origen:
+                scn.numero_factura_origen = target_inv_num
+            if nc_data.get("timbrado") and not scn.timbrado:
+                scn.timbrado = nc_data.get("timbrado")
+            if scn.saldo_disponible is None or scn.saldo_disponible <= 0:
+                scn.saldo_disponible = monto
+        else:
+            scn = SupplierCreditNote(
+                company_id=company_id,
+                supplier_id=sr.proveedor_id,
+                numero=num or f"NC-{sr.codigo}",
+                numero_factura_origen=target_inv_num or (", ".join(filter(None, {item.factura_numero for item in sr.items})) or None),
+                timbrado=(nc_data.get("timbrado") or "").strip() or None,
+                fecha=f_fecha_date,
+                fecha_recepcion=f_fecha_date,
+                motivo=nc_data.get("motivo") or f"Devolución de mercadería {sr.codigo}",
+                motivo_categoria="devolucion_rotura",
+                impacto_contable="otros_ingresos",
+                monto=monto,
+                saldo_disponible=monto,
+                moneda="PYG",
+                observaciones=nc_data.get("observaciones") or f"NC agregada a devolución {sr.codigo}",
+                cancelado=False,
+            )
+            db.add(scn)
+            await db.flush()
 
         if target_inv_id:
             inv_q = select(SupplierInvoice).where(SupplierInvoice.id == target_inv_id, SupplierInvoice.company_id == company_id)
@@ -1067,12 +1127,12 @@ async def add_nc_to_supplier_return(
         current_ncs.append({
             "id": str(scn.id),
             "numero": num,
-            "timbrado": (nc_data.get("timbrado") or "").strip() or None,
+            "timbrado": (nc_data.get("timbrado") or scn.timbrado or "").strip() or None,
             "fecha": f_fecha_date.isoformat(),
             "monto": float(monto),
             "factura_id": str(target_inv_id) if target_inv_id else None,
             "factura_numero": target_inv_num,
-            "motivo": nc_data.get("motivo"),
+            "motivo": nc_data.get("motivo") or scn.motivo,
             "observaciones": nc_data.get("observaciones"),
         })
 
@@ -1081,6 +1141,12 @@ async def add_nc_to_supplier_return(
     if all_nums:
         sr.nota_credito_numero = ", ".join(all_nums)
     sr.nota_credito_monto = Decimal(str(sum(c.get("monto", 0) for c in current_ncs)))
+
+    if enviar_a_perdida or monto_perdida is not None:
+        p_monto = Decimal(str(monto_perdida)) if monto_perdida is not None else max(Decimal(0), (sr.valor_total_estimado or Decimal(0)) - (sr.nota_credito_monto or Decimal(0)))
+        sr.monto_perdida = p_monto
+        sr.motivo_perdida = motivo_perdida or f"Merma asumida por vencimiento / No reconocida por proveedor ({sr.codigo})"
+        sr.enviado_a_perdida = True
 
     await db.commit()
     await db.refresh(sr)
