@@ -201,17 +201,46 @@ export default function Product360Modal({ data: initialData, onClose, onPriceUpd
   const [savingLink, setSavingLink] = useState(false)
   const [unlinkingFrac, setUnlinkingFrac] = useState(false)
 
+  const costoDisplayPadre = Number(m.costo_promedio || p.costo_promedio || m.costo_unitario || 0)
+  const precioDisplayPadre = Number(m.precio_venta || p.precio_venta || 0)
+  const factorActual = quickChildFactor > 0 ? quickChildFactor : 24
+  const costoUnitarioProrrateado = costoDisplayPadre > 0 ? Math.round(costoDisplayPadre / factorActual) : 0
+  const precioUnitarioVenta = quickChildPrice || 0
+
+  const margenComercialPct = (precioUnitarioVenta > 0 && costoUnitarioProrrateado > 0)
+    ? (((precioUnitarioVenta - costoUnitarioProrrateado) / precioUnitarioVenta) * 100)
+    : 0
+  const markupPct = (costoUnitarioProrrateado > 0)
+    ? (((precioUnitarioVenta - costoUnitarioProrrateado) / costoUnitarioProrrateado) * 100)
+    : 0
+  const gananciaUnitariaGs = Math.max(0, precioUnitarioVenta - costoUnitarioProrrateado)
+  const gananciaTotalDisplayGs = gananciaUnitariaGs * factorActual
+  const diferenciaVsDisplayCerrado = (precioUnitarioVenta * factorActual) - precioDisplayPadre
+
+  const MARGENES_RAPIDOS = [15, 20, 25, 30, 35, 40]
+  const aplicarMargenRapido = useCallback((margenDeseado: number) => {
+    if (costoUnitarioProrrateado <= 0) return
+    const precioCalculado = Math.round(costoUnitarioProrrateado / (1 - margenDeseado / 100))
+    const precioRedondeado = Math.ceil(precioCalculado / 50) * 50
+    setQuickChildPrice(precioRedondeado)
+  }, [costoUnitarioProrrateado])
+
   const handleOpenLinkModal = useCallback(() => {
     setQuickChildName(`${p.nombre} (Unidad)`)
     setQuickChildBarcode("")
-    setQuickChildFactor(24)
-    const pDisplay = Number(m.precio_venta || p.precio_venta || 0)
-    setQuickChildPrice(pDisplay > 0 ? Math.round(pDisplay / 24) : 0)
+    const f = 24
+    setQuickChildFactor(f)
+    const cDisplay = Number(m.costo_promedio || p.costo_promedio || m.costo_unitario || 0)
+    const cProrrateado = cDisplay > 0 ? Math.round(cDisplay / f) : 0
+    const pSugerido = cProrrateado > 0 ? Math.ceil(Math.round(cProrrateado / (1 - 0.25)) / 50) * 50 : (
+      Number(m.precio_venta || p.precio_venta || 0) > 0 ? Math.round(Number(m.precio_venta || p.precio_venta || 0) / f) : 0
+    )
+    setQuickChildPrice(pSugerido)
     setExistingChildId("")
-    setExistingFactor(24)
+    setExistingFactor(f)
     setLinkMode("quick_create")
     setShowLinkModal(true)
-  }, [p.nombre, p.precio_venta, m.precio_venta])
+  }, [p.nombre, p.costo_promedio, p.precio_venta, m.costo_promedio, m.costo_unitario, m.precio_venta])
 
   const handleCreateAltCode = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
@@ -2577,7 +2606,36 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                       </div>
 
                       {linkMode === "quick_create" ? (
-                        <div className="space-y-3">
+                        <div className="space-y-4">
+                          {/* ── CARD: ESTRUCTURA DEL DISPLAY PADRE ── */}
+                          <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-2">
+                              📦 Datos del Producto Display Padre (Caja Cerrada)
+                            </span>
+                            <div className="grid grid-cols-3 gap-2 text-center">
+                              <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                                <span className="text-[10px] font-bold text-slate-400 block">Costo Compra</span>
+                                <strong className="text-xs font-mono font-bold text-slate-800 dark:text-slate-200">
+                                  {formatPYG(costoDisplayPadre)}
+                                </strong>
+                              </div>
+                              <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                                <span className="text-[10px] font-bold text-slate-400 block">Precio Display</span>
+                                <strong className="text-xs font-mono font-bold text-slate-800 dark:text-slate-200">
+                                  {formatPYG(precioDisplayPadre)}
+                                </strong>
+                              </div>
+                              <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                                <span className="text-[10px] font-bold text-slate-400 block">Margen Display</span>
+                                <strong className="text-xs font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                                  {costoDisplayPadre > 0 && precioDisplayPadre > 0
+                                    ? (((precioDisplayPadre - costoDisplayPadre) / precioDisplayPadre) * 100).toFixed(1) + "%"
+                                    : "—"}
+                                </strong>
+                              </div>
+                            </div>
+                          </div>
+
                           <div>
                             <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
                               Nombre de la Unidad en Góndola <span className="text-rose-500">*</span>
@@ -2620,27 +2678,124 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                                 onChange={(e) => {
                                   const f = Math.max(2, parseInt(e.target.value) || 2)
                                   setQuickChildFactor(f)
-                                  const pD = Number(m.precio_venta || p.precio_venta || 0)
-                                  if (pD > 0) setQuickChildPrice(Math.round(pD / f))
                                 }}
                                 className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-violet-500"
                               />
                             </div>
                           </div>
 
+                          {/* ── BANNER DESTACADO: COSTO PRORRATEADO ── */}
+                          <div className="p-3 rounded-xl bg-violet-50 dark:bg-violet-950/40 border border-violet-200 dark:border-violet-900/60 flex items-center justify-between">
+                            <div>
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-violet-600 dark:text-violet-400 block">
+                                Costo Unitario Prorrateado
+                              </span>
+                              <span className="text-base font-mono font-black text-violet-900 dark:text-violet-200">
+                                ₲ {formatPYG(costoUnitarioProrrateado)}
+                              </span>
+                            </div>
+                            <span className="text-[11px] text-violet-700 dark:text-violet-300 font-medium bg-violet-100 dark:bg-violet-900/60 px-2 py-1 rounded-lg">
+                              {formatPYG(costoDisplayPadre)} ÷ {factorActual} unid.
+                            </span>
+                          </div>
+
+                          {/* ── BOTONES DE MÁRGENES RÁPIDOS ── */}
+                          <div>
+                            <div className="flex items-center justify-between mb-1.5">
+                              <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                                Márgenes Rápidos Comerciales:
+                              </label>
+                              <span className="text-[10px] text-slate-400">Clic para sugerir precio</span>
+                            </div>
+                            <div className="grid grid-cols-6 gap-1.5">
+                              {MARGENES_RAPIDOS.map((mObj) => {
+                                const isSelected = Math.abs(margenComercialPct - mObj) < 1.5
+                                return (
+                                  <button
+                                    key={mObj}
+                                    type="button"
+                                    onClick={() => aplicarMargenRapido(mObj)}
+                                    className={`py-1.5 px-1 rounded-lg text-xs font-bold font-mono transition-all border ${
+                                      isSelected
+                                        ? "bg-violet-600 border-violet-600 text-white shadow-sm"
+                                        : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-violet-400 hover:text-violet-600 dark:hover:text-violet-400"
+                                    }`}
+                                  >
+                                    +{mObj}%
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+
+                          {/* ── INPUT DE PRECIO UNITARIO MINORISTA ── */}
                           <div>
                             <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                              Precio Unitario Minorista (PYG)
+                              Precio Unitario Minorista (PYG) <span className="text-rose-500">*</span>
                             </label>
                             <CurrencyInput
                               value={quickChildPrice}
                               onChangeValue={(val) => setQuickChildPrice(val || 0)}
                               placeholder="0"
-                              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold text-sm focus:ring-2 focus:ring-violet-500"
+                              className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-black text-lg focus:ring-2 focus:ring-violet-500"
                             />
-                            <p className="text-[11px] text-slate-400 mt-1">
-                              Costo display: <strong>{formatPYG(m.costo_promedio || p.costo_promedio || 0)}</strong> &rarr; Costo unitario sugerido: <strong>{formatPYG(Math.round(Number(m.costo_promedio || p.costo_promedio || 0) / quickChildFactor))}</strong>
-                            </p>
+                          </div>
+
+                          {/* ── PANEL DE ANÁLISIS EN VIVO DE MARGEN & RENTABILIDAD ── */}
+                          <div className="p-3.5 rounded-xl bg-slate-900 text-white space-y-2.5">
+                            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                                Indicadores de Rentabilidad en Góndola
+                              </span>
+                              <span
+                                className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                                  margenComercialPct >= 25
+                                    ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                                    : margenComercialPct >= 15
+                                    ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                                    : "bg-rose-500/20 text-rose-400 border border-rose-500/30"
+                                }`}
+                              >
+                                {margenComercialPct >= 25 ? "Margen Óptimo" : margenComercialPct >= 15 ? "Margen Aceptable" : "Margen Ajustado"}
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-center">
+                              <div className="p-2 rounded-lg bg-slate-800/70 border border-slate-700/60">
+                                <span className="text-[10px] text-slate-400 block font-medium">Margen Comercial</span>
+                                <strong
+                                  className={`text-sm font-mono font-black ${
+                                    margenComercialPct >= 20 ? "text-emerald-400" : "text-amber-400"
+                                  }`}
+                                >
+                                  {margenComercialPct.toFixed(1)}%
+                                </strong>
+                              </div>
+                              <div className="p-2 rounded-lg bg-slate-800/70 border border-slate-700/60">
+                                <span className="text-[10px] text-slate-400 block font-medium">Markup (Marcación)</span>
+                                <strong className="text-sm font-mono font-black text-indigo-300">
+                                  {markupPct.toFixed(1)}%
+                                </strong>
+                              </div>
+                              <div className="p-2 rounded-lg bg-slate-800/70 border border-slate-700/60">
+                                <span className="text-[10px] text-slate-400 block font-medium">Ganancia x Unidad</span>
+                                <strong className="text-sm font-mono font-black text-emerald-400">
+                                  +{formatPYG(gananciaUnitariaGs)}
+                                </strong>
+                              </div>
+                              <div className="p-2 rounded-lg bg-slate-800/70 border border-slate-700/60">
+                                <span className="text-[10px] text-slate-400 block font-medium">Total x Display</span>
+                                <strong className="text-sm font-mono font-black text-amber-300">
+                                  +{formatPYG(gananciaTotalDisplayGs)}
+                                </strong>
+                              </div>
+                            </div>
+
+                            {diferenciaVsDisplayCerrado > 0 && (
+                              <p className="text-[11px] text-emerald-400 text-center font-medium pt-1">
+                                ✨ Vender fraccionado genera <strong>+{formatPYG(diferenciaVsDisplayCerrado)}</strong> más por display que venderlo cerrado.
+                              </p>
+                            )}
                           </div>
                         </div>
                       ) : (

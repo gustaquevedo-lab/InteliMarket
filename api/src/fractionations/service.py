@@ -273,8 +273,6 @@ async def quick_create_child_and_link(
         tipo="producto",
         tipo_venta="unidad",
         categoria_id=parent_prod.categoria_id,
-        marca_id=getattr(parent_prod, "marca_id", None),
-        departamento_id=getattr(parent_prod, "departamento_id", None),
         supplier_id=getattr(parent_prod, "supplier_id", None),
         costo_promedio=costo_child,
         ultimo_costo=costo_child,
