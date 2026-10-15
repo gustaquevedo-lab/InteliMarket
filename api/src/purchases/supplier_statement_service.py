@@ -52,6 +52,7 @@ async def get_supplier_account_statement(
     fecha_desde: Optional[date] = None,
     fecha_hasta: Optional[date] = None,
     solo_pendientes: bool = False,
+    ordenar_por: str = "numero_factura",
 ) -> Dict[str, Any]:
     """Genera el estado de cuenta corriente cíclico del proveedor ordenado cronológicamente.
     
@@ -340,6 +341,20 @@ async def get_supplier_account_statement(
                 m_copy["punteado"] = False
                 pendientes_list.append(m_copy)
 
+        if ordenar_por == "numero_factura":
+            def _extract_invoice_sort_key(item):
+                ref = (item.get("factura_relacionada") or item.get("comprobante") or "").strip()
+                return (ref.lower(), str(item.get("fecha", "")))
+
+            pendientes_list.sort(key=_extract_invoice_sort_key)
+            running = 0.0
+            for item in pendientes_list:
+                if item["tipo"] == "FACTURA":
+                    running += item["debito"]
+                elif item["tipo"] == "NOTA_CREDITO":
+                    running -= item["credito"]
+                item["saldo_progresivo"] = running
+
         final_movements = pendientes_list
         saldo_deudor_final = max(0.0, saldo_running)
         tot_debito = tot_debito_pend
@@ -365,6 +380,13 @@ async def get_supplier_account_statement(
 
             final_movements.append(m_copy)
 
+        if ordenar_por == "numero_factura":
+            def _extract_invoice_sort_key_all(item):
+                ref = (item.get("factura_relacionada") or item.get("comprobante") or "").strip()
+                return (ref.lower(), str(item.get("fecha", "")))
+
+            final_movements.sort(key=_extract_invoice_sort_key_all)
+
         tot_credito = tot_nc + tot_pago
         saldo_deudor_final = saldo_acumulado
     compromiso_total_con_cheques = saldo_deudor_final + cheques_diferidos_transito_monto
@@ -375,6 +397,7 @@ async def get_supplier_account_statement(
             "fecha_desde": _date_str(fecha_desde) if fecha_desde else "",
             "fecha_hasta": _date_str(fecha_hasta) if fecha_hasta else "",
             "solo_pendientes": solo_pendientes,
+            "ordenar_por": ordenar_por,
             "fecha_emision_reporte": _date_str(today),
         },
         "saldo_anterior": saldo_anterior,

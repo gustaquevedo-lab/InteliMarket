@@ -1309,6 +1309,7 @@ from api.src.purchases import supplier_360_pdf
 from api.src.purchases import supplier_return_pdf
 from api.src.purchases import supplier_statement_service
 from api.src.purchases import supplier_statement_pdf
+from api.src.purchases import supplier_statement_excel
 
 
 @router.get("/purchases/suppliers/{supplier_id}/360")
@@ -1363,15 +1364,16 @@ async def get_supplier_account_statement_endpoint(
     fecha_desde: Optional[date] = Query(None, description="Fecha inicio del extracto"),
     fecha_hasta: Optional[date] = Query(None, description="Fecha fin del extracto"),
     solo_pendientes: bool = Query(False, description="Filtrar solo comprobantes pendientes/con saldo"),
+    ordenar_por: str = Query("numero_factura", description="Ordenar por 'numero_factura' o 'fecha'"),
     company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    """Retorna el extracto cronológico de cuenta corriente (facturas, NCs, pagos) con saldo progresivo acumulado."""
+    """Retorna el extracto de cuenta corriente (facturas, NCs, pagos) ordenado por N° de factura o cronológico."""
     cid = uuid.UUID(user.get("company_id") or company_id)
     sid = uuid.UUID(supplier_id)
     return await supplier_statement_service.get_supplier_account_statement(
-        db, cid, sid, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta, solo_pendientes=solo_pendientes
+        db, cid, sid, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta, solo_pendientes=solo_pendientes, ordenar_por=ordenar_por
     )
 
 
@@ -1382,6 +1384,7 @@ async def export_supplier_account_statement_pdf_endpoint(
     fecha_desde: Optional[date] = Query(None, description="Fecha inicio del extracto"),
     fecha_hasta: Optional[date] = Query(None, description="Fecha fin del extracto"),
     solo_pendientes: bool = Query(False, description="Filtrar solo comprobantes pendientes/con saldo"),
+    ordenar_por: str = Query("numero_factura", description="Ordenar por 'numero_factura' o 'fecha'"),
     company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
@@ -1390,7 +1393,7 @@ async def export_supplier_account_statement_pdf_endpoint(
     cid = uuid.UUID(user.get("company_id") or company_id)
     sid = uuid.UUID(supplier_id)
     data = await supplier_statement_service.get_supplier_account_statement(
-        db, cid, sid, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta, solo_pendientes=solo_pendientes
+        db, cid, sid, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta, solo_pendientes=solo_pendientes, ordenar_por=ordenar_por
     )
     company = await _get_company_info(db, str(cid))
     user_name = user.get("nombre") or user.get("email") or "Tesorería / Cuentas por Pagar"
@@ -1404,6 +1407,38 @@ async def export_supplier_account_statement_pdf_endpoint(
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
             "Content-Length": str(len(pdf_bytes)),
+        },
+    )
+
+
+@router.get("/purchases/suppliers/{supplier_id}/account-statement/excel")
+@router.get("/suppliers/{supplier_id}/account-statement/excel")
+async def export_supplier_account_statement_excel_endpoint(
+    supplier_id: str,
+    fecha_desde: Optional[date] = Query(None, description="Fecha inicio del extracto"),
+    fecha_hasta: Optional[date] = Query(None, description="Fecha fin del extracto"),
+    solo_pendientes: bool = Query(False, description="Filtrar solo comprobantes pendientes/con saldo"),
+    ordenar_por: str = Query("numero_factura", description="Ordenar por 'numero_factura' o 'fecha'"),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Genera y descarga el archivo Excel oficial (.xlsx) para punteo y conciliación de deudas contra el extracto del proveedor."""
+    cid = uuid.UUID(user.get("company_id") or company_id)
+    sid = uuid.UUID(supplier_id)
+    data = await supplier_statement_service.get_supplier_account_statement(
+        db, cid, sid, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta, solo_pendientes=solo_pendientes, ordenar_por=ordenar_por
+    )
+    excel_bytes = supplier_statement_excel.generate_supplier_statement_excel(data)
+    rz_clean = (data.get("supplier", {}).get("razon_social") or "proveedor").replace(" ", "_").replace("/", "_")
+    p_suf = f"_{fecha_desde}_{fecha_hasta}" if (fecha_desde and fecha_hasta) else ""
+    filename = f"Extracto_Punteo_{rz_clean}{p_suf}.xlsx"
+    return StreamingResponse(
+        iter([excel_bytes]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(excel_bytes)),
         },
     )
 

@@ -2869,21 +2869,33 @@ export const api = {
       const tabSuffix = tab ? `_${tab}` : ""
       return downloadAuthenticated(`/v1/purchases/suppliers/${supplierId}/360/pdf?company_id=${COMPANY_ID}${tabParam}`, {}, `Informe_360_${clean}${tabSuffix}.pdf`)
     },
-    getSupplierAccountStatement: (supplierId: string, params?: { fecha_desde?: string; fecha_hasta?: string; solo_pendientes?: boolean }) => {
+    getSupplierAccountStatement: (supplierId: string, params?: { fecha_desde?: string; fecha_hasta?: string; solo_pendientes?: boolean; ordenar_por?: string }) => {
       const q = new URLSearchParams({ company_id: COMPANY_ID })
       if (params?.fecha_desde) q.set("fecha_desde", params.fecha_desde)
       if (params?.fecha_hasta) q.set("fecha_hasta", params.fecha_hasta)
       if (params?.solo_pendientes) q.set("solo_pendientes", "true")
+      if (params?.ordenar_por) q.set("ordenar_por", params.ordenar_por)
       return client.get<SupplierAccountStatementResponse>(`/v1/purchases/suppliers/${supplierId}/account-statement?${q.toString()}`)
     },
-    downloadSupplierAccountStatementPdf: (supplierId: string, razonSocial?: string, params?: { fecha_desde?: string; fecha_hasta?: string; solo_pendientes?: boolean }) => {
+    downloadSupplierAccountStatementPdf: (supplierId: string, razonSocial?: string, params?: { fecha_desde?: string; fecha_hasta?: string; solo_pendientes?: boolean; ordenar_por?: string }) => {
       const clean = (razonSocial || "proveedor").replace(/\s+/g, "_").replace(/\//g, "_")
       const q = new URLSearchParams({ company_id: COMPANY_ID })
       if (params?.fecha_desde) q.set("fecha_desde", params.fecha_desde)
       if (params?.fecha_hasta) q.set("fecha_hasta", params.fecha_hasta)
       if (params?.solo_pendientes) q.set("solo_pendientes", "true")
+      if (params?.ordenar_por) q.set("ordenar_por", params.ordenar_por)
       const pSuffix = (params?.fecha_desde && params?.fecha_hasta) ? `_${params.fecha_desde}_${params.fecha_hasta}` : ""
       return downloadAuthenticated(`/v1/purchases/suppliers/${supplierId}/account-statement/pdf?${q.toString()}`, {}, `Extracto_Punteo_${clean}${pSuffix}.pdf`)
+    },
+    downloadSupplierAccountStatementExcel: (supplierId: string, razonSocial?: string, params?: { fecha_desde?: string; fecha_hasta?: string; solo_pendientes?: boolean; ordenar_por?: string }) => {
+      const clean = (razonSocial || "proveedor").replace(/\s+/g, "_").replace(/\//g, "_")
+      const q = new URLSearchParams({ company_id: COMPANY_ID })
+      if (params?.fecha_desde) q.set("fecha_desde", params.fecha_desde)
+      if (params?.fecha_hasta) q.set("fecha_hasta", params.fecha_hasta)
+      if (params?.solo_pendientes) q.set("solo_pendientes", "true")
+      if (params?.ordenar_por) q.set("ordenar_por", params.ordenar_por)
+      const pSuffix = (params?.fecha_desde && params?.fecha_hasta) ? `_${params.fecha_desde}_${params.fecha_hasta}` : ""
+      return downloadAuthenticated(`/v1/purchases/suppliers/${supplierId}/account-statement/excel?${q.toString()}`, {}, `Extracto_Punteo_${clean}${pSuffix}.xlsx`)
     },
     getSupplierPerformance: (id: string) => client.get<{ supplier_id: string; razon_social: string; total_orders: number; total_spent: number; on_time_rate: number | null; avg_quality_score: number | null; avg_delivery_score: number | null; avg_price_score: number | null; avg_attention_score: number | null; overall_rating: number | null; last_evaluation_date: string | null }>(`/v1/suppliers/${id}/performance`),
     getSupplierPriceHistory: (id: string) => client.get<{ product_id: string; product_nombre: string; sku: string; purchase_order_id: string; fecha_orden: string; precio_unitario: number; cantidad: number }[]>(`/v1/suppliers/${id}/price-history`),

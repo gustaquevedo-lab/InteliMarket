@@ -6,7 +6,8 @@ import {
   FileText, ShieldAlert, CreditCard, RefreshCw, Layers, Eye,
   BarChart3, Calendar, Truck, ArrowUpRight, ArrowDownRight,
   Search, ExternalLink, HelpCircle, Check, Sparkles, Printer,
-  Wallet, Tag, FileCheck, Filter, ShieldCheck, ChevronDown, CornerDownRight
+  Wallet, Tag, FileCheck, Filter, ShieldCheck, ChevronDown, CornerDownRight,
+  FileSpreadsheet, ArrowUpDown
 } from "lucide-react"
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, XAxis, YAxis,
@@ -68,9 +69,12 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
   const [statementData, setStatementData] = useState<SupplierAccountStatementResponse | null>(null)
   const [loadingStatement, setLoadingStatement] = useState(false)
   const [downloadingStatementPdf, setDownloadingStatementPdf] = useState(false)
+  const [downloadingStatementExcel, setDownloadingStatementExcel] = useState(false)
   const [statementFechaDesde, setStatementFechaDesde] = useState("")
   const [statementFechaHasta, setStatementFechaHasta] = useState("")
   const [statementSoloPendientes, setStatementSoloPendientes] = useState(true)
+  const [statementOrdenarPor, setStatementOrdenarPor] = useState<"numero_factura" | "fecha">("numero_factura")
+  const [sortFacturasPor, setSortFacturasPor] = useState<"numero" | "vencimiento" | "fecha" | "saldo">("numero")
   const [punteadosLocal, setPunteadosLocal] = useState<Record<string, boolean>>({})
   const [searchMovimiento, setSearchMovimiento] = useState("")
 
@@ -142,17 +146,20 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
     fecha_desde?: string
     fecha_hasta?: string
     solo_pendientes?: boolean
+    ordenar_por?: string
   }) => {
     setLoadingStatement(true)
     try {
       const pDesde = overrideParams?.fecha_desde !== undefined ? overrideParams.fecha_desde : statementFechaDesde
       const pHasta = overrideParams?.fecha_hasta !== undefined ? overrideParams.fecha_hasta : statementFechaHasta
       const pPendientes = overrideParams?.solo_pendientes !== undefined ? overrideParams.solo_pendientes : statementSoloPendientes
+      const pOrden = overrideParams?.ordenar_por !== undefined ? overrideParams.ordenar_por : statementOrdenarPor
 
       const res = await api.purchases.getSupplierAccountStatement(supplierId, {
         fecha_desde: pDesde || undefined,
         fecha_hasta: pHasta || undefined,
         solo_pendientes: pPendientes,
+        ordenar_por: pOrden,
       })
       setStatementData(res)
     } catch (err: any) {
@@ -173,6 +180,7 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
           fecha_desde: statementFechaDesde || undefined,
           fecha_hasta: statementFechaHasta || undefined,
           solo_pendientes: isSoloPendientes,
+          ordenar_por: statementOrdenarPor,
         }
       )
       toast.success(
@@ -188,6 +196,27 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
     }
   }
 
+  const handleDownloadStatementExcel = async () => {
+    setDownloadingStatementExcel(true)
+    try {
+      await api.purchases.downloadSupplierAccountStatementExcel(
+        supplierId,
+        data?.supplier?.razon_social || supplierNombre || "proveedor",
+        {
+          fecha_desde: statementFechaDesde || undefined,
+          fecha_hasta: statementFechaHasta || undefined,
+          solo_pendientes: statementSoloPendientes,
+          ordenar_por: statementOrdenarPor,
+        }
+      )
+      toast.success("Excel Descargado", "El extracto y planilla para punteo en Excel fue descargado con éxito.")
+    } catch (err: any) {
+      toast.error("Error al exportar Excel", err.message)
+    } finally {
+      setDownloadingStatementExcel(false)
+    }
+  }
+
   // Carga automática al cambiar a vista extracto
   useEffect(() => {
     if (subVistaDeudas === "extracto" && !statementData && !loadingStatement) {
@@ -198,7 +227,7 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
   // Filtrado de Facturas
   const facturasFiltradas = useMemo(() => {
     if (!data?.facturas) return []
-    return data.facturas.filter(f => {
+    const list = data.facturas.filter(f => {
       const matchText =
         !searchFactura ||
         f.numero_factura.toLowerCase().includes(searchFactura.toLowerCase()) ||
@@ -228,7 +257,23 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
 
       return matchText && matchSaldo && matchVenc && matchNc && matchFase
     })
-  }, [data?.facturas, searchFactura, filterEstadoSaldo, filterVencimiento, filterNcFactura, filterFaseFactura])
+
+    return list.sort((a, b) => {
+      if (sortFacturasPor === "numero") {
+        return a.numero_factura.localeCompare(b.numero_factura, undefined, { numeric: true, sensitivity: "base" })
+      }
+      if (sortFacturasPor === "vencimiento") {
+        return (a.fecha_vencimiento || "").localeCompare(b.fecha_vencimiento || "")
+      }
+      if (sortFacturasPor === "fecha") {
+        return (b.fecha_emision || "").localeCompare(a.fecha_emision || "")
+      }
+      if (sortFacturasPor === "saldo") {
+        return (b.saldo_neto_real ?? b.saldo_pendiente ?? 0) - (a.saldo_neto_real ?? a.saldo_pendiente ?? 0)
+      }
+      return 0
+    })
+  }, [data?.facturas, searchFactura, filterEstadoSaldo, filterVencimiento, filterNcFactura, filterFaseFactura, sortFacturasPor])
 
   const totalSaldoFiltradas = useMemo(() => {
     return facturasFiltradas.reduce((acc, f) => acc + (f.saldo_neto_real ?? f.saldo_pendiente ?? 0), 0)
@@ -748,6 +793,17 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
+                        onClick={handleDownloadStatementExcel}
+                        disabled={downloadingStatementExcel}
+                        className="px-3.5 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-700/20 transition disabled:opacity-50"
+                        title="Exportar extracto completo o consolidado de punteo a archivo Excel (.xlsx)"
+                      >
+                        <FileSpreadsheet className={`w-3.5 h-3.5 ${downloadingStatementExcel ? "animate-spin" : ""}`} />
+                        <span>{downloadingStatementExcel ? "Generando..." : "Exportar Excel (.xlsx)"}</span>
+                      </button>
+
+                      <button
+                        type="button"
                         onClick={() => handleDownloadStatementPdf(true)}
                         disabled={downloadingStatementPdf}
                         className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition disabled:opacity-50"
@@ -838,6 +894,17 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                           <option value="bloqueada_nc">Fase 1: Retenida por NC</option>
                           <option value="vencida">Fase 1: Vencida</option>
                           <option value="al_dia">Fase 1: Al Día</option>
+                        </select>
+
+                        <select
+                          value={sortFacturasPor}
+                          onChange={e => setSortFacturasPor(e.target.value as any)}
+                          className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-rose-300 dark:border-rose-800 text-xs font-bold text-rose-700 dark:text-rose-400 focus:ring-2 focus:ring-rose-500"
+                        >
+                          <option value="numero">Ordenar: N° de Factura (Punteo)</option>
+                          <option value="vencimiento">Ordenar: Fecha Vencimiento</option>
+                          <option value="fecha">Ordenar: Fecha Emisión</option>
+                          <option value="saldo">Ordenar: Saldo Pendiente</option>
                         </select>
                       </div>
 
@@ -1007,6 +1074,19 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                           />
                           <span>Solo Pendientes / Con Saldo</span>
                         </label>
+
+                        <select
+                          value={statementOrdenarPor}
+                          onChange={e => {
+                            const val = e.target.value as any
+                            setStatementOrdenarPor(val)
+                            loadStatement({ ordenar_por: val })
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-emerald-300 dark:border-emerald-700 text-xs font-bold text-emerald-700 dark:text-emerald-400 focus:ring-2 focus:ring-emerald-500"
+                        >
+                          <option value="numero_factura">Ordenar por: N° de Factura</option>
+                          <option value="fecha">Ordenar por: Fecha Cronológica</option>
+                        </select>
 
                         <button
                           type="button"

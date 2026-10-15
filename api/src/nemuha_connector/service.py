@@ -460,6 +460,14 @@ async def sync_accounts_payable(db: AsyncSession, company_id: str, since: date |
                     SELECT 1 FROM supplier_payment_order_allocations spoa
                     JOIN supplier_payment_orders spo ON spo.id = spoa.payment_order_id
                     WHERE spoa.invoice_id = :id AND spo.estado = 'pagado'
+                    UNION
+                    SELECT 1 FROM supplier_invoices si
+                    WHERE si.id = :id AND (
+                        si.estado = 'cancelada'
+                        OR si.concepto ILIKE '%duplicad%'
+                        OR si.notas ILIKE '%rectificad%'
+                        OR si.notas ILIKE '%ajuste%'
+                    )
                     LIMIT 1
                 """),
                 {"id": str(existing_id)},
