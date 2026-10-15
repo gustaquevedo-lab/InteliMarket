@@ -46,6 +46,17 @@ COLUMN_MIGRATIONS = [
     ("customers",                "empresa_vinculada_ruc", "VARCHAR(20)"),
     # products
     ("products",                 "tipo_producto",         "VARCHAR(20) DEFAULT 'producto'"),
+    # tenants
+    ("tenants",                  "contacto_phone",        "VARCHAR(30)"),
+    # customers
+    ("customers",                "contacto",              "VARCHAR(200)"),
+    # suppliers
+    ("suppliers",                "contacto",              "VARCHAR(200)"),
+    ("suppliers",                "contacto_nombre",       "VARCHAR(100)"),
+    ("suppliers",                "contacto_telefono",     "VARCHAR(20)"),
+    ("suppliers",                "contacto_email",        "VARCHAR(255)"),
+    # sales_orders
+    ("sales_orders",             "cliente_contacto",      "VARCHAR(100)"),
 ]
 
 # ──────────────────────────────────────────────

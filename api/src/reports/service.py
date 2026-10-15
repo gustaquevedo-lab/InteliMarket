@@ -23,9 +23,12 @@ async def _exec(db: AsyncSession, query: str, params: Optional[dict] = None):
     return result.mappings()
 
 
-async def get_sales_summary(db: AsyncSession, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None, branch_id: Optional[str] = None) -> dict:
+async def get_sales_summary(db: AsyncSession, company_id: Optional[str] = None, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None, branch_id: Optional[str] = None) -> dict:
     params = {}
     where = "v.estado <> 'cancelado'"
+    if company_id:
+        where += " AND v.company_id = :company_id"
+        params["company_id"] = company_id
     if fecha_desde:
         where += " AND v.fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
@@ -72,7 +75,7 @@ async def get_sales_summary(db: AsyncSession, fecha_desde: Optional[date] = None
     }
 
 
-async def get_sales_by_period(db: AsyncSession, agrupar_por: str = "dia", fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None, branch_id: Optional[str] = None, company_id: Optional[str] = None) -> list:
+async def get_sales_by_period(db: AsyncSession, company_id: Optional[str] = None, agrupar_por: str = "dia", fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None, branch_id: Optional[str] = None) -> list:
     params = {}
     where = "v.estado <> 'cancelado'"
     if company_id:
@@ -119,9 +122,12 @@ async def get_sales_by_period(db: AsyncSession, agrupar_por: str = "dia", fecha_
     ]
 
 
-async def get_sales_by_category(db: AsyncSession, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
+async def get_sales_by_category(db: AsyncSession, company_id: Optional[str] = None, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
     params = {}
     where = "v.estado <> 'cancelado'"
+    if company_id:
+        where += " AND v.company_id = :company_id"
+        params["company_id"] = company_id
     if fecha_desde:
         where += " AND v.fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
@@ -232,10 +238,10 @@ async def get_sales_by_product(db: AsyncSession, company_id: Optional[str] = Non
 
 
 async def get_chart_comparison(db: AsyncSession, company_id: Optional[str] = None, agrupar_por: str = "dia", fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
-    return await get_sales_by_period(db, agrupar_por, fecha_desde, fecha_hasta, company_id=company_id)
+    return await get_sales_by_period(db, company_id, agrupar_por, fecha_desde, fecha_hasta)
 
 
-async def get_sales_by_client(db: AsyncSession, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
+async def get_sales_by_client(db: AsyncSession, company_id: Optional[str] = None, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
     params = {}
     where = "v.estado <> 'cancelado'"
     if fecha_desde:
@@ -271,7 +277,7 @@ async def get_sales_by_client(db: AsyncSession, fecha_desde: Optional[date] = No
     ]
 
 
-async def get_inventory_summary(db: AsyncSession, warehouse_id: Optional[int] = None) -> dict:
+async def get_inventory_summary(db: AsyncSession, company_id: Optional[str] = None, warehouse_id: Optional[int] = None) -> dict:
     params = {}
     where = "s.cantidad > 0"
     if warehouse_id:
@@ -309,7 +315,7 @@ async def get_inventory_summary(db: AsyncSession, warehouse_id: Optional[int] = 
     }
 
 
-async def get_inventory_detail(db: AsyncSession, warehouse_id: Optional[int] = None) -> list:
+async def get_inventory_detail(db: AsyncSession, company_id: Optional[str] = None, warehouse_id: Optional[int] = None) -> list:
     params = {}
     where = "1=1"
     if warehouse_id:
@@ -353,7 +359,7 @@ async def get_inventory_detail(db: AsyncSession, warehouse_id: Optional[int] = N
     ]
 
 
-async def get_inventory_rotation(db: AsyncSession) -> list:
+async def get_inventory_rotation(db: AsyncSession, company_id: Optional[str] = None, supplier_id: Optional[str] = None) -> list:
     query = """
         SELECT
             p.nombre as producto,
@@ -389,7 +395,7 @@ async def get_inventory_rotation(db: AsyncSession) -> list:
     return sorted(items, key=lambda x: x["ventas_30d"], reverse=True)
 
 
-async def get_fiscal_book(db: AsyncSession, tipo_libro: str = "ventas", fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
+async def get_fiscal_book(db: AsyncSession, company_id: Optional[str] = None, tipo_libro: str = "ventas", fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
     params = {}
     where = "v.estado <> 'cancelado'"
     if fecha_desde:
@@ -461,7 +467,7 @@ async def get_fiscal_book(db: AsyncSession, tipo_libro: str = "ventas", fecha_de
     ]
 
 
-async def get_fiscal_summary(db: AsyncSession, tipo_libro: str = "ventas", fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> dict:
+async def get_fiscal_summary(db: AsyncSession, company_id: Optional[str] = None, tipo_libro: str = "ventas", fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> dict:
     params = {}
     where = "v.estado <> 'cancelado'"
     if fecha_desde:
@@ -495,7 +501,7 @@ async def get_fiscal_summary(db: AsyncSession, tipo_libro: str = "ventas", fecha
     }
 
 
-async def get_financial_summary(db: AsyncSession, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> dict:
+async def get_financial_summary(db: AsyncSession, company_id: Optional[str] = None, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> dict:
     params = {}
     where = "estado <> 'cancelado'"
     if fecha_desde:
@@ -548,7 +554,7 @@ async def get_financial_summary(db: AsyncSession, fecha_desde: Optional[date] = 
     }
 
 
-async def get_financial_by_day(db: AsyncSession, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
+async def get_financial_by_day(db: AsyncSession, company_id: Optional[str] = None, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
     params = {}
     where = "estado <> 'cancelado'"
     if fecha_desde:
@@ -581,7 +587,7 @@ async def get_financial_by_day(db: AsyncSession, fecha_desde: Optional[date] = N
     ]
 
 
-async def get_fifo_costing(db: AsyncSession, product_id=None, warehouse_id=None) -> list:
+async def get_fifo_costing(db: AsyncSession, company_id: Optional[str] = None, product_id=None, warehouse_id=None) -> list:
     params = {}
     where = "sl.cantidad_disponible > 0"
     if product_id:
@@ -652,7 +658,7 @@ async def get_fifo_costing(db: AsyncSession, product_id=None, warehouse_id=None)
     return sorted(products.values(), key=lambda x: x["total_stock"], reverse=True)
 
 
-async def get_lifo_costing(db: AsyncSession, product_id=None, warehouse_id=None) -> list:
+async def get_lifo_costing(db: AsyncSession, company_id: Optional[str] = None, product_id=None, warehouse_id=None) -> list:
     params = {}
     where = "sl.cantidad_disponible > 0"
     if product_id:
@@ -723,9 +729,9 @@ async def get_lifo_costing(db: AsyncSession, product_id=None, warehouse_id=None)
     return sorted(products.values(), key=lambda x: x["total_stock"], reverse=True)
 
 
-async def get_cost_comparison(db: AsyncSession, product_id=None, warehouse_id=None) -> list:
-    fifo_data = await get_fifo_costing(db, product_id, warehouse_id)
-    lifo_data = await get_lifo_costing(db, product_id, warehouse_id)
+async def get_cost_comparison(db: AsyncSession, company_id: Optional[str] = None, product_id=None, warehouse_id=None) -> list:
+    fifo_data = await get_fifo_costing(db, company_id, product_id, warehouse_id)
+    lifo_data = await get_lifo_costing(db, company_id, product_id, warehouse_id)
 
     lifo_map = {item["producto"]: item for item in lifo_data}
 
@@ -757,7 +763,7 @@ async def get_cost_comparison(db: AsyncSession, product_id=None, warehouse_id=No
     return comparison
 
 
-async def get_inventory_valuation(db: AsyncSession, warehouse_id: Optional[str] = None) -> dict:
+async def get_inventory_valuation(db: AsyncSession, company_id: Optional[str] = None, warehouse_id: Optional[str] = None, supplier_id: Optional[str] = None, fecha_corte: Optional[date] = None) -> dict:
     params = {}
     where = "s.cantidad > 0"
     if warehouse_id:
