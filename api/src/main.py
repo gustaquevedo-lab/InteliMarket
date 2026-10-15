@@ -116,6 +116,7 @@ from api.src.fiscal.router import router as fiscal_router
 from api.src.distribuidora.router import router as distribuidora_router
 from api.src.distribuidora.tracking_router import router as distribuidora_tracking_router
 from api.src.ruta_caja.router import router as ruta_caja_router
+from api.src.viajes.router import router as viajes_router
 from api.src.pagares.router import router as pagares_router
 from api.src.delivery_notes.router import router as delivery_notes_router
 from api.src.intelientregas.fase2_router import router as intelientregas_fase2_router
@@ -471,6 +472,7 @@ app.include_router(data_migration_router)
 app.include_router(distribuidora_router)
 app.include_router(distribuidora_tracking_router)
 app.include_router(ruta_caja_router)
+app.include_router(viajes_router, prefix="/api/v1/distribuidora")
 app.include_router(pagares_router)
 app.include_router(delivery_notes_router)
 app.include_router(intelientregas_fase2_router)
