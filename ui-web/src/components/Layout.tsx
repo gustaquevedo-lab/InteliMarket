@@ -9,7 +9,7 @@ import {
   PieChart, DollarSign, TrendingUp, Bot, Clock, Award, Globe, Repeat, Wrench,
   Copy, Package, Upload, Mail, AlertTriangle, LayoutGrid, Carrot, ChefHat, Radio, Plus, Sparkles, Tag,
   Ticket, ArrowLeftRight, ClipboardCheck, RefreshCw, Radar, Smartphone,
-  Map, Navigation, Trophy
+  Map, Navigation, Trophy, Route, Lightbulb, Thermometer, BarChart3, Shield
 } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
@@ -69,10 +69,22 @@ const navGroups: NavGroup[] = [
     title: "Inicio",
     items: [
       { icon: LayoutDashboard, label: "Dashboard", path: "/" },
+    ]
+  },
+  {
+    // Sección de IA — existía en main (commit a3e8d6d5) pero nunca se mergeó a distribuidora
+    title: "IA & Analítica",
+    verticals: ["distribuidora"],
+    items: [
       { icon: TrendingUp, label: "Gerente de Ventas IA", path: "/sales-agent" },
       { icon: Bot, label: "Gerente Financiero IA", path: "/finance-agent" },
       { icon: Sparkles, label: "Gerente de Marketing IA", path: "/marketing-agent" },
-      { icon: Bot, label: "Marco IA (Asistente)", path: "/asistente-virtual", feature: "asistente_virtual" },
+      { icon: Bot, label: "Marco IA (Cerebro)", path: "/asistente-virtual", feature: "asistente_virtual" },
+      { icon: Route, label: "Ruteo Inteligente", path: "/intelligent-routing", feature: "intelligent_routing" },
+      { icon: Shield, label: "Scoring Crédito", path: "/credit-scoring", feature: "credit_scoring" },
+      { icon: Lightbulb, label: "Oportunidades Comerciales", path: "/oportunidades", feature: "comerciales" },
+      { icon: Thermometer, label: "Cadena de Frío", path: "/cold-chain", feature: "cold_chain" },
+      { icon: BarChart3, label: "Forecast Avanzado", path: "/forecast-avanzado", feature: "forecast_avanzado" },
     ]
   },
   {
