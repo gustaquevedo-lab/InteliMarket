@@ -11,7 +11,7 @@
 | 2 | Gestión de Crédito y Cobranzas | ✅ COMPLETO + DEPLOY | Commits b5a4b054..7ce6cda8. Migración aplicada en minisforum-ia |
 | 3 | Liquidaciones de Cobrador (Cajas de Ruta) | ✅ COMPLETO + DEPLOY | Commits 794cf01a..7635704e. Tablas y API en producción 15-oct-2026 |
 | 4 | Compras e Inventario | ✅ COMPLETO | Commits ecc67a27..0bc85d6f. Reglas proveedor, forecast, SIFEN, muelle, pesaje camión |
-| 5 | Logística / Reparto | 📋 PLAN LISTO | Spec + plan escritos 15-oct-2026. Listo para ejecutar |
+| 5 | Logística / Reparto | ✅ COMPLETO | Commits 8c6b73d8..a1a4d7d8. Deploy pendiente (migración via psql en VM) |
 | 6 | Contabilidad | ⬜ PENDIENTE | Sin spec ni plan — 3.26M asientos desde 2007 |
 
 ## Sub-proyecto 1: Rutas y Vendedores de Campo ✅
