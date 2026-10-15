@@ -13,11 +13,33 @@ import asyncpg
 # Column additions (safe to run repeatedly)
 # ──────────────────────────────────────────────
 COLUMN_MIGRATIONS = [
-    # SP: users extra cols
-    ("users", "foto_url",           "VARCHAR(500)"),
-    ("users", "current_session_id", "VARCHAR(64)"),
-    ("users", "pos_pin_hash",       "VARCHAR(255)"),
-    ("users", "pos_pin_updated_at", "TIMESTAMPTZ"),
+    # users extra cols
+    ("users",                    "foto_url",              "VARCHAR(500)"),
+    ("users",                    "current_session_id",    "VARCHAR(64)"),
+    ("users",                    "pos_pin_hash",          "VARCHAR(255)"),
+    ("users",                    "pos_pin_updated_at",    "TIMESTAMPTZ"),
+    # companies
+    ("companies",                "tenant_id",             "UUID"),
+    ("companies",                "nombre_fantasia",       "VARCHAR(255)"),
+    # customers
+    ("customers",                "tipo",                  "VARCHAR(50) DEFAULT 'cliente'"),
+    ("customers",                "tipo_persona",          "VARCHAR(20) DEFAULT 'juridica'"),
+    ("customers",                "empresa_vinculada_nombre", "VARCHAR(255)"),
+    # suppliers
+    ("suppliers",                "nombre_fantasia",       "VARCHAR(200)"),
+    # tenants
+    ("tenants",                  "fecha_vencimiento",     "TIMESTAMPTZ"),
+    # products
+    ("products",                 "categoria_id",          "UUID"),
+    # sales
+    ("sales",                    "session_id",            "UUID"),
+    # supplier_invoices
+    ("supplier_invoices",        "total_brl",             "NUMERIC(12,2)"),
+    ("supplier_invoices",        "estado",                "VARCHAR(50) DEFAULT 'pendiente'"),
+    # purchase_requisitions
+    ("purchase_requisitions",    "estado",                "VARCHAR(30) DEFAULT 'borrador'"),
+    # demand_forecast purchase_suggestions
+    ("purchase_suggestions",     "supplier_candidates",   "JSONB"),
 ]
 
 # ──────────────────────────────────────────────
@@ -144,9 +166,127 @@ CREATE TABLE IF NOT EXISTS trip_stop_items (
 );
 """
 
+# ──────────────────────────────────────────────
+# Table creations (Plataforma / Monitor)
+# ──────────────────────────────────────────────
+PLATFORM_DDL = """
+CREATE TABLE IF NOT EXISTS mon_issues (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    environment VARCHAR(12) NOT NULL DEFAULT 'production',
+    fingerprint VARCHAR(64) NOT NULL,
+    source VARCHAR(16) NOT NULL,
+    level VARCHAR(10) NOT NULL DEFAULT 'error',
+    title VARCHAR(300) NOT NULL,
+    culprit VARCHAR(300),
+    provider VARCHAR(40),
+    status VARCHAR(12) NOT NULL DEFAULT 'unresolved',
+    first_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+    occurrences INTEGER NOT NULL DEFAULT 1,
+    regressions INTEGER NOT NULL DEFAULT 0,
+    first_release VARCHAR(60),
+    last_release VARCHAR(60),
+    resolved_at TIMESTAMPTZ,
+    resolved_release VARCHAR(60),
+    resolved_by VARCHAR(120),
+    ignored_until TIMESTAMPTZ,
+    last_alert_at TIMESTAMPTZ,
+    spike_alert_at TIMESTAMPTZ,
+    note TEXT,
+    dims JSONB NOT NULL DEFAULT '{}',
+    CONSTRAINT uq_mon_issue_fp UNIQUE (environment, fingerprint)
+);
+CREATE INDEX IF NOT EXISTS ix_mon_issues_status_last ON mon_issues (status, last_seen);
+CREATE INDEX IF NOT EXISTS ix_mon_issues_source ON mon_issues (source);
+CREATE INDEX IF NOT EXISTS ix_mon_issues_provider ON mon_issues (provider);
+
+CREATE TABLE IF NOT EXISTS mon_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    issue_id UUID NOT NULL REFERENCES mon_issues(id) ON DELETE CASCADE,
+    ts TIMESTAMPTZ NOT NULL DEFAULT now(),
+    level VARCHAR(10) NOT NULL DEFAULT 'error',
+    message TEXT,
+    stack TEXT,
+    request_id VARCHAR(16),
+    route VARCHAR(300),
+    http_method VARCHAR(8),
+    http_status INTEGER,
+    duration_ms INTEGER,
+    user_id VARCHAR(40),
+    user_name VARCHAR(120),
+    rol VARCHAR(40),
+    hostname VARCHAR(80),
+    punto_emision VARCHAR(10),
+    release VARCHAR(60),
+    app_version VARCHAR(40),
+    url VARCHAR(500),
+    client_ip VARCHAR(45),
+    user_agent VARCHAR(300),
+    breadcrumbs JSONB,
+    extra JSONB
+);
+CREATE INDEX IF NOT EXISTS ix_mon_events_issue_ts ON mon_events (issue_id, ts);
+CREATE INDEX IF NOT EXISTS ix_mon_events_ts ON mon_events (ts);
+
+CREATE TABLE IF NOT EXISTS mon_issue_hourly (
+    issue_id UUID NOT NULL REFERENCES mon_issues(id) ON DELETE CASCADE,
+    bucket TIMESTAMPTZ NOT NULL,
+    count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (issue_id, bucket)
+);
+
+CREATE TABLE IF NOT EXISTS mon_heartbeats (
+    key VARCHAR(120) PRIMARY KEY,
+    kind VARCHAR(10) NOT NULL DEFAULT 'web',
+    environment VARCHAR(12) NOT NULL DEFAULT 'production',
+    hostname VARCHAR(80),
+    punto_emision VARCHAR(10),
+    user_name VARCHAR(120),
+    rol VARCHAR(40),
+    release VARCHAR(60),
+    app_version VARCHAR(40),
+    electron_version VARCHAR(40),
+    capabilities JSONB,
+    url VARCHAR(500),
+    client_ip VARCHAR(45),
+    user_agent VARCHAR(300),
+    first_seen TIMESTAMPTZ DEFAULT now(),
+    last_seen TIMESTAMPTZ DEFAULT now(),
+    meta JSONB
+);
+
+CREATE TABLE IF NOT EXISTS platform_audit (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ts TIMESTAMPTZ NOT NULL DEFAULT now(),
+    actor_id VARCHAR(40),
+    actor_name VARCHAR(120),
+    action VARCHAR(60) NOT NULL,
+    target_type VARCHAR(40),
+    target_id VARCHAR(80),
+    target_label VARCHAR(160),
+    company_id UUID,
+    before JSONB,
+    after JSONB,
+    client_ip VARCHAR(45)
+);
+CREATE INDEX IF NOT EXISTS ix_platform_audit_ts ON platform_audit (ts);
+
+CREATE TABLE IF NOT EXISTS integration_checks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ts TIMESTAMPTZ NOT NULL DEFAULT now(),
+    company_id UUID,
+    provider VARCHAR(40) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'ok',
+    latency_ms INTEGER,
+    error_message TEXT,
+    meta JSONB
+);
+"""
+
 ALEMBIC_VERSIONS = [
     ("20261014120000", "SP3 route_sessions/liquidations/bank_deposits"),
     ("20261015100000", "SP5 trip_vehicles/trips/stops/items"),
+    ("20261015200000", "platform mon_issues/mon_events/mon_heartbeats/platform_audit"),
 ]
 
 
@@ -173,6 +313,8 @@ async def main():
         print("  ✓ SP3 tables")
         await c.execute(SP5_DDL)
         print("  ✓ SP5 tables")
+        await c.execute(PLATFORM_DDL)
+        print("  ✓ platform tables")
 
         # 3. Alembic versions
         for ver, label in ALEMBIC_VERSIONS:
