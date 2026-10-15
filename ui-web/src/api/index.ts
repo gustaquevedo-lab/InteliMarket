@@ -1214,6 +1214,11 @@ export interface LiquidationItem { id: string; tipo: 'cheque' | 'pagare'; numero
 export interface RouteLiquidation { id: string; route_session_id: string; efectivo_declarado: number; cheques_declarado: number; pagares_declarado: number; nc_aplicadas: number; descuentos_autorizados: number; efectivo_esperado: number; total_cobrado_ar: number; diferencia: number; estado: 'pendiente' | 'autorizada' | 'observada' | 'rechazada'; supervisor_id?: string; observaciones?: string; fecha_autorizacion?: string; created_at: string; items?: LiquidationItem[] }
 export interface RouteSession { id: string; company_id: string; cobrador_id: string; cobrador_nombre?: string; route_id?: string; fecha: string; estado: 'abierta' | 'cerrada' | 'liquidada' | 'observada'; fondo_inicial: number; fondo_sobrante?: number; opened_at: string; closed_at?: string; created_by: string; liquidation?: RouteLiquidation; ar_summary?: { total_efectivo: number; total_cheques: number; total_pagares: number; total_nc: number } }
 export interface TreasuryDailySummary { fecha: string; rutas: Array<{ liquidation_id: string; cobrador_id: string; efectivo: number; cheques: number; pagares: number }>; retail: { total_efectivo: number; session_count: number }; totales: { total_efectivo: number; total_cheques: number; total_pagares: number } }
+export interface TripVehicle { id: string; company_id: string; patente: string; descripcion?: string; max_weight_kg: number; activo: boolean }
+export interface TripStopItem { id: string; stop_id: string; sales_order_item_id: string; product_id: string; cantidad_asignada: number; cantidad_entregada: number; cantidad_rechazada: number; cantidad_faltante: number; nc_id?: string }
+export interface TripStop { id: string; trip_id: string; sales_order_id: string; customer_id: string; orden_visita: number; estado: 'pendiente' | 'entregado' | 'rechazado_parcial' | 'rechazado_total' | 'faltante'; firmado: boolean; observaciones?: string; visited_at?: string; items?: TripStopItem[] }
+export interface Trip { id: string; company_id: string; cobrador_id: string; patente: string; fecha: string; estado: 'armando' | 'listo' | 'en_ruta' | 'completado' | 'cancelado'; km_salida?: number; km_llegada?: number; peso_total_kg?: number; route_session_id?: string; despachante_id: string; created_at: string; stops?: TripStop[] }
+export interface PendingOrderForDispatch { id: string; customer_id: string; customer_name: string; numero: string; total: number; peso_kg: number; zona?: string }
 
 export interface ExpenseCategory { id: string; nombre: string; descripcion?: string; presupuesto_mensual?: number; activo?: boolean; created_at?: string }
 export interface CostCenter { id: string; nombre: string; tipo: "sector" | "global"; peso_prorateo: number; activo?: boolean; created_at?: string }
@@ -4014,6 +4019,30 @@ export const api = {
         client.get<TreasuryDailySummary>('/v1/distribuidora/treasury/daily-summary', { company_id, fecha } as any),
       createBankDeposit: (data: { company_id: string; fecha: string; bank_name: string; account_number: string; monto_efectivo: number; monto_cheques: number; referencia?: string; route_liquidation_ids: string[]; cash_session_ids: string[]; observaciones?: string; created_by: string }) =>
         client.post<any>('/v1/distribuidora/treasury/bank-deposit', data),
+    },
+    viajes: {
+      listVehicles: (company_id: string) =>
+        client.get<TripVehicle[]>('/v1/distribuidora/viajes/vehicles', { company_id } as any),
+      createVehicle: (data: { company_id: string; patente: string; descripcion?: string; max_weight_kg: number }) =>
+        client.post<TripVehicle>('/v1/distribuidora/viajes/vehicles', data),
+      listPendingOrders: (company_id: string, fecha: string) =>
+        client.get<PendingOrderForDispatch[]>('/v1/distribuidora/viajes/pending-orders', { company_id, fecha } as any),
+      listTrips: (company_id: string, fecha: string) =>
+        client.get<Trip[]>('/v1/distribuidora/viajes/', { company_id, fecha } as any),
+      createTrip: (data: { company_id: string; cobrador_id: string; patente: string; fecha: string; despachante_id: string }) =>
+        client.post<Trip>('/v1/distribuidora/viajes/', data),
+      updateTripStops: (trip_id: string, stops: Array<{ sales_order_id: string; customer_id: string; orden_visita: number }>, company_id: string) =>
+        client.patch<Trip>(`/v1/distribuidora/viajes/${trip_id}/stops?company_id=${encodeURIComponent(company_id)}`, { stops }),
+      confirmTrip: (trip_id: string, company_id: string) =>
+        client.post<Trip>(`/v1/distribuidora/viajes/${trip_id}/confirm?company_id=${encodeURIComponent(company_id)}`, {}),
+      getMiViajeHoy: (company_id: string) =>
+        client.get<Trip | null>('/v1/distribuidora/viajes/mi-viaje-hoy', { company_id } as any),
+      registerSalida: (trip_id: string, km_salida: number, company_id: string) =>
+        client.post<Trip>(`/v1/distribuidora/viajes/${trip_id}/salida?company_id=${encodeURIComponent(company_id)}`, { km_salida }),
+      confirmStop: (trip_id: string, stop_id: string, company_id: string, data: { items: Array<{ stop_item_id: string; cantidad_entregada: number; cantidad_rechazada: number; cantidad_faltante: number }>; firmado: boolean; observaciones?: string }) =>
+        client.post<TripStop>(`/v1/distribuidora/viajes/${trip_id}/stops/${stop_id}/confirm?company_id=${encodeURIComponent(company_id)}`, data),
+      registerLlegada: (trip_id: string, km_llegada: number, company_id: string) =>
+        client.post<Trip>(`/v1/distribuidora/viajes/${trip_id}/llegada?company_id=${encodeURIComponent(company_id)}`, { km_llegada }),
     },
   },
   intellizapp: {
