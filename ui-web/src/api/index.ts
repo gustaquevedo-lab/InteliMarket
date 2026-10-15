@@ -2282,7 +2282,7 @@ export const api = {
     dashboard: () => client.get<any>("/v1/supermer/inventory/dashboard"),
   },
   customers: {
-    list: (params?: { search?: string; tipo?: string; activo?: boolean; exclude_proveedores?: boolean; updated_since?: string; limit?: number; offset?: number }) => client.get<Customer[]>(`/v1/companies/${COMPANY_ID}/customers`, params),
+    list: (params?: { search?: string; tipo?: string; activo?: boolean; exclude_proveedores?: boolean; updated_since?: string; country?: string; extra_club_only?: boolean; has_offers_only?: boolean; archetype?: string; limit?: number; offset?: number }) => client.get<Customer[]>(`/v1/companies/${COMPANY_ID}/customers`, params),
     get: (id: string) => client.get<Customer>(`/v1/customers/${id}`),
     get360: (id: string) => client.get<any>(`/v1/customer360/profile/${id}`),
     lookupRuc: (doc: string) => client.get<{ ruc: string; ci: string; dv: string; nombre: string; razon_social: string; telefono?: string; email?: string; encontrado_en_db: boolean; fuente: string }>(`/v1/customers/lookup-ruc/${doc}`),

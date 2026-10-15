@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react"
+import { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import {
   BarChart3, Users, ShoppingBag, TrendingDown, Target, Gift,
   Loader2, RefreshCcw, AlertTriangle, Clock, DollarSign, PieChart,
@@ -6,15 +6,17 @@ import {
   Phone, Mail, ArrowUpRight, TrendingUp, ShieldCheck, CheckCircle2,
   Award, MessageCircle, Send, Filter, Check, Eye, UserCheck, Star,
   Percent, ArrowRight, CreditCard, ShoppingCart, MessageSquare, Flame,
-  Plus, X, Tag, Bot, BadgePercent, CheckCircle, Sparkle
+  Plus, X, Tag, Bot, BadgePercent, CheckCircle, Sparkle,
+  Copy, ExternalLink, Smartphone, MessageSquareText, ChevronDown, SlidersHorizontal
 } from "lucide-react"
-import { api, type Customer } from "../../api"
+import { api, type Customer, type Product } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate } from "../../utils/format"
+import CurrencyInput from "../../components/CurrencyInput"
 
 type Tab = "perfil" | "canasta_habitual" | "scoring_rfm" | "ofertas_personalizadas" | "campanias_retencion"
-type BehaviorFilter = "todos" | "brasil" | "paraguay" | "vip"
+type BehaviorFilter = "todos" | "brasil" | "paraguay" | "vip" | "ofertas_activas" | "riesgo_fuga"
 
 interface Customer360Profile {
   customer: {
@@ -111,8 +113,12 @@ export default function Customer360Page() {
   const [hasMore, setHasMore] = useState(true)
   const [offset, setOffset] = useState(0)
 
-  // Filtro de Comportamiento en barra lateral
+  // Filtros Avanzados y de Comportamiento
   const [behaviorFilter, setBehaviorFilter] = useState<BehaviorFilter>("todos")
+  const [selectedArchetypeFilter, setSelectedArchetypeFilter] = useState<string>("")
+  const [showFilterPanel, setShowFilterPanel] = useState<boolean>(false)
+  const [sortBy, setSortBy] = useState<"reciente" | "gasto" | "compras" | "inactividad">("reciente")
+  const cachedCustomersRef = useRef<Customer[]>([])
 
   // IA Local Qwen 2.5 & Tags interactivos
   const [reanalyzing, setReanalyzing] = useState(false)
@@ -129,6 +135,12 @@ export default function Customer360Page() {
   const [offerValidityDays, setOfferValidityDays] = useState<number>(7)
   const [submittingOffer, setSubmittingOffer] = useState(false)
 
+  // Selector dual de producto para ofertas
+  const [offerMode, setOfferMode] = useState<"frecuentes" | "catalogo">("frecuentes")
+  const [catalogSearch, setCatalogSearch] = useState("")
+  const [catalogResults, setCatalogResults] = useState<Product[]>([])
+  const [searchingCatalog, setSearchingCatalog] = useState(false)
+
   // Métricas del Dashboard
   const [dashboardStats, setDashboardStats] = useState<{
     total_customers: number
@@ -139,10 +151,13 @@ export default function Customer360Page() {
     total_socios_vip: number
   } | null>(null)
 
-  // Mensajería IntelliZapp
+  // Mensajería IntelliZapp & Simulador de WhatsApp
   const [customMsg, setCustomMsg] = useState("")
   const [sendingMsg, setSendingMsg] = useState(false)
   const [sentSuccess, setSentSuccess] = useState(false)
+  const [msgLanguage, setMsgLanguage] = useState<"es" | "pt">("es")
+  const [copiedMsg, setCopiedMsg] = useState(false)
+  const [activeTemplate, setActiveTemplate] = useState<"oferta" | "reactivacion" | "extraclub" | "feria" | "libre">("oferta")
 
   // Debounce para búsqueda remota
   useEffect(() => {
@@ -177,16 +192,33 @@ export default function Customer360Page() {
     }
     try {
       const currentOffset = reset ? 0 : offset
-      const res: any = await api.customers.list({
+      const params: any = {
         search: debouncedSearch.trim() || undefined,
         limit: 50,
         offset: currentOffset,
         exclude_proveedores: true
-      } as any)
+      }
+
+      if (behaviorFilter === "brasil") {
+        params.country = "brasil"
+      } else if (behaviorFilter === "paraguay") {
+        params.country = "paraguay"
+      } else if (behaviorFilter === "vip") {
+        params.extra_club_only = true
+      } else if (behaviorFilter === "ofertas_activas") {
+        params.has_offers_only = true
+      }
+
+      if (selectedArchetypeFilter) {
+        params.archetype = selectedArchetypeFilter
+      }
+
+      const res: any = await api.customers.list(params)
       const list: Customer[] = Array.isArray(res) ? res : (res?.data || [])
       
       if (reset) {
         setCustomers(list)
+        cachedCustomersRef.current = list
         setOffset(list.length)
         if (list.length > 0) {
           if (!selectedCustomerId || !list.some(c => c.id === selectedCustomerId)) {
@@ -194,22 +226,51 @@ export default function Customer360Page() {
           }
         }
       } else {
-        setCustomers(prev => [...prev, ...list])
+        setCustomers(prev => {
+          const merged = [...prev, ...list]
+          cachedCustomersRef.current = merged
+          return merged
+        })
         setOffset(prev => prev + list.length)
       }
       setHasMore(list.length === 50)
     } catch (err: any) {
       console.error("Error loading customers:", err)
-      toast.error("Error al cargar lista de clientes", err.message)
+      if (cachedCustomersRef.current.length > 0 && reset) {
+        setCustomers(cachedCustomersRef.current)
+        toast.info("Modo Resiliencia", "Mostrando clientes en memoria ante problemas de red.")
+      } else {
+        toast.error("Error al cargar lista de clientes", err.message)
+      }
     } finally {
       setLoadingList(false)
       setLoadingMore(false)
     }
-  }, [debouncedSearch, offset, selectedCustomerId, toast])
+  }, [debouncedSearch, offset, selectedCustomerId, behaviorFilter, selectedArchetypeFilter, toast])
 
   useEffect(() => {
     loadCustomers(true)
-  }, [debouncedSearch])
+  }, [debouncedSearch, behaviorFilter, selectedArchetypeFilter])
+
+  // Búsqueda en vivo de productos del catálogo general para ofertas
+  useEffect(() => {
+    if (!catalogSearch.trim() || offerMode !== "catalogo") {
+      setCatalogResults([])
+      return
+    }
+    const timer = setTimeout(async () => {
+      setSearchingCatalog(true)
+      try {
+        const prods = await api.products.list({ search: catalogSearch.trim(), limit: 8, activo: true } as any)
+        setCatalogResults(Array.isArray(prods) ? (prods as Product[]) : [])
+      } catch (err) {
+        console.error("Error buscando en catálogo general:", err)
+      } finally {
+        setSearchingCatalog(false)
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [catalogSearch, offerMode])
 
   // Cargar ofertas del cliente
   const loadOffers = useCallback(async (cid: string) => {
@@ -240,6 +301,7 @@ export default function Customer360Page() {
           
           // Generar mensaje sugerido respetando idioma (Portugués para Brasil, Español para PY)
           const isPT = res.customer.idioma === 'pt' || res.customer.telefono?.startsWith("+55")
+          setMsgLanguage(isPT ? "pt" : "es")
           const favProd = res.customer.ia_analisis?.producto_sugerido_promo || res.frequent_basket?.[0]?.producto || (isPT ? "nossos produtos" : "nuestros productos")
           const primerNombre = (res.customer.razon_social || "").split(",")[0].split(" ")[0]
           
@@ -247,11 +309,11 @@ export default function Customer360Page() {
             setCustomMsg(res.customer.ia_analisis.gancho_mensaje)
           } else if (isPT) {
             setCustomMsg(
-              `Olá ${primerNombre}! 👋 No Extra Supermercado estamos com saudades. Você acumulou ${res.loyalty.total_points.toLocaleString("es-PY")} pontos ExtraClub. Preparamos uma oferta exclusiva em ${favProd}. Passe no caixa e informe seu documento!`
+              `Olá ${primerNombre}! 👋 No Extra Supermercado estamos com saudades. Você acumulou ${res.loyalty.total_points.toLocaleString("es-PY")} pontos ExtraClub. Preparamos uma oferta exclusiva em *${favProd}*. Passe no caixa e informe seu documento!`
             )
           } else {
             setCustomMsg(
-              `¡Hola ${primerNombre}! 👋 En Extra Supermercado te extrañamos. Tenés acumulados ${res.loyalty.total_points.toLocaleString("es-PY")} puntos ExtraClub. Te preparamos un descuento especial en tu favorito ${favProd}. ¡Pedilo en caja con tu cédula!`
+              `¡Hola ${primerNombre}! 👋 En Extra Supermercado te extrañamos. Tenés acumulados ${res.loyalty.total_points.toLocaleString("es-PY")} puntos ExtraClub. Te preparamos un descuento especial en tu favorito *${favProd}*. ¡Pedilo en caja con tu cédula!`
             )
           }
           setSentSuccess(false)
@@ -274,21 +336,23 @@ export default function Customer360Page() {
     }
   }, [selectedCustomerId, toast, loadOffers])
 
-  // Filtrado reactivo en sidebar
+  // Filtrado reactivo y ordenamiento en cliente
   const filteredCustomers = useMemo(() => {
-    return customers.filter(c => {
-      if (behaviorFilter === "brasil") {
-        return (c as any).idioma === 'pt' || c.telefono?.startsWith("+55")
-      }
-      if (behaviorFilter === "paraguay") {
-        return (c as any).idioma !== 'pt' && !c.telefono?.startsWith("+55")
-      }
-      if (behaviorFilter === "vip") {
-        return c.extra_club_numero && c.extra_club_numero.trim() !== ""
-      }
-      return true
-    })
-  }, [customers, behaviorFilter])
+    let result = [...customers]
+    if (behaviorFilter === "riesgo_fuga") {
+      // Filtrar aquellos sin compra reciente o identificados
+      result = result.filter(c => (c as any).arquetipo?.toLowerCase().includes("riesgo") || (c as any).dias_inactivo > 30)
+    }
+
+    if (sortBy === "reciente") {
+      // Orden por defecto
+    } else if (sortBy === "compras") {
+      result.sort((a, b) => ((b as any).total_tickets || 0) - ((a as any).total_tickets || 0))
+    } else if (sortBy === "gasto") {
+      result.sort((a, b) => ((b as any).total_spent || 0) - ((a as any).total_spent || 0))
+    }
+    return result
+  }, [customers, behaviorFilter, sortBy])
 
   // Acción: Re-analizar con Qwen 2.5 IA Local
   const handleReanalyzeWithQwen = async () => {
@@ -361,13 +425,12 @@ export default function Customer360Page() {
     }
   }
 
-  // Abrir Modal de Creación de Oferta
-  const handleOpenCreateOfferModal = (prefillProd?: any) => {
-    const prod = prefillProd || (profile?.frequent_basket && profile.frequent_basket[0]) || null
+  // Seleccionar producto para la oferta (sea frecuente o de catálogo)
+  const handleSelectProductForOffer = (prod: any) => {
     setOfferSelectedProduct(prod)
     if (prod) {
-      const normal = Number(prod.precio_normal || prod.total / Math.max(1, prod.unidades) || 10000)
-      const costo = Number(prod.costo || normal * 0.7)
+      const normal = Number(prod.precio_venta || prod.precio_normal || (prod.total ? prod.total / Math.max(1, prod.unidades) : 10000))
+      const costo = Number(prod.ultimo_costo || prod.costo_promedio || prod.costo || normal * 0.7)
       const piso = Math.round(Math.max(costo * 1.05, 1000))
       // Sugerir 15% OFF respetando piso de costo
       const suggested = Math.max(Math.round(normal * 0.85), piso)
@@ -375,19 +438,28 @@ export default function Customer360Page() {
     } else {
       setOfferPriceInput(0)
     }
+  }
+
+  // Abrir Modal de Creación de Oferta
+  const handleOpenCreateOfferModal = (prefillProd?: any) => {
+    setOfferMode("frecuentes")
+    setCatalogSearch("")
+    setCatalogResults([])
+    const prod = prefillProd || (profile?.frequent_basket && profile.frequent_basket[0]) || null
+    handleSelectProductForOffer(prod)
     setOfferValidityDays(7)
     setShowCreateOfferModal(true)
   }
 
-  // Acción: Confirmar Creación de Oferta con Blindaje Anti-Costo
+  // Acción: Confirmar Creación de Oferta con Blindaje Anti-Costo y Generación de Mensaje
   const handleConfirmCreateOffer = async () => {
     if (!profile?.customer?.id || !offerSelectedProduct) {
       toast.warning("Datos incompletos", "Seleccione un producto para la oferta.")
       return
     }
 
-    const costo = Number(offerSelectedProduct.costo || 0)
-    const normal = Number(offerSelectedProduct.precio_normal || offerPriceInput * 1.2)
+    const normal = Number(offerSelectedProduct.precio_venta || offerSelectedProduct.precio_normal || (offerSelectedProduct.total ? offerSelectedProduct.total / Math.max(1, offerSelectedProduct.unidades) : offerPriceInput * 1.2))
+    const costo = Number(offerSelectedProduct.ultimo_costo || offerSelectedProduct.costo_promedio || offerSelectedProduct.costo || 0)
     const safetyFloor = Math.round(Math.max(costo * 1.05, 500))
 
     if (costo > 0 && offerPriceInput < safetyFloor) {
@@ -403,8 +475,10 @@ export default function Customer360Page() {
       const isPT = profile.customer.idioma === 'pt' || profile.customer.telefono?.startsWith("+55")
       const primerNombre = (profile.customer.razon_social || "").split(",")[0].split(" ")[0]
       const prodName = offerSelectedProduct.producto || offerSelectedProduct.nombre || "Producto Especial"
+      const ahorro = Math.max(0, normal - offerPriceInput)
+      const ahorroPct = normal > 0 ? Math.round((ahorro / normal) * 100) : 0
       
-      const promoTitle = isPT ? `Oferta Especial Te Extrañamos: ${prodName}` : `Promo Te Extrañamos: ${prodName}`
+      const promoTitle = isPT ? `Oferta Especial: ${prodName}` : `Promo Te Extrañamos: ${prodName}`
       const promoDesc = isPT
         ? `Preço especial de Gs. ${offerPriceInput.toLocaleString('es-PY')} para ${primerNombre}. Ativação direta no caixa ao informar documento.`
         : `Precio exclusivo de Gs. ${offerPriceInput.toLocaleString('es-PY')} para ${primerNombre}. Activación directa en caja con cédula o RUC.`
@@ -419,21 +493,87 @@ export default function Customer360Page() {
         dias_validez: offerValidityDays,
       })
 
-      toast.success("🎉 ¡Oferta Creada y Activa en Caja!", `Descuento listo para aplicarse al presentar documento. Margen: ${res.margen_estimado_pct}%`)
+      toast.success("🎉 ¡Oferta Creada y Activa en Caja!", `Precio especial asignado. Margen: ${res.margen_estimado_pct}%. Mensaje preparado en WhatsApp.`)
       setShowCreateOfferModal(false)
       loadOffers(profile.customer.id)
 
-      // Actualizar mensaje de WhatsApp en el Hub con la oferta
+      // Actualizar mensaje de WhatsApp en el Hub con precio normal y precio oferta
+      setMsgLanguage(isPT ? "pt" : "es")
       const waMsg = isPT
-        ? `Olá ${primerNombre}! 👋 No Extra Supermercado estamos com saudades. Preparamos para você um preço exclusivo de Gs. ${offerPriceInput.toLocaleString('es-PY')} no seu produto preferido ${prodName} (Preço normal: Gs. ${normal.toLocaleString('es-PY')}). É só informar seu documento no caixa! Válido por ${offerValidityDays} dias.`
-        : `¡Hola ${primerNombre}! 👋 En Extra Supermercado te extrañamos. Te preparamos un precio exclusivo de Gs. ${offerPriceInput.toLocaleString('es-PY')} en tu producto preferido ${prodName} (Precio normal: Gs. ${normal.toLocaleString('es-PY')}). ¡Pedilo en caja directamente con tu cédula! Válido por ${offerValidityDays} días.`
+        ? `Olá ${primerNombre}! 👋 No Extra Supermercado preparamos um preço exclusivo no seu produto preferido *${prodName}*: por apenas *Gs. ${offerPriceInput.toLocaleString('es-PY')}* (Preço normal: ~Gs. ${normal.toLocaleString('es-PY')}~. Economia de *Gs. ${ahorro.toLocaleString('es-PY')}* - ${ahorroPct}% OFF!). É só informar seu documento no caixa! Válido por ${offerValidityDays} dias.`
+        : `¡Hola ${primerNombre}! 👋 En Extra Supermercado te preparamos un precio exclusivo en tu producto preferido *${prodName}*: a solo *Gs. ${offerPriceInput.toLocaleString('es-PY')}* (Precio normal: ~Gs. ${normal.toLocaleString('es-PY')}~. ¡Ahorrás *Gs. ${ahorro.toLocaleString('es-PY')}* - ${ahorroPct}% OFF!). Solo tenés que dictar tu cédula o RUC en caja. Válido por ${offerValidityDays} dias.`
       setCustomMsg(waMsg)
-      setTab("ofertas_personalizadas")
+      setActiveTemplate("oferta")
+      setTab("campanias_retencion")
     } catch (e: any) {
       toast.error("Error al crear oferta", e.message)
     } finally {
       setSubmittingOffer(false)
     }
+  }
+
+  // Generador dinámico de plantillas para WhatsApp
+  const generateTemplateMessage = (templateKey: "oferta" | "reactivacion" | "extraclub" | "feria" | "libre", lang: "es" | "pt") => {
+    if (!profile) return ""
+    const primerNombre = (profile.customer.razon_social || "").split(",")[0].split(" ")[0]
+    const isPT = lang === "pt"
+    
+    // Buscar oferta activa o producto frecuente
+    const activeOffer = customerOffers.find(o => o.is_active)
+    const favProd = activeOffer?.producto_nombre || profile.customer.ia_analisis?.producto_sugerido_promo || profile.frequent_basket[0]?.producto || (isPT ? "nossos produtos" : "nuestros productos")
+    const pNormal = activeOffer?.precio_normal || (profile.frequent_basket[0] ? (profile.frequent_basket[0].total / Math.max(1, profile.frequent_basket[0].unidades)) : 35000)
+    const pOferta = activeOffer?.precio_oferta || Math.round(pNormal * 0.85)
+    const ahorro = Math.max(0, pNormal - pOferta)
+    const ahorroPct = pNormal > 0 ? Math.round((ahorro / pNormal) * 100) : 15
+    const pts = profile.loyalty.total_points.toLocaleString("es-PY")
+    const vales = formatPYG(profile.loyalty.redeemable_value_pyg)
+
+    if (templateKey === "oferta") {
+      return isPT
+        ? `Olá ${primerNombre}! 👋 No Extra Supermercado preparamos uma oferta exclusiva no seu produto preferido *${favProd}*: por apenas *Gs. ${pOferta.toLocaleString('es-PY')}* (Preço normal: ~Gs. ${pNormal.toLocaleString('es-PY')}~. Economia de *Gs. ${ahorro.toLocaleString('es-PY')}* - ${ahorroPct}% OFF!). É só informar seu documento no caixa! Válido por 7 dias.`
+        : `¡Hola ${primerNombre}! 👋 En Extra Supermercado te preparamos un precio exclusivo en tu producto preferido *${favProd}*: a solo *Gs. ${pOferta.toLocaleString('es-PY')}* (Precio normal: ~Gs. ${pNormal.toLocaleString('es-PY')}~. ¡Ahorrás *Gs. ${ahorro.toLocaleString('es-PY')}* - ${ahorroPct}% OFF!). Solo tenés que dictar tu cédula o RUC en caja. Válido por 7 dias.`
+    }
+    if (templateKey === "reactivacion") {
+      return isPT
+        ? `Olá ${primerNombre}! 👋 Sentimos sua falta no Extra Supermercado! Para celebrar sua volta, preparamos um desconto especial no seu favorito *${favProd}*: de ~Gs. ${pNormal.toLocaleString('es-PY')}~ por apenas *Gs. ${pOferta.toLocaleString('es-PY')}*. Esperamos você esta semana no Extra!`
+        : `¡Hola ${primerNombre}! 👋 ¡Te extrañamos en Extra Supermercado! Para celebrar tu regreso, te preparamos un descuento especial en tu favorito *${favProd}*: de ~Gs. ${pNormal.toLocaleString('es-PY')}~ a solo *Gs. ${pOferta.toLocaleString('es-PY')}*. ¡Te esperamos esta semana en Extra!`
+    }
+    if (templateKey === "extraclub") {
+      return isPT
+        ? `Olá ${primerNombre}! 🌟 Seu saldo atual no ExtraClub é de *${pts} pontos* (equivalentes a *${vales}* em compras). Você pode resgatar hoje mesmo no caixa com seu documento!`
+        : `¡Hola ${primerNombre}! 🌟 Tu saldo actual en ExtraClub es de *${pts} puntos* (equivalentes a *${vales}* en vales de compra). ¡Podés canjearlos hoy mismo en caja presentando tu cédula!`
+    }
+    if (templateKey === "feria") {
+      return isPT
+        ? `Olá ${primerNombre}! 🥩 Te esperamos neste fim de semana no Extra Supermercado com as melhores ofertas na Feira de Carnes Frescas e Hortifruti de fronteira! Venha aproveitar a qualidade e preços de Extra.`
+        : `¡Hola ${primerNombre}! 🥩 ¡Te esperamos este fin de semana en Extra Supermercado con las mejores ofertas en carnes premium y frescos de frontera! Vení a disfrutar de la calidad y los mejores precios.`
+    }
+    return ""
+  }
+
+  // Renderizar formato WhatsApp en el simulador
+  const renderFormattedWhatsAppText = (text: string) => {
+    if (!text) return <span className="text-gray-400 italic">Escriba un mensaje para previsualizar...</span>
+    const lines = text.split("\n")
+    return lines.map((line, lIdx) => {
+      const parts = line.split(/(\*[^*]+\*|~[^~]+~|_[^_]+_)/g)
+      return (
+        <span key={lIdx} className="block min-h-[1.25em]">
+          {parts.map((part, pIdx) => {
+            if (part.startsWith("*") && part.endsWith("*") && part.length > 2) {
+              return <strong key={pIdx} className="font-black text-gray-950 dark:text-white">{part.slice(1, -1)}</strong>
+            }
+            if (part.startsWith("~") && part.endsWith("~") && part.length > 2) {
+              return <del key={pIdx} className="line-through opacity-75">{part.slice(1, -1)}</del>
+            }
+            if (part.startsWith("_") && part.endsWith("_") && part.length > 2) {
+              return <em key={pIdx} className="italic">{part.slice(1, -1)}</em>
+            }
+            return <span key={pIdx}>{part}</span>
+          })}
+        </span>
+      )
+    })
   }
 
   // Acción: Enviar WhatsApp IntelliZapp
@@ -522,15 +662,15 @@ export default function Customer360Page() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* COLUMNA IZQUIERDA: BUSCADOR, FILTROS CONDUCTUALES & LISTA */}
         <div className="lg:col-span-4 space-y-3">
-          <div className="card p-3 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs space-y-2">
+          <div className="card p-3 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs space-y-2.5">
             <div className="relative">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input 
                 type="text" 
                 value={searchCust} 
                 onChange={e => setSearchCust(e.target.value)}
-                placeholder="Buscar por Nombre, Cédula, RUC o Tel..." 
-                className="input text-xs pl-9 w-full bg-gray-50 dark:bg-slate-800/50 border-gray-200 dark:border-slate-700" 
+                placeholder="Buscar por Nombre, Cédula, RUC, Tel o Tarjeta..." 
+                className="input text-xs pl-9 pr-7 w-full bg-gray-50 dark:bg-slate-800/50 border-gray-200 dark:border-slate-700" 
               />
               {searchCust && (
                 <button onClick={() => setSearchCust("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600">
@@ -539,18 +679,20 @@ export default function Customer360Page() {
               )}
             </div>
 
-            {/* FILTROS POR COMPORTAMIENTO */}
+            {/* FILTROS RÁPIDOS MULTIDIMENSIONALES */}
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[10px] font-extrabold scrollbar-none">
               {[
                 { id: "todos", label: "Todos" },
                 { id: "brasil", label: "🇧🇷 Brasil (PT)" },
                 { id: "paraguay", label: "🇵🇾 Paraguay (ES)" },
                 { id: "vip", label: "⭐ Socios Club" },
+                { id: "ofertas_activas", label: "🎁 Con Ofertas" },
+                { id: "riesgo_fuga", label: "⚠️ Riesgo Fuga" },
               ].map((bf) => (
                 <button
                   key={bf.id}
                   onClick={() => setBehaviorFilter(bf.id as BehaviorFilter)}
-                  className={`px-2.5 py-1 rounded-lg transition whitespace-nowrap ${
+                  className={`px-2.5 py-1 rounded-lg transition whitespace-nowrap shrink-0 ${
                     behaviorFilter === bf.id
                       ? "bg-cyan-600 text-white shadow-xs"
                       : "bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200"
@@ -561,9 +703,70 @@ export default function Customer360Page() {
               ))}
             </div>
 
+            {/* BOTÓN Y PANEL DE FILTROS AVANZADOS (DRAWER) */}
+            <div className="pt-1 border-t border-gray-100 dark:border-slate-800/80">
+              <button
+                type="button"
+                onClick={() => setShowFilterPanel(!showFilterPanel)}
+                className="w-full flex items-center justify-between text-[11px] font-bold text-gray-500 dark:text-gray-400 hover:text-cyan-600 transition py-0.5"
+              >
+                <span className="flex items-center gap-1.5">
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                  <span>Filtros Avanzados & Orden</span>
+                  {(selectedArchetypeFilter || sortBy !== "reciente") && (
+                    <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
+                  )}
+                </span>
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showFilterPanel ? "rotate-180" : ""}`} />
+              </button>
+
+              {showFilterPanel && (
+                <div className="mt-2 p-2.5 bg-gray-50 dark:bg-slate-800/60 rounded-xl space-y-2 border border-gray-200 dark:border-slate-700 animate-in fade-in duration-150">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase">Filtrar por Arquetipo:</label>
+                    <select
+                      value={selectedArchetypeFilter}
+                      onChange={e => setSelectedArchetypeFilter(e.target.value)}
+                      className="input text-[11px] py-1 w-full bg-white dark:bg-slate-900 border-gray-200 dark:border-slate-700"
+                    >
+                      <option value="">Todos los arquetipos</option>
+                      {ARCHETYPE_OPTIONS.map(opt => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase">Ordenar por:</label>
+                    <select
+                      value={sortBy}
+                      onChange={e => setSortBy(e.target.value as any)}
+                      className="input text-[11px] py-1 w-full bg-white dark:bg-slate-900 border-gray-200 dark:border-slate-700"
+                    >
+                      <option value="reciente">Más Recientes / Padrón</option>
+                      <option value="gasto">Mayor Gasto Acumulado</option>
+                      <option value="compras">Mayor Cantidad de Compras</option>
+                    </select>
+                  </div>
+
+                  {(selectedArchetypeFilter || sortBy !== "reciente") && (
+                    <button
+                      type="button"
+                      onClick={() => { setSelectedArchetypeFilter(""); setSortBy("reciente"); }}
+                      className="text-[10px] text-cyan-600 dark:text-cyan-400 font-bold hover:underline block text-right pt-1"
+                    >
+                      Limpiar Filtros
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="flex items-center justify-between text-[10px] text-gray-400 px-1 font-bold uppercase pt-1 border-t border-gray-100 dark:border-slate-800">
-              <span>Mostrando: {filteredCustomers.length} {dashboardStats ? `de ${dashboardStats.total_customers.toLocaleString("es-PY")}` : ""}</span>
-              <span>Búsqueda Remota ✓</span>
+              <span>Coincidencias: {filteredCustomers.length} {dashboardStats ? `de ${dashboardStats.total_customers.toLocaleString("es-PY")}` : ""}</span>
+              <span className="text-emerald-500 flex items-center gap-1 font-mono">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Server-Side ✓
+              </span>
             </div>
           </div>
 
@@ -1164,108 +1367,270 @@ export default function Customer360Page() {
                 </div>
               )}
 
-              {/* TAB 5: HUB WHATSAPP INTELLIZAPP */}
+              {/* TAB 5: HUB WHATSAPP INTELLIZAPP & SIMULADOR EN VIVO */}
               {tab === "campanias_retencion" && (
-                <div className="card p-6 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl shadow-xs space-y-5 text-xs">
-                  <div>
-                    <h3 className="font-black text-sm text-gray-900 dark:text-white uppercase flex items-center gap-2">
-                      <MessageCircle className="w-4 h-4 text-emerald-500" /> Hub de Comunicación IntelliZapp WhatsApp
-                    </h3>
-                    <p className="text-[11px] text-gray-400 mt-0.5">
-                      Envío directo de ofertas personalizadas, avisos de puntos ExtraClub y recordatorios en el idioma del cliente.
-                    </p>
-                  </div>
+                <div className="card p-6 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl shadow-xs space-y-6 text-xs">
+                  {/* CABECERA DEL HUB & CONMUTADOR BILINGÜE */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 dark:border-slate-800 pb-4">
+                    <div>
+                      <h3 className="font-black text-sm text-gray-900 dark:text-white uppercase flex items-center gap-2">
+                        <MessageCircle className="w-4 h-4 text-emerald-500" /> 
+                        <span>Hub de Comunicación IntelliZapp WhatsApp</span>
+                      </h3>
+                      <p className="text-[11px] text-gray-400 mt-0.5">
+                        Mensajería hiper-personalizada con inyección de precios, tokens dinámicos y simulador en tiempo real.
+                      </p>
+                    </div>
 
-                  {/* PLANTILLAS RÁPIDAS */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    {[
-                      {
-                        title: "Oferta 'Te Extrañamos'",
-                        desc: "Precio especial en favorito",
-                        icon: Percent,
-                        gen: () => {
-                          const isPT = profile.customer.idioma === 'pt' || profile.customer.telefono?.startsWith("+55")
-                          const pName = (profile.customer.razon_social || "").split(",")[0].split(" ")[0]
-                          const favProd = profile.customer.ia_analisis?.producto_sugerido_promo || profile.frequent_basket[0]?.producto || (isPT ? "produtos preferidos" : "productos preferidos")
-                          return isPT
-                            ? `Olá ${pName}! 🎉 No Extra Supermercado estamos com saudades. Preparamos uma oferta exclusiva no seu produto favorito ${favProd}. É só informar seu documento no caixa! Esperamos você.`
-                            : `¡Hola ${pName}! 🎉 En Extra Supermercado te extrañamos. Te preparamos un descuento exclusivo en tu producto favorito ${favProd}. ¡Pedilo directamente en caja con tu cédula!`
-                        }
-                      },
-                      {
-                        title: "Aviso Puntos ExtraClub",
-                        desc: "Notificación de saldo y vales",
-                        icon: Sparkles,
-                        gen: () => {
-                          const pName = (profile.customer.razon_social || "").split(",")[0].split(" ")[0]
-                          return `¡Hola ${pName}! 🌟 Tu saldo actual en ExtraClub es de ${profile.loyalty.total_points.toLocaleString("es-PY")} puntos (equivalentes a ${formatPYG(profile.loyalty.redeemable_value_pyg)} en vales de compra). Podés canjearlos hoy mismo en caja.`
-                        }
-                      },
-                      {
-                        title: "Invitación de Fin de Semana",
-                        desc: "Feria de carnes y frescos",
-                        icon: Flame,
-                        gen: () => {
-                          const pName = (profile.customer.razon_social || "").split(",")[0].split(" ")[0]
-                          return `¡Hola ${pName}! Te esperamos este fin de semana en Extra Supermercado con las mejores ofertas en carnes y frescos de frontera. ¡Vení a disfrutar de los precios de Extra!`
-                        }
-                      }
-                    ].map((tpl) => (
+                    {/* SELECTOR BILINGÜE ES / PT */}
+                    <div className="flex items-center gap-1 bg-gray-100 dark:bg-slate-800 p-1 rounded-xl self-start sm:self-auto shrink-0">
                       <button
-                        key={tpl.title}
                         type="button"
                         onClick={() => {
-                          setCustomMsg(tpl.gen())
-                          setSentSuccess(false)
+                          setMsgLanguage("es")
+                          if (activeTemplate !== "libre") {
+                            setCustomMsg(generateTemplateMessage(activeTemplate, "es"))
+                          }
                         }}
-                        className="p-3 rounded-2xl bg-gray-50 dark:bg-slate-800/60 border border-gray-200 dark:border-slate-700 text-left hover:border-cyan-500 dark:hover:border-cyan-500 transition space-y-1"
+                        className={`px-3 py-1 rounded-lg text-xs font-black transition flex items-center gap-1.5 ${
+                          msgLanguage === "es"
+                            ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-300 shadow-xs"
+                            : "text-gray-500 hover:text-gray-900 dark:hover:text-white"
+                        }`}
                       >
-                        <div className="flex items-center justify-between">
-                          <span className="font-extrabold text-gray-900 dark:text-white text-xs">{tpl.title}</span>
-                          <tpl.icon className="w-3.5 h-3.5 text-cyan-600" />
-                        </div>
-                        <p className="text-[10px] text-gray-400">{tpl.desc}</p>
+                        <span>🇵🇾</span>
+                        <span>Español</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMsgLanguage("pt")
+                          if (activeTemplate !== "libre") {
+                            setCustomMsg(generateTemplateMessage(activeTemplate, "pt"))
+                          }
+                        }}
+                        className={`px-3 py-1 rounded-lg text-xs font-black transition flex items-center gap-1.5 ${
+                          msgLanguage === "pt"
+                            ? "bg-white dark:bg-slate-700 text-amber-600 dark:text-amber-300 shadow-xs"
+                            : "text-gray-500 hover:text-gray-900 dark:hover:text-white"
+                        }`}
+                      >
+                        <span>🇧🇷</span>
+                        <span>Português</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* PLANTILLAS ESPECIALIZADAS */}
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider block">
+                      Seleccionar Plantilla de Comunicación:
+                    </span>
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                      {[
+                        { id: "oferta", title: "Oferta 1-a-1", desc: "Precio regular vs especial", icon: Percent, color: "text-purple-600" },
+                        { id: "reactivacion", title: "Te Extrañamos", desc: "Gancho en producto favorito", icon: HeartHandshake, color: "text-amber-500" },
+                        { id: "extraclub", title: "Puntos ExtraClub", desc: "Saldo y vales de compra", icon: Sparkles, color: "text-cyan-600" },
+                        { id: "feria", title: "Feria Frescos", desc: "Carnes y fin de semana", icon: Flame, color: "text-red-500" },
+                        { id: "libre", title: "Redacción Libre", desc: "Mensaje abierto con tokens", icon: MessageSquareText, color: "text-emerald-600" },
+                      ].map((tpl) => (
+                        <button
+                          key={tpl.id}
+                          type="button"
+                          onClick={() => {
+                            setActiveTemplate(tpl.id as any)
+                            if (tpl.id !== "libre") {
+                              setCustomMsg(generateTemplateMessage(tpl.id as any, msgLanguage))
+                            }
+                            setSentSuccess(false)
+                          }}
+                          className={`p-2.5 rounded-2xl border text-left transition space-y-1 ${
+                            activeTemplate === tpl.id
+                              ? "bg-cyan-50 dark:bg-cyan-950/40 border-cyan-500 dark:border-cyan-500 shadow-xs"
+                              : "bg-gray-50/70 dark:bg-slate-800/50 border-gray-200 dark:border-slate-700/80 hover:border-gray-300"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-extrabold text-gray-900 dark:text-white text-xs">{tpl.title}</span>
+                            <tpl.icon className={`w-3.5 h-3.5 ${tpl.color}`} />
+                          </div>
+                          <p className="text-[9px] text-gray-400 leading-tight">{tpl.desc}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* TOKENS DINÁMICOS DE INSERCIÓN RÁPIDA */}
+                  <div className="flex items-center gap-1.5 flex-wrap bg-gray-50 dark:bg-slate-800/40 p-2.5 rounded-2xl border border-gray-100 dark:border-slate-800">
+                    <span className="text-[10px] font-black text-gray-400 uppercase flex items-center gap-1 mr-1">
+                      <Tag className="w-3 h-3 text-cyan-600" /> Insertar Token:
+                    </span>
+                    {[
+                      { label: "{primer_nombre}", val: (profile.customer.razon_social || "").split(",")[0].split(" ")[0] },
+                      { label: "{producto}", val: customerOffers[0]?.producto_nombre || profile.frequent_basket[0]?.producto || "Producto Favorito" },
+                      { label: "{precio_regular}", val: customerOffers[0] ? formatPYG(customerOffers[0].precio_normal) : "Gs. 35.000" },
+                      { label: "{precio_especial}", val: customerOffers[0] ? formatPYG(customerOffers[0].precio_oferta) : "Gs. 28.000" },
+                      { label: "{puntos_club}", val: `${profile.loyalty.total_points.toLocaleString("es-PY")} pts` },
+                      { label: "{validez}", val: "7 días" },
+                    ].map((tk) => (
+                      <button
+                        key={tk.label}
+                        type="button"
+                        onClick={() => setCustomMsg(prev => `${prev} ${tk.val}`)}
+                        className="px-2 py-1 rounded-lg bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-[10px] font-mono font-bold text-gray-700 dark:text-gray-300 hover:border-cyan-500 hover:text-cyan-600 transition shadow-2xs"
+                        title={`Inserta: ${tk.val}`}
+                      >
+                        {tk.label}
                       </button>
                     ))}
                   </div>
 
-                  {/* EDITOR Y ENVIADOR DE MENSAJE */}
-                  <div className="space-y-3 bg-gray-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-gray-100 dark:border-slate-700/60">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-gray-600 dark:text-gray-300 text-xs">Mensaje Personalizado WhatsApp:</span>
-                      <span className="text-[10px] text-gray-400 font-mono">Destino: {profile.customer.telefono || "Sin teléfono registrado"}</span>
+                  {/* LAYOUT DE 2 COLUMNAS: EDITOR + SIMULADOR SMARTPHONE DE WHATSAPP */}
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                    {/* COLUMNA IZQUIERDA: EDITOR Y ACCIONES */}
+                    <div className="lg:col-span-7 space-y-4">
+                      <div className="space-y-2 bg-gray-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-gray-100 dark:border-slate-700/60">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-gray-700 dark:text-gray-300">
+                            Cuerpo del Mensaje (con soporte *negrita* y ~tachado~):
+                          </span>
+                          <span className="text-[10px] text-gray-400 font-mono">
+                            {customMsg.length} caracteres
+                          </span>
+                        </div>
+                        <textarea
+                          rows={7}
+                          value={customMsg}
+                          onChange={e => setCustomMsg(e.target.value)}
+                          className="input w-full text-xs font-sans leading-relaxed bg-white dark:bg-slate-900 p-3.5 rounded-xl border-gray-200 dark:border-slate-700 focus:ring-emerald-500"
+                          placeholder="Escriba o personalice el mensaje para el cliente..."
+                        />
+
+                        {/* ACCIONES DE ENVÍO */}
+                        <div className="pt-2 flex items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(customMsg)
+                                setCopiedMsg(true)
+                                setTimeout(() => setCopiedMsg(false), 2000)
+                                toast.success("Copiado al portapapeles", "Listo para pegar en WhatsApp.")
+                              }}
+                              className="px-3 py-2 rounded-xl bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 text-gray-700 dark:text-gray-300 font-bold text-xs flex items-center gap-1.5 transition"
+                            >
+                              {copiedMsg ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 text-gray-500" />}
+                              <span>{copiedMsg ? "¡Copiado!" : "Copiar"}</span>
+                            </button>
+
+                            {profile.customer.telefono && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const cleanPhone = profile.customer.telefono?.replace(/[^0-9]/g, "") || ""
+                                  window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(customMsg)}`, "_blank")
+                                }}
+                                className="px-3 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 font-bold text-xs flex items-center gap-1.5 border border-emerald-200 dark:border-emerald-800 transition"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                                <span>Abrir en WhatsApp</span>
+                              </button>
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={handleSendIntelliZapp}
+                            disabled={sendingMsg || !customMsg.trim()}
+                            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold text-xs flex items-center gap-2 shadow-lg shadow-emerald-600/25 transition disabled:opacity-50"
+                          >
+                            {sendingMsg ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                <span>Enviando por IntelliZapp...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Send className="w-4 h-4" />
+                                <span>Enviar Directo vía IntelliZapp</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      {sentSuccess && (
+                        <div className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs font-bold flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          <span>¡Mensaje despachado con éxito al número registrado del cliente!</span>
+                        </div>
+                      )}
                     </div>
-                    <textarea
-                      rows={4}
-                      value={customMsg}
-                      onChange={e => setCustomMsg(e.target.value)}
-                      className="input w-full text-xs font-sans leading-relaxed bg-white dark:bg-slate-900 p-3 rounded-xl"
-                      placeholder="Escriba el mensaje para el cliente..."
-                    />
-                    <div className="flex items-center justify-between pt-1">
-                      {sentSuccess ? (
-                        <span className="text-xs text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1.5">
-                          <CheckCircle2 className="w-4 h-4" /> ¡Enviado exitosamente por IntelliZapp!
-                        </span>
-                      ) : <div />}
-                      <button
-                        type="button"
-                        onClick={handleSendIntelliZapp}
-                        disabled={sendingMsg || !customMsg.trim()}
-                        className="btn-primary text-xs px-4 py-2 flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-md"
-                      >
-                        {sendingMsg ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            <span>Enviando...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Send className="w-4 h-4" />
-                            <span>Enviar vía IntelliZapp</span>
-                          </>
-                        )}
-                      </button>
+
+                    {/* COLUMNA DERECHA: SIMULADOR DE WHATSAPP EN VIVO (SMARTPHONE MOCKUP) */}
+                    <div className="lg:col-span-5 flex flex-col items-center">
+                      <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1">
+                        <Smartphone className="w-3.5 h-3.5 text-emerald-500" /> Simulador de Pantalla en Vivo
+                      </span>
+
+                      {/* MARCO DEL SMARTPHONE */}
+                      <div className="w-full max-w-[320px] rounded-[36px] bg-slate-900 p-3 shadow-2xl border-4 border-slate-700/80 ring-1 ring-slate-800">
+                        {/* PANTALLA INTERNA */}
+                        <div className="rounded-[28px] overflow-hidden bg-[#EFEAE2] dark:bg-[#0b141a] flex flex-col h-[460px] text-gray-900 dark:text-gray-100 select-none shadow-inner">
+                          {/* CABECERA VERDE WHATSAPP */}
+                          <div className="bg-[#075E54] dark:bg-[#1f2c34] text-white p-3 flex items-center justify-between gap-2 shrink-0">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-white text-xs font-bold">←</span>
+                              <div className="w-7 h-7 rounded-full bg-emerald-700 font-black text-white text-xs flex items-center justify-center shrink-0">
+                                {(profile.customer.razon_social || "C")[0].toUpperCase()}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="font-extrabold text-xs truncate leading-tight">
+                                  {profile.customer.razon_social}
+                                </p>
+                                <span className="text-[9px] text-emerald-200/90 leading-none flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse" />
+                                  <span>en línea</span>
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 text-white/80 text-xs">
+                              <span>📞</span>
+                              <span>⋮</span>
+                            </div>
+                          </div>
+
+                          {/* CUERPO DEL CHAT / BURBUJA */}
+                          <div className="flex-1 p-3 overflow-y-auto space-y-2 flex flex-col justify-end">
+                            {/* FECHA DEL DÍA */}
+                            <div className="text-center my-1">
+                              <span className="bg-white/80 dark:bg-slate-800/80 text-[9px] px-2 py-0.5 rounded-md font-bold text-gray-500 shadow-2xs">
+                                Hoy
+                              </span>
+                            </div>
+
+                            {/* BURBUJA DE MENSAJE SALIENTE */}
+                            <div className="self-end max-w-[92%] bg-[#D9FDD3] dark:bg-[#005c4b] text-gray-900 dark:text-white p-2.5 rounded-2xl rounded-tr-xs shadow-xs text-[11px] leading-relaxed relative">
+                              <div>{renderFormattedWhatsAppText(customMsg)}</div>
+                              <div className="flex items-center justify-end gap-1 text-[8px] text-gray-500 dark:text-emerald-200/80 font-mono mt-1 text-right">
+                                <span>12:00</span>
+                                <span className="text-sky-500 font-bold">✓✓</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* BARRA INFERIOR DE CHAT */}
+                          <div className="p-2 bg-[#F0F2F5] dark:bg-[#1f2c34] flex items-center gap-2 shrink-0 border-t border-black/5">
+                            <span className="text-gray-400 text-xs">😊</span>
+                            <div className="flex-1 bg-white dark:bg-[#2a3942] rounded-full px-3 py-1 text-[10px] text-gray-400">
+                              Mensaje...
+                            </div>
+                            <div className="w-6 h-6 rounded-full bg-[#00A884] text-white flex items-center justify-center text-xs">
+                              🎤
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1279,10 +1644,10 @@ export default function Customer360Page() {
         </div>
       </div>
 
-      {/* 🎁 MODAL: CREAR OFERTA "TE EXTRAÑAMOS" CON BLINDAJE ANTI-COSTO */}
+      {/* 🎁 MODAL HÍBRIDO: CREAR OFERTA 1-A-1 (CANASTA FRECUENTE O CATÁLOGO GENERAL) CON CURRENCYINPUT */}
       {showCreateOfferModal && profile && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl">
+          <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl max-w-xl w-full p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <div className="p-2 rounded-xl bg-purple-500/10 text-purple-600">
@@ -1306,45 +1671,140 @@ export default function Customer360Page() {
               </button>
             </div>
 
-            {/* SELECCIÓN DE PRODUCTO */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
-                Producto Preferido del Cliente:
-              </label>
-              <select
-                value={offerSelectedProduct?.product_id || offerSelectedProduct?.id || ""}
-                onChange={(e) => {
-                  const selected = profile.frequent_basket.find(p => p.product_id === e.target.value)
-                  if (selected) {
-                    setOfferSelectedProduct(selected)
-                    const normal = Number(selected.total / Math.max(1, selected.unidades) || 10000)
-                    const costo = Number((selected as any).costo || normal * 0.7)
-                    const piso = Math.round(Math.max(costo * 1.05, 1000))
-                    setOfferPriceInput(Math.max(Math.round(normal * 0.85), piso))
-                  }
-                }}
-                className="input w-full text-xs bg-gray-50 dark:bg-slate-800 border-gray-200 dark:border-slate-700"
-              >
-                {profile.frequent_basket.map(p => (
-                  <option key={p.product_id} value={p.product_id}>
-                    {p.producto} (Comprado {p.veces} veces)
-                  </option>
-                ))}
-              </select>
+            {/* PESTAÑAS DE SELECCIÓN DE PRODUCTO: FRECUENTES VS CATÁLOGO */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 border-b border-gray-100 dark:border-slate-800 pb-2">
+                <button
+                  type="button"
+                  onClick={() => setOfferMode("frecuentes")}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                    offerMode === "frecuentes"
+                      ? "bg-purple-600 text-white shadow-xs"
+                      : "bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300"
+                  }`}
+                >
+                  <ShoppingBag className="w-3.5 h-3.5" />
+                  <span>Top Canasta Habitual ({profile.frequent_basket.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOfferMode("catalogo")}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                    offerMode === "catalogo"
+                      ? "bg-purple-600 text-white shadow-xs"
+                      : "bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300"
+                  }`}
+                >
+                  <Search className="w-3.5 h-3.5" />
+                  <span>Buscar en Catálogo General</span>
+                </button>
+              </div>
+
+              {/* MODO A: CANASTA FRECUENTE */}
+              {offerMode === "frecuentes" && (
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  {profile.frequent_basket.length === 0 ? (
+                    <p className="text-center text-xs text-gray-400 py-4">No hay canasta habitual registrada para este cliente.</p>
+                  ) : (
+                    profile.frequent_basket.map((p) => {
+                      const isSelected = (offerSelectedProduct?.product_id || offerSelectedProduct?.id) === p.product_id
+                      return (
+                        <button
+                          key={p.product_id}
+                          type="button"
+                          onClick={() => handleSelectProductForOffer(p)}
+                          className={`w-full text-left p-2.5 rounded-xl transition flex items-center justify-between text-xs border ${
+                            isSelected
+                              ? "bg-purple-50 dark:bg-purple-950/50 border-purple-500 shadow-xs"
+                              : "bg-gray-50 dark:bg-slate-800/40 border-gray-100 dark:border-slate-800 hover:border-gray-200"
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <p className="font-bold text-gray-900 dark:text-white truncate">{p.producto}</p>
+                            <span className="text-[10px] text-gray-400">Comprado {p.veces} veces · {p.unidades.toFixed(1)} u.</span>
+                          </div>
+                          <div className="text-right ml-2 shrink-0">
+                            <span className="font-mono font-bold text-xs text-purple-600 dark:text-purple-400">
+                              {formatPYG(p.total / Math.max(1, p.unidades))}
+                            </span>
+                            <span className="text-[9px] text-gray-400 block">precio habitual</span>
+                          </div>
+                        </button>
+                      )
+                    })
+                  )}
+                </div>
+              )}
+
+              {/* MODO B: BUSCADOR EN CATÁLOGO GENERAL */}
+              {offerMode === "catalogo" && (
+                <div className="space-y-2">
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="text"
+                      value={catalogSearch}
+                      onChange={e => setCatalogSearch(e.target.value)}
+                      placeholder="Escriba código de barras o nombre del producto..."
+                      className="input pl-9 text-xs w-full bg-gray-50 dark:bg-slate-800"
+                    />
+                    {searchingCatalog && (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin absolute right-3 top-1/2 -translate-y-1/2 text-purple-600" />
+                    )}
+                  </div>
+
+                  <div className="max-h-40 overflow-y-auto space-y-1 pr-1">
+                    {catalogResults.map((prod) => {
+                      const isSelected = (offerSelectedProduct?.product_id || offerSelectedProduct?.id) === prod.id
+                      return (
+                        <button
+                          key={prod.id}
+                          type="button"
+                          onClick={() => handleSelectProductForOffer(prod)}
+                          className={`w-full text-left p-2 rounded-xl text-xs flex items-center justify-between border transition ${
+                            isSelected
+                              ? "bg-purple-50 dark:bg-purple-950/50 border-purple-500"
+                              : "bg-gray-50 dark:bg-slate-800/40 border-gray-100 dark:border-slate-800 hover:border-gray-200"
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <p className="font-bold text-gray-900 dark:text-white truncate">{prod.nombre}</p>
+                            <span className="text-[10px] text-gray-400 font-mono">Cód: {prod.codigo_barra || "S/C"}</span>
+                          </div>
+                          <span className="font-mono font-bold text-xs text-purple-600 dark:text-purple-400 ml-2">
+                            {formatPYG(prod.precio_venta || 0)}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* PISO DE SEGURIDAD & CÁLCULO DE COSTO */}
             {offerSelectedProduct && (() => {
-              const costo = Number(offerSelectedProduct.costo || 0)
-              const normal = Number(offerSelectedProduct.precio_normal || (offerSelectedProduct.total / Math.max(1, offerSelectedProduct.unidades)) || 0)
+              const normal = Number(offerSelectedProduct.precio_venta || offerSelectedProduct.precio_normal || (offerSelectedProduct.total ? offerSelectedProduct.total / Math.max(1, offerSelectedProduct.unidades) : offerPriceInput * 1.2))
+              const costo = Number(offerSelectedProduct.ultimo_costo || offerSelectedProduct.costo_promedio || offerSelectedProduct.costo || 0)
               const safetyFloor = Math.round(Math.max(costo * 1.05, 500))
               const isBelowCost = costo > 0 && offerPriceInput < safetyFloor
+              const ahorro = Math.max(0, normal - offerPriceInput)
+              const ahorroPct = normal > 0 ? Math.round((ahorro / normal) * 100) : 0
               const estimatedMarginPct = offerPriceInput > 0 && costo > 0
                 ? Math.round(((offerPriceInput - costo) / offerPriceInput) * 100)
                 : 20
 
               return (
-                <div className="space-y-3">
+                <div className="space-y-3 pt-2 border-t border-gray-100 dark:border-slate-800">
+                  <div className="p-2 rounded-xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-200/60 dark:border-purple-800/40 text-xs flex items-center justify-between">
+                    <span className="font-bold text-gray-700 dark:text-gray-300 truncate">
+                      Seleccionado: <strong>{offerSelectedProduct.producto || offerSelectedProduct.nombre}</strong>
+                    </span>
+                    <span className="font-mono font-black text-purple-700 dark:text-purple-300 shrink-0 ml-2">
+                      Normal: {formatPYG(normal)}
+                    </span>
+                  </div>
+
                   <div className="grid grid-cols-3 gap-2 p-3 bg-gray-50 dark:bg-slate-800/60 rounded-2xl border border-gray-100 dark:border-slate-700 text-center">
                     <div>
                       <span className="text-[9px] font-bold text-gray-400 uppercase block">Costo Base</span>
@@ -1353,9 +1813,9 @@ export default function Customer360Page() {
                       </span>
                     </div>
                     <div>
-                      <span className="text-[9px] font-bold text-gray-400 uppercase block">Precio Normal</span>
+                      <span className="text-[9px] font-bold text-gray-400 uppercase block">Precio Regular</span>
                       <span className="font-mono font-bold text-xs text-gray-700 dark:text-gray-300">
-                        {normal > 0 ? formatPYG(normal) : "S/D"}
+                        {formatPYG(normal)}
                       </span>
                     </div>
                     <div>
@@ -1366,24 +1826,33 @@ export default function Customer360Page() {
                     </div>
                   </div>
 
-                  {/* INPUT DE PRECIO PROMOCIONAL */}
+                  {/* INPUT CANÓNICO DE PRECIO ESPECIAL (REGLA #10: CURRENCYINPUT) */}
                   <div className="space-y-1">
                     <div className="flex items-center justify-between text-xs">
                       <label className="font-bold text-gray-700 dark:text-gray-300">
                         Precio Especial para este Cliente (Gs.):
                       </label>
-                      <span className={`font-mono font-black text-[11px] px-2 py-0.5 rounded-md ${
-                        isBelowCost
-                          ? "bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300"
-                          : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
-                      }`}>
-                        Margen: ~{estimatedMarginPct}%
-                      </span>
+                      <div className="flex items-center gap-2">
+                        {ahorro > 0 && (
+                          <span className="text-[11px] font-black text-emerald-600 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-md">
+                            Ahorra {formatPYG(ahorro)} ({ahorroPct}% OFF)
+                          </span>
+                        )}
+                        <span className={`font-mono font-black text-[11px] px-2 py-0.5 rounded-md ${
+                          isBelowCost
+                            ? "bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300"
+                            : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+                        }`}>
+                          Margen: ~{estimatedMarginPct}%
+                        </span>
+                      </div>
                     </div>
-                    <input
-                      type="number"
+
+                    <CurrencyInput
                       value={offerPriceInput}
-                      onChange={(e) => setOfferPriceInput(Number(e.target.value))}
+                      onChangeValue={(numVal) => setOfferPriceInput(numVal)}
+                      currency="PYG"
+                      prefix="Gs."
                       className={`input w-full text-base font-mono font-black bg-white dark:bg-slate-900 ${
                         isBelowCost ? "border-red-500 text-red-600 focus:ring-red-500" : "border-gray-200 dark:border-slate-700"
                       }`}
@@ -1394,7 +1863,7 @@ export default function Customer360Page() {
                     <div className="p-2.5 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-[11px] flex items-center gap-2">
                       <AlertTriangle className="w-4 h-4 shrink-0 text-red-600" />
                       <span>
-                        <strong>¡Bloqueo de Seguridad!</strong> No se permite vender por debajo del costo ({formatPYG(safetyFloor)}).
+                        <strong>¡Bloqueo Anti-Costo!</strong> No se permite vender por debajo del costo ({formatPYG(safetyFloor)}).
                       </span>
                     </div>
                   )}
@@ -1438,17 +1907,17 @@ export default function Customer360Page() {
                 type="button"
                 onClick={handleConfirmCreateOffer}
                 disabled={submittingOffer || offerPriceInput <= 0}
-                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-black transition flex items-center gap-2 shadow-md shadow-purple-500/20 disabled:opacity-50"
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-emerald-600 hover:from-purple-500 hover:to-emerald-500 text-white text-xs font-black transition flex items-center gap-2 shadow-lg shadow-purple-500/20 disabled:opacity-50"
               >
                 {submittingOffer ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Guardando...</span>
+                    <span>Guardando y Preparando WhatsApp...</span>
                   </>
                 ) : (
                   <>
                     <Gift className="w-4 h-4" />
-                    <span>Activar Oferta en Caja</span>
+                    <span>Activar Oferta & Preparar WhatsApp</span>
                   </>
                 )}
               </button>

@@ -3,7 +3,7 @@
 import re
 from datetime import datetime
 
-from sqlalchemy import select, or_, and_, func
+from sqlalchemy import select, or_, and_, func, not_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.customers.models import Customer
@@ -139,6 +139,10 @@ async def list_customers(
     limit: int = 10000,
     offset: int = 0,
     updated_since: datetime | None = None,
+    country: str | None = None,
+    extra_club_only: bool = False,
+    has_offers_only: bool = False,
+    archetype: str | None = None,
 ) -> list[Customer]:
     query = select(Customer).where(Customer.company_id == company_id)
     if search:
@@ -184,6 +188,32 @@ async def list_customers(
         query = query.where(Customer.tipo == tipo)
     elif exclude_proveedores:
         query = query.where(or_(Customer.tipo != "proveedor", Customer.tipo.is_(None)))
+
+    # Filtro por País / Idioma
+    if country == "brasil":
+        query = query.where(or_(Customer.idioma == "pt", Customer.telefono.like("+55%")))
+    elif country == "paraguay":
+        query = query.where(and_(or_(Customer.idioma != "pt", Customer.idioma.is_(None)), not_(Customer.telefono.like("+55%"))))
+
+    # Filtro de Socios ExtraClub
+    if extra_club_only:
+        query = query.where(and_(Customer.extra_club_numero.isnot(None), Customer.extra_club_numero != ""))
+
+    # Filtro por Arquetipo conductual
+    if archetype:
+        query = query.where(Customer.arquetipo == archetype)
+
+    # Filtro de Clientes con ofertas activas en caja
+    if has_offers_only:
+        from api.src.marketing.models import CustomerOffer
+        from datetime import timezone
+        now_utc = datetime.now(timezone.utc)
+        offers_subq = select(CustomerOffer.customer_id).where(
+            CustomerOffer.usado.is_(False),
+            or_(CustomerOffer.valido_hasta.is_(None), CustomerOffer.valido_hasta >= now_utc)
+        ).distinct()
+        query = query.where(Customer.id.in_(offers_subq))
+
     if updated_since is not None:
         query = query.where(Customer.updated_at >= updated_since).order_by(Customer.updated_at.asc())
     else:

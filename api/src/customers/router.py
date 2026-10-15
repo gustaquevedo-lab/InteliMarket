@@ -34,13 +34,21 @@ async def list_customers(
     search: str | None = Query(None),
     activo: bool | None = Query(None),
     tipo: str | None = Query(None),
+    country: str | None = Query(None),
+    extra_club_only: bool = Query(False),
+    has_offers_only: bool = Query(False),
+    archetype: str | None = Query(None),
     exclude_proveedores: bool = Query(False),
     updated_since: datetime | None = Query(None),
     limit: int = Query(50000, le=100000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_customers(db, company_id, search, activo, tipo, exclude_proveedores, limit, offset, updated_since=updated_since)
+    return await service.list_customers(
+        db, company_id, search, activo, tipo, exclude_proveedores, limit, offset,
+        updated_since=updated_since, country=country, extra_club_only=extra_club_only,
+        has_offers_only=has_offers_only, archetype=archetype,
+    )
 
 
 @router.get("/customers/{customer_id}", response_model=CustomerResponse)
