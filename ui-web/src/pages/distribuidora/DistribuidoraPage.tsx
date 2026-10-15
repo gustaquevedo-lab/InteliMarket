@@ -1,5 +1,6 @@
 import { useEntityLookup, getCustomerName } from "../../hooks/useEntityLookup"
 import { useState, useEffect } from "react"
+import { useNavigate } from "react-router-dom"
 import { api } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
@@ -8,7 +9,7 @@ import {
   BarChart3, Container, DollarSign, TrendingUp, Users, AlertTriangle,
   CheckCircle, XCircle, Truck, ShoppingBag, Globe, Anchor, RefreshCw,
   ClipboardList, Handshake, Percent, Sparkles, Trash2, Zap, ShieldAlert,
-  ArrowRight, Check, Clock, User as UserIcon,
+  ArrowRight, Check, Clock, User as UserIcon, Wallet, ClipboardCheck, Landmark,
 } from "lucide-react"
 import CustomerSearchInput, { CustomerOption } from "../../components/CustomerSearchInput"
 import SupplierSearchInput from "../../components/SupplierSearchInput"
@@ -44,6 +45,7 @@ const StatusBadge = ({ status }: { status: string }) => {
 
 
 export default function DistribuidoraPage() {
+  const navigate = useNavigate()
   useEntityLookup()
   const [custMap, setCustMap] = useState<Record<string, string>>({})
   const [usersMap, setUsersMap] = useState<Record<string, string>>({})
@@ -315,6 +317,19 @@ export default function DistribuidoraPage() {
             className={"flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all " +
               (tab === k ? "bg-white dark:bg-slate-700 shadow-sm text-gray-900 dark:text-white" : "text-gray-500 hover:text-gray-700")}>
             <Icon className="w-4 h-4" />{l}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex gap-2 flex-wrap">
+        {[
+          { path: "/distribuidora/rendiciones", label: "Mis rendiciones", Icon: Wallet },
+          { path: "/distribuidora/liquidaciones", label: "Liquidaciones", Icon: ClipboardCheck },
+          { path: "/distribuidora/tesoreria", label: "Tesorería", Icon: Landmark },
+        ].map(({ path, label, Icon }) => (
+          <button key={path} onClick={() => navigate(path)}
+            className="flex items-center gap-2 text-sm font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg px-3 py-1.5 transition">
+            <Icon className="w-4 h-4" />{label}
           </button>
         ))}
       </div>
