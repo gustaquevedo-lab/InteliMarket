@@ -26,6 +26,15 @@ npm install --silent || echo "npm install warning (some packages may have failed
 npx vite build 2>&1 | grep -E 'built in|✓|PWA|error|Error'
 
 echo "=== [4/4] Restart APIs (zero-downtime) ==="
+# Kill any suelto uvicorn that might be occupying ports
+for port in 8000 8010; do
+    pid=$(ss -tlnp "sport = :$port" 2>/dev/null | awk '/LISTEN/{match($0,/pid=([0-9]+)/,m); if(m[1]) print m[1]}' | head -1)
+    if [ -n "$pid" ]; then
+        echo "Killing suelto on port $port (PID $pid)"
+        kill "$pid" 2>/dev/null || true
+        sleep 1
+    fi
+done
 sudo "$SYSTEMCTL" restart intelimarket-api-2
 sleep 6
 sudo "$SYSTEMCTL" restart intelimarket-api
