@@ -254,3 +254,53 @@ class AutomationRuleResponse(BaseModel):
     active: bool
     created_at: datetime
     updated_at: datetime
+
+
+class AITrainingExampleCreate(BaseModel):
+    categoria: str = "general"
+    mensaje_usuario: str
+    respuesta_ideal: str
+    directiva_asociada: Optional[str] = None
+    activo: bool = True
+    origen: str = "manual_admin"
+
+
+class AITrainingExampleUpdate(BaseModel):
+    categoria: Optional[str] = None
+    mensaje_usuario: Optional[str] = None
+    respuesta_ideal: Optional[str] = None
+    directiva_asociada: Optional[str] = None
+    activo: Optional[bool] = None
+
+
+class AITrainingExampleResponse(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    company_id: Optional[UUID] = None
+    categoria: str
+    mensaje_usuario: str
+    respuesta_ideal: str
+    directiva_asociada: Optional[str] = None
+    activo: bool
+    origen: str
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+
+class AITrainingSimulateRequest(BaseModel):
+    message: str
+    persona: str = "paraguay_regular"  # paraguay_regular, brasil_frontier, extraclub_vip, reclamante
+    conversation_history: Optional[list] = None
+
+
+class AITrainingSimulateResponse(BaseModel):
+    text: str
+    latency_ms: int
+    model: str
+    tools_called: list = []
+    tools_trace: list = []
+    guardrails_passed: bool = True
+    guardrails_notes: Optional[str] = None
+    pdf_filename: Optional[str] = None
+    order_code: Optional[str] = None
+

@@ -12,6 +12,7 @@ import { useToast } from "../../context/ToastContext"
 import { useAuth } from "../../context/AuthContext"
 import { Modal } from "../../components/Modal"
 import { LiveChatHub } from "./components/livechat/LiveChatHub"
+import { AITrainingLab } from "./components/AITrainingLab"
 import {
   MessageCircle, Settings, FileText, Send, Plus, Edit, Trash2,
   Loader2, Check, ExternalLink, RefreshCw, Smartphone, ShieldCheck,
@@ -209,7 +210,7 @@ interface GatewayStatus {
   gateway_url?: string
 }
 
-type TabType = "connection" | "conversations" | "chatbot" | "campaigns" | "automations" | "templates" | "gateway"
+type TabType = "connection" | "conversations" | "chatbot" | "simulator" | "campaigns" | "automations" | "templates" | "gateway"
 
 export default function WhatsAppPage() {
   const [tab, setTab] = useState<TabType>("connection")
@@ -1426,6 +1427,7 @@ export default function WhatsAppPage() {
           { key: "connection", label: "Conexión QR", icon: Smartphone, count: null },
           { key: "conversations", label: "Chat en Vivo", icon: MessageSquare, count: conversations.length },
           { key: "chatbot", label: "Agente IA (InteliZapp)", icon: Bot, count: null },
+          { key: "simulator", label: "🧪 Laboratorio IA", icon: Sparkles, count: null },
           { key: "campaigns", label: "Campañas Masivas", icon: Megaphone, count: campaigns.length },
           { key: "automations", label: "Automatizaciones", icon: Zap, count: rules.length },
           { key: "templates", label: "Plantillas Oficiales", icon: FileText, count: templates.length },
@@ -2458,6 +2460,11 @@ export default function WhatsAppPage() {
         </div>
         )}
       </div>
+      )}
+
+      {/* ── TAB: LABORATORIO DE ENTRENAMIENTO IA & SIMULADOR ── */}
+      {tab === "simulator" && (
+        <AITrainingLab />
       )}
 
       {/* ── TAB 4: CAMPAÑAS MASIVAS (INTELLIZAPP) ── */}

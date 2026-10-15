@@ -251,3 +251,25 @@ class WhatsAppAutomationRule(Base):
     __table_args__ = (
         Index("ix_wa_automation_rules_tenant_event", "tenant_id", "trigger_event"),
     )
+
+
+class WhatsAppAITrainingExample(Base):
+    """Ejemplos de adiestramiento (Few-Shot Prompting) y feedback para el Agente IA de WhatsApp."""
+    __tablename__ = "whatsapp_ai_training_examples"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    company_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    categoria = Column(String(50), nullable=False, default="general", server_default="general", index=True)
+    mensaje_usuario = Column(Text, nullable=False)
+    respuesta_ideal = Column(Text, nullable=False)
+    directiva_asociada = Column(Text, nullable=True)
+    activo = Column(Boolean, default=True, server_default="true", index=True)
+    origen = Column(String(50), default="manual_admin", server_default="manual_admin")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_wa_ai_training_tenant_cat", "tenant_id", "categoria", "activo"),
+    )
+

@@ -14,12 +14,15 @@ from api.src.db import get_db
 from api.src.auth.middleware import require_auth
 from api.src.config import settings
 import httpx
+from zoneinfo import ZoneInfo
 from api.src.whatsapp.schemas import (
     WhatsAppConfigCreate, WhatsAppConfigUpdate, WhatsAppConfigResponse,
     WhatsAppConversationResponse, WhatsAppMessageResponse,
     WhatsAppTemplateCreate, WhatsAppTemplateUpdate, WhatsAppTemplateResponse,
     TwilioWebhook, SendMessageRequest, WhatsAppStats,
     AssignConversationRequest, SetHandlingModeRequest, CreateInternalNoteRequest, AgentItemResponse,
+    AITrainingExampleCreate, AITrainingExampleUpdate, AITrainingExampleResponse,
+    AITrainingSimulateRequest, AITrainingSimulateResponse,
 )
 from api.src.auth.models import User
 from api.src.whatsapp import service as whatsapp_service
@@ -29,6 +32,7 @@ from api.src.whatsapp.models import (
     MessageDirection,
     MessageStatus,
     ConversationStatus,
+    WhatsAppAITrainingExample,
 )
 from api.src.whatsapp.evolution_client import (
     evolution_client,
@@ -36,6 +40,7 @@ from api.src.whatsapp.evolution_client import (
     save_media_file_to_uploads,
     _UPLOADS_DIR,
 )
+from api.src.whatsapp.watchdog import get_watchdog_status, trigger_watchdog_check
 
 logger = logging.getLogger("whatsapp.router")
 
@@ -1512,8 +1517,66 @@ async def evolution_webhook(
             if not should_reply:
                 logger.info(f"[Evolution Webhook] Agente IA en PAUSA para '{clean_phone}' (auto_reply={auto_reply_active}).")
             else:
-                # Evitar ejecuciones simultáneas/solapadas si el cliente envía mensajes seguidos
-                if conv.id in _active_agent_conversations:
+                # 0. Capa de Respuestas Determinísticas Ultrarrápidas (<100ms)
+                asuncion_tz = ZoneInfo("America/Asuncion")
+                now_py = datetime.now(asuncion_tz)
+                weekday = now_py.weekday()
+                cur_time = now_py.time()
+                from datetime import time as dt_time
+                is_open = (dt_time(7, 30) <= cur_time <= dt_time(21, 0)) if weekday < 6 else (dt_time(8, 0) <= cur_time <= dt_time(14, 0))
+
+                deterministic_reply = None
+                normalized_text = (content or "").lower().strip()
+
+                bank_triggers = ["alias", "pix", "cuenta", "banco", "transferencia", "cbu", "datos bancarios"]
+                loc_triggers = ["ubicacion", "ubicación", "donde queda", "donde quedan", "donde estan", "donde están", "direccion", "dirección"]
+
+                if any(w in normalized_text for w in bank_triggers):
+                    deterministic_reply = (
+                        "💳 *Datos Bancarios Oficiales — Extra Supermercado*\n\n"
+                        "🏦 *Banco:* Banco Continental\n"
+                        "📄 *Razón Social:* GRUPO SANTA TERESA E.A.S.\n"
+                        "🆔 *RUC:* 80150377-9\n"
+                        "🔢 *Cta. Cte. Gs:* 01-2345678-01\n"
+                        "📲 *Alias / PIX:* compras@superextra.com.py\n\n"
+                        "_Por favor enviá tu comprobante por este medio una vez realizada la transferencia para validar tu pedido._"
+                    )
+                elif any(w in normalized_text for w in loc_triggers):
+                    deterministic_reply = (
+                        "📍 *Extra Supermercado Mayorista*\n\n"
+                        "Estamos ubicados en la frontera comercial de Pedro Juan Caballero / Santa Teresa.\n"
+                        "🕒 *Horarios de Atención:*\n"
+                        "• Lunes a Sábado: 07:30 a 21:00 hs\n"
+                        "• Domingos: 08:00 a 14:00 hs\n\n"
+                        "¡Te esperamos con los mejores precios por mayor y menor!"
+                    )
+                elif not is_open and any(w in normalized_text for w in ["hola", "buenas", "abierto", "estan", "están", "horario"]):
+                    deterministic_reply = (
+                        "🌙 *Extra Supermercado — Fuera de Horario*\n\n"
+                        "¡Hola! En este momento nos encontramos fuera del horario de atención al público.\n\n"
+                        "🕒 *Nuestros Horarios (Hora Paraguay):*\n"
+                        "• Lunes a Sábado: 07:30 a 21:00 hs\n"
+                        "• Domingos: 08:00 a 14:00 hs\n\n"
+                        "Dejanos tu consulta o pedido detallado aquí y nuestro equipo te responderá a primera hora. ¡Muchas gracias por escribirnos!"
+                    )
+
+                if deterministic_reply:
+                    logger.info(f"[Evolution Webhook] Respuesta DETERMINÍSTICA rápida despachada a '{clean_phone}'")
+                    await evolution_client.send_text_message(clean_phone, deterministic_reply)
+                    outbound_msg = WhatsAppMessage(
+                        tenant_id=tenant.id,
+                        conversation_id=conv.id,
+                        direction=MessageDirection.outbound,
+                        content=deterministic_reply,
+                        message_id=f"det-{datetime.now(timezone.utc).timestamp()}",
+                        status=MessageStatus.sent,
+                        sender_type="bot",
+                        sender_name="ExtraBot Directo",
+                    )
+                    db.add(outbound_msg)
+                    conv.last_message_at = datetime.now(timezone.utc)
+                    await db.commit()
+                elif conv.id in _active_agent_conversations:
                     logger.info(f"[Evolution Webhook] Conversación {conv.id} ('{clean_phone}') ya está siendo procesada por el Agente IA. Omitiendo despacho concurrente.")
                 else:
                     _active_agent_conversations.add(conv.id)
@@ -1626,3 +1689,289 @@ async def get_stats(
     tenant_id = UUID(user["tenant_id"])
     stats = await whatsapp_service.get_stats(db, tenant_id)
     return WhatsAppStats(**stats)
+
+
+# =========================================================================
+# LABORATORIO DE ENTRENAMIENTO IA & SIMULADOR (IntelliZapp Overhaul)
+# =========================================================================
+
+@router.get("/ai-training/examples", response_model=list[AITrainingExampleResponse])
+async def list_ai_training_examples(
+    category: Optional[str] = Query(None),
+    active_only: bool = Query(False),
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Lista los ejemplos de entrenamiento (few-shot) para el Agente IA de WhatsApp."""
+    tenant_id = UUID(user["tenant_id"])
+    examples = await whatsapp_service.list_ai_training_examples(
+        db, tenant_id=tenant_id, category=category, active_only=active_only
+    )
+    return examples
+
+
+@router.post("/ai-training/examples", response_model=AITrainingExampleResponse)
+async def create_ai_training_example(
+    body: AITrainingExampleCreate,
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Registra un nuevo ejemplo de entrenamiento o corrección de diálogo."""
+    tenant_id = UUID(user["tenant_id"])
+    company_id = UUID(user["company_id"]) if user.get("company_id") else None
+    example = await whatsapp_service.create_ai_training_example(
+        db, tenant_id=tenant_id, company_id=company_id, data=body.model_dump()
+    )
+    return example
+
+
+@router.put("/ai-training/examples/{example_id}", response_model=AITrainingExampleResponse)
+async def update_ai_training_example(
+    example_id: UUID,
+    body: AITrainingExampleUpdate,
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Actualiza una directiva o ejemplo de entrenamiento."""
+    tenant_id = UUID(user["tenant_id"])
+    example = await whatsapp_service.update_ai_training_example(
+        db, example_id=example_id, tenant_id=tenant_id, data=body.model_dump(exclude_unset=True)
+    )
+    if not example:
+        raise HTTPException(status_code=404, detail="Ejemplo de entrenamiento no encontrado")
+    return example
+
+
+@router.delete("/ai-training/examples/{example_id}")
+async def delete_ai_training_example(
+    example_id: UUID,
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Elimina un ejemplo de entrenamiento."""
+    tenant_id = UUID(user["tenant_id"])
+    deleted = await whatsapp_service.delete_ai_training_example(db, example_id=example_id, tenant_id=tenant_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Ejemplo de entrenamiento no encontrado")
+    return {"status": "ok", "deleted": True}
+
+
+@router.post("/ai-training/simulate", response_model=AITrainingSimulateResponse)
+async def simulate_ai_interaction(
+    body: AITrainingSimulateRequest,
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Simulador de Laboratorio IA:
+    Ejecuta el Agente IA con Ollama (Qwen 2.5) bajo un entorno sandbox controlado,
+    devolviendo trazabilidad detallada (latencia, herramientas SQL invocadas, guardrails).
+    """
+    tenant_id = UUID(user["tenant_id"])
+    company_id = UUID(user["company_id"]) if user.get("company_id") else None
+    if not company_id:
+        from api.src.companies.models import Company
+        comp_res = await db.execute(select(Company).where(Company.tenant_id == tenant_id).limit(1))
+        company = comp_res.scalar_one_or_none()
+        company_id = company.id if company else None
+
+    if not company_id:
+        raise HTTPException(status_code=400, detail="No se encontró una empresa asociada al tenant")
+
+    # Mapear persona a número de teléfono simulado y nombre
+    persona_phone = "595981000001"
+    persona_name = "Cliente General"
+    if body.persona == "brasil":
+        persona_phone = "5567999990002"
+        persona_name = "Cliente Frontera BR"
+    elif body.persona == "extraclub":
+        persona_phone = "595982000003"
+        persona_name = "Socio ExtraClub"
+    elif body.persona == "reclamante":
+        persona_phone = "595983000004"
+        persona_name = "Cliente Reclamante"
+
+    # Obtener o crear conversación simulada
+    conv = await whatsapp_service.get_or_create_conversation(
+        db, tenant_id, persona_phone, name=f"Simulador: {persona_name}"
+    )
+
+    from api.src.whatsapp.ai_agent import CustomerAIAgent
+    import base64
+
+    agent = CustomerAIAgent(db, company_id, tenant_id)
+    ai_res = await agent.process_message(
+        conv,
+        body.message,
+        custom_instructions=body.custom_instructions or "",
+        emphasis_promotions=body.emphasis_promotions or "",
+    )
+
+    pdf_base64 = None
+    if ai_res.get("pdf_bytes"):
+        pdf_base64 = base64.b64encode(ai_res["pdf_bytes"]).decode("ascii")
+
+    return AITrainingSimulateResponse(
+        text=ai_res.get("text", ""),
+        tools_called=ai_res.get("tools_called", []),
+        tools_trace=ai_res.get("tools_trace", []),
+        pdf_generated=bool(ai_res.get("pdf_bytes")),
+        pdf_base64=pdf_base64,
+        pdf_filename=ai_res.get("pdf_filename"),
+        order_code=ai_res.get("order_code"),
+        latency_ms=ai_res.get("latency_ms", 0),
+        persona=body.persona,
+        guardrails_passed=ai_res.get("guardrails_passed", True),
+    )
+
+
+@router.post("/ai-training/run-tests")
+async def run_ai_qa_tests(
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Batería de Pruebas de Calidad de 5 Escenarios:
+    1. Saludo y Horario de Atención
+    2. Consulta de Stock y Precio (Arroz / Alimentos)
+    3. Solicitud de Pedido / Presupuesto en PDF
+    4. Consulta de Promociones del Día
+    5. Datos Bancarios y RUC Oficial
+    """
+    tenant_id = UUID(user["tenant_id"])
+    from api.src.companies.models import Company
+    comp_res = await db.execute(select(Company).where(Company.tenant_id == tenant_id).limit(1))
+    company = comp_res.scalar_one_or_none()
+    if not company:
+        raise HTTPException(status_code=400, detail="Empresa no encontrada")
+
+    from api.src.whatsapp.ai_agent import CustomerAIAgent
+    agent = CustomerAIAgent(db, company.id, tenant_id)
+
+    # Conversación de prueba
+    test_conv = await whatsapp_service.get_or_create_conversation(
+        db, tenant_id, "595999999999", name="QA Test Bot"
+    )
+
+    scenarios = [
+        {
+            "id": 1,
+            "title": "Saludo y Horario de Atención",
+            "prompt": "Hola, ¿hasta qué hora atienden hoy?",
+            "expected_keywords": ["extra", "horario", "07:30", "21:00"],
+            "expected_tool": None,
+        },
+        {
+            "id": 2,
+            "title": "Consulta de Stock y Precio",
+            "prompt": "¿Tienen arroz y cuánto cuesta?",
+            "expected_keywords": ["arroz", "precio", "gs"],
+            "expected_tool": "consultar_catalogo_stock",
+        },
+        {
+            "id": 3,
+            "title": "Generación de Pedido PDF",
+            "prompt": "Quiero encargar 5 bolsas de arroz y 2 paquetes de fideos para retirar hoy",
+            "expected_keywords": ["pedido", "presupuesto"],
+            "expected_tool": "generar_presupuesto_pedido",
+        },
+        {
+            "id": 4,
+            "title": "Promociones Vigentes",
+            "prompt": "¿Qué ofertas o promociones tienen hoy en el supermercado?",
+            "expected_keywords": ["oferta", "precio", "extra", "promo"],
+            "expected_tool": None,
+        },
+        {
+            "id": 5,
+            "title": "RUC y Cuentas Bancarias",
+            "prompt": "¿Me pasas el RUC y los datos de banco para hacer una transferencia?",
+            "expected_keywords": ["80150377-9", "continental", "santa teresa"],
+            "expected_tool": None,
+        },
+    ]
+
+    results = []
+    passed_count = 0
+
+    for s in scenarios:
+        start_t = datetime.now()
+        ai_res = await agent.process_message(test_conv, s["prompt"])
+        duration_ms = int((datetime.now() - start_t).total_seconds() * 1000)
+
+        reply_text = (ai_res.get("text") or "").lower()
+        tools_called = ai_res.get("tools_called") or []
+
+        keywords_matched = [kw for kw in s["expected_keywords"] if kw in reply_text]
+        kw_pass = len(keywords_matched) >= 1
+
+        tool_pass = True
+        if s["expected_tool"]:
+            tool_pass = s["expected_tool"] in tools_called or bool(ai_res.get("pdf_bytes"))
+
+        is_success = kw_pass and tool_pass and ai_res.get("guardrails_passed", True)
+        if is_success:
+            passed_count += 1
+
+        results.append({
+            "id": s["id"],
+            "title": s["title"],
+            "prompt": s["prompt"],
+            "passed": is_success,
+            "latency_ms": duration_ms,
+            "response_preview": ai_res.get("text", "")[:150] + "..." if len(ai_res.get("text", "")) > 150 else ai_res.get("text", ""),
+            "tools_called": tools_called,
+            "pdf_generated": bool(ai_res.get("pdf_bytes")),
+            "guardrails_passed": ai_res.get("guardrails_passed", True),
+            "keywords_matched": keywords_matched,
+        })
+
+    return {
+        "passed": passed_count,
+        "total": len(scenarios),
+        "all_passed": passed_count == len(scenarios),
+        "score_percentage": round((passed_count / len(scenarios)) * 100, 1),
+        "scenarios": results,
+    }
+
+
+# =========================================================================
+# MONITOR WATCHDOG & RECONEXIÓN AUTOMÁTICA
+# =========================================================================
+
+@router.get("/watchdog/status")
+async def get_watchdog_api_status(
+    user: dict = Depends(require_auth),
+):
+    """Consulta el estado del supervisor automático de conexión (Watchdog)."""
+    return get_watchdog_status()
+
+
+@router.post("/watchdog/trigger")
+async def trigger_watchdog_now(
+    user: dict = Depends(require_auth),
+):
+    """Fuerza una comprobación y autoreconexión inmediata del Watchdog."""
+    result = await trigger_watchdog_check()
+    return result
+
+
+@router.post("/gateway/harden-settings")
+async def harden_gateway_settings(
+    user: dict = Depends(require_auth),
+):
+    """
+    Aplica las directivas de robustez en Evolution API / Baileys:
+    - alwaysOnline: true (elimina desconexiones por inactividad)
+    - groupsIgnore: true (no satura el socket con mensajes de grupos)
+    - rejectCall: true (rechaza llamadas de voz que rompen Baileys)
+    - Registra el webhook de alta disponibilidad en NGINX
+    """
+    res_settings = await evolution_client.apply_hardened_settings()
+    res_webhook = await evolution_client.set_webhook()
+    return {
+        "status": "ok",
+        "settings": res_settings,
+        "webhook": res_webhook,
+    }
+

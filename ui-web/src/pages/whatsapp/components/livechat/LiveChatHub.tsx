@@ -28,6 +28,7 @@ import { api, WhatsAppConversation, WhatsAppMessage } from "../../../../api"
 import { ChatMediaMessage } from "./ChatMediaMessage"
 import { MediaLightboxModal } from "./MediaLightboxModal"
 import { TransferChatModal } from "./TransferChatModal"
+import { Modal } from "../../../../components/Modal"
 
 interface LiveChatHubProps {
   initialConversations?: WhatsAppConversation[]
@@ -83,6 +84,59 @@ export const LiveChatHub: React.FC<LiveChatHubProps> = ({
     filename?: string
     sizeBytes?: number
   } | null>(null)
+
+  // ── Adiestramiento IA desde Chat en Vivo ──
+  const [trainModalOpen, setTrainModalOpen] = useState(false)
+  const [trainingData, setTrainingData] = useState<{
+    userMessage: string
+    botResponse: string
+    categoria: string
+    directiva: string
+  }>({
+    userMessage: "",
+    botResponse: "",
+    categoria: "general",
+    directiva: "",
+  })
+  const [savingTraining, setSavingTraining] = useState(false)
+
+  const handleOpenTrainModal = (botMsg: WhatsAppMessage) => {
+    const msgIdx = messages.findIndex((m) => m.id === botMsg.id)
+    let prevUserMsg = ""
+    for (let i = msgIdx - 1; i >= 0; i--) {
+      if (messages[i].direction === "inbound") {
+        prevUserMsg = messages[i].content || ""
+        break
+      }
+    }
+    setTrainingData({
+      userMessage: prevUserMsg,
+      botResponse: botMsg.content || "",
+      categoria: "general",
+      directiva: "Responder con precisión de catálogo y tono cordial de Extra Supermercado",
+    })
+    setTrainModalOpen(true)
+  }
+
+  const handleSaveTrainingExample = async () => {
+    if (!trainingData.userMessage || !trainingData.botResponse) return
+    setSavingTraining(true)
+    try {
+      await api.whatsapp.createTrainingExample({
+        mensaje_usuario: trainingData.userMessage,
+        respuesta_ideal: trainingData.botResponse,
+        categoria: trainingData.categoria,
+        directiva_asociada: trainingData.directiva,
+        activo: true,
+        origen: "livechat_correction",
+      })
+      setTrainModalOpen(false)
+    } catch (err) {
+      console.error("Error guardando directiva de entrenamiento:", err)
+    } finally {
+      setSavingTraining(false)
+    }
+  }
 
   const chatBottomRef = useRef<HTMLDivElement | null>(null)
   const replyInputRef = useRef<HTMLTextAreaElement | null>(null)
@@ -713,9 +767,19 @@ export const LiveChatHub: React.FC<LiveChatHubProps> = ({
                         {isOutbound && (
                           <div className="flex items-center justify-between text-[10px] font-bold mb-1 opacity-90 border-b border-white/20 pb-0.5">
                             {isBotMsg ? (
-                              <span className="flex items-center gap-1 text-indigo-200">
-                                <Bot className="w-3 h-3" /> ExtraBot IA (Qwen 2.5)
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="flex items-center gap-1 text-indigo-200">
+                                  <Bot className="w-3 h-3" /> ExtraBot IA (Qwen 2.5)
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenTrainModal(m)}
+                                  className="px-1.5 py-0.5 rounded bg-indigo-500/40 hover:bg-indigo-500 text-white font-bold text-[9px] flex items-center gap-1 transition-colors"
+                                  title="Adiestrar / corregir respuesta del bot"
+                                >
+                                  <Sparkles className="w-2.5 h-2.5" /> Adiestrar
+                                </button>
+                              </div>
                             ) : (
                               <span className="flex items-center gap-1 text-emerald-200">
                                 <User className="w-3 h-3" /> {m.sender_name || "Operador"}
@@ -984,6 +1048,95 @@ export const LiveChatHub: React.FC<LiveChatHubProps> = ({
           onClose={() => setLightboxMedia(null)}
         />
       )}
+
+      {/* Modal de Adiestramiento Rápido desde Chat en Vivo */}
+      <Modal
+        open={trainModalOpen}
+        onClose={() => setTrainModalOpen(false)}
+        title="Adiestrar ExtraBot IA (Corrección de Diálogo)"
+        size="md"
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-slate-500">
+            Esta corrección se guardará en la base de directivas del bot y se inyectará al modelo local (Qwen 2.5) para que aprenda a responder correctamente ante consultas similares.
+          </p>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              Categoría
+            </label>
+            <select
+              value={trainingData.categoria}
+              onChange={(e) => setTrainingData({ ...trainingData, categoria: e.target.value })}
+              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs"
+            >
+              <option value="general">General & Saludos</option>
+              <option value="catalogo">Catálogo & Stock</option>
+              <option value="pedidos">Pedidos & Presupuestos</option>
+              <option value="fiscal">Datos Fiscales & Bancarios</option>
+              <option value="frontera">Frontera & Idiomas</option>
+              <option value="quejas">Reclamos & Soporte</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              Mensaje del Cliente (Pregunta / Contexto)
+            </label>
+            <input
+              type="text"
+              value={trainingData.userMessage}
+              onChange={(e) => setTrainingData({ ...trainingData, userMessage: e.target.value })}
+              placeholder="Mensaje o pregunta del cliente..."
+              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              Respuesta Ideal Corregida
+            </label>
+            <textarea
+              rows={4}
+              value={trainingData.botResponse}
+              onChange={(e) => setTrainingData({ ...trainingData, botResponse: e.target.value })}
+              placeholder="Escribí cómo debió responder el bot exactamente..."
+              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              Directiva Asociada (Opcional)
+            </label>
+            <input
+              type="text"
+              value={trainingData.directiva}
+              onChange={(e) => setTrainingData({ ...trainingData, directiva: e.target.value })}
+              placeholder="Ej: Siempre citar precios en Guaraníes con IVA incluido"
+              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => setTrainModalOpen(false)}
+              className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold text-xs"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveTrainingExample}
+              disabled={savingTraining}
+              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-sm"
+            >
+              {savingTraining ? "Guardando..." : "Guardar e Instruir Bot"}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

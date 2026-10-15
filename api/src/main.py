@@ -167,12 +167,17 @@ async def lifespan(app: FastAPI):
         # Vigilante de precios de balanza (tiempo real); misma instancia unica que el scheduler.
         from api.src.integrations.scales.watcher import balanza_watcher
         balanza_watcher.start()
+        # Watchdog de reconexión y salud de WhatsApp (Evolution API)
+        from api.src.whatsapp.watchdog import start_whatsapp_watchdog
+        start_whatsapp_watchdog(interval_seconds=60)
     from api.src.plataforma import capture as _capture
     _capture.install_log_handler()
     _capture.start_background()
     yield
     from api.src.integrations.scales.watcher import balanza_watcher as _bw
     await _bw.stop()
+    from api.src.whatsapp.watchdog import stop_whatsapp_watchdog
+    stop_whatsapp_watchdog()
 
 
 app = FastAPI(

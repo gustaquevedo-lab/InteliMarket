@@ -310,6 +310,102 @@ class EvolutionClient:
             logger.error(f"Error desconectando instancia {instance}: {e}")
             return {"instance": instance, "success": False, "error": str(e)}
 
+    async def apply_hardened_settings(self, instance_name: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Aplica los parámetros de blindaje para máxima estabilidad en WhatsApp:
+        - alwaysOnline: true (evita desconexión por suspensión del celular)
+        - groupsIgnore: true (ignora mensajes grupales para no saturar memoria)
+        - rejectCall: true (rechaza llamadas y envía mensaje informativo)
+        - readMessages: true
+        """
+        instance = instance_name or self.default_instance
+        url = f"{self.base_url}/settings/set/{instance}"
+        payload = {
+            "rejectCall": True,
+            "msgCall": "Este canal oficial de Extra Supermercado es exclusivo para mensajes de texto y WhatsApp. Por favor escribinos tu consulta por este medio.",
+            "groupsIgnore": True,
+            "alwaysOnline": True,
+            "readMessages": True,
+            "readStatus": False,
+            "syncFullHistory": False,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                res = await client.post(url, headers=self._headers(), json=payload)
+                return {
+                    "instance": instance,
+                    "success": res.status_code in (200, 201),
+                    "status_code": res.status_code,
+                    "data": res.json() if res.status_code in (200, 201) else res.text,
+                }
+        except Exception as e:
+            logger.error(f"Error aplicando settings de blindaje a {instance}: {e}")
+            return {"instance": instance, "success": False, "error": str(e)}
+
+    async def set_webhook(self, instance_name: Optional[str] = None, webhook_url: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Configura el webhook oficial de Evolution API apuntando al pool balanceado de NGINX.
+        """
+        instance = instance_name or self.default_instance
+        target_url = webhook_url or "http://100.83.91.76:5173/api/v1/whatsapp/webhook/evolution"
+        url = f"{self.base_url}/webhook/set/{instance}"
+        payload = {
+            "enabled": True,
+            "url": target_url,
+            "headers": {},
+            "webhookByEvents": False,
+            "webhookBase64": True,
+            "events": [
+                "MESSAGES_UPSERT",
+                "MESSAGES_UPDATE",
+                "CONNECTION_UPDATE",
+                "QRCODE_UPDATED",
+            ],
+        }
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                res = await client.post(url, headers=self._headers(), json=payload)
+                return {
+                    "instance": instance,
+                    "success": res.status_code in (200, 201),
+                    "status_code": res.status_code,
+                    "data": res.json() if res.status_code in (200, 201) else res.text,
+                }
+        except Exception as e:
+            logger.error(f"Error configurando webhook para {instance}: {e}")
+            return {"instance": instance, "success": False, "error": str(e)}
+
+    async def reconnect_if_needed(self, instance_name: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Comprueba el estado de la conexión. Si está en 'close' y no ha sido desvinculada
+        permanentemente, intenta reconectar silenciosamente el socket.
+        """
+        instance = instance_name or self.default_instance
+        status = await self.get_instance_status(instance)
+        state = status.get("state")
+
+        if state == "open":
+            return {"instance": instance, "reconnected": False, "state": "open", "message": "Ya conectado"}
+
+        if state in ("close", "connecting"):
+            logger.info(f"[Evolution Watchdog] Instancia '{instance}' en estado '{state}'. Intentando reconexión automática...")
+            url = f"{self.base_url}/instance/connect/{instance}"
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    res = await client.get(url, headers=self._headers())
+                    return {
+                        "instance": instance,
+                        "reconnected": True,
+                        "status_code": res.status_code,
+                        "detail": res.text[:200],
+                    }
+            except Exception as e:
+                logger.error(f"Error reconectando instancia {instance}: {e}")
+                return {"instance": instance, "reconnected": False, "error": str(e)}
+
+        return {"instance": instance, "reconnected": False, "state": state}
+
+
     async def send_text_message(
         self,
         phone: str,

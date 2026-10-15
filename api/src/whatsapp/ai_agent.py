@@ -7,8 +7,7 @@ armado de carritos y generación de PDF de pedido / derivación a humano.
 
 import json
 import logging
-import re
-import uuid
+import time
 from datetime import datetime, date, timezone
 from zoneinfo import ZoneInfo
 from typing import Optional, Dict, Any, List, Tuple
@@ -17,7 +16,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, desc
 
 from api.src.config import get_settings
-from api.src.whatsapp.models import WhatsAppMessage, WhatsAppConversation, MessageDirection, MessageStatus
+from api.src.whatsapp.models import (
+    WhatsAppMessage,
+    WhatsAppConversation,
+    MessageDirection,
+    MessageStatus,
+    WhatsAppAITrainingExample,
+)
 from api.src.products.models import Product
 from api.src.customers.models import Customer
 from api.src.loyalty.models import LoyaltyPoints, LoyaltyConfig
@@ -685,12 +690,36 @@ class CustomerAIAgent:
         )
         recent_msgs = list(reversed(recent_msgs_res.scalars().all()))
 
-        # System Prompt enriquecido con directivas de la administración
+        # 3. System Prompt enriquecido con directivas y Few-Shot Training Examples
         system_content = DEFAULT_SYSTEM_PROMPT
         if custom_instructions:
             system_content += f"\n\nDIRECTIVAS ADICIONALES DE LA ADMINISTRACIÓN:\n{custom_instructions}"
         if emphasis_promotions:
             system_content += f"\n\nPROMOCIONES CON ÉNFASIS ESPECIAL HOY (Sugierelas activamente cuando sea propicio):\n{emphasis_promotions}"
+
+        # Cargar ejemplos activos de adiestramiento (Few-Shot) para este tenant
+        try:
+            stmt_ex = (
+                select(WhatsAppAITrainingExample)
+                .where(
+                    WhatsAppAITrainingExample.tenant_id == self.tenant_id,
+                    WhatsAppAITrainingExample.activo == True,
+                )
+                .order_by(desc(WhatsAppAITrainingExample.created_at))
+                .limit(10)
+            )
+            ex_res = await self.db.execute(stmt_ex)
+            training_examples = ex_res.scalars().all()
+
+            if training_examples:
+                few_shot_block = "\n\nEJEMPLOS DE ATENCIÓN Y RESPUESTAS MODELO APRENDIDAS (Síguelas fielmente como referencia de tono y contenido):"
+                for ex in training_examples:
+                    few_shot_block += f"\n- Situación/Pregunta: \"{ex.mensaje_usuario}\"\n  Respuesta modelo: \"{ex.respuesta_ideal}\""
+                    if ex.directiva_asociada:
+                        few_shot_block += f"\n  Pauta a recordar: {ex.directiva_asociada}"
+                system_content += few_shot_block
+        except Exception as e:
+            logger.warning(f"[AIAgent] No se pudieron cargar ejemplos de adiestramiento: {e}")
 
         messages: List[Dict[str, Any]] = [
             {"role": "system", "content": system_content}
@@ -705,7 +734,8 @@ class CustomerAIAgent:
         if not messages or messages[-1].get("content") != incoming_text:
             messages.append({"role": "user", "content": incoming_text})
 
-        # 3. Invocar a Ollama con Tools
+        # 4. Invocar a Ollama con Tools y medir latencia
+        start_time = time.perf_counter()
         url = f"{self.ollama_base_url}/chat/completions"
         payload = {
             "model": self.ollama_model,
@@ -718,6 +748,9 @@ class CustomerAIAgent:
 
         generated_pdf_bytes = None
         generated_pdf_filename = None
+        tools_called = []
+        tools_trace = []
+        last_order_code = None
 
         try:
             async with httpx.AsyncClient(timeout=90.0) as client:
@@ -727,6 +760,11 @@ class CustomerAIAgent:
                     return {
                         "text": "Disculpá, en este momento estoy teniendo una pequeña demora en el sistema. En instantes un asesor continuará tu consulta. 🙏",
                         "pdf_bytes": None,
+                        "latency_ms": int((time.perf_counter() - start_time) * 1000),
+                        "model": self.ollama_model,
+                        "tools_called": [],
+                        "tools_trace": [],
+                        "guardrails_passed": True,
                     }
 
                 data = res.json()
@@ -736,7 +774,7 @@ class CustomerAIAgent:
 
                 # Si el modelo decidió invocar herramientas
                 if tool_calls:
-                    messages.append(message)  # Agregar la respuesta con las llamadas
+                    messages.append(message)
 
                     for tc in tool_calls:
                         fn_name = tc.get("function", {}).get("name")
@@ -749,6 +787,16 @@ class CustomerAIAgent:
                         logger.info(f"[AIAgent] Ejecutando tool '{fn_name}' con args: {fn_args}")
                         tool_result, pdf_b, pdf_fn = await self.execute_tool_call(fn_name, fn_args, conversation)
 
+                        tools_called.append(fn_name)
+                        tools_trace.append({
+                            "tool": fn_name,
+                            "args": fn_args,
+                            "result": tool_result,
+                        })
+
+                        if fn_name == "finalizar_pedido" and tool_result.get("order_code"):
+                            last_order_code = tool_result.get("order_code")
+
                         if pdf_b:
                             generated_pdf_bytes = pdf_b
                             generated_pdf_filename = pdf_fn
@@ -759,7 +807,7 @@ class CustomerAIAgent:
                             "content": json.dumps(tool_result, ensure_ascii=False),
                         })
 
-                    # Segunda llamada a Ollama para que redacte la respuesta final con la data
+                    # Segunda llamada a Ollama para redactar la respuesta final con la data
                     payload["messages"] = messages
                     payload["tools"] = None  # Evitar bucle infinito de tools
                     res2 = await client.post(url, json=payload)
@@ -773,11 +821,30 @@ class CustomerAIAgent:
                     final_text = message.get("content", "")
 
                 await self.db.commit()
+                latency_ms = int((time.perf_counter() - start_time) * 1000)
+
+                # Verificación de Guardrails (Confidencialidad y Seguridad)
+                guardrails_passed = True
+                guardrails_notes = []
+                lower_resp = (final_text or "").lower()
+                if any(kw in lower_resp for kw in ["costo de compra", "costo promedio", "margen de ganancia", "proveedor mayorista"]):
+                    guardrails_passed = False
+                    guardrails_notes.append("Advertencia: Posible mención a costos internos o márgenes.")
+                if any(kw in lower_resp for kw in ["password", "contraseña", "clave de acceso", "token secreto"]):
+                    guardrails_passed = False
+                    guardrails_notes.append("Alerta de seguridad: Mención de credenciales.")
 
                 return {
                     "text": final_text,
                     "pdf_bytes": generated_pdf_bytes,
                     "pdf_filename": generated_pdf_filename,
+                    "order_code": last_order_code,
+                    "latency_ms": latency_ms,
+                    "model": self.ollama_model,
+                    "tools_called": tools_called,
+                    "tools_trace": tools_trace,
+                    "guardrails_passed": guardrails_passed,
+                    "guardrails_notes": "; ".join(guardrails_notes) if guardrails_notes else "OK: Sin filtraciones de datos sensibles",
                 }
 
         except Exception as err:
@@ -785,4 +852,9 @@ class CustomerAIAgent:
             return {
                 "text": "¡Hola! En instantes un compañero de atención al cliente te responderá por este chat. ¡Muchas gracias por escribir a Extra Supermercado!",
                 "pdf_bytes": None,
+                "latency_ms": int((time.perf_counter() - start_time) * 1000),
+                "model": self.ollama_model,
+                "tools_called": [],
+                "tools_trace": [],
+                "guardrails_passed": True,
             }

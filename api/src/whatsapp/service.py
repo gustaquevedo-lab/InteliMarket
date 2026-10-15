@@ -812,3 +812,76 @@ async def seed_wa_templates(db: AsyncSession, tenant_id: UUID):
             )
             db.add(template)
     await db.commit()
+
+
+# ── AI Training & Few-Shot Examples ──────────────────────────────────────────
+
+async def list_ai_training_examples(
+    db: AsyncSession,
+    tenant_id: UUID,
+    categoria: Optional[str] = None,
+    activo_only: bool = False,
+) -> list:
+    from api.src.whatsapp.models import WhatsAppAITrainingExample
+    stmt = select(WhatsAppAITrainingExample).where(WhatsAppAITrainingExample.tenant_id == tenant_id)
+    if categoria:
+        stmt = stmt.where(WhatsAppAITrainingExample.categoria == categoria)
+    if activo_only:
+        stmt = stmt.where(WhatsAppAITrainingExample.activo == True)
+    stmt = stmt.order_by(WhatsAppAITrainingExample.created_at.desc())
+    res = await db.execute(stmt)
+    return list(res.scalars().all())
+
+
+async def create_ai_training_example(
+    db: AsyncSession,
+    tenant_id: UUID,
+    data: dict,
+    company_id: Optional[UUID] = None,
+):
+    from api.src.whatsapp.models import WhatsAppAITrainingExample
+    example = WhatsAppAITrainingExample(
+        tenant_id=tenant_id,
+        company_id=company_id,
+        categoria=data.get("categoria", "general"),
+        mensaje_usuario=data["mensaje_usuario"].strip(),
+        respuesta_ideal=data["respuesta_ideal"].strip(),
+        directiva_asociada=data.get("directiva_asociada"),
+        activo=data.get("activo", True),
+        origen=data.get("origen", "manual_admin"),
+    )
+    db.add(example)
+    await db.commit()
+    await db.refresh(example)
+    return example
+
+
+async def update_ai_training_example(
+    db: AsyncSession,
+    example_id: UUID,
+    data: dict,
+):
+    from api.src.whatsapp.models import WhatsAppAITrainingExample
+    example = await db.get(WhatsAppAITrainingExample, example_id)
+    if not example:
+        return None
+    for k, v in data.items():
+        if hasattr(example, k) and v is not None:
+            setattr(example, k, v)
+    await db.commit()
+    await db.refresh(example)
+    return example
+
+
+async def delete_ai_training_example(
+    db: AsyncSession,
+    example_id: UUID,
+) -> bool:
+    from api.src.whatsapp.models import WhatsAppAITrainingExample
+    example = await db.get(WhatsAppAITrainingExample, example_id)
+    if not example:
+        return False
+    await db.delete(example)
+    await db.commit()
+    return True
+

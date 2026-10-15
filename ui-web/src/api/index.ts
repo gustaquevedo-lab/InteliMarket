@@ -1178,6 +1178,10 @@ export interface WhatsAppConversation { id: string; tenant_id?: string; company_
 export interface WhatsAppMessage { id: string; tenant_id?: string; message_id?: string; conversacion_id?: string; conversation_id?: string; conversacion?: WhatsAppConversation; direccion?: string; direction?: string; tipo?: string; contenido?: string; content?: string; media_url?: string; estado?: string; status?: string; error_mensaje?: string; fecha_envio?: string; fecha_entrega?: string; fecha_lectura?: string; metadata?: Record<string, unknown>; created_at?: string; sender_type?: string; sender_user_id?: string | null; sender_name?: string | null; media_type?: string | null; media_filename?: string | null; media_size_bytes?: number | null }
 export interface WhatsAppTemplate { id: string; tenant_id?: string; company_id?: string; nombre?: string; name?: string; tipo?: string; categoria?: string; idioma?: string; contenido?: string; content?: string; variables?: string[]; ejemplo?: string; aprobado?: boolean; estado_aprobacion?: string; activo?: boolean; active?: boolean; created_at?: string; updated_at?: string }
 export interface WhatsAppStats { id?: string; company_id?: string; fecha?: string; total_conversaciones?: number; total_conversations?: number; conversaciones_activas?: number; active_today?: number; mensajes_enviados?: number; messages_today?: number; mensajes_recibidos?: number; tiempo_respuesta_promedio_min?: number; avg_response_time?: number; satisfaccion_promedio?: number; conversiones?: number; ventas_generadas?: number; created_at?: string }
+export interface WhatsAppAITrainingExample { id: string; tenant_id: string; company_id?: string; categoria: string; mensaje_usuario: string; respuesta_ideal: string; directiva_asociada?: string; activo: boolean; origen: string; created_at?: string; updated_at?: string }
+export interface AITrainingSimulateResponse { text: string; tools_called: string[]; tools_trace: Array<{ tool: string; input: any; output_preview: string; latency_ms?: number }>; pdf_generated: boolean; pdf_base64?: string; pdf_filename?: string; order_code?: string; latency_ms: number; persona: string; guardrails_passed: boolean }
+export interface AIQAResult { passed: number; total: number; all_passed: boolean; score_percentage: number; scenarios: Array<{ id: number; title: string; prompt: string; passed: boolean; latency_ms: number; response_preview: string; tools_called: string[]; pdf_generated: boolean; guardrails_passed: boolean; keywords_matched: string[] }> }
+export interface WatchdogStatus { status: string; last_check_at: string | null; last_reconnect_at: string | null; failure_count: number; last_error: string | null; instance: string; watchdog_running: boolean }
 export interface SifenTimbrado { id: string; company_id?: string; numero?: string; fecha_inicio?: string; fecha_fin?: string; numero_inicio?: number; numero_fin?: number; numero_actual?: number; rango_desde?: number; rango_hasta?: number; estado?: string; activo?: boolean; tipo_comprobante?: string; created_at?: string; updated_at?: string }
 export interface SifenResponse { id: string; sale_id?: string; cdc?: string; estado?: string; xml_enviado?: string; xml_sent?: string; xml_respuesta?: string; mensaje?: string; fecha_envio?: string; fecha_respuesta?: string; mensaje_error?: string; codigo_error?: string; created_at?: string }
 export interface Currency { id: string; codigo?: string; nombre?: string; simbolo?: string; es_default?: boolean; es_moneda_local?: boolean; tasa_cambio?: number; activo?: boolean; activa?: boolean; created_at?: string; updated_at?: string }
@@ -2751,6 +2755,24 @@ export const api = {
     saveBotFlow: (flow: any) => client.put<{ status: string; flow: any }>("/v1/whatsapp/flow", { flow }),
     resetBotFlow: () => client.post<{ status: string; flow: any }>("/v1/whatsapp/flow/reset"),
     getAiAgentStatus: () => client.get<{ online: boolean; host: string; latency_ms?: number; models?: string[]; active_model?: string; error?: string }>("/v1/whatsapp/ai-agent/status"),
+    listTrainingExamples: (params?: { category?: string; active_only?: boolean }) =>
+      client.get<WhatsAppAITrainingExample[]>("/v1/whatsapp/ai-training/examples", params),
+    createTrainingExample: (data: Partial<WhatsAppAITrainingExample>) =>
+      client.post<WhatsAppAITrainingExample>("/v1/whatsapp/ai-training/examples", data),
+    updateTrainingExample: (id: string, data: Partial<WhatsAppAITrainingExample>) =>
+      client.put<WhatsAppAITrainingExample>(`/v1/whatsapp/ai-training/examples/${id}`, data),
+    deleteTrainingExample: (id: string) =>
+      client.delete<{ status: string; deleted: boolean }>(`/v1/whatsapp/ai-training/examples/${id}`),
+    simulateAI: (data: {
+      message: string
+      persona?: string
+      custom_instructions?: string
+      emphasis_promotions?: string
+    }) => client.post<AITrainingSimulateResponse>("/v1/whatsapp/ai-training/simulate", data),
+    runQATests: () => client.post<AIQAResult>("/v1/whatsapp/ai-training/run-tests"),
+    getWatchdogStatus: () => client.get<WatchdogStatus>("/v1/whatsapp/watchdog/status"),
+    triggerWatchdog: () => client.post<WatchdogStatus>("/v1/whatsapp/watchdog/trigger"),
+    hardenGatewaySettings: () => client.post<{ status: string; settings: any; webhook: any }>("/v1/whatsapp/gateway/harden-settings"),
   },
   crm: {
     listLeads: () => client.get<Lead[]>("/v1/crm/leads"),
