@@ -69,10 +69,10 @@ import api.src.ecommerce.models
 import api.src.data_migration.models
 import api.src.financial.models
 import api.src.finance_agent.models
-import api.src.nemuha_connector.models
 import api.src.client_app.models
 import api.src.distribuidora.models
 import api.src.distribuidora.tracking_models
+import api.src.ruta_caja.models
 import api.src.fiscal.models
 import api.src.products.models
 import api.src.smart_pricing.models
