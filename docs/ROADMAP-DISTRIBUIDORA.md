@@ -11,7 +11,7 @@
 | 2 | Gestión de Crédito y Cobranzas | ✅ COMPLETO + DEPLOY | Commits b5a4b054..7ce6cda8. Migración aplicada en minisforum-ia |
 | 3 | Liquidaciones de Cobrador (Cajas de Ruta) | ✅ COMPLETO + DEPLOY | Commits 794cf01a..7635704e. Tablas y API en producción 15-oct-2026 |
 | 4 | Compras e Inventario | ✅ COMPLETO | Commits ecc67a27..0bc85d6f. Reglas proveedor, forecast, SIFEN, muelle, pesaje camión |
-| 5 | Logística / Reparto | ⬜ PENDIENTE | Sin spec ni plan |
+| 5 | Logística / Reparto | 📋 PLAN LISTO | Spec + plan escritos 15-oct-2026. Listo para ejecutar |
 | 6 | Contabilidad | ⬜ PENDIENTE | Sin spec ni plan — 3.26M asientos desde 2007 |
 
 ## Sub-proyecto 1: Rutas y Vendedores de Campo ✅
@@ -70,11 +70,14 @@ Plan listo pero sin ledger (nunca ejecutado). Revisar el plan antes de iniciar.
 
 Siguiente paso: leer el plan y ejecutar con `superpowers:executing-plans`.
 
-## Sub-proyecto 5: Logística / Reparto ⬜
+## Sub-proyecto 5: Logística / Reparto 📋
 
-Asignación de camiones y choferes a rutas, registro de viajes (km salida/llegada), historial de entregas.
+**Spec:** `docs/superpowers/specs/2026-10-15-viajes-logistica-distribuidora-design.md`  
+**Plan:** `docs/superpowers/plans/2026-10-15-viajes-logistica-distribuidora-plan.md`
 
-Siguiente paso: brainstorm → spec → plan → ejecutar.
+6 tareas: DB migration (trip_vehicles/trips/trip_stops/trip_stop_items), backend service+router (11 endpoints), frontend TS types+API client, DespachoPage drag-and-drop, MiViajeHoyPage cobrador mobile, navegación.
+
+Siguiente paso: ejecutar plan con `superpowers:executing-plans`.
 
 ## Sub-proyecto 6: Contabilidad ⬜
 
