@@ -73,6 +73,7 @@ import api.src.client_app.models
 import api.src.distribuidora.models
 import api.src.distribuidora.tracking_models
 import api.src.ruta_caja.models
+import api.src.viajes.models
 import api.src.fiscal.models
 import api.src.products.models
 import api.src.smart_pricing.models
