@@ -9,7 +9,7 @@
 |---|---|---|---|
 | 1 | Rutas y Vendedores de Campo | ✅ COMPLETO | Commits 283edd38..cf8de36b. Deploy pendiente confirmación |
 | 2 | Gestión de Crédito y Cobranzas | ✅ COMPLETO + DEPLOY | Commits b5a4b054..7ce6cda8. Migración aplicada en minisforum-ia |
-| 3 | Liquidaciones de Cobrador (Cajas de Ruta) | ⬜ PENDIENTE | Sin spec ni plan |
+| 3 | Liquidaciones de Cobrador (Cajas de Ruta) | 📝 SPEC LISTA | Spec: docs/superpowers/specs/2026-10-14-caja-ruta-tesoreria-design.md |
 | 4 | Compras e Inventario | ⬜ PENDIENTE | Plan: docs/superpowers/plans/2026-09-28-compras-inteligentes-proveedores-plan.md — sin ledger, sin ejecutar |
 | 5 | Logística / Reparto | ⬜ PENDIENTE | Sin spec ni plan |
 | 6 | Contabilidad | ⬜ PENDIENTE | Sin spec ni plan — 3.26M asientos desde 2007 |
@@ -48,18 +48,18 @@ Entregables:
 
 Migración aplicada: `20261013110000` en minisforum-ia ✅
 
-## Sub-proyecto 3: Liquidaciones de Cobrador ⬜
+## Sub-proyecto 3: Liquidaciones de Cobrador (Cajas de Ruta) 📝
 
-**Contexto:** 907 cobradores históricos. Hoy no existe ninguna pantalla de cierre diario.
+**Spec:** `docs/superpowers/specs/2026-10-14-caja-ruta-tesoreria-design.md`
 
-Módulo de cierre diario por cobrador que registre:
-- Efectivo cobrado
-- Anticipos entregados
-- Descuentos aplicados
-- Pagarés recibidos
-- Diferencias y observaciones
+**Diseño aprobado (14-oct-2026):**
+- Módulo nuevo `api/src/ruta_caja/` (independiente del módulo `caja` retail)
+- 4 tablas: `route_sessions`, `route_liquidations`, `route_liquidation_items`, `bank_deposits`
+- 3 páginas: `RendicionesPage` (cobrador, responsive), `LiquidacionesPage` (supervisor), `TesoreriaPage` (tesorero, unifica rutas + retail)
+- 10 endpoints bajo `/api/v1/distribuidora/`
+- Reconciliación híbrida: sistema calcula esperado desde AR, cobrador declara, supervisor autoriza
 
-Siguiente paso: brainstorm → spec → plan → ejecutar.
+Siguiente paso: invocar `superpowers:writing-plans` → ejecutar plan.
 
 ## Sub-proyecto 4: Compras e Inventario ⬜
 
