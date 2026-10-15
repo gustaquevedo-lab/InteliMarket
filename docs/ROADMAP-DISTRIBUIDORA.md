@@ -9,8 +9,8 @@
 |---|---|---|---|
 | 1 | Rutas y Vendedores de Campo | ✅ COMPLETO | Commits 283edd38..cf8de36b. Deploy pendiente confirmación |
 | 2 | Gestión de Crédito y Cobranzas | ✅ COMPLETO + DEPLOY | Commits b5a4b054..7ce6cda8. Migración aplicada en minisforum-ia |
-| 3 | Liquidaciones de Cobrador (Cajas de Ruta) | 📝 SPEC LISTA | Spec: docs/superpowers/specs/2026-10-14-caja-ruta-tesoreria-design.md |
-| 4 | Compras e Inventario | ⬜ PENDIENTE | Plan: docs/superpowers/plans/2026-09-28-compras-inteligentes-proveedores-plan.md — sin ledger, sin ejecutar |
+| 3 | Liquidaciones de Cobrador (Cajas de Ruta) | ✅ COMPLETO + DEPLOY | Commits 794cf01a..7635704e. Tablas y API en producción 15-oct-2026 |
+| 4 | Compras e Inventario | ✅ COMPLETO | Commits ecc67a27..0bc85d6f. Reglas proveedor, forecast, SIFEN, muelle, pesaje camión |
 | 5 | Logística / Reparto | ⬜ PENDIENTE | Sin spec ni plan |
 | 6 | Contabilidad | ⬜ PENDIENTE | Sin spec ni plan — 3.26M asientos desde 2007 |
 
