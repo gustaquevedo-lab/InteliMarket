@@ -21,11 +21,32 @@ import NotificationBell from "./NotificationBell"
 
 const isElectron = typeof window !== "undefined" && !!(window as any).electronAPI
 
+// ═══════════════════════════════════════════════════════════════════════════
+// REGLA DE BLINDAJE DE VERTICALES — leer antes de tocar este archivo
+// ═══════════════════════════════════════════════════════════════════════════
+// Cada ítem o sección que sea EXCLUSIVO de una vertical DEBE declarar su
+// campo `verticals`.  Sin él, el ítem/sección aparece en TODAS las verticales.
+//
+// Valores válidos hoy: "supermercado" | "distribuidora"
+//
+// Para secciones enteras → `verticals` en NavGroup.
+// Para ítems dentro de un grupo mixto → `verticals` en NavItem.
+//
+// Reglas:
+//  1. ¿Tiene sentido para un supermercado de retail? → verticals: ["supermercado"]
+//  2. ¿Tiene sentido para una distribuidora/preventa? → verticals: ["distribuidora"]
+//  3. ¿Sirve a cualquier vertical? → sin campo verticals (se muestra en todo)
+//
+// NUNCA hagas un merge desde otra vertical sin revisar esta sección y taggear
+// los ítems nuevos.  Un ítem sin tag aparece en todos — eso es el bug original.
+// ═══════════════════════════════════════════════════════════════════════════
+
 interface NavItem {
   icon: React.ComponentType<{ className?: string }>
   label: string
   path: string
   feature?: string
+  verticals?: string[]   // si se declara, el ítem solo aparece en estas verticales
   permission?: string
   // Alternativa a `permission` cuando la pantalla mezcla mas de una accion
   // gateada (ej. /crm tiene ajuste manual de puntos con crm:update y
@@ -39,6 +60,7 @@ interface NavItem {
 interface NavGroup {
   title: string
   items: NavItem[]
+  verticals?: string[]   // si se declara, la sección entera solo aparece en estas verticales
 }
 
 const navGroups: NavGroup[] = [
@@ -87,6 +109,7 @@ const navGroups: NavGroup[] = [
   },
   {
     title: "Operaciones de Salón",
+    verticals: ["supermercado"],   // ← SOLO supermercado retail
     items: [
       // Permission "salon:manage" -- las 6 pantallas de gestion real de este
       // bloque (todas sus escrituras estan gateadas por ese permiso en el
@@ -120,7 +143,7 @@ const navGroups: NavGroup[] = [
     title: "Finanzas & Tesorería",
     items: [
       { icon: Banknote, label: "Arqueo de Caja", path: "/caja" },
-      { icon: Ticket, label: "Vales y Convenios", path: "/vales", keywords: ["vales", "convenio", "convenios", "up", "empresas", "gift card", "bonos"] },
+      { icon: Ticket, label: "Vales y Convenios", path: "/vales", verticals: ["supermercado"], keywords: ["vales", "convenio", "convenios", "up", "empresas", "gift card", "bonos"] },
       { icon: Landmark, label: "Bóveda Central", path: "/boveda" },
       { icon: Landmark, label: "Cuentas Bancarias", path: "/bancos" },
       { icon: CreditCard, label: "Gestión de Cheques", path: "/cheques" },
@@ -129,15 +152,15 @@ const navGroups: NavGroup[] = [
       // { icon: ShieldCheck, label: "Scoring de Crédito", path: "/credit-scoring" },
       { icon: CreditCard, label: "Pagos a Proveedores (AP)", path: "/payments", keywords: ["cuentas por pagar", "facturas proveedores", "op", "ordenes de pago", "vales", "frutihorti", "lote brasil"] },
       { icon: ReceiptText, label: "Gastos Operativos", path: "/gastos" },
-      { icon: DollarSign, label: "PyG Diario por Depto.", path: "/pyg-diario" },
+      { icon: DollarSign, label: "PyG Diario por Depto.", path: "/pyg-diario", verticals: ["supermercado"] },
       { icon: Building, label: "Gestión Financiera", path: "/financiero" },
     ]
   },
   {
     title: "CRM & Marketing",
     items: [
-      { icon: Users, label: "Fidelidad ExtraClub", path: "/crm", anyPermission: ["crm:update", "crm:campaigns"] },
-      { icon: Ticket, label: "Cupones de Sorteo", path: "/cupones" },
+      { icon: Users, label: "Fidelidad ExtraClub", path: "/crm", verticals: ["supermercado"], anyPermission: ["crm:update", "crm:campaigns"] },
+      { icon: Ticket, label: "Cupones de Sorteo", path: "/cupones", verticals: ["supermercado"] },
       { icon: PieChart, label: "Customer 360", path: "/customer360" },
       { icon: MessageCircle, label: "WhatsApp & IntelliZapp", path: "/whatsapp" },
       { icon: Tag, label: "Promociones & Campañas", path: "/promociones" },
@@ -154,7 +177,7 @@ const navGroups: NavGroup[] = [
     items: [
       { icon: ShieldCheck, label: "Facturación & Autoimpresor (DNIT)", path: "/sifen" },
       { icon: FileSignature, label: "Facturación Electrónica (Próximamente)", path: "/facturacion-electronica" },
-      { icon: Scale, label: "Básculas & Balanzas", path: "/escalas" },
+      { icon: Scale, label: "Básculas & Balanzas", path: "/escalas", verticals: ["supermercado"] },
       // DESACTIVADO 2026-09-04: dispositivos ESL (MAC, bateria, señal) sintetizados
       // en el cliente, sin integracion real a hardware. Ver auditoria de sidebar.
       // { icon: Radio, label: "Etiquetas Electrónicas (ESL)", path: "/esl" },
@@ -181,11 +204,17 @@ const navGroups: NavGroup[] = [
     ]
   },
   {
-    title: "Distribuidora & Preventa",
+    title: "Distribuidora & Logística",
+    verticals: ["distribuidora"],   // ← SOLO distribuidora/preventa
     items: [
-      { icon: Navigation, label: "Mapa en Tiempo Real", path: "/mapa-tiempo-real", feature: "distribuidora" },
-      { icon: Map, label: "Planificador de Rutas", path: "/rutas", feature: "distribuidora" },
-      { icon: Trophy, label: "Rendimiento Preventistas", path: "/distribuidora/rendimiento-vendedores", feature: "distribuidora" },
+      { icon: Navigation, label: "Mapa en Tiempo Real", path: "/mapa-tiempo-real" },
+      { icon: Map, label: "Planificador de Rutas", path: "/rutas" },
+      { icon: Trophy, label: "Rendimiento Preventistas", path: "/distribuidora/rendimiento-vendedores" },
+      { icon: Truck, label: "Despacho & Reparto", path: "/distribuidora/despacho", keywords: ["viajes", "reparto", "despacho", "carga", "camion"] },
+      { icon: Navigation, label: "Mi Viaje Hoy (Cobrador)", path: "/distribuidora/mi-viaje", keywords: ["cobrador", "ruta", "mobile", "viaje"] },
+      { icon: DollarSign, label: "Rendiciones de Cobro", path: "/distribuidora/rendiciones", keywords: ["rendicion", "cobros", "efectivo", "cheques"] },
+      { icon: Landmark, label: "Liquidaciones de Ruta", path: "/distribuidora/liquidaciones", keywords: ["liquidacion", "ruta", "supervisor", "cierre"] },
+      { icon: Briefcase, label: "Tesorería de Rutas", path: "/distribuidora/tesoreria", keywords: ["tesoreria", "deposito", "banco", "caja cobrador"] },
     ]
   },
   {
@@ -199,7 +228,13 @@ const navGroups: NavGroup[] = [
 export default function Layout() {
   const { user, logout } = useAuth()
   const { theme, setTheme } = useTheme()
-  const { hasFeature } = useFeatures()
+  const { hasFeature, verticalSlug } = useFeatures()
+
+  // Devuelve true si el ítem/grupo aplica al vertical activo.
+  // Fail-closed: si verticalSlug aún no cargó (null) y hay restricción de vertical,
+  // el ítem se OCULTA hasta que la config llegue.
+  const inVertical = (verticals?: string[]) =>
+    !verticals || (verticalSlug != null && verticals.includes(verticalSlug))
   const { hasPermission, hasAnyPermission } = usePermissions()
   const navigate = useNavigate()
   const location = useLocation()
@@ -245,11 +280,14 @@ export default function Layout() {
   const [searchQuery, setSearchQuery] = useState("")
   const [searchOpen, setSearchOpen] = useState(false)
 
-  const allNavItems = navGroups.flatMap(g => g.items)
+  const allNavItems = navGroups
+    .filter(g => inVertical(g.verticals))
+    .flatMap(g => g.items)
   const searchResults = searchQuery.trim().length > 0
     ? allNavItems.filter(item =>
         (item.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
          item.keywords?.some(k => k.toLowerCase().includes(searchQuery.toLowerCase()))) &&
+        inVertical(item.verticals) &&
         (!item.feature || hasFeature(item.feature)) &&
         (!item.permission || hasPermission(item.permission)) &&
         (!item.anyPermission || hasAnyPermission(...item.anyPermission)) &&
@@ -285,7 +323,7 @@ export default function Layout() {
             <div className="flex flex-col text-left">
               <Logo />
               <span className="mt-1.5 text-[9px] font-black bg-emerald-500/90 text-white px-2 py-0.5 rounded-full w-max uppercase tracking-widest shadow-sm">
-                Versión: Supermercado
+                {verticalSlug === "distribuidora" ? "Distribuidora" : verticalSlug === "supermercado" ? "Supermercado" : verticalSlug ?? "InteliMarket"}
               </span>
             </div>
             <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-white/70 hover:text-white">
@@ -296,8 +334,9 @@ export default function Layout() {
 
         {/* Menú de Navegación con Pills y Guía Vertical */}
         <nav className="flex-1 p-3 space-y-3 overflow-y-auto">
-          {navGroups.map((group) => {
+          {navGroups.filter(group => inVertical(group.verticals)).map((group) => {
             const visibleItems = group.items.filter((item) => {
+              if (!inVertical(item.verticals)) return false
               if (item.superadminOnly && !user?.is_superadmin) return false
               if (item.permission && !hasPermission(item.permission)) return false
               if (item.anyPermission && !hasAnyPermission(...item.anyPermission)) return false
