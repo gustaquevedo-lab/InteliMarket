@@ -326,6 +326,8 @@ export default function DistribuidoraPage() {
           { path: "/distribuidora/rendiciones", label: "Mis rendiciones", Icon: Wallet },
           { path: "/distribuidora/liquidaciones", label: "Liquidaciones", Icon: ClipboardCheck },
           { path: "/distribuidora/tesoreria", label: "Tesorería", Icon: Landmark },
+          { path: "/distribuidora/despacho", label: "Despacho", Icon: Truck },
+          { path: "/distribuidora/mi-viaje", label: "Mi Viaje", Icon: MapPin },
         ].map(({ path, label, Icon }) => (
           <button key={path} onClick={() => navigate(path)}
             className="flex items-center gap-2 text-sm font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg px-3 py-1.5 transition">
