@@ -18,6 +18,7 @@ import { usePermissions } from "../context/PermissionsContext"
 import { api } from "../api"
 import Logo from "./Logo"
 import NotificationBell from "./NotificationBell"
+import MarcoCopilot from "./MarcoCopilot"
 
 const isElectron = typeof window !== "undefined" && !!(window as any).electronAPI
 
@@ -71,6 +72,7 @@ const navGroups: NavGroup[] = [
       { icon: TrendingUp, label: "Gerente de Ventas IA", path: "/sales-agent" },
       { icon: Bot, label: "Gerente Financiero IA", path: "/finance-agent" },
       { icon: Sparkles, label: "Gerente de Marketing IA", path: "/marketing-agent" },
+      { icon: Bot, label: "Marco IA (Asistente)", path: "/asistente-virtual", feature: "asistente_virtual" },
     ]
   },
   {
@@ -552,6 +554,8 @@ export default function Layout() {
 
         <main className="flex-1 overflow-y-auto p-4 lg:p-6"><ErrorBoundary><Outlet /></ErrorBoundary></main>
       </div>
+      {/* Marco - AI Copilot flotante */}
+      <MarcoCopilot />
     </div>
   )
 }
