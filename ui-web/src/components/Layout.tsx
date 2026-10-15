@@ -231,10 +231,10 @@ export default function Layout() {
   const { hasFeature, verticalSlug } = useFeatures()
 
   // Devuelve true si el ítem/grupo aplica al vertical activo.
-  // Fail-closed: si verticalSlug aún no cargó (null) y hay restricción de vertical,
-  // el ítem se OCULTA hasta que la config llegue.
+  // Mientras verticalSlug no haya cargado (null) se muestra todo (UI loading state).
+  // Una vez cargado, se filtra estrictamente: solo aparece en su vertical declarada.
   const inVertical = (verticals?: string[]) =>
-    !verticals || (verticalSlug != null && verticals.includes(verticalSlug))
+    !verticals || verticalSlug == null || verticals.includes(verticalSlug)
   const { hasPermission, hasAnyPermission } = usePermissions()
   const navigate = useNavigate()
   const location = useLocation()
