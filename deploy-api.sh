@@ -34,7 +34,7 @@ wait_healthy 8000 "Instancia 1"
 echo "==> [3/4] Instancia 1 ya sirve el codigo nuevo. Margen de seguridad antes de tocar la instancia 2..."
 sleep 5
 echo "==> Reiniciando instancia 2 (puerto 8010)..."
-sudo -n /usr/bin/systemctl restart intelimarket-api-2.service
+sudo -n /usr/bin/systemctl restart intelimarket-api-2
 wait_healthy 8010 "Instancia 2"
 
 echo "==> [4/4] Verificando el pool completo por nginx..."
