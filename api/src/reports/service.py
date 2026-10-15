@@ -72,9 +72,12 @@ async def get_sales_summary(db: AsyncSession, fecha_desde: Optional[date] = None
     }
 
 
-async def get_sales_by_period(db: AsyncSession, agrupar_por: str = "dia", fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None, branch_id: Optional[str] = None) -> list:
+async def get_sales_by_period(db: AsyncSession, agrupar_por: str = "dia", fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None, branch_id: Optional[str] = None, company_id: Optional[str] = None) -> list:
     params = {}
     where = "v.estado <> 'cancelado'"
+    if company_id:
+        where += " AND v.company_id = :company_id"
+        params["company_id"] = company_id
     if fecha_desde:
         where += " AND v.fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
@@ -186,9 +189,12 @@ async def get_margin_summary(db: AsyncSession, fecha_desde: Optional[date] = Non
     }
 
 
-async def get_sales_by_product(db: AsyncSession, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None, limit: int = 50) -> list:
+async def get_sales_by_product(db: AsyncSession, company_id: Optional[str] = None, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None, limit: int = 50) -> list:
     params = {"limit": limit}
     where = "v.estado <> 'cancelado'"
+    if company_id:
+        where += " AND v.company_id = :company_id"
+        params["company_id"] = company_id
     if fecha_desde:
         where += " AND v.fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
@@ -223,6 +229,10 @@ async def get_sales_by_product(db: AsyncSession, fecha_desde: Optional[date] = N
         }
         for r in results
     ]
+
+
+async def get_chart_comparison(db: AsyncSession, company_id: Optional[str] = None, agrupar_por: str = "dia", fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
+    return await get_sales_by_period(db, agrupar_por, fecha_desde, fecha_hasta, company_id=company_id)
 
 
 async def get_sales_by_client(db: AsyncSession, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
