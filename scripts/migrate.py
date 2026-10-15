@@ -40,6 +40,12 @@ COLUMN_MIGRATIONS = [
     ("purchase_requisitions",    "estado",                "VARCHAR(30) DEFAULT 'borrador'"),
     # demand_forecast purchase_suggestions
     ("purchase_suggestions",     "supplier_candidates",   "JSONB"),
+    # tenants
+    ("tenants",                  "contacto_email",        "VARCHAR(255)"),
+    # customers extra cols
+    ("customers",                "empresa_vinculada_ruc", "VARCHAR(20)"),
+    # products
+    ("products",                 "tipo_producto",         "VARCHAR(20) DEFAULT 'producto'"),
 ]
 
 # ──────────────────────────────────────────────
@@ -280,6 +286,12 @@ CREATE TABLE IF NOT EXISTS integration_checks (
     latency_ms INTEGER,
     error_message TEXT,
     meta JSONB
+);
+
+CREATE TABLE IF NOT EXISTS platform_settings (
+    key VARCHAR(60) PRIMARY KEY,
+    value JSONB,
+    updated_at TIMESTAMPTZ DEFAULT now()
 );
 """
 
