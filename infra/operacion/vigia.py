@@ -499,6 +499,25 @@ def chequear_sueltos(eventos: list) -> dict:
             "detalle": (f"se terminaron {len(huerfanos)} proceso(s) abandonados" if huerfanos else "ninguno")}
 
 
+def chequear_rama_git(eventos: list) -> dict:
+    nombre = "Rama git de producción"
+    rc, out = sh(["git", "-C", REPO, "branch", "--show-current"])
+    rama = out.strip()
+    if rc != 0 or not rama:
+        return {"id": "git:branch", "grupo": "Servicios", "nombre": nombre, "estado": "critico",
+                "detalle": f"no se pudo determinar la rama git ({out})"}
+    if rama != "vertical/supermercado":
+        # Corrección automática inmediata: revertir a vertical/supermercado y redesplegar
+        sh(["git", "-C", REPO, "checkout", "vertical/supermercado"])
+        sh(["bash", f"{REPO}/deploy-api.sh"])
+        eventos.append({"ts": ahora(), "nivel": "critico", "nuevo": True,
+                        "texto": f"🚨 ALERTA CRÍTICA: Se detectó rama '{rama}' en vez de 'vertical/supermercado' en el servidor de producción. Revertido y redesplegado automáticamente."})
+        return {"id": "git:branch", "grupo": "Servicios", "nombre": nombre, "estado": "critico",
+                "detalle": f"estaba en '{rama}'; corregido automáticamente a vertical/supermercado"}
+    return {"id": "git:branch", "grupo": "Servicios", "nombre": nombre, "estado": "ok",
+            "detalle": "vertical/supermercado"}
+
+
 # ── principal ───────────────────────────────────────────────────────────────
 
 ICONO = {"ok": "✅", "aviso": "🟡", "critico": "🔴"}
@@ -527,6 +546,7 @@ def main() -> None:
     checks, servicios = chequear_servicios(mem)
     checks += chequear_puertos(mem, eventos)
     checks.append(chequear_sueltos(eventos))
+    checks.append(chequear_rama_git(eventos))
     checks.append(chequear_interfaz())
     checks.append(chequear_api(mem))
     checks += chequear_base(mem)
