@@ -1209,6 +1209,12 @@ export interface SellerPerformance { seller_id: string; seller_name: string; pho
 export interface Pagare { id: string; company_id: string; customer_id: string; receivable_account_id?: string; numero_pagare: string; monto_original: number; saldo_pendiente: number; fecha_emision: string; fecha_vencimiento: string; motivo?: string; estado: "vigente" | "pagado" | "protestado" | "anulado"; cobrador_id?: string; created_at: string }
 export interface DeliveryNote { id: string; company_id: string; customer_id: string; sale_id?: string; numero_nota: string; numero_factura_ref?: string; fecha: string; monto: number; concepto: "no_es_su_pedido" | "faltante_deposito" | "sin_dinero" | "vencimiento_averia" | "otro"; descripcion?: string; vendedor_id?: string; cobrador_id?: string; estado: "pendiente" | "aplicada" | "anulada"; aplicada_en_cobro_id?: string; created_at: string }
 export interface RouteCobranzaClient { customer_id: string; customer_name: string; customer_telefono?: string; saldo_total: number; n_docs: number; ultimo_cobro?: string }
+
+export interface LiquidationItem { id: string; tipo: 'cheque' | 'pagare'; numero: string; banco?: string; monto: number; customer_id?: string; vencimiento?: string }
+export interface RouteLiquidation { id: string; route_session_id: string; efectivo_declarado: number; cheques_declarado: number; pagares_declarado: number; nc_aplicadas: number; descuentos_autorizados: number; efectivo_esperado: number; total_cobrado_ar: number; diferencia: number; estado: 'pendiente' | 'autorizada' | 'observada' | 'rechazada'; supervisor_id?: string; observaciones?: string; fecha_autorizacion?: string; created_at: string; items?: LiquidationItem[] }
+export interface RouteSession { id: string; company_id: string; cobrador_id: string; cobrador_nombre?: string; route_id?: string; fecha: string; estado: 'abierta' | 'cerrada' | 'liquidada' | 'observada'; fondo_inicial: number; fondo_sobrante?: number; opened_at: string; closed_at?: string; created_by: string; liquidation?: RouteLiquidation; ar_summary?: { total_efectivo: number; total_cheques: number; total_pagares: number; total_nc: number } }
+export interface TreasuryDailySummary { fecha: string; rutas: Array<{ liquidation_id: string; cobrador_id: string; efectivo: number; cheques: number; pagares: number }>; retail: { total_efectivo: number; session_count: number }; totales: { total_efectivo: number; total_cheques: number; total_pagares: number } }
+
 export interface ExpenseCategory { id: string; nombre: string; descripcion?: string; presupuesto_mensual?: number; activo?: boolean; created_at?: string }
 export interface CostCenter { id: string; nombre: string; tipo: "sector" | "global"; peso_prorateo: number; activo?: boolean; created_at?: string }
 export interface Expense {
@@ -3986,6 +3992,28 @@ export const api = {
       create: (data: object) => client.post<DeliveryNote>(`/v1/distribuidora/delivery-notes`, data),
       apply: (noteId: string, data: object) => client.post<DeliveryNote>(`/v1/distribuidora/delivery-notes/${noteId}/apply`, data),
       cancel: (noteId: string) => client.post<DeliveryNote>(`/v1/distribuidora/delivery-notes/${noteId}/cancel`),
+    },
+    rutaCaja: {
+      openSession: (data: { company_id: string; cobrador_id: string; route_id?: string; fecha: string; fondo_inicial: number; created_by: string }) =>
+        client.post<RouteSession>('/v1/distribuidora/route-sessions', data),
+      listSessions: (params: { company_id: string; fecha?: string; cobrador_id?: string; estado?: string }) =>
+        client.get<RouteSession[]>('/v1/distribuidora/route-sessions', params as any),
+      getSession: (id: string) =>
+        client.get<RouteSession>(`/v1/distribuidora/route-sessions/${id}`),
+      closeSession: (id: string, data: { efectivo_declarado: number; cheques_declarado: number; pagares_declarado: number; nc_aplicadas: number; descuentos_autorizados: number; items: Array<{ tipo: string; numero: string; banco?: string; monto: number; customer_id?: string; vencimiento?: string }> }) =>
+        client.post<RouteLiquidation>(`/v1/distribuidora/route-sessions/${id}/close`, data),
+      getLiquidation: (id: string) =>
+        client.get<RouteLiquidation>(`/v1/distribuidora/route-liquidations/${id}`),
+      authorizeLiquidation: (id: string) =>
+        client.post<RouteLiquidation>(`/v1/distribuidora/route-liquidations/${id}/authorize`, {}),
+      observeLiquidation: (id: string, observaciones: string) =>
+        client.post<RouteLiquidation>(`/v1/distribuidora/route-liquidations/${id}/observe`, { observaciones }),
+      rejectLiquidation: (id: string, observaciones: string) =>
+        client.post<RouteLiquidation>(`/v1/distribuidora/route-liquidations/${id}/reject`, { observaciones }),
+      getDailySummary: (company_id: string, fecha: string) =>
+        client.get<TreasuryDailySummary>('/v1/distribuidora/treasury/daily-summary', { company_id, fecha } as any),
+      createBankDeposit: (data: { company_id: string; fecha: string; bank_name: string; account_number: string; monto_efectivo: number; monto_cheques: number; referencia?: string; route_liquidation_ids: string[]; cash_session_ids: string[]; observaciones?: string; created_by: string }) =>
+        client.post<any>('/v1/distribuidora/treasury/bank-deposit', data),
     },
   },
   intellizapp: {
