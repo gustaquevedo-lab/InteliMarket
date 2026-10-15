@@ -446,12 +446,16 @@ async def sync_accounts_payable(db: AsyncSession, company_id: str, since: date |
 
         existing_id = await _get_mapped_target(db, company_id, "fin_conta_pagar", r["ID_CONTA_PAGAR"])
         if existing_id:
-            # Blindaje: no pisar facturas que ya tienen órdenes de pago o pagos procesados nativamente en InteliMarket
-            has_native_payments = await db.execute(
+            # Blindaje: no pisar facturas que ya tienen órdenes de pago, pagos nativos
+            # o pagos ajustados/anulados explícitamente (ej: NC no reconocida por el proveedor)
+            has_protected_adjustments = await db.execute(
                 text("""
                     SELECT 1 FROM supplier_invoice_payments sip
                     WHERE sip.invoice_id = :id AND sip.estado != 'anulado'
                       AND sip.id NOT IN (SELECT target_id FROM nemuha_record_map WHERE source_table = 'fin_pagamento')
+                    UNION
+                    SELECT 1 FROM supplier_invoice_payments sip
+                    WHERE sip.invoice_id = :id AND (sip.referencia ILIKE '%no reconocid%' OR sip.referencia ILIKE '%no aprobad%')
                     UNION
                     SELECT 1 FROM supplier_payment_order_allocations spoa
                     JOIN supplier_payment_orders spo ON spo.id = spoa.payment_order_id
@@ -460,7 +464,7 @@ async def sync_accounts_payable(db: AsyncSession, company_id: str, since: date |
                 """),
                 {"id": str(existing_id)},
             )
-            if saldo == 0 or not has_native_payments.first():
+            if not has_protected_adjustments.first():
                 await db.execute(
                     text("UPDATE supplier_invoices SET saldo_pendiente = :saldo, estado = :estado, updated_at = now() WHERE id = :id"),
                     {"saldo": saldo, "estado": estado, "id": str(existing_id)},
@@ -511,13 +515,16 @@ async def sync_supplier_invoice_payments(db: AsyncSession, company_id: str, sinc
         existing_id = await _get_mapped_target(db, company_id, "fin_pagamento", r["ID_PAGAMENTO"])
         if existing_id:
             # Si el pago existía pero fue revertido/anulado indebidamente en InteliMarket,
-            # reactivarlo a 'pagado' dado que en Ñemuha sigue 100% activo
+            # reactivarlo a 'pagado' dado que en Ñemuha sigue 100% activo, SALVO que
+            # haya sido anulado explícitamente (ej: notas de crédito / devoluciones no reconocidas por el proveedor)
             await db.execute(
                 text("""
                     UPDATE supplier_invoice_payments
                     SET estado = 'pagado',
                         referencia = TRIM(REGEXP_REPLACE(COALESCE(referencia, ''), '\\[Pago revertido/anulado:[^\\]]*\\]', '', 'g'))
-                    WHERE id = :id AND estado = 'anulado'
+                    WHERE id = :id
+                      AND estado = 'anulado'
+                      AND (referencia IS NULL OR (referencia NOT ILIKE '%no reconocid%' AND referencia NOT ILIKE '%no aprobad%'))
                 """),
                 {"id": str(existing_id)},
             )
