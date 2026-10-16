@@ -41,4 +41,13 @@ sudo "$SYSTEMCTL" restart intelimarket-api
 "$SYSTEMCTL" is-active intelimarket-api-2 && echo "api-2: OK" || echo "api-2: FAIL"
 "$SYSTEMCTL" is-active intelimarket-api  && echo "api:   OK" || echo "api:   FAIL"
 
+echo "=== [3b/4] Publicar UI en nginx ==="
+WWW="/var/www/intelimarket-ui/current"
+if [ -w "$WWW" ]; then
+    rsync -a --delete "$REPO/ui-web-dist/" "$WWW/"
+    echo "✓ UI publicada en $WWW"
+else
+    echo "ADVERTENCIA: sin permisos en $WWW — ejecutar: sudo chown -R intellihouse:intellihouse /var/www/intelimarket-ui"
+fi
+
 echo "=== Deploy completo ==="
