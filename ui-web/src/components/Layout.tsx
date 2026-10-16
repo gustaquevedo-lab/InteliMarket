@@ -9,7 +9,7 @@ import {
   PieChart, DollarSign, TrendingUp, Bot, Clock, Award, Globe, Repeat, Wrench,
   Copy, Package, Upload, Mail, AlertTriangle, LayoutGrid, Carrot, ChefHat, Radio, Plus, Sparkles, Tag,
   Ticket, ArrowLeftRight, ClipboardCheck, RefreshCw, Radar, Smartphone,
-  Map, Navigation, Trophy, Route, Lightbulb, Thermometer, BarChart3, Shield
+  Map, Navigation, Trophy
 } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
@@ -22,32 +22,11 @@ import MarcoCopilot from "./MarcoCopilot"
 
 const isElectron = typeof window !== "undefined" && !!(window as any).electronAPI
 
-// ═══════════════════════════════════════════════════════════════════════════
-// REGLA DE BLINDAJE DE VERTICALES — leer antes de tocar este archivo
-// ═══════════════════════════════════════════════════════════════════════════
-// Cada ítem o sección que sea EXCLUSIVO de una vertical DEBE declarar su
-// campo `verticals`.  Sin él, el ítem/sección aparece en TODAS las verticales.
-//
-// Valores válidos hoy: "supermercado" | "distribuidora"
-//
-// Para secciones enteras → `verticals` en NavGroup.
-// Para ítems dentro de un grupo mixto → `verticals` en NavItem.
-//
-// Reglas:
-//  1. ¿Tiene sentido para un supermercado de retail? → verticals: ["supermercado"]
-//  2. ¿Tiene sentido para una distribuidora/preventa? → verticals: ["distribuidora"]
-//  3. ¿Sirve a cualquier vertical? → sin campo verticals (se muestra en todo)
-//
-// NUNCA hagas un merge desde otra vertical sin revisar esta sección y taggear
-// los ítems nuevos.  Un ítem sin tag aparece en todos — eso es el bug original.
-// ═══════════════════════════════════════════════════════════════════════════
-
 interface NavItem {
   icon: React.ComponentType<{ className?: string }>
   label: string
   path: string
   feature?: string
-  verticals?: string[]   // si se declara, el ítem solo aparece en estas verticales
   permission?: string
   // Alternativa a `permission` cuando la pantalla mezcla mas de una accion
   // gateada (ej. /crm tiene ajuste manual de puntos con crm:update y
@@ -61,7 +40,6 @@ interface NavItem {
 interface NavGroup {
   title: string
   items: NavItem[]
-  verticals?: string[]   // si se declara, la sección entera solo aparece en estas verticales
 }
 
 const navGroups: NavGroup[] = [
@@ -69,22 +47,11 @@ const navGroups: NavGroup[] = [
     title: "Inicio",
     items: [
       { icon: LayoutDashboard, label: "Dashboard", path: "/" },
-    ]
-  },
-  {
-    // Sección de IA — existía en main (commit a3e8d6d5) pero nunca se mergeó a distribuidora
-    title: "IA & Analítica",
-    verticals: ["distribuidora"],
-    items: [
+      { icon: FileSpreadsheet, label: "Cierre Mensual de Resultados", path: "/cierre-mensual", keywords: ["cierre", "pnl", "resultados", "mensual", "setiembre", "septiembre", "balance"] },
       { icon: TrendingUp, label: "Gerente de Ventas IA", path: "/sales-agent" },
       { icon: Bot, label: "Gerente Financiero IA", path: "/finance-agent" },
       { icon: Sparkles, label: "Gerente de Marketing IA", path: "/marketing-agent" },
       { icon: Bot, label: "Marco IA (Cerebro)", path: "/asistente-virtual", feature: "asistente_virtual" },
-      { icon: Route, label: "Ruteo Inteligente", path: "/intelligent-routing", feature: "intelligent_routing" },
-      { icon: Shield, label: "Scoring Crédito", path: "/credit-scoring", feature: "credit_scoring" },
-      { icon: Lightbulb, label: "Oportunidades Comerciales", path: "/oportunidades", feature: "comerciales" },
-      { icon: Thermometer, label: "Cadena de Frío", path: "/cold-chain", feature: "cold_chain" },
-      { icon: BarChart3, label: "Forecast Avanzado", path: "/forecast-avanzado", feature: "forecast_avanzado" },
     ]
   },
   {
@@ -112,8 +79,9 @@ const navGroups: NavGroup[] = [
   {
     title: "Inventario",
     items: [
+      // "Variantes & Empaques" se degrado a pestañas internas dentro de "Catálogo de Productos"
+      // (/products?tab=variantes y /products?tab=packs) para simplificar la barra lateral y evitar ruido.
       { icon: Tags, label: "Catálogo de Productos", path: "/products" },
-      { icon: Copy, label: "Variantes & Empaques", path: "/variants" },
       { icon: Package, label: "Kits & Combos", path: "/kits" },
       { icon: Warehouse, label: "Depósitos & Stock", path: "/inventory", permission: "inventory:adjust" },
       { icon: ArrowLeftRight, label: "Transferencias entre Depósitos", path: "/transferencias", permission: "inventory:transfer" },
@@ -123,7 +91,6 @@ const navGroups: NavGroup[] = [
   },
   {
     title: "Operaciones de Salón",
-    verticals: ["supermercado"],   // ← SOLO supermercado retail
     items: [
       // Permission "salon:manage" -- las 6 pantallas de gestion real de este
       // bloque (todas sus escrituras estan gateadas por ese permiso en el
@@ -157,7 +124,7 @@ const navGroups: NavGroup[] = [
     title: "Finanzas & Tesorería",
     items: [
       { icon: Banknote, label: "Arqueo de Caja", path: "/caja" },
-      { icon: Ticket, label: "Vales y Convenios", path: "/vales", verticals: ["supermercado"], keywords: ["vales", "convenio", "convenios", "up", "empresas", "gift card", "bonos"] },
+      { icon: Ticket, label: "Vales y Convenios", path: "/vales", keywords: ["vales", "convenio", "convenios", "up", "empresas", "gift card", "bonos"] },
       { icon: Landmark, label: "Bóveda Central", path: "/boveda" },
       { icon: Landmark, label: "Cuentas Bancarias", path: "/bancos" },
       { icon: CreditCard, label: "Gestión de Cheques", path: "/cheques" },
@@ -166,15 +133,16 @@ const navGroups: NavGroup[] = [
       // { icon: ShieldCheck, label: "Scoring de Crédito", path: "/credit-scoring" },
       { icon: CreditCard, label: "Pagos a Proveedores (AP)", path: "/payments", keywords: ["cuentas por pagar", "facturas proveedores", "op", "ordenes de pago", "vales", "frutihorti", "lote brasil"] },
       { icon: ReceiptText, label: "Gastos Operativos", path: "/gastos" },
-      { icon: DollarSign, label: "PyG Diario por Depto.", path: "/pyg-diario", verticals: ["supermercado"] },
+      { icon: DollarSign, label: "PyG Diario por Depto.", path: "/pyg-diario" },
       { icon: Building, label: "Gestión Financiera", path: "/financiero" },
+      { icon: FileSpreadsheet, label: "Cierre Mensual de Resultados", path: "/cierre-mensual", keywords: ["cierre", "pnl", "resultados", "mensual", "setiembre", "septiembre", "balance"] },
     ]
   },
   {
     title: "CRM & Marketing",
     items: [
-      { icon: Users, label: "Fidelidad ExtraClub", path: "/crm", verticals: ["supermercado"], anyPermission: ["crm:update", "crm:campaigns"] },
-      { icon: Ticket, label: "Cupones de Sorteo", path: "/cupones", verticals: ["supermercado"] },
+      { icon: Users, label: "Fidelidad ExtraClub", path: "/crm", anyPermission: ["crm:update", "crm:campaigns"] },
+      { icon: Ticket, label: "Cupones de Sorteo", path: "/cupones" },
       { icon: PieChart, label: "Customer 360", path: "/customer360" },
       { icon: MessageCircle, label: "WhatsApp & IntelliZapp", path: "/whatsapp" },
       { icon: Tag, label: "Promociones & Campañas", path: "/promociones" },
@@ -191,7 +159,7 @@ const navGroups: NavGroup[] = [
     items: [
       { icon: ShieldCheck, label: "Facturación & Autoimpresor (DNIT)", path: "/sifen" },
       { icon: FileSignature, label: "Facturación Electrónica (Próximamente)", path: "/facturacion-electronica" },
-      { icon: Scale, label: "Básculas & Balanzas", path: "/escalas", verticals: ["supermercado"] },
+      { icon: Scale, label: "Básculas & Balanzas", path: "/escalas" },
       // DESACTIVADO 2026-09-04: dispositivos ESL (MAC, bateria, señal) sintetizados
       // en el cliente, sin integracion real a hardware. Ver auditoria de sidebar.
       // { icon: Radio, label: "Etiquetas Electrónicas (ESL)", path: "/esl" },
@@ -219,16 +187,15 @@ const navGroups: NavGroup[] = [
   },
   {
     title: "Distribuidora & Logística",
-    verticals: ["distribuidora"],   // ← SOLO distribuidora/preventa
     items: [
-      { icon: Navigation, label: "Mapa en Tiempo Real", path: "/mapa-tiempo-real" },
-      { icon: Map, label: "Planificador de Rutas", path: "/rutas" },
-      { icon: Trophy, label: "Rendimiento Preventistas", path: "/distribuidora/rendimiento-vendedores" },
-      { icon: Truck, label: "Despacho & Reparto", path: "/distribuidora/despacho", keywords: ["viajes", "reparto", "despacho", "carga", "camion"] },
-      { icon: Navigation, label: "Mi Viaje Hoy (Cobrador)", path: "/distribuidora/mi-viaje", keywords: ["cobrador", "ruta", "mobile", "viaje"] },
-      { icon: DollarSign, label: "Rendiciones de Cobro", path: "/distribuidora/rendiciones", keywords: ["rendicion", "cobros", "efectivo", "cheques"] },
-      { icon: Landmark, label: "Liquidaciones de Ruta", path: "/distribuidora/liquidaciones", keywords: ["liquidacion", "ruta", "supervisor", "cierre"] },
-      { icon: Briefcase, label: "Tesorería de Rutas", path: "/distribuidora/tesoreria", keywords: ["tesoreria", "deposito", "banco", "caja cobrador"] },
+      { icon: Navigation, label: "Mapa en Tiempo Real", path: "/mapa-tiempo-real", feature: "distribuidora" },
+      { icon: Map, label: "Planificador de Rutas", path: "/rutas", feature: "distribuidora" },
+      { icon: Trophy, label: "Rendimiento Preventistas", path: "/distribuidora/rendimiento-vendedores", feature: "distribuidora" },
+      { icon: Truck, label: "Despacho & Reparto", path: "/distribuidora/despacho", feature: "distribuidora", keywords: ["viajes", "reparto", "despacho", "carga", "camion"] },
+      { icon: Navigation, label: "Mi Viaje Hoy (Cobrador)", path: "/distribuidora/mi-viaje", feature: "distribuidora", keywords: ["cobrador", "ruta", "mobile", "viaje"] },
+      { icon: DollarSign, label: "Rendiciones de Cobro", path: "/distribuidora/rendiciones", feature: "distribuidora", keywords: ["rendicion", "cobros", "efectivo", "cheques"] },
+      { icon: Landmark, label: "Liquidaciones de Ruta", path: "/distribuidora/liquidaciones", feature: "distribuidora", keywords: ["liquidacion", "ruta", "supervisor", "cierre"] },
+      { icon: Briefcase, label: "Tesorería de Rutas", path: "/distribuidora/tesoreria", feature: "distribuidora", keywords: ["tesoreria", "deposito", "banco", "caja cobrador"] },
     ]
   },
   {
@@ -242,13 +209,7 @@ const navGroups: NavGroup[] = [
 export default function Layout() {
   const { user, logout } = useAuth()
   const { theme, setTheme } = useTheme()
-  const { hasFeature, verticalSlug } = useFeatures()
-
-  // Devuelve true si el ítem/grupo aplica al vertical activo.
-  // Mientras verticalSlug no haya cargado (null) se muestra todo (UI loading state).
-  // Una vez cargado, se filtra estrictamente: solo aparece en su vertical declarada.
-  const inVertical = (verticals?: string[]) =>
-    !verticals || verticalSlug == null || verticals.includes(verticalSlug)
+  const { hasFeature } = useFeatures()
   const { hasPermission, hasAnyPermission } = usePermissions()
   const navigate = useNavigate()
   const location = useLocation()
@@ -294,14 +255,11 @@ export default function Layout() {
   const [searchQuery, setSearchQuery] = useState("")
   const [searchOpen, setSearchOpen] = useState(false)
 
-  const allNavItems = navGroups
-    .filter(g => inVertical(g.verticals))
-    .flatMap(g => g.items)
+  const allNavItems = navGroups.flatMap(g => g.items)
   const searchResults = searchQuery.trim().length > 0
     ? allNavItems.filter(item =>
         (item.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
          item.keywords?.some(k => k.toLowerCase().includes(searchQuery.toLowerCase()))) &&
-        inVertical(item.verticals) &&
         (!item.feature || hasFeature(item.feature)) &&
         (!item.permission || hasPermission(item.permission)) &&
         (!item.anyPermission || hasAnyPermission(...item.anyPermission)) &&
@@ -328,16 +286,16 @@ export default function Layout() {
     <div className="h-screen bg-body-light dark:bg-body-dark flex overflow-hidden font-sans">
       {sidebarOpen && <div className="fixed inset-0 z-[110] bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
-      {/* ── Sidebar Estilo Vertical Distribuidora con Estilo Pill y Línea Vertical ── */}
+      {/* ── Sidebar Distribuidora con Estilo Pill y Línea Vertical ── */}
       <aside className={`fixed lg:static inset-y-0 left-0 z-[120] lg:z-30 w-64 sidebar-gradient transform transition-transform duration-300 lg:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} flex flex-col`}>
-        
+
         {/* Logo & Header */}
         <div className="p-5 border-b border-white/10">
           <div className="flex items-center justify-between">
             <div className="flex flex-col text-left">
               <Logo />
               <span className="mt-1.5 text-[9px] font-black bg-emerald-500/90 text-white px-2 py-0.5 rounded-full w-max uppercase tracking-widest shadow-sm">
-                {verticalSlug === "distribuidora" ? "Distribuidora" : verticalSlug === "supermercado" ? "Supermercado" : verticalSlug ?? "InteliMarket"}
+                Versión: Distribuidora
               </span>
             </div>
             <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-white/70 hover:text-white">
@@ -348,9 +306,8 @@ export default function Layout() {
 
         {/* Menú de Navegación con Pills y Guía Vertical */}
         <nav className="flex-1 p-3 space-y-3 overflow-y-auto">
-          {navGroups.filter(group => inVertical(group.verticals)).map((group) => {
+          {navGroups.map((group) => {
             const visibleItems = group.items.filter((item) => {
-              if (!inVertical(item.verticals)) return false
               if (item.superadminOnly && !user?.is_superadmin) return false
               if (item.permission && !hasPermission(item.permission)) return false
               if (item.anyPermission && !hasAnyPermission(...item.anyPermission)) return false
@@ -367,8 +324,8 @@ export default function Layout() {
                   <button
                     onClick={() => toggleGroup(group.title)}
                     className={`w-full flex items-center justify-between px-3 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wider transition-all text-left shadow-sm ${
-                      isExpanded 
-                        ? "bg-white/15 text-white border border-white/20" 
+                      isExpanded
+                        ? "bg-white/15 text-white border border-white/20"
                         : "bg-white/5 text-white/70 hover:bg-white/10 hover:text-white border border-white/5"
                     }`}
                   >
@@ -381,7 +338,7 @@ export default function Layout() {
                 <div className={`overflow-hidden transition-all duration-300 ${isExpanded ? "max-h-[800px] opacity-100" : "max-h-0 opacity-0"}`}>
                   <div className={`${group.title !== "Inicio" ? "ml-3 pl-2.5 border-l-2 border-white/20 space-y-1 py-1" : "space-y-1"}`}>
                     {visibleItems.map((item) => {
-                      const active = location.pathname === item.path
+                      const active = location.pathname === item.path || (item.path === "/cierre-mensual" && location.pathname === "/financiero/cierre-mensual")
                       return (
                         <button
                           key={item.path}
@@ -448,7 +405,7 @@ export default function Layout() {
               <Menu className="w-6 h-6" />
             </button>
           </div>
-          
+
           {/* Global Search */}
           <div className="hidden lg:flex flex-1 max-w-xl relative">
             <div className="relative w-full group">
@@ -497,7 +454,7 @@ export default function Layout() {
           <div className="flex items-center gap-2 sm:gap-4 ml-auto">
             {/* Branch Selector */}
             <div className="relative">
-              <div 
+              <div
                 onClick={() => setBranchDropdownOpen(!branchDropdownOpen)}
                 className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-slate-800/50 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors text-left"
               >
@@ -534,14 +491,14 @@ export default function Layout() {
 
             {/* Quick Actions & Notifications */}
             <div className="flex items-center gap-1 sm:gap-2">
-              <button 
+              <button
                 onClick={() => navigate("/pos")}
                 className="hidden sm:flex items-center gap-1.5 bg-primary/10 hover:bg-primary/20 text-primary px-3 py-2 rounded-lg text-sm font-medium transition-colors"
               >
                 <Plus className="w-4 h-4" />
                 <span>Nuevo</span>
               </button>
-              
+
               <NotificationBell />
             </div>
 
@@ -549,7 +506,7 @@ export default function Layout() {
             <div className="hidden sm:block w-px h-6 bg-gray-200 dark:bg-gray-700 mx-1"></div>
 
             {/* User Profile */}
-            <div 
+            <div
               onClick={() => navigate("/settings")}
               className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity text-left"
             >
@@ -566,7 +523,7 @@ export default function Layout() {
 
         <main className="flex-1 overflow-y-auto p-4 lg:p-6"><ErrorBoundary><Outlet /></ErrorBoundary></main>
       </div>
-      {/* Marco - AI Copilot flotante */}
+
       <MarcoCopilot />
     </div>
   )
