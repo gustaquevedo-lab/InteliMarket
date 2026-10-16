@@ -92,7 +92,8 @@ async def get_sales_by_period(db: AsyncSession, company_id: Optional[str] = None
         params["branch_id"] = branch_id
 
     group_expr = {
-        "dia": "DATE(v.fecha)",
+        "hora": "TO_CHAR(v.fecha, 'HH24:00')",
+        "dia": "TO_CHAR(v.fecha, 'YYYY-MM-DD')",
         "semana": "TO_CHAR(v.fecha, 'IYYY-IW')",
         "mes": "TO_CHAR(v.fecha, 'YYYY-MM')",
     }

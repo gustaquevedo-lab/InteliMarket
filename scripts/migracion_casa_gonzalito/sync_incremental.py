@@ -166,7 +166,7 @@ def mysql_conn():
 
 
 def pg_conn():
-    return psycopg.connect(PG_DSN, autocommit=False)
+    return psycopg.connect(PG_DSN, autocommit=False, options="-c timezone=America/Asuncion")
 
 
 # ----------------------------------------------------------------------------

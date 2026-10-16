@@ -17,7 +17,7 @@ import { useAuth } from "../context/AuthContext"
 import { useToast } from "../context/ToastContext"
 import { formatPYG, formatDate, formatCurrency } from "../utils/format"
 
-type TimeRange = "hoy" | "7d" | "mes" | "30d" | "historico"
+type TimeRange = "hoy" | "7d" | "mes" | "30d" | "historico" | "custom"
 
 function formatLocalDate(d: Date = new Date()): string {
   const year = d.getFullYear()
@@ -26,7 +26,7 @@ function formatLocalDate(d: Date = new Date()): string {
   return `${year}-${month}-${day}`
 }
 
-function computeDateRange(range: TimeRange) {
+function computeDateRange(range: TimeRange, customD?: string, customH?: string) {
   const now = new Date()
   const todayStr = formatLocalDate(now)
   
@@ -41,11 +41,25 @@ function computeDateRange(range: TimeRange) {
     const d = new Date(now.getFullYear(), now.getMonth(), 1)
     return { fecha_desde: formatLocalDate(d), fecha_hasta: todayStr, label: "Este Mes (MTD)", dias: Math.max(1, now.getDate()), agrupar: "dia" }
   }
-  if (range === "historico") {
-    return { fecha_desde: undefined, fecha_hasta: undefined, label: "Histórico Total", dias: 365, agrupar: "mes" }
+  if (range === "30d") {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29)
+    return { fecha_desde: formatLocalDate(d), fecha_hasta: todayStr, label: "Últimos 30 Días", dias: 30, agrupar: "dia" }
   }
-  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29)
-  return { fecha_desde: formatLocalDate(d), fecha_hasta: todayStr, label: "Últimos 30 Días", dias: 30, agrupar: "dia" }
+  if (range === "custom") {
+    const desde = customD || todayStr
+    const hasta = customH || todayStr
+    const d1 = new Date(desde + "T00:00:00")
+    const d2 = new Date(hasta + "T00:00:00")
+    const diffDays = Math.max(1, Math.round((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24)) + 1)
+    return {
+      fecha_desde: desde,
+      fecha_hasta: hasta,
+      label: `${desde} al ${hasta}`,
+      dias: diffDays,
+      agrupar: diffDays <= 2 ? "hora" : diffDays <= 45 ? "dia" : "mes"
+    }
+  }
+  return { fecha_desde: undefined, fecha_hasta: undefined, label: "Histórico Total", dias: 365, agrupar: "mes" }
 }
 
 export default function Dashboard() {
@@ -54,6 +68,8 @@ export default function Dashboard() {
   const navigate = useNavigate()
 
   const [timeRange, setTimeRange] = useState<TimeRange>("mes")
+  const [customDesde, setCustomDesde] = useState<string>(() => formatLocalDate())
+  const [customHasta, setCustomHasta] = useState<string>(() => formatLocalDate())
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [pacingMode, setPacingMode] = useState<"diario" | "acumulado">("diario")
@@ -74,8 +90,11 @@ export default function Dashboard() {
   const cacheRef = useMemo(() => new Map<string, { summary: any; byCat: any[]; byProd: any[]; period: any[] }>(), [])
 
   // 1. Carga robusta y garantizada de Ventas según período
-  const loadSalesData = useCallback(async (currentRange: TimeRange, showSpinner = false) => {
-    const cached = cacheRef.get(currentRange)
+  const loadSalesData = useCallback(async (currentRange: TimeRange, showSpinner = false, customD?: string, customH?: string) => {
+    const dDesde = customD || customDesde
+    const dHasta = customH || customHasta
+    const cacheKey = currentRange === "custom" ? `custom:${dDesde}_${dHasta}` : currentRange
+    const cached = cacheRef.get(cacheKey)
     if (cached) {
       setSalesSummary(cached.summary)
       setSalesByCat(cached.byCat)
@@ -84,7 +103,7 @@ export default function Dashboard() {
     }
 
     if (showSpinner || !cached) setPeriodLoading(true)
-    const { fecha_desde, fecha_hasta, agrupar } = computeDateRange(currentRange)
+    const { fecha_desde, fecha_hasta, agrupar } = computeDateRange(currentRange, dDesde, dHasta)
 
     try {
       const [summaryRes, byCatRes, byProdRes, periodRes] = await Promise.allSettled([
@@ -94,35 +113,27 @@ export default function Dashboard() {
         api.reports.salesByPeriod(fecha_desde ? { fecha_desde, fecha_hasta, agrupar_por: agrupar } : { agrupar_por: agrupar }),
       ])
 
-      let newSummary = summaryRes.status === "fulfilled" ? summaryRes.value : null
-      let newByCat = byCatRes.status === "fulfilled" && Array.isArray(byCatRes.value) ? byCatRes.value : []
-      let newByProd = byProdRes.status === "fulfilled" && Array.isArray(byProdRes.value) ? byProdRes.value : []
-      let newPeriod = periodRes.status === "fulfilled" && Array.isArray(periodRes.value) ? periodRes.value : []
-
-      // Si el período específico no devolvió ventas (ej. Hoy domingo o fuera de horario), recuperar el acumulado del mes
-      if ((!newSummary || !newSummary.total_ventas) && currentRange !== "historico") {
-        try {
-          const fallbackRes = await api.reports.salesSummary({})
-          if (fallbackRes && fallbackRes.total_ventas > 0) {
-            newSummary = fallbackRes
-            const [fbCats, fbProds, fbPeriod] = await Promise.allSettled([
-              api.reports.salesByCategory({}),
-              api.reports.salesByProduct({ limit: 6 }),
-              api.reports.salesByPeriod({ agrupar_por: "dia" }),
-            ])
-            if (fbCats.status === "fulfilled" && Array.isArray(fbCats.value)) newByCat = fbCats.value
-            if (fbProds.status === "fulfilled" && Array.isArray(fbProds.value)) newByProd = fbProds.value
-            if (fbPeriod.status === "fulfilled" && Array.isArray(fbPeriod.value)) newPeriod = fbPeriod.value
-          }
-        } catch {}
+      const newSummary = summaryRes.status === "fulfilled" && summaryRes.value ? summaryRes.value : {
+        total_ventas: 0,
+        monto_total: 0,
+        monto_iva_10: 0,
+        monto_iva_5: 0,
+        monto_exento: 0,
+        ticket_promedio: 0,
+        total_items: 0,
+        total_pagado: 0,
+        saldo_pendiente: 0,
       }
+      const newByCat = byCatRes.status === "fulfilled" && Array.isArray(byCatRes.value) ? byCatRes.value : []
+      const newByProd = byProdRes.status === "fulfilled" && Array.isArray(byProdRes.value) ? byProdRes.value : []
+      const newPeriod = periodRes.status === "fulfilled" && Array.isArray(periodRes.value) ? periodRes.value : []
 
       setSalesSummary(newSummary)
       setSalesByCat(newByCat)
       setSalesByProd(newByProd)
       setSalesPeriodData(newPeriod)
 
-      cacheRef.set(currentRange, { summary: newSummary, byCat: newByCat, byProd: newByProd, period: newPeriod })
+      cacheRef.set(cacheKey, { summary: newSummary, byCat: newByCat, byProd: newByProd, period: newPeriod })
     } catch (e: any) {
       console.error("[Dashboard] Error al cargar ventas:", e)
     } finally {
@@ -130,7 +141,7 @@ export default function Dashboard() {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [cacheRef])
+  }, [cacheRef, customDesde, customHasta])
 
   // 2. Carga de estado operativo general (Compras, Stock, Finanzas, AR)
   const loadStaticData = useCallback(async () => {
@@ -156,15 +167,15 @@ export default function Dashboard() {
     loadStaticData()
   }, [])
 
-  const handlePeriodChange = (newRange: TimeRange) => {
+  const handlePeriodChange = (newRange: TimeRange, cDesde?: string, cHasta?: string) => {
     setTimeRange(newRange)
-    loadSalesData(newRange, true)
+    loadSalesData(newRange, true, cDesde ?? customDesde, cHasta ?? customHasta)
   }
 
   const handleManualRefresh = () => {
     setRefreshing(true)
     cacheRef.clear()
-    loadSalesData(timeRange, true)
+    loadSalesData(timeRange, true, customDesde, customHasta)
     loadStaticData()
   }
 
@@ -345,20 +356,45 @@ export default function Dashboard() {
 
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
           <div className="bg-slate-100 dark:bg-slate-700/60 p-1 rounded-xl flex items-center gap-1 border border-slate-200 dark:border-slate-600 text-xs font-bold">
-            {(["hoy", "7d", "mes", "30d", "historico"] as TimeRange[]).map((r) => (
+            {(["hoy", "7d", "mes", "30d", "historico", "custom"] as TimeRange[]).map((r) => (
               <button
                 key={r}
                 onClick={() => handlePeriodChange(r)}
-                className={`px-3 py-1.5 rounded-lg transition-all capitalize font-mono ${
+                className={`px-3 py-1.5 rounded-lg transition-all capitalize font-mono flex items-center gap-1 ${
                   timeRange === r
                     ? "bg-indigo-600 text-white shadow-sm font-black"
                     : "text-slate-600 dark:text-slate-300 hover:bg-white/60 dark:hover:bg-slate-600"
                 }`}
               >
-                {r === "7d" ? "7 Días" : r === "mes" ? "Este Mes" : r === "30d" ? "30 Días" : r === "historico" ? "Histórico" : "Hoy"}
+                {r === "custom" && <Calendar className="w-3.5 h-3.5" />}
+                {r === "7d" ? "7 Días" : r === "mes" ? "Este Mes" : r === "30d" ? "30 Días" : r === "historico" ? "Histórico" : r === "custom" ? "Rango" : "Hoy"}
               </button>
             ))}
           </div>
+
+          {timeRange === "custom" && (
+            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-700/60 p-1 rounded-xl border border-slate-200 dark:border-slate-600 text-xs animate-fade-in">
+              <input
+                type="date"
+                value={customDesde}
+                onChange={(e) => setCustomDesde(e.target.value)}
+                className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white border border-slate-200 dark:border-slate-600 font-mono text-xs focus:ring-1 focus:ring-indigo-500 outline-none"
+              />
+              <span className="text-slate-400 font-bold">→</span>
+              <input
+                type="date"
+                value={customHasta}
+                onChange={(e) => setCustomHasta(e.target.value)}
+                className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-white border border-slate-200 dark:border-slate-600 font-mono text-xs focus:ring-1 focus:ring-indigo-500 outline-none"
+              />
+              <button
+                onClick={() => handlePeriodChange("custom", customDesde, customHasta)}
+                className="px-3 py-1 rounded-lg bg-indigo-600 text-white font-bold hover:bg-indigo-700 transition-colors shadow-sm"
+              >
+                Filtrar
+              </button>
+            </div>
+          )}
 
           <button
             onClick={handleManualRefresh}
