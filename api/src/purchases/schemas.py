@@ -1,7 +1,7 @@
 """Purchase schemas — suppliers, orders, receipts, requisitions, contracts, forecasting, suggestions, budgets"""
 
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List
+from typing import Optional, List, Any
 from datetime import datetime, date
 from uuid import UUID
 from decimal import Decimal
@@ -105,7 +105,7 @@ class SupplierUpdate(BaseModel):
 class SupplierResponse(BaseModel):
     id: UUID
     company_id: UUID
-    tipo_persona: str
+    tipo_persona: Optional[str] = "juridica"
     ruc: Optional[str] = None
     ci: Optional[str] = None
     razon_social: str
@@ -122,13 +122,13 @@ class SupplierResponse(BaseModel):
     ciudad: Optional[str] = None
     telefono: Optional[str] = None
     email: Optional[str] = None
-    plazo_pago_dias: int = 0
-    activo: bool = True
-    tipo_proveedor: str = "nacional"
+    plazo_pago_dias: Optional[int] = 0
+    activo: Optional[bool] = True
+    tipo_proveedor: Optional[str] = "nacional"
     grupo: Optional[str] = None
     categoria_ids: Optional[list[UUID]] = None
-    moneda_default: str = "PYG"
-    plazo_entrega_promedio: int = 0
+    moneda_default: Optional[str] = "PYG"
+    plazo_entrega_promedio: Optional[int] = 0
     rating: Optional[Decimal] = None
     notas: Optional[str] = None
     contacto_nombre: Optional[str] = None
@@ -140,15 +140,15 @@ class SupplierResponse(BaseModel):
     tipo_cuenta_bancaria: Optional[str] = None
     identificacion_bancaria: Optional[str] = None
     tipo_contribuyente: Optional[str] = None
-    retencion_irp: bool = False
-    retencion_iva: bool = False
-    porcentaje_retencion_iva: int = 30
-    agente_retencion: bool = False
-    admite_bonificaciones: bool = False
-    control_envases: bool = False
-    vida_util_minima_dias: int = 0
-    unidad_compra_minima: str = "unidad"
-    escalas_costo_volumen: Optional[dict] = None
+    retencion_irp: Optional[bool] = False
+    retencion_iva: Optional[bool] = False
+    porcentaje_retencion_iva: Optional[int] = 30
+    agente_retencion: Optional[bool] = False
+    admite_bonificaciones: Optional[bool] = False
+    control_envases: Optional[bool] = False
+    vida_util_minima_dias: Optional[int] = 0
+    unidad_compra_minima: Optional[str] = "unidad"
+    escalas_costo_volumen: Optional[Any] = None
     created_at: datetime
     updated_at: datetime
 
