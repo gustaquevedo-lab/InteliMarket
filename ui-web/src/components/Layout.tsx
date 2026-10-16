@@ -49,6 +49,7 @@ const navGroups: NavGroup[] = [
     items: [
       { icon: Receipt, label: "Facturación SIFEN", path: "/sales" },
       { icon: ClipboardList, label: "Pedidos & Preventa", path: "/sales-orders" },
+      { icon: Target, label: "Metas de Venta", path: "/sales-targets" },
       { icon: FileSpreadsheet, label: "Cotizaciones", path: "/quotes" },
       { icon: RotateCcw, label: "Devoluciones & NC", path: "/returns" },
       { icon: Users, label: "Clientes Mayoristas", path: "/customers" },
@@ -68,7 +69,7 @@ const navGroups: NavGroup[] = [
       { icon: DollarSign, label: "Rendiciones de Cobro", path: "/distribuidora/rendiciones" },
       { icon: Landmark, label: "Liquidaciones de Ruta", path: "/distribuidora/liquidaciones" },
       { icon: Briefcase, label: "Tesorería de Rutas", path: "/distribuidora/tesoreria" },
-      { icon: Award, label: "KPIs Proveedores (PARESA)", path: "/supplier-kpis" },
+      { icon: Award, label: "KPIs & Rebates (PARESA)", path: "/supplier-kpis" },
       { icon: Factory, label: "Módulo Distribuidora", path: "/distribuidora" },
     ]
   },

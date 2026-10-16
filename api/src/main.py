@@ -97,6 +97,7 @@ from api.src.whatsapp.public_router import router as whatsapp_public_router
 from api.src.whatsapp.campaign_router import router as intellizapp_router
 from api.src.notifications.router import router as notifications_router
 from api.src.sales_targets.router import router as sales_targets_router
+from api.src.supplier_kpis.router import router as supplier_kpis_router
 from api.src.intelientregas.router import router as intelientregas_router
 from api.src.intelientregas.driver_router import router as intelientregas_driver_router
 from api.src.promotions.router import router as promotions_router
@@ -429,6 +430,7 @@ app.include_router(whatsapp_public_router)
 app.include_router(intellizapp_router)
 app.include_router(notifications_router)
 app.include_router(sales_targets_router)
+app.include_router(supplier_kpis_router)
 app.include_router(intelientregas_router)
 app.include_router(intelientregas_driver_router)
 app.include_router(promotions_router)

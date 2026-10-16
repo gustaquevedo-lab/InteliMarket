@@ -562,7 +562,7 @@ export default function Dashboard() {
           </p>
           <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-700/60 font-mono">
             <span>Rebate Estimado: <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{formatPYG(paresaVolumeData.rebateEstimadoGs)}</strong></span>
-            <button onClick={() => navigate("/contratos-proveedores")} className="text-indigo-600 dark:text-indigo-400 font-bold hover:underline">Ver Tabla →</button>
+            <button onClick={() => navigate("/supplier-kpis")} className="text-indigo-600 dark:text-indigo-400 font-bold hover:underline">Ver KPIs & Rebate →</button>
           </div>
         </div>
 
