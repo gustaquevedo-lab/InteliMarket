@@ -111,7 +111,6 @@ from .schemas_fase3 import (
 router = APIRouter(
     prefix="/api/v1/supermer",
     tags=["supermer"],
-    dependencies=[Depends(require_feature("supermercado"))],
 )
 
 

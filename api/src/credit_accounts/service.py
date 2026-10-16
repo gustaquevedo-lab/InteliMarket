@@ -1,6 +1,6 @@
 """Credit account service"""
 
-from sqlalchemy import select, text
+from sqlalchemy import select, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from datetime import datetime, timezone, date
@@ -37,13 +37,33 @@ async def create_credit_account(db: AsyncSession, data: CreditAccountCreate) -> 
     return account
 
 
-async def list_credit_accounts(db: AsyncSession, company_id: str, activo: Optional[bool] = None) -> list[CreditAccount]:
+async def list_credit_accounts(
+    db: AsyncSession,
+    company_id: str,
+    activo: Optional[bool] = None,
+    search: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+) -> list[CreditAccount]:
     query = select(CreditAccount, Customer.razon_social, Customer.ruc, Customer.empresa_vinculada_nombre).join(
         Customer, Customer.id == CreditAccount.customer_id, isouter=True
     ).where(CreditAccount.company_id == company_id)
     if activo is not None:
         query = query.where(CreditAccount.activo == activo)
+    if search:
+        search_filter = f"%{search}%"
+        query = query.where(
+            or_(
+                Customer.razon_social.ilike(search_filter),
+                Customer.ruc.ilike(search_filter),
+                Customer.empresa_vinculada_nombre.ilike(search_filter),
+            )
+        )
     query = query.order_by(CreditAccount.saldo_utilizado.desc())
+    if offset:
+        query = query.offset(offset)
+    if limit:
+        query = query.limit(limit)
     result = await db.execute(query)
     accounts = []
     for account, razon_social, ruc, empresa_vinculada_nombre in result.all():
