@@ -276,6 +276,7 @@ class SupplierReturn(Base):
     """Mercaderia devuelta a un proveedor (vencidos, sobrestock, premios/bonif.)
     — acredita el saldo del proveedor, distinto de una nota de credito recibida."""
     __tablename__ = "supplier_returns"
+    __table_args__ = {"extend_existing": True}
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)

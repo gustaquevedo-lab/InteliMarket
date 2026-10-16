@@ -220,7 +220,7 @@ class POResponse(BaseModel):
     fecha_entrega_estimada: Optional[date] = None
     estado: str
     moneda: str
-    tipo_cambio: Decimal
+    tipo_cambio: Optional[Decimal] = Decimal("1")
     subtotal: Optional[Decimal] = None
     descuento_total: Optional[Decimal] = None
     iva_10: Optional[Decimal] = None
