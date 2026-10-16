@@ -4,18 +4,15 @@ import { Outlet, useNavigate, useLocation } from "react-router-dom"
 import {
   LayoutDashboard, MonitorSmartphone, Receipt, FileSpreadsheet, Users, MessageCircle, Megaphone,
   Tags, Warehouse, Scale, ShoppingBag, Briefcase, Banknote, Landmark, CreditCard, Wallet, ReceiptText,
-  Truck, ShoppingCart, ShieldCheck, BadgeDollarSign, Blocks, LineChart, Fingerprint, Settings, FileSignature,
-  LogOut, Menu, X, Moon, Sun, Monitor, Search, Store, ChevronDown, Building, Scan, QrCode, BookOpen, PiggyBank,
-  PieChart, DollarSign, TrendingUp, Bot, Clock, Award, Globe, Repeat, Wrench,
-  Copy, Package, Upload, Mail, AlertTriangle, LayoutGrid, Carrot, ChefHat, Radio, Plus, Sparkles, Tag,
-  Ticket, ArrowLeftRight, ClipboardCheck, RefreshCw, Radar, Smartphone,
-  Map, Navigation, Trophy
+  MapPinned, Truck, ShoppingCart, Pill, Shirt, ShieldCheck, BadgeDollarSign, Blocks, LineChart, Fingerprint, Settings,
+  LogOut, Menu, X, Moon, Sun, Monitor, Search, Plus, Store, ChevronDown, Building2, Shield, Crown, Target,
+  ClipboardList, RotateCcw, Percent, Coins, HandCoins, Building, Scan, QrCode, BookOpen, PiggyBank, Beaker, PieChart, Factory, Smartphone,
+  ArrowLeftRight, Cpu, Map, Navigation, Fence, BarChart3, MapPin, DollarSign, TrendingUp, Route, Lightbulb, Thermometer, Bot, Clock, Award, Globe, Repeat, Wrench,
+  Copy, Package, Upload, Mail, AlertTriangle, LayoutGrid, Trophy
 } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
 import { useFeatures } from "../context/FeatureContext"
-import { usePermissions } from "../context/PermissionsContext"
-import { api } from "../api"
 import Logo from "./Logo"
 import NotificationBell from "./NotificationBell"
 import MarcoCopilot from "./MarcoCopilot"
@@ -27,14 +24,6 @@ interface NavItem {
   label: string
   path: string
   feature?: string
-  permission?: string
-  // Alternativa a `permission` cuando la pantalla mezcla mas de una accion
-  // gateada (ej. /crm tiene ajuste manual de puntos con crm:update y
-  // configuracion del programa con crm:campaigns) -- alcanza con tener
-  // cualquiera de los dos.
-  anyPermission?: string[]
-  superadminOnly?: boolean
-  keywords?: string[]
 }
 
 interface NavGroup {
@@ -47,192 +36,164 @@ const navGroups: NavGroup[] = [
     title: "Inicio",
     items: [
       { icon: LayoutDashboard, label: "Dashboard", path: "/" },
-      { icon: FileSpreadsheet, label: "Cierre Mensual de Resultados", path: "/cierre-mensual", keywords: ["cierre", "pnl", "resultados", "mensual", "setiembre", "septiembre", "balance"] },
-      { icon: TrendingUp, label: "Gerente de Ventas IA", path: "/sales-agent" },
-      { icon: Bot, label: "Gerente Financiero IA", path: "/finance-agent" },
-      { icon: Sparkles, label: "Gerente de Marketing IA", path: "/marketing-agent" },
-      { icon: Bot, label: "Marco IA (Cerebro)", path: "/asistente-virtual", feature: "asistente_virtual" },
     ]
   },
   {
     title: "Ventas",
     items: [
-      { icon: MonitorSmartphone, label: "Punto de Venta", path: "/pos" },
-      // DESACTIVADO 2026-09-04: escanea contra 7 productos hardcodeados (MOCK_ITEMS),
-      // no contra el catalogo real -- un cliente real no puede usarlo tal cual esta.
-      // { icon: Scan, label: "Self-Checkout", path: "/self-checkout" },
+      { icon: TrendingUp, label: "Gerente de Ventas IA", path: "/sales-agent" },
+      { icon: MonitorSmartphone, label: "Punto de Venta", path: "/pos", feature: "pos" },
       { icon: Receipt, label: "Facturación", path: "/sales" },
-      { icon: FileSpreadsheet, label: "Pedidos & Cotizaciones", path: "/sales-orders" },
-      { icon: Repeat, label: "Devoluciones & NC", path: "/returns" },
+      { icon: ClipboardList, label: "Pedidos", path: "/sales-orders" },
+      { icon: FileSpreadsheet, label: "Cotizaciones", path: "/quotes" },
+      { icon: RotateCcw, label: "Devoluciones", path: "/returns" },
       { icon: Users, label: "Clientes", path: "/customers" },
-      // FUSIONADO 2026-09-04: Precios Inteligentes y Listas de Precios hacian
-      // basicamente lo mismo (editar margen de un producto) con dos pantallas
-      // separadas y confusas. El editor de margen ahora es una pestaña mas
-      // dentro de "Listas de Precios" (Editor de Margen). /smart-pricing
-      // redirige ahi.
-      { icon: BadgeDollarSign, label: "Listas de Precios", path: "/price-lists" },
-      { icon: LineChart, label: "Benchmarking Precios", path: "/benchmarking" },
-      { icon: DollarSign, label: "Comisiones", path: "/commissions" },
-      { icon: Store, label: "Tienda Online", path: "/tienda" },
+      { icon: Globe, label: "Portal Clientes", path: "/portal", feature: "portal" },
+      { icon: LineChart, label: "Reportes de Ventas", path: "/reports?sector=ventas" },
     ]
   },
   {
     title: "Inventario",
     items: [
-      // "Variantes & Empaques" se degrado a pestañas internas dentro de "Catálogo de Productos"
-      // (/products?tab=variantes y /products?tab=packs) para simplificar la barra lateral y evitar ruido.
-      { icon: Tags, label: "Catálogo de Productos", path: "/products" },
-      { icon: Package, label: "Kits & Combos", path: "/kits" },
-      { icon: Warehouse, label: "Depósitos & Stock", path: "/inventory", permission: "inventory:adjust" },
-      { icon: ArrowLeftRight, label: "Transferencias entre Depósitos", path: "/transferencias", permission: "inventory:transfer" },
-      { icon: ClipboardCheck, label: "Conteo Cíclico", path: "/advanced-inventory", permission: "inventory:cycle_count" },
-      { icon: AlertTriangle, label: "Mermas (Shrinkage)", path: "/shrinkage" },
-    ]
-  },
-  {
-    title: "Operaciones de Salón",
-    items: [
-      // Permission "salon:manage" -- las 6 pantallas de gestion real de este
-      // bloque (todas sus escrituras estan gateadas por ese permiso en el
-      // backend). Verificador y TV Digital quedan sin permission a proposito:
-      // son pantallas de kiosko/display, no de gestion, y no llaman a
-      // ningun endpoint gateado.
-      { icon: LayoutGrid, label: "Hub Operaciones (PWA)", path: "/operaciones-salon", permission: "salon:manage" },
-      { icon: Scan, label: "Verificador de Precios (Kiosko)", path: "/verificador" },
-      { icon: Monitor, label: "TV Digital Carnicería (55\")", path: "/tv/carniceria" },
-      { icon: Scale, label: "Carnicería & Desposte", path: "/desposte", permission: "salon:manage" },
-      { icon: Carrot, label: "Verdulería & Frescos", path: "/frescos", permission: "salon:manage" },
-      { icon: ChefHat, label: "Panadería & Rotisería", path: "/panaderia-rotiseria", permission: "salon:manage" },
-      { icon: ShieldCheck, label: "Inocuidad & HACCP", path: "/haccp", permission: "salon:manage" },
-      { icon: Wrench, label: "Mantenimiento & Equipos", path: "/equipos-mantenimiento", permission: "salon:manage" },
+      { icon: Tags, label: "Catálogo", path: "/products" },
+      { icon: Copy, label: "Variantes", path: "/variants", feature: "variants" },
+      { icon: Package, label: "Kits", path: "/kits", feature: "kits" },
+      { icon: Warehouse, label: "Almacenes", path: "/inventory" },
+      { icon: Scale, label: "Básculas", path: "/escalas", feature: "supermercado" },
+      { icon: ArrowLeftRight, label: "Transferencias", path: "/transferencias", feature: "supermercado" },
+      { icon: ClipboardList, label: "Reabastecimiento", path: "/auto-replenish", feature: "supermercado" },
+      { icon: MapPin, label: "Inventario Avanzado", path: "/advanced-inventory", feature: "advanced_inventory" },
+      { icon: LineChart, label: "Reportes de Inventario", path: "/reports?sector=inventario" },
     ]
   },
   {
     title: "Abastecimiento",
     items: [
       { icon: ShoppingBag, label: "Gestión de Compras", path: "/purchases" },
-      { icon: Truck, label: "Recepción de Mercadería (Muelle)", path: "/deposito", permission: "purchases:receive" },
-      { icon: Tags, label: "Etiquetas", path: "/etiquetas" },
-      { icon: TrendingUp, label: "Forecast & Reposición", path: "/demand-forecast" },
-      { icon: RefreshCw, label: "Reglas de Reposición Automática", path: "/auto-replenish" },
-      { icon: Truck, label: "Recepción Directa DSD", path: "/dsd" },
+      { icon: Upload, label: "Importaciones CSV", path: "/imports", feature: "imports" },
       { icon: Briefcase, label: "Contratos & Rebates", path: "/contratos-proveedores" },
-      { icon: Globe, label: "Portal Proveedores", path: "/portal/proveedores" },
+      { icon: Globe, label: "Portal Proveedores", path: "/portal/proveedores/dashboard" },
     ]
   },
   {
     title: "Finanzas & Tesorería",
     items: [
-      { icon: Banknote, label: "Arqueo de Caja", path: "/caja" },
-      { icon: Ticket, label: "Vales y Convenios", path: "/vales", keywords: ["vales", "convenio", "convenios", "up", "empresas", "gift card", "bonos"] },
-      { icon: Landmark, label: "Bóveda Central", path: "/boveda" },
-      { icon: Landmark, label: "Cuentas Bancarias", path: "/bancos" },
-      { icon: CreditCard, label: "Gestión de Cheques", path: "/cheques" },
-      { icon: DollarSign, label: "Cuentas por Cobrar", path: "/accounts-receivable" },
-      // DESACTIVADO 2026-09-04: el modulo hoy es una maqueta -- 0 datos reales, el frontend rellena con clientes inventados si la API real da vacio (que es siempre). No lo usa este tenant. Ver auditoria de sidebar.
-      // { icon: ShieldCheck, label: "Scoring de Crédito", path: "/credit-scoring" },
-      { icon: CreditCard, label: "Pagos a Proveedores (AP)", path: "/payments", keywords: ["cuentas por pagar", "facturas proveedores", "op", "ordenes de pago", "vales", "frutihorti", "lote brasil"] },
-      { icon: ReceiptText, label: "Gastos Operativos", path: "/gastos" },
-      { icon: DollarSign, label: "PyG Diario por Depto.", path: "/pyg-diario" },
-      { icon: Building, label: "Gestión Financiera", path: "/financiero" },
-      { icon: FileSpreadsheet, label: "Cierre Mensual de Resultados", path: "/cierre-mensual", keywords: ["cierre", "pnl", "resultados", "mensual", "setiembre", "septiembre", "balance"] },
+      { icon: Bot, label: "Gerente Financiero IA", path: "/finance-agent" },
+      { icon: Banknote, label: "Caja y Cajeros", path: "/caja" },
+      { icon: Landmark, label: "Bóveda Central", path: "/boveda", feature: "supermercado" },
+      { icon: Landmark, label: "Cuentas por Cobrar", path: "/accounts-receivable" },
+      { icon: Building, label: "Cuentas por Pagar y Bancos", path: "/financiero" },
+      { icon: HandCoins, label: "Pagos y Cobros", path: "/payments" },
+      { icon: Wallet, label: "Líneas de Crédito", path: "/credit-accounts", feature: "credit_accounts" },
+      { icon: ReceiptText, label: "Gastos (Caja Chica)", path: "/gastos" },
+      { icon: BarChart3, label: "Contabilidad Integrada", path: "/integrated-finance", feature: "integrated_finance" },
+      { icon: LineChart, label: "Reportes Financieros", path: "/reports?sector=financiero" },
     ]
   },
   {
     title: "CRM & Marketing",
     items: [
-      { icon: Users, label: "Fidelidad ExtraClub", path: "/crm", anyPermission: ["crm:update", "crm:campaigns"] },
-      { icon: Ticket, label: "Cupones de Sorteo", path: "/cupones" },
-      { icon: PieChart, label: "Customer 360", path: "/customer360" },
-      { icon: MessageCircle, label: "WhatsApp & IntelliZapp", path: "/whatsapp" },
-      { icon: Tag, label: "Promociones & Campañas", path: "/promociones" },
+      { icon: Target, label: "Fidelidad & CRM", path: "/crm", feature: "crm" },
+      { icon: Award, label: "Programa de Fidelización", path: "/loyalty", feature: "loyalty" },
+      { icon: MessageCircle, label: "WhatsApp", path: "/whatsapp", feature: "whatsapp" },
+      { icon: Megaphone, label: "IntelliZapp", path: "/intellizapp", feature: "intellizapp" },
+      { icon: Megaphone, label: "Campañas", path: "/promociones" },
+      { icon: Percent, label: "Descuentos", path: "/discounts" },
+      { icon: Coins, label: "Comisiones", path: "/commissions" },
+      { icon: Users, label: "Acuerdos Clientes", path: "/acuerdos-clientes" },
+      { icon: DollarSign, label: "Precios Inteligente", path: "/smart-pricing", feature: "smart_pricing" },
+      { icon: BadgeDollarSign, label: "Listas de Precios", path: "/price-lists", feature: "price_lists" },
+      { icon: Megaphone, label: "Marketing Automat.", path: "/marketing", feature: "marketing_automation" },
     ]
   },
   {
-    title: "Recursos Humanos",
+    title: "IA & Analítica",
     items: [
-      { icon: PiggyBank, label: "Nómina & Sueldos (SueldOK)", path: "/sueldok", keywords: ["sueldos", "sueldok", "rrhh", "personal", "salarios", "asistencia", "reloj", "dahua"] },
-    ]
-  },
-  {
-    title: "Integraciones",
-    items: [
-      { icon: ShieldCheck, label: "Facturación & Autoimpresor (DNIT)", path: "/sifen" },
-      { icon: FileSignature, label: "Facturación Electrónica (Próximamente)", path: "/facturacion-electronica" },
-      { icon: Scale, label: "Básculas & Balanzas", path: "/escalas" },
-      // DESACTIVADO 2026-09-04: dispositivos ESL (MAC, bateria, señal) sintetizados
-      // en el cliente, sin integracion real a hardware. Ver auditoria de sidebar.
-      // { icon: Radio, label: "Etiquetas Electrónicas (ESL)", path: "/esl" },
-      // DESACTIVADO 2026-09-04: cero llamadas a backend, plataformas/pedidos 100%
-      // hardcodeados incluido el badge "3 Canales Conectados". Ver auditoria de sidebar.
-    ]
-  },
-  {
-    title: "Inteligencia & Sistema",
-    items: [
-      { icon: LineChart, label: "Business Intelligence", path: "/reports", keywords: ["reportes", "ventas", "medios de pago", "tarjetas", "pix", "qr", "gaveta", "arqueo"] },
-      { icon: PieChart, label: "Reportes Gerenciales", path: "/gerencial" },
-      // REACTIVADO 2026-09-04: la maqueta vieja (nombres reales de empleados en
-      // fraude inventado) fue reemplazada por RiskAgentPage -- dashboard y chat
-      // reales sobre audit_logs, clasificados por nivel/categoria de riesgo.
-      { icon: Fingerprint, label: "Auditoría & Riesgos", path: "/audit" },
-      { icon: Smartphone, label: "Apps Móviles & APKs", path: "/apps-moviles", keywords: ["apps", "movil", "apk", "descarga", "deposito", "supervisor", "salon", "conteo", "android"] },
-      { icon: Settings, label: "Configuración", path: "/settings" },
-      { icon: Building, label: "Sucursales", path: "/branches" },
-      { icon: Users, label: "Gestión de Usuarios", path: "/usuarios" },
-      { icon: ShieldCheck, label: "Permisos & Roles (RBAC)", path: "/rbac" },
-      { icon: Radar, label: "Consola de Plataforma", path: "/plataforma", superadminOnly: true, keywords: ["incidencias", "errores", "sentry", "integraciones", "cajas", "tenants", "auditoria"] },
-      { icon: ShieldCheck, label: "Salud del Sistema", path: "/salud-sistema", superadminOnly: true },
+      { icon: TrendingUp, label: "Forecast Demanda", path: "/demand-forecast", feature: "demand_forecast" },
+      { icon: Route, label: "Ruteo Inteligente", path: "/intelligent-routing", feature: "intelligent_routing" },
+      { icon: Shield, label: "Scoring Crédito", path: "/credit-scoring", feature: "credit_scoring" },
+      { icon: Lightbulb, label: "Oportunidades", path: "/oportunidades", feature: "comerciales" },
+      { icon: Thermometer, label: "Cadena de Frío", path: "/cold-chain", feature: "cold_chain" },
+      { icon: Bot, label: "Marco IA (Cerebro)", path: "/asistente-virtual", feature: "asistente_virtual" },
+      { icon: Users, label: "Clientes 360", path: "/clientes", feature: "clientes_fidelizacion" },
+      { icon: PieChart, label: "Customer 360", path: "/customer360", feature: "customer360" },
+      { icon: Clock, label: "Turnos", path: "/schedule", feature: "schedule" },
+      { icon: BarChart3, label: "Productividad", path: "/productividad", feature: "productividad" },
+      { icon: BookOpen, label: "Capacitación", path: "/capacitacion", feature: "capacitacion" },
+      { icon: DollarSign, label: "PyG Diario", path: "/pyg-diario", feature: "pyg_diario" },
+      { icon: AlertTriangle, label: "Shrinkage", path: "/shrinkage", feature: "shrinkage" },
+      { icon: TrendingUp, label: "Forecast Avanz.", path: "/forecast-avanzado", feature: "forecast_avanzado" },
+      { icon: BarChart3, label: "Benchmarking", path: "/benchmarking", feature: "benchmarking" },
     ]
   },
   {
     title: "Distribuidora & Logística",
     items: [
-      { icon: Navigation, label: "Mapa en Tiempo Real", path: "/mapa-tiempo-real", feature: "distribuidora" },
-      { icon: Map, label: "Planificador de Rutas", path: "/rutas", feature: "distribuidora" },
+      { icon: Map, label: "Mapa en Tiempo Real", path: "/mapa-tiempo-real", feature: "distribuidora" },
+      { icon: Navigation, label: "Planificador de Rutas", path: "/rutas", feature: "distribuidora" },
       { icon: Trophy, label: "Rendimiento Preventistas", path: "/distribuidora/rendimiento-vendedores", feature: "distribuidora" },
-      { icon: Truck, label: "Despacho & Reparto", path: "/distribuidora/despacho", feature: "distribuidora", keywords: ["viajes", "reparto", "despacho", "carga", "camion"] },
-      { icon: Navigation, label: "Mi Viaje Hoy (Cobrador)", path: "/distribuidora/mi-viaje", feature: "distribuidora", keywords: ["cobrador", "ruta", "mobile", "viaje"] },
-      { icon: DollarSign, label: "Rendiciones de Cobro", path: "/distribuidora/rendiciones", feature: "distribuidora", keywords: ["rendicion", "cobros", "efectivo", "cheques"] },
-      { icon: Landmark, label: "Liquidaciones de Ruta", path: "/distribuidora/liquidaciones", feature: "distribuidora", keywords: ["liquidacion", "ruta", "supervisor", "cierre"] },
-      { icon: Briefcase, label: "Tesorería de Rutas", path: "/distribuidora/tesoreria", feature: "distribuidora", keywords: ["tesoreria", "deposito", "banco", "caja cobrador"] },
+      { icon: Truck, label: "Despacho & Reparto", path: "/distribuidora/despacho", feature: "distribuidora" },
+      { icon: Navigation, label: "Mi Viaje Hoy (Cobrador)", path: "/distribuidora/mi-viaje", feature: "distribuidora" },
+      { icon: DollarSign, label: "Rendiciones de Cobro", path: "/distribuidora/rendiciones", feature: "distribuidora" },
+      { icon: Landmark, label: "Liquidaciones de Ruta", path: "/distribuidora/liquidaciones", feature: "distribuidora" },
+      { icon: Briefcase, label: "Tesorería de Rutas", path: "/distribuidora/tesoreria", feature: "distribuidora" },
     ]
   },
   {
-    title: "Ayuda",
+    title: "Verticales (Especiales)",
     items: [
-      { icon: BookOpen, label: "Manual Interactivo", path: "/manual" },
+      { icon: ShoppingCart, label: "Supermercado", path: "/supermer", feature: "supermercado" },
+      { icon: Scan, label: "Self-Checkout", path: "/self-checkout", feature: "supermercado" },
+      { icon: QrCode, label: "Scan&Go", path: "/scanandgo", feature: "scanandgo" },
+      { icon: Cpu, label: "Edge Hardware", path: "/edge-agent", feature: "supermercado" },
+      { icon: Pill, label: "Farmacia", path: "/pharma", feature: "pharma" },
+      { icon: Beaker, label: "POS Farmacia", path: "/pharma-pos", feature: "pharma" },
+      { icon: Shirt, label: "Boutique", path: "/boutique", feature: "boutique_pedidos" },
+      { icon: Wrench, label: "Servicios", path: "/servicios", feature: "servicios" },
+      { icon: Smartphone, label: "App Clientes", path: "/client-app", feature: "client_app" },
     ]
   },
+  {
+    title: "Integraciones",
+    items: [
+      { icon: ShieldCheck, label: "Facturación SET", path: "/sifen", feature: "sifen" },
+      { icon: ShieldCheck, label: "SIFEN Avanzado", path: "/sifen-avanzado", feature: "sifen_avanzado" },
+      { icon: CreditCard, label: "Pagopar", path: "/pagopar", feature: "pagopar" },
+      { icon: QrCode, label: "Kuapay", path: "/kuapay", feature: "kuapay" },
+      { icon: Scan, label: "SPI QR", path: "/spi", feature: "spi" },
+      { icon: CreditCard, label: "Bancard", path: "/bancard", feature: "bancard" },
+      { icon: CreditCard, label: "Dinelco", path: "/dinelco", feature: "dinelco" },
+      { icon: Mail, label: "Email", path: "/email", feature: "email" },
+      { icon: BookOpen, label: "InteliCont", path: "/intelicont" },
+      { icon: PiggyBank, label: "SueldOK", path: "/sueldok" },
+      { icon: Blocks, label: "Ecosistema Intelli", path: "/integrations" },
+    ]
+  },
+  {
+    title: "Inteligencia & Sistema",
+    items: [
+      { icon: LineChart, label: "Reportes", path: "/reports" },
+      { icon: PieChart, label: "Panel Gerencial", path: "/gerencial" },
+      { icon: Fingerprint, label: "Auditoría", path: "/audit" },
+      { icon: Settings, label: "Configuración", path: "/settings" },
+      { icon: Building2, label: "Sucursales", path: "/branches", feature: "branches" },
+      { icon: Shield, label: "RBAC", path: "/rbac", feature: "rbac" },
+      { icon: Crown, label: "Admin SaaS", path: "/admin" },
+      { icon: LayoutGrid, label: "Verticales", path: "/admin/verticals" },
+    ]
+  }
 ]
 
 export default function Layout() {
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [themeDropdownOpen, setThemeDropdownOpen] = useState(false)
   const { user, logout } = useAuth()
   const { theme, setTheme } = useTheme()
   const { hasFeature } = useFeatures()
-  const { hasPermission, hasAnyPermission } = usePermissions()
   const navigate = useNavigate()
   const location = useLocation()
 
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [themeDropdownOpen, setThemeDropdownOpen] = useState(false)
   const [expandedGroups, setExpandedGroups] = useState<string[]>([])
-  const [branches, setBranches] = useState<any[]>([])
-  const [selectedBranch, setSelectedBranch] = useState<any>(null)
-  const [branchDropdownOpen, setBranchDropdownOpen] = useState(false)
-
-  useEffect(() => {
-    api.branches.list()
-      .then((data: any) => {
-        if (Array.isArray(data)) {
-          setBranches(data)
-          if (data.length > 0) {
-            setSelectedBranch(data[0])
-          }
-        }
-      })
-      .catch((err: any) => console.error("Error fetching branches:", err))
-  }, [])
 
   useEffect(() => {
     const activeGroup = navGroups.find(g => g.items.some(i => i.path === location.pathname))
@@ -247,33 +208,7 @@ export default function Layout() {
     )
   }
 
-  const userRole = user?.is_superadmin
-    ? "Super Admin"
-    : (user as any)?.rol || (user as any)?.role || "Administrador"
-
-  // ── Buscador global funcional ────────────────────────────────────────────
-  const [searchQuery, setSearchQuery] = useState("")
-  const [searchOpen, setSearchOpen] = useState(false)
-
-  const allNavItems = navGroups.flatMap(g => g.items)
-  const searchResults = searchQuery.trim().length > 0
-    ? allNavItems.filter(item =>
-        (item.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
-         item.keywords?.some(k => k.toLowerCase().includes(searchQuery.toLowerCase()))) &&
-        (!item.feature || hasFeature(item.feature)) &&
-        (!item.permission || hasPermission(item.permission)) &&
-        (!item.anyPermission || hasAnyPermission(...item.anyPermission)) &&
-        (!item.superadminOnly || user?.is_superadmin)
-      ).slice(0, 8)
-    : []
-
-  const handleSearchNavigate = (path: string) => {
-    navigate(path)
-    setSearchQuery("")
-    setSearchOpen(false)
-  }
-
-  const isPosRoute = location.pathname.startsWith("/pos") || location.pathname.startsWith("/self-checkout") || location.pathname.startsWith("/pharma-pos");
+  const isPosRoute = location.pathname.startsWith("/pos") || location.pathname.startsWith("/self-checkout") || location.pathname.startsWith("/pharma-pos")
   if (isElectron || isPosRoute) {
     return (
       <div className="min-h-screen bg-body-light dark:bg-body-dark">
@@ -283,244 +218,142 @@ export default function Layout() {
   }
 
   return (
-    <div className="h-screen bg-body-light dark:bg-body-dark flex overflow-hidden font-sans">
-      {sidebarOpen && <div className="fixed inset-0 z-[110] bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
+    <div className="h-screen bg-body-light dark:bg-body-dark flex overflow-hidden">
+      {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
-      {/* ── Sidebar Distribuidora con Estilo Pill y Línea Vertical ── */}
-      <aside className={`fixed lg:static inset-y-0 left-0 z-[120] lg:z-30 w-64 sidebar-gradient transform transition-transform duration-300 lg:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} flex flex-col`}>
-
-        {/* Logo & Header */}
-        <div className="p-5 border-b border-white/10">
+      <aside className={`fixed lg:static inset-y-0 left-0 z-40 w-64 sidebar-gradient transform transition-transform duration-300 lg:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} flex flex-col`}>
+        <div className="p-6 border-b border-white/10">
           <div className="flex items-center justify-between">
-            <div className="flex flex-col text-left">
+            <div className="flex flex-col">
               <Logo />
-              <span className="mt-1.5 text-[9px] font-black bg-emerald-500/90 text-white px-2 py-0.5 rounded-full w-max uppercase tracking-widest shadow-sm">
-                Versión: Distribuidora
+              <span className="mt-1 text-[10px] font-bold bg-emerald-500 text-white px-2 py-0.5 rounded-full w-max uppercase tracking-wider">
+                Distribuidora
               </span>
             </div>
-            <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-white/70 hover:text-white">
-              <X className="w-5 h-5" />
-            </button>
+            <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
           </div>
         </div>
 
-        {/* Menú de Navegación con Pills y Guía Vertical */}
-        <nav className="flex-1 p-3 space-y-3 overflow-y-auto">
+        <nav className="flex-1 p-3 space-y-4 overflow-y-auto">
           {navGroups.map((group) => {
-            const visibleItems = group.items.filter((item) => {
-              if (item.superadminOnly && !user?.is_superadmin) return false
-              if (item.permission && !hasPermission(item.permission)) return false
-              if (item.anyPermission && !hasAnyPermission(...item.anyPermission)) return false
-              return !item.feature || hasFeature(item.feature)
-            })
+            const visibleItems = group.items.filter((item) => !item.feature || hasFeature(item.feature))
             if (visibleItems.length === 0) return null
 
-            const isExpanded = group.title === "Inicio" || expandedGroups.includes(group.title)
-
             return (
-              <div key={group.title} className="space-y-1 text-left">
-                {/* ── Estilo Pill en la Categoría ── */}
+              <div key={group.title} className="space-y-1">
                 {group.title !== "Inicio" && (
                   <button
                     onClick={() => toggleGroup(group.title)}
-                    className={`w-full flex items-center justify-between px-3 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wider transition-all text-left shadow-sm ${
-                      isExpanded
-                        ? "bg-white/15 text-white border border-white/20"
-                        : "bg-white/5 text-white/70 hover:bg-white/10 hover:text-white border border-white/5"
-                    }`}
+                    className="w-full flex items-center justify-between px-3 py-2 mt-2 text-xs font-semibold text-white/50 hover:text-white uppercase tracking-wide transition-colors"
                   >
-                    <span className="text-left flex-1 truncate">{group.title}</span>
-                    <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${isExpanded ? "rotate-180 text-white" : "text-white/60"}`} />
+                    <span>{group.title}</span>
+                    <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${expandedGroups.includes(group.title) ? "rotate-180 text-white" : ""}`} />
                   </button>
                 )}
 
-                {/* ── Submenús con Línea Vertical al Costado Izquierdo ── */}
-                <div className={`overflow-hidden transition-all duration-300 ${isExpanded ? "max-h-[800px] opacity-100" : "max-h-0 opacity-0"}`}>
-                  <div className={`${group.title !== "Inicio" ? "ml-3 pl-2.5 border-l-2 border-white/20 space-y-1 py-1" : "space-y-1"}`}>
-                    {visibleItems.map((item) => {
-                      const active = location.pathname === item.path || (item.path === "/cierre-mensual" && location.pathname === "/financiero/cierre-mensual")
-                      return (
-                        <button
-                          key={item.path}
-                          onClick={() => { navigate(item.path); setSidebarOpen(false) }}
-                          className={`w-full flex items-center justify-start gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-left transition-all duration-200 ${
-                            active
-                              ? "bg-white/25 text-white font-bold shadow-lg border-l-4 border-emerald-400 pl-2"
-                              : "text-white/75 hover:text-white hover:bg-white/10"
-                          }`}
-                        >
-                          <item.icon className={`w-4 h-4 flex-shrink-0 ${active ? "text-emerald-300" : "text-white/70"}`} />
-                          <span className="text-left flex-1 truncate leading-tight">{item.label}</span>
-                        </button>
-                      )
-                    })}
-                  </div>
+                <div className={`space-y-1 overflow-hidden transition-all duration-300 ${group.title === "Inicio" || expandedGroups.includes(group.title) ? "max-h-[800px] opacity-100" : "max-h-0 opacity-0"}`}>
+                  {visibleItems.map((item) => {
+                    const active = location.pathname === item.path
+                    return (
+                      <button key={item.path} onClick={() => { navigate(item.path); setSidebarOpen(false) }}
+                        className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${active ? "bg-white/20 text-white shadow-lg" : "text-white/70 hover:text-white hover:bg-white/10"}`}>
+                        <item.icon className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                        <span className="text-left leading-tight">{item.label}</span>
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
             )
           })}
         </nav>
 
-        {/* Footer: User & Settings */}
-        <div className="p-3 border-t border-white/10 space-y-1">
+        <div className="p-3 border-t border-white/10 space-y-1 relative">
           <div className="relative">
-            <button
-              onClick={() => setThemeDropdownOpen(!themeDropdownOpen)}
-              className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-all text-left"
-            >
-              <div className="flex items-center gap-2.5 text-left">
-                {theme === 'light' ? <Sun className="w-4 h-4 text-amber-300" /> : theme === 'dark' ? <Moon className="w-4 h-4 text-indigo-300" /> : <Monitor className="w-4 h-4 text-emerald-300" />}
-                <span className="text-left">Tema</span>
+            <button onClick={() => setThemeDropdownOpen(!themeDropdownOpen)} className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-white/70 hover:text-white hover:bg-white/10 transition-all">
+              <div className="flex items-center gap-3">
+                {theme === 'light' ? <Sun className="w-5 h-5" /> : theme === 'dark' ? <Moon className="w-5 h-5" /> : <Monitor className="w-5 h-5" />}
+                <span>Tema: {theme === 'light' ? "Claro" : theme === 'dark' ? "Oscuro" : "Sistema"}</span>
               </div>
-              <ChevronDown className="w-3.5 h-3.5" />
+              <svg className={`w-4 h-4 transition-transform ${themeDropdownOpen ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
             </button>
             {themeDropdownOpen && (
-              <div className="absolute bottom-full left-0 mb-2 w-full bg-[#0a2244] dark:bg-slate-800 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 text-left">
-                <button onClick={() => { setTheme('light'); setThemeDropdownOpen(false) }} className="w-full flex items-center gap-3 px-4 py-2.5 text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 text-left">
-                  <Sun className="w-4 h-4 text-amber-300" /> <span className="text-left">Claro</span>
+              <div className="absolute bottom-full left-0 mb-2 w-full bg-[#0a2244] dark:bg-slate-800 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50">
+                <button onClick={() => { setTheme('light'); setThemeDropdownOpen(false) }} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-white/70 hover:text-white hover:bg-white/10">
+                  <Sun className="w-4 h-4" /> Claro
                 </button>
-                <button onClick={() => { setTheme('dark'); setThemeDropdownOpen(false) }} className="w-full flex items-center gap-3 px-4 py-2.5 text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 text-left">
-                  <Moon className="w-4 h-4 text-indigo-300" /> <span className="text-left">Oscuro</span>
+                <button onClick={() => { setTheme('dark'); setThemeDropdownOpen(false) }} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-white/70 hover:text-white hover:bg-white/10">
+                  <Moon className="w-4 h-4" /> Oscuro
                 </button>
-                <button onClick={() => { setTheme('system'); setThemeDropdownOpen(false) }} className="w-full flex items-center gap-3 px-4 py-2.5 text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 text-left">
-                  <Monitor className="w-4 h-4 text-emerald-300" /> <span className="text-left">Sistema</span>
+                <button onClick={() => { setTheme('system'); setThemeDropdownOpen(false) }} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-white/70 hover:text-white hover:bg-white/10">
+                  <Monitor className="w-4 h-4" /> Sistema
                 </button>
               </div>
             )}
           </div>
-          <button
-            onClick={() => { logout(); window.location.href = "/login" }}
-            className="w-full flex items-center justify-start gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-red-300 hover:text-red-200 hover:bg-red-500/20 transition-all text-left"
-          >
-            <LogOut className="w-4 h-4 flex-shrink-0" /> <span className="text-left">Cerrar sesión</span>
+          <button onClick={() => { logout(); navigate("/login") }} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-red-300 hover:text-red-200 hover:bg-red-500/20 transition-all">
+            <LogOut className="w-5 h-5" />Cerrar sesión
           </button>
         </div>
       </aside>
 
-      {/* ── Main Content ───────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
-        <header className="relative z-20 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 px-4 lg:px-6 py-3 flex items-center gap-4 lg:gap-8 justify-between">
+        <header className="relative z-40 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 px-4 lg:px-6 py-3 flex items-center gap-4 lg:gap-8 justify-between">
           <div className="flex items-center gap-4 lg:hidden">
-            <button onClick={() => setSidebarOpen(true)} className="text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 p-2 rounded-lg transition-colors">
-              <Menu className="w-6 h-6" />
-            </button>
+            <button onClick={() => setSidebarOpen(true)} className="text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 p-2 rounded-lg transition-colors"><Menu className="w-6 h-6" /></button>
           </div>
 
           {/* Global Search */}
-          <div className="hidden lg:flex flex-1 max-w-xl relative">
+          <div className="hidden lg:flex flex-1 max-w-xl">
             <div className="relative w-full group">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <Search className="h-4 w-4 text-gray-400 group-focus-within:text-primary transition-colors" />
               </div>
               <input
                 type="text"
-                value={searchQuery}
-                onChange={e => { setSearchQuery(e.target.value); setSearchOpen(true) }}
-                onFocus={() => setSearchOpen(true)}
-                onBlur={() => setTimeout(() => setSearchOpen(false), 150)}
-                onKeyDown={e => {
-                  if (e.key === "Escape") { setSearchQuery(""); setSearchOpen(false) }
-                  if (e.key === "Enter" && searchResults.length > 0) handleSearchNavigate(searchResults[0].path)
-                }}
-                className="w-full bg-gray-100 dark:bg-slate-800/50 border border-transparent focus:border-primary/50 focus:bg-white dark:focus:bg-slate-800 text-sm rounded-xl pl-10 pr-12 py-2.5 transition-all text-gray-900 dark:text-white placeholder-gray-500 outline-none text-left"
+                className="w-full bg-gray-100 dark:bg-slate-800/50 border border-transparent focus:border-primary/50 focus:bg-white dark:focus:bg-slate-800 text-sm rounded-xl pl-10 pr-12 py-2.5 transition-all text-gray-900 dark:text-white placeholder-gray-500 outline-none"
                 placeholder="Buscar productos, clientes, facturas..."
               />
               <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
                 <span className="text-[10px] font-semibold text-gray-400 border border-gray-200 dark:border-gray-700 px-1.5 py-0.5 rounded-md bg-white dark:bg-slate-800">Ctrl K</span>
               </div>
             </div>
-
-            {/* Dropdown de resultados */}
-            {searchOpen && searchResults.length > 0 && (
-              <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl overflow-hidden z-30 text-left">
-                {searchResults.map((item) => (
-                  <button
-                    key={item.path}
-                    onMouseDown={() => handleSearchNavigate(item.path)}
-                    className="w-full flex items-center justify-start gap-3 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors text-left"
-                  >
-                    <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center text-primary flex-shrink-0">
-                      <item.icon className="w-3.5 h-3.5" />
-                    </div>
-                    <span className="text-sm font-medium text-gray-900 dark:text-white text-left flex-1 truncate">{item.label}</span>
-                    <span className="ml-auto text-[10px] text-gray-400 font-mono text-right">{item.path}</span>
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
 
           {/* Right Tools */}
           <div className="flex items-center gap-2 sm:gap-4 ml-auto">
-            {/* Branch Selector */}
-            <div className="relative">
-              <div
-                onClick={() => setBranchDropdownOpen(!branchDropdownOpen)}
-                className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-slate-800/50 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors text-left"
-              >
-                <div className="w-6 h-6 rounded bg-primary/10 flex items-center justify-center text-primary">
-                  <Store className="w-3.5 h-3.5" />
-                </div>
-                <div className="flex flex-col text-left">
-                  <span className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider leading-none text-left">Sucursal</span>
-                  <span className="text-xs font-medium text-gray-900 dark:text-white leading-tight mt-0.5 text-left truncate max-w-[150px]">
-                    {selectedBranch?.nombre || "Casa Central"}
-                  </span>
-                </div>
-                <ChevronDown className="w-3.5 h-3.5 text-gray-400 ml-1" />
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-slate-800/50 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors">
+              <div className="w-6 h-6 rounded bg-primary/10 flex items-center justify-center text-primary">
+                <Store className="w-3.5 h-3.5" />
               </div>
-
-              {branchDropdownOpen && branches.length > 0 && (
-                <div className="absolute top-full right-0 mt-2 w-64 bg-white dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl overflow-hidden z-30 text-left font-sans">
-                  {branches.map((b) => (
-                    <button
-                      key={b.id}
-                      onClick={() => {
-                        setSelectedBranch(b)
-                        setBranchDropdownOpen(false)
-                      }}
-                      className="w-full flex flex-col items-start px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-slate-700/60 transition-colors text-left"
-                    >
-                      <span className="text-xs font-bold text-gray-900 dark:text-white">{b.nombre}</span>
-                      <span className="text-[10px] text-gray-500">{b.ciudad} · Código {b.codigo}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
+              <div className="flex flex-col">
+                <span className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider leading-none">Sucursal</span>
+                <span className="text-xs font-medium text-gray-900 dark:text-white leading-tight mt-0.5">Casa Central</span>
+              </div>
+              <ChevronDown className="w-3.5 h-3.5 text-gray-400 ml-1" />
             </div>
 
-            {/* Quick Actions & Notifications */}
             <div className="flex items-center gap-1 sm:gap-2">
-              <button
-                onClick={() => navigate("/pos")}
-                className="hidden sm:flex items-center gap-1.5 bg-primary/10 hover:bg-primary/20 text-primary px-3 py-2 rounded-lg text-sm font-medium transition-colors"
-              >
+              <button className="hidden sm:flex items-center gap-1.5 bg-primary/10 hover:bg-primary/20 text-primary px-3 py-2 rounded-lg text-sm font-medium transition-colors">
                 <Plus className="w-4 h-4" />
                 <span>Nuevo</span>
               </button>
-
               <NotificationBell />
             </div>
 
-            {/* Divider */}
             <div className="hidden sm:block w-px h-6 bg-gray-200 dark:bg-gray-700 mx-1"></div>
 
-            {/* User Profile */}
-            <div
-              onClick={() => navigate("/settings")}
-              className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity text-left"
-            >
+            <div className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity">
               <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-primary to-primary-light flex items-center justify-center text-white shadow-sm font-semibold text-sm">
                 {user?.nombre?.charAt(0).toUpperCase() || "U"}
               </div>
-              <div className="hidden md:flex flex-col text-left">
-                <span className="text-sm font-medium text-gray-900 dark:text-white leading-none text-left">{user?.nombre || "Usuario"}</span>
-                <span className="text-[11px] text-gray-500 mt-0.5 text-left">{userRole}</span>
+              <div className="hidden md:flex flex-col">
+                <span className="text-sm font-medium text-gray-900 dark:text-white leading-none">{user?.nombre || "Usuario"}</span>
+                <span className="text-[11px] text-gray-500 mt-0.5">Administrador</span>
               </div>
             </div>
           </div>
         </header>
-
         <main className="flex-1 overflow-y-auto p-4 lg:p-6"><ErrorBoundary><Outlet /></ErrorBoundary></main>
       </div>
 
