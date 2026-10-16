@@ -74,7 +74,7 @@ COLUMN_MIGRATIONS = [
     ("receivable_payments",      "delivery_note_id",      "UUID"),
     ("receivable_payments",      "delivery_note_monto",   "NUMERIC(15,0)"),
     # companies
-    ("companies",                "condicion_iva",         "VARCHAR(20) DEFAULT 'responsable_inscripto'"),
+    ("companies",                "condicion_iva",         "VARCHAR(50) DEFAULT 'responsable_inscripto'"),
     ("companies",                "config",                "JSONB DEFAULT '{}'"),
     ("companies",                "activo",                "BOOLEAN DEFAULT true"),
     # products
