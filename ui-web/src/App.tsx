@@ -106,6 +106,7 @@ const LiquidacionesPage = lazy(() => import("./pages/distribuidora/Liquidaciones
 const TesoreriaPage = lazy(() => import("./pages/distribuidora/TesoreriaPage"))
 const DespachoPage = lazy(() => import("./pages/distribuidora/DespachoPage"))
 const MiViajeHoyPage = lazy(() => import("./pages/distribuidora/MiViajeHoyPage"))
+const SupplierKpisPage = lazy(() => import("./pages/supplier-kpis/SupplierKpisPage"))
 const InventoryAdvancedPage = lazy(() => import("./pages/inventory/InventoryAdvancedPage"))
 const IntegratedFinancePage = lazy(() => import("./pages/integrated-finance/IntegratedFinancePage"))
 const DemandForecastPage = lazy(() => import("./pages/demand-forecast/DemandForecastPage"))
@@ -349,6 +350,7 @@ function AppRoutes() {
           ["distribuidora/tesoreria", <TesoreriaPage />],
           ["distribuidora/despacho", <DespachoPage />],
           ["distribuidora/mi-viaje", <MiViajeHoyPage />],
+          ["supplier-kpis", <SupplierKpisPage />],
         ].map(([path, el]) => (
           <Route key={path as string} path={path as string} element={<Suspense fallback={<PageLoader />}>{el as React.ReactNode}</Suspense>} />
         ))}

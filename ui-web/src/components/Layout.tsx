@@ -132,6 +132,7 @@ const navGroups: NavGroup[] = [
       { icon: Map, label: "Mapa en Tiempo Real", path: "/mapa-tiempo-real", feature: "distribuidora" },
       { icon: Navigation, label: "Planificador de Rutas", path: "/rutas", feature: "distribuidora" },
       { icon: Trophy, label: "Rendimiento Preventistas", path: "/distribuidora/rendimiento-vendedores", feature: "distribuidora" },
+      { icon: Award, label: "KPIs Proveedores (PARESA)", path: "/supplier-kpis", feature: "distribuidora" },
       { icon: Truck, label: "Despacho & Reparto", path: "/distribuidora/despacho", feature: "distribuidora" },
       { icon: Navigation, label: "Mi Viaje Hoy (Cobrador)", path: "/distribuidora/mi-viaje", feature: "distribuidora" },
       { icon: DollarSign, label: "Rendiciones de Cobro", path: "/distribuidora/rendiciones", feature: "distribuidora" },

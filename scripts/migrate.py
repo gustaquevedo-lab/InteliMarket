@@ -42,6 +42,10 @@ COLUMN_MIGRATIONS = [
     ("purchase_suggestions",     "supplier_candidates",   "JSONB"),
     # tenants
     ("tenants",                  "contacto_email",        "VARCHAR(255)"),
+    # customers geocoords (migration 20261012100000)
+    ("customers",                "lat",                   "NUMERIC(10,8)"),
+    ("customers",                "lng",                   "NUMERIC(11,8)"),
+    ("customers",                "geocoded_at",           "TIMESTAMPTZ"),
     # customers extra cols
     ("customers",                "empresa_vinculada_ruc", "VARCHAR(20)"),
     # products
@@ -57,6 +61,13 @@ COLUMN_MIGRATIONS = [
     ("suppliers",                "contacto_email",        "VARCHAR(255)"),
     # sales_orders
     ("sales_orders",             "cliente_contacto",      "VARCHAR(100)"),
+    # accounts_receivable SP4 extensions (migration 20261013110000)
+    ("accounts_receivable",      "cobrador_id",           "UUID"),
+    ("accounts_receivable",      "route_id",              "UUID"),
+    # receivable_payments SP4 extensions
+    ("receivable_payments",      "cobrador_id",           "UUID"),
+    ("receivable_payments",      "delivery_note_id",      "UUID"),
+    ("receivable_payments",      "delivery_note_monto",   "NUMERIC(15,0)"),
 ]
 
 # ──────────────────────────────────────────────
@@ -306,7 +317,190 @@ CREATE TABLE IF NOT EXISTS platform_settings (
 );
 """
 
+ADV_INVENTORY_DDL = """
+CREATE TABLE IF NOT EXISTS adv_storage_locations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL,
+    warehouse_id UUID NOT NULL,
+    codigo VARCHAR(50) NOT NULL,
+    pasillo VARCHAR(50),
+    estante VARCHAR(50),
+    posicion VARCHAR(50),
+    capacidad_maxima NUMERIC(15,3),
+    activo BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    CONSTRAINT uq_location_code UNIQUE (company_id, warehouse_id, codigo)
+);
+CREATE INDEX IF NOT EXISTS ix_adv_storage_locations_company ON adv_storage_locations (company_id);
+
+CREATE TABLE IF NOT EXISTS adv_picking_lists (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL,
+    warehouse_id UUID NOT NULL,
+    numero VARCHAR(30) NOT NULL,
+    referencia_tipo VARCHAR(30),
+    referencia_id UUID,
+    estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',
+    assigned_to UUID,
+    notas TEXT,
+    total_items INTEGER DEFAULT 0,
+    picked_items INTEGER DEFAULT 0,
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_adv_picking_lists_company ON adv_picking_lists (company_id);
+
+CREATE TABLE IF NOT EXISTS adv_picking_list_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    picking_list_id UUID NOT NULL REFERENCES adv_picking_lists(id) ON DELETE CASCADE,
+    product_id UUID NOT NULL,
+    product_nombre VARCHAR(200),
+    cantidad_solicitada NUMERIC(15,3) NOT NULL,
+    cantidad_pickeada NUMERIC(15,3) DEFAULT 0,
+    location_id UUID,
+    lot_id UUID,
+    estado VARCHAR(20) DEFAULT 'pendiente',
+    notas TEXT,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS adv_cycle_counts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL,
+    warehouse_id UUID NOT NULL,
+    numero VARCHAR(30) NOT NULL,
+    tipo VARCHAR(20) NOT NULL DEFAULT 'rotativo',
+    estado VARCHAR(20) NOT NULL DEFAULT 'abierto',
+    conteo_total INTEGER DEFAULT 0,
+    conteo_completado INTEGER DEFAULT 0,
+    discrepancias INTEGER DEFAULT 0,
+    notas TEXT,
+    created_by UUID,
+    completed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_adv_cycle_counts_company ON adv_cycle_counts (company_id);
+
+CREATE TABLE IF NOT EXISTS adv_cycle_count_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    cycle_count_id UUID NOT NULL REFERENCES adv_cycle_counts(id) ON DELETE CASCADE,
+    product_id UUID NOT NULL,
+    product_nombre VARCHAR(200),
+    location_id UUID,
+    cantidad_sistema NUMERIC(15,3) NOT NULL DEFAULT 0,
+    cantidad_fisica NUMERIC(15,3),
+    diferencia NUMERIC(15,3),
+    estado VARCHAR(20) DEFAULT 'pendiente',
+    notas TEXT,
+    counted_by UUID,
+    counted_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS adv_consignment_stock (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL,
+    warehouse_id UUID NOT NULL,
+    product_id UUID NOT NULL,
+    supplier_id UUID NOT NULL,
+    supplier_nombre VARCHAR(200),
+    cantidad NUMERIC(15,3) NOT NULL DEFAULT 0,
+    costo_acordado NUMERIC(15,2),
+    moneda VARCHAR(3) DEFAULT 'PYG',
+    fecha_ingreso TIMESTAMPTZ,
+    fecha_vencimiento TIMESTAMPTZ,
+    notas TEXT,
+    activo BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_adv_consignment_company ON adv_consignment_stock (company_id);
+
+CREATE TABLE IF NOT EXISTS adv_consignment_movements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    consignment_id UUID NOT NULL REFERENCES adv_consignment_stock(id) ON DELETE CASCADE,
+    tipo VARCHAR(20) NOT NULL,
+    cantidad NUMERIC(15,3) NOT NULL,
+    referencia_tipo VARCHAR(30),
+    referencia_id UUID,
+    notas TEXT,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS adv_auto_replenish_rules (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL,
+    product_id UUID NOT NULL,
+    warehouse_id UUID NOT NULL,
+    stock_minimo NUMERIC(15,3) NOT NULL,
+    stock_seguridad NUMERIC(15,3) DEFAULT 0,
+    cantidad_reorden NUMERIC(15,3),
+    lead_time_dias INTEGER DEFAULT 1,
+    supplier_id UUID,
+    activo BOOLEAN DEFAULT true,
+    ultima_alerta_at TIMESTAMPTZ,
+    auto_generar_oc BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    CONSTRAINT uq_replenish_rule UNIQUE (company_id, product_id, warehouse_id)
+);
+CREATE INDEX IF NOT EXISTS ix_adv_auto_replenish_company ON adv_auto_replenish_rules (company_id);
+"""
+
+SP4_DDL = """
+CREATE TABLE IF NOT EXISTS pagares (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL,
+    customer_id UUID NOT NULL,
+    receivable_account_id UUID,
+    numero_pagare VARCHAR(30) NOT NULL,
+    monto_original NUMERIC(15,0) NOT NULL,
+    saldo_pendiente NUMERIC(15,0) NOT NULL,
+    fecha_emision DATE NOT NULL,
+    fecha_vencimiento DATE NOT NULL,
+    motivo TEXT,
+    estado VARCHAR(20) NOT NULL DEFAULT 'vigente',
+    cobrador_id UUID,
+    created_by UUID,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_pagares_company ON pagares (company_id);
+CREATE INDEX IF NOT EXISTS ix_pagares_customer ON pagares (customer_id);
+
+CREATE TABLE IF NOT EXISTS pagare_payments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    pagare_id UUID NOT NULL REFERENCES pagares(id),
+    receivable_payment_id UUID,
+    monto_aplicado NUMERIC(15,0) NOT NULL,
+    fecha DATE NOT NULL,
+    observaciones TEXT,
+    created_by UUID,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_pagare_payments_pagare ON pagare_payments (pagare_id);
+
+CREATE TABLE IF NOT EXISTS delivery_notes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL,
+    customer_id UUID NOT NULL,
+    sale_id UUID,
+    numero_nota VARCHAR(30) NOT NULL,
+    fecha DATE NOT NULL,
+    monto_total NUMERIC(15,0) NOT NULL DEFAULT 0,
+    estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',
+    cobrador_id UUID,
+    cobrado_at TIMESTAMPTZ,
+    observaciones TEXT,
+    created_by UUID,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_delivery_notes_company ON delivery_notes (company_id);
+CREATE INDEX IF NOT EXISTS ix_delivery_notes_customer ON delivery_notes (customer_id);
+"""
+
 ALEMBIC_VERSIONS = [
+    ("20260531230000", "adv_storage_locations/picking_lists/cycle_counts/consignment/replenish"),
+    ("20261012100000", "geocoords lat/lng/geocoded_at on customers"),
+    ("20261013110000", "pagares/delivery_notes/AR extensions"),
     ("20261014120000", "SP3 route_sessions/liquidations/bank_deposits"),
     ("20261015100000", "SP5 trip_vehicles/trips/stops/items"),
     ("20261015200000", "platform mon_issues/mon_events/mon_heartbeats/platform_audit"),
@@ -332,6 +526,10 @@ async def main():
                 print(f"  ✓ {table}.{col}")
 
         # 2. Tables
+        await c.execute(ADV_INVENTORY_DDL)
+        print("  ✓ advanced inventory tables")
+        await c.execute(SP4_DDL)
+        print("  ✓ SP4 tables (pagares/delivery_notes)")
         await c.execute(SP3_DDL)
         print("  ✓ SP3 tables")
         await c.execute(SP5_DDL)
