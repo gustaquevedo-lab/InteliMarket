@@ -878,10 +878,14 @@ async def record_vendor_credit_note(
 
 async def sync_nemuha_promotions(db: AsyncSession, company_id: str) -> dict:
     """Sincroniza en lote todas las promociones activas e históricas de ven_promocao de MySQL Nemuha."""
-    from api.src.nemuha_connector.service import sync_promotions
-    res = await sync_promotions(db, company_id, return_details=True)
-    await db.commit()
-    return res
+    try:
+        from api.src.nemuha_connector.service import sync_promotions
+        res = await sync_promotions(db, company_id, return_details=True)
+        await db.commit()
+        return res
+    except ImportError:
+        return {"status": "skipped", "message": "Conector Ñemuha no aplica a vertical distribuidora", "total": 0}
+
 
 
 async def calculate_applicable(

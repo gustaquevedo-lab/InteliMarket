@@ -10,7 +10,7 @@ import Layout from "./components/Layout"
 import ErrorBoundary from "./components/ErrorBoundary"
 
 const Login = lazy(() => import("./pages/Login"))
-const Dashboard = lazy(() => import("./pages/DashboardDistribuidora"))
+const Dashboard = lazy(() => import("./pages/Dashboard"))
 const DepositoDashboard = lazy(() => import("./pages/RoleDashboards").then(m => ({ default: m.DepositoDashboard })))
 const AtencionClienteDashboard = lazy(() => import("./pages/RoleDashboards").then(m => ({ default: m.AtencionClienteDashboard })))
 const SalonDashboard = lazy(() => import("./pages/RoleDashboards").then(m => ({ default: m.SalonDashboard })))
