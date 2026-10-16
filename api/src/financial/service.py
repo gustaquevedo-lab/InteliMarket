@@ -2247,13 +2247,17 @@ async def get_cash_flow_dashboard(db: AsyncSession, company_id: str) -> dict:
 
     projections = await generate_projection(db, company_id, dias=30)
 
-    ingresos_30d = sum(p.ingresos_estimados for p in projections)
-    egresos_30d = sum(p.egresos_estimados for p in projections)
+    saldo_actual = saldo_bancario
     saldo_proyectado_30d = projections[-1].saldo_final_proyectado if projections else saldo_actual
 
     # Overdue summaries
     overdue_ar = (await db.execute(
         text("SELECT COALESCE(SUM(saldo_pendiente), 0) FROM accounts_receivable WHERE company_id = :cid AND estado = 'pendiente' AND fecha_vencimiento < CURRENT_DATE"),
+        {"cid": cid}
+    )).scalar() or 0
+
+    overdue_ap = (await db.execute(
+        text("SELECT COALESCE(SUM(total), 0) FROM supplier_invoices WHERE company_id = :cid AND estado = 'pendiente' AND fecha_vencimiento < CURRENT_DATE"),
         {"cid": cid}
     )).scalar() or 0
 
