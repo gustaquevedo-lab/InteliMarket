@@ -2247,6 +2247,8 @@ async def get_cash_flow_dashboard(db: AsyncSession, company_id: str) -> dict:
 
     projections = await generate_projection(db, company_id, dias=30)
 
+    ingresos_30d = sum(p.ingresos_estimados for p in projections)
+    egresos_30d = sum(p.egresos_estimados for p in projections)
     saldo_actual = saldo_bancario
     saldo_proyectado_30d = projections[-1].saldo_final_proyectado if projections else saldo_actual
 
