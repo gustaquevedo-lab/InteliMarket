@@ -701,9 +701,9 @@ class PaymentOrderDisbursementResponse(BaseModel):
     id: UUID
     forma_pago: str
     monto: Decimal
-    moneda: str
-    tipo_cambio: Decimal
-    monto_pyg: Decimal
+    moneda: str = "PYG"
+    tipo_cambio: Optional[Decimal] = Decimal("1")
+    monto_pyg: Optional[Decimal] = Decimal("0")
     bank_account_id: Optional[UUID] = None
     banco_nombre: Optional[str] = None
     referencia_transferencia: Optional[str] = None

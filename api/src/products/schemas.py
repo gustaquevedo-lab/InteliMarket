@@ -89,33 +89,33 @@ class ProductResponse(BaseModel):
     categoria_id: Optional[UUID] = None
     supplier_id: Optional[UUID] = None
     supplier_nombre: Optional[str] = None
-    sku: str
+    sku: str = ""
     codigo_barra: Optional[str] = None
-    nombre: str
+    nombre: str = ""
     descripcion: Optional[str] = None
-    tipo: str
+    tipo: str = "producto"
     tipo_producto: str = "producto"  # producto | materia_prima | insumo | servicio
     tipo_venta: str = "unidad"
-    unidad_medida: str
-    iva_tasa: Decimal
-    metodo_costeo: str
-    tiene_lotes: bool
-    tiene_vencimiento: bool
-    tiene_serial: bool
-    stock_minimo: int
+    unidad_medida: Optional[str] = "UN"
+    iva_tasa: Optional[Decimal] = Decimal("10")
+    metodo_costeo: Optional[str] = "promedio"
+    tiene_lotes: Optional[bool] = False
+    tiene_vencimiento: Optional[bool] = False
+    tiene_serial: Optional[bool] = False
+    stock_minimo: Optional[int] = 0
     stock_maximo: Optional[int] = None
     stock_actual: Optional[int] = 0
     stock_disponible: Optional[int] = 0
     peso_kg: Optional[Decimal] = None
     plu_balanza: Optional[int] = None
     imagen_url: Optional[str] = None
-    precio_venta: Decimal = Decimal("0")
-    costo_promedio: Decimal = Decimal("0")
-    ultimo_costo: Decimal = Decimal("0")
-    costo_landed: Decimal = Decimal("0")
-    activo: bool
-    created_at: datetime
-    updated_at: datetime
+    precio_venta: Optional[Decimal] = Decimal("0")
+    costo_promedio: Optional[Decimal] = Decimal("0")
+    ultimo_costo: Optional[Decimal] = Decimal("0")
+    costo_landed: Optional[Decimal] = Decimal("0")
+    activo: Optional[bool] = True
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     categoria: Optional[CategoryResponse] = None
     # Campos de promoción vigente (si aplica hoy)
     precio_regular: Optional[Decimal] = None

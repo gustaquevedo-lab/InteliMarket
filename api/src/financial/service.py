@@ -2064,27 +2064,20 @@ async def _compute_daily_cash_flow(db: AsyncSession, company_id: str, dias: int)
             SupplierInvoice.estado == "pendiente",
         )
     )
-    ap_due = {row.fecha_vencimiento: Decimal(str(row.total_saldo or 0)) for row in ap_result.fetchall()}
+    ap_invoices = list(ap_result.scalars().all())
+    ap_due = {inv.fecha_vencimiento: Decimal(str(getattr(inv, "total_saldo", None) or getattr(inv, "total", 0) or 0)) for inv in ap_invoices if getattr(inv, "fecha_vencimiento", None)}
 
-    # Ingresos: antes esta funcion consultaba SupplierInvoice (lo que
-    # debemos) para proyectar ingresos (lo que nos deben) -- copiado y
-    # pegado del bloque de arriba -- y el resultado ni siquiera se usaba,
-    # asi que ingresos quedaba fijo en 0 y la proyeccion mostraba el saldo
-    # bancario vaciandose sin ningun cobro entrando, siempre. El modelo ORM
-    # de accounts_receivable (clase Account) esta desalineado con la tabla
-    # real (le faltan fecha_vencimiento/saldo_pendiente/estado reales), asi
-    # que se consulta la tabla real directo por SQL, igual que ya hace
-    # integrated_finance con esta misma tabla.
-    ar_rows = await db.execute(
+    # Ingresos: consultar tabla real directo por SQL
+    ar_rows = (await db.execute(
         text("""
             SELECT fecha_vencimiento, COALESCE(SUM(saldo_pendiente), 0) as total
             FROM accounts_receivable
-            WHERE company_id = :cid AND estado = 'pendiente'
+            WHERE company_id = :cid AND estado = 'pendiente' AND fecha_vencimiento IS NOT NULL
             GROUP BY fecha_vencimiento
         """),
         {"cid": company_id},
-    )
-    ar_due = {row.fecha_vencimiento: Decimal(str(row.total)) for row in ar_rows}
+    )).fetchall()
+    ar_due = {row[0]: Decimal(str(row[1] or 0)) for row in ar_rows}
 
     dias_calc = []
     running_balance = saldo_bancario
