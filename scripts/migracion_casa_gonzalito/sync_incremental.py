@@ -962,6 +962,19 @@ def sync_zparruta(pg, my, rutas_validas):
             uuid.uuid5(NS, f"rutacli:{ruta}:{cli}"), uuid.uuid5(NS, f"ruta:{ruta}"),
             uuid.uuid5(NS, f"cli:{cli}"), orden or 0,
         ))
+    # Regla de negocio Gonzalito: ruta 437 (2017-SAN BLAS Sabado) hereda clientes de ruta 436 (Miercoles)
+    if 437 in rutas_validas and 436 in rutas_validas:
+        cli_437 = {txt_keep(cod, 15) for cod, r in legacy_rows if r == 437}
+        for codiclie, ruta in legacy_rows:
+            if ruta == 436:
+                cli = txt_keep(codiclie, 15)
+                if cli and cli in clientes_validos and cli not in cli_437:
+                    orden = orden_by_key.get((436, cli), 0)
+                    rows.append((
+                        uuid.uuid5(NS, f"rutacli:437:{cli}"), uuid.uuid5(NS, f"ruta:437"),
+                        uuid.uuid5(NS, f"cli:{cli}"), orden or 0,
+                    ))
+
     n = upsert(pg, "route_customers", ["id", "route_id", "customer_id", "orden_visita"], rows)
     log(f"  zparruta (clientes x ruta): {n} filas (resync completo"
         f"{', ' + str(saltados) + ' saltadas sin ruta/cliente valido' if saltados else ''})")
