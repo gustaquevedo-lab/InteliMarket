@@ -1617,9 +1617,13 @@ export interface LaborSettlement {
   preaviso_monto: number
   indemnizacion_monto: number
   descuentos_monto: number
+  descuento_extra_club?: number
+  descuento_anticipos?: number
   total_neto: number
   estado: string
   payment_order_id?: string | null
+  receivable_payment_id?: string | null
+  receivable_payment_numero?: string | null
   observaciones?: string | null
   created_at: string
   payment_order?: {
@@ -1627,6 +1631,11 @@ export interface LaborSettlement {
     numero_orden: string
     estado: string
     monto_neto: number
+  } | null
+  receipt?: {
+    id: string
+    numero_recibo: string
+    monto: number
   } | null
 }
 export interface Budget { id: string; company_id?: string; nombre?: string; periodo?: string; categoria?: string; monto_presupuestado?: number; monto_ejecutado?: number; monto_disponible?: number; area?: string; tipo?: string; created_at?: string }

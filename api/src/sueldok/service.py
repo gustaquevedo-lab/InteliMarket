@@ -450,6 +450,27 @@ async def create_labor_settlement(
         payment_order_id = uuid.UUID(payment_order["id"]) if payment_order.get("id") else None
         payment_order_num = payment_order.get("numero_orden")
 
+    # Compensación formal de Cuentas por Cobrar (Extra Club / Vales) si corresponde
+    rec_payment = None
+    rec_payment_id = None
+    rec_payment_num = None
+    monto_extra_club_dec = Decimal(str(data.descuento_extra_club or 0))
+
+    if data.confirmar_compensacion and monto_extra_club_dec > Decimal("0"):
+        from api.src.sueldok.compensations_service import process_settlement_compensation
+        rec_payment = await process_settlement_compensation(
+            db=db,
+            company_id=company_id,
+            employee_nombre=data.employee_nombre,
+            employee_ci=data.employee_ci,
+            monto_extra_club=monto_extra_club_dec,
+            referencia=f"Finiquito {data.employee_nombre}",
+            user_id=user_id
+        )
+        if rec_payment:
+            rec_payment_id = rec_payment.id
+            rec_payment_num = rec_payment.numero_recibo
+
     settlement = LaborSettlement(
         company_id=cid,
         employee_id=data.employee_id,
@@ -467,9 +488,12 @@ async def create_labor_settlement(
         preaviso=Decimal(str(data.preaviso or 0)),
         indemnizacion_legal=Decimal(str(data.indemnizacion_legal or 0)),
         descuentos_varios=Decimal(str(data.descuentos_varios or 0)),
+        descuento_extra_club=monto_extra_club_dec,
+        descuento_anticipos=Decimal(str(data.descuento_anticipos or 0)),
         total_liquidacion_neta=Decimal(str(data.total_liquidacion_neta)),
         payment_order_id=payment_order_id,
-        estado="pagado" if data.liquidar_inmediato else "pendiente",
+        receivable_payment_id=rec_payment_id,
+        estado="pagado" if (data.liquidar_inmediato or Decimal(str(data.total_liquidacion_neta)) <= 0) else "pendiente",
         observaciones=data.observaciones,
         created_by=uuid.UUID(user_id) if user_id else None,
     )
@@ -494,27 +518,43 @@ async def create_labor_settlement(
         "preaviso": float(settlement.preaviso or 0),
         "indemnizacion_legal": float(settlement.indemnizacion_legal or 0),
         "descuentos_varios": float(settlement.descuentos_varios or 0),
+        "descuento_extra_club": float(settlement.descuento_extra_club or 0),
+        "descuento_anticipos": float(settlement.descuento_anticipos or 0),
         "total_liquidacion_neta": float(settlement.total_liquidacion_neta),
         "payment_order_id": str(payment_order_id) if payment_order_id else None,
         "payment_order_numero": payment_order_num,
+        "receivable_payment_id": str(rec_payment_id) if rec_payment_id else None,
+        "receivable_payment_numero": rec_payment_num,
         "estado": settlement.estado,
         "observaciones": settlement.observaciones,
         "created_at": settlement.created_at.isoformat() if settlement.created_at else None,
-        "order": payment_order
+        "order": payment_order,
+        "receipt": {
+            "id": str(rec_payment.id),
+            "numero_recibo": rec_payment.numero_recibo,
+            "monto": float(rec_payment.monto_total)
+        } if rec_payment else None
     }
 
 
 async def list_labor_settlements(db: AsyncSession, company_id: str) -> list[dict]:
-    """Lista las liquidaciones laborales registradas con su estado de pago y OP asociada."""
+    """Lista las liquidaciones laborales registradas con su estado de pago, OP y Recibo de Cobranza asociado."""
     from sqlalchemy import select
     import uuid
     from api.src.sueldok.models import LaborSettlement
     from api.src.financial.models import SupplierPaymentOrder
+    from api.src.accounts_receivable.models import ReceivablePayment
 
     cid = uuid.UUID(company_id)
     query = (
-        select(LaborSettlement, SupplierPaymentOrder.numero_orden, SupplierPaymentOrder.estado.label("order_estado"))
+        select(
+            LaborSettlement,
+            SupplierPaymentOrder.numero_orden.label("op_numero"),
+            SupplierPaymentOrder.estado.label("order_estado"),
+            ReceivablePayment.numero_recibo.label("rc_numero")
+        )
         .outerjoin(SupplierPaymentOrder, SupplierPaymentOrder.id == LaborSettlement.payment_order_id)
+        .outerjoin(ReceivablePayment, ReceivablePayment.id == LaborSettlement.receivable_payment_id)
         .where(LaborSettlement.company_id == cid)
         .order_by(LaborSettlement.created_at.desc())
     )
@@ -523,8 +563,9 @@ async def list_labor_settlements(db: AsyncSession, company_id: str) -> list[dict
     items = []
     for r in results:
         s = r.LaborSettlement
-        num_op = getattr(r, "numero_orden", None)
+        num_op = getattr(r, "op_numero", None)
         ord_est = getattr(r, "order_estado", None)
+        num_rc = getattr(r, "rc_numero", None)
         items.append({
             "id": str(s.id),
             "company_id": str(s.company_id),
@@ -543,9 +584,13 @@ async def list_labor_settlements(db: AsyncSession, company_id: str) -> list[dict
             "preaviso": float(s.preaviso or 0),
             "indemnizacion_legal": float(s.indemnizacion_legal or 0),
             "descuentos_varios": float(s.descuentos_varios or 0),
+            "descuento_extra_club": float(getattr(s, "descuento_extra_club", 0) or 0),
+            "descuento_anticipos": float(getattr(s, "descuento_anticipos", 0) or 0),
             "total_liquidacion_neta": float(s.total_liquidacion_neta),
             "payment_order_id": str(s.payment_order_id) if s.payment_order_id else None,
             "payment_order_numero": num_op,
+            "receivable_payment_id": str(s.receivable_payment_id) if getattr(s, "receivable_payment_id", None) else None,
+            "receivable_payment_numero": num_rc,
             "estado": ord_est or s.estado,
             "observaciones": s.observaciones,
             "created_at": s.created_at.isoformat() if s.created_at else None,

@@ -201,3 +201,110 @@ async def process_payroll_compensations(
         "dossier_id": str(dossier.id),
         "periodo": dossier.periodo
     }
+
+
+async def process_settlement_compensation(
+    db: AsyncSession,
+    company_id: str,
+    employee_nombre: str,
+    employee_ci: str | None,
+    monto_extra_club: Decimal,
+    referencia: str = "Finiquito Laboral",
+    user_id: Optional[str] = None
+) -> Optional[ReceivablePayment]:
+    """
+    Extingue formalmente las Cuentas por Cobrar (vales/compras Extra Club)
+    de un colaborador desvinculado mediante un Recibo Oficial de Cobranza Interno.
+    """
+    if monto_extra_club <= Decimal("0"):
+        return None
+
+    cid = uuid.UUID(company_id)
+    uid = uuid.UUID(user_id) if user_id else None
+    raw_ci = str(employee_ci or "")
+    clean_doc = _clean_ci(raw_ci)
+
+    # 1. Buscar o crear cliente del empleado
+    cust_query = select(Customer).where(
+        Customer.company_id == cid,
+        or_(
+            Customer.ci == clean_doc,
+            Customer.ci == raw_ci,
+            Customer.extra_club_numero == clean_doc,
+            Customer.ruc.ilike(f"%{clean_doc}%")
+        )
+    )
+    cust_res = await db.execute(cust_query)
+    customer = cust_res.scalars().first()
+
+    if not customer:
+        customer = Customer(
+            company_id=cid,
+            razon_social=employee_nombre,
+            ci=clean_doc or "S/CI",
+            extra_club_numero=clean_doc or None,
+            tipo_persona="fisica",
+            tipo="funcionario",
+            credito_usado=0,
+            activo=True
+        )
+        db.add(customer)
+        await db.flush()
+
+    # 2. Emitir Recibo Oficial de Cobranza Interno
+    clean_fecha = date.today().strftime("%Y%m%d")
+    receipt_num = f"RC-FINIQUITO-{clean_fecha}-{clean_doc or 'COL'}"
+
+    rec_payment = ReceivablePayment(
+        company_id=cid,
+        customer_id=customer.id,
+        monto_total=monto_extra_club,
+        moneda="PYG",
+        forma_pago="RETENCION_NOMINA",
+        referencia=f"Compensación Finiquito - {referencia}",
+        fecha=date.today(),
+        destino_fondos="compensacion_interna",
+        numero_recibo=receipt_num,
+        observaciones=f"Compensación y extinción formal de deudas comerciales por finiquito laboral. Colaborador: {employee_nombre} (CI: {raw_ci})",
+        registrado_por=uid
+    )
+    db.add(rec_payment)
+    await db.flush()
+
+    # 3. Amortizar Cuentas por Cobrar abiertas (vales / créditos impagos)
+    ar_query = select(Account).where(
+        Account.company_id == cid,
+        Account.customer_id == customer.id,
+        Account.estado == "pendiente"
+    ).order_by(Account.fecha_vencimiento.asc(), Account.created_at.asc())
+    ar_res = await db.execute(ar_query)
+    open_accounts = ar_res.scalars().all()
+
+    rem_to_apply = monto_extra_club
+    for acc in open_accounts:
+        if rem_to_apply <= 0:
+            break
+        current_saldo = acc.saldo_pendiente or 0
+        if current_saldo <= 0:
+            continue
+
+        alloc_amt = min(current_saldo, rem_to_apply)
+        acc.saldo_pendiente = current_saldo - alloc_amt
+        if acc.saldo_pendiente <= 0:
+            acc.estado = "pagado"
+            acc.saldo_pendiente = 0
+
+        alloc = ReceivablePaymentAllocation(
+            receivable_payment_id=rec_payment.id,
+            accounts_receivable_id=acc.id,
+            monto=alloc_amt
+        )
+        db.add(alloc)
+        rem_to_apply -= alloc_amt
+
+    # Actualizar crédito usado del cliente
+    if customer.credito_usado and customer.credito_usado > 0:
+        customer.credito_usado = max(Decimal("0"), customer.credito_usado - monto_extra_club)
+
+    await db.flush()
+    return rec_payment

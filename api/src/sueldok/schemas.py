@@ -75,6 +75,9 @@ class SettlementCreate(BaseModel):
     preaviso: Optional[float] = 0
     indemnizacion_legal: Optional[float] = 0
     descuentos_varios: Optional[float] = 0
+    descuento_extra_club: Optional[float] = 0
+    descuento_anticipos: Optional[float] = 0
+    confirmar_compensacion: Optional[bool] = True
     total_liquidacion_neta: float
     observaciones: Optional[str] = None
     generar_op: Optional[bool] = True
@@ -108,9 +111,13 @@ class SettlementResponse(BaseModel):
     preaviso: Optional[float] = 0
     indemnizacion_legal: Optional[float] = 0
     descuentos_varios: Optional[float] = 0
+    descuento_extra_club: Optional[float] = 0
+    descuento_anticipos: Optional[float] = 0
     total_liquidacion_neta: float
     payment_order_id: Optional[str] = None
     payment_order_numero: Optional[str] = None
+    receivable_payment_id: Optional[str] = None
+    receivable_payment_numero: Optional[str] = None
     estado: str
     observaciones: Optional[str] = None
     created_at: Optional[datetime] = None
