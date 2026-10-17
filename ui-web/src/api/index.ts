@@ -4002,7 +4002,35 @@ export const api = {
       forma_pago: data.forma_pago ?? data.metodo_pago,
       referencia_transferencia: data.referencia_transferencia ?? data.referencia,
     }),
-    createSettlement: (data: any) => client.post<LaborSettlement>(`/v1/sueldok/settlements?company_id=${COMPANY_ID}`, data),
+    createSettlement: (data: any) => {
+      const salario = Number(data.salario_base ?? data.salario_mes_monto ?? 0)
+      const vacaciones = Number(data.vacaciones_monto ?? data.vacaciones_causadas_monto ?? 0)
+      const aguinaldo = Number(data.aguinaldo_proporcional ?? data.aguinaldo_proporcional_monto ?? 0)
+      const preaviso = Number(data.preaviso ?? data.preaviso_monto ?? 0)
+      const indemnizacion = Number(data.indemnizacion_legal ?? data.indemnizacion_monto ?? 0)
+      const descuentosVarios = Number(data.descuentos_varios ?? data.descuentos_monto ?? 0)
+      const extraClub = Number(data.descuento_extra_club ?? 0)
+      const anticipos = Number(data.descuento_anticipos ?? 0)
+
+      const calculatedNeto = Math.max(0, salario + vacaciones + aguinaldo + preaviso + indemnizacion - (descuentosVarios + extraClub + anticipos))
+
+      return client.post<LaborSettlement>(`/v1/sueldok/settlements?company_id=${COMPANY_ID}`, {
+        ...data,
+        fecha_salida: data.fecha_salida || data.fecha_egreso,
+        motivo: data.motivo || data.motivo_egreso || "despido_sin_causa",
+        salario_base: salario,
+        vacaciones_monto: vacaciones,
+        aguinaldo_proporcional: aguinaldo,
+        preaviso: preaviso,
+        indemnizacion_legal: indemnizacion,
+        descuentos_varios: descuentosVarios,
+        total_liquidacion_neta: data.total_liquidacion_neta ?? data.total_neto ?? calculatedNeto,
+        generar_op: data.generar_op ?? data.generar_orden_pago ?? true,
+        liquidar_inmediato: data.liquidar_inmediato ?? data.desembolso_inmediato ?? false,
+        forma_pago: data.forma_pago ?? data.metodo_pago ?? "transferencia",
+        referencia_transferencia: data.referencia_transferencia ?? data.referencia,
+      })
+    },
     listSettlements: () => client.get<LaborSettlement[]>(`/v1/sueldok/settlements`, { company_id: COMPANY_ID }),
     createDossier: (data: any) => client.post<any>(`/v1/sueldok/dossiers?company_id=${COMPANY_ID}`, data),
     syncFromSueldok: (periodo: string = "2026-09", apiKey?: string, force: boolean = false) => {

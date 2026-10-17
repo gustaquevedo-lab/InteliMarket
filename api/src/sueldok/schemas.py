@@ -1,6 +1,6 @@
 """SueldOK integration schemas"""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from typing import Optional
 from datetime import datetime
 
@@ -65,31 +65,102 @@ class SettlementCreate(BaseModel):
     employee_ci: Optional[str] = None
     employee_cargo: Optional[str] = None
     fecha_ingreso: Optional[str] = None
-    fecha_salida: str
+    fecha_salida: Optional[str] = None
+    fecha_egreso: Optional[str] = None
     motivo: Optional[str] = "despido_injustificado"
-    salario_base: float
+    motivo_egreso: Optional[str] = None
+    salario_base: Optional[float] = None
+    salario_mes_monto: Optional[float] = None
     dias_trabajados_mes: Optional[int] = 0
     monto_dias_trabajados: Optional[float] = 0
     vacaciones_monto: Optional[float] = 0
+    vacaciones_causadas_monto: Optional[float] = 0
     aguinaldo_proporcional: Optional[float] = 0
+    aguinaldo_proporcional_monto: Optional[float] = 0
     preaviso: Optional[float] = 0
+    preaviso_monto: Optional[float] = 0
     indemnizacion_legal: Optional[float] = 0
+    indemnizacion_monto: Optional[float] = 0
     descuentos_varios: Optional[float] = 0
+    descuentos_monto: Optional[float] = 0
     descuento_extra_club: Optional[float] = 0
     descuento_anticipos: Optional[float] = 0
     confirmar_compensacion: Optional[bool] = True
-    total_liquidacion_neta: float
+    total_liquidacion_neta: Optional[float] = None
+    total_neto: Optional[float] = None
     observaciones: Optional[str] = None
     generar_op: Optional[bool] = True
+    generar_orden_pago: Optional[bool] = None
     liquidar_inmediato: Optional[bool] = False
+    desembolso_inmediato: Optional[bool] = None
     forma_pago: Optional[str] = "transferencia"  # transferencia | cheque | boveda | fondo_fijo
+    metodo_pago: Optional[str] = None
     bank_account_id: Optional[str] = None
     petty_cash_fund_id: Optional[str] = None
     referencia_transferencia: Optional[str] = None
+    referencia: Optional[str] = None
     numero_cheque: Optional[str] = None
     banco_cheque: Optional[str] = None
     fecha_pago: Optional[str] = None
     sueldok_liquidation_id: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_aliases(cls, data: any) -> any:
+        if isinstance(data, dict):
+            # Normalizar fechas
+            if not data.get("fecha_salida") and data.get("fecha_egreso"):
+                data["fecha_salida"] = data["fecha_egreso"]
+            if not data.get("motivo") and data.get("motivo_egreso"):
+                data["motivo"] = data["motivo_egreso"]
+            
+            # Normalizar haberes
+            if data.get("salario_base") is None and data.get("salario_mes_monto") is not None:
+                data["salario_base"] = data["salario_mes_monto"]
+            elif data.get("salario_base") is None:
+                data["salario_base"] = 0.0
+
+            if data.get("vacaciones_monto") is None and data.get("vacaciones_causadas_monto") is not None:
+                data["vacaciones_monto"] = data["vacaciones_causadas_monto"]
+            if data.get("aguinaldo_proporcional") is None and data.get("aguinaldo_proporcional_monto") is not None:
+                data["aguinaldo_proporcional"] = data["aguinaldo_proporcional_monto"]
+            if data.get("preaviso") is None and data.get("preaviso_monto") is not None:
+                data["preaviso"] = data["preaviso_monto"]
+            if data.get("indemnizacion_legal") is None and data.get("indemnizacion_monto") is not None:
+                data["indemnizacion_legal"] = data["indemnizacion_monto"]
+            if data.get("descuentos_varios") is None and data.get("descuentos_monto") is not None:
+                data["descuentos_varios"] = data["descuentos_monto"]
+
+            # Normalizar opciones de pago
+            if data.get("generar_op") is None and data.get("generar_orden_pago") is not None:
+                data["generar_op"] = data["generar_orden_pago"]
+            if data.get("liquidar_inmediato") is None and data.get("desembolso_inmediato") is not None:
+                data["liquidar_inmediato"] = data["desembolso_inmediato"]
+            if not data.get("forma_pago") and data.get("metodo_pago"):
+                data["forma_pago"] = data["metodo_pago"]
+            if not data.get("referencia_transferencia") and data.get("referencia"):
+                data["referencia_transferencia"] = data["referencia"]
+
+            # Normalizar total_liquidacion_neta
+            if data.get("total_liquidacion_neta") is None:
+                if data.get("total_neto") is not None:
+                    data["total_liquidacion_neta"] = data["total_neto"]
+                else:
+                    # Calcular automáticamente
+                    salario = float(data.get("salario_base") or 0)
+                    vacaciones = float(data.get("vacaciones_monto") or 0)
+                    aguinaldo = float(data.get("aguinaldo_proporcional") or 0)
+                    preaviso = float(data.get("preaviso") or 0)
+                    indemnizacion = float(data.get("indemnizacion_legal") or 0)
+                    descuentos_varios = float(data.get("descuentos_varios") or 0)
+                    extra_club = float(data.get("descuento_extra_club") or 0)
+                    anticipos = float(data.get("descuento_anticipos") or 0)
+
+                    total_haberes = salario + vacaciones + aguinaldo + preaviso + indemnizacion
+                    total_descuentos = descuentos_varios + extra_club + anticipos
+                    data["total_liquidacion_neta"] = max(0.0, total_haberes - total_descuentos)
+
+        return data
 
 
 
