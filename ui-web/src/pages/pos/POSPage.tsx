@@ -1265,8 +1265,13 @@ export default function POSPage() {
   }
   const addExtraLeg = (method: ExtraLegMethod, dinelcoOpType: "card" | "qr" = "card") => {
     const id = `leg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    const defaultCardType = method === "bancard"
+      ? (bancardSubMethod === "credito" ? "credito" : "debito")
+      : method === "dinelco"
+      ? (dinelcoSubMethod === "credito" ? "credito" : "debito")
+      : "debito"
     setExtraPaymentLegs((prev) => [...prev, {
-      id, method, montoStr: "", cardType: "debito", cardCuotas: 1,
+      id, method, montoStr: "", cardType: defaultCardType, cardCuotas: 1,
       txnState: "idle", txnResult: null, txnError: "", showManualFallback: false,
       manualCupon: "", manualAuth: "", logId: null, dinelcoOpType, dinelcoQrMode: "qr", pixCpf: "",
       plugpayCpf: "", plugpayPhone: "", plugpayQrImageUrl: "", plugpayBrlValue: null,
@@ -12553,7 +12558,15 @@ export default function POSPage() {
                             ))}
                             <button
                               type="button"
-                              onClick={() => addExtraLeg("bancard")}
+                              onClick={() => {
+                                const montoPrincipalActual = parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10)
+                                if (montoPrincipalActual <= 0 && extraPaymentLegs.filter((l) => l.method === "bancard").length === 0) {
+                                  // Si la principal aún no tenía monto asignado, sugerir la mitad o dejar que se divida
+                                  const mitad = Math.floor(totalPyg / 2)
+                                  setMixedCardPyg(mitad > 0 ? mitad.toLocaleString("es-PY") : "")
+                                }
+                                addExtraLeg("bancard")
+                              }}
                               className="w-full text-[11px] font-bold text-blue-600 dark:text-blue-400 border border-dashed border-blue-400/50 rounded-xl py-2 hover:bg-blue-500/5 cursor-pointer"
                             >
                               + Agregar otra tarjeta (otra cuenta/cliente)
@@ -13243,7 +13256,14 @@ export default function POSPage() {
                                 ))}
                                 <button
                                   type="button"
-                                  onClick={() => addExtraLeg("dinelco")}
+                                  onClick={() => {
+                                    const montoPrincipalActual = parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10)
+                                    if (montoPrincipalActual <= 0 && extraPaymentLegs.filter((l) => l.method === "dinelco" && l.dinelcoOpType !== "qr").length === 0) {
+                                      const mitad = Math.floor(totalPyg / 2)
+                                      setMixedDinelcoPyg(mitad > 0 ? mitad.toLocaleString("es-PY") : "")
+                                    }
+                                    addExtraLeg("dinelco")
+                                  }}
                                   className="w-full text-[11px] font-bold text-purple-600 dark:text-purple-400 border border-dashed border-purple-400/50 rounded-xl py-2 hover:bg-purple-500/5 cursor-pointer"
                                 >
                                   + Agregar otra tarjeta Dinelco (otra cuenta/cliente)
@@ -14204,8 +14224,8 @@ export default function POSPage() {
                           </div>
                         )}
 
-                        {/* Monto de línea si es pago mixto */}
-                        {isMultiPayment && (
+                        {/* Monto de línea si es pago mixto o hay vale aplicado */}
+                        {(isMultiPayment || Boolean(valeData)) && (
                           <div>
                             <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto en esta línea (₲):</label>
                             <div className="flex gap-1">
@@ -14384,6 +14404,9 @@ export default function POSPage() {
                                             setOtrosSupervisorApproved(true)
                                             if (totalPyg > 0 && totalPyg > saldoVale) {
                                               const resto = totalPyg - saldoVale
+                                              setAllowMixedPayment(true)
+                                              setActiveMethods(prev => new Set([...prev, "otros", "cash"]))
+                                              setPayCashPyg(resto.toLocaleString("es-PY"))
                                               toast.success("Vale Válido", `${res.convenio_nombre} • N° ${res.numero_vale} por Gs. ${saldoVale.toLocaleString("es-PY")}. Restan Gs. ${resto.toLocaleString("es-PY")} por cobrar con otro medio.`)
                                             } else {
                                               toast.success("Vale Válido", `${res.convenio_nombre} • Vale N° ${res.numero_vale} por Gs. ${montoAplicar.toLocaleString("es-PY")} (cubierto al 100%, sin vuelto).`)
@@ -14428,6 +14451,9 @@ export default function POSPage() {
                                         setOtrosSupervisorApproved(true)
                                         if (totalPyg > 0 && totalPyg > saldoVale) {
                                           const resto = totalPyg - saldoVale
+                                          setAllowMixedPayment(true)
+                                          setActiveMethods(prev => new Set([...prev, "otros", "cash"]))
+                                          setPayCashPyg(resto.toLocaleString("es-PY"))
                                           toast.success("Vale Válido", `${res.convenio_nombre} • N° ${res.numero_vale} por Gs. ${saldoVale.toLocaleString("es-PY")}. Restan Gs. ${resto.toLocaleString("es-PY")} por cobrar con otro medio.`)
                                         } else {
                                           toast.success("Vale Válido", `${res.convenio_nombre} • Vale N° ${res.numero_vale} por Gs. ${montoAplicar.toLocaleString("es-PY")} (cubierto al 100%, sin vuelto).`)
@@ -14455,9 +14481,24 @@ export default function POSPage() {
                                   <span className="font-black block">{valeData.convenio_nombre} • Vale N° {valeData.numero_vale}</span>
                                   <span className="text-[10px] opacity-75">Saldo aplicado al cobro: Gs. {valeData.monto.toLocaleString("es-PY")}</span>
                                 </div>
-                                <span className="text-xs font-black bg-orange-600 text-white px-2 py-0.5 rounded-lg">
-                                  Gs. {valeData.monto.toLocaleString("es-PY")}
-                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-black bg-orange-600 text-white px-2 py-0.5 rounded-lg">
+                                    Gs. {valeData.monto.toLocaleString("es-PY")}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setValeData(null)
+                                      setValeCodigo("")
+                                      setMixedOtrosPyg("")
+                                      setOtrosSupervisorApproved(false)
+                                      toast.info("Vale Desasignado", "El vale fue removido del cobro.")
+                                    }}
+                                    className="text-[10px] text-slate-500 hover:text-rose-500 underline font-bold cursor-pointer"
+                                  >
+                                    Quitar
+                                  </button>
+                                </div>
                               </div>
                             )}
                           </div>
