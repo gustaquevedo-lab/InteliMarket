@@ -4025,8 +4025,8 @@ export const api = {
         indemnizacion_legal: indemnizacion,
         descuentos_varios: descuentosVarios,
         total_liquidacion_neta: data.total_liquidacion_neta ?? data.total_neto ?? calculatedNeto,
-        generar_op: data.generar_op ?? data.generar_orden_pago ?? true,
-        liquidar_inmediato: data.liquidar_inmediato ?? data.desembolso_inmediato ?? false,
+        generar_op: data.generar_op !== undefined ? data.generar_op : (data.generar_orden_pago !== undefined ? data.generar_orden_pago : (calculatedNeto > 0)),
+        liquidar_inmediato: data.liquidar_inmediato !== undefined ? data.liquidar_inmediato : (data.desembolso_inmediato ?? false),
         forma_pago: data.forma_pago ?? data.metodo_pago ?? "transferencia",
         referencia_transferencia: data.referencia_transferencia ?? data.referencia,
       })

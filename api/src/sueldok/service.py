@@ -416,16 +416,18 @@ async def create_labor_settlement(
     payment_order_id = None
     payment_order_num = None
 
-    if data.generar_op:
+    monto_neto_dec = Decimal(str(data.total_liquidacion_neta or 0))
+
+    if data.generar_op and monto_neto_dec > Decimal("0"):
         disbursements = None
         if data.liquidar_inmediato:
             disbursements = [
                 PaymentOrderDisbursementCreate(
                     forma_pago=data.forma_pago or "transferencia",
-                    monto=Decimal(str(data.total_liquidacion_neta)),
+                    monto=monto_neto_dec,
                     moneda="PYG",
                     tipo_cambio=Decimal("1"),
-                    monto_pyg=Decimal(str(data.total_liquidacion_neta)),
+                    monto_pyg=monto_neto_dec,
                     bank_account_id=uuid.UUID(data.bank_account_id) if data.bank_account_id else None,
                     petty_cash_fund_id=uuid.UUID(data.petty_cash_fund_id) if data.petty_cash_fund_id else None,
                     referencia_transferencia=data.referencia_transferencia or f"Finiquito {data.employee_nombre}",
@@ -436,13 +438,12 @@ async def create_labor_settlement(
                 )
             ]
 
-
         po_data = SupplierPaymentOrderCreate(
             subtipo="finiquito",
             beneficiario_nombre=data.employee_nombre,
             beneficiario_documento=data.employee_ci,
             sueldok_sync_id=data.sueldok_liquidation_id,
-            monto_neto=Decimal(str(data.total_liquidacion_neta)),
+            monto_neto=monto_neto_dec,
             observaciones=f"Finiquito Laboral - {data.employee_nombre} (CI: {data.employee_ci or '-'}). Motivo: {data.motivo}. {data.observaciones or ''}",
             disbursements=disbursements,
         )
