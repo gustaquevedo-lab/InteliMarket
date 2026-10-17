@@ -4557,8 +4557,15 @@ export const api = {
     cashPosition: () => client.get<any>("/v1/financial/banks/cash-position", { company_id: COMPANY_ID } as any),
     outstandingItems: () => client.get<any>("/v1/financial/banks/outstanding-items", { company_id: COMPANY_ID } as any),
     downloadCashPositionPdf: () => downloadAuthenticated("/v1/financial/banks/export/cash-position.pdf", { company_id: COMPANY_ID }, "posicion_de_caja.pdf"),
-    downloadReconciliationPdf: (accountId: string, params?: { desde?: string; hasta?: string }) =>
-      downloadAuthenticated(`/v1/financial/banks/${accountId}/export/reconciliation.pdf`, { company_id: COMPANY_ID, ...params }, `conciliacion_bancaria_${accountId.slice(0, 8)}.pdf`),
+    downloadReconciliationPdf: (accountId: string, params?: { desde?: string; hasta?: string; formato?: "landscape" | "portrait" }) => {
+      const formato = params?.formato || "landscape"
+      const suffix = formato === "landscape" ? "detallada" : "resumen"
+      return downloadAuthenticated(
+        `/v1/financial/banks/${accountId}/export/reconciliation.pdf`,
+        { company_id: COMPANY_ID, ...params, formato },
+        `conciliacion_${suffix}_${accountId.slice(0, 8)}.pdf`
+      )
+    },
     downloadApAgingPdf: () => downloadAuthenticated("/v1/financial/ap/export/aging.pdf", { company_id: COMPANY_ID }, "antiguedad_saldos_ap.pdf"),
     downloadTopSuppliersPdf: (params?: { desde?: string; hasta?: string }) =>
       downloadAuthenticated("/v1/financial/ap/export/top-suppliers.pdf", { company_id: COMPANY_ID, ...params }, "top_proveedores_dpo.pdf"),

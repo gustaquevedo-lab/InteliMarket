@@ -15,7 +15,16 @@ import {
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts"
 import { useAuth } from "../../context/AuthContext"
 
-type AutoCandidate = { txId: string; descripcion: string; monto: number; fecha?: string; suggestion: any; selected: boolean }
+type AutoCandidate = {
+  txId: string
+  descripcion: string
+  monto: number
+  fecha?: string
+  suggestion: any
+  selected: boolean
+  confidence: "verde" | "amarillo"
+  matchNro?: boolean
+}
 
 type TabType = "posicion" | "movimientos" | "conciliacion" | "cheques" | "auditoria"
 
@@ -106,6 +115,7 @@ export default function BancosPage() {
   const [importLoading, setImportLoading] = useState(false)
   const [reconcileModal, setReconcileModal] = useState<{ txId: string; suggestions: any[]; loading: boolean } | null>(null)
   const [autoModal, setAutoModal] = useState<{ loading: boolean; candidates: AutoCandidate[] } | null>(null)
+  const [showPdfMenu, setShowPdfMenu] = useState(false)
   const [umbralModal, setUmbralModal] = useState<{ id: string; valor: string } | null>(null)
   const [corrections, setCorrections] = useState<any[]>([])
   const [correctionModal, setCorrectionModal] = useState<{ id: string; saldo_propuesto: string; motivo: string } | null>(null)
@@ -428,15 +438,29 @@ export default function BancosPage() {
     if (!selectedBank) return
     setAutoModal({ loading: true, candidates: [] })
     try {
-      const pendientes = await api.financial.banks.transactions(selectedBank, { conciliado: false, limit: 50 })
+      const pendientes = await api.financial.banks.transactions(selectedBank, { conciliado: false, limit: 100 })
       const results = await Promise.all(
         pendientes.map(async (t: any) => {
           const suggestions = await api.financial.suggestions(t.id)
-          const mejor = suggestions.find((s: any) => s.confidence === "alta")
-          return mejor ? { txId: t.id, descripcion: t.descripcion || "-", monto: t.monto, fecha: t.fecha, suggestion: mejor, selected: true } as AutoCandidate : null
+          if (!suggestions || suggestions.length === 0) return null
+          const mejor = suggestions[0] // El backend ya los ordena: Verde primero, luego por número y cercanía
+          const isVerde = mejor.confidence === "verde" || mejor.confidence === "alta"
+          return {
+            txId: t.id,
+            descripcion: t.descripcion || "-",
+            monto: t.monto,
+            fecha: t.fecha,
+            suggestion: mejor,
+            selected: isVerde, // Verde preseleccionado al 100%, Amarillo requiere confirmación
+            confidence: isVerde ? "verde" : "amarillo",
+            matchNro: Boolean(mejor.match_nro),
+          } as AutoCandidate
         })
       )
-      setAutoModal({ loading: false, candidates: results.filter((c): c is AutoCandidate => c !== null) })
+      const validos = results.filter((c): c is AutoCandidate => c !== null)
+      // Ordenar: Verdes primero, luego Amarillos
+      validos.sort((a, b) => (a.confidence === "verde" ? -1 : 1))
+      setAutoModal({ loading: false, candidates: validos })
     } catch (e: any) {
       toast.error("Error", e.message || "No se pudo buscar coincidencias")
       setAutoModal(null)
@@ -1317,17 +1341,59 @@ export default function BancosPage() {
                     >
                       <Plus className="w-3.5 h-3.5" /> Registrar Movimiento
                     </button>
-                    <button
-                      onClick={() => {
-                        const hoyStr = getTodayAsuncion()
-                        const [year, month] = hoyStr.split("-")
-                        const desde = `${year}-${month}-01`
-                        api.financial.downloadReconciliationPdf(selectedBank, { desde, hasta: hoyStr }).catch((e: any) => toast.error("Error", e.message))
-                      }}
-                      className="btn-outline text-xs flex items-center gap-1.5"
-                    >
-                      <FileDown className="w-3.5 h-3.5 text-red-500" /> PDF Conciliación
-                    </button>
+                    {/* Menú Selector de PDF (Landscape vs Portrait) */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowPdfMenu(prev => !prev)}
+                        className="btn-outline text-xs flex items-center gap-1.5"
+                      >
+                        <FileDown className="w-3.5 h-3.5 text-red-500" /> PDF Conciliación ▾
+                      </button>
+                      {showPdfMenu && (
+                        <div
+                          className="absolute right-0 mt-1 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl py-1 z-30 animate-in fade-in zoom-in-95 duration-100"
+                          onClick={() => setShowPdfMenu(false)}
+                        >
+                          <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-slate-800">
+                            Elegir formato de reporte
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const hoyStr = getTodayAsuncion()
+                              const [year, month] = hoyStr.split("-")
+                              const desde = `${year}-${month}-01`
+                              api.financial.downloadReconciliationPdf(selectedBank, { desde, hasta: hoyStr, formato: "landscape" })
+                                .catch((e: any) => toast.error("Error", e.message))
+                            }}
+                            className="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-800 flex items-start gap-2.5 transition-colors cursor-pointer"
+                          >
+                            <span className="text-base">📄</span>
+                            <div>
+                              <div className="font-bold text-slate-800 dark:text-slate-100">Extracto Detallado (Horizontal)</div>
+                              <div className="text-[10px] text-slate-400">Cuadro de cuadre, 8 columnas completas y saldo progresivo</div>
+                            </div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const hoyStr = getTodayAsuncion()
+                              const [year, month] = hoyStr.split("-")
+                              const desde = `${year}-${month}-01`
+                              api.financial.downloadReconciliationPdf(selectedBank, { desde, hasta: hoyStr, formato: "portrait" })
+                                .catch((e: any) => toast.error("Error", e.message))
+                            }}
+                            className="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-800 flex items-start gap-2.5 transition-colors cursor-pointer border-t border-slate-100 dark:border-slate-800/60"
+                          >
+                            <span className="text-base">📑</span>
+                            <div>
+                              <div className="font-bold text-slate-800 dark:text-slate-100">Resumen Ejecutivo (Vertical)</div>
+                              <div className="text-[10px] text-slate-400">Cuadro contable, partidas pendientes y firmas en 1 página</div>
+                            </div>
+                          </button>
+                        </div>
+                      )}
+                    </div>
                     <button onClick={openAutoReconcile} className="btn-primary text-xs flex items-center gap-1.5">
                       <Wand2 className="w-3.5 h-3.5" /> Auto-Conciliar
                     </button>
@@ -1832,30 +1898,98 @@ export default function BancosPage() {
         <div className="modal-overlay" onClick={() => setAutoModal(null)}>
           <div className="modal-content max-w-xl p-0 overflow-hidden flex flex-col max-h-[85vh] border border-slate-200 dark:border-slate-800" onClick={e => e.stopPropagation()}>
             <div className="p-6 border-b border-gray-100 dark:border-gray-800 shrink-0">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Conciliación Automática en Lote</h3>
-              <p className="text-xs text-gray-500 mt-1">Coincidencias de alta confianza (monto exacto y fecha cercana)</p>
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <Wand2 className="w-5 h-5 text-primary" />
+                Asistente de Auto-Conciliación Inteligente
+              </h3>
+              <p className="text-xs text-gray-500 mt-1">
+                Emparejamiento automático por cheque emitido y coincidencia de importes.
+              </p>
             </div>
-            <div className="p-6 space-y-2 flex-1 min-h-0 overflow-y-auto">
+            <div className="p-6 space-y-3 flex-1 min-h-0 overflow-y-auto">
               {autoModal.loading ? (
-                <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+                <div className="flex flex-col items-center justify-center py-8 gap-2">
+                  <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                  <span className="text-xs text-gray-400">Analizando extracto contra cartera de cheques y facturas...</span>
+                </div>
               ) : autoModal.candidates.length === 0 ? (
-                <p className="text-sm text-gray-500 text-center py-6">No se encontraron coincidencias de alta confianza entre los movimientos pendientes.</p>
+                <p className="text-sm text-gray-500 text-center py-6">No se encontraron movimientos con contrapartes sugeridas entre los pendientes.</p>
               ) : (
-                autoModal.candidates.map(c => (
-                  <label key={c.txId} className="card p-3 flex items-center gap-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800">
-                    <input type="checkbox" checked={c.selected} onChange={() => toggleAutoCandidate(c.txId)} className="rounded text-primary" />
-                    <div className="flex-1">
-                      <div className="text-sm font-semibold text-gray-900 dark:text-white">{c.descripcion}</div>
-                      <div className="text-xs text-gray-500">{formatGs(c.monto)} · {c.fecha ? new Date(c.fecha).toLocaleDateString("es-PY") : ""} → {c.suggestion.descripcion}</div>
-                    </div>
-                  </label>
-                ))
+                <>
+                  <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+                    <span>{autoModal.candidates.filter(c => c.confidence === "verde").length} coincidencias seguras (Verde) · {autoModal.candidates.filter(c => c.confidence === "amarillo").length} para revisión (Amarillo)</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const allSelected = autoModal.candidates.every(c => c.selected)
+                        setAutoModal({ ...autoModal, candidates: autoModal.candidates.map(c => ({ ...c, selected: !allSelected })) })
+                      }}
+                      className="text-primary hover:underline font-semibold"
+                    >
+                      {autoModal.candidates.every(c => c.selected) ? "Deseleccionar todos" : "Seleccionar todos"}
+                    </button>
+                  </div>
+                  {autoModal.candidates.map(c => {
+                    const isVerde = c.confidence === "verde"
+                    return (
+                      <label
+                        key={c.txId}
+                        className={`card p-3 flex items-start gap-3 cursor-pointer border transition-all ${
+                          c.selected
+                            ? isVerde
+                              ? "bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-800"
+                              : "bg-amber-50/50 dark:bg-amber-950/20 border-amber-300 dark:border-amber-800"
+                            : "hover:bg-gray-50 dark:hover:bg-slate-800 border-gray-200 dark:border-gray-700"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={c.selected}
+                          onChange={() => toggleAutoCandidate(c.txId)}
+                          className="mt-1 rounded text-primary"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              isVerde
+                                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700"
+                                : "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 border border-amber-300 dark:border-amber-700"
+                            }`}>
+                              {isVerde ? "🟢 Match Seguro (100%)" : "🟡 Sugerencia (Revisar)"}
+                            </span>
+                            {c.matchNro && (
+                              <span className="text-[10px] font-bold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 px-1.5 py-0.5 rounded">
+                                Cheque N° detectado
+                              </span>
+                            )}
+                            <span className="text-xs font-bold text-gray-900 dark:text-white ml-auto">
+                              {formatGs(c.monto)}
+                            </span>
+                          </div>
+                          <div className="text-xs font-medium text-gray-800 dark:text-gray-200 truncate">{c.descripcion}</div>
+                          <div className="text-[11px] text-gray-500 mt-1 flex items-center gap-1.5 flex-wrap">
+                            <span>Extracto: {c.fecha ? new Date(c.fecha).toLocaleDateString("es-PY") : "—"}</span>
+                            <span>→</span>
+                            <span className="font-semibold text-gray-700 dark:text-gray-300">
+                              {c.suggestion.descripcion} ({formatGs(c.suggestion.monto)})
+                            </span>
+                          </div>
+                        </div>
+                      </label>
+                    )
+                  })}
+                </>
               )}
             </div>
             <div className="p-4 sm:p-5 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm shrink-0 sticky bottom-0 z-20 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]">
               <button onClick={() => setAutoModal(null)} className="btn-ghost text-xs">Cancelar</button>
-              <button onClick={confirmAutoReconcile} disabled={autoModal.loading || autoModal.candidates.every(c => !c.selected)} className="btn-primary text-xs disabled:opacity-50">
-                Conciliar {autoModal.candidates.filter(c => c.selected).length} movimientos seleccionados
+              <button
+                onClick={confirmAutoReconcile}
+                disabled={autoModal.loading || autoModal.candidates.every(c => !c.selected)}
+                className="btn-primary text-xs disabled:opacity-50 flex items-center gap-1.5"
+              >
+                <Check className="w-3.5 h-3.5" />
+                Conciliar {autoModal.candidates.filter(c => c.selected).length} seleccionados
               </button>
             </div>
           </div>
@@ -2053,10 +2187,10 @@ export default function BancosPage() {
             <div className="p-6 border-b border-gray-100 dark:border-gray-800 shrink-0">
               <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
                 <Upload className="w-5 h-5 text-primary" />
-                Importar Extracto Bancario
+                Importar Extracto Bancario Oficial
               </h3>
               <p className="text-xs text-gray-500 mt-1">
-                Subí el archivo Excel (.xlsx / .xls) o extracto bancario. Los movimientos duplicados se detectan automáticamente.
+                Subí el extracto bancario en <b>PDF oficial</b> o planilla <b>Excel (.xlsx / .xls)</b> entregada por el banco.
               </p>
             </div>
             <div className="p-6 space-y-4 flex-1 min-h-0 overflow-y-auto">
@@ -2080,8 +2214,24 @@ export default function BancosPage() {
                 </div>
               </div>
               <div>
-                <label className="label-field">Archivo del Extracto (.xlsx, .xls)</label>
-                <input className="input-field" type="file" accept=".xlsx,.xls" onChange={e => { setImportForm({ ...importForm, file: e.target.files?.[0] || null }); setImportPreview(null); }} />
+                <label className="label-field">Archivo del Extracto (PDF o Excel)</label>
+                <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-primary rounded-xl p-4 text-center cursor-pointer bg-slate-50/50 dark:bg-slate-800/30 transition-colors relative">
+                  <input
+                    type="file"
+                    accept=".pdf,.xlsx,.xls"
+                    onChange={e => { setImportForm({ ...importForm, file: e.target.files?.[0] || null }); setImportPreview(null); }}
+                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                  />
+                  <div className="flex flex-col items-center gap-1.5 pointer-events-none">
+                    <FileSpreadsheet className="w-8 h-8 text-primary/70" />
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                      {importForm.file ? importForm.file.name : "Hacé clic o arrastrá el extracto aquí"}
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      Soporta extractos PDF de Banco Continental y Banco Interfisa, o archivos Excel (.xlsx/.xls)
+                    </span>
+                  </div>
+                </div>
               </div>
 
               {!importPreview && (
