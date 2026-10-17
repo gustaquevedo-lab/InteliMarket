@@ -3981,9 +3981,11 @@ export const api = {
       referencia_transferencia?: string
       numero_cheque?: string
       banco_cheque?: string
+      petty_cash_fund_id?: string
       fecha_pago?: string
       sueldok_run_id?: string
     }) => client.post<SupplierPaymentOrder>(`/v1/sueldok/payroll-payment-order?company_id=${COMPANY_ID}`, {
+
       ...data,
       total_neto: data.total_neto ?? data.monto_neto,
       colaboradores_count: data.colaboradores_count ?? data.cantidad_funcionarios,

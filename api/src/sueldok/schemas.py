@@ -50,11 +50,13 @@ class PayrollPaymentOrderCreate(BaseModel):
     liquidar_inmediato: Optional[bool] = False
     forma_pago: Optional[str] = "transferencia"  # transferencia | cheque | boveda | fondo_fijo
     bank_account_id: Optional[str] = None
+    petty_cash_fund_id: Optional[str] = None
     referencia_transferencia: Optional[str] = None
     numero_cheque: Optional[str] = None
     banco_cheque: Optional[str] = None
     fecha_pago: Optional[str] = None
     sueldok_run_id: Optional[str] = None
+
 
 
 class SettlementCreate(BaseModel):
@@ -79,10 +81,13 @@ class SettlementCreate(BaseModel):
     liquidar_inmediato: Optional[bool] = False
     forma_pago: Optional[str] = "transferencia"  # transferencia | cheque | boveda | fondo_fijo
     bank_account_id: Optional[str] = None
+    petty_cash_fund_id: Optional[str] = None
     referencia_transferencia: Optional[str] = None
     numero_cheque: Optional[str] = None
     banco_cheque: Optional[str] = None
     fecha_pago: Optional[str] = None
+    sueldok_liquidation_id: Optional[str] = None
+
 
 
 class SettlementResponse(BaseModel):

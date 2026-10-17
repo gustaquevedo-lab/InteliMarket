@@ -154,6 +154,7 @@ export default function SueldokPage() {
 
   // Bancos para liquidación de nómina/finiquito
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
+  const [pettyCashFunds, setPettyCashFunds] = useState<any[]>([])
 
   // Estado pestaña Finiquitos
   const [settlements, setSettlements] = useState<LaborSettlement[]>([])
@@ -178,6 +179,7 @@ export default function SueldokPage() {
   const [finiquitoDesembolsoInmediato, setFiniquitoDesembolsoInmediato] = useState(false)
   const [finiquitoMetodoPago, setFiniquitoMetodoPago] = useState("transferencia_sipap")
   const [finiquitoBankAccountId, setFiniquitoBankAccountId] = useState("")
+  const [finiquitoPettyCashFundId, setFiniquitoPettyCashFundId] = useState("")
   const [finiquitoReferencia, setFiniquitoReferencia] = useState("")
 
   // Modal Emitir OP de Nómina
@@ -186,8 +188,10 @@ export default function SueldokPage() {
   const [nominaOPDesembolsoInmediato, setNominaOPDesembolsoInmediato] = useState(false)
   const [nominaOPMetodoPago, setNominaOPMetodoPago] = useState("transferencia_sipap")
   const [nominaOPBankAccountId, setNominaOPBankAccountId] = useState("")
+  const [nominaOPPettyCashFundId, setNominaOPPettyCashFundId] = useState("")
   const [nominaOPReferencia, setNominaOPReferencia] = useState("")
   const [nominaOPObservaciones, setNominaOPObservaciones] = useState("")
+
 
   // Modales
   const [modalAnticipoOpen, setModalAnticipoOpen] = useState(false)
@@ -300,14 +304,22 @@ export default function SueldokPage() {
     return () => clearInterval(interval)
   }, [fetchData])
 
-  // Cargar cuentas bancarias para desembolsos
+  // Cargar cuentas bancarias y fondos fijos para desembolsos
   useEffect(() => {
     api.financial.banks.list()
-      .then((res) => {
+      .then((res: any) => {
         if (Array.isArray(res)) setBankAccounts(res.filter(b => b.activo !== false))
       })
-      .catch((err) => console.error("Error cargando bancos:", err))
+      .catch((err: any) => console.error("Error cargando bancos:", err))
+
+    api.expenses.funds.list({ activo: true })
+      .then((res: any) => {
+        if (Array.isArray(res)) setPettyCashFunds(res)
+      })
+      .catch((err: any) => console.error("Error cargando fondos fijos:", err))
   }, [])
+
+
 
   // Finiquitos consolidados (SueldOK + Intelimarket local)
   const allSettlements = useMemo(() => {
@@ -328,6 +340,7 @@ export default function SueldokPage() {
       indemnizacion_legal_monto: l.indemnizacion,
       descuentos_salariales_monto: l.descuentoComercial,
       total_liquidacion_neta: l.montoNeto,
+      total_neto: l.montoNeto,
       payment_order_id: l.payoutReference,
       payment_order_num: l.payoutReference,
       estado_pago: l.estado === "paid" || l.payoutConfirmed ? "pagado" : "pendiente",
@@ -563,9 +576,15 @@ export default function SueldokPage() {
       toast.error("Nómina Vacía", "No hay funcionarios o el monto neto es cero.")
       return
     }
-    if (nominaOPDesembolsoInmediato && (nominaOPMetodoPago === "transferencia_sipap" || nominaOPMetodoPago === "cheque") && !nominaOPBankAccountId) {
-      toast.error("Seleccione Cuenta", "Debe seleccionar la cuenta bancaria de origen para el desembolso.")
-      return
+    if (nominaOPDesembolsoInmediato) {
+      if ((nominaOPMetodoPago === "transferencia_sipap" || nominaOPMetodoPago === "cheque") && !nominaOPBankAccountId) {
+        toast.error("Seleccione Cuenta", "Debe seleccionar la cuenta bancaria de origen para el desembolso.")
+        return
+      }
+      if (nominaOPMetodoPago === "fondo_fijo" && !nominaOPPettyCashFundId) {
+        toast.error("Seleccione Fondo Fijo", "Debe seleccionar el fondo fijo para el desembolso.")
+        return
+      }
     }
 
     setSavingNominaOP(true)
@@ -577,10 +596,12 @@ export default function SueldokPage() {
         desembolso_inmediato: nominaOPDesembolsoInmediato,
         metodo_pago: nominaOPDesembolsoInmediato ? nominaOPMetodoPago : undefined,
         bank_account_id: nominaOPDesembolsoInmediato && nominaOPBankAccountId ? nominaOPBankAccountId : undefined,
+        petty_cash_fund_id: nominaOPDesembolsoInmediato && nominaOPPettyCashFundId ? nominaOPPettyCashFundId : undefined,
         referencia: nominaOPReferencia || undefined,
         observaciones: nominaOPObservaciones || undefined,
         sueldok_run_id: data?.approvedPayroll?.id || undefined,
       })
+
 
       toast.success(
         "Orden de Pago Generada",
@@ -648,9 +669,15 @@ export default function SueldokPage() {
     const emp = employees.find((e: any) => e.id === finiquitoEmpId)
     if (!emp) return
 
-    if (finiquitoGenerarOP && finiquitoDesembolsoInmediato && (finiquitoMetodoPago === "transferencia_sipap" || finiquitoMetodoPago === "cheque") && !finiquitoBankAccountId) {
-      toast.error("Seleccione Cuenta", "Debe indicar la cuenta bancaria para el desembolso inmediato.")
-      return
+    if (finiquitoGenerarOP && finiquitoDesembolsoInmediato) {
+      if ((finiquitoMetodoPago === "transferencia_sipap" || finiquitoMetodoPago === "cheque") && !finiquitoBankAccountId) {
+        toast.error("Seleccione Cuenta", "Debe indicar la cuenta bancaria para el desembolso inmediato.")
+        return
+      }
+      if (finiquitoMetodoPago === "fondo_fijo" && !finiquitoPettyCashFundId) {
+        toast.error("Seleccione Fondo Fijo", "Debe indicar el fondo fijo para el desembolso inmediato.")
+        return
+      }
     }
 
     setSavingFiniquito(true)
@@ -674,8 +701,10 @@ export default function SueldokPage() {
         desembolso_inmediato: finiquitoDesembolsoInmediato,
         metodo_pago: finiquitoDesembolsoInmediato ? finiquitoMetodoPago : undefined,
         bank_account_id: finiquitoDesembolsoInmediato && finiquitoBankAccountId ? finiquitoBankAccountId : undefined,
+        petty_cash_fund_id: finiquitoDesembolsoInmediato && finiquitoPettyCashFundId ? finiquitoPettyCashFundId : undefined,
         referencia: finiquitoReferencia || undefined,
       })
+
 
       toast.success(
         "Finiquito Registrado",
@@ -2598,6 +2627,25 @@ export default function SueldokPage() {
                       </div>
                     )}
 
+                    {nominaOPMetodoPago === "fondo_fijo" && (
+                      <div>
+                        <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Fondo Fijo (Caja Chica) *</label>
+                        <select
+                          value={nominaOPPettyCashFundId}
+                          onChange={(e) => setNominaOPPettyCashFundId(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white"
+                        >
+                          <option value="">Seleccione fondo fijo…</option>
+                          {pettyCashFunds.map((f) => (
+                            <option key={f.id} value={f.id}>
+                              {f.nombre} · Saldo Disponible: {formatPYG(f.saldo_actual || 0)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+
                     <div>
                       <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">N° Referencia / Lote SIPAP</label>
                       <input
@@ -2833,6 +2881,25 @@ export default function SueldokPage() {
                             </select>
                           </div>
                         )}
+
+                        {finiquitoMetodoPago === "fondo_fijo" && (
+                          <div>
+                            <label className="font-bold text-slate-600 dark:text-slate-400 block mb-1">Fondo Fijo (Caja Chica) *</label>
+                            <select
+                              value={finiquitoPettyCashFundId}
+                              onChange={(e) => setFiniquitoPettyCashFundId(e.target.value)}
+                              className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold"
+                            >
+                              <option value="">Seleccione fondo…</option>
+                              {pettyCashFunds.map((f) => (
+                                <option key={f.id} value={f.id}>
+                                  {f.nombre} · Saldo: {formatPYG(f.saldo_actual || 0)}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
                       </div>
                     )}
                   </div>

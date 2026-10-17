@@ -375,12 +375,14 @@ async def generate_payroll_payment_order(
                 tipo_cambio=Decimal("1"),
                 monto_pyg=Decimal(str(data.total_neto)),
                 bank_account_id=uuid.UUID(data.bank_account_id) if data.bank_account_id else None,
+                petty_cash_fund_id=uuid.UUID(data.petty_cash_fund_id) if data.petty_cash_fund_id else None,
                 referencia_transferencia=data.referencia_transferencia or f"SIPAP Nómina {data.periodo}",
                 numero_cheque=data.numero_cheque,
                 banco_cheque=data.banco_cheque,
                 observaciones=data.observaciones or f"Liquidación Salarial Período {data.periodo}"
             )
         ]
+
 
     po_data = SupplierPaymentOrderCreate(
         subtipo="nomina_salarios",
@@ -425,6 +427,7 @@ async def create_labor_settlement(
                     tipo_cambio=Decimal("1"),
                     monto_pyg=Decimal(str(data.total_liquidacion_neta)),
                     bank_account_id=uuid.UUID(data.bank_account_id) if data.bank_account_id else None,
+                    petty_cash_fund_id=uuid.UUID(data.petty_cash_fund_id) if data.petty_cash_fund_id else None,
                     referencia_transferencia=data.referencia_transferencia or f"Finiquito {data.employee_nombre}",
                     numero_cheque=data.numero_cheque,
                     banco_cheque=data.banco_cheque,
@@ -432,6 +435,7 @@ async def create_labor_settlement(
                     observaciones=f"Finiquito Laboral - {data.employee_nombre} (CI: {data.employee_ci or '-'})"
                 )
             ]
+
 
         po_data = SupplierPaymentOrderCreate(
             subtipo="finiquito",
