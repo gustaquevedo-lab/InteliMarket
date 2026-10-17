@@ -74,3 +74,8 @@
    - **Autoconsistencia de Dependencias en Backend:** Antes de desplegar cualquier cambio en el backend, asegurar que todas las variables, loggers (`logging.getLogger(__name__)`), módulos importados y modelos contables invocados estén formalmente definidos y tipados.
    - **Despliegues Coordinados:** Desplegar de forma coordinada frontend (`deploy-ui.sh`) y backend (`deploy-api.sh`) para prevenir desfasajes donde la interfaz emita requerimientos no soportados por el API o viceversa.
 
+12. **LONGITUD DE COLUMNAS EN BASE DE DATOS Y AISLAMIENTO TRANSACCIONAL (ANTI-TRUNCAMIENTO):**
+   - **Verificación Previa de Límites DDL:** Antes de insertar constantes de texto, clasificadores o identificadores semánticos (ej. `referencia_tipo`, `concepto`, `estado`, `tipo`), se DEBE verificar la restricción `VARCHAR(N)` en el modelo SQLAlchemy y en el DDL real de PostgreSQL. Queda prohibido asumir longitudes sin comprobar.
+   - **Margen de Seguridad en Esquemas:** Todo campo de clasificación o referencia externa (`referencia_tipo`, `origen`, etc.) debe tener al menos `VARCHAR(60)` a `VARCHAR(100)` para evitar desbordes ante constantes descriptivas.
+   - **Aislamiento de Operaciones Contables o Secundarias:** Las operaciones que involucren inserciones contables automáticas o sub-rutinas dentro de un flujo principal deben ejecutarse dentro de savepoints anidados (`async with db.begin_nested():`) para que un eventual error no aborte en cascada la transacción principal de la sesión de base de datos.
+
