@@ -1982,6 +1982,11 @@ async def get_reconciliation_report(db: AsyncSession, company_id: str, bank_acco
         )
         saldo_anterior = Decimal(str(tx_prev.scalar() or 0))
 
+    total_creditos = sum((m.monto for m in movimientos if m.tipo == "credito"), Decimal("0"))
+    total_debitos = sum((m.monto for m in movimientos if m.tipo == "debito"), Decimal("0"))
+    conciliados = [m for m in movimientos if m.conciliado]
+    pendientes = [m for m in movimientos if not m.conciliado]
+
     # Movimientos con saldo progresivo calculado
     running_balance = saldo_anterior
     movimientos_enriquecidos = []
