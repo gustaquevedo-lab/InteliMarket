@@ -276,8 +276,13 @@ async def get_outstanding_items(company_id: str | None = Query(None), db: AsyncS
 
 @router.get("/banks/{account_id}/export/reconciliation.pdf")
 async def export_reconciliation_pdf(
-    account_id: str, company_id: str = Query(), desde: date | None = Query(None), hasta: date | None = Query(None),
-    db: AsyncSession = Depends(get_db), user=Depends(require_auth),
+    account_id: str,
+    company_id: str = Query(),
+    desde: date | None = Query(None),
+    hasta: date | None = Query(None),
+    formato: str = Query("landscape", regex="^(landscape|portrait)$"),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
 ):
     try:
         reporte = await service.get_reconciliation_report(db, company_id, account_id, desde, hasta)
@@ -285,10 +290,13 @@ async def export_reconciliation_pdf(
         raise HTTPException(status_code=404, detail=str(e))
     company = await _get_company_info(db, company_id)
     generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
-    pdf_bytes = bancos_pdf_reports.generate_reconciliation_pdf(company, reporte["account"], reporte, desde, hasta, generated_by)
+    pdf_bytes = bancos_pdf_reports.generate_reconciliation_pdf(
+        company, reporte["account"], reporte, desde, hasta, generated_by, formato=formato
+    )
+    suffix = "detallada" if formato == "landscape" else "resumen"
     return StreamingResponse(
         iter([pdf_bytes]), media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=conciliacion_bancaria_{account_id[:8]}.pdf", "Content-Length": str(len(pdf_bytes))},
+        headers={"Content-Disposition": f"attachment; filename=conciliacion_{suffix}_{account_id[:8]}.pdf", "Content-Length": str(len(pdf_bytes))},
     )
 
 
