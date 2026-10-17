@@ -27,9 +27,11 @@ def upgrade() -> None:
         ALTER TABLE labor_settlements
         ADD COLUMN IF NOT EXISTS descuento_extra_club NUMERIC(15, 0) DEFAULT 0,
         ADD COLUMN IF NOT EXISTS descuento_anticipos NUMERIC(15, 0) DEFAULT 0,
-        ADD COLUMN IF NOT EXISTS receivable_payment_id UUID REFERENCES receivable_payments(id) ON DELETE SET NULL;
+        ADD COLUMN IF NOT EXISTS receivable_payment_id UUID REFERENCES receivable_payments(id) ON DELETE SET NULL
+    """)
 
-        CREATE INDEX IF NOT EXISTS idx_settlements_rec_payment ON labor_settlements(receivable_payment_id);
+    op.execute("""
+        CREATE INDEX IF NOT EXISTS idx_settlements_rec_payment ON labor_settlements(receivable_payment_id)
     """)
 
     # 2. Esquema sandbox si existe
@@ -53,5 +55,5 @@ def downgrade() -> None:
         ALTER TABLE labor_settlements
         DROP COLUMN IF EXISTS descuento_extra_club,
         DROP COLUMN IF EXISTS descuento_anticipos,
-        DROP COLUMN IF EXISTS receivable_payment_id;
+        DROP COLUMN IF EXISTS receivable_payment_id
     """)
