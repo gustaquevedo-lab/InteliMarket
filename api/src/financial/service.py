@@ -4372,37 +4372,38 @@ async def _execute_disbursements_internal(
     if diff_val < Decimal("0"):
         monto_a_favor = abs(diff_val)
         try:
-            from api.src.integrated_finance.auto_posting import PostingEngine
-            engine = PostingEngine(db, str(order.company_id))
-            await engine.ensure_accounts()
-            # Asegurar cuenta 4.1.03 (Diferencia de Cambio / Descuentos Obtenidos a Favor)
-            if "4.1.03" not in engine._accounts:
-                from api.src.integrated_finance.models import AccountPlan
-                res_acc = await db.execute(
-                    select(AccountPlan.id).where(
-                        AccountPlan.company_id == order.company_id,
-                        AccountPlan.codigo == "4.1.03"
+            async with db.begin_nested():
+                from api.src.integrated_finance.auto_posting import PostingEngine
+                engine = PostingEngine(db, str(order.company_id))
+                await engine.ensure_accounts()
+                # Asegurar cuenta 4.1.03 (Diferencia de Cambio / Descuentos Obtenidos a Favor)
+                if "4.1.03" not in engine._accounts:
+                    from api.src.integrated_finance.models import AccountPlan
+                    res_acc = await db.execute(
+                        select(AccountPlan.id).where(
+                            AccountPlan.company_id == order.company_id,
+                            AccountPlan.codigo == "4.1.03"
+                        )
                     )
+                    acc_id = res_acc.scalar_one_or_none()
+                    if acc_id:
+                        engine._accounts["4.1.03"] = acc_id
+                
+                # Debe: 2.1.01 (Cuentas por Pagar Proveedores) -> Disminuye el pasivo
+                # Haber: 4.1.03 (Diferencia de Cambio / Descuentos a Favor) -> Reconoce ganancia/ingreso
+                lines_asiento = [
+                    ("2.1.01", "debe", monto_a_favor),
+                    ("4.1.03", "haber", monto_a_favor),
+                ]
+                sup_nombre = supplier.razon_social if supplier else "Proveedor"
+                await engine.post(
+                    fecha=order.fecha_pago or _today(),
+                    concepto=f"Ajuste por Redondeo / Diferencia de Cambio a Favor en OP {order.numero_orden} - {sup_nombre}",
+                    referencia_tipo="op_diff_cambio",
+                    referencia_id=order.id,
+                    lines=lines_asiento,
                 )
-                acc_id = res_acc.scalar_one_or_none()
-                if acc_id:
-                    engine._accounts["4.1.03"] = acc_id
-            
-            # Debe: 2.1.01 (Cuentas por Pagar Proveedores) -> Disminuye el pasivo
-            # Haber: 4.1.03 (Diferencia de Cambio / Descuentos a Favor) -> Reconoce ganancia/ingreso
-            lines_asiento = [
-                ("2.1.01", "debe", monto_a_favor),
-                ("4.1.03", "haber", monto_a_favor),
-            ]
-            sup_nombre = supplier.razon_social if supplier else "Proveedor"
-            await engine.post(
-                fecha=order.fecha_pago or _today(),
-                concepto=f"Ajuste por Redondeo / Diferencia de Cambio a Favor en OP {order.numero_orden} - {sup_nombre}",
-                referencia_tipo="supplier_payment_order_rounding",
-                referencia_id=order.id,
-                lines=lines_asiento,
-            )
-            logger.info("Asiento de diferencia de cambio a favor posteado para OP %s: %s Gs", order.numero_orden, monto_a_favor)
+                logger.info("Asiento de diferencia de cambio a favor posteado para OP %s: %s Gs", order.numero_orden, monto_a_favor)
         except Exception as e_post:
             logger.warning("No se pudo postear asiento de diferencia de cambio para OP %s: %s", order.numero_orden, e_post)
 
