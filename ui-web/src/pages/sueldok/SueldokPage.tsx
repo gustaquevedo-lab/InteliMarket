@@ -192,6 +192,17 @@ export default function SueldokPage() {
   const [nominaOPReferencia, setNominaOPReferencia] = useState("")
   const [nominaOPObservaciones, setNominaOPObservaciones] = useState("")
 
+  // Modal Emitir OP de Finiquito individual
+  const [selectedSettlementForOP, setSelectedSettlementForOP] = useState<any | null>(null)
+  const [modalFiniquitoOPOpen, setModalFiniquitoOPOpen] = useState(false)
+  const [savingFiniquitoOP, setSavingFiniquitoOP] = useState(false)
+  const [finiquitoOPDesembolsoInmediato, setFiniquitoOPDesembolsoInmediato] = useState(true)
+  const [finiquitoOPMetodoPago, setFiniquitoOPMetodoPago] = useState("fondo_fijo")
+  const [finiquitoOPBankAccountId, setFiniquitoOPBankAccountId] = useState("")
+  const [finiquitoOPPettyCashFundId, setFiniquitoOPPettyCashFundId] = useState("")
+  const [finiquitoOPReferencia, setFiniquitoOPReferencia] = useState("")
+  const [finiquitoOPObservaciones, setFiniquitoOPObservaciones] = useState("")
+
 
   // Modales
   const [modalAnticipoOpen, setModalAnticipoOpen] = useState(false)
@@ -612,6 +623,76 @@ export default function SueldokPage() {
       toast.error("Error al emitir OP", err.message || String(err))
     } finally {
       setSavingNominaOP(false)
+    }
+  }
+
+  // Abrir modal de OP para un Finiquito específico
+  const handleOpenFiniquitoOPModal = (settlement: any) => {
+    setSelectedSettlementForOP(settlement)
+    setFiniquitoOPDesembolsoInmediato(true)
+    setFiniquitoOPMetodoPago(pettyCashFunds.length > 0 ? "fondo_fijo" : "boveda")
+    setFiniquitoOPBankAccountId(bankAccounts.length > 0 ? bankAccounts[0].id : "")
+    setFiniquitoOPPettyCashFundId(pettyCashFunds.length > 0 ? pettyCashFunds[0].id : "")
+    setFiniquitoOPReferencia(`Finiquito ${settlement.employee_nombre}`)
+    setFiniquitoOPObservaciones(`Liquidación Final Laboral de ${settlement.employee_nombre} (CI: ${settlement.employee_ci || '—'})`)
+    setModalFiniquitoOPOpen(true)
+  }
+
+  const handleEmitirFiniquitoOP = async () => {
+    if (!selectedSettlementForOP) return
+    const neto = Number(selectedSettlementForOP.total_neto || 0)
+    if (neto <= 0) {
+      toast.error("Liquidación Compensada", "El importe neto es 0 (100% compensado con deducciones/anticipos). No requiere OP de desembolso.")
+      return
+    }
+
+    if (finiquitoOPDesembolsoInmediato) {
+      if ((finiquitoOPMetodoPago === "transferencia_sipap" || finiquitoOPMetodoPago === "cheque") && !finiquitoOPBankAccountId) {
+        toast.error("Seleccione Cuenta", "Debe indicar la cuenta bancaria de origen.")
+        return
+      }
+      if (finiquitoOPMetodoPago === "fondo_fijo" && !finiquitoOPPettyCashFundId) {
+        toast.error("Seleccione Fondo Fijo", "Debe seleccionar la caja chica para el desembolso.")
+        return
+      }
+    }
+
+    setSavingFiniquitoOP(true)
+    try {
+      const res = await api.sueldok.createSettlement({
+        employee_id: selectedSettlementForOP.employee_id || selectedSettlementForOP.id,
+        employee_nombre: selectedSettlementForOP.employee_nombre,
+        employee_ci: selectedSettlementForOP.employee_ci || undefined,
+        fecha_ingreso: selectedSettlementForOP.fecha_ingreso || undefined,
+        fecha_egreso: selectedSettlementForOP.fecha_egreso,
+        motivo_egreso: selectedSettlementForOP.motivo_egreso,
+        salario_mes_monto: Number(selectedSettlementForOP.salario_mes_monto || 0),
+        vacaciones_causadas_monto: Number(selectedSettlementForOP.vacaciones_causadas_monto || 0),
+        aguinaldo_proporcional_monto: Number(selectedSettlementForOP.aguinaldo_proporcional_monto || 0),
+        preaviso_monto: Number(selectedSettlementForOP.preaviso_monto || 0),
+        indemnizacion_monto: Number(selectedSettlementForOP.indemnizacion_legal_monto || 0),
+        descuentos_monto: Number(selectedSettlementForOP.descuentos_salariales_monto || 0),
+        observaciones: finiquitoOPObservaciones || undefined,
+        generar_orden_pago: true,
+        desembolso_inmediato: finiquitoOPDesembolsoInmediato,
+        metodo_pago: finiquitoOPDesembolsoInmediato ? finiquitoOPMetodoPago : undefined,
+        bank_account_id: finiquitoOPDesembolsoInmediato && finiquitoOPBankAccountId ? finiquitoOPBankAccountId : undefined,
+        petty_cash_fund_id: finiquitoOPDesembolsoInmediato && finiquitoOPPettyCashFundId ? finiquitoOPPettyCashFundId : undefined,
+        referencia: finiquitoOPReferencia || undefined,
+      })
+
+      toast.success(
+        "Orden de Pago Generada",
+        `Se emitió la OP N° ${res.payment_order?.numero_orden || res.id} por ₲ ${formatPYG(neto).replace('₲ ', '')} (${finiquitoOPDesembolsoInmediato ? 'Liquidada' : 'Aguardando Desembolso'}).`
+      )
+      setModalFiniquitoOPOpen(false)
+      setSelectedSettlementForOP(null)
+      fetchSettlements()
+      fetchData(false)
+    } catch (err: any) {
+      toast.error("Error al emitir OP", err.message || String(err))
+    } finally {
+      setSavingFiniquitoOP(false)
     }
   }
 
@@ -1936,8 +2017,19 @@ export default function SueldokPage() {
                                 {s.payment_order.estado === "pagado" ? "Liquidada" : "Pte. Desembolso"}
                               </span>
                             </div>
+                          ) : Number(s.total_neto || 0) > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenFiniquitoOPModal(s)}
+                              className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold shadow-xs transition-all cursor-pointer flex items-center gap-1 mx-auto"
+                            >
+                              <Plus className="w-3 h-3" />
+                              <span>Emitir OP</span>
+                            </button>
                           ) : (
-                            <span className="text-[10px] text-slate-400 italic">Sin OP</span>
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+                              ✓ 100% Compensado
+                            </span>
                           )}
                         </td>
                       </tr>
@@ -2685,6 +2777,188 @@ export default function SueldokPage() {
               >
                 {savingNominaOP ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <DollarSign className="w-3.5 h-3.5" />}
                 <span>Emitir Orden de Pago</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: EMITIR ORDEN DE PAGO (OP) DE FINIQUITO ── */}
+      {modalFiniquitoOPOpen && selectedSettlementForOP && (
+        <div
+          onClick={() => setModalFiniquitoOPOpen(false)}
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-lg rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl p-6 space-y-5 animate-in fade-in zoom-in-95 duration-150"
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                  <DollarSign className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 dark:text-white text-base">
+                    Emitir Orden de Pago de Finiquito
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    {selectedSettlementForOP.employee_nombre} · CI: {selectedSettlementForOP.employee_ci || "—"}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setModalFiniquitoOPOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white text-lg font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              {/* Tarjeta de Resumen del Finiquito */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 space-y-2">
+                <div className="flex items-center justify-between text-slate-500">
+                  <span>Fecha de Egreso:</span>
+                  <span className="font-mono font-bold text-slate-700 dark:text-slate-200">
+                    {formatDate(selectedSettlementForOP.fecha_egreso)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-slate-500">
+                  <span>Causa de Salida:</span>
+                  <span className="font-bold text-slate-700 dark:text-slate-200 capitalize">
+                    {selectedSettlementForOP.motivo_egreso?.replace('_', ' ') || "—"}
+                  </span>
+                </div>
+                <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                  <span className="font-black text-slate-800 dark:text-white">Importe Neto a Liquidar:</span>
+                  <span className="font-mono font-black text-base text-amber-600 dark:text-amber-400">
+                    ₲ {formatPYG(selectedSettlementForOP.total_neto).replace('₲ ', '')}
+                  </span>
+                </div>
+              </div>
+
+              {/* Opciones de Desembolso */}
+              <div className="p-4 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-200/80 dark:border-indigo-900/40 space-y-3">
+                <div className="font-black text-slate-800 dark:text-slate-200 text-xs">Modo de Afectación en Tesorería</div>
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setFiniquitoOPDesembolsoInmediato(false)}
+                    className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+                      !finiquitoOPDesembolsoInmediato
+                        ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
+                        : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700"
+                    }`}
+                  >
+                    <div className="font-bold text-xs">🟡 Aguardar Desembolso</div>
+                    <div className="text-[10px] opacity-80 mt-0.5">Queda pendiente en Tesorería para ser pagada luego.</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFiniquitoOPDesembolsoInmediato(true)}
+                    className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+                      finiquitoOPDesembolsoInmediato
+                        ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
+                        : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700"
+                    }`}
+                  >
+                    <div className="font-bold text-xs">🟢 Liquidar Inmediato</div>
+                    <div className="text-[10px] opacity-80 mt-0.5">Debita banco o caja chica y la marca como Pagada.</div>
+                  </button>
+                </div>
+
+                {finiquitoOPDesembolsoInmediato && (
+                  <div className="space-y-3 pt-2 border-t border-indigo-100 dark:border-indigo-900/40">
+                    <div>
+                      <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Medio de Pago</label>
+                      <select
+                        value={finiquitoOPMetodoPago}
+                        onChange={(e) => setFiniquitoOPMetodoPago(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white"
+                      >
+                        <option value="fondo_fijo">Fondo Fijo (Caja Chica)</option>
+                        <option value="boveda">Bóveda Central (Efectivo)</option>
+                        <option value="transferencia_sipap">Transferencia Bancaria (SIPAP)</option>
+                        <option value="cheque">Cheque Bancario</option>
+                      </select>
+                    </div>
+
+                    {finiquitoOPMetodoPago === "fondo_fijo" && (
+                      <div>
+                        <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Fondo Fijo (Caja Chica) *</label>
+                        <select
+                          value={finiquitoOPPettyCashFundId}
+                          onChange={(e) => setFiniquitoOPPettyCashFundId(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white"
+                        >
+                          <option value="">Seleccione fondo fijo…</option>
+                          {pettyCashFunds.map((f) => (
+                            <option key={f.id} value={f.id}>
+                              {f.nombre} · Saldo Disponible: {formatPYG(f.saldo_actual || 0)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    {(finiquitoOPMetodoPago === "transferencia_sipap" || finiquitoOPMetodoPago === "cheque") && (
+                      <div>
+                        <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Cuenta Bancaria *</label>
+                        <select
+                          value={finiquitoOPBankAccountId}
+                          onChange={(e) => setFiniquitoOPBankAccountId(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white"
+                        >
+                          <option value="">Seleccione cuenta…</option>
+                          {bankAccounts.map((b) => (
+                            <option key={b.id} value={b.id}>
+                              {b.banco} — {b.numero_cuenta} · Saldo: {formatPYG(b.saldo_actual || 0)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">N° Referencia / Comprobante</label>
+                      <input
+                        type="text"
+                        value={finiquitoOPReferencia}
+                        onChange={(e) => setFiniquitoOPReferencia(e.target.value)}
+                        placeholder="Ej: REC-FINIQUITO-01"
+                        className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-900 dark:text-white"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Concepto / Observaciones</label>
+                <textarea
+                  rows={2}
+                  value={finiquitoOPObservaciones}
+                  onChange={(e) => setFiniquitoOPObservaciones(e.target.value)}
+                  className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button
+                onClick={() => setModalFiniquitoOPOpen(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleEmitirFiniquitoOP}
+                disabled={savingFiniquitoOP}
+                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black transition-all shadow-md cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {savingFiniquitoOP ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <DollarSign className="w-3.5 h-3.5" />}
+                <span>Generar Orden de Pago</span>
               </button>
             </div>
           </div>
