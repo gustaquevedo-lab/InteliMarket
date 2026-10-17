@@ -1705,7 +1705,7 @@ async def list_ai_training_examples(
     """Lista los ejemplos de entrenamiento (few-shot) para el Agente IA de WhatsApp."""
     tenant_id = UUID(user["tenant_id"])
     examples = await whatsapp_service.list_ai_training_examples(
-        db, tenant_id=tenant_id, category=category, active_only=active_only
+        db, tenant_id=tenant_id, categoria=category, activo_only=active_only
     )
     return examples
 

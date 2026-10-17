@@ -544,7 +544,29 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
     # DPO financiero ponderado por volumen de desembolso
     dpo_promedio_dias = round(dias_pago_ponderado_acum / total_monto_con_dias, 1) if total_monto_con_dias > 0 else (supplier.plazo_pago_dias or 30)
 
-    # 7. Órdenes de Compra (PurchaseOrders)
+    # 7. Recepciones de Mercadería (PurchaseReceipts)
+    q_rc = select(PurchaseReceipt).where(
+        PurchaseReceipt.company_id == company_id,
+        PurchaseReceipt.supplier_id == supplier_id,
+    ).order_by(PurchaseReceipt.fecha.desc())
+    rc_res = await db.execute(q_rc)
+    receipts = rc_res.scalars().all()
+
+    receipts_list = []
+    for r in receipts[:30]:
+        receipts_list.append({
+            "id": str(r.id),
+            "numero": r.numero or "REM S/N",
+            "fecha": _date_str(r.fecha),
+            "total": _dec_to_float(r.total),
+            "estado": r.estado or "completado",
+            "proveedor_ref": r.proveedor_ref or "",
+            "requiere_revision": bool(r.requiere_revision),
+            "motivo_revision": r.motivo_revision or "",
+            "observaciones": r.observaciones or "",
+        })
+
+    # 8. Órdenes de Compra (PurchaseOrders)
     q_oc = select(PurchaseOrder).where(
         PurchaseOrder.company_id == company_id,
         PurchaseOrder.supplier_id == supplier_id,
@@ -575,28 +597,6 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
             "moneda": o.moneda or "PYG",
             "condiciones_pago": o.condiciones_pago or "",
             "observaciones": o.observaciones or "",
-        })
-
-    # 8. Recepciones de Mercadería (PurchaseReceipts)
-    q_rc = select(PurchaseReceipt).where(
-        PurchaseReceipt.company_id == company_id,
-        PurchaseReceipt.supplier_id == supplier_id,
-    ).order_by(PurchaseReceipt.fecha.desc())
-    rc_res = await db.execute(q_rc)
-    receipts = rc_res.scalars().all()
-
-    receipts_list = []
-    for r in receipts[:30]:
-        receipts_list.append({
-            "id": str(r.id),
-            "numero": r.numero or "REM S/N",
-            "fecha": _date_str(r.fecha),
-            "total": _dec_to_float(r.total),
-            "estado": r.estado or "completado",
-            "proveedor_ref": r.proveedor_ref or "",
-            "requiere_revision": bool(r.requiere_revision),
-            "motivo_revision": r.motivo_revision or "",
-            "observaciones": r.observaciones or "",
         })
 
     # 9. Catálogo de Productos y Existencias de Stock
