@@ -484,11 +484,12 @@ async def preview_import_bank_statement_file(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ):
-    if not file.filename.lower().endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=400, detail="Solo se aceptan archivos Excel (.xlsx/.xls)")
+    ext = (file.filename or "").lower()
+    if not (ext.endswith((".xlsx", ".xls")) or ext.endswith(".pdf")):
+        raise HTTPException(status_code=400, detail="Solo se aceptan archivos Excel (.xlsx/.xls) o PDF oficial del banco (.pdf)")
     content = await file.read()
     try:
-        return await service.preview_bank_statement_file(db, account_id, content, mes, anio)
+        return await service.preview_bank_statement_file(db, account_id, content, mes, anio, filename=file.filename)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -502,11 +503,12 @@ async def import_bank_statement_file(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ):
-    if not file.filename.lower().endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=400, detail="Solo se aceptan archivos Excel (.xlsx/.xls)")
+    ext = (file.filename or "").lower()
+    if not (ext.endswith((".xlsx", ".xls")) or ext.endswith(".pdf")):
+        raise HTTPException(status_code=400, detail="Solo se aceptan archivos Excel (.xlsx/.xls) o PDF oficial del banco (.pdf)")
     content = await file.read()
     try:
-        return await service.import_bank_statement_file(db, company_id, account_id, content, mes, anio)
+        return await service.import_bank_statement_file(db, company_id, account_id, content, mes, anio, filename=file.filename)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

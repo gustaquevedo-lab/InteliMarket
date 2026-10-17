@@ -1451,29 +1451,49 @@ async def delete_bank_transaction(db: AsyncSession, company_id: str, transaction
     return True
 
 
-async def preview_bank_statement_file(db: AsyncSession, bank_account_id: str, file_bytes: bytes, mes: int, anio: int) -> dict:
-    """Parsea el archivo sin escribir nada -- para la vista previa del
+async def preview_bank_statement_file(db: AsyncSession, bank_account_id: str, file_bytes: bytes, mes: int, anio: int, filename: Optional[str] = None) -> dict:
+    """Parsea el archivo (Excel o PDF) sin escribir nada -- para la vista previa del
     frontend antes de confirmar la carga (Bancos Fase 6)."""
     from api.src.financial import statement_import
+    from api.src.financial import pdf_parser
 
     account = await get_bank_account(db, bank_account_id)
     if not account:
         raise ValueError("Cuenta bancaria no encontrada")
 
-    account_tipo = statement_import.account_tipo_normalizado(account.tipo, account.titular, account.numero_cuenta)
-    parsed = statement_import.parse_statement(file_bytes, mes, anio, account.banco, account_tipo)
+    is_pdf = (filename and filename.lower().endswith(".pdf")) or file_bytes.startswith(b"%PDF")
+    if is_pdf:
+        parsed_pdf = pdf_parser.parse_bank_statement_pdf(file_bytes)
+        transacciones = parsed_pdf["transacciones"]
+        sheet_matched = f"PDF Oficial {parsed_pdf['banco']} ({parsed_pdf['tipo_cuenta']} / {parsed_pdf['numero_cuenta']})"
+        saldo_ant = float(parsed_pdf["saldo_anterior"]) if parsed_pdf["saldo_anterior"] is not None else None
+        saldo_cierre = float(parsed_pdf["saldo_cierre"]) if parsed_pdf["saldo_cierre"] is not None else None
+    else:
+        account_tipo = statement_import.account_tipo_normalizado(account.tipo, account.titular, account.numero_cuenta)
+        parsed = statement_import.parse_statement(file_bytes, mes, anio, account.banco, account_tipo)
+        transacciones = parsed["transacciones"]
+        sheet_matched = parsed["sheet_matched"]
+        saldo_ant = parsed["saldo_anterior"]
+        saldo_cierre = parsed["closing_from_totals"]
 
-    duplicadas = await _count_duplicate_transactions(db, bank_account_id, parsed["transacciones"])
+    duplicadas = await _count_duplicate_transactions(db, bank_account_id, transacciones)
     return {
-        "sheet_matched": parsed["sheet_matched"],
-        "saldo_anterior": parsed["saldo_anterior"],
-        "closing_from_totals": parsed["closing_from_totals"],
-        "total_detectadas": len(parsed["transacciones"]),
-        "nuevas": len(parsed["transacciones"]) - duplicadas,
+        "sheet_matched": sheet_matched,
+        "saldo_anterior": saldo_ant,
+        "closing_from_totals": saldo_cierre,
+        "total_detectadas": len(transacciones),
+        "nuevas": len(transacciones) - duplicadas,
         "duplicadas": duplicadas,
         "transacciones": [
-            {"fecha": t["fecha"].isoformat(), "tipo": t["tipo"], "monto": float(t["monto"]), "descripcion": t["descripcion"], "referencia": t["referencia"]}
-            for t in parsed["transacciones"]
+            {
+                "fecha": t["fecha"].isoformat(),
+                "tipo": t["tipo"],
+                "monto": float(t["monto"]),
+                "descripcion": t["descripcion"],
+                "referencia": t.get("referencia"),
+                "nro_cheque": t.get("nro_cheque"),
+            }
+            for t in transacciones
         ],
     }
 
@@ -1488,25 +1508,31 @@ async def _count_duplicate_transactions(db: AsyncSession, bank_account_id: str, 
     existing_keys = {(row.fecha, row.tipo, row.monto, row.descripcion or "", row.referencia or "") for row in existing.all()}
     return sum(
         1 for t in transacciones
-        if (t["fecha"], t["tipo"], t["monto"], t["descripcion"] or "", t["referencia"] or "") in existing_keys
+        if (t["fecha"], t["tipo"], t["monto"], t["descripcion"] or "", t.get("referencia") or "") in existing_keys
     )
 
 
-async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_account_id: str, file_bytes: bytes, mes: int, anio: int) -> dict:
-    """Carga real de un extracto Excel tal cual lo entrega el banco (Bancos
-    Fase 6, reemplaza el textarea TSV manual). Idempotente: una transaccion
-    ya presente (misma fecha+tipo+monto+descripcion+referencia en la misma
-    cuenta) se saltea en vez de duplicarse, para poder resubir el mismo mes
-    sin miedo si hace falta corregir algo."""
+async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_account_id: str, file_bytes: bytes, mes: int, anio: int, filename: Optional[str] = None) -> dict:
+    """Carga real de un extracto (Excel o PDF) tal cual lo entrega el banco.
+    Idempotente: una transaccion ya presente (misma fecha+tipo+monto+descripcion+referencia en la misma
+    cuenta) se saltea en vez de duplicarse, para poder resubir el archivo sin miedo a duplicar."""
     from api.src.financial import statement_import
+    from api.src.financial import pdf_parser
 
     account = await get_bank_account(db, bank_account_id)
     if not account:
         raise ValueError("Cuenta bancaria no encontrada")
 
-    account_tipo = statement_import.account_tipo_normalizado(account.tipo, account.titular, account.numero_cuenta)
-    parsed = statement_import.parse_statement(file_bytes, mes, anio, account.banco, account_tipo)
-    transacciones = parsed["transacciones"]
+    is_pdf = (filename and filename.lower().endswith(".pdf")) or file_bytes.startswith(b"%PDF")
+    if is_pdf:
+        parsed_pdf = pdf_parser.parse_bank_statement_pdf(file_bytes)
+        transacciones = parsed_pdf["transacciones"]
+        sheet_matched = f"PDF Oficial {parsed_pdf['banco']} ({parsed_pdf['tipo_cuenta']} / {parsed_pdf['numero_cuenta']})"
+    else:
+        account_tipo = statement_import.account_tipo_normalizado(account.tipo, account.titular, account.numero_cuenta)
+        parsed = statement_import.parse_statement(file_bytes, mes, anio, account.banco, account_tipo)
+        transacciones = parsed["transacciones"]
+        sheet_matched = parsed["sheet_matched"]
 
     existing = await db.execute(
         select(BankTransaction.fecha, BankTransaction.tipo, BankTransaction.monto, BankTransaction.descripcion, BankTransaction.referencia)
@@ -1516,13 +1542,14 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
 
     nuevas = 0
     for t in transacciones:
-        key = (t["fecha"], t["tipo"], t["monto"], t["descripcion"] or "", t["referencia"] or "")
+        ref_val = t.get("referencia") or ""
+        key = (t["fecha"], t["tipo"], t["monto"], t["descripcion"] or "", ref_val)
         if key in existing_keys:
             continue
         db.add(BankTransaction(
             company_id=uuid.UUID(company_id), bank_account_id=uuid.UUID(bank_account_id),
             fecha=t["fecha"], tipo=t["tipo"], monto=t["monto"], moneda=account.moneda,
-            descripcion=t["descripcion"], referencia=t["referencia"], categoria="otros",
+            descripcion=t["descripcion"], referencia=ref_val or None, categoria="otros",
         ))
         account.saldo_actual = (account.saldo_actual or Decimal("0")) + (t["monto"] if t["tipo"] == "credito" else -t["monto"])
         existing_keys.add(key)
@@ -1538,7 +1565,7 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
 
     await db.flush()
     return {
-        "sheet_matched": parsed["sheet_matched"],
+        "sheet_matched": sheet_matched,
         "total_detectadas": len(transacciones),
         "nuevas": nuevas,
         "duplicadas": len(transacciones) - nuevas,
