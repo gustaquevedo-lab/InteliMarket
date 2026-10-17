@@ -126,6 +126,7 @@ async def get_routes_today(db: AsyncSession, company_id: str, rep: SalesRep) -> 
         WHERE sr.company_id = :company_id
         AND sr.user_id = :user_id
         AND sr.estado = 'activo'
+        AND (sr.dias_semana IS NULL OR sr.dias_semana::jsonb @> to_jsonb(CAST(:dow AS integer)))
         AND (rc.dia_semana IS NULL OR rc.dia_semana = :dow)
         ORDER BY rc.orden_visita ASC
     """)
