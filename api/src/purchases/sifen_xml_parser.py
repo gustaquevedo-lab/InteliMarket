@@ -47,6 +47,17 @@ def _find_text(element: Optional[ET.Element], path_tags: list[str]) -> Optional[
     return None
 
 
+def _find_text_recursive(parent: Optional[ET.Element], target_tag: str) -> Optional[str]:
+    """Busca recursivamente en profundidad cualquier elemento por nombre de tag ignorando namespaces."""
+    if parent is None:
+        return None
+    target = target_tag.lower()
+    for elem in parent.iter():
+        if _strip_ns(elem.tag).lower() == target and elem.text and elem.text.strip():
+            return elem.text.strip()
+    return None
+
+
 def parse_sifen_xml(xml_content: str | bytes) -> dict[str, Any]:
     """Parsea el contenido de un XML SIFEN (DTE) y extrae datos estructurados."""
     if isinstance(xml_content, str):
@@ -111,24 +122,73 @@ def parse_sifen_xml(xml_content: str | bytes) -> dict[str, Any]:
     else:
         fecha_emision = date.today()
 
-    tipo_documento_code = _find_element_text(de_elem, ["gTimb", "iTiDE"]) or "1"
-    tipo_documento_desc = _find_element_text(de_elem, ["gTimb", "dDesTiDE"]) or "Factura electrónica"
+    tipo_documento_code = _find_element_text(de_elem, ["gTimb", "iTiDE"]) or _find_text_recursive(de_elem, "iTiDE")
+    if not tipo_documento_code and cdc and len(cdc) >= 2:
+        tipo_documento_code = str(int(cdc[:2]))
+    tipo_documento_code = tipo_documento_code or "1"
 
-    # 2. Datos del Emisor (Proveedor)
-    emisor_ruc = _find_element_text(de_elem, ["gEmis", "dRucEm"]) or ""
-    emisor_dv = _find_element_text(de_elem, ["gEmis", "dDVEmi"]) or ""
+    tipo_documento_desc = _find_element_text(de_elem, ["gTimb", "dDesTiDE"]) or _find_text_recursive(de_elem, "dDesTiDE") or "Factura electrónica"
+
+    # 2. Datos del Emisor (Proveedor) - en SIFEN e-Kuatia gEmis está anidado en gDatGralOpe / gDGen
+    emisor_ruc = _find_element_text(de_elem, ["gDatGralOpe", "gEmis", "dRucEm"]) or \
+                 _find_element_text(de_elem, ["gDGen", "gEmis", "dRucEm"]) or \
+                 _find_element_text(de_elem, ["gEmis", "dRucEm"]) or \
+                 _find_text_recursive(de_elem, "dRucEm") or ""
+
+    emisor_dv = _find_element_text(de_elem, ["gDatGralOpe", "gEmis", "dDVEmi"]) or \
+                _find_element_text(de_elem, ["gDGen", "gEmis", "dDVEmi"]) or \
+                _find_element_text(de_elem, ["gEmis", "dDVEmi"]) or \
+                _find_text_recursive(de_elem, "dDVEmi") or ""
+
+    # Respaldo infalible: Decodificar RUC y DV desde el CDC si el XML no lo expuso en texto plano
+    if not emisor_ruc and cdc and len(cdc) >= 44:
+        emisor_ruc = cdc[2:10].lstrip("0")
+        emisor_dv = cdc[10:11]
+
     emisor_ruc_completo = f"{emisor_ruc}-{emisor_dv}" if emisor_dv else emisor_ruc
-    emisor_razon_social = _find_element_text(de_elem, ["gEmis", "dNomEmi"]) or "Proveedor Desconocido"
-    emisor_nombre_fantasia = _find_element_text(de_elem, ["gEmis", "dNomFanEmi"]) or emisor_razon_social
-    emisor_direccion = _find_element_text(de_elem, ["gEmis", "dDirEmi"]) or ""
-    emisor_telefono = _find_element_text(de_elem, ["gEmis", "dTelEmi"]) or ""
-    emisor_email = _find_element_text(de_elem, ["gEmis", "dEmailE"]) or ""
+
+    emisor_razon_social = _find_element_text(de_elem, ["gDatGralOpe", "gEmis", "dNomEmi"]) or \
+                          _find_element_text(de_elem, ["gDGen", "gEmis", "dNomEmi"]) or \
+                          _find_element_text(de_elem, ["gEmis", "dNomEmi"]) or \
+                          _find_text_recursive(de_elem, "dNomEmi") or "Proveedor SIFEN"
+
+    emisor_nombre_fantasia = _find_element_text(de_elem, ["gDatGralOpe", "gEmis", "dNomFanEmi"]) or \
+                             _find_element_text(de_elem, ["gDGen", "gEmis", "dNomFanEmi"]) or \
+                             _find_element_text(de_elem, ["gEmis", "dNomFanEmi"]) or \
+                             _find_text_recursive(de_elem, "dNomFanEmi") or emisor_razon_social
+
+    emisor_direccion = _find_element_text(de_elem, ["gDatGralOpe", "gEmis", "dDirEmi"]) or \
+                       _find_element_text(de_elem, ["gDGen", "gEmis", "dDirEmi"]) or \
+                       _find_element_text(de_elem, ["gEmis", "dDirEmi"]) or \
+                       _find_text_recursive(de_elem, "dDirEmi") or ""
+
+    emisor_telefono = _find_element_text(de_elem, ["gDatGralOpe", "gEmis", "dTelEmi"]) or \
+                      _find_element_text(de_elem, ["gDGen", "gEmis", "dTelEmi"]) or \
+                      _find_element_text(de_elem, ["gEmis", "dTelEmi"]) or \
+                      _find_text_recursive(de_elem, "dTelEmi") or ""
+
+    emisor_email = _find_element_text(de_elem, ["gDatGralOpe", "gEmis", "dEmailE"]) or \
+                   _find_element_text(de_elem, ["gDGen", "gEmis", "dEmailE"]) or \
+                   _find_element_text(de_elem, ["gEmis", "dEmailE"]) or \
+                   _find_text_recursive(de_elem, "dEmailE") or ""
 
     # 3. Datos del Receptor
-    receptor_ruc = _find_element_text(de_elem, ["gDatRec", "dRucRec"]) or ""
-    receptor_dv = _find_element_text(de_elem, ["gDatRec", "dDVRec"]) or ""
+    receptor_ruc = _find_element_text(de_elem, ["gDatGralOpe", "gDatRec", "dRucRec"]) or \
+                   _find_element_text(de_elem, ["gDGen", "gDatRec", "dRucRec"]) or \
+                   _find_element_text(de_elem, ["gDatRec", "dRucRec"]) or \
+                   _find_text_recursive(de_elem, "dRucRec") or ""
+
+    receptor_dv = _find_element_text(de_elem, ["gDatGralOpe", "gDatRec", "dDVRec"]) or \
+                  _find_element_text(de_elem, ["gDGen", "gDatRec", "dDVRec"]) or \
+                  _find_element_text(de_elem, ["gDatRec", "dDVRec"]) or \
+                  _find_text_recursive(de_elem, "dDVRec") or ""
+
     receptor_ruc_completo = f"{receptor_ruc}-{receptor_dv}" if receptor_dv else receptor_ruc
-    receptor_razon_social = _find_element_text(de_elem, ["gDatRec", "dNomRec"]) or ""
+
+    receptor_razon_social = _find_element_text(de_elem, ["gDatGralOpe", "gDatRec", "dNomRec"]) or \
+                            _find_element_text(de_elem, ["gDGen", "gDatRec", "dNomRec"]) or \
+                            _find_element_text(de_elem, ["gDatRec", "dNomRec"]) or \
+                            _find_text_recursive(de_elem, "dNomRec") or ""
 
     # 4. Condición de Operación
     condicion_code = _find_element_text(de_elem, ["gCamCond", "iCondOpe"]) or "1"

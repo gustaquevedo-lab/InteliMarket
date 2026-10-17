@@ -22,7 +22,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.src.financial.models import SupplierInvoice, SupplierInvoiceItem
+from api.src.financial.models import SupplierInvoice, SupplierInvoiceItem, SupplierCreditNote
 from api.src.purchases.models import Supplier, PurchaseOrder, PurchaseInboxConfig, PurchaseReceipt
 from api.src.purchases.sifen_xml_parser import parse_sifen_xml, map_sifen_items_to_catalog
 from api.src.purchases.utils import normalize_invoice_number, invoice_numbers_match
@@ -217,8 +217,19 @@ async def ingest_parsed_dte(
     raw_numero_factura = dte_data.get("numero_factura")
     numero_factura = normalize_invoice_number(raw_numero_factura) or raw_numero_factura
     timbrado = dte_data.get("timbrado")
+    tipo_doc_code = str(dte_data.get("tipo_documento_code") or "1").strip().lstrip("0")
 
-    # 1. Verificar si ya existe por CDC
+    # 0. Filtrar Notas de Remisión (tipo 7): no generan deuda ni crédito
+    if tipo_doc_code == "7":
+        return {
+            "created": False,
+            "id": None,
+            "numero_factura": numero_factura,
+            "cdc": cdc,
+            "mensaje": f"Nota de remisión electrónica {numero_factura} omitida de cuentas por pagar."
+        }
+
+    # 1. Verificar si ya existe por CDC en facturas
     if cdc:
         existing_q = select(SupplierInvoice).where(
             SupplierInvoice.company_id == company_uuid,
@@ -241,15 +252,18 @@ async def ingest_parsed_dte(
     supplier: Optional[Supplier] = None
 
     if emisor_ruc:
-        ruc_full = emisor.get("ruc")
-        ruc_sin_dv = emisor.get("ruc_sin_dv")
-        candidates = [c for c in [ruc_full, ruc_sin_dv, emisor_ruc] if c]
+        ruc_raw = emisor_ruc.strip()
+        ruc_sin_dv = emisor.get("ruc_sin_dv") or (ruc_raw.split("-")[0] if "-" in ruc_raw else ruc_raw)
+        clean_num = ruc_sin_dv.lstrip("0")
+        candidates = list({c for c in [ruc_raw, ruc_sin_dv, clean_num, f"{clean_num}-{emisor.get('dv')}" if emisor.get('dv') else None] if c})
+        
         from sqlalchemy import or_
         sup_q = select(Supplier).where(
             Supplier.company_id == company_uuid,
             or_(
                 Supplier.ruc.in_(candidates),
-                Supplier.ruc.like(f"{ruc_sin_dv}-%") if ruc_sin_dv else False
+                Supplier.ruc.like(f"{clean_num}-%") if clean_num else False,
+                Supplier.ruc == clean_num
             )
         )
         sup_res = await db.execute(sup_q)
@@ -257,10 +271,11 @@ async def ingest_parsed_dte(
 
     if not supplier:
         # Crear proveedor automáticamente a partir de los datos fiscales del DTE
+        razon_social = emisor.get("razon_social") or emisor.get("nombre_fantasia") or "Proveedor SIFEN"
         supplier = Supplier(
             company_id=company_uuid,
             ruc=emisor.get("ruc") or emisor.get("ruc_sin_dv") or "N/A",
-            razon_social=emisor.get("razon_social") or emisor.get("nombre_fantasia") or "Proveedor SIFEN",
+            razon_social=razon_social,
             direccion=emisor.get("direccion"),
             telefono=emisor.get("telefono"),
             email=emisor.get("email"),
@@ -271,6 +286,54 @@ async def ingest_parsed_dte(
         )
         db.add(supplier)
         await db.flush()
+
+    # 2b. Si es Nota de Crédito Electrónica (tipo 5), registrar en SupplierCreditNote
+    if tipo_doc_code == "5":
+        ex_nc_q = select(SupplierCreditNote).where(
+            SupplierCreditNote.company_id == company_uuid,
+            SupplierCreditNote.supplier_id == supplier.id,
+            SupplierCreditNote.numero == numero_factura
+        )
+        ex_nc_res = await db.execute(ex_nc_q)
+        ex_nc = ex_nc_res.scalar_one_or_none()
+        if ex_nc:
+            return {
+                "created": False,
+                "id": str(ex_nc.id),
+                "numero_factura": ex_nc.numero,
+                "mensaje": f"Nota de crédito {numero_factura} ya registrada anteriormente para {supplier.razon_social}."
+            }
+
+        total_nc = dte_data.get("total", Decimal("0"))
+        nc = SupplierCreditNote(
+            company_id=company_uuid,
+            supplier_id=supplier.id,
+            numero=numero_factura or "S/N",
+            timbrado=timbrado,
+            fecha=dte_data.get("fecha_emision") or datetime.now().date(),
+            monto=total_nc,
+            saldo_disponible=total_nc,
+            moneda=dte_data.get("moneda", "PYG"),
+            motivo="Nota de crédito electrónica SIFEN",
+            observaciones=f"Ingresado vía {origen}. {origen_info or ''}".strip(),
+            cancelado=False,
+            impacto_contable="devolucion_credito",
+            motivo_categoria="devolucion"
+        )
+        db.add(nc)
+        await db.flush()
+        return {
+            "created": True,
+            "id": str(nc.id),
+            "tipo": "nota_credito",
+            "numero_factura": nc.numero,
+            "timbrado": nc.timbrado,
+            "supplier_id": str(supplier.id),
+            "supplier_nombre": supplier.razon_social,
+            "total": float(nc.monto),
+            "items_count": 0,
+            "items_mapeados": 0,
+        }
 
     # Verificar si ya existe factura con este número para este proveedor
     if supplier and numero_factura:
