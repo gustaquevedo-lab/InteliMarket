@@ -1023,11 +1023,11 @@ export default function SupplierPaymentOrderModal({
                       Ajuste por Redondeo / Decimales (Centavos)
                     </span>
                     <span className="text-[10px] bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded-full font-mono font-semibold">
-                      Tolerancia: ± ₲ 5.000
+                      {ajusteSigno === "-" ? "A favor (Sin límite)" : "Máx +₲ 5.000"}
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-500">
-                    Ajuste contable para compensar pequeñas diferencias de decimales de la factura física impresa sin distorsionar la retención impositiva.
+                    Ajuste contable para compensar diferencias a favor o centavos de factura física impresa.
                   </p>
                   <div className="flex items-center gap-2 pt-1 max-w-sm">
                     <select
@@ -1041,7 +1041,7 @@ export default function SupplierPaymentOrderModal({
                     <div className="flex-1">
                       <CurrencyInput
                         value={ajusteMonto}
-                        onChangeValue={val => setAjusteMonto(Math.min(5000, Math.max(0, val)))}
+                        onChangeValue={val => setAjusteMonto(ajusteSigno === "-" ? Math.max(0, val) : Math.min(5000, Math.max(0, val)))}
                         placeholder="0"
                         className="w-full text-xs p-1.5 font-mono text-right bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold"
                       />
@@ -1528,7 +1528,7 @@ export default function SupplierPaymentOrderModal({
                     Ajuste por Redondeo / Decimales:
                   </span>
                   <span className="text-[10px] bg-slate-200 dark:bg-slate-750 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded-full font-mono font-semibold">
-                    Máx ± ₲ 5.000
+                    {ajusteSigno === "-" ? "A favor (Sin límite)" : "Máx +₲ 5.000"}
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1543,7 +1543,7 @@ export default function SupplierPaymentOrderModal({
                   <div className="w-32">
                     <CurrencyInput
                       value={ajusteMonto}
-                      onChangeValue={val => setAjusteMonto(Math.min(5000, Math.max(0, val)))}
+                      onChangeValue={val => setAjusteMonto(ajusteSigno === "-" ? Math.max(0, val) : Math.min(5000, Math.max(0, val)))}
                       placeholder="0"
                       className="w-full text-xs p-1 font-mono text-right bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold"
                     />
