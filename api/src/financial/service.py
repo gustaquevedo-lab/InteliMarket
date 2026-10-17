@@ -11,6 +11,9 @@ from decimal import Decimal
 from pathlib import Path
 import json
 import uuid
+import logging
+
+logger = logging.getLogger(__name__)
 
 from api.src.financial.models import (
     SupplierInvoice, SupplierInvoicePayment,
