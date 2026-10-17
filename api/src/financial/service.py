@@ -1968,19 +1968,79 @@ async def get_reconciliation_report(db: AsyncSession, company_id: str, bank_acco
     result = await db.execute(query)
     movimientos = list(result.scalars().all())
 
-    total_creditos = sum((m.monto for m in movimientos if m.tipo == "credito"), Decimal("0"))
-    total_debitos = sum((m.monto for m in movimientos if m.tipo == "debito"), Decimal("0"))
-    conciliados = [m for m in movimientos if m.conciliado]
-    pendientes = [m for m in movimientos if not m.conciliado]
+    # Calcular saldo inicial anterior al período
+    saldo_anterior = Decimal("0")
+    if desde:
+        tx_prev = await db.execute(
+            select(
+                func.coalesce(func.sum(case((BankTransaction.tipo == "credito", BankTransaction.monto), else_=-BankTransaction.monto)), 0)
+            ).where(
+                BankTransaction.company_id == uuid.UUID(company_id),
+                BankTransaction.bank_account_id == uuid.UUID(bank_account_id),
+                BankTransaction.fecha < desde,
+            )
+        )
+        saldo_anterior = Decimal(str(tx_prev.scalar() or 0))
+
+    # Movimientos con saldo progresivo calculado
+    running_balance = saldo_anterior
+    movimientos_enriquecidos = []
+    for m in movimientos:
+        if m.tipo == "credito":
+            running_balance += (m.monto or Decimal("0"))
+        else:
+            running_balance -= (m.monto or Decimal("0"))
+        movimientos_enriquecidos.append({
+            "id": str(m.id),
+            "fecha": m.fecha,
+            "tipo": m.tipo,
+            "monto": m.monto,
+            "descripcion": m.descripcion,
+            "referencia": m.referencia,
+            "conciliado": m.conciliado,
+            "fecha_conciliacion": m.fecha_conciliacion,
+            "cheque_id": str(m.cheque_id) if m.cheque_id else None,
+            "invoice_id": str(m.invoice_id) if m.invoice_id else None,
+            "saldo_progresivo": running_balance,
+        })
+
+    saldo_final_banco = running_balance
+
+    # Partidas en tránsito: Cheques emitidos de esta cuenta pendientes de cobro
+    from api.src.cheques.models import Cheque
+    cheques_transito_query = select(Cheque).where(
+        Cheque.company_id == uuid.UUID(company_id),
+        Cheque.bank_account_id == uuid.UUID(bank_account_id),
+        Cheque.estado.in_(["pendiente", "entregado"]),
+    )
+    if hasta:
+        cheques_transito_query = cheques_transito_query.where(Cheque.fecha_emision <= hasta)
+    chq_res = await db.execute(cheques_transito_query)
+    cheques_en_transito = list(chq_res.scalars().all())
+    total_cheques_transito = sum((c.monto for c in cheques_en_transito), Decimal("0"))
+
+    # Depósitos en tránsito (no acreditados en extracto o no conciliados)
+    depositos_pendientes = [m for m in movimientos_enriquecidos if m["tipo"] == "credito" and not m["conciliado"]]
+    total_depositos_transito = sum((d["monto"] for d in depositos_pendientes), Decimal("0"))
+
+    # Saldo según libros contables = Saldo Banco + Depósitos en tránsito - Cheques en tránsito
+    saldo_libros = saldo_final_banco + total_depositos_transito - total_cheques_transito
 
     return {
         "account": account,
-        "movimientos": movimientos,
+        "movimientos": movimientos_enriquecidos,
+        "saldo_anterior": saldo_anterior,
+        "saldo_final_banco": saldo_final_banco,
         "total_creditos": total_creditos,
         "total_debitos": total_debitos,
         "cantidad_conciliados": len(conciliados),
         "cantidad_pendientes": len(pendientes),
         "monto_pendiente": sum((m.monto for m in pendientes), Decimal("0")),
+        "cheques_en_transito": cheques_en_transito,
+        "total_cheques_transito": total_cheques_transito,
+        "depositos_en_transito": depositos_pendientes,
+        "total_depositos_transito": total_depositos_transito,
+        "saldo_libros": saldo_libros,
     }
 
 
