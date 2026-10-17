@@ -934,10 +934,10 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         norm_ref = normalize_invoice_number(data.proveedor_ref) if data.proveedor_ref else None
         invoice_num = norm_ref or (data.proveedor_ref or receipt.numero).strip()
 
-        # Verificar si ya existe una factura para este proveedor con este comprobante
+        # Verificar si ya existe una factura para este proveedor con este comprobante o para esta OC
         existing_inv = None
         if norm_ref or data.proveedor_ref:
-            cands = [c for c in [norm_ref, data.proveedor_ref] if c]
+            cands = list({c for c in [norm_ref, data.proveedor_ref, (data.proveedor_ref or "").strip()] if c})
             ex_res = await db.execute(
                 select(SupplierInvoice).where(
                     SupplierInvoice.company_id == company_id,
@@ -947,11 +947,25 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
             )
             existing_inv = ex_res.scalars().first()
 
+        # Si aún no se encontró, buscar si existe una factura ya ingresada (ej. vía IMAP/DTE SIFEN) asociada a esta OC
+        if not existing_inv and data.purchase_order_id:
+            ex_po_res = await db.execute(
+                select(SupplierInvoice).where(
+                    SupplierInvoice.company_id == company_id,
+                    SupplierInvoice.supplier_id == supplier_id,
+                    SupplierInvoice.purchase_order_id == data.purchase_order_id,
+                    SupplierInvoice.estado != "cancelada",
+                ).order_by(SupplierInvoice.created_at.desc())
+            )
+            existing_inv = ex_po_res.scalars().first()
+
         if existing_inv:
             inv = existing_inv
             inv.receipt_id = receipt.id
             if data.purchase_order_id and not inv.purchase_order_id:
                 inv.purchase_order_id = data.purchase_order_id
+            if norm_ref and not inv.numero_factura:
+                inv.numero_factura = norm_ref
             await db.flush()
         else:
             diff_redondeo = Decimal("0")

@@ -139,6 +139,8 @@ export default function DepositoRecepcionPage() {
   const [itemsDraft, setItemsDraft] = useState<ReceptionItemDraft[]>([])
   const [activeItemIndex, setActiveItemIndex] = useState<number | null>(null)
   const [proveedorRef, setProveedorRef] = useState("")
+  const [detectedSifenInvoice, setDetectedSifenInvoice] = useState<{ id: string; numero: string; total: number; cdc?: string } | null>(null)
+  const [showOverrideInvoiceModal, setShowOverrideInvoiceModal] = useState(false)
   const [observaciones, setObservaciones] = useState("")
   const [confirmingReceipt, setConfirmingReceipt] = useState(false)
   const [lastReceiptCreated, setLastReceiptCreated] = useState<{ id: string; numero: string } | null>(null)
@@ -465,13 +467,47 @@ export default function DepositoRecepcionPage() {
       })
 
       setItemsDraft(initialDraft)
-      setProveedorRef("")
       setObservaciones("")
       setRestoredFromDraft(false)
       setItemSearchQuery("")
       setItemStatusFilter("todos")
       setViewState("receiving")
-      saveDraftToStorage(activePO, initialDraft, "", "")
+
+      // 3. Buscar si ya existe una Factura Electrónica (SIFEN / IMAP) vinculada a esta OC o al proveedor
+      let prefilledRef = ""
+      try {
+        const matchingInvoices = await api.financial.invoices.list({
+          supplier_id: activePO.supplier_id,
+          order_by: "newest",
+          limit: 15,
+        })
+        const poInvoice = (matchingInvoices || []).find((inv: any) =>
+          inv.purchase_order_id === activePO.id ||
+          (inv.notas && inv.notas.includes(activePO.numero || "")) ||
+          (inv.concepto && inv.concepto.includes(activePO.numero || ""))
+        )
+        if (poInvoice && poInvoice.numero_factura) {
+          prefilledRef = poInvoice.numero_factura
+          setDetectedSifenInvoice({
+            id: poInvoice.id,
+            numero: poInvoice.numero_factura,
+            total: Number(poInvoice.total || 0),
+            cdc: poInvoice.cdc,
+          })
+          toast.info(
+            "Factura Electrónica Detectada",
+            `Se detectó la Factura N° ${poInvoice.numero_factura} recibida por e-mail/SIFEN para esta orden.`
+          )
+        } else {
+          setDetectedSifenInvoice(null)
+        }
+      } catch (e) {
+        console.warn("No se pudo verificar facturas previas para la OC:", e)
+        setDetectedSifenInvoice(null)
+      }
+
+      setProveedorRef(prefilledRef)
+      saveDraftToStorage(activePO, initialDraft, prefilledRef, "")
       window.scrollTo({ top: 0, behavior: "smooth" })
     } catch (err: any) {
       toast.error("Error al cargar orden", err.message || "No se pudieron obtener los ítems de la orden.")
@@ -769,6 +805,19 @@ export default function DepositoRecepcionPage() {
     const totalRecibir = itemsDraft.reduce((acc, it) => acc + (it.cantidad_recibir || 0), 0)
     if (totalRecibir <= 0) {
       toast.error("Sin mercadería", "Debe registrar al menos 1 unidad recibida.")
+      return
+    }
+
+    if (
+      detectedSifenInvoice &&
+      proveedorRef &&
+      proveedorRef.trim() !== detectedSifenInvoice.numero &&
+      !window.confirm(
+        `ATENCIÓN: Se recibió previamente la factura electrónica ${detectedSifenInvoice.numero} para esta Orden de Compra.\n\n` +
+        `Usted ingresó el comprobante: "${proveedorRef.trim()}".\n\n` +
+        `¿Está seguro de que la factura física recibida en muelle es diferente a la registrada por correo?`
+      )
+    ) {
       return
     }
 
@@ -1566,16 +1615,39 @@ export default function DepositoRecepcionPage() {
               {/* Campos Remito & Observaciones */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                 <div>
-                  <label className="text-xs font-bold text-slate-600 dark:text-slate-400 block uppercase mb-1">
-                    Remito / Factura Proveedor *
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase">
+                      Remito / Factura Proveedor *
+                    </label>
+                    {detectedSifenInvoice && (
+                      <span className="text-[10px] font-bold text-teal-600 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/60 px-2 py-0.5 rounded-full border border-teal-200 dark:border-teal-800 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> Factura e-mail / SIFEN
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     value={proveedorRef}
                     onChange={(e) => setProveedorRef(e.target.value)}
-                    placeholder="Ej. REM-001248"
+                    placeholder="Ej. 001-001-0028201 o REM-001248"
                     className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:border-amber-500 font-mono font-semibold"
                   />
+                  {detectedSifenInvoice && proveedorRef && proveedorRef.trim() !== detectedSifenInvoice.numero && (
+                    <div className="mt-1.5 p-2 bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-700 rounded-lg text-[11px] text-amber-800 dark:text-amber-200 flex items-start gap-1.5">
+                      <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold">¡Atención!</span> La factura recibida por correo para esta orden es{" "}
+                        <strong className="font-mono text-indigo-600 dark:text-indigo-400">{detectedSifenInvoice.numero}</strong> ({formatPYG(detectedSifenInvoice.total)}).
+                        <button
+                          type="button"
+                          onClick={() => setProveedorRef(detectedSifenInvoice.numero)}
+                          className="ml-2 underline font-bold text-amber-900 dark:text-amber-100 hover:text-amber-700"
+                        >
+                          Usar {detectedSifenInvoice.numero}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 dark:text-slate-400 block uppercase mb-1">

@@ -337,20 +337,34 @@ async def ingest_parsed_dte(
 
     # Verificar si ya existe factura con este número para este proveedor
     if supplier and numero_factura:
+        cands = list({c for c in [numero_factura, raw_numero_factura] if c})
         ex_q = select(SupplierInvoice).where(
             SupplierInvoice.company_id == company_uuid,
             SupplierInvoice.supplier_id == supplier.id,
-            SupplierInvoice.numero_factura == numero_factura
+            SupplierInvoice.numero_factura.in_(cands)
         )
         ex_res = await db.execute(ex_q)
         ex_inv = ex_res.scalar_one_or_none()
         if ex_inv:
+            # Enriquecer con los datos fiscales oficiales del DTE si no los tenía
+            modificado = False
+            if cdc and not ex_inv.cdc:
+                ex_inv.cdc = cdc
+                modificado = True
+            if timbrado and not ex_inv.timbrado:
+                ex_inv.timbrado = timbrado
+                modificado = True
+            if xml_raw and not ex_inv.xml_sifen_url:
+                ex_inv.xml_sifen_url = xml_raw
+                modificado = True
+            if modificado:
+                await db.flush()
             return {
                 "created": False,
                 "id": str(ex_inv.id),
                 "numero_factura": ex_inv.numero_factura,
                 "cdc": ex_inv.cdc,
-                "mensaje": f"Factura {numero_factura} ya registrada anteriormente para {supplier.razon_social}."
+                "mensaje": f"Factura {numero_factura} enriquecida con datos fiscales de SIFEN para {supplier.razon_social}."
             }
 
     # 3. Mapear los ítems contra el catálogo de productos local

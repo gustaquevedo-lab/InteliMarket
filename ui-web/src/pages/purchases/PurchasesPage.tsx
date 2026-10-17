@@ -5909,7 +5909,7 @@ export default function PurchasesPage() {
               <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Solicitudes de NC Pendientes</span>
               <p className="text-xl font-black font-mono text-amber-600 mt-1 flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4" />
-                {supplierNcRequests.filter(r => r.estado === "pendiente").length}
+                {supplierNcRequests.filter(r => r.estado === "pendiente" || r.estado === "pendiente_entrega").length}
               </p>
               <span className="text-[10px] text-gray-400">Esperando emisión del proveedor</span>
             </div>
@@ -5917,7 +5917,7 @@ export default function PurchasesPage() {
             <div className="card p-4 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60">
               <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Monto Total Reclamado en NC</span>
               <p className="text-xl font-black font-mono text-indigo-600 mt-1">
-                {formatPYG(supplierNcRequests.filter(r => r.estado === "pendiente").reduce((acc, r) => acc + Number(r.monto_reclamado || 0), 0))}
+                {formatPYG(supplierNcRequests.filter(r => r.estado === "pendiente" || r.estado === "pendiente_entrega").reduce((acc, r) => acc + Number(r.monto_reclamado || 0), 0))}
               </p>
               <span className="text-[10px] text-gray-400">Retenido en Tesorería</span>
             </div>
@@ -5966,55 +5966,58 @@ export default function PurchasesPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                    {supplierNcRequests.map(req => (
-                      <tr key={req.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/30 transition-colors">
-                        <td className="p-3 font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                          {req.numero_solicitud}
-                        </td>
-                        <td className="p-3 font-bold text-gray-900 dark:text-white">
-                          {req.supplier?.razon_social || req.supplier?.nombre_fantasia || "Proveedor"}
-                        </td>
-                        <td className="p-3 font-mono text-gray-600 dark:text-gray-300">
-                          {req.invoice?.numero_factura || "—"}
-                        </td>
-                        <td className="p-3">
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
-                            {req.tipo_motivo?.replace("_", " ").toUpperCase()}
-                          </span>
-                          {req.observaciones && (
-                            <p className="text-[10px] text-gray-400 mt-0.5 truncate max-w-xs">{req.observaciones}</p>
-                          )}
-                        </td>
-                        <td className="p-3 text-right font-mono font-black text-red-600 dark:text-red-400">
-                          {formatPYG(req.monto_reclamado || 0)}
-                        </td>
-                        <td className="p-3">
-                          {req.estado === "recibida_aplicada" ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
-                              <CheckCircle className="w-3 h-3 text-emerald-500" /> NC Recibida & Aplicada
+                    {supplierNcRequests.map(req => {
+                      const isResolved = req.estado === "recibida_aplicada" || req.estado === "resuelta";
+                      return (
+                        <tr key={req.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/30 transition-colors">
+                          <td className="p-3 font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                            {req.numero_solicitud}
+                          </td>
+                          <td className="p-3 font-bold text-gray-900 dark:text-white">
+                            {req.supplier?.razon_social || req.supplier?.nombre_fantasia || "Proveedor"}
+                          </td>
+                          <td className="p-3 font-mono text-gray-600 dark:text-gray-300">
+                            {req.invoice?.numero_factura || "—"}
+                          </td>
+                          <td className="p-3">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                              {req.tipo_motivo?.replace("_", " ").toUpperCase()}
                             </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300">
-                              <Clock className="w-3 h-3 text-rose-500" /> Pendiente NC Proveedor
-                            </span>
-                          )}
-                        </td>
-                        <td className="p-3 text-right">
-                          {req.estado === "pendiente" ? (
-                            <button
-                              onClick={() => handleOpenResolveNc(req)}
-                              className="px-3 py-1 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5 ml-auto shadow-sm"
-                            >
-                              <FileCheck className="w-3.5 h-3.5" /> Registrar NC Recibida
-                            </button>
-                          ) : (
-                            <span className="text-[11px] font-mono text-gray-400">
-                              NC N° {req.nc_recibida_numero || "—"}
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                            {req.observaciones && (
+                              <p className="text-[10px] text-gray-400 mt-0.5 truncate max-w-xs">{req.observaciones}</p>
+                            )}
+                          </td>
+                          <td className="p-3 text-right font-mono font-black text-red-600 dark:text-red-400">
+                            {formatPYG(req.monto_reclamado || 0)}
+                          </td>
+                          <td className="p-3">
+                            {isResolved ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                                <CheckCircle className="w-3 h-3 text-emerald-500" /> NC Recibida & Aplicada
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300">
+                                <Clock className="w-3 h-3 text-rose-500" /> Pendiente NC Proveedor
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3 text-right">
+                            {!isResolved ? (
+                              <button
+                                onClick={() => handleOpenResolveNc(req)}
+                                className="px-3 py-1 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5 ml-auto shadow-sm"
+                              >
+                                <FileCheck className="w-3.5 h-3.5" /> Registrar NC Recibida
+                              </button>
+                            ) : (
+                              <span className="text-[11px] font-mono text-gray-400">
+                                NC N° {req.nc_recibida_numero || "—"}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

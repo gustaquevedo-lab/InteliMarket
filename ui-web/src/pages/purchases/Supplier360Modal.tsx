@@ -1372,6 +1372,60 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                           </div>
                         </div>
                       )}
+
+                      {/* SECCIÓN SOLICITUDES DE NOTA DE CRÉDITO PENDIENTES (SNC) */}
+                      {statementData && (statementData as any).solicitudes_nc_pendientes && (statementData as any).solicitudes_nc_pendientes.length > 0 && (
+                        <div className="bg-amber-50/60 dark:bg-amber-950/30 p-4 rounded-2xl border border-amber-300 dark:border-amber-800 space-y-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <h4 className="text-xs font-black uppercase tracking-wider text-amber-900 dark:text-amber-200 flex items-center gap-2">
+                              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                              Solicitudes de Nota de Crédito Pendientes de Emisión por el Proveedor ({(statementData as any).solicitudes_nc_pendientes.length})
+                            </h4>
+                            <span className="text-xs font-mono font-black text-rose-600 dark:text-rose-400">
+                              Total Reclamado: {formatPYG((statementData as any).totales?.total_snc_reclamado_monto || 0)}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-amber-800 dark:text-amber-300">
+                            Reclamos emitidos por faltantes de mercadería en muelle, roturas o discrepancias de precio pendientes de que el proveedor entregue la NC física / electrónica.
+                          </p>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs text-left">
+                              <thead className="bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200 uppercase text-[10px] font-black">
+                                <tr>
+                                  <th className="py-2 px-3">N° Solicitud</th>
+                                  <th className="py-2 px-3">Fecha</th>
+                                  <th className="py-2 px-3">Factura Relacionada</th>
+                                  <th className="py-2 px-3">Motivo Reclamo</th>
+                                  <th className="py-2 px-3 text-right">Monto Reclamado Gs.</th>
+                                  <th className="py-2 px-3">Observación</th>
+                                  <th className="py-2 px-3 text-center">Estado</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-amber-200 dark:divide-amber-800/50 font-mono">
+                                {(statementData as any).solicitudes_nc_pendientes.map((s: any) => (
+                                  <tr key={s.id} className="hover:bg-amber-100/50 dark:hover:bg-amber-900/20">
+                                    <td className="py-2 px-3 font-bold text-indigo-600 dark:text-indigo-400">{s.numero_solicitud}</td>
+                                    <td className="py-2 px-3">{s.fecha}</td>
+                                    <td className="py-2 px-3 font-bold">{s.factura_relacionada || "—"}</td>
+                                    <td className="py-2 px-3 font-sans">
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-200">
+                                        {s.tipo_motivo?.replace("_", " ").toUpperCase()}
+                                      </span>
+                                    </td>
+                                    <td className="py-2 px-3 text-right font-black text-rose-600 dark:text-rose-400">
+                                      {formatPYG(s.monto_reclamado)}
+                                    </td>
+                                    <td className="py-2 px-3 font-sans truncate max-w-[200px] text-slate-500">{s.observaciones || "—"}</td>
+                                    <td className="py-2 px-3 text-center font-sans font-bold text-[10px] text-amber-700 dark:text-amber-300">
+                                      PENDIENTE NC
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

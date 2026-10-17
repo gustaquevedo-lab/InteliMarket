@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select, and_, or_, desc, asc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.src.purchases.models import Supplier
+from api.src.purchases.models import Supplier, SupplierNcRequest
 from api.src.financial.models import (
     SupplierInvoice, SupplierInvoicePayment,
     SupplierCreditNote, SupplierCreditNoteApplication,
@@ -159,6 +159,36 @@ async def get_supplier_account_statement(
                 "concepto": c.concepto or "Pago a Proveedor",
                 "estado": estado_ch.upper(),
             })
+
+    # 5b. Solicitudes de Nota de Crédito (SNC) pendientes de entrega del proveedor
+    q_snc = (
+        select(SupplierNcRequest)
+        .where(
+            SupplierNcRequest.company_id == company_id,
+            SupplierNcRequest.supplier_id == supplier_id,
+            SupplierNcRequest.estado.in_(["pendiente_entrega", "entregada_parcial", "pendiente"]),
+        )
+        .order_by(SupplierNcRequest.created_at.desc())
+    )
+    snc_res = await db.execute(q_snc)
+    snc_pendientes_rows = snc_res.scalars().all()
+
+    solicitudes_nc_pendientes = []
+    total_snc_reclamado_monto = 0.0
+    for s in snc_pendientes_rows:
+        m_rec = _dec_to_float(s.monto_reclamado)
+        total_snc_reclamado_monto += m_rec
+        solicitudes_nc_pendientes.append({
+            "id": str(s.id),
+            "numero_solicitud": s.numero_solicitud,
+            "invoice_id": str(s.invoice_id),
+            "factura_relacionada": invoice_map.get(s.invoice_id).numero_factura if invoice_map.get(s.invoice_id) else "",
+            "tipo_motivo": s.tipo_motivo,
+            "monto_reclamado": m_rec,
+            "estado": s.estado,
+            "observaciones": s.observaciones or "",
+            "fecha": _date_str(s.created_at),
+        })
 
     # 6. Construir lista unificada de movimientos
     raw_movements = []
@@ -412,12 +442,16 @@ async def get_supplier_account_statement(
             "cheques_diferidos_count": len(cheques_transito),
             "compromiso_total_con_cheques": compromiso_total_con_cheques,
             "saldo_neto_con_cheques": saldo_deudor_final,
+            "total_snc_reclamado_monto": total_snc_reclamado_monto,
+            "snc_pendientes_count": len(solicitudes_nc_pendientes),
         },
         "cheques_diferidos": cheques_transito,
+        "solicitudes_nc_pendientes": solicitudes_nc_pendientes,
         "resumen_items": {
             "total_movimientos": len(final_movements),
             "total_facturas": len([m for m in final_movements if m["tipo"] == "FACTURA"]),
             "total_ncs": len([m for m in final_movements if m["tipo"] == "NOTA_CREDITO"]),
             "total_pagos": len([m for m in final_movements if m["tipo"] == "PAGO"]),
+            "total_sncs": len(solicitudes_nc_pendientes),
         }
     }
