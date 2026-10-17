@@ -82,31 +82,32 @@ El motor busca contrapartes en el sistema clasificando la certeza en dos niveles
 
 ---
 
-### Componente 3: Rediseño Integral del PDF de Conciliación Bancaria
+### Componente 3: Rediseño Integral del PDF de Conciliación Bancaria (Modalidad Dual)
 
-- **Hoja y Orientación:** A4 Horizontal (Landscape — $297 \times 210\,\text{mm}$), garantizando $275\,\text{mm}$ de área imprimible útil.
-- **Tipografía y Estilos:** Fuentes estándar ReportLab (`Helvetica` y `Helvetica-Bold`), con tamaño base 7.5pt y leading 9pt para evitar desbordes y cortes de texto.
-- **Moneda:** Formato canónico Paraguay (PYG enteros con separadores de miles con punto, ej. `Gs. 28.663.060`).
+Se implementarán dos variantes de PDF seleccionables por el usuario según la necesidad operativa:
 
-#### Secciones del Reporte:
-1. **Encabezado Institucional:**
-   - Logo y Membrete: `GRUPO SANTA TERESA E.A.S.` | RUC: `80150377-9` | Extra Supermercado Mayorista.
-   - Título: **INFORME OFICIAL DE CONCILIACIÓN BANCARIA Y ESTADO DE CUENTA**.
-   - Datos de la Cuenta: Banco, Número de Cuenta, Alias, Moneda y Período (`dd/mm/aaaa` al `dd/mm/aaaa`).
-2. **Cuadro Ejecutivo de Cuadre Contable (KPI Cards):**
-   - **(+) Saldo al Cierre según Extracto Bancario:** $S_{\text{banco}}$.
-   - **(+) Depósitos y Recaudaciones en Tránsito:** $D_{\text{tránsito}}$.
-   - **(-) Cheques Emitidos en Tránsito:** $C_{\text{tránsito}}$ (cheques diferidos entregados aún no debitados).
-   - **(=) Saldo Conciliado en Libros:** $S_{\text{libros}}$.
-   - **Badge de Cuadre:** *"CUADRADO"* (Verde) si la diferencia es 0, o *"DISCREPANCIA"* (Rojo) con el monto exacto de descuadre.
-3. **Sección 1: Movimientos del Extracto Bancario Conciliados en el Período:**
-   - Columnas: `Fecha`, `Hora/Operación`, `Concepto Bancario`, `Referencia / Cheque`, `Contraparte Contable`, `Débito (Gs.)`, `Crédito (Gs.)`, `Saldo Progresivo (Gs.)`.
-4. **Sección 2: Detalle de Partidas en Tránsito (Cheques y Valores Diferidos):**
-   - Listado de los cheques diferidos que la empresa ya entregó pero que al corte del extracto siguen pendientes de cobro por el proveedor (con N° de cheque, proveedor, fecha de vencimiento y monto).
-5. **Sección 3: Partidas Pendientes de Acreditación / Identificación:**
-   - Movimientos del extracto que aún no fueron asociados a ningún comprobante contable.
-6. **Pie de Firma y Auditoría:**
-   - Nombre de usuario, fecha y hora de emisión en zona horaria `America/Asuncion`, paginación *"Página X de Y"* y campos para firmas de Tesorería y Contabilidad.
+1. **Modalidad 1: Detallada (A4 Landscape — Horizontal):**
+   - **Propósito:** Auditoría exhaustiva y punteo minucioso.
+   - **Dimensiones:** $297 \times 210\,\text{mm}$ (área útil $275\,\text{mm}$).
+   - **Contenido:**
+     - Cuadro formal de conciliación bancaria contable superior (Saldo Banco + Depósitos en tránsito - Cheques en tránsito = Saldo en Libros).
+     - **Grilla completa de movimientos:** `Fecha`, `Hora/Operación`, `Concepto Bancario`, `Referencia / Cheque`, `Contraparte Contable`, `Débito (Gs.)`, `Crédito (Gs.)`, `Saldo Progresivo (Gs.)`.
+     - Anexo de Partidas en Tránsito desglosadas (cheques diferidos pendientes con proveedor y vencimiento).
+     - Anexo de movimientos bancarios pendientes de identificar.
+
+2. **Modalidad 2: Resumida Ejecutiva (A4 Portrait — Vertical):**
+   - **Propósito:** Presentación ejecutiva a gerencia, directorio y archivo rápido de 1 sola página.
+   - **Dimensiones:** $210 \times 297\,\text{mm}$ (área útil $180\,\text{mm}$).
+   - **Contenido:**
+     - Encabezado institucional de Extra Supermercado.
+     - **Cuadro Resumen de Conciliación:** Saldo Bancario, Totales en Tránsito y Saldo en Libros con badge de cuadre.
+     - **Solo Partidas Pendientes de Conciliar:** Resumen de cheques diferidos en tránsito y depósitos pendientes (sin listar los cientos de movimientos ya conciliados que abultan páginas innecesarias).
+     - Firmas de Tesorería y Contabilidad.
+
+- **Selector en Interfaz Web (`BancosPage.tsx`):**
+  - El botón *"PDF Conciliación"* dispondrá de un menú desplegable (o modal ágil) con dos opciones claras:
+    * 📄 **"Extracto Detallado (Horizontal)"** $\rightarrow$ `formato=landscape`
+    * 📑 **"Resumen Ejecutivo (Vertical)"** $\rightarrow$ `formato=portrait`
 
 ---
 
