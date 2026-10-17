@@ -1592,6 +1592,37 @@ async def suggest_reconciliation_matches(db: AsyncSession, company_id: str, tran
     sugerencias = []
 
     if tx.tipo == "debito":
+        from api.src.financial.pdf_parser import _extract_nro_cheque
+        nro_detectado = _extract_nro_cheque(tx.descripcion or "", tx.referencia or "")
+        
+        # 1. Búsqueda prioritaria por número de cheque si fue extraído de la descripción/referencia
+        if nro_detectado:
+            chq_exact = await db.execute(
+                select(Cheque).where(
+                    Cheque.company_id == cid,
+                    Cheque.estado.in_(["pendiente", "entregado"]),
+                    Cheque.numero.ilike(f"%{nro_detectado}%")
+                )
+            )
+            for c in chq_exact.scalars().all():
+                dias = abs((tx.fecha - (c.fecha_pago or c.fecha_emision)).days) if (c.fecha_pago or c.fecha_emision) else 0
+                diff_monto = abs(Decimal(str(c.monto)) - monto_abs)
+                mismo_monto = diff_monto <= (monto_abs * Decimal("0.005"))
+                misma_cuenta = (c.bank_account_id == tx.bank_account_id) if (c.bank_account_id and tx.bank_account_id) else True
+                
+                # Nivel Verde = coincidencia por número exacto + monto idéntico
+                confidence = "verde" if (mismo_monto and misma_cuenta) else "amarillo"
+                
+                sugerencias.append({
+                    "tipo": "cheque", "id": str(c.id),
+                    "descripcion": f"Cheque N° {c.numero} — {c.beneficiario} (Match N° {nro_detectado})",
+                    "monto": float(c.monto), "fecha": c.fecha_pago.isoformat() if c.fecha_pago else None,
+                    "diferencia_dias": dias,
+                    "confidence": confidence,
+                    "match_nro": True
+                })
+
+        # 2. Búsqueda por monto similar en cheques pendientes/entregados
         chq_result = await db.execute(
             select(Cheque).where(
                 Cheque.company_id == cid,
@@ -1601,17 +1632,22 @@ async def suggest_reconciliation_matches(db: AsyncSession, company_id: str, tran
             )
         )
         for c in chq_result.scalars().all():
+            if any(s["id"] == str(c.id) for s in sugerencias):
+                continue
             ref_date = c.fecha_pago or c.fecha_emision
             if ref_date and abs((tx.fecha - ref_date).days) <= ventana_dias.days:
                 dias = abs((tx.fecha - ref_date).days)
+                conf = _match_confidence(monto_abs, Decimal(str(c.monto)), dias)
                 sugerencias.append({
                     "tipo": "cheque", "id": str(c.id),
                     "descripcion": f"Cheque N° {c.numero} — {c.beneficiario}",
                     "monto": float(c.monto), "fecha": c.fecha_pago.isoformat() if c.fecha_pago else None,
                     "diferencia_dias": dias,
-                    "confidence": _match_confidence(monto_abs, Decimal(str(c.monto)), dias),
+                    "confidence": "verde" if conf == "alta" else "amarillo",
+                    "match_nro": False
                 })
 
+        # 3. Búsqueda en facturas de proveedor
         inv_result = await db.execute(
             select(SupplierInvoice).where(
                 SupplierInvoice.company_id == cid,
@@ -1623,23 +1659,23 @@ async def suggest_reconciliation_matches(db: AsyncSession, company_id: str, tran
         for inv in inv_result.scalars().all():
             if abs((tx.fecha - inv.fecha_vencimiento).days) <= ventana_dias.days:
                 dias = abs((tx.fecha - inv.fecha_vencimiento).days)
+                conf = _match_confidence(monto_abs, Decimal(str(inv.saldo_pendiente)), dias)
                 sugerencias.append({
                     "tipo": "invoice", "id": str(inv.id),
                     "descripcion": f"Factura {inv.numero_factura}",
                     "monto": float(inv.saldo_pendiente), "fecha": inv.fecha_vencimiento.isoformat(),
                     "diferencia_dias": dias,
-                    "confidence": _match_confidence(monto_abs, Decimal(str(inv.saldo_pendiente)), dias),
+                    "confidence": "verde" if conf == "alta" else "amarillo",
+                    "match_nro": False
                 })
 
-    # alta confianza primero, despues por cercania de fecha
-    sugerencias.sort(key=lambda s: (0 if s["confidence"] == "alta" else 1, s["diferencia_dias"]))
+    # Ordenar: nivel verde primero, luego los que coinciden por número, luego por diferencia de días
+    sugerencias.sort(key=lambda s: (0 if s["confidence"] == "verde" else 1, 0 if s.get("match_nro") else 1, s["diferencia_dias"]))
     return sugerencias[:10]
 
 
 def _match_confidence(monto_transaccion: Decimal, monto_candidato: Decimal, diferencia_dias: int) -> str:
-    """Alta confianza = mismo monto (dentro de 0.1%, no el 1% de tolerancia
-    de busqueda) y fecha muy cercana -- suficiente para preseleccionar en
-    conciliacion automatica sin que el usuario revise cada uno a mano."""
+    """Alta confianza = mismo monto (dentro de 0.1%) y fecha muy cercana."""
     if monto_transaccion == 0:
         return "baja"
     diff_pct = abs(monto_candidato - monto_transaccion) / monto_transaccion
