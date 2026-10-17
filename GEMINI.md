@@ -67,3 +67,10 @@
    - **Formato Divisas (USD / BRL):** Con separador de miles por punto (`.`) y centavos por coma (`,`), ej: `1.250,50`.
    - **Visualización en Pantallas / Tablas:** Se debe emplear siempre `formatPYG()`, `formatCurrency()`, `formatBRL()` o `formatUSD()` de `src/utils/format.ts`. Nunca imprimir números crudos sin formato en montos de dinero.
 
+11. **CONSISTENCIA Y SINCRONIZACIÓN FULL-STACK SIMÉTRICA (FRONTEND & BACKEND):**
+   - **Simetría Operativa Obligatoria:** Toda modificación de reglas de negocio, validaciones o flujos operativos (ej. redondeos, límites, pagos, notas de crédito, retenciones) debe reflejarse y validarse de forma completa y simultánea en ambos extremos:
+     * **Frontend:** Formularios, máscaras, límites interactivos, badges y alertas.
+     * **Backend:** Validación de payloads en schemas Pydantic, lógica de servicios, excepciones HTTP y asientos contables correspondientes.
+   - **Autoconsistencia de Dependencias en Backend:** Antes de desplegar cualquier cambio en el backend, asegurar que todas las variables, loggers (`logging.getLogger(__name__)`), módulos importados y modelos contables invocados estén formalmente definidos y tipados.
+   - **Despliegues Coordinados:** Desplegar de forma coordinada frontend (`deploy-ui.sh`) y backend (`deploy-api.sh`) para prevenir desfasajes donde la interfaz emita requerimientos no soportados por el API o viceversa.
+

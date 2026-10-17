@@ -115,7 +115,7 @@ class AccountingEntry(Base):
     tipo = Column(String(10), nullable=False)
     monto = Column(Numeric(15, 0), nullable=False)
     concepto = Column(String(300))
-    referencia_tipo = Column(String(30))
+    referencia_tipo = Column(String(60))
     referencia_id = Column(UUID(as_uuid=True))
     asiento_numero = Column(String(20))
     reversa_de_asiento = Column(String(20), index=True)
