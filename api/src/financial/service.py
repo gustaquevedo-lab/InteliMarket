@@ -3167,6 +3167,20 @@ async def create_supplier_credit_note(db: AsyncSession, company_id: str, data: S
     if monto_dec <= 0:
         raise ValueError("El monto de la Nota de Crédito debe ser mayor a 0")
 
+    num_clean = data.numero.strip()
+    # Blindaje anti-duplicados: verificar que la NC no exista ya para este proveedor
+    dup_res = await db.execute(
+        select(SupplierCreditNote.id)
+        .where(
+            SupplierCreditNote.company_id == cid,
+            SupplierCreditNote.supplier_id == sid,
+            SupplierCreditNote.numero == num_clean,
+            SupplierCreditNote.cancelado.is_(False),
+        )
+    )
+    if dup_res.scalar_one_or_none():
+        raise ValueError(f"La Nota de Crédito N° {num_clean} ya se encuentra registrada para este proveedor.")
+
     note = SupplierCreditNote(
         company_id=cid,
         supplier_id=sid,
