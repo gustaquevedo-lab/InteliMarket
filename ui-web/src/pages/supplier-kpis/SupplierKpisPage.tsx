@@ -22,6 +22,20 @@ function currentMonthStr() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
 }
 
+function formatMonthName(periodoStr: string): string {
+  if (!periodoStr) return ""
+  const parts = periodoStr.split("-")
+  if (parts.length < 2) return periodoStr
+  const year = parts[0]
+  const monthNum = parseInt(parts[1], 10)
+  const monthNames = [
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+  ]
+  const name = monthNames[monthNum - 1] || parts[1]
+  return `${name} ${year}`
+}
+
 const PARESA_ID = "1de9068d-9c27-5557-b142-710b227dc153"
 
 interface TramoEscala {
@@ -100,6 +114,17 @@ export default function SupplierKpisPage() {
   const [selectedPeriodId, setSelectedPeriodId] = useState<string>("")
   const [summary, setSummary] = useState<SupplierKpiSummary | null>(null)
   const [loadingParesa, setLoadingParesa] = useState(false)
+  const [recalculatingSales, setRecalculatingSales] = useState(false)
+
+  // Selector de Productos PARESA
+  const [productPickerOpen, setProductPickerOpen] = useState(false)
+  const [activeIndicatorForProducts, setActiveIndicatorForProducts] = useState<any>(null)
+  const [paresaProducts, setParesaProducts] = useState<any[]>([])
+  const [loadingParesaProducts, setLoadingParesaProducts] = useState(false)
+  const [productSearch, setProductSearch] = useState("")
+  const [productSegmentFilter, setProductSegmentFilter] = useState("all")
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([])
+  const [savingProducts, setSavingProducts] = useState(false)
 
   // Modals PARESA
   const [modalOpen, setModalOpen] = useState(false)
@@ -157,15 +182,20 @@ export default function SupplierKpisPage() {
     }
   }, [selectedBranch])
 
-  const loadParesaPeriods = useCallback(async () => {
+  const loadParesaPeriods = useCallback(async (targetMes?: string) => {
     setLoadingParesa(true)
     try {
       const list = await api.supplierKpis.listPeriods(PARESA_ID)
       if (Array.isArray(list) && list.length > 0) {
-        setPeriods(list)
-        const currentPeriod = list.find(p => p.periodo.startsWith(mes)) || list[0]
-        setSelectedPeriodId(currentPeriod.id)
-        await loadParesaSummary(currentPeriod.id)
+        const sorted = [...list].sort((a, b) => a.periodo.localeCompare(b.periodo))
+        setPeriods(sorted)
+        const searchMonth = targetMes || mes
+        const currentPeriod = sorted.find(p => p.periodo.startsWith(searchMonth)) || sorted[sorted.length - 1]
+        if (currentPeriod) {
+          setSelectedPeriodId(currentPeriod.id)
+          setMes(currentPeriod.periodo.slice(0, 7))
+          await loadParesaSummary(currentPeriod.id)
+        }
       }
     } catch (e: any) {
       console.error("Error loading PARESA periods:", e)
@@ -173,6 +203,121 @@ export default function SupplierKpisPage() {
       setLoadingParesa(false)
     }
   }, [mes, loadParesaSummary])
+
+  const handleSelectPeriod = (period: SupplierKpiPeriod) => {
+    setSelectedPeriodId(period.id)
+    setMes(period.periodo.slice(0, 7))
+    loadParesaSummary(period.id)
+  }
+
+  const handleRecalculateSales = async () => {
+    if (!selectedPeriodId) return
+    setRecalculatingSales(true)
+    try {
+      const updatedSummary = await (api.supplierKpis as any).recalculateSales(selectedPeriodId)
+      if (updatedSummary) {
+        setSummary(updatedSummary)
+      } else {
+        await loadParesaSummary(selectedPeriodId)
+      }
+      toast.success("Ventas reales en Cajas Unitarias (UC) recalculadas con éxito desde la base de datos")
+    } catch (e: any) {
+      console.error("Error recalculating sales:", e)
+      toast.error("Error al recalcular ventas reales", e)
+    } finally {
+      setRecalculatingSales(false)
+    }
+  }
+
+  // Carga del catálogo de productos PARESA
+  const loadParesaProducts = useCallback(async () => {
+    if (paresaProducts.length > 0) return
+    setLoadingParesaProducts(true)
+    try {
+      const prods = await (api.supplierKpis as any).getParesaProducts()
+      if (Array.isArray(prods)) {
+        setParesaProducts(prods)
+      }
+    } catch (e: any) {
+      console.error("Error fetching PARESA products:", e)
+      toast.error("Error al cargar productos PARESA", e)
+    } finally {
+      setLoadingParesaProducts(false)
+    }
+  }, [paresaProducts.length, toast])
+
+  const handleOpenProductPicker = async (indicator: any) => {
+    setActiveIndicatorForProducts(indicator)
+    setSelectedProductIds(Array.isArray(indicator.product_ids) ? indicator.product_ids : [])
+    setProductSearch("")
+    setProductSegmentFilter("all")
+    setProductPickerOpen(true)
+    await loadParesaProducts()
+  }
+
+  const toggleProduct = (productId: string) => {
+    setSelectedProductIds(prev => 
+      prev.includes(productId) ? prev.filter(id => id !== productId) : [...prev, productId]
+    )
+  }
+
+  const handleSelectAllFiltered = (filteredIds: string[]) => {
+    setSelectedProductIds(prev => Array.from(new Set([...prev, ...filteredIds])))
+  }
+
+  const handleDeselectAllFiltered = (filteredIds: string[]) => {
+    const filterSet = new Set(filteredIds)
+    setSelectedProductIds(prev => prev.filter(id => !filterSet.has(id)))
+  }
+
+  const handleSaveProductSelection = async () => {
+    if (!summary || !activeIndicatorForProducts) return
+    setSavingProducts(true)
+    try {
+      const updatedIndicators = summary.indicadores.map((ind: any) => {
+        const isTarget = ind.id === activeIndicatorForProducts.id
+        return {
+          id: ind.id,
+          codigo: ind.codigo,
+          nombre: ind.nombre,
+          categoria: ind.categoria,
+          segmento_paresa: ind.segmento_paresa,
+          unidad_medida: ind.unidad_medida || "uc",
+          peso_pct: ind.peso_pct,
+          meta_uc: ind.meta_uc || ind.meta,
+          resultado_uc: ind.resultado_uc || ind.resultado,
+          piso_minimo_pct: ind.piso_minimo_pct,
+          orden: ind.orden,
+          es_foco: ind.es_foco,
+          descripcion_skus: ind.descripcion_skus,
+          product_ids: isTarget ? selectedProductIds : ind.product_ids,
+          reglas_escala: ind.reglas_escala,
+        }
+      })
+
+      await api.supplierKpis.bulkUpdateIndicators(summary.period.id, {
+        rebate_pct_objetivo: summary.period.rebate_pct_objetivo,
+        observaciones: summary.period.observaciones,
+        indicators: updatedIndicators,
+      })
+
+      toast.success(`${selectedProductIds.length} productos vinculados a "${activeIndicatorForProducts.nombre}"`)
+      setProductPickerOpen(false)
+
+      // Recalcular ventas inmediatamente
+      const updatedSummary = await (api.supplierKpis as any).recalculateSales(summary.period.id)
+      if (updatedSummary) {
+        setSummary(updatedSummary)
+      } else {
+        await loadParesaSummary(summary.period.id)
+      }
+    } catch (e: any) {
+      console.error(e)
+      toast.error("Error al guardar la asignación de productos", e)
+    } finally {
+      setSavingProducts(false)
+    }
+  }
 
   useEffect(() => {
     if (activeMainTab === "general") {
@@ -395,6 +540,25 @@ export default function SupplierKpisPage() {
       gap: totalGap
     }
   }, [paresaFocusIndicators, multiDashboard])
+
+  const filteredProducts = useMemo(() => {
+    return paresaProducts.filter(p => {
+      if (productSegmentFilter === "selected") {
+        if (!selectedProductIds.includes(p.id)) return false
+      } else if (productSegmentFilter !== "all") {
+        if (p.segmento_paresa !== productSegmentFilter) return false
+      }
+
+      if (productSearch.trim()) {
+        const q = productSearch.toLowerCase()
+        const matchName = (p.nombre || "").toLowerCase().includes(q)
+        const matchSku = (p.sku || "").toLowerCase().includes(q)
+        const matchBar = (p.codigo_barra || "").toLowerCase().includes(q)
+        if (!matchName && !matchSku && !matchBar) return false
+      }
+      return true
+    })
+  }, [paresaProducts, productSegmentFilter, productSearch, selectedProductIds])
 
   return (
     <div className="p-6 space-y-6 max-w-[1700px] mx-auto bg-gray-50/50 dark:bg-slate-950 min-h-screen text-gray-900 dark:text-gray-100">
@@ -903,6 +1067,64 @@ export default function SupplierKpisPage() {
             </div>
           </div>
 
+          {/* ─── BARRA DE NAVEGACIÓN MENSUAL PARESA & RECALCULO DE VENTAS (UC) ─── */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-xl border border-gray-200 dark:border-gray-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-2 text-xs font-black text-gray-500 uppercase tracking-wider mr-2">
+                <Calendar className="w-4 h-4 text-red-600" />
+                <span>Mes de Control:</span>
+              </div>
+              {periods.map(p => {
+                const isSelected = p.id === selectedPeriodId
+                const monthLabel = formatMonthName(p.periodo)
+                const isCurrent = p.periodo.startsWith("2026-10")
+                const isPlanilla = p.periodo.startsWith("2026-09")
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => handleSelectPeriod(p)}
+                    className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                      isSelected
+                        ? "bg-red-600 text-white shadow-lg shadow-red-600/30 scale-105"
+                        : "bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-700"
+                    }`}
+                  >
+                    <span>{monthLabel}</span>
+                    {isCurrent && (
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${isSelected ? "bg-white/20 text-white" : "bg-emerald-100 text-emerald-800"}`}>
+                        En Curso
+                      </span>
+                    )}
+                    {isPlanilla && (
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${isSelected ? "bg-white/20 text-white" : "bg-blue-100 text-blue-800"}`}>
+                        Oficial Planilla
+                      </span>
+                    )}
+                    {p.estado === "cerrado" && !isPlanilla && (
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${isSelected ? "bg-white/20 text-white" : "bg-gray-200 text-gray-600"}`}>
+                        Cerrado
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+
+            <div className="flex items-center gap-2 w-full md:w-auto justify-end">
+              <button
+                type="button"
+                onClick={handleRecalculateSales}
+                disabled={recalculatingSales}
+                className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-2xl text-xs font-black shadow-md shadow-indigo-600/20 flex items-center gap-2 transition cursor-pointer disabled:opacity-50"
+                title="Recalcula las ventas en Cajas Unitarias (UC) para el mes seleccionado directamente desde la base de datos de facturación"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${recalculatingSales ? "animate-spin" : ""}`} />
+                <span>{recalculatingSales ? "Recalculando UCs..." : "Recalcular Ventas Reales (UC)"}</span>
+              </button>
+            </div>
+          </div>
+
           {/* PARESA Macro Cards con Tooltips Informativos */}
           {summary && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1157,6 +1379,7 @@ export default function SupplierKpisPage() {
                         <th className="py-3 px-4 text-center">% Proyectado</th>
                         <th className="py-3 px-4 text-right">Brecha Restante (Gap)</th>
                         <th className="py-3 px-4 text-center">Estado Proyectado</th>
+                        <th className="py-3 px-4 text-center">SKUs Asignados</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -1168,6 +1391,7 @@ export default function SupplierKpisPage() {
                         const proyVal = diasTrans > 0 ? (realVal / diasTrans) * diasTot : 0
                         const proyPct = metaVal > 0 ? ((proyVal / metaVal) * 100).toFixed(1) : "0"
                         const gapVal = Math.max(0, metaVal - realVal)
+                        const assignedCount = Array.isArray(ind.product_ids) ? ind.product_ids.length : 0
 
                         return (
                           <tr key={ind.id} className="hover:bg-gray-50/80 dark:hover:bg-slate-800/40">
@@ -1216,6 +1440,17 @@ export default function SupplierKpisPage() {
                                   EN RIESGO
                                 </span>
                               )}
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenProductPicker(ind)}
+                                className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900 border border-indigo-200 dark:border-indigo-800 inline-flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+                                title="Seleccionar SKUs que suman a este indicador"
+                              >
+                                <Package className="w-3.5 h-3.5 text-indigo-600" />
+                                <span>{assignedCount > 0 ? `${assignedCount} SKUs` : "Todos del segmento"}</span>
+                              </button>
                             </td>
                           </tr>
                         )
@@ -1270,6 +1505,7 @@ export default function SupplierKpisPage() {
                             </span>
                           )}
                         </td>
+                        <td></td>
                       </tr>
                     </tfoot>
                   </table>
@@ -1433,6 +1669,7 @@ export default function SupplierKpisPage() {
                         <th className="py-3 px-4 text-center">% Proyectado</th>
                         <th className="py-3 px-4 text-right">Brecha (Faltante)</th>
                         <th className="py-3 px-4 text-center">Estado Proyectado</th>
+                        <th className="py-3 px-4 text-center">SKUs en Foco</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -1446,6 +1683,7 @@ export default function SupplierKpisPage() {
                         const gapVal = Math.max(0, metaVal - realVal)
                         const isSuperado = Number(proyPct) >= 100
                         const isEnMeta = Number(proyPct) >= 80
+                        const assignedCount = Array.isArray(ind.product_ids) ? ind.product_ids.length : 0
 
                         return (
                           <tr key={ind.id} className="hover:bg-amber-50/40 dark:hover:bg-slate-800/40 transition">
@@ -1495,6 +1733,17 @@ export default function SupplierKpisPage() {
                                   ⚠️ EN RIESGO
                                 </span>
                               )}
+                            </td>
+                            <td className="py-3.5 px-4 text-center">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenProductPicker(ind)}
+                                className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900 border border-amber-200 dark:border-amber-800 inline-flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+                                title="Seleccionar qué productos entran en este foco"
+                              >
+                                <Package className="w-3.5 h-3.5 text-amber-600" />
+                                <span>{assignedCount > 0 ? `${assignedCount} SKUs` : "Seleccionar SKUs"}</span>
+                              </button>
                             </td>
                           </tr>
                         )
@@ -1549,6 +1798,7 @@ export default function SupplierKpisPage() {
                             </span>
                           )}
                         </td>
+                        <td></td>
                       </tr>
                     </tfoot>
                   </table>
@@ -1899,6 +2149,201 @@ export default function SupplierKpisPage() {
                 <Printer className="w-4 h-4" />
                 Imprimir Liquidación
               </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* ═════════════════════════════════════════════════════════════════════════════ */}
+      {/* ─── MODAL SELECTOR DE PRODUCTOS PARESA (SKUs POR META / FOCO) ─── */}
+      {/* ═════════════════════════════════════════════════════════════════════════════ */}
+      {productPickerOpen && activeIndicatorForProducts && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-4xl w-full p-6 shadow-2xl border border-gray-200 dark:border-slate-800 flex flex-col max-h-[90vh]">
+            
+            {/* Header Modal */}
+            <div className="flex items-start justify-between border-b border-gray-100 dark:border-slate-800 pb-4 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-red-50 dark:bg-red-950/60 text-red-600 rounded-2xl shrink-0">
+                  <Package className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-lg font-black text-gray-900 dark:text-white">
+                      Selector de SKUs PARESA
+                    </h3>
+                    <span className="text-xs font-black px-2.5 py-0.5 rounded-full bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300 border border-red-200">
+                      {activeIndicatorForProducts.nombre}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Selecciona qué productos exactos computan ventas (Cajas Unitarias) para este indicador.
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setProductPickerOpen(false)} 
+                className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Filtros y Buscador */}
+            <div className="py-4 space-y-3 shrink-0">
+              <div className="flex flex-col sm:flex-row gap-2">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 absolute left-3.5 top-3 text-gray-400" />
+                  <input
+                    type="text"
+                    value={productSearch}
+                    onChange={e => setProductSearch(e.target.value)}
+                    placeholder="Buscar por nombre, SKU, código de barras..."
+                    className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-slate-800/80 border border-gray-200 dark:border-slate-700 rounded-2xl text-xs font-bold focus:outline-none focus:ring-2 focus:ring-red-500/20"
+                  />
+                  {productSearch && (
+                    <button 
+                      onClick={() => setProductSearch("")} 
+                      className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Segment Filter */}
+                <select
+                  value={productSegmentFilter}
+                  onChange={e => setProductSegmentFilter(e.target.value)}
+                  className="px-3 py-2 bg-gray-50 dark:bg-slate-800/80 border border-gray-200 dark:border-slate-700 rounded-2xl text-xs font-bold text-gray-700 dark:text-gray-300 focus:outline-none"
+                >
+                  <option value="all">Todos los segmentos</option>
+                  <option value="ssd_core_ms">SSDs Core Multi-Serve (Gaseosas Grandes)</option>
+                  <option value="ssd_core_ss">SSDs Core Single-Serve (Gaseosas Personales)</option>
+                  <option value="hidra_core_dasani">Hidratación Dasani (Aguas)</option>
+                  <option value="hidra_isotonico_powerade">Hidratación Powerade (Isotónicos)</option>
+                  <option value="nutri_nectar_delvalle">Nutrición Del Valle (Néctares/Jugos)</option>
+                  <option value="nutri_soja_ades">Nutrición Ades (Soja)</option>
+                  <option value="nutri_energia_monster">Nutrición Monster (Energizantes)</option>
+                  <option value="selected">Solo Seleccionados ({selectedProductIds.length})</option>
+                </select>
+              </div>
+
+              {/* Botones de selección rápida */}
+              <div className="flex items-center justify-between text-xs flex-wrap gap-2 pt-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-black text-gray-700 dark:text-gray-300">
+                    {selectedProductIds.length} seleccionados
+                  </span>
+                  <span className="text-gray-400">•</span>
+                  <span className="text-gray-500">
+                    Mostrando {filteredProducts.length} de {paresaProducts.length} productos
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSelectAllFiltered(filteredProducts.map(p => p.id))}
+                    className="px-2.5 py-1 text-[11px] font-bold bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300 rounded-xl transition cursor-pointer"
+                  >
+                    Marcar todos filtrados ({filteredProducts.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeselectAllFiltered(filteredProducts.map(p => p.id))}
+                    className="px-2.5 py-1 text-[11px] font-bold bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-rose-600 rounded-xl transition cursor-pointer"
+                  >
+                    Desmarcar filtrados
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Lista scrolleable de productos */}
+            <div className="flex-1 overflow-y-auto border border-gray-100 dark:border-slate-800 rounded-2xl divide-y divide-gray-100 dark:divide-slate-800/60 min-h-[300px]">
+              {loadingParesaProducts ? (
+                <div className="py-20 flex flex-col items-center justify-center gap-2 text-gray-400">
+                  <Loader2 className="w-6 h-6 animate-spin text-red-600" />
+                  <p className="text-xs font-semibold">Cargando 543 productos de PARESA...</p>
+                </div>
+              ) : filteredProducts.length === 0 ? (
+                <div className="py-16 text-center text-gray-400">
+                  <p className="text-sm font-bold">No se encontraron productos con ese filtro</p>
+                  <p className="text-xs mt-1">Prueba con otro término de búsqueda o segmento.</p>
+                </div>
+              ) : (
+                filteredProducts.map(p => {
+                  const isChecked = selectedProductIds.includes(p.id)
+                  return (
+                    <div
+                      key={p.id}
+                      onClick={() => toggleProduct(p.id)}
+                      className={`p-3 flex items-center justify-between gap-3 cursor-pointer transition ${
+                        isChecked 
+                          ? "bg-red-50/60 dark:bg-red-950/20 hover:bg-red-50 dark:hover:bg-red-950/30" 
+                          : "hover:bg-gray-50/80 dark:hover:bg-slate-800/40"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => {}}
+                          className="w-4 h-4 rounded text-red-600 focus:ring-red-500 cursor-pointer"
+                        />
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-black text-xs text-gray-900 dark:text-white">
+                              {p.nombre}
+                            </span>
+                            {p.segmento_paresa && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 font-mono">
+                                {p.segmento_paresa}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-gray-400 font-mono mt-0.5">
+                            SKU: {p.sku || "N/A"} {p.codigo_barra ? `• Barra: ${p.codigo_barra}` : ""}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="text-right shrink-0">
+                        <span className="text-xs font-black text-indigo-600 dark:text-indigo-400 font-mono">
+                          x{p.caja_unitaria_factor.toFixed(2)} UC
+                        </span>
+                        <p className="text-[10px] text-gray-400 font-medium">Factor Caja</p>
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+
+            {/* Footer Modal */}
+            <div className="pt-4 mt-2 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between shrink-0">
+              <span className="text-xs font-bold text-gray-500">
+                Total para esta meta: <b className="text-red-600">{selectedProductIds.length} SKUs</b>
+              </span>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setProductPickerOpen(false)}
+                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300 rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveProductSelection}
+                  disabled={savingProducts}
+                  className="px-5 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-black flex items-center gap-2 shadow-lg shadow-red-600/30 transition cursor-pointer disabled:opacity-50"
+                >
+                  {savingProducts ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  <span>Guardar Selección & Recalcular Ventas (UC)</span>
+                </button>
+              </div>
             </div>
 
           </div>

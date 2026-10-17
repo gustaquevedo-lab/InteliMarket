@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, Any
 
 from pydantic import BaseModel
 
@@ -37,16 +37,56 @@ class IndicatorResponse(BaseModel):
     piso_minimo_pct: Optional[float] = None
     orden: int = 0
     categoria: Optional[str] = None
+    unidad_medida: Optional[str] = "uc"
     meta_uc: Optional[float] = None
     resultado_uc: Optional[float] = None
     cumplimiento_pct: Optional[float] = None
     es_foco: Optional[bool] = None
     segmento_paresa: Optional[str] = None
+    descripcion_skus: Optional[str] = None
+    product_ids: Optional[list[str]] = None
+    reglas_escala: Optional[Any] = None
     pct_cumplimiento: Optional[float] = None  # calculado, no persistido
     aporte_ponderado_pct: Optional[float] = None  # calculado, no persistido
 
     class Config:
         from_attributes = True
+
+
+class BulkIndicatorItem(BaseModel):
+    id: Optional[uuid.UUID] = None
+    codigo: str
+    nombre: str
+    categoria: Optional[str] = "volumen"
+    segmento_paresa: Optional[str] = None
+    unidad_medida: Optional[str] = "uc"
+    peso_pct: Decimal = Decimal("0")
+    meta_uc: Optional[Decimal] = None
+    resultado_uc: Optional[Decimal] = None
+    piso_minimo_pct: Optional[Decimal] = None
+    orden: int = 0
+    es_foco: bool = False
+    descripcion_skus: Optional[str] = None
+    product_ids: Optional[list[str]] = None
+    reglas_escala: Optional[Any] = None
+
+
+class BulkUpdateIndicatorsRequest(BaseModel):
+    rebate_pct_objetivo: Optional[Decimal] = None
+    observaciones: Optional[str] = None
+    indicators: list[BulkIndicatorItem]
+
+
+class ParesaProductItem(BaseModel):
+    id: uuid.UUID
+    sku: Optional[str] = None
+    nombre: str
+    codigo_barra: Optional[str] = None
+    caja_unitaria_factor: float = 1.0
+    segmento_paresa: Optional[str] = None
+    precio_venta: Optional[float] = None
+    costo_promedio: Optional[float] = None
+    activo: Optional[bool] = True
 
 
 class PeriodCreate(BaseModel):

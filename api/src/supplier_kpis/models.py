@@ -7,8 +7,8 @@ eso no se modelan como columnas fijas sino como filas editables por periodo,
 todas atadas a un SupplierKpiPeriod via FK.
 """
 
-from sqlalchemy import Column, String, Numeric, Date, DateTime, ForeignKey, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, String, Numeric, Date, DateTime, ForeignKey, Text, Boolean
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 
 from api.src.db import Base
@@ -40,5 +40,17 @@ class SupplierKpiIndicator(Base):
     resultado = Column(Numeric(15, 2))
     piso_minimo_pct = Column(Numeric(5, 2))  # nullable: bajo ese % de cumplimiento, aporta 0
     orden = Column(Numeric(3, 0), default=0)
+    categoria = Column(String(50))
+    segmento_paresa = Column(String(50))
+    unidad_medida = Column(String(20), default="uc")
+    meta_uc = Column(Numeric(15, 2))
+    resultado_uc = Column(Numeric(15, 2))
+    cumplimiento_pct = Column(Numeric(5, 2))
+    rebate_ganado_pct = Column(Numeric(5, 2), default=0)
+    es_foco = Column(Boolean, default=False)
+    reglas_escala = Column(JSONB)
+    condicion_extra = Column(JSONB)
+    descripcion_skus = Column(Text)
+    product_ids = Column(JSONB)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

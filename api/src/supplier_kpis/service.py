@@ -11,8 +11,9 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import select, delete, text
+from sqlalchemy import select, delete, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import HTTPException
 
 from api.src.supplier_kpis.models import SupplierKpiPeriod, SupplierKpiIndicator
 from api.src.supplier_kpis import schemas
@@ -117,6 +118,211 @@ async def list_indicators(db: AsyncSession, period_id: uuid.UUID) -> list[Suppli
     return list(result.scalars().all())
 
 
+async def bulk_update_indicators(
+    db: AsyncSession,
+    period_id: uuid.UUID,
+    data: schemas.BulkUpdateIndicatorsRequest
+) -> list[SupplierKpiIndicator]:
+    period = await get_period(db, period_id)
+    if not period:
+        raise HTTPException(status_code=404, detail="Periodo no encontrado")
+
+    if data.rebate_pct_objetivo is not None:
+        period.rebate_pct_objetivo = data.rebate_pct_objetivo
+    if data.observaciones is not None:
+        period.observaciones = data.observaciones
+
+    saved_indicators = []
+    for item in data.indicators:
+        meta_dec = item.meta_uc if item.meta_uc is not None else None
+        res_dec = item.resultado_uc if item.resultado_uc is not None else None
+        
+        ind = None
+        if item.id:
+            res_db = await db.execute(
+                select(SupplierKpiIndicator).where(
+                    SupplierKpiIndicator.id == item.id,
+                    SupplierKpiIndicator.period_id == period_id
+                )
+            )
+            ind = res_db.scalar_one_or_none()
+            
+        if not ind:
+            res_code = await db.execute(
+                select(SupplierKpiIndicator).where(
+                    SupplierKpiIndicator.codigo == item.codigo,
+                    SupplierKpiIndicator.period_id == period_id
+                )
+            )
+            ind = res_code.scalar_one_or_none()
+
+        if ind:
+            ind.nombre = item.nombre
+            ind.categoria = item.categoria
+            ind.segmento_paresa = item.segmento_paresa
+            ind.unidad_medida = item.unidad_medida or "uc"
+            ind.peso_pct = item.peso_pct
+            ind.meta = meta_dec
+            ind.resultado = res_dec
+            ind.meta_uc = meta_dec
+            ind.resultado_uc = res_dec
+            ind.piso_minimo_pct = item.piso_minimo_pct
+            ind.orden = item.orden
+            ind.es_foco = item.es_foco
+            ind.descripcion_skus = item.descripcion_skus
+            ind.product_ids = item.product_ids
+            ind.reglas_escala = item.reglas_escala
+            if meta_dec and meta_dec > 0 and res_dec is not None:
+                ind.cumplimiento_pct = (res_dec / meta_dec) * Decimal("100")
+            saved_indicators.append(ind)
+        else:
+            cumpl = (res_dec / meta_dec * Decimal("100")) if (meta_dec and meta_dec > 0 and res_dec is not None) else None
+            new_ind = SupplierKpiIndicator(
+                period_id=period_id,
+                codigo=item.codigo,
+                nombre=item.nombre,
+                categoria=item.categoria,
+                segmento_paresa=item.segmento_paresa,
+                unidad_medida=item.unidad_medida or "uc",
+                peso_pct=item.peso_pct,
+                meta=meta_dec,
+                resultado=res_dec,
+                meta_uc=meta_dec,
+                resultado_uc=res_dec,
+                cumplimiento_pct=cumpl,
+                piso_minimo_pct=item.piso_minimo_pct,
+                orden=item.orden,
+                es_foco=item.es_foco,
+                descripcion_skus=item.descripcion_skus,
+                product_ids=item.product_ids,
+                reglas_escala=item.reglas_escala,
+            )
+            db.add(new_ind)
+            saved_indicators.append(new_ind)
+
+    await db.commit()
+    for ind in saved_indicators:
+        await db.refresh(ind)
+    return saved_indicators
+
+
+async def get_paresa_products(db: AsyncSession, company_id: uuid.UUID) -> list[schemas.ParesaProductItem]:
+    from api.src.products.models import Product
+    paresa_supplier_id = uuid.UUID("1de9068d-9c27-5557-b142-710b227dc153")
+    q = (
+        select(Product)
+        .where(
+            Product.company_id == company_id,
+            or_(
+                Product.supplier_id == paresa_supplier_id,
+                Product.segmento_paresa.isnot(None)
+            )
+        )
+        .order_by(Product.segmento_paresa.nulls_last(), Product.nombre)
+    )
+    result = await db.execute(q)
+    products = result.scalars().all()
+    
+    return [
+        schemas.ParesaProductItem(
+            id=p.id,
+            sku=p.sku,
+            nombre=p.nombre,
+            codigo_barra=p.codigo_barra,
+            caja_unitaria_factor=float(p.caja_unitaria_factor or 1.0),
+            segmento_paresa=p.segmento_paresa,
+            precio_venta=float(p.precio_venta) if p.precio_venta is not None else None,
+            costo_promedio=float(p.costo_promedio) if p.costo_promedio is not None else None,
+            activo=p.activo if p.activo is not None else True,
+        )
+        for p in products
+    ]
+
+
+async def recalculate_period_sales(db: AsyncSession, period_id: uuid.UUID) -> schemas.PeriodSummary:
+    period = await get_period(db, period_id)
+    if not period:
+        raise HTTPException(status_code=404, detail="Periodo no encontrado")
+        
+    start_date, end_date = _month_range(period.periodo)
+    paresa_supplier_id = period.supplier_id
+    
+    sales_query = text("""
+        SELECT 
+            si.product_id,
+            p.segmento_paresa,
+            p.nombre,
+            SUM(si.cantidad * COALESCE(p.caja_unitaria_factor, 1.0)) as total_uc
+        FROM sale_items si
+        JOIN sales s ON s.id = si.sale_id
+        JOIN products p ON p.id = si.product_id
+        WHERE s.company_id = :company_id
+          AND s.fecha >= :start_date 
+          AND s.fecha < :end_date
+          AND s.estado != 'cancelada'
+          AND (p.supplier_id = :supplier_id OR p.segmento_paresa IS NOT NULL)
+        GROUP BY si.product_id, p.segmento_paresa, p.nombre
+    """)
+    res = await db.execute(sales_query, {
+        "company_id": str(period.company_id),
+        "start_date": start_date,
+        "end_date": end_date,
+        "supplier_id": str(paresa_supplier_id),
+    })
+    rows = res.fetchall()
+    
+    uc_by_product: dict[str, float] = {}
+    uc_by_segment: dict[str, float] = {}
+    total_paresa_uc: float = 0.0
+    
+    for r in rows:
+        pid = str(r.product_id)
+        seg = (r.segmento_paresa or "").strip()
+        uc = float(r.total_uc or 0.0)
+        
+        uc_by_product[pid] = uc_by_product.get(pid, 0.0) + uc
+        total_paresa_uc += uc
+        
+        if seg:
+            uc_by_segment[seg] = uc_by_segment.get(seg, 0.0) + uc
+            
+    indicators = await list_indicators(db, period_id)
+    for ind in indicators:
+        calculated_uc: float = 0.0
+        
+        # 1. If explicit product_ids are assigned
+        if ind.product_ids and isinstance(ind.product_ids, list) and len(ind.product_ids) > 0:
+            for pid in ind.product_ids:
+                calculated_uc += uc_by_product.get(str(pid), 0.0)
+        # 2. Otherwise based on segmento_paresa or indicator code
+        elif ind.codigo == "total_compra" or ind.segmento_paresa == "total_paresa":
+            calculated_uc = total_paresa_uc
+        elif ind.codigo == "venta_ssds" or ind.segmento_paresa == "ssds_total":
+            calculated_uc = uc_by_segment.get("ssd_core_ms", 0.0) + uc_by_segment.get("ssd_core_ss", 0.0)
+        elif ind.codigo == "venta_hidratacion" or ind.segmento_paresa == "hidra_total":
+            calculated_uc = uc_by_segment.get("hidra_core_dasani", 0.0) + uc_by_segment.get("hidra_isotonico_powerade", 0.0)
+        elif ind.codigo == "venta_nutricion_energia" or ind.segmento_paresa == "nutri_total":
+            calculated_uc = uc_by_segment.get("nutri_nectar_delvalle", 0.0) + uc_by_segment.get("nutri_soja_ades", 0.0) + uc_by_segment.get("nutri_energia_monster", 0.0)
+        elif ind.codigo == "foco_ssds_schweppes" or ind.segmento_paresa == "foco_schweppes":
+            calculated_uc = sum(float(r.total_uc or 0) for r in rows if "schweppes" in (r.nombre or "").lower())
+        elif ind.codigo == "foco_hidratacion_aguas" or ind.segmento_paresa == "foco_aguas_total" or (ind.es_foco and "hidra" in (ind.nombre or "").lower()):
+            calculated_uc = uc_by_segment.get("hidra_core_dasani", 0.0)
+        elif ind.codigo == "foco_nutricion_delvalle" or ind.segmento_paresa == "foco_delvalle_1l" or (ind.es_foco and "valle" in (ind.nombre or "").lower()):
+            valle_uc = sum(float(r.total_uc or 0) for r in rows if "del valle" in (r.nombre or "").lower() and ("1l" in (r.nombre or "").lower() or "1 l" in (r.nombre or "").lower() or "tetra" in (r.nombre or "").lower()))
+            calculated_uc = valle_uc if valle_uc > 0 else uc_by_segment.get("nutri_nectar_delvalle", 0.0)
+        elif ind.es_foco and "retornable" in (ind.nombre or "").lower():
+            calculated_uc = sum(float(r.total_uc or 0) for r in rows if "ret" in (r.nombre or "").lower() or "vidrio" in (r.nombre or "").lower())
+            
+        if ind.categoria != "trade_marketing":
+            ind.resultado = Decimal(str(round(calculated_uc, 2)))
+            ind.resultado_uc = Decimal(str(round(calculated_uc, 2)))
+            if ind.meta and ind.meta > 0:
+                ind.cumplimiento_pct = (ind.resultado / ind.meta) * Decimal("100")
+                
+    await db.commit()
+    return await get_summary(db, period)
+
+
 def _pct_cumplimiento(ind: SupplierKpiIndicator) -> Decimal:
     """% de cumplimiento de UN indicador, aplicando piso minimo si esta definido.
     Nunca aporta mas del 100% de su propio peso (cap), aunque se supere la meta."""
@@ -189,8 +395,12 @@ async def get_summary(db: AsyncSession, period: SupplierKpiPeriod) -> schemas.Pe
                 piso_minimo_pct=float(ind.piso_minimo_pct) if ind.piso_minimo_pct is not None else None,
                 orden=ind.orden or 0,
                 categoria=cat_norm,
+                unidad_medida=getattr(ind, "unidad_medida", "uc") or "uc",
                 es_foco=is_foco,
                 segmento_paresa=getattr(ind, "segmento_paresa", None),
+                descripcion_skus=getattr(ind, "descripcion_skus", None),
+                product_ids=getattr(ind, "product_ids", None),
+                reglas_escala=getattr(ind, "reglas_escala", None),
                 pct_cumplimiento=pct_val,
                 aporte_ponderado_pct=aporte_val,
             )

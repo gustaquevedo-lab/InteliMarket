@@ -11,9 +11,19 @@ from api.src.supplier_kpis import service
 from api.src.supplier_kpis.schemas import (
     PeriodCreate, PeriodUpdate, PeriodResponse, PeriodSummary,
     IndicatorCreate, IndicatorUpdate, IndicatorResponse,
+    BulkUpdateIndicatorsRequest, ParesaProductItem,
 )
 
 router = APIRouter(prefix="/api/v1/supplier-kpis", tags=["supplier-kpis"])
+
+
+@router.get("/paresa-products", response_model=list[ParesaProductItem])
+async def get_paresa_products(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    company_id = uuid.UUID(user.get("company_id") or "00000000-0000-0000-0000-000000000010")
+    return await service.get_paresa_products(db, company_id)
 
 
 @router.get("/dashboard")
@@ -82,7 +92,33 @@ async def update_indicator(indicator_id: uuid.UUID, data: IndicatorUpdate, db: A
     return await service.update_indicator(db, indicator, data)
 
 
+@router.put("/periods/{period_id}/indicators/bulk", response_model=list[IndicatorResponse])
+async def bulk_update_indicators(
+    period_id: uuid.UUID,
+    data: BulkUpdateIndicatorsRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    period = await service.get_period(db, period_id)
+    if not period or str(period.company_id) != user["company_id"]:
+        raise HTTPException(status_code=404, detail="Periodo no encontrado")
+    return await service.bulk_update_indicators(db, period_id, data)
+
+
+@router.post("/periods/{period_id}/recalculate-sales", response_model=PeriodSummary)
+async def recalculate_period_sales(
+    period_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    period = await service.get_period(db, period_id)
+    if not period or str(period.company_id) != user["company_id"]:
+        raise HTTPException(status_code=404, detail="Periodo no encontrado")
+    return await service.recalculate_period_sales(db, period_id)
+
+
 @router.delete("/indicators/{indicator_id}")
 async def delete_indicator(indicator_id: uuid.UUID, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
     await service.delete_indicator(db, indicator_id)
     return {"ok": True}
+

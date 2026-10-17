@@ -4919,6 +4919,8 @@ export const api = {
     bulkUpdateIndicators: (periodId: string, data: any) => client.put<any>(`/v1/supplier-kpis/periods/${periodId}/indicators/bulk`, data),
     deleteIndicator: (id: string) => client.delete<void>(`/v1/supplier-kpis/indicators/${id}`),
     addIndicator: (periodId: string, data: any) => client.post<any>(`/v1/supplier-kpis/periods/${periodId}/indicators`, data),
+    getParesaProducts: () => client.get<any[]>("/v1/supplier-kpis/paresa-products"),
+    recalculateSales: (periodId: string) => client.post<any>(`/v1/supplier-kpis/periods/${periodId}/recalculate-sales`),
   },
   supplierRebates: {
     getDashboard: (mes?: string, branchId?: string) => client.get<any>("/v1/supplier-kpis/dashboard", { mes, branch_id: branchId }),
