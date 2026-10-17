@@ -222,6 +222,7 @@ export default function PurchasesPage() {
     factura_numero?: string
     motivo?: string
     observaciones?: string
+    ya_reconocida?: boolean
   }[]>([])
   const [managingNcsReturn, setManagingNcsReturn] = useState<any | null>(null)
   const [managingNcsList, setManagingNcsList] = useState<{
@@ -234,6 +235,7 @@ export default function PurchasesPage() {
     factura_numero?: string
     motivo?: string
     observaciones?: string
+    ya_reconocida?: boolean
   }[]>([])
   const [ncNumberInput, setNcNumberInput] = useState("")
   const [enviarAPerdida, setEnviarAPerdida] = useState(false)
@@ -3070,6 +3072,7 @@ export default function PurchasesPage() {
           factura_numero: nc.factura_numero || undefined,
           motivo: nc.motivo || undefined,
           observaciones: nc.observaciones || undefined,
+          ya_reconocida: Boolean(nc.ya_reconocida),
         }))
 
       const ncNumStr = validNcs.map(n => n.numero).filter(Boolean).join(", ") || ncNumberInput || undefined
@@ -3221,6 +3224,7 @@ export default function PurchasesPage() {
         factura_numero: nc.factura_numero || undefined,
         motivo: nc.motivo || undefined,
         observaciones: nc.observaciones || undefined,
+        ya_reconocida: Boolean(nc.ya_reconocida),
       }))
 
     if (validNcs.length === 0 && !enviarAPerdidaPosterior) {
@@ -10751,6 +10755,20 @@ export default function PurchasesPage() {
                               />
                             </div>
                           </div>
+
+                          <div className="pt-1 flex items-center justify-between">
+                            <label className="flex items-center gap-2 cursor-pointer select-none">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(nc.ya_reconocida)}
+                                onChange={(e) => handleUpdateNcRow(idx, "ya_reconocida", e.target.checked)}
+                                className="w-3.5 h-3.5 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-600"
+                              />
+                              <span className="text-[11px] text-slate-600 dark:text-slate-300">
+                                <b>Reconocimiento previo / Acciones</b> (no duplicar saldo en monedero)
+                              </span>
+                            </label>
+                          </div>
                         </div>
                       )
                     })}
@@ -11167,6 +11185,20 @@ export default function PurchasesPage() {
                               className="w-full px-2.5 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                             />
                           </div>
+                        </div>
+
+                        <div className="pt-1 flex items-center justify-between">
+                          <label className="flex items-center gap-2 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(nc.ya_reconocida)}
+                              onChange={(e) => handleUpdateManagingNcRow(idx, "ya_reconocida", e.target.checked)}
+                              className="w-3.5 h-3.5 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-600"
+                            />
+                            <span className="text-[11px] text-slate-600 dark:text-slate-300">
+                              <b>Reconocimiento previo / Acciones</b> (no duplicar saldo en monedero)
+                            </span>
+                          </label>
                         </div>
                       </div>
                     )

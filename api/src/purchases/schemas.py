@@ -1371,6 +1371,7 @@ class SupplierReturnNCItem(BaseModel):
     factura_numero: Optional[str] = None
     motivo: Optional[str] = None
     observaciones: Optional[str] = None
+    ya_reconocida: Optional[bool] = False  # True si ya fue recibida por acciones/previo (no duplicar en monedero)
 
 
 class SupplierReturnCompleteInput(BaseModel):

@@ -17,8 +17,77 @@ from api.src.financial.models import SupplierInvoice, SupplierInvoiceItem, Suppl
 from api.src.purchases.models import Supplier
 from api.src.inventory.models import Stock, InventoryMovement, Warehouse
 from api.src.auth.models import User
+from api.src.integrated_finance.auto_posting import PostingEngine, ACC_INVENTARIO
 
 logger = logging.getLogger(__name__)
+
+ACC_MERMAS_PERDIDAS = "6.1.08"
+
+
+async def _post_return_loss_accounting(
+    db: AsyncSession,
+    company_id: uuid.UUID,
+    sr: SupplierReturn,
+    monto_perdida: Decimal,
+    motivo_perdida: Optional[str] = None,
+) -> None:
+    """Genera el asiento contable formal de pérdida/merma no reconocida por proveedor.
+    Debe: 6.1.08 (Mermas y Devoluciones No Reconocidas / Gastos)
+    Haber: 1.1.03 (Inventario de Mercaderías)
+    """
+    try:
+        engine = PostingEngine(db, str(company_id))
+        # Asegurar cuentas mínimas del plan
+        await engine.ensure_accounts()
+
+        # Asegurar cuenta de mermas si no existe aún en account_plans
+        if ACC_MERMAS_PERDIDAS not in engine._accounts:
+            res_acc = await db.execute(
+                select(AccountPlan).where(
+                    AccountPlan.company_id == company_id,
+                    AccountPlan.codigo == ACC_MERMAS_PERDIDAS,
+                )
+            )
+            acc_merma = res_acc.scalar_one_or_none()
+            if not acc_merma:
+                # Obtener cuenta padre de gastos (nivel 1, ej: 6 o 6.1)
+                res_parent = await db.execute(
+                    select(AccountPlan.padre_id).where(
+                        AccountPlan.company_id == company_id,
+                        AccountPlan.codigo.like("6.1%"),
+                    ).limit(1)
+                )
+                parent_id = res_parent.scalar_one_or_none()
+                acc_merma = AccountPlan(
+                    company_id=company_id,
+                    codigo=ACC_MERMAS_PERDIDAS,
+                    nombre="Mermas y Devoluciones No Reconocidas",
+                    tipo="gasto",
+                    nivel=2,
+                    padre_id=parent_id,
+                    acepta_asientos=True,
+                )
+                db.add(acc_merma)
+                await db.flush()
+            engine._accounts[ACC_MERMAS_PERDIDAS] = acc_merma.id
+
+        fecha_asiento = sr.fecha_creacion.date() if sr.fecha_creacion else date.today()
+        concepto = f"Pérdida por Devolución {sr.codigo}: {motivo_perdida or 'Merma asumida no reconocida'}"
+        lines = [
+            (ACC_MERMAS_PERDIDAS, "debe", monto_perdida),
+            (ACC_INVENTARIO, "haber", monto_perdida),
+        ]
+        posted = await engine.post(
+            fecha=fecha_asiento,
+            concepto=concepto,
+            referencia_tipo="supplier_return_loss",
+            referencia_id=sr.id,
+            lines=lines,
+        )
+        if posted:
+            logger.info(f"Asiento contable de pérdida posteado para devolución {sr.codigo}: {monto_perdida} Gs.")
+    except Exception as e:
+        logger.warning(f"No se pudo postear asiento contable de pérdida para devolución {sr.codigo}: {e}")
 
 
 async def list_supplier_products(db: AsyncSession, company_id: uuid.UUID, supplier_id: uuid.UUID) -> List[Dict[str, Any]]:
@@ -892,15 +961,20 @@ async def complete_supplier_return(
             )
             scn = existing_cn_res.scalar_one_or_none()
 
+        is_ya_reconocida = bool(nc_data.get("ya_reconocida", False))
+
         if scn:
             if target_inv_num and not scn.numero_factura_origen:
                 scn.numero_factura_origen = target_inv_num
             if nc_data.get("timbrado") and not scn.timbrado:
                 scn.timbrado = nc_data.get("timbrado")
-            if scn.saldo_disponible is None or scn.saldo_disponible <= 0:
-                scn.saldo_disponible = monto_nc
+            if not is_ya_reconocida:
+                if scn.saldo_disponible is None or scn.saldo_disponible <= 0:
+                    scn.saldo_disponible = monto_nc
         else:
             # Crear registro formal SupplierCreditNote
+            # Si fue previamente reconocida por acciones, saldo_disponible inicia en 0 para no duplicar en monedero
+            saldo_inicial = Decimal(0) if is_ya_reconocida else monto_nc
             scn = SupplierCreditNote(
                 company_id=company_id,
                 supplier_id=sr.proveedor_id,
@@ -913,9 +987,9 @@ async def complete_supplier_return(
                 motivo_categoria="devolucion_rotura",
                 impacto_contable="otros_ingresos",
                 monto=monto_nc,
-                saldo_disponible=monto_nc,
+                saldo_disponible=saldo_inicial,
                 moneda="PYG",
-                observaciones=nc_data.get("observaciones") or f"Emitida por devolución {sr.codigo}",
+                observaciones=nc_data.get("observaciones") or (f"Reconocimiento previo de NC para devolución {sr.codigo}" if is_ya_reconocida else f"Emitida por devolución {sr.codigo}"),
                 cancelado=False,
             )
             db.add(scn)
@@ -928,7 +1002,8 @@ async def complete_supplier_return(
             inv = inv_res.scalar_one_or_none()
             if inv:
                 saldo_inv = Decimal(str(inv.saldo_pendiente or 0))
-                monto_aplicar = min(saldo_inv, monto_nc)
+                disponible_para_aplicar = scn.saldo_disponible if not is_ya_reconocida else monto_nc
+                monto_aplicar = min(saldo_inv, disponible_para_aplicar)
                 if monto_aplicar > 0:
                     inv.saldo_pendiente = max(Decimal(0), saldo_inv - monto_aplicar)
                     inv.monto_retenido_nc = Decimal(str(inv.monto_retenido_nc or 0)) + monto_aplicar
@@ -937,7 +1012,7 @@ async def complete_supplier_return(
                     else:
                         inv.estado = "parcial"
 
-                    scn.saldo_disponible = max(Decimal(0), scn.saldo_disponible - monto_aplicar)
+                    scn.saldo_disponible = max(Decimal(0), (scn.saldo_disponible or Decimal(0)) - monto_aplicar)
 
                     app_record = SupplierCreditNoteApplication(
                         company_id=company_id,
@@ -954,13 +1029,14 @@ async def complete_supplier_return(
         saved_ncs.append({
             "id": str(scn.id),
             "numero": num_nc,
-            "timbrado": nc_data.get("timbrado") or scn.timbrado,
+            "timbrado": (nc_data.get("timbrado") or scn.timbrado or "").strip() or None,
             "fecha": f_fecha_date.isoformat(),
             "monto": float(monto_nc),
             "factura_id": str(target_inv_id) if target_inv_id else None,
             "factura_numero": target_inv_num,
             "motivo": nc_data.get("motivo") or scn.motivo,
             "observaciones": nc_data.get("observaciones"),
+            "ya_reconocida": is_ya_reconocida,
         })
 
     # Si NO se cargaron NCs pero había facturas vinculadas a los ítems, descontar saldo provisional
@@ -991,6 +1067,9 @@ async def complete_supplier_return(
         sr.monto_perdida = p_monto
         sr.motivo_perdida = motivo_perdida or f"Merma asumida por vencimiento / No reconocida por proveedor ({sr.codigo})"
         sr.enviado_a_perdida = True
+
+        if p_monto > Decimal(0):
+            await _post_return_loss_accounting(db, company_id, sr, p_monto, sr.motivo_perdida)
 
     # 3. IMPACTO FINANCIERO Y LEGAL:
     # La devolución física (DEV) es el acto administrativo de baja de inventario / Kardex en depósito.
@@ -1067,14 +1146,18 @@ async def add_nc_to_supplier_return(
             )
             scn = existing_cn_res.scalar_one_or_none()
 
+        is_ya_reconocida = bool(nc_data.get("ya_reconocida", False))
+
         if scn:
             if target_inv_num and not scn.numero_factura_origen:
                 scn.numero_factura_origen = target_inv_num
             if nc_data.get("timbrado") and not scn.timbrado:
                 scn.timbrado = nc_data.get("timbrado")
-            if scn.saldo_disponible is None or scn.saldo_disponible <= 0:
-                scn.saldo_disponible = monto
+            if not is_ya_reconocida:
+                if scn.saldo_disponible is None or scn.saldo_disponible <= 0:
+                    scn.saldo_disponible = monto
         else:
+            saldo_inicial = Decimal(0) if is_ya_reconocida else monto
             scn = SupplierCreditNote(
                 company_id=company_id,
                 supplier_id=sr.proveedor_id,
@@ -1087,9 +1170,9 @@ async def add_nc_to_supplier_return(
                 motivo_categoria="devolucion_rotura",
                 impacto_contable="otros_ingresos",
                 monto=monto,
-                saldo_disponible=monto,
+                saldo_disponible=saldo_inicial,
                 moneda="PYG",
-                observaciones=nc_data.get("observaciones") or f"NC agregada a devolución {sr.codigo}",
+                observaciones=nc_data.get("observaciones") or (f"Reconocimiento previo de NC para devolución {sr.codigo}" if is_ya_reconocida else f"NC agregada a devolución {sr.codigo}"),
                 cancelado=False,
             )
             db.add(scn)
@@ -1101,7 +1184,8 @@ async def add_nc_to_supplier_return(
             inv = inv_res.scalar_one_or_none()
             if inv:
                 saldo_inv = Decimal(str(inv.saldo_pendiente or 0))
-                monto_aplicar = min(saldo_inv, monto)
+                disponible_para_aplicar = scn.saldo_disponible if not is_ya_reconocida else monto
+                monto_aplicar = min(saldo_inv, disponible_para_aplicar)
                 if monto_aplicar > 0:
                     inv.saldo_pendiente = max(Decimal(0), saldo_inv - monto_aplicar)
                     inv.monto_retenido_nc = Decimal(str(inv.monto_retenido_nc or 0)) + monto_aplicar
@@ -1110,7 +1194,7 @@ async def add_nc_to_supplier_return(
                     else:
                         inv.estado = "parcial"
 
-                    scn.saldo_disponible = max(Decimal(0), scn.saldo_disponible - monto_aplicar)
+                    scn.saldo_disponible = max(Decimal(0), (scn.saldo_disponible or Decimal(0)) - monto_aplicar)
 
                     app_record = SupplierCreditNoteApplication(
                         company_id=company_id,
@@ -1134,6 +1218,7 @@ async def add_nc_to_supplier_return(
             "factura_numero": target_inv_num,
             "motivo": nc_data.get("motivo") or scn.motivo,
             "observaciones": nc_data.get("observaciones"),
+            "ya_reconocida": is_ya_reconocida,
         })
 
     sr.notas_credito = current_ncs
@@ -1147,6 +1232,9 @@ async def add_nc_to_supplier_return(
         sr.monto_perdida = p_monto
         sr.motivo_perdida = motivo_perdida or f"Merma asumida por vencimiento / No reconocida por proveedor ({sr.codigo})"
         sr.enviado_a_perdida = True
+
+        if p_monto > Decimal(0):
+            await _post_return_loss_accounting(db, company_id, sr, p_monto, sr.motivo_perdida)
 
     await db.commit()
     await db.refresh(sr)
