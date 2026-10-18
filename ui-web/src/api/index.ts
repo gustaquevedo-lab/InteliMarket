@@ -3190,6 +3190,12 @@ export const api = {
         producto: string;
         sku: string;
         codigo_barra: string;
+        costo_unitario?: number;
+        precio_minorista?: number;
+        margen_minorista_pct?: number;
+        precio_mayorista?: number | null;
+        mayorista_min_qty?: number | null;
+        margen_mayorista_pct?: number | null;
         unidades_vendidas: number;
         total_ventas: number;
         costo_total: number;

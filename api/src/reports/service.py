@@ -327,6 +327,10 @@ async def get_sales_by_supplier_products(
             p.nombre as producto,
             COALESCE(p.sku, '—') as sku,
             COALESCE(p.codigo_barra, '—') as codigo_barra,
+            COALESCE(p.ultimo_costo, p.costo_promedio, 0) as costo_unitario,
+            COALESCE(p.precio_venta, 0) as precio_minorista,
+            sp_may.may_precio as precio_mayorista,
+            sp_may.may_min_qty as mayorista_min_qty,
             SUM(vi.cantidad) as unidades_vendidas,
             SUM(vi.total) as total_ventas,
             SUM(vi.cantidad * COALESCE(vi.costo_unitario, p.costo_promedio, p.ultimo_costo, 0)) as costo_total
@@ -334,8 +338,17 @@ async def get_sales_by_supplier_products(
         JOIN sale_items vi ON vi.sale_id = v.id
         JOIN products p ON p.id = vi.product_id
         LEFT JOIN suppliers sup ON sup.id = p.supplier_id
+        LEFT JOIN (
+            SELECT DISTINCT ON (product_id)
+                product_id,
+                min_qty as may_min_qty,
+                precio_unitario as may_precio
+            FROM sp_tiered_prices
+            WHERE activo = true
+            ORDER BY product_id, min_qty ASC
+        ) sp_may ON sp_may.product_id = p.id
         WHERE {where}
-        GROUP BY p.id, p.nombre, p.sku, p.codigo_barra
+        GROUP BY p.id, p.nombre, p.sku, p.codigo_barra, p.ultimo_costo, p.costo_promedio, p.precio_venta, sp_may.may_precio, sp_may.may_min_qty
         ORDER BY total_ventas DESC
         {limit_clause}
     """
@@ -345,8 +358,18 @@ async def get_sales_by_supplier_products(
     items = []
     for r in results:
         monto = float(r["total_ventas"] or 0)
-        costo = float(r["costo_total"] or 0)
-        utilidad = monto - costo
+        costo_tot = float(r["costo_total"] or 0)
+        costo_u = float(r["costo_unitario"] or 0)
+        p_min = float(r["precio_minorista"] or 0)
+        p_may = float(r["precio_mayorista"]) if r["precio_mayorista"] is not None else None
+        may_qty = int(r["mayorista_min_qty"]) if r["mayorista_min_qty"] is not None else None
+
+        # Margen minorista esperado sobre PVP
+        mg_min_pct = round(((p_min - costo_u) / p_min * 100), 1) if p_min > 0 else (100.0 if costo_u == 0 and p_min > 0 else 0.0)
+        # Margen mayorista esperado sobre PV May
+        mg_may_pct = round(((p_may - costo_u) / p_may * 100), 1) if p_may and p_may > 0 else None
+
+        utilidad = monto - costo_tot
         margen_pct = round((utilidad / max(monto, 1.0)) * 100, 1)
         participacion_pct = round((monto / total_general) * 100, 1)
 
@@ -355,9 +378,15 @@ async def get_sales_by_supplier_products(
             "producto": r["producto"],
             "sku": r["sku"],
             "codigo_barra": r["codigo_barra"],
+            "costo_unitario": costo_u,
+            "precio_minorista": p_min,
+            "margen_minorista_pct": mg_min_pct,
+            "precio_mayorista": p_may,
+            "mayorista_min_qty": may_qty,
+            "margen_mayorista_pct": mg_may_pct,
             "unidades_vendidas": float(r["unidades_vendidas"] or 0),
             "total_ventas": monto,
-            "costo_total": costo,
+            "costo_total": costo_tot,
             "utilidad_bruta": utilidad,
             "margen_pct": margen_pct,
             "participacion_pct": participacion_pct,
@@ -2189,7 +2218,42 @@ async def get_purchases_vs_sales_report(
     porcentaje_presupuesto_consumido = round((total_compras / max(presupuesto_maximo_compras, 1.0)) * 100, 1) if presupuesto_maximo_compras > 0 else 0.0
     esta_sobrecomprado = total_compras > presupuesto_maximo_compras
 
-    # 4. Desglose comparativo por Proveedor
+    # 4. Proyección Estadística y Mismo Período Año Pasado (SPLY)
+    # Fechas equivalentes del año pasado
+    from datetime import timedelta
+    import calendar
+
+    # Si no se definieron fechas, asumir mes corriente en America/Asuncion
+    now_py = datetime.now(PY_TZ).date()
+    effective_desde = fecha_desde or date(now_py.year, now_py.month, 1)
+    effective_hasta = fecha_hasta or now_py
+
+    # Días transcurridos en el período evaluado
+    dias_periodo = max((effective_hasta - effective_desde).days + 1, 1)
+    # Total de días del mes de fecha_hasta
+    _, dias_mes_total = calendar.monthrange(effective_hasta.year, effective_hasta.month)
+
+    # Ventas mismo período año anterior (SPLY: Same Period Last Year)
+    try:
+        ly_desde = date(effective_desde.year - 1, effective_desde.month, min(effective_desde.day, 28))
+        ly_hasta = date(effective_hasta.year - 1, effective_hasta.month, min(effective_hasta.day, 28))
+        # Mes completo año anterior para medir factor de estacionalidad
+        _, ly_dias_mes = calendar.monthrange(ly_hasta.year, ly_hasta.month)
+        ly_mes_fin = date(ly_hasta.year, ly_hasta.month, ly_dias_mes)
+    except Exception:
+        ly_desde = None
+        ly_hasta = None
+        ly_mes_fin = None
+
+    ly_params = {"company_id": company_id}
+    ly_where = "v.estado <> 'cancelado' AND v.company_id = :company_id"
+    if ly_desde and ly_hasta:
+        ly_where += _build_tz_filter(ly_desde, ly_hasta, ly_params, "v.fecha")
+        has_ly = True
+    else:
+        has_ly = False
+
+    # 5. Desglose comparativo por Proveedor con Proyección
     q_prov = f"""
         WITH v_prov AS (
             SELECT 
@@ -2215,6 +2279,29 @@ async def get_purchases_vs_sales_report(
             LEFT JOIN suppliers sup ON sup.id = si.supplier_id
             WHERE {pur_where}
             GROUP BY si.supplier_id, sup.razon_social, sup.nombre_fantasia, sup.ruc
+        ),
+        v_ly AS (
+            SELECT 
+                sup.id as supplier_id,
+                SUM(vi.total) as ventas_ly_periodo
+            FROM sales v
+            JOIN sale_items vi ON vi.sale_id = v.id
+            JOIN products p ON p.id = vi.product_id
+            JOIN suppliers sup ON sup.id = p.supplier_id
+            WHERE {ly_where if has_ly else "1=0"}
+            GROUP BY sup.id
+        ),
+        v_ly_mes AS (
+            SELECT 
+                sup.id as supplier_id,
+                SUM(vi.total) as ventas_ly_mes_completo
+            FROM sales v
+            JOIN sale_items vi ON vi.sale_id = v.id
+            JOIN products p ON p.id = vi.product_id
+            JOIN suppliers sup ON sup.id = p.supplier_id
+            WHERE v.company_id = :company_id AND v.estado <> 'cancelado'
+              AND {f"v.fecha >= '{ly_desde}' AND v.fecha <= '{ly_mes_fin} 23:59:59'" if (has_ly and ly_mes_fin) else "1=0"}
+            GROUP BY sup.id
         )
         SELECT 
             COALESCE(v.supplier_id::text, c.supplier_id::text, 'sin_id') as supplier_id,
@@ -2222,30 +2309,69 @@ async def get_purchases_vs_sales_report(
             COALESCE(v.ruc, c.ruc) as ruc,
             COALESCE(v.ventas_prov, 0) as ventas,
             COALESCE(c.compras_prov, 0) as compras,
-            COALESCE(c.facturas_prov, 0) as facturas
+            COALESCE(c.facturas_prov, 0) as facturas,
+            COALESCE(ly.ventas_ly_periodo, 0) as ventas_ly,
+            COALESCE(lym.ventas_ly_mes_completo, 0) as ventas_ly_mes
         FROM v_prov v
         FULL OUTER JOIN c_prov c ON c.supplier_id = v.supplier_id
+        LEFT JOIN v_ly ly ON ly.supplier_id::text = COALESCE(v.supplier_id::text, c.supplier_id::text)
+        LEFT JOIN v_ly_mes lym ON lym.supplier_id::text = COALESCE(v.supplier_id::text, c.supplier_id::text)
         ORDER BY compras DESC, ventas DESC
     """
     # Combinar params
-    combined_params = {**sales_params, **pur_params}
+    combined_params = {**sales_params, **pur_params, **ly_params}
     prov_rows = (await _exec(db, q_prov, combined_params)).all()
 
     proveedores = []
+    tot_ventas_ly = 0.0
+    tot_ventas_proy = 0.0
+
     for r in prov_rows:
         v_monto = float(r["ventas"] or 0)
         c_monto = float(r["compras"] or 0)
+        v_ly_monto = float(r["ventas_ly"] or 0)
+        v_ly_mes = float(r["ventas_ly_mes"] or 0)
+
+        # Variación porcentual interanual vs mismo período año pasado
+        var_interanual_pct = round(((v_monto - v_ly_monto) / v_ly_monto * 100), 1) if v_ly_monto > 0 else None
+
+        # Proyección de Ventas:
+        # 1. Ritmo lineal extrapolado al mes completo:
+        proy_lineal = (v_monto / dias_periodo) * dias_mes_total if dias_periodo > 0 else v_monto
+
+        # 2. Factor de avance estacional del año pasado si existe:
+        if v_ly_mes > 0 and v_ly_monto > 0:
+            avance_estacional = v_ly_monto / v_ly_mes
+            proy_estacional = (v_monto / avance_estacional) if avance_estacional > 0 else proy_lineal
+            # Ponderación 65% estacionalidad año pasado + 35% ritmo actual
+            proy_final = round((proy_estacional * 0.65) + (proy_lineal * 0.35), 0)
+        else:
+            proy_final = round(proy_lineal, 0)
+
         ratio_p = round((c_monto / v_monto * 100), 1) if v_monto > 0 else (100.0 if c_monto > 0 else 0.0)
+        ratio_proy = round((c_monto / proy_final * 100), 1) if proy_final > 0 else (100.0 if c_monto > 0 else 0.0)
+
+        tot_ventas_ly += v_ly_monto
+        tot_ventas_proy += proy_final
+
         proveedores.append({
             "supplier_id": str(r["supplier_id"]),
             "proveedor": r["proveedor"],
             "ruc": r["ruc"],
             "ventas": v_monto,
+            "ventas_ly": v_ly_monto,
+            "var_interanual_pct": var_interanual_pct,
+            "ventas_proyeccion": proy_final,
             "compras": c_monto,
             "facturas": int(r["facturas"] or 0),
             "ratio_pct": ratio_p,
+            "ratio_proy_pct": ratio_proy,
             "estado": "excedido" if ratio_p > target_ratio_pct else "normal",
         })
+
+    var_global_ly_pct = round(((total_ventas - tot_ventas_ly) / tot_ventas_ly * 100), 1) if tot_ventas_ly > 0 else None
+    presupuesto_proyectado_compras = round(tot_ventas_proy * (target_ratio_pct / 100.0), 0)
+    saldo_otb_proyectado = round(presupuesto_proyectado_compras - total_compras, 0)
 
     return {
         "fecha_desde": str(fecha_desde) if fecha_desde else None,
@@ -2254,12 +2380,18 @@ async def get_purchases_vs_sales_report(
         "tipo_provision": tipo_provision,
         "resumen": {
             "total_ventas": total_ventas,
+            "total_ventas_ly": tot_ventas_ly,
+            "var_interanual_pct": var_global_ly_pct,
+            "total_ventas_proyeccion": tot_ventas_proy,
             "total_compras": total_compras,
             "total_tickets_ventas": total_tickets,
             "total_facturas_compras": total_facturas_compras,
             "ratio_real_pct": ratio_real_pct,
+            "ratio_proyectado_pct": round((total_compras / tot_ventas_proy * 100), 2) if tot_ventas_proy > 0 else 0.0,
             "presupuesto_maximo_compras": presupuesto_maximo_compras,
+            "presupuesto_proyectado_compras": presupuesto_proyectado_compras,
             "saldo_otb_disponible": saldo_otb_disponible,
+            "saldo_otb_proyectado": saldo_otb_proyectado,
             "porcentaje_presupuesto_consumido": porcentaje_presupuesto_consumido,
             "esta_sobrecomprado": esta_sobrecomprado,
         },

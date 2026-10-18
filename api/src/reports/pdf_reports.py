@@ -1021,30 +1021,37 @@ def generate_purchases_vs_sales_pdf(
 
     # 2. Desglose por Proveedor
     provs = report_data.get("proveedores", [])
-    t_rows = [["#", "Proveedor / Razón Social", "RUC", "Ventas Generadas", "Compras Recibidas", "Facturas", "Ratio C/V", "Estado"]]
-    for idx, p in enumerate(provs[:45], 1):
+    t_rows = [["#", "Proveedor / Razón Social", "RUC", "Ventas Actual", "Año Anterior", "Proyección Mes", "Compras", "Ratio C/V", "Estado"]]
+    for idx, p in enumerate(provs[:50], 1):
         est_color = "🟢 Normal" if p.get("estado") == "normal" else "🔴 Excedido"
+        var_str = f" ({p.get('var_interanual_pct'):+.1f}%)" if p.get("var_interanual_pct") is not None else ""
         t_rows.append([
             str(idx),
-            Paragraph(p.get("proveedor", "—")[:35], styles["Small"]),
+            Paragraph(p.get("proveedor", "—")[:32], styles["Small"]),
             p.get("ruc", "—"),
             _fmt_gs(p.get("ventas", 0)),
+            f"{_fmt_gs(p.get('ventas_ly', 0))}{var_str}",
+            _fmt_gs(p.get("ventas_proyeccion", 0)),
             _fmt_gs(p.get("compras", 0)),
-            str(p.get("facturas", 0)),
             f"{p.get('ratio_pct', 0):.1f}%",
             est_color,
         ])
 
     # Totales finales
+    tot_proy = resumen.get("total_ventas_proyeccion", 0.0)
+    tot_ly = resumen.get("total_ventas_ly", 0.0)
+    var_tot_str = f" ({resumen.get('var_interanual_pct'):+.1f}%)" if resumen.get("var_interanual_pct") is not None else ""
     t_rows.append([
         "TOTAL", "CONSOLIDADO DEL PERÍODO", "",
-        _fmt_gs(t_ventas), _fmt_gs(t_compras),
-        str(resumen.get("total_facturas_compras", 0)),
+        _fmt_gs(t_ventas),
+        f"{_fmt_gs(tot_ly)}{var_tot_str}",
+        _fmt_gs(tot_proy),
+        _fmt_gs(t_compras),
         f"{ratio_real:.1f}%",
         "SALUDABLE" if saldo_otb >= 0 else "EXCESO",
     ])
 
-    col_widths = [10 * mm, 75 * mm, 25 * mm, 40 * mm, 40 * mm, 20 * mm, 25 * mm, 35 * mm]
+    col_widths = [8 * mm, 58 * mm, 20 * mm, 32 * mm, 36 * mm, 35 * mm, 32 * mm, 22 * mm, 25 * mm]
     t_detail = Table(t_rows, colWidths=col_widths, repeatRows=1)
     t_detail.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
