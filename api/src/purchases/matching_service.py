@@ -17,7 +17,12 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from api.src.financial.models import SupplierInvoice, SupplierInvoiceItem
+from api.src.financial.models import (
+    SupplierInvoice,
+    SupplierInvoiceItem,
+    SupplierCreditNote,
+    SupplierCreditNoteApplication,
+)
 from api.src.purchases.models import (
     PurchaseOrder,
     PurchaseOrderItem,
@@ -522,6 +527,52 @@ async def resolve_supplier_nc(
     nc_req.nc_recibida_fecha = nc_recibida_fecha
     nc_req.observaciones = f"{nc_req.observaciones or ''} | Resuelto: {observaciones or ''}".strip()
     nc_req.resolved_at = datetime.now(timezone.utc)
+
+    # 1. Crear o reutilizar la entidad fiscal formal SupplierCreditNote
+    existing_nc_q = select(SupplierCreditNote).where(
+        SupplierCreditNote.company_id == nc_req.company_id,
+        SupplierCreditNote.supplier_id == nc_req.supplier_id,
+        SupplierCreditNote.numero == nc_recibida_numero,
+        SupplierCreditNote.timbrado == nc_recibida_timbrado,
+        SupplierCreditNote.cancelado == False,
+    )
+    existing_nc_res = await db.execute(existing_nc_q)
+    credit_note = existing_nc_res.scalar_one_or_none()
+
+    if not credit_note:
+        credit_note = SupplierCreditNote(
+            company_id=nc_req.company_id,
+            supplier_id=nc_req.supplier_id,
+            numero=nc_recibida_numero,
+            numero_factura_origen=invoice.numero_factura,
+            timbrado=nc_recibida_timbrado,
+            fecha=nc_recibida_fecha or date.today(),
+            fecha_recepcion=date.today(),
+            motivo=f"SNC {nc_req.numero_solicitud} - {nc_req.tipo_motivo or 'Diferencia en recepción'}",
+            motivo_categoria="faltante_recepcion",
+            impacto_contable="recuperacion_merma",
+            monto=nc_recibida_monto,
+            saldo_disponible=Decimal("0"),  # Aplicada directamente a esta factura
+            moneda=invoice.moneda or "PYG",
+            observaciones=f"Generada por resolución de {nc_req.numero_solicitud} sobre factura {invoice.numero_factura}",
+            cancelado=False,
+        )
+        db.add(credit_note)
+        await db.flush()
+    else:
+        # Si ya existía, asegurarse de asociar la factura origen
+        if not credit_note.numero_factura_origen:
+            credit_note.numero_factura_origen = invoice.numero_factura
+        credit_note.saldo_disponible = max(Decimal("0"), (credit_note.saldo_disponible or Decimal("0")) - nc_recibida_monto)
+
+    # 2. Registrar la aplicación formal de la NC a la factura en supplier_credit_note_applications
+    db.add(SupplierCreditNoteApplication(
+        company_id=nc_req.company_id,
+        credit_note_id=credit_note.id,
+        invoice_id=invoice.id,
+        monto_aplicado=nc_recibida_monto,
+        observaciones=f"Compensación automática por resolución de {nc_req.numero_solicitud}",
+    ))
 
     # Descontar del saldo pendiente de la factura
     invoice.saldo_pendiente = max(Decimal("0"), (invoice.saldo_pendiente or invoice.total) - nc_recibida_monto)

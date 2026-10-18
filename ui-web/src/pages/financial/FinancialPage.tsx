@@ -1101,10 +1101,20 @@ export default function FinancialPage() {
         })
       }
     })
+    const seenFreeNcKeys = new Set<string>()
     const freeNcs = sup.creditNotes.filter((n: any) => {
       const nId = String(n.id)
       const nNum = String(n.numero || "").trim().toLowerCase()
-      return !assignedNcIds.has(nId) && (!nNum || !assignedNcNums.has(nNum))
+      const nTimb = String(n.timbrado || "").trim()
+      const key = `${nNum}_${nTimb}`
+      if (assignedNcIds.has(nId) || (nNum && assignedNcNums.has(nNum))) {
+        return false
+      }
+      if (nNum && seenFreeNcKeys.has(key)) {
+        return false
+      }
+      if (nNum) seenFreeNcKeys.add(key)
+      return true
     })
     setSelectedOpCreditNoteIds(new Set(freeNcs.map((n: any) => n.id)))
 
@@ -1160,14 +1170,24 @@ export default function FinancialPage() {
       }
     })
 
-    // 2. Notas de Crédito Registradas LIBRES (Excluir las ya asignadas a una factura específica)
+    // 2. Notas de Crédito Registradas LIBRES (Excluir las ya asignadas a una factura específica y deduplicar)
+    const seenNcKeys = new Set<string>()
     currentSelectedSupplier.creditNotes.forEach(nc => {
       const ncIdStr = String(nc.id)
       const ncNumStr = String(nc.numero || "").trim().toLowerCase()
+      const ncTimbStr = String(nc.timbrado || "").trim()
+      const ncDedupKey = `${ncNumStr}_${ncTimbStr}`
+
       // Si la NC ya está deducida en una factura específica, no exponerla como comprobante suelto para evitar duplicación
       if (assignedNcIds.has(ncIdStr) || (ncNumStr && assignedNcNumeros.has(ncNumStr))) {
         return
       }
+
+      // Deduplicar si vino dos veces con el mismo número y timbrado
+      if (ncNumStr && seenNcKeys.has(ncDedupKey)) {
+        return
+      }
+      if (ncNumStr) seenNcKeys.add(ncDedupKey)
 
       const saldoNC = Number(nc.saldo_disponible) > 0 ? Number(nc.saldo_disponible) : Number(nc.monto || 0)
       docs.push({
@@ -1490,9 +1510,14 @@ export default function FinancialPage() {
       // Distribuir el saldo de las NCs seleccionadas hasta cubrir como máximo el total de las facturas
       let restanteACubrir = selectedFacturasTotal
       const ncDisbursements = []
+      const seenAppliedNc = new Set<string>()
       for (const n of currentSelectedSupplier.creditNotes.filter(n => selectedOpCreditNoteIds.has(n.id))) {
         if (restanteACubrir <= 0) break
-        const saldoNC = Number(n.saldo_disponible !== undefined ? n.saldo_disponible : n.monto || 0)
+        const nKey = `${(n.numero || "").trim().toLowerCase()}_${(n.timbrado || "").trim()}`
+        if (nKey && seenAppliedNc.has(nKey)) continue
+        if (nKey) seenAppliedNc.add(nKey)
+
+        const saldoNC = Number(n.saldo_disponible) > 0 ? Number(n.saldo_disponible) : Number(n.monto || 0)
         if (saldoNC <= 0) continue
         const montoAplicar = Math.min(saldoNC, restanteACubrir)
         ncDisbursements.push({
