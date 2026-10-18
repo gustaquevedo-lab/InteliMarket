@@ -454,10 +454,10 @@ export default function Login() {
         {/* Logo + Brand */}
         <div className="text-center mb-8">
           <div
-            className="inline-flex items-center justify-center w-20 h-20 rounded-3xl logo-glow mb-5"
-            style={{ background: "linear-gradient(135deg, #1e4db7 0%, #6366f1 60%, #38bdf8 100%)" }}
+            className="inline-flex items-center justify-center w-24 h-24 rounded-3xl logo-glow mb-5 p-2"
+            style={{ background: "linear-gradient(135deg, rgba(28, 68, 130, 0.4) 0%, rgba(99, 102, 241, 0.2) 100%)", border: "1px solid rgba(255, 255, 255, 0.15)" }}
           >
-            <InteliMarketIsotypeWhite className="w-12 h-12" />
+            <img src="/logo.png" alt="InteliMarket Logo" className="w-full h-full object-contain filter drop-shadow-md" />
           </div>
 
           <h1 className="text-3xl font-black text-white mb-1 tracking-tight">
