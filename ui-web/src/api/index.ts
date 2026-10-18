@@ -3275,6 +3275,8 @@ export const api = {
       downloadAuthenticated("/api/reports/export/sales-detailed-day.pdf", params, `ventas_detalladas_${params.fecha}.pdf`),
     downloadSalesDailyConsolidationXlsx: (params?: { fecha_desde?: string; fecha_hasta?: string; branch_id?: string }) =>
       downloadAuthenticated("/api/reports/export/sales-daily-consolidation.xlsx", params, `consolidado_diario_ventas_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.xlsx`),
+    downloadSalesDailyConsolidationPdf: (params?: { fecha_desde?: string; fecha_hasta?: string; branch_id?: string }) =>
+      downloadAuthenticated("/api/reports/export/sales-daily-consolidation.pdf", params, `consolidado_diario_ventas_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.pdf`),
     salesBySupplierPaymentsSummary: (params: { supplier_id: string }) =>
       client.get<{ supplier_id: string; monto_pagado_mes: number; monto_pagado_historico: number }>("/api/reports/sales/by-supplier/payments-summary", params),
     purchasesVsSales: (params?: { fecha_desde?: string; fecha_hasta?: string; target_ratio_pct?: number }) =>
