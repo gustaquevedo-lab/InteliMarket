@@ -1757,7 +1757,17 @@ export interface Supplier360Response {
       fecha: string
       observaciones?: string
     }>
+    sncs_vinculadas?: Array<{
+      id: string
+      numero_solicitud: string
+      monto_reclamado: number
+      tipo_motivo: string
+      estado: string
+      nc_recibida_numero?: string
+      observaciones?: string
+    }>
     monto_nc_aplicado?: number
+    monto_snc_reclamado?: number
     saldo_neto_real?: number
     fase_pago?: string
     fase_pago_label?: string
@@ -1964,8 +1974,8 @@ export interface SupplierStatementMovement {
   fecha: string
   fecha_str: string
   fecha_vencimiento_str?: string
-  tipo: "FACTURA" | "NOTA_CREDITO" | "PAGO"
-  tipo_badge: "FAC" | "NC" | "PAGO"
+  tipo: "FACTURA" | "NOTA_CREDITO" | "PAGO" | "SOLICITUD_NC"
+  tipo_badge: "FAC" | "NC" | "PAGO" | "SNC"
   tipo_label: string
   comprobante: string
   timbrado?: string

@@ -945,8 +945,11 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                           ) : (
                             facturasFiltradas.map(f => {
                               const mNc = f.monto_nc_aplicado || 0
+                              const mSnc = f.monto_snc_reclamado || 0
+                              const mRet = f.monto_retenido_nc || 0
                               const hasNc = mNc > 0 || (f.ncs_vinculadas && f.ncs_vinculadas.length > 0)
-                              const isRetenida = f.requiere_nc || (f.monto_retenido_nc || 0) > 0 || f.bloqueada_para_pago
+                              const hasSnc = mSnc > 0 || (f.sncs_vinculadas && f.sncs_vinculadas.length > 0)
+                              const isRetenida = f.requiere_nc || mRet > 0 || hasSnc || f.bloqueada_para_pago
 
                               return (
                                 <React.Fragment key={f.id}>
@@ -979,10 +982,23 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                                             </span>
                                           )}
                                         </div>
+                                      ) : hasSnc ? (
+                                        <div className="inline-flex flex-col items-center">
+                                          <span className="px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 font-black font-mono text-[10px] border border-purple-300 dark:border-purple-800">
+                                            -{formatPYG(mSnc || mRet)}
+                                          </span>
+                                          {f.sncs_vinculadas && f.sncs_vinculadas.length > 0 && (
+                                            <span className="text-[9px] text-purple-600 dark:text-purple-400 mt-0.5">
+                                              {f.sncs_vinculadas.map(a => a.numero_solicitud).join(", ")}
+                                            </span>
+                                          )}
+                                        </div>
                                       ) : isRetenida ? (
-                                        <span className="px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 font-black text-[9px] border border-purple-300 dark:border-purple-800">
-                                          Retenida por NC
-                                        </span>
+                                        <div className="inline-flex flex-col items-center">
+                                          <span className="px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 font-black text-[9px] border border-purple-300 dark:border-purple-800">
+                                            Retenida NC {mRet > 0 ? `(-${formatPYG(mRet)})` : ''}
+                                          </span>
+                                        </div>
                                       ) : (
                                         <span className="text-slate-400 text-[10px]">Sin NC</span>
                                       )}
@@ -1013,6 +1029,34 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                                               NC #{nc.numero_nc || nc.numero} (-{formatPYG(nc.monto_aplicado || nc.monto)})
                                             </span>
                                           ))}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )}
+                                  {hasSnc && f.sncs_vinculadas && f.sncs_vinculadas.length > 0 && (
+                                    <tr className="bg-purple-50/60 dark:bg-purple-950/20 border-b border-purple-200/60">
+                                      <td colSpan={8} className="py-2 px-6 pl-10">
+                                        <div className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                                          <CornerDownRight className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
+                                          <span className="text-[11px] font-bold text-purple-800 dark:text-purple-300">Reclamo / Faltante Muelle (SNC):</span>
+                                          {f.sncs_vinculadas.map((snc: any, i: number) => (
+                                            <span key={i} className="font-mono text-purple-700 dark:text-purple-300 font-bold text-xs bg-purple-100 dark:bg-purple-900/40 px-2 py-0.5 rounded border border-purple-300/80">
+                                              {snc.numero_solicitud} (-{formatPYG(snc.monto_reclamado)}) {snc.tipo_motivo ? `[${snc.tipo_motivo.replace('_', ' ')}]` : ''} — Estado: {snc.estado}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )}
+                                  {mRet > 0 && (!f.sncs_vinculadas || f.sncs_vinculadas.length === 0) && (
+                                    <tr className="bg-purple-50/40 dark:bg-purple-950/20 border-b border-purple-200/50">
+                                      <td colSpan={8} className="py-2 px-6 pl-10">
+                                        <div className="flex items-center gap-2 text-xs font-semibold text-purple-800 dark:text-purple-300">
+                                          <CornerDownRight className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
+                                          <span className="text-[11px] font-bold">Retención Preventiva en Muelle:</span>
+                                          <span className="font-mono font-bold text-xs bg-purple-100 dark:bg-purple-900/40 px-2 py-0.5 rounded border border-purple-300/80">
+                                            -{formatPYG(mRet)} (Pendiente de emisión de NC formal)
+                                          </span>
                                         </div>
                                       </td>
                                     </tr>
@@ -1270,6 +1314,8 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                                               ? "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200"
                                               : m.tipo_badge === "NC"
                                               ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200"
+                                              : m.tipo_badge === "SNC"
+                                              ? "bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-200"
                                               : "bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200"
                                           }`}>
                                             {m.tipo_badge}
