@@ -780,8 +780,13 @@ export default function FinancialPage() {
       deudaTotalCompuesta: number
       creditNotes: any[]
       ncConsolidada: number
+      ncTotalRegistrado: number
+      creditNotesConSaldo: number
       devolucionesPendientes: any[]
       ncNoRegistrada: number
+      ncMuellePendiente: number
+      ncLibrePendiente: number
+      montoRetenidoFacturas: number
       vencimientoMasCercano: string | null
       vencimientoMasLejano: string | null
       tieneVencidas: boolean
@@ -791,100 +796,83 @@ export default function FinancialPage() {
       netoExigible: number
     }>()
 
+    const createEmptySupplierItem = (sId: string, nombre: string, ruc: string = "") => {
+      let supChqs: any[] = []
+      if (sId && sId !== "sin_id" && chequesBySupplierId.has(sId)) {
+        supChqs = chequesBySupplierId.get(sId)!
+      } else if (nombre) {
+        const norm = String(nombre).trim().toLowerCase()
+        if (chequesByNormalizedName.has(norm)) {
+          supChqs = chequesByNormalizedName.get(norm)!
+        }
+      }
+      supChqs.sort((a, b) => {
+        const da = a.fecha_pago || a.fecha_emision || ""
+        const db = b.fecha_pago || b.fecha_emision || ""
+        return String(da).localeCompare(String(db))
+      })
+      const montoChqs = supChqs.reduce((acc, ch) => acc + Number(ch.monto || 0), 0)
+
+      return {
+        supplier_id: sId,
+        supplier_nombre: nombre,
+        nombre_fantasia: "",
+        ruc: ruc,
+        telefono: "",
+        plazo_credito_factura_dias: 0,
+        plazo_credito_cheque_dias: 0,
+        formas_pago_acordadas: [],
+        acuerdo_pago_tipo: "contado",
+        acuerdo_pago_notas: "",
+        invoices: [] as SupplierInvoice[],
+        pendingInvoices: [] as SupplierInvoice[],
+        deudaConsolidada: 0,
+        chequesDiferidos: supChqs,
+        montoChequesDiferidos: montoChqs,
+        cantidadChequesDiferidos: supChqs.length,
+        chequeDiferidoMasProximo: supChqs[0] || null,
+        deudaTotalCompuesta: montoChqs,
+        creditNotes: [] as any[],
+        ncConsolidada: 0,
+        ncTotalRegistrado: 0,
+        creditNotesConSaldo: 0,
+        devolucionesPendientes: [] as any[],
+        ncNoRegistrada: 0,
+        ncMuellePendiente: 0,
+        ncLibrePendiente: 0,
+        montoRetenidoFacturas: 0,
+        vencimientoMasCercano: null as string | null,
+        vencimientoMasLejano: null as string | null,
+        tieneVencidas: false,
+        montoVencido: 0,
+        cantidadFacturasPendientes: 0,
+        cantidadFacturasTotal: 0,
+        netoExigible: 0,
+      }
+    }
+
     // 1. Sembrar desde allSuppliers para datos limpios
     allSuppliers.forEach((s: any) => {
       if (s.id) {
         const sId = String(s.id)
-        let supChqs: any[] = []
-        if (chequesBySupplierId.has(sId)) {
-          supChqs = chequesBySupplierId.get(sId)!
-        } else if (s.razon_social) {
-          const norm = String(s.razon_social).trim().toLowerCase()
-          if (chequesByNormalizedName.has(norm)) {
-            supChqs = chequesByNormalizedName.get(norm)!
-          }
-        }
-        supChqs.sort((a, b) => {
-          const da = a.fecha_pago || a.fecha_emision || ""
-          const db = b.fecha_pago || b.fecha_emision || ""
-          return String(da).localeCompare(String(db))
-        })
-        const montoChqs = supChqs.reduce((acc, ch) => acc + Number(ch.monto || 0), 0)
-
-        map.set(s.id, {
-          supplier_id: s.id,
-          supplier_nombre: s.razon_social || s.nombre || "Proveedor",
-          nombre_fantasia: s.nombre_fantasia || "",
-          ruc: s.ruc || "",
-          telefono: s.telefono || "",
-          plazo_credito_factura_dias: Number(s.plazo_credito_factura_dias ?? s.plazo_pago_dias ?? 0),
-          plazo_credito_cheque_dias: Number(s.plazo_credito_cheque_dias ?? 0),
-          formas_pago_acordadas: Array.isArray(s.formas_pago_acordadas) ? s.formas_pago_acordadas : [],
-          acuerdo_pago_tipo: s.acuerdo_pago_tipo || (Number(s.plazo_credito_factura_dias || s.plazo_pago_dias) > 0 ? "credito_factura" : "contado"),
-          acuerdo_pago_notas: s.acuerdo_pago_notas || "",
-          invoices: [],
-          pendingInvoices: [],
-          deudaConsolidada: 0,
-          chequesDiferidos: supChqs,
-          montoChequesDiferidos: montoChqs,
-          cantidadChequesDiferidos: supChqs.length,
-          chequeDiferidoMasProximo: supChqs[0] || null,
-          deudaTotalCompuesta: montoChqs,
-          creditNotes: [],
-          ncConsolidada: 0,
-          devolucionesPendientes: [],
-          ncNoRegistrada: 0,
-          vencimientoMasCercano: null,
-          vencimientoMasLejano: null,
-          tieneVencidas: false,
-          montoVencido: 0,
-          cantidadFacturasPendientes: 0,
-          cantidadFacturasTotal: 0,
-          netoExigible: 0,
-        })
+        const item = createEmptySupplierItem(sId, s.razon_social || s.nombre || "Proveedor", s.ruc || "")
+        item.nombre_fantasia = s.nombre_fantasia || ""
+        item.telefono = s.telefono || ""
+        item.plazo_credito_factura_dias = Number(s.plazo_credito_factura_dias ?? s.plazo_pago_dias ?? 0)
+        item.plazo_credito_cheque_dias = Number(s.plazo_credito_cheque_dias ?? 0)
+        item.formas_pago_acordadas = Array.isArray(s.formas_pago_acordadas) ? s.formas_pago_acordadas : []
+        item.acuerdo_pago_tipo = s.acuerdo_pago_tipo || (item.plazo_credito_factura_dias > 0 ? "credito_factura" : "contado")
+        item.acuerdo_pago_notas = s.acuerdo_pago_notas || ""
+        map.set(sId, item)
       }
     })
 
     // 2. Acumular Facturas
     invoices.forEach(inv => {
-      const supId = inv.supplier_id || "sin_id"
+      const supId = String(inv.supplier_id || "sin_id")
       let item = map.get(supId)
       if (!item) {
-        const sId = supId !== "sin_id" ? supId : null
-        let supChqs: any[] = []
-        if (sId && chequesBySupplierId.has(sId)) {
-          supChqs = chequesBySupplierId.get(sId)!
-        }
-        const montoChqs = supChqs.reduce((acc, ch) => acc + Number(ch.monto || 0), 0)
-        item = {
-          supplier_id: supId,
-          supplier_nombre: inv.supplier_nombre || "Proveedor Desconocido",
-          ruc: (inv as any).supplier_ruc || "",
-          plazo_credito_factura_dias: 0,
-          plazo_credito_cheque_dias: 0,
-          formas_pago_acordadas: [],
-          acuerdo_pago_tipo: "contado",
-          acuerdo_pago_notas: "",
-          invoices: [],
-          pendingInvoices: [],
-          deudaConsolidada: 0,
-          chequesDiferidos: supChqs,
-          montoChequesDiferidos: montoChqs,
-          cantidadChequesDiferidos: supChqs.length,
-          chequeDiferidoMasProximo: supChqs[0] || null,
-          deudaTotalCompuesta: montoChqs,
-          creditNotes: [],
-          ncConsolidada: 0,
-          devolucionesPendientes: [],
-          ncNoRegistrada: 0,
-          vencimientoMasCercano: null,
-          vencimientoMasLejano: null,
-          tieneVencidas: false,
-          montoVencido: 0,
-          cantidadFacturasPendientes: 0,
-          cantidadFacturasTotal: 0,
-          netoExigible: 0,
-        }
+        item = createEmptySupplierItem(supId, inv.supplier_nombre || "Proveedor Desconocido", (inv as any).supplier_ruc || "")
         map.set(supId, item)
       }
 
@@ -895,7 +883,9 @@ export default function FinancialPage() {
       if (isPendiente) {
         item.pendingInvoices.push(inv)
         const saldo = Number(inv.saldo_pendiente ?? inv.total ?? 0)
+        const retenido = Number(inv.monto_retenido_nc || 0)
         item.deudaConsolidada += saldo
+        item.montoRetenidoFacturas += retenido
         item.cantidadFacturasPendientes += 1
 
         const vto = inv.fecha_vencimiento ? String(inv.fecha_vencimiento).slice(0, 10) : null
@@ -914,60 +904,71 @@ export default function FinancialPage() {
       }
     })
 
-    // 3. Acumular NCs Fiscales con saldo disponible
+    // 3. Acumular NCs Fiscales (Total registrado y Saldo Disponible a favor)
     creditNotes.forEach(cn => {
-      const supId = cn.supplier_id
+      const supId = String(cn.supplier_id || "")
       if (!supId) return
       let item = map.get(supId)
       if (!item) {
-        item = {
-          supplier_id: supId,
-          supplier_nombre: cn.supplier_nombre || "Proveedor",
-          ruc: "",
-          plazo_credito_factura_dias: 0,
-          plazo_credito_cheque_dias: 0,
-          formas_pago_acordadas: [],
-          acuerdo_pago_tipo: "contado",
-          acuerdo_pago_notas: "",
-          invoices: [],
-          pendingInvoices: [],
-          deudaConsolidada: 0,
-          chequesDiferidos: [],
-          montoChequesDiferidos: 0,
-          cantidadChequesDiferidos: 0,
-          chequeDiferidoMasProximo: null,
-          deudaTotalCompuesta: 0,
-          creditNotes: [],
-          ncConsolidada: 0,
-          devolucionesPendientes: [],
-          ncNoRegistrada: 0,
-          vencimientoMasCercano: null,
-          vencimientoMasLejano: null,
-          tieneVencidas: false,
-          montoVencido: 0,
-          cantidadFacturasPendientes: 0,
-          cantidadFacturasTotal: 0,
-          netoExigible: 0,
-        }
+        item = createEmptySupplierItem(supId, cn.supplier_nombre || "Proveedor", "")
         map.set(supId, item)
       }
+      const montoTotalNC = Math.max(0, Number(cn.monto || 0))
       const saldoNC = Math.max(0, Number(cn.saldo_disponible || 0))
       item.creditNotes.push(cn)
+      item.ncTotalRegistrado += montoTotalNC
       if (saldoNC > 0) {
         item.ncConsolidada += saldoNC
+        item.creditNotesConSaldo += 1
       }
     })
 
-    // 4. Devoluciones de Mercadería pendientes de formalización fiscal
+    // 4. Reclamos y Solicitudes de NC (Muelle / Discrepancias)
+    const seenSncIds = new Set<string>()
+    supplierNcRequests.forEach((snc: any) => {
+      const sncId = String(snc.id || "")
+      if (sncId && seenSncIds.has(sncId)) return
+      if (sncId) seenSncIds.add(sncId)
+
+      const supId = String(snc.supplier_id || snc.proveedor_id || "")
+      if (!supId) return
+
+      const est = String(snc.estado || "").toLowerCase()
+      if (est === "resuelta" || est === "rechazada" || snc.nc_recibida_numero) return
+
+      let item = map.get(supId)
+      if (!item) {
+        item = createEmptySupplierItem(supId, snc.supplier_nombre || snc.proveedor_nombre || "Proveedor", "")
+        map.set(supId, item)
+      }
+
+      const montoReq = Number(snc.monto_reclamado || snc.monto || 0)
+      if (montoReq > 0) {
+        item.devolucionesPendientes.push({
+          ...snc,
+          tipo_origen: "solicitud_nc",
+          codigo: snc.numero_solicitud || "SNC",
+          monto: montoReq,
+        })
+        item.ncNoRegistrada += montoReq
+        if (snc.invoice_id) {
+          item.ncMuellePendiente += montoReq
+        } else {
+          item.ncLibrePendiente += montoReq
+        }
+      }
+    })
+
+    // 5. Devoluciones Físicas de Mercadería (Salón / Merma)
     const allReturns = [...supplierReturns, ...supermerReturns]
     const seenReturnIds = new Set<string>()
 
     allReturns.forEach(ret => {
-      const retId = ret.id
+      const retId = String(ret.id || "")
       if (retId && seenReturnIds.has(retId)) return
       if (retId) seenReturnIds.add(retId)
 
-      const supId = ret.supplier_id || ret.proveedor_id
+      const supId = String(ret.supplier_id || ret.proveedor_id || "")
       if (!supId) return
 
       const hasNC = !!(
@@ -982,50 +983,29 @@ export default function FinancialPage() {
 
       let item = map.get(supId)
       if (!item) {
-        item = {
-          supplier_id: supId,
-          supplier_nombre: ret.supplier_nombre || ret.proveedor_nombre || "Proveedor",
-          ruc: "",
-          plazo_credito_factura_dias: 0,
-          plazo_credito_cheque_dias: 0,
-          formas_pago_acordadas: [],
-          acuerdo_pago_tipo: "contado",
-          acuerdo_pago_notas: "",
-          invoices: [],
-          pendingInvoices: [],
-          deudaConsolidada: 0,
-          chequesDiferidos: [],
-          montoChequesDiferidos: 0,
-          cantidadChequesDiferidos: 0,
-          chequeDiferidoMasProximo: null,
-          deudaTotalCompuesta: 0,
-          creditNotes: [],
-          ncConsolidada: 0,
-          devolucionesPendientes: [],
-          ncNoRegistrada: 0,
-          vencimientoMasCercano: null,
-          vencimientoMasLejano: null,
-          tieneVencidas: false,
-          montoVencido: 0,
-          cantidadFacturasPendientes: 0,
-          cantidadFacturasTotal: 0,
-          netoExigible: 0,
-        }
+        item = createEmptySupplierItem(supId, ret.supplier_nombre || ret.proveedor_nombre || "Proveedor", "")
         map.set(supId, item)
       }
 
       const montoDev = Number(ret.monto || ret.total || ret.total_costo || ret.valor_total_estimado || 0)
       if (montoDev > 0) {
-        item.devolucionesPendientes.push(ret)
+        item.devolucionesPendientes.push({
+          ...ret,
+          tipo_origen: "devolucion_fisica",
+          codigo: ret.codigo || "DEV",
+          monto: montoDev,
+        })
         item.ncNoRegistrada += montoDev
+        item.ncLibrePendiente += montoDev
       }
     })
 
-    // 5. Consolidar deuda compuesta y neto exigible
+    // 6. Consolidar deuda compuesta y neto exigible
     const list = Array.from(map.values())
       .map(item => {
         const deudaCompuesta = item.deudaConsolidada + item.montoChequesDiferidos
-        const neto = Math.max(0, item.deudaConsolidada - item.ncConsolidada - item.ncNoRegistrada)
+        // Neto exigible: deuda facturas menos crédito a favor en monedero menos reclamos libres de salón
+        const neto = Math.max(0, item.deudaConsolidada - item.ncConsolidada - item.ncLibrePendiente)
         return {
           ...item,
           deudaTotalCompuesta: deudaCompuesta,
@@ -1074,7 +1054,7 @@ export default function FinancialPage() {
       }
       return 0
     })
-  }, [allSuppliers, invoices, creditNotes, supplierReturns, supermerReturns, allCheques, apSupplierSearch, apSupplierFilter, apSupplierSort])
+  }, [allSuppliers, invoices, creditNotes, supplierReturns, supermerReturns, supplierNcRequests, allCheques, apSupplierSearch, apSupplierFilter, apSupplierSort])
 
   // Proveedor actualmente seleccionado para ver detalle y armar lote de pago / OP
   const currentSelectedSupplier = useMemo(() => {
@@ -3342,25 +3322,32 @@ export default function FinancialPage() {
                                     </div>
                                   </div>
 
-                                  {/* 2 Columnas: NC Registrada vs NC Pendiente de Proveedor */}
+                                  {/* 2 Columnas: Saldo a Favor (NCs Disponibles) vs NC Pendiente de Proveedor */}
                                   <div className="grid grid-cols-2 gap-2">
-                                    {/* NC Fiscal Consolidada */}
-                                    <div className="p-2.5 rounded-lg bg-purple-50/70 dark:bg-purple-950/30 border border-purple-100 dark:border-purple-900/40">
+                                    {/* NC Fiscal Consolidada (Saldo Disponible) */}
+                                    <div
+                                      className="p-2.5 rounded-lg bg-purple-50/70 dark:bg-purple-950/30 border border-purple-100 dark:border-purple-900/40"
+                                      title={sup.ncConsolidada > 0 ? `Saldo disponible en monedero para deducir (${sup.creditNotesConSaldo} NCs con saldo a favor)` : `${sup.creditNotes.length} NCs legales registradas (todas ya imputadas o aplicadas)`}
+                                    >
                                       <span className="text-[9px] font-bold uppercase tracking-wider text-purple-700 dark:text-purple-300 block">
-                                        NC Registrada
+                                        Saldo a Favor (NCs)
                                       </span>
                                       <span className="text-xs font-bold font-mono text-purple-800 dark:text-purple-200 block mt-0.5">
                                         {formatPYG(sup.ncConsolidada)}
                                       </span>
-                                      <span className="text-[10px] text-purple-600/80 dark:text-purple-400">
-                                        {sup.creditNotes.length} NCs legales
+                                      <span className="text-[10px] text-purple-600/80 dark:text-purple-400 block truncate">
+                                        {sup.creditNotesConSaldo > 0
+                                          ? `${sup.creditNotesConSaldo} con saldo activo`
+                                          : sup.creditNotes.length > 0
+                                          ? `${sup.creditNotes.length} NCs (ya aplicadas)`
+                                          : "Sin NCs registradas"}
                                       </span>
                                     </div>
 
-                                    {/* NC Pendiente de Proveedor (Devoluciones) */}
+                                    {/* NC Pendiente de Proveedor (Devoluciones y Reclamos de Muelle) */}
                                     <div
                                       className="p-2.5 rounded-lg bg-amber-50/70 dark:bg-amber-950/30 border border-amber-100 dark:border-amber-900/40"
-                                      title="Devoluciones físicas de mercadería realizadas por nosotros pendientes de entrega de NC legal por el proveedor"
+                                      title="Reclamos de muelle (SNC) y devoluciones físicas de mercadería pendientes de entrega de NC legal por el proveedor"
                                     >
                                       <span className="text-[9px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300 block truncate">
                                         NC Pend. Proveedor
@@ -3369,7 +3356,9 @@ export default function FinancialPage() {
                                         {formatPYG(sup.ncNoRegistrada)}
                                       </span>
                                       <span className="text-[10px] text-amber-600/80 dark:text-amber-400 truncate block">
-                                        {sup.devolucionesPendientes.length} devs. reclamo
+                                        {sup.devolucionesPendientes.length > 0
+                                          ? `${sup.devolucionesPendientes.length} reclamos / faltantes`
+                                          : "0 reclamos"}
                                       </span>
                                     </div>
                                   </div>
