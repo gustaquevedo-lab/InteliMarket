@@ -267,9 +267,15 @@ async def get_cash_position(company_id: str | None = Query(None), db: AsyncSessi
 
 
 @router.get("/banks/outstanding-items", response_model=dict)
-async def get_outstanding_items(company_id: str | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+async def get_outstanding_items(
+    company_id: str | None = Query(None),
+    bank_account_id: str | None = Query(None),
+    hasta: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
     cid = _resolve_company_id(company_id, user)
-    return await service.get_outstanding_items(db, cid)
+    return await service.get_outstanding_items(db, cid, bank_account_id=bank_account_id, hasta=hasta)
 
 
 # ── Reportes PDF (Bancos Fase 7) ────────────────────────────────────────────
