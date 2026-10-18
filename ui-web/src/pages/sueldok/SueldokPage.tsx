@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
+import { useNavigate } from "react-router-dom"
 import {
   Users,
   Clock,
@@ -141,6 +142,7 @@ function AvatarCircle({ initials, idx, size = 40 }: { initials: string; idx: num
 }
 
 export default function SueldokPage() {
+  const navigate = useNavigate()
   const [selectedCompany, setSelectedCompany] = useState(EMPRESAS_DISPONIBLES[0])
   const [tab, setTab] = useState<TabType>("dashboard")
   const [search, setSearch] = useState("")
@@ -2117,7 +2119,8 @@ export default function SueldokPage() {
                     <th className="px-4 py-3.5">Fecha</th>
                     <th className="px-4 py-3.5">Motivo / Concepto</th>
                     <th className="px-4 py-3.5 text-right">Monto</th>
-                    <th className="px-6 py-3.5 text-right">Estado</th>
+                    <th className="px-4 py-3.5 text-center">Estado</th>
+                    <th className="px-6 py-3.5 text-right">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
@@ -2136,7 +2139,7 @@ export default function SueldokPage() {
                       <td className="px-4 py-3.5 text-right font-mono font-black text-slate-900 dark:text-white">
                         {formatPYG(adv.monto)}
                       </td>
-                      <td className="px-6 py-3.5 text-right">
+                      <td className="px-4 py-3.5 text-center">
                         <span
                           className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black uppercase tracking-wider border ${
                             adv.estado === "approved"
@@ -2146,6 +2149,19 @@ export default function SueldokPage() {
                         >
                           {adv.estado === "approved" ? "Aprobado en Nómina" : "Pendiente"}
                         </span>
+                      </td>
+                      <td className="px-6 py-3.5 text-right">
+                        {adv.estado === "approved" && (
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/expenses?action=desembolsar_sueldok&sueldok_id=${adv.id}`)}
+                            className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm ml-auto"
+                            title="Desembolsar y registrar en Gastos Operativos (Fondo Fijo, Bóveda o Banco)"
+                          >
+                            <DollarSign className="w-3.5 h-3.5" />
+                            <span>Desembolsar en Gastos</span>
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}

@@ -1198,6 +1198,41 @@ async def disburse_expense(
     await db.commit()
     await db.refresh(exp)
     exp.disbursements = await list_expense_disbursements(db, str(exp.id))
+
+    # Notificar a SueldOK si el gasto corresponde a un anticipo o préstamo aprobado allí
+    if exp.sueldok_sync_id and (exp.es_anticipo_sueldo or exp.naturaleza_economica == "ANTICIPO_PERSONAL"):
+        try:
+            # Obtener el primer medio de pago utilizado para registrarlo en SueldOK
+            primer_medio = (data.disbursements[0].medio_pago if data.disbursements else "fondo_fijo").lower()
+            primer_recibo = data.disbursements[0].numero_comprobante if data.disbursements else (exp.numero_factura or "")
+            # Determinar tipo de entidad: loan si la descripción o notas indican préstamo, sino advance
+            desc_lower = (exp.descripcion or "").lower()
+            entity_type = "loan" if ("préstamo" in desc_lower or "prestamo" in desc_lower) else "advance"
+            
+            disb_ms = None
+            if fecha_efectiva_pago:
+                try:
+                    p_dt = datetime.combine(fecha_efectiva_pago, datetime.min.time()).replace(tzinfo=TZ_ASUNCION)
+                    disb_ms = int(p_dt.timestamp() * 1000)
+                except Exception:
+                    disb_ms = None
+
+            asyncio.create_task(
+                notify_sueldok_disbursement_confirmed(
+                    entity_id=str(exp.sueldok_sync_id),
+                    entity_type=entity_type,
+                    external_ref=f"EXP-{str(exp.id)[:8]}",
+                    payment_voucher=primer_recibo or f"REC-{str(exp.id)[:6].upper()}",
+                    payment_method=primer_medio,
+                    disbursed_at_ms=disb_ms,
+                )
+            )
+            # Actualizar sync status en base de datos local
+            exp.sueldok_sync_status = "confirmado"
+            await db.commit()
+        except Exception as e:
+            logger.error(f"Error despachando confirmación a SueldOK tras desembolso: {e}")
+
     return exp
 
 
@@ -3126,6 +3161,7 @@ async def get_rendicion_pdf_data(db: AsyncSession, company_id: str, rendicion_id
 SUELDOK_BASE_URL = os.environ.get("SUELDOK_URL", "https://sueldok.intellihouse.lat")
 SUELDOK_API_KEY = os.environ.get("SUELDOK_API_KEY", "ifk_santateresa_live_api_key_2026")
 _SUELDOK_CACHE: dict = {"data": None, "timestamp": 0}
+_SUELDOK_DISBURSEMENTS_CACHE: dict = {"data": None, "timestamp": 0}
 
 
 async def fetch_sueldok_overview_data() -> dict:
@@ -3151,6 +3187,71 @@ async def fetch_sueldok_overview_data() -> dict:
         if _SUELDOK_CACHE.get("data"):
             return _SUELDOK_CACHE["data"]
     return _SUELDOK_CACHE.get("data") or {}
+
+
+async def fetch_sueldok_pending_disbursements() -> list[dict]:
+    """Consulta la API de SueldOK para obtener compromisos financieros de anticipos y préstamos pendientes."""
+    global _SUELDOK_DISBURSEMENTS_CACHE
+    now = time.time()
+    if _SUELDOK_DISBURSEMENTS_CACHE.get("data") and (now - _SUELDOK_DISBURSEMENTS_CACHE.get("timestamp", 0)) < 15:
+        return _SUELDOK_DISBURSEMENTS_CACHE["data"]
+
+    url = f"{SUELDOK_BASE_URL.rstrip('/')}/http/api/financial/pending-disbursements?apiKey={SUELDOK_API_KEY}&limit=100"
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            res = await client.get(url, headers={"User-Agent": "InteliMarket/1.0", "Accept": "application/json"})
+            if res.status_code == 200:
+                data = res.json()
+                events = data.get("events", []) if isinstance(data, dict) else []
+                _SUELDOK_DISBURSEMENTS_CACHE = {"data": events, "timestamp": now}
+                return events
+            else:
+                logger.warning(f"SueldOK pending disbursements returned status {res.status_code}")
+    except Exception as e:
+        logger.warning(f"Error connecting to SueldOK pending disbursements: {e}")
+        if _SUELDOK_DISBURSEMENTS_CACHE.get("data"):
+            return _SUELDOK_DISBURSEMENTS_CACHE["data"]
+    return _SUELDOK_DISBURSEMENTS_CACHE.get("data") or []
+
+
+async def notify_sueldok_disbursement_confirmed(
+    entity_id: str,
+    entity_type: str = "advance",
+    external_ref: str | None = None,
+    payment_voucher: str | None = None,
+    payment_method: str | None = None,
+    disbursed_at_ms: int | None = None,
+) -> dict:
+    """Notifica a SueldOK que un anticipo o préstamo fue efectivamente desembolsado en Intelimarket/Gastos."""
+    url = f"{SUELDOK_BASE_URL.rstrip('/')}/http/api/financial/confirm"
+    payload = {
+        "apiKey": SUELDOK_API_KEY,
+        "entityType": entity_type or "advance",
+        "entityId": entity_id,
+        "status": "confirmed",
+        "externalReference": external_ref or "",
+        "paymentVoucher": payment_voucher or "",
+        "paymentMethod": payment_method or "fondo_fijo",
+        "disbursedAt": disbursed_at_ms or int(time.time() * 1000),
+    }
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            res = await client.post(url, json=payload, headers={"User-Agent": "InteliMarket/1.0", "Accept": "application/json"})
+            if res.status_code in (200, 201):
+                logger.info(f"SueldOK financial confirmation succeeded for {entity_type} {entity_id}: {res.json()}")
+                # Invalidar caché local de SueldOK para refrescar vistas
+                global _SUELDOK_CACHE, _SUELDOK_DISBURSEMENTS_CACHE
+                _SUELDOK_CACHE["timestamp"] = 0
+                _SUELDOK_DISBURSEMENTS_CACHE["timestamp"] = 0
+                return {"status": "success", "data": res.json()}
+            else:
+                logger.warning(f"SueldOK financial confirm returned {res.status_code}: {res.text}")
+                return {"status": "error", "code": res.status_code, "text": res.text}
+    except Exception as e:
+        logger.error(f"Error sending financial confirmation to SueldOK: {e}")
+        return {"status": "error", "message": str(e)}
 
 
 async def get_staff_candidates(db: AsyncSession, company_id: str, search: str | None = None) -> list[dict]:
@@ -3191,9 +3292,10 @@ async def get_staff_candidates(db: AsyncSession, company_id: str, search: str | 
 
 
 async def get_sueldok_approved_advances(db: AsyncSession, company_id: str, search: str | None = None) -> list[dict]:
-    """Retorna los anticipos cargados en SueldOK y APROBADOS allí, cotejando si ya fueron desembolsados en caja chica."""
+    """Retorna los anticipos y préstamos cargados en SueldOK y APROBADOS allí, cotejando si ya fueron desembolsados en caja chica/gastos."""
     data = await fetch_sueldok_overview_data()
     raw_advances = data.get("advances", [])
+    pending_events = await fetch_sueldok_pending_disbursements()
 
     # Obtener los sueldok_sync_id ya desembolsados/usados en gastos de caja chica
     used_res = await db.execute(
@@ -3202,13 +3304,71 @@ async def get_sueldok_approved_advances(db: AsyncSession, company_id: str, searc
     used_advances_map = {row.sueldok_sync_id: row for row in used_res.fetchall()}
 
     advances = []
+    seen_ids = set()
+
+    # 1. Incorporar eventos pendientes formales de SueldOK (anticipos y préstamos)
+    for ev in pending_events:
+        eid = str(ev.get("entityId") or "")
+        if not eid:
+            continue
+        seen_ids.add(eid)
+
+        emp_obj = ev.get("employee") or {}
+        nombre = (emp_obj.get("name") or "").strip()
+        ci = str(emp_obj.get("ci") or "").strip()
+        monto = ev.get("amount") or 0
+        motivo = (ev.get("notes") or "").strip()
+        entity_type = ev.get("entityType") or "advance"
+        tipo_label = "Préstamo" if entity_type == "loan" else "Anticipo de Sueldo"
+
+        created_ms = ev.get("createdAt")
+        fecha = ""
+        if created_ms:
+            try:
+                dt_obj = datetime.fromtimestamp(created_ms / 1000.0, tz=TZ_ASUNCION)
+                fecha = dt_obj.strftime("%Y-%m-%d")
+            except Exception:
+                fecha = ""
+
+        if search:
+            q = search.strip().lower()
+            if (q not in nombre.lower() and q not in ci.lower() and 
+                q not in motivo.lower() and q not in tipo_label.lower()):
+                continue
+
+        ya_usado = eid in used_advances_map
+        expense_info = used_advances_map.get(eid)
+
+        advances.append({
+            "id": eid,
+            "eventId": ev.get("eventId"),
+            "entityType": entity_type,
+            "tipo_label": tipo_label,
+            "employeeId": str(emp_obj.get("id") or ""),
+            "nombre": nombre,
+            "ci": ci,
+            "cargo": "Colaborador",
+            "depto": "General",
+            "monto": monto,
+            "motivo": motivo,
+            "fecha": fecha,
+            "estado": "approved",
+            "ya_desembolsado": ya_usado,
+            "expense_id": str(expense_info.id) if expense_info else None,
+            "expense_estado": expense_info.estado if expense_info else None,
+        })
+
+    # 2. Complementar con los anticipos del overview que no estén en pending_events
     for adv in raw_advances:
+        adv_id = str(adv.get("id") or "")
+        if not adv_id or adv_id in seen_ids:
+            continue
+
         estado = (adv.get("estado") or "").strip().lower()
-        # Solo los cargados en SueldOK y APROBADOS allí
         if estado not in ("approved", "aprobado"):
             continue
 
-        adv_id = str(adv.get("id") or "")
+        seen_ids.add(adv_id)
         nombre = (adv.get("nombre") or "").strip()
         ci = str(adv.get("ci") or "").strip()
         monto = adv.get("monto") or 0
@@ -3216,6 +3376,7 @@ async def get_sueldok_approved_advances(db: AsyncSession, company_id: str, searc
         cargo = (adv.get("cargo") or "").strip()
         depto = (adv.get("depto") or "").strip()
         fecha = str(adv.get("fecha") or "")
+        tipo_label = "Anticipo de Sueldo"
 
         if search:
             q = search.strip().lower()
@@ -3228,11 +3389,14 @@ async def get_sueldok_approved_advances(db: AsyncSession, company_id: str, searc
 
         advances.append({
             "id": adv_id,
+            "eventId": None,
+            "entityType": "advance",
+            "tipo_label": tipo_label,
             "employeeId": str(adv.get("employeeId") or ""),
             "nombre": nombre,
             "ci": ci,
-            "cargo": cargo,
-            "depto": depto,
+            "cargo": cargo or "Colaborador",
+            "depto": depto or "General",
             "monto": monto,
             "motivo": motivo,
             "fecha": fecha,

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
+import { useSearchParams } from "react-router-dom"
 import {
   Search, Plus, Loader2, DollarSign, CheckCircle2, XCircle, Wallet, TrendingUp,
   TrendingDown, BarChart3, Ban, Receipt as ReceiptIcon, Building2, Sparkles,
@@ -272,12 +273,42 @@ export default function ExpensesPage() {
   const [loadingStaff, setLoadingStaff] = useState(false)
   const staffSearchRef = useRef<HTMLDivElement>(null)
 
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [showSueldokModal, setShowSueldokModal] = useState(false)
+
   // Anticipos formalmente cargados y aprobados en SueldOK
   const [sueldokAdvances, setSueldokAdvances] = useState<any[]>([])
   const [advanceSearchQuery, setAdvanceSearchQuery] = useState("")
   const [advanceDropdownOpen, setAdvanceDropdownOpen] = useState(false)
   const [loadingAdvances, setLoadingAdvances] = useState(false)
   const advanceSearchRef = useRef<HTMLDivElement>(null)
+
+  const handleSelectSueldokAdvance = useCallback((adv: any) => {
+    const isLoan = adv.entityType === "loan" || (adv.tipo_label || "").toLowerCase().includes("préstamo") || (adv.tipo_label || "").toLowerCase().includes("prestamo")
+    const descPrefix = isLoan ? "Desembolso de Préstamo al Personal" : "Anticipo de sueldo"
+    setForm((prev: any) => ({
+      ...prev,
+      es_anticipo_sueldo: true,
+      naturaleza_economica: "ANTICIPO_PERSONAL",
+      sueldok_sync_id: adv.id,
+      employee_id: adv.employeeId,
+      employee_nombre: adv.nombre,
+      employee_ci: adv.ci,
+      proveedor: adv.nombre,
+      ruc: adv.ci,
+      monto: String(adv.monto),
+      descripcion: `${descPrefix} - ${adv.nombre}${adv.motivo ? ` (${adv.motivo})` : ''}`,
+      fecha_gasto: adv.fecha || getTodayAsuncion(),
+      tipo_comprobante: "recibo_dinero",
+      iva_10: "",
+      iva_5: "",
+      exentas: String(adv.monto),
+    }))
+    setAdvanceDropdownOpen(false)
+    setAdvanceSearchQuery("")
+    setShowSueldokModal(false)
+    setShowForm(true)
+  }, [])
 
   // Buscador ágil de Categorías de Gasto en el modal de registro
   const [categorySearchQuery, setCategorySearchQuery] = useState("")
@@ -755,6 +786,36 @@ export default function ExpensesPage() {
   useEffect(() => {
     fetchAll()
   }, [tab, filterEstado, filterCategory, filterRendicionFund, filterRendicionEstado])
+
+  // Listener de URL searchParams para integraciones cruzadas (ej: desde SueldOK)
+  useEffect(() => {
+    const action = searchParams.get("action")
+    const sueldokId = searchParams.get("sueldok_id")
+    if (action === "desembolsar_sueldok") {
+      setTab("list")
+      if (sueldokId) {
+        // Cargar y seleccionar de inmediato el anticipo / préstamo
+        api.expenses.sueldokAdvances().then(list => {
+          setSueldokAdvances(list)
+          const found = list.find((a: any) => a.id === sueldokId)
+          if (found) {
+            handleSelectSueldokAdvance(found)
+          } else {
+            setShowSueldokModal(true)
+          }
+        }).catch(() => {
+          setShowSueldokModal(true)
+        })
+      } else {
+        setShowSueldokModal(true)
+      }
+      // Limpiar URL params para evitar re-aperturas al navegar
+      const newSp = new URLSearchParams(searchParams)
+      newSp.delete("action")
+      newSp.delete("sueldok_id")
+      setSearchParams(newSp, { replace: true })
+    }
+  }, [searchParams, setSearchParams, handleSelectSueldokAdvance])
 
   const fetchReportData = async () => {
     setLoadingReport(true)
@@ -2671,6 +2732,19 @@ export default function ExpensesPage() {
                   Gastos Generales / Banco (Sin Fondo Fijo)
                   <span className="text-[10px] opacity-70">
                     ({expenses.filter(e => !e.fund_id).length})
+                  </span>
+                </button>
+
+                {/* 🌟 ACCESO RÁPIDO: ANTICIPOS Y PRÉSTAMOS SUELDOK PENDIENTES */}
+                <button
+                  type="button"
+                  onClick={() => setShowSueldokModal(true)}
+                  className="px-3 py-1.5 rounded-xl font-extrabold transition flex items-center gap-2 shrink-0 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-sm ring-2 ring-blue-400/40 animate-pulse"
+                >
+                  <UserCheck className="w-3.5 h-3.5" />
+                  <span>SueldOK: Anticipos & Préstamos</span>
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white text-blue-700 font-black">
+                    {sueldokAdvances.filter((a: any) => !a.ya_desembolsado).length} ptes
                   </span>
                 </button>
               </div>
@@ -4994,24 +5068,7 @@ export default function ExpensesPage() {
                                     isSelected ? "bg-blue-100/60 dark:bg-blue-900/40" : ""
                                   }`}
                                   onMouseDown={() => {
-                                    setForm((prev: any) => ({
-                                      ...prev,
-                                      sueldok_sync_id: adv.id,
-                                      employee_id: adv.employeeId,
-                                      employee_nombre: adv.nombre,
-                                      employee_ci: adv.ci,
-                                      proveedor: adv.nombre,
-                                      ruc: adv.ci,
-                                      monto: String(adv.monto),
-                                      descripcion: `Anticipo de sueldo - ${adv.nombre}${adv.motivo ? ` (${adv.motivo})` : ''}`,
-                                      fecha_gasto: adv.fecha || prev.fecha_gasto,
-                                      tipo_comprobante: "recibo_dinero",
-                                      iva_10: "",
-                                      iva_5: "",
-                                      exentas: String(adv.monto),
-                                    }))
-                                    setAdvanceDropdownOpen(false)
-                                    setAdvanceSearchQuery("")
+                                    handleSelectSueldokAdvance(adv)
                                   }}
                                 >
                                   <div className="space-y-0.5 min-w-0">
@@ -7047,6 +7104,178 @@ export default function ExpensesPage() {
               >
                 {batchAssigning ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
                 <span>Confirmar Asignación Agrupada</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🌟 MODAL / BANDEJA DE DESEMBOLSO: ANTICIPOS Y PRÉSTAMOS DE SUELDOK */}
+      {showSueldokModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl max-w-4xl w-full border border-blue-200 dark:border-blue-900/60 overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Header del Modal */}
+            <div className="p-6 bg-gradient-to-r from-blue-900 via-indigo-950 to-slate-900 text-white flex items-center justify-between border-b border-blue-800/40">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-blue-500/20 border border-blue-400/30 flex items-center justify-center text-blue-300">
+                  <UserCheck className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/30">
+                      Sincronización SueldOK ⇄ Intelimarket
+                    </span>
+                    <span className="text-xs text-blue-200 font-mono">
+                      {sueldokAdvances.filter((a: any) => !a.ya_desembolsado).length} pendientes
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-black text-white mt-0.5">
+                    Anticipos & Préstamos de Personal Aprobados en SueldOK
+                  </h3>
+                  <p className="text-xs text-blue-200/80">
+                    Seleccione un registro para imputar su medio de pago (Fondo Fijo, Bóveda o Banco) y reflejar el egreso contable en Gastos Operativos.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSueldokModal(false)}
+                className="p-2 rounded-xl text-blue-200 hover:text-white hover:bg-white/10 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Buscador interno */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 flex items-center gap-3">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Buscar por colaborador, cédula o motivo..."
+                  value={advanceSearchQuery}
+                  onChange={(e) => setAdvanceSearchQuery(e.target.value)}
+                  className="input-field pl-9 text-xs w-full"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setLoadingAdvances(true)
+                  api.expenses.sueldokAdvances()
+                    .then(list => setSueldokAdvances(list))
+                    .finally(() => setLoadingAdvances(false))
+                }}
+                disabled={loadingAdvances}
+                className="px-3 py-2 rounded-xl bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-xs font-bold transition flex items-center gap-1.5"
+                title="Refrescar lista desde SueldOK"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingAdvances ? "animate-spin text-blue-500" : ""}`} />
+                <span>Actualizar</span>
+              </button>
+            </div>
+
+            {/* Lista de Registros */}
+            <div className="p-4 overflow-y-auto space-y-2 flex-1">
+              {filteredSueldokAdvances.length === 0 ? (
+                <div className="py-16 text-center text-slate-400 space-y-2">
+                  <CheckCircle2 className="w-10 h-10 mx-auto text-emerald-500/60" />
+                  <p className="text-sm font-bold text-slate-700 dark:text-slate-300">
+                    No hay anticipos ni préstamos pendientes de desembolso
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    Todos los compromisos aprobados en SueldOK ya fueron procesados o no coinciden con la búsqueda.
+                  </p>
+                </div>
+              ) : (
+                filteredSueldokAdvances.map((adv: any) => {
+                  const isLoan = adv.entityType === "loan" || (adv.tipo_label || "").toLowerCase().includes("préstamo") || (adv.tipo_label || "").toLowerCase().includes("prestamo")
+                  return (
+                    <div
+                      key={adv.id}
+                      className={`p-3.5 rounded-2xl border transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                        adv.ya_desembolsado
+                          ? "bg-slate-50/60 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 opacity-70"
+                          : "bg-white dark:bg-slate-800 border-blue-200 dark:border-blue-900/60 shadow-sm hover:border-blue-400 dark:hover:border-blue-700"
+                      }`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                            isLoan
+                              ? "bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-800"
+                              : "bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-800"
+                          }`}>
+                            {isLoan ? "Préstamo Personal" : "Anticipo de Sueldo"}
+                          </span>
+                          <span className="font-extrabold text-sm text-slate-900 dark:text-white">
+                            {adv.nombre}
+                          </span>
+                          {adv.cargo && (
+                            <span className="text-[10px] text-slate-400 font-medium">
+                              · {adv.cargo}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400 flex-wrap">
+                          <span>C.I.: <strong className="font-mono text-slate-700 dark:text-slate-200">{adv.ci || "S/D"}</strong></span>
+                          {adv.fecha && <span>Fecha: <strong className="font-mono">{adv.fecha}</strong></span>}
+                          {adv.motivo && <span className="italic">"{adv.motivo}"</span>}
+                        </div>
+
+                        {adv.ya_desembolsado && (
+                          <div className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-md border border-amber-300/40">
+                            <CheckCircle2 className="w-3 h-3 text-amber-600" />
+                            Ya desembolsado en comprobante de gasto
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-4 self-end sm:self-center shrink-0">
+                        <div className="text-right">
+                          <div className="text-[10px] uppercase font-bold text-slate-400">Importe a Desembolsar</div>
+                          <div className="text-base font-black font-mono text-slate-900 dark:text-white">
+                            ₲ {formatPYG(adv.monto)}
+                          </div>
+                        </div>
+
+                        {!adv.ya_desembolsado ? (
+                          <button
+                            type="button"
+                            onClick={() => handleSelectSueldokAdvance(adv)}
+                            className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-blue-600/20"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Desembolsar en Gastos</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled
+                            className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 text-xs font-medium cursor-not-allowed border border-slate-200 dark:border-slate-700"
+                          >
+                            Desembolsado
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+
+            {/* Footer Modal */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs text-slate-500">
+              <span>
+                💡 Al registrar el desembolso y liquidarlo por Fondo Fijo o Banco, SueldOK actualiza automáticamente su estado.
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowSueldokModal(false)}
+                className="px-4 py-2 rounded-xl bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-bold border border-slate-200 dark:border-slate-600 transition"
+              >
+                Cerrar
               </button>
             </div>
           </div>
