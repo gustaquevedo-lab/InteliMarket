@@ -310,9 +310,10 @@ async def export_sales_by_supplier_pdf(
         sup_data = await service.get_sales_by_supplier(db, company_id, fecha_desde, fecha_hasta, limit=1, supplier_id=supplier_id)
         supplier_info = sup_data[0] if sup_data else {"proveedor": "Proveedor", "ruc": "—"}
         product_items = await service.get_sales_by_supplier_products(db, company_id, supplier_id, fecha_desde, fecha_hasta, limit=limit)
+        payment_info = await service.get_supplier_payments_summary(db, company_id, supplier_id)
         pdf_bytes = pdf_reports.generate_sales_by_supplier_pdf(
             company, sup_data, fecha_desde, fecha_hasta, generated_by,
-            supplier_info=supplier_info, product_items=product_items
+            supplier_info=supplier_info, product_items=product_items, payment_info=payment_info
         )
         safe_name = "".join(c for c in supplier_info.get("proveedor", "proveedor") if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
         filename = f"ventas_proveedor_{safe_name}_{fecha_desde or 'inicio'}_{fecha_hasta or 'hoy'}.pdf"

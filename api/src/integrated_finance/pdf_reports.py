@@ -72,9 +72,14 @@ PAGE_W, PAGE_H = A4
 MARGIN = 12 * mm
 
 
-def _fmt_gs(v) -> str:
+def _fmt_gs(v, include_symbol: bool = False) -> str:
+    """Formato canónico para montos en Guaraníes (PYG):
+    Por regla de Extra Supermercado, la moneda corriente es Guaraníes y NO debe
+    repetirse 'Gs.' salvo que se solicite explícitamente o sea una divisa extranjera.
+    """
     n = int(round(float(v or 0)))
-    return f"{'-' if n < 0 else ''}Gs. {abs(n):,}".replace(",", ".")
+    formatted = f"{'-' if n < 0 else ''}{abs(n):,}".replace(",", ".")
+    return f"Gs. {formatted}" if include_symbol else formatted
 
 
 def _logo_flowable(company: dict, max_w=38*mm, max_h=15*mm):

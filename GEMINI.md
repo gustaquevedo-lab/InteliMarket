@@ -66,6 +66,7 @@
    - **Formato Paraguay (PYG):** Guaraníes siempre enteros, sin decimales, con separador de miles por punto (`.`), ej: `1.500.000`.
    - **Formato Divisas (USD / BRL):** Con separador de miles por punto (`.`) y centavos por coma (`,`), ej: `1.250,50`.
    - **Visualización en Pantallas / Tablas:** Se debe emplear siempre `formatPYG()`, `formatCurrency()`, `formatBRL()` o `formatUSD()` de `src/utils/format.ts`. Nunca imprimir números crudos sin formato en montos de dinero.
+   - **REGLA CANÓNICA DE MONEDA EN REPORTES Y PDFs:** En Extra Supermercado, la moneda corriente tácita es el **Guaraní (PYG)**. En reportes contables, ejecutivos, inventarios, auditorías y PDFs, queda terminantemente PROHIBIDO agregar el prefijo o sufijo `Gs.` (tanto en valores numéricos como en encabezados de columna ej: `Venta Total (Gs.)` -> `Venta Total`). Solo y exclusivamente se debe identificar y prefijar la moneda cuando sea una divisa extranjera (`R$` o `US$`).
 
 11. **CONSISTENCIA Y SINCRONIZACIÓN FULL-STACK SIMÉTRICA (FRONTEND & BACKEND):**
    - **Simetría Operativa Obligatoria:** Toda modificación de reglas de negocio, validaciones o flujos operativos (ej. redondeos, límites, pagos, notas de crédito, retenciones) debe reflejarse y validarse de forma completa y simultánea en ambos extremos:

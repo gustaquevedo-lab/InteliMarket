@@ -890,7 +890,7 @@ export default function FinancialPage() {
       item.invoices.push(inv)
       item.cantidadFacturasTotal += 1
 
-      const isPendiente = !!inv.estado && ["pendiente", "aprobada", "parcial"].includes(inv.estado) && Number(inv.saldo_pendiente ?? inv.total ?? 0) > 0
+      const isPendiente = !!inv.estado && ["pendiente", "aprobada", "parcial", "retenida_discrepancia"].includes(inv.estado) && Number(inv.saldo_pendiente ?? inv.total ?? 0) > 0
       if (isPendiente) {
         item.pendingInvoices.push(inv)
         const saldo = Number(inv.saldo_pendiente ?? inv.total ?? 0)
@@ -1954,30 +1954,49 @@ export default function FinancialPage() {
 
                           {pendingSncs.length > 0 && (
                             <div className="mt-3 pt-3 border-t border-amber-500/20 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                              {pendingSncs.map((snc: any) => (
-                                <div key={snc.id} className="bg-amber-900/30 border border-amber-600/30 rounded-lg p-3 text-xs space-y-2 flex flex-col justify-between">
-                                  <div className="space-y-1">
-                                    <div className="flex items-center justify-between">
-                                      <span className="font-mono font-bold text-amber-300">{snc.numero_solicitud || "SNC"}</span>
-                                      <span className="font-mono font-bold text-rose-400">₲ {Number(snc.monto_reclamado || 0).toLocaleString("es-PY")}</span>
+                              {pendingSncs.map((snc: any) => {
+                                const linkedInv = invoices.find((i: any) => String(i.id) === String(snc.invoice_id))
+                                const sncFecha = snc.created_at ? formatDate(snc.created_at) : (snc.fecha ? formatDate(snc.fecha) : null)
+                                return (
+                                  <div key={snc.id} className="bg-amber-900/30 border border-amber-600/30 rounded-lg p-3 text-xs space-y-2 flex flex-col justify-between">
+                                    <div className="space-y-1.5">
+                                      <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="font-mono font-bold text-amber-300">{snc.numero_solicitud || "SNC"}</span>
+                                          {sncFecha && (
+                                            <span className="text-[10px] text-amber-300/70 font-mono">({sncFecha})</span>
+                                          )}
+                                        </div>
+                                        <span className="font-mono font-bold text-rose-400">₲ {Number(snc.monto_reclamado || 0).toLocaleString("es-PY")}</span>
+                                      </div>
+
+                                      {/* Factura vinculada */}
+                                      <div className="flex items-center gap-1.5 text-[11px] text-amber-200/90 font-mono bg-amber-950/50 px-2 py-1 rounded border border-amber-600/20">
+                                        <Receipt className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                        <span>Factura:</span>
+                                        <strong className="text-white font-bold">
+                                          {linkedInv?.numero_factura || (snc.invoice_id ? `ID #${String(snc.invoice_id).slice(0, 8)}` : "S/F vinculada")}
+                                        </strong>
+                                      </div>
+
+                                      <p className="text-[11px] text-amber-200/70 truncate" title={snc.observaciones || snc.tipo_motivo}>
+                                        {snc.observaciones || snc.tipo_motivo || "Diferencia de recepción en muelle"}
+                                      </p>
+                                      <div className="text-[10px] text-amber-400/80 font-mono">
+                                        Estado: <span className="uppercase font-semibold">{snc.estado?.replace("_", " ")}</span>
+                                      </div>
                                     </div>
-                                    <p className="text-[11px] text-amber-200/70 truncate" title={snc.observaciones || snc.tipo_motivo}>
-                                      {snc.observaciones || snc.tipo_motivo || "Diferencia de recepción en muelle"}
-                                    </p>
-                                    <div className="text-[10px] text-amber-400/80 font-mono">
-                                      Estado: <span className="uppercase font-semibold">{snc.estado?.replace("_", " ")}</span>
-                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenResolveNcModal(snc)}
+                                      className="w-full mt-1 py-1.5 px-2.5 rounded-lg bg-emerald-600/90 hover:bg-emerald-600 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-sm transition active:scale-[0.98]"
+                                    >
+                                      <FileCheck className="w-3.5 h-3.5" />
+                                      <span>Cargar NC Recibida</span>
+                                    </button>
                                   </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleOpenResolveNcModal(snc)}
-                                    className="w-full mt-1 py-1.5 px-2.5 rounded-lg bg-emerald-600/90 hover:bg-emerald-600 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-sm transition active:scale-[0.98]"
-                                  >
-                                    <FileCheck className="w-3.5 h-3.5" />
-                                    <span>Cargar NC Recibida</span>
-                                  </button>
-                                </div>
-                              ))}
+                                )
+                              })}
                             </div>
                           )}
                         </div>
@@ -2580,6 +2599,11 @@ export default function FinancialPage() {
                                                     <span className="font-mono font-bold text-rose-700 dark:text-rose-300">
                                                       {snc.numero_solicitud || "SNC"}
                                                     </span>
+                                                    {snc.created_at && (
+                                                      <span className="text-[10px] text-rose-600/80 dark:text-rose-400/80 font-mono">
+                                                        ({formatDate(snc.created_at)})
+                                                      </span>
+                                                    )}
                                                     <span className="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-rose-200/80 dark:bg-rose-950 text-rose-800 dark:text-rose-300">
                                                       {snc.estado?.replace("_", " ")}
                                                     </span>
@@ -4805,19 +4829,65 @@ export default function FinancialPage() {
             </div>
 
             <form onSubmit={handleSaveResolveNc} className="p-5 space-y-4">
-              <div className="p-3.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40 rounded-xl space-y-1 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-600 dark:text-gray-400">Motivo de la Discrepancia:</span>
-                  <span className="font-semibold text-amber-800 dark:text-amber-300">{selectedNcRequestForResolve.tipo_motivo || "Rechazo en muelle"}</span>
-                </div>
-                {selectedNcRequestForResolve.observaciones && (
-                  <p className="text-[11px] text-gray-500 italic mt-0.5">"{selectedNcRequestForResolve.observaciones}"</p>
-                )}
-                <div className="flex items-center justify-between pt-1 border-t border-amber-200/50 dark:border-amber-900/40 font-mono font-bold">
-                  <span className="text-gray-700 dark:text-gray-300">Monto Reclamado:</span>
-                  <span className="text-rose-600 dark:text-rose-400">₲ {Number(selectedNcRequestForResolve.monto_reclamado || 0).toLocaleString("es-PY")}</span>
-                </div>
-              </div>
+              {(() => {
+                const linkedInv = invoices.find((i: any) => String(i.id) === String(selectedNcRequestForResolve.invoice_id))
+                const sncFecha = selectedNcRequestForResolve.created_at ? formatDate(selectedNcRequestForResolve.created_at) : (selectedNcRequestForResolve.fecha ? formatDate(selectedNcRequestForResolve.fecha) : "—")
+                return (
+                  <div className="p-4 bg-amber-50/80 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800/60 rounded-xl space-y-2 text-xs">
+                    <div className="flex items-center justify-between pb-2 border-b border-amber-200/60 dark:border-amber-900/50">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-amber-900 dark:text-amber-200 text-sm">
+                          {selectedNcRequestForResolve.numero_solicitud || "SNC"}
+                        </span>
+                        <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-amber-200/70 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300">
+                          {selectedNcRequestForResolve.estado?.replace("_", " ") || "PENDIENTE"}
+                        </span>
+                      </div>
+                      <span className="text-[11px] font-mono text-gray-500 dark:text-gray-400">
+                        Fecha: <strong>{sncFecha}</strong>
+                      </span>
+                    </div>
+
+                    {/* Factura Atada */}
+                    <div className="bg-white/80 dark:bg-slate-900/80 p-2.5 rounded-lg border border-amber-200/60 dark:border-amber-900/40 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-500 font-medium flex items-center gap-1.5">
+                          <Receipt className="w-3.5 h-3.5 text-indigo-500" /> Factura Atada:
+                        </span>
+                        <span className="font-mono font-bold text-gray-900 dark:text-white">
+                          {linkedInv?.numero_factura || (selectedNcRequestForResolve.invoice_id ? `ID #${String(selectedNcRequestForResolve.invoice_id).slice(0, 8)}` : "S/F vinculada")}
+                        </span>
+                      </div>
+                      {linkedInv && (
+                        <div className="flex items-center justify-between text-[11px] text-gray-500 font-mono pt-1 border-t border-gray-100 dark:border-slate-800">
+                          <span>Emisión: {linkedInv.fecha_emision ? formatDate(linkedInv.fecha_emision) : "—"} · Timbrado: {linkedInv.timbrado || "—"}</span>
+                          <span>Total: <strong>{formatPYG(Number(linkedInv.total || 0))}</strong></span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Motivo y Observaciones */}
+                    <div className="space-y-1 pt-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-600 dark:text-gray-400">Motivo de la Discrepancia:</span>
+                        <span className="font-semibold text-amber-800 dark:text-amber-300">{selectedNcRequestForResolve.tipo_motivo || "Rechazo en muelle"}</span>
+                      </div>
+                      {selectedNcRequestForResolve.observaciones && (
+                        <p className="text-[11px] text-gray-600 dark:text-gray-300 italic bg-amber-100/50 dark:bg-amber-900/20 p-2 rounded border border-amber-200/40 dark:border-amber-900/30">
+                          "{selectedNcRequestForResolve.observaciones}"
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-amber-200/60 dark:border-amber-900/50 font-mono">
+                      <span className="text-gray-700 dark:text-gray-300 font-bold">Monto Reclamado por Descontar:</span>
+                      <span className="text-rose-600 dark:text-rose-400 font-black text-sm">
+                        ₲ {Number(selectedNcRequestForResolve.monto_reclamado || 0).toLocaleString("es-PY")}
+                      </span>
+                    </div>
+                  </div>
+                )
+              })()}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>

@@ -155,7 +155,7 @@ def generate_sales_executive_pdf(company: dict, data: dict, fecha_desde: date | 
     neto = res.get("resultado_neto", 0)
 
     t1_data = [
-        ["#", "Concepto Económico / Operativo", "Monto (Gs. / %)", "Naturaleza / Impacto"],
+        ["#", "Concepto Económico / Operativo", "Monto / %", "Naturaleza / Impacto"],
         ["1", "Facturación Bruta (Total Vendido)", _fmt_gs(tot_vendido), "Ventas brutas acumuladas en POS"],
         ["2", "Costo Mercadería Vendida (CMV)", _fmt_gs(cmv), "Costo promedio de reposición"],
         ["3", "Margen / Utilidad Comercial Bruta", _fmt_gs(utilidad_bruta), "Margen comercial bruto (L1 - L2)"],
@@ -198,7 +198,7 @@ def generate_sales_executive_pdf(company: dict, data: dict, fecha_desde: date | 
     elements.append(Spacer(1, 2 * mm))
 
     medios = data.get("medios_pago", [])
-    t2_data = [["Medio de Pago / Canal", "Moneda", "Operaciones", "Total Recaudado (Gs.)", "% Part."]]
+    t2_data = [["Medio de Pago / Canal", "Moneda", "Operaciones", "Total Recaudado", "% Part."]]
     tot_ops = 0
     tot_monto_medios = 0.0
 
@@ -247,7 +247,7 @@ def generate_sales_executive_pdf(company: dict, data: dict, fecha_desde: date | 
     elements.append(Spacer(1, 2 * mm))
 
     cajeras = data.get("cajeras", [])
-    t3_data = [["Cajera / Operador", "Turnos", "Tickets", "Total Ventas (Gs.)", "Descuentos", "Ticket Medio"]]
+    t3_data = [["Cajera / Operador", "Turnos", "Tickets", "Total Ventas", "Descuentos", "Ticket Medio"]]
     tot_tix = 0
     tot_caj_sales = 0.0
     tot_desc = 0.0
@@ -361,7 +361,7 @@ def generate_inventory_valuation_pdf(company: dict, data: dict, fecha_corte: dat
     elements.append(Spacer(1, 2 * mm))
 
     suppliers = data.get("by_supplier", [])[:15]  # Top 15 proveedores
-    t2_data = [["Proveedor", "SKUs", "Unidades", "Capital Valorizado (Gs.)", "% Stock"]]
+    t2_data = [["Proveedor", "SKUs", "Unidades", "Capital Valorizado", "% Stock"]]
     for s in suppliers:
         t2_data.append([
             s.get("supplier_name", "Sin Proveedor")[:35],
@@ -392,7 +392,7 @@ def generate_inventory_valuation_pdf(company: dict, data: dict, fecha_corte: dat
     elements.append(Spacer(1, 2 * mm))
 
     items = data.get("items", [])[:50]
-    t3_data = [["SKU", "Descripción Producto", "Depósito", "Stock", "Costo Unit.", "Valor Total (Gs.)"]]
+    t3_data = [["SKU", "Descripción Producto", "Depósito", "Stock", "Costo Unit.", "Valor Total"]]
     for it in items:
         t3_data.append([
             it.get("sku", "")[:12],
@@ -437,6 +437,7 @@ def generate_sales_by_supplier_pdf(
     generated_by: str = "",
     supplier_info: dict | None = None,
     product_items: list[dict] | None = None,
+    payment_info: dict | None = None,
 ) -> bytes:
     from reportlab.lib.colors import HexColor
     buffer = io.BytesIO()
@@ -488,12 +489,20 @@ def generate_sales_by_supplier_pdf(
         total_unidades = sum(it.get("unidades_vendidas", 0) for it in product_items)
         margen_global_pct = round((total_margen / max(total_ventas, 1)) * 100, 1)
 
+        monto_pagado_mes = payment_info.get("monto_pagado_mes", 0.0) if payment_info else 0.0
+        monto_pagado_hist = payment_info.get("monto_pagado_historico", 0.0) if payment_info else 0.0
+        cobertura_cmv = monto_pagado_mes - total_costo
+        cobertura_lbl = f"+{_fmt_gs(cobertura_cmv)} (Al día)" if cobertura_cmv >= 0 else f"{_fmt_gs(cobertura_cmv)} (Pendiente)"
+
         elements.append(Paragraph("<b>1. Resumen Consolidado del Proveedor</b>", styles["SectionTitle"]))
         resumen_data = [
             ("Proveedor Auditado", f"{prov_nombre} (RUC: {prov_ruc})", False),
             ("Ventas Totales Registradas", _fmt_gs(total_ventas), False),
             ("Costo de Mercadería Vendida (CMV)", _fmt_gs(total_costo), False),
             ("Margen Bruto Comercial", f"{_fmt_gs(total_margen)} ({margen_global_pct}%)", True),
+            ("Monto Pagado en el Mes (Tesorería)", _fmt_gs(monto_pagado_mes), False),
+            ("Monto Pagado Acumulado Histórico", _fmt_gs(monto_pagado_hist), False),
+            ("Liquidación vs. CMV del Período", cobertura_lbl, False),
             ("Total Artículos / SKUs Vendidos", str(len(product_items)), False),
             ("Total Unidades Despachadas", f"{total_unidades:,.0f}", False),
         ]
@@ -501,7 +510,7 @@ def generate_sales_by_supplier_pdf(
         elements.append(Spacer(1, 4 * mm))
 
         elements.append(Paragraph(f"<b>2. Detalle Completo de Artículos Vendidos ({len(product_items)} SKUs)</b>", styles["SectionTitle"]))
-        t_data = [["#", "SKU", "Código Barra", "Descripción del Producto", "Unidades", "Venta Total (Gs.)", "Costo (Gs.)", "Margen (Gs.)", "Margen %"]]
+        t_data = [["#", "SKU", "Código Barra", "Descripción del Producto", "Unidades", "Venta Total", "Costo", "Margen", "Margen %"]]
         for idx, it in enumerate(product_items, 1):
             t_data.append([
                 str(idx),
@@ -524,8 +533,10 @@ def generate_sales_by_supplier_pdf(
             ("FONTSIZE", (0, 0), (-1, -1), 6.5),
             ("ALIGN", (4, 0), (-1, -1), "RIGHT"),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, GRAY_LIGHT]),
-            ("TOPPADDING", (0, 0), (-1, -1), 2),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 3),
             ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
             ("INNERGRID", (0, 0), (-1, -1), 0.5, HexColor("#E2E8F0")),
         ]))
@@ -570,7 +581,7 @@ def generate_sales_by_supplier_pdf(
     elements.append(Spacer(1, 4 * mm))
 
     elements.append(Paragraph("<b>2. Ranking de Proveedores por Volumen de Venta</b>", styles["SectionTitle"]))
-    t_data = [["#", "Proveedor", "RUC", "SKUs", "Unidades", "Venta Total (Gs.)", "Margen (Gs.)", "Margen %", "Part."]]
+    t_data = [["#", "Proveedor", "RUC", "SKUs", "Unidades", "Venta Total", "Margen", "Margen %", "Part."]]
     for idx, it in enumerate(items[:60], 1):
         t_data.append([
             str(idx),
@@ -680,9 +691,9 @@ def generate_sales_detailed_day_pdf(
             Paragraph(f"<b>TICKETS EMITIDOS:</b><br/><font size=11 color='#0F172A'><b>{t_tickets:,}</b></font>", styles["Normal"]),
             Paragraph(f"<b>SKUs VENDIDOS:</b><br/><font size=11 color='#0F172A'><b>{t_skus:,}</b></font>", styles["Normal"]),
             Paragraph(f"<b>UNIDADES / KG:</b><br/><font size=11 color='#0F172A'><b>{t_unidades:,.2f}</b></font>", styles["Normal"]),
-            Paragraph(f"<b>VENTA TOTAL:</b><br/><font size=11 color='#047857'><b>Gs. {_fmt_gs(t_venta)}</b></font>", styles["Normal"]),
-            Paragraph(f"<b>COSTO MERCADERÍA:</b><br/><font size=11 color='#1E40AF'><b>Gs. {_fmt_gs(t_costo)}</b></font>", styles["Normal"]),
-            Paragraph(f"<b>MARGEN BRUTO:</b><br/><font size=11 color='#B45309'><b>Gs. {_fmt_gs(t_margen_gs)} ({t_margen_pct:.1f}%)</b></font>", styles["Normal"]),
+            Paragraph(f"<b>VENTA TOTAL:</b><br/><font size=11 color='#047857'><b>{_fmt_gs(t_venta)}</b></font>", styles["Normal"]),
+            Paragraph(f"<b>COSTO MERCADERÍA:</b><br/><font size=11 color='#1E40AF'><b>{_fmt_gs(t_costo)}</b></font>", styles["Normal"]),
+            Paragraph(f"<b>MARGEN BRUTO:</b><br/><font size=11 color='#B45309'><b>{_fmt_gs(t_margen_gs)} ({t_margen_pct:.1f}%)</b></font>", styles["Normal"]),
         ]
     ]
     kpi_table = Table(kpi_data, colWidths=[40 * mm, 38 * mm, 40 * mm, 50 * mm, 49 * mm, 50 * mm])
@@ -717,8 +728,8 @@ def generate_sales_detailed_day_pdf(
         "PPP",
         "Últ. Costo",
         "Costo Prom.",
-        "Total Venta (Gs.)",
-        "Margen (Gs.)",
+        "Total Venta",
+        "Margen",
         "% Mg.",
     ]
     t_data = [headers]
@@ -838,10 +849,10 @@ def generate_sales_daily_consolidation_pdf(
         [
             Paragraph(f"<b>DÍAS EVALUADOS:</b><br/><font size=11 color='#0F172A'><b>{tot_dias}</b></font>", styles["Normal"]),
             Paragraph(f"<b>TOTAL TICKETS:</b><br/><font size=11 color='#0F172A'><b>{tot_tickets:,}</b></font>", styles["Normal"]),
-            Paragraph(f"<b>FACTURACIÓN PERÍODO:</b><br/><font size=11 color='#047857'><b>Gs. {_fmt_gs(tot_venta)}</b></font>", styles["Normal"]),
-            Paragraph(f"<b>COSTO MERCADERÍA:</b><br/><font size=11 color='#1E40AF'><b>Gs. {_fmt_gs(tot_costo)}</b></font>", styles["Normal"]),
-            Paragraph(f"<b>MARGEN BRUTO:</b><br/><font size=11 color='#B45309'><b>Gs. {_fmt_gs(tot_margen)} ({tot_margen_pct:.1f}%)</b></font>", styles["Normal"]),
-            Paragraph(f"<b>PROMEDIO DIARIO:</b><br/><font size=11 color='#0F172A'><b>Gs. {_fmt_gs(prom_diario)}</b></font>", styles["Normal"]),
+            Paragraph(f"<b>FACTURACIÓN PERÍODO:</b><br/><font size=11 color='#047857'><b>{_fmt_gs(tot_venta)}</b></font>", styles["Normal"]),
+            Paragraph(f"<b>COSTO MERCADERÍA:</b><br/><font size=11 color='#1E40AF'><b>{_fmt_gs(tot_costo)}</b></font>", styles["Normal"]),
+            Paragraph(f"<b>MARGEN BRUTO:</b><br/><font size=11 color='#B45309'><b>{_fmt_gs(tot_margen)} ({tot_margen_pct:.1f}%)</b></font>", styles["Normal"]),
+            Paragraph(f"<b>PROMEDIO DIARIO:</b><br/><font size=11 color='#0F172A'><b>{_fmt_gs(prom_diario)}</b></font>", styles["Normal"]),
         ]
     ]
     kpi_table = Table(kpi_data, colWidths=[36 * mm, 40 * mm, 50 * mm, 48 * mm, 50 * mm, 43 * mm])
@@ -869,12 +880,12 @@ def generate_sales_daily_consolidation_pdf(
         "Tickets",
         "SKUs",
         "Unidades / KG",
-        "Total Ventas (Gs.)",
-        "Costo Mercadería (Gs.)",
-        "Margen Bruto (Gs.)",
+        "Total Ventas",
+        "Costo Mercadería",
+        "Margen Bruto",
         "Margen (%)",
-        "Ticket Prom. (Gs.)",
-        "PPP Prom. (Gs.)",
+        "Ticket Prom.",
+        "PPP Prom.",
     ]
     t_data = [headers]
 
@@ -1010,7 +1021,7 @@ def generate_purchases_vs_sales_pdf(
 
     # 2. Desglose por Proveedor
     provs = report_data.get("proveedores", [])
-    t_rows = [["#", "Proveedor / Razón Social", "RUC", "Ventas Generadas (Gs.)", "Compras Recibidas (Gs.)", "Facturas", "Ratio C/V", "Estado"]]
+    t_rows = [["#", "Proveedor / Razón Social", "RUC", "Ventas Generadas", "Compras Recibidas", "Facturas", "Ratio C/V", "Estado"]]
     for idx, p in enumerate(provs[:45], 1):
         est_color = "🟢 Normal" if p.get("estado") == "normal" else "🔴 Excedido"
         t_rows.append([
