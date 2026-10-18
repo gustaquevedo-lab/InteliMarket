@@ -15,17 +15,30 @@ import { useToast } from "../../context/ToastContext"
 import { formatPYG } from "../../utils/format"
 import PlanillaDetalleDiaTab from "./PlanillaDetalleDiaTab"
 import ConsolidadoDiarioTab from "./ConsolidadoDiarioTab"
+import ComprasVsVentasTab from "./ComprasVsVentasTab"
 
 const COLORS = ["#10b981", "#3b82f6", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4", "#64748b", "#14b8a6", "#f97316"]
 
-type TabKey = "planilla_dia" | "consolidado_diario" | "utilidad_7_lineas" | "proveedores" | "medios_pago" | "cajeras" | "categorias"
+export type MainCategory = "rentabilidad" | "proveedores_compras" | "caja_auditoria"
+
+export type TabKey =
+  | "utilidad_7_lineas"
+  | "categorias"
+  | "proveedores"
+  | "compras_vs_ventas"
+  | "planilla_dia"
+  | "consolidado_diario"
+  | "medios_pago"
+  | "cajeras"
 
 export default function ReportsPage() {
   const toast = useToast()
-  const [activeTab, setActiveTab] = useState<TabKey>("planilla_dia")
+  const [mainCat, setMainCat] = useState<MainCategory>("proveedores_compras")
+  const [activeTab, setActiveTab] = useState<TabKey>("proveedores")
   const [loading, setLoading] = useState(false)
   const [downloadingPdf, setDownloadingPdf] = useState(false)
   const [downloadingXlsx, setDownloadingXlsx] = useState(false)
+
 
   // Proveedores
   const [suppliersData, setSuppliersData] = useState<any[]>([])
@@ -36,6 +49,9 @@ export default function ReportsPage() {
   const [productSearch, setProductSearch] = useState("")
   const [supplierPickerOpen, setSupplierPickerOpen] = useState(false)
   const [supplierSearchText, setSupplierSearchText] = useState("")
+  const [supplierPaymentData, setSupplierPaymentData] = useState<{ monto_pagado_mes: number; monto_pagado_historico: number } | null>(null)
+  const [paymentPeriod, setPaymentPeriod] = useState<"mes" | "historico">("mes")
+  const [loadingSupplierPayment, setLoadingSupplierPayment] = useState(false)
 
   // Selector de fechas con zona horaria America/Asuncion
   const todayStr = useMemo(() => new Date().toISOString().split("T")[0], [])
@@ -154,13 +170,32 @@ export default function ReportsPage() {
     }
   }, [fechaDesde, fechaHasta])
 
+  const fetchSupplierPayments = useCallback(async (supId: string) => {
+    if (!supId || supId === "todos" || supId === "sin_proveedor") {
+      setSupplierPaymentData(null)
+      return
+    }
+    setLoadingSupplierPayment(true)
+    try {
+      const res = await api.reports.salesBySupplierPaymentsSummary({ supplier_id: supId })
+      setSupplierPaymentData(res)
+    } catch (err: any) {
+      console.error("Error al cargar resumen de pagos a proveedor:", err)
+      setSupplierPaymentData(null)
+    } finally {
+      setLoadingSupplierPayment(false)
+    }
+  }, [])
+
   useEffect(() => {
     if (selectedSupplierId && selectedSupplierId !== "todos") {
       fetchSupplierProducts(selectedSupplierId)
+      fetchSupplierPayments(selectedSupplierId)
     } else {
       setSupplierProducts([])
+      setSupplierPaymentData(null)
     }
-  }, [selectedSupplierId, fetchSupplierProducts])
+  }, [selectedSupplierId, fetchSupplierProducts, fetchSupplierPayments])
 
   // Exportar PDF
   const handleExportPdf = async () => {
@@ -509,9 +544,172 @@ export default function ReportsPage() {
       </div>
       )}
 
-      {/* ── 4 KPIS SUPERIORES (SOLO EN VISTAS EJECUTIVAS) ── */}
-      {activeTab !== "planilla_dia" && activeTab !== "consolidado_diario" && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* ── NAVEGACIÓN ORGANIZADA EN 2 NIVELES (CATEGORÍAS MAESTRAS + SUB-PESTAÑAS) ── */}
+      <div className="space-y-3">
+        {/* Nivel 1: Categorías Maestras */}
+        <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-3 overflow-x-auto">
+          <button
+            onClick={() => {
+              setMainCat("rentabilidad")
+              if (activeTab !== "utilidad_7_lineas" && activeTab !== "categorias") {
+                setActiveTab("utilidad_7_lineas")
+              }
+            }}
+            className={`flex items-center gap-2 px-4 py-2 text-xs font-black rounded-xl transition cursor-pointer whitespace-nowrap ${
+              mainCat === "rentabilidad"
+                ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-md shadow-slate-900/20"
+                : "bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+            }`}
+          >
+            <Layers className="w-4 h-4 text-emerald-500" />
+            1. Rentabilidad Comercial
+          </button>
+
+          <button
+            onClick={() => {
+              setMainCat("proveedores_compras")
+              if (activeTab !== "proveedores" && activeTab !== "compras_vs_ventas") {
+                setActiveTab("proveedores")
+              }
+            }}
+            className={`flex items-center gap-2 px-4 py-2 text-xs font-black rounded-xl transition cursor-pointer whitespace-nowrap ${
+              mainCat === "proveedores_compras"
+                ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-md shadow-slate-900/20"
+                : "bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+            }`}
+          >
+            <Building2 className="w-4 h-4 text-blue-500" />
+            2. Compras & Proveedores
+          </button>
+
+          <button
+            onClick={() => {
+              setMainCat("caja_auditoria")
+              if (activeTab !== "planilla_dia" && activeTab !== "consolidado_diario" && activeTab !== "medios_pago" && activeTab !== "cajeras") {
+                setActiveTab("planilla_dia")
+              }
+            }}
+            className={`flex items-center gap-2 px-4 py-2 text-xs font-black rounded-xl transition cursor-pointer whitespace-nowrap ${
+              mainCat === "caja_auditoria"
+                ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-md shadow-slate-900/20"
+                : "bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+            }`}
+          >
+            <CreditCard className="w-4 h-4 text-amber-500" />
+            3. Caja & Auditoría
+          </button>
+        </div>
+
+        {/* Nivel 2: Sub-pestañas según categoría maestra seleccionada */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          {mainCat === "rentabilidad" && (
+            <>
+              <button
+                onClick={() => setActiveTab("utilidad_7_lineas")}
+                className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
+                  activeTab === "utilidad_7_lineas"
+                    ? "bg-emerald-600 text-white shadow-sm"
+                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                Ventas con Utilidad (7 Líneas)
+              </button>
+              <button
+                onClick={() => setActiveTab("categorias")}
+                className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
+                  activeTab === "categorias"
+                    ? "bg-emerald-600 text-white shadow-sm"
+                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                }`}
+              >
+                <BarChart3 className="w-3.5 h-3.5" />
+                Mix Familias & Categorías
+              </button>
+            </>
+          )}
+
+          {mainCat === "proveedores_compras" && (
+            <>
+              <button
+                onClick={() => setActiveTab("proveedores")}
+                className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
+                  activeTab === "proveedores"
+                    ? "bg-blue-600 text-white shadow-sm"
+                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                }`}
+              >
+                <Building2 className="w-3.5 h-3.5" />
+                Ventas por Proveedor
+              </button>
+              <button
+                onClick={() => setActiveTab("compras_vs_ventas")}
+                className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
+                  activeTab === "compras_vs_ventas"
+                    ? "bg-blue-600 text-white shadow-sm"
+                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                }`}
+              >
+                <TrendingUp className="w-3.5 h-3.5" />
+                Compras vs. Ventas (Presupuesto OTB)
+              </button>
+            </>
+          )}
+
+          {mainCat === "caja_auditoria" && (
+            <>
+              <button
+                onClick={() => setActiveTab("planilla_dia")}
+                className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
+                  activeTab === "planilla_dia"
+                    ? "bg-amber-600 text-white shadow-sm"
+                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                }`}
+              >
+                <TableProperties className="w-3.5 h-3.5" />
+                Planilla Detallada por Día
+              </button>
+              <button
+                onClick={() => setActiveTab("consolidado_diario")}
+                className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
+                  activeTab === "consolidado_diario"
+                    ? "bg-teal-600 text-white shadow-sm"
+                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                }`}
+              >
+                <CalendarRange className="w-3.5 h-3.5" />
+                Consolidado por Día
+              </button>
+              <button
+                onClick={() => setActiveTab("medios_pago")}
+                className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
+                  activeTab === "medios_pago"
+                    ? "bg-purple-600 text-white shadow-sm"
+                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                }`}
+              >
+                <CreditCard className="w-3.5 h-3.5" />
+                Medios de Pago & Gaveta
+              </button>
+              <button
+                onClick={() => setActiveTab("cajeras")}
+                className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
+                  activeTab === "cajeras"
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                }`}
+              >
+                <UserCheck className="w-3.5 h-3.5" />
+                Rendimiento por Cajera
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ── 4 KPIS GENERALES: UBICADOS EXCLUSIVAMENTE EN RENTABILIDAD COMERCIAL (EVITA SALTOS EN OTRAS PESTAÑAS) ── */}
+      {mainCat === "rentabilidad" && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 animate-fade-in">
           {/* KPI 1 */}
           <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
             <div className="h-1 w-full bg-gradient-to-r from-emerald-500 to-teal-500 absolute top-0 left-0" />
@@ -589,87 +787,6 @@ export default function ReportsPage() {
           </div>
         </div>
       )}
-
-      {/* ── TABS DE NAVEGACIÓN ── */}
-      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2 overflow-x-auto">
-        <button
-          onClick={() => setActiveTab("planilla_dia")}
-          className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
-            activeTab === "planilla_dia"
-              ? "bg-emerald-600 text-white shadow-md shadow-emerald-500/25"
-              : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-          }`}
-        >
-          <TableProperties className="w-4 h-4" />
-          Planilla Detallada por Día
-        </button>
-        <button
-          onClick={() => setActiveTab("consolidado_diario")}
-          className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
-            activeTab === "consolidado_diario"
-              ? "bg-teal-600 text-white shadow-md shadow-teal-500/25"
-              : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-          }`}
-        >
-          <CalendarRange className="w-4 h-4" />
-          Consolidado por Día
-        </button>
-        <button
-          onClick={() => setActiveTab("utilidad_7_lineas")}
-          className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
-            activeTab === "utilidad_7_lineas"
-              ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow"
-              : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-          }`}
-        >
-          <Layers className="w-4 h-4" />
-          Ventas con Utilidad (7 Líneas)
-        </button>
-        <button
-          onClick={() => setActiveTab("proveedores")}
-          className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
-            activeTab === "proveedores"
-              ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow"
-              : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-          }`}
-        >
-          <Building2 className="w-4 h-4" />
-          Ventas por Proveedor
-        </button>
-        <button
-          onClick={() => setActiveTab("medios_pago")}
-          className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
-            activeTab === "medios_pago"
-              ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow"
-              : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-          }`}
-        >
-          <CreditCard className="w-4 h-4" />
-          Medios de Pago & Gaveta
-        </button>
-        <button
-          onClick={() => setActiveTab("cajeras")}
-          className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
-            activeTab === "cajeras"
-              ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow"
-              : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-          }`}
-        >
-          <UserCheck className="w-4 h-4" />
-          Rendimiento por Cajera
-        </button>
-        <button
-          onClick={() => setActiveTab("categorias")}
-          className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
-            activeTab === "categorias"
-              ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow"
-              : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-          }`}
-        >
-          <BarChart3 className="w-4 h-4" />
-          Familias & Categorías
-        </button>
-      </div>
 
       {/* ── CONTENIDO TAB NUEVO: PLANILLA DETALLADA POR DÍA ── */}
       {activeTab === "planilla_dia" && (
@@ -1154,23 +1271,67 @@ export default function ReportsPage() {
               </div>
             </div>
 
+            {/* KPI 4: Monto Pagado vs. Costo Vendido (CMV) con Dropdown */}
             <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
-              <div className="h-1 w-full bg-gradient-to-r from-purple-500 to-pink-500 absolute top-0 left-0" />
+              <div className="h-1 w-full bg-gradient-to-r from-purple-500 to-indigo-600 absolute top-0 left-0" />
               <div className="flex items-center justify-between mb-1">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  {selectedSupplierObj ? "Unidades del Proveedor" : "Volumen Despachado"}
+                  {selectedSupplierObj ? "Monto Pagado al Proveedor" : "Volumen Despachado"}
                 </span>
-                <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-950/50 text-purple-600">
-                  <TrendingUp className="w-4 h-4" />
-                </div>
+                {selectedSupplierObj ? (
+                  <select
+                    value={paymentPeriod}
+                    onChange={(e) => setPaymentPeriod(e.target.value as any)}
+                    className="text-[10px] font-bold bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-0.5 text-slate-700 dark:text-slate-200 focus:outline-none"
+                  >
+                    <option value="mes">Este Mes</option>
+                    <option value="historico">Total Histórico</option>
+                  </select>
+                ) : (
+                  <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-950/50 text-purple-600">
+                    <TrendingUp className="w-4 h-4" />
+                  </div>
+                )}
               </div>
-              <p className="text-2xl font-black font-mono text-purple-600 dark:text-purple-400">
-                {activeSupplierStats.totalUnidades.toLocaleString("es-PY")}
-              </p>
-              <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <span>Unidades / Kilos</span>
-                <span className="text-purple-600 font-bold font-mono">En Salón</span>
-              </div>
+
+              {selectedSupplierObj ? (
+                <>
+                  <p className="text-2xl font-black font-mono text-purple-600 dark:text-purple-400">
+                    {loadingSupplierPayment ? (
+                      <Loader2 className="w-6 h-6 animate-spin text-purple-600" />
+                    ) : (
+                      formatPYG(
+                        paymentPeriod === "mes"
+                          ? (supplierPaymentData?.monto_pagado_mes || 0)
+                          : (supplierPaymentData?.monto_pagado_historico || 0)
+                      )
+                    )}
+                  </p>
+                  <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                    <span>CMV Vendido ({paymentPeriod === "mes" ? "Período" : "Período"}):</span>
+                    {(() => {
+                      const pagado = paymentPeriod === "mes" ? (supplierPaymentData?.monto_pagado_mes || 0) : (supplierPaymentData?.monto_pagado_historico || 0)
+                      const cmv = activeSupplierStats.totalCosto || 0
+                      const diff = pagado - cmv
+                      return (
+                        <span className={`font-bold font-mono ${diff >= 0 ? "text-emerald-600" : "text-amber-600"}`}>
+                          {diff >= 0 ? `+${formatPYG(diff)} (Al día)` : `${formatPYG(diff)} (Pendiente)`}
+                        </span>
+                      )
+                    })()}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-2xl font-black font-mono text-purple-600 dark:text-purple-400">
+                    {activeSupplierStats.totalUnidades.toLocaleString("es-PY")}
+                  </p>
+                  <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                    <span>Unidades / Kilos</span>
+                    <span className="text-purple-600 font-bold font-mono">En Salón</span>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -1555,6 +1716,14 @@ export default function ReportsPage() {
             </ResponsiveContainer>
           </div>
         </div>
+      )}
+
+      {/* ── CONTENIDO TAB: COMPRAS VS VENTAS (PRESUPUESTO OTB) ── */}
+      {activeTab === "compras_vs_ventas" && (
+        <ComprasVsVentasTab
+          fechaDesde={fechaDesde}
+          fechaHasta={fechaHasta}
+        />
       )}
     </div>
   )
