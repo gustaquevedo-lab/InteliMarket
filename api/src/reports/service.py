@@ -2183,21 +2183,31 @@ async def get_purchases_vs_sales_report(
     total_tickets = int(sales_res["tickets_total"]) if sales_res and sales_res["tickets_total"] else 0
 
     # 2. Compras del período (facturas de proveedor registradas para mercaderías)
-    pur_params = {"company_id": company_id}
-    pur_where = "si.company_id = :company_id AND COALESCE(si.estado, 'pendiente') <> 'anulado'"
+    pur_params = {"pur_company_id": company_id}
+    pur_where = "si.company_id = :pur_company_id AND COALESCE(si.estado, 'pendiente') <> 'anulado'"
     if fecha_desde:
-        pur_where += " AND si.fecha_emision >= :fecha_desde"
-        pur_params["fecha_desde"] = fecha_desde
+        pur_where += " AND si.fecha_emision >= :pur_fecha_desde"
+        pur_params["pur_fecha_desde"] = fecha_desde
     if fecha_hasta:
-        pur_where += " AND si.fecha_emision <= :fecha_hasta"
-        pur_params["fecha_hasta"] = fecha_hasta
+        pur_where += " AND si.fecha_emision <= :pur_fecha_hasta"
+        pur_params["pur_fecha_hasta"] = fecha_hasta
 
-    # Filtro de tipo_provision (mercaderías = bienes + mixto)
+    # Filtro de tipo_provision (mercaderías = bienes + mixto de proveedores comerciales para reventa)
     if tipo_provision == "mercaderias":
-        pur_where += " AND COALESCE(sup.tipo_provision, 'bienes') IN ('bienes', 'mixto')"
-    elif tipo_provision in ("bienes", "mixto", "servicios"):
-        pur_where += " AND COALESCE(sup.tipo_provision, 'bienes') = :tipo_provision"
-        pur_params["tipo_provision"] = tipo_provision
+        pur_where += """ AND COALESCE(sup.tipo_provision, 'bienes') IN ('bienes', 'mixto')
+                         AND (
+                             EXISTS (SELECT 1 FROM products p WHERE p.supplier_id = sup.id)
+                             OR EXISTS (SELECT 1 FROM sale_items vi JOIN products p ON p.id = vi.product_id WHERE p.supplier_id = sup.id)
+                         )"""
+    elif tipo_provision == "bienes":
+        pur_where += """ AND COALESCE(sup.tipo_provision, 'bienes') = 'bienes'
+                         AND (
+                             EXISTS (SELECT 1 FROM products p WHERE p.supplier_id = sup.id)
+                             OR EXISTS (SELECT 1 FROM sale_items vi JOIN products p ON p.id = vi.product_id WHERE p.supplier_id = sup.id)
+                         )"""
+    elif tipo_provision in ("mixto", "servicios"):
+        pur_where += " AND COALESCE(sup.tipo_provision, 'bienes') = :pur_tipo_provision"
+        pur_params["pur_tipo_provision"] = tipo_provision
 
     q_purchases = f"""
         SELECT 
@@ -2247,13 +2257,8 @@ async def get_purchases_vs_sales_report(
         ly_hasta = None
         ly_mes_fin = None
 
-    ly_params = {"company_id": company_id}
-    ly_where = "v.estado <> 'cancelado' AND v.company_id = :company_id"
-    if ly_desde and ly_hasta:
-        ly_where += _build_tz_filter(ly_desde, ly_hasta, ly_params, "v.fecha")
-        has_ly = True
-    else:
-        has_ly = False
+    ly_where = f"v.company_id = :sales_company_id AND v.estado <> 'cancelado' AND v.fecha >= '{ly_desde}' AND v.fecha <= '{ly_hasta} 23:59:59'" if (ly_desde and ly_hasta) else "1=0"
+    has_ly = bool(ly_desde and ly_hasta)
 
     # 5. Desglose comparativo por Proveedor con Proyección
     q_prov = f"""
@@ -2290,7 +2295,7 @@ async def get_purchases_vs_sales_report(
             JOIN sale_items vi ON vi.sale_id = v.id
             JOIN products p ON p.id = vi.product_id
             JOIN suppliers sup ON sup.id = p.supplier_id
-            WHERE {ly_where if has_ly else "1=0"}
+            WHERE {ly_where}
             GROUP BY sup.id
         ),
         v_ly_mes AS (
@@ -2301,7 +2306,7 @@ async def get_purchases_vs_sales_report(
             JOIN sale_items vi ON vi.sale_id = v.id
             JOIN products p ON p.id = vi.product_id
             JOIN suppliers sup ON sup.id = p.supplier_id
-            WHERE v.company_id = :company_id AND v.estado <> 'cancelado'
+            WHERE v.company_id = :sales_company_id AND v.estado <> 'cancelado'
               AND {f"v.fecha >= '{ly_desde}' AND v.fecha <= '{ly_mes_fin} 23:59:59'" if (has_ly and ly_mes_fin) else "1=0"}
             GROUP BY sup.id
         )
@@ -2320,8 +2325,8 @@ async def get_purchases_vs_sales_report(
         LEFT JOIN v_ly_mes lym ON lym.supplier_id::text = COALESCE(v.supplier_id::text, c.supplier_id::text)
         ORDER BY compras DESC, ventas DESC
     """
-    # Combinar params
-    combined_params = {**sales_params, **pur_params, **ly_params}
+    # Combinar params sin colisión
+    combined_params = {**sales_params, **pur_params, "sales_company_id": company_id}
     prov_rows = (await _exec(db, q_prov, combined_params)).all()
 
     proveedores = []
