@@ -1391,63 +1391,103 @@ export default function ReportsPage() {
                       <tr>
                         <th className="py-3 px-3 w-10 text-center">#</th>
                         <th className="py-3 px-3">SKU</th>
-                        <th className="py-3 px-3">Código de Barra</th>
+                        <th className="py-3 px-3">Código Barra</th>
                         <th className="py-3 px-3">Descripción del Producto</th>
                         <th className="py-3 px-3 text-right">Unidades</th>
-                        <th className="py-3 px-3 text-right">Total Ventas (Gs.)</th>
-                        <th className="py-3 px-3 text-right">Costo Total (Gs.)</th>
-                        <th className="py-3 px-3 text-right">Margen Bruto (Gs.)</th>
-                        <th className="py-3 px-3 text-right">Margen %</th>
+                        <th className="py-3 px-3 text-right">Costo Unitario</th>
+                        <th className="py-3 px-3 text-right">PVP Minorista</th>
+                        <th className="py-3 px-3 text-center">Mg. Minorista %</th>
+                        <th className="py-3 px-3 text-right">PV Mayorista</th>
+                        <th className="py-3 px-3 text-center">Mg. Mayorista %</th>
+                        <th className="py-3 px-3 text-right">Venta Total</th>
                         <th className="py-3 px-3 text-right">% Part.</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                       {filteredSupplierProducts.length === 0 ? (
                         <tr>
-                          <td colSpan={10} className="py-12 text-center text-slate-400">
+                          <td colSpan={12} className="py-12 text-center text-slate-400">
                             <PackageCheck className="w-8 h-8 mx-auto mb-2 opacity-40" />
                             No se registraron ventas de artículos para este proveedor en el período seleccionado.
                           </td>
                         </tr>
                       ) : (
-                        filteredSupplierProducts.map((p: any, idx: number) => (
-                          <tr key={p.product_id || idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
-                            <td className="py-2.5 px-3 text-center text-slate-400 font-mono text-[11px]">{idx + 1}</td>
-                            <td className="py-2.5 px-3 font-mono text-slate-700 dark:text-slate-300 font-bold">{p.sku}</td>
-                            <td className="py-2.5 px-3 font-mono text-slate-500 text-[11px]">{p.codigo_barra || "—"}</td>
-                            <td className="py-2.5 px-3">
-                              <span className="font-bold text-slate-900 dark:text-slate-100">{p.producto}</span>
-                            </td>
-                            <td className="py-2.5 px-3 text-right font-mono text-slate-700 dark:text-slate-300">
-                              {Number(p.unidades_vendidas || 0).toLocaleString("es-PY")}
-                            </td>
-                            <td className="py-2.5 px-3 text-right font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm">
-                              {formatPYG(p.total_ventas)}
-                            </td>
-                            <td className="py-2.5 px-3 text-right font-mono text-slate-500 dark:text-slate-400">
-                              {formatPYG(p.costo_total)}
-                            </td>
-                            <td className="py-2.5 px-3 text-right font-mono font-bold text-amber-600 dark:text-amber-400">
-                              {formatPYG(p.utilidad_bruta)}
-                            </td>
-                            <td className="py-2.5 px-3 text-right">
-                              <span
-                                className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
-                                  p.margen_pct >= 25
-                                    ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
-                                    : p.margen_pct >= 15
-                                    ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
-                                    : "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
-                                }`}
-                              >
-                                {Number(p.margen_pct || 0).toFixed(1)}%
-                              </span>
-                            </td>
-                            <td className="py-2.5 px-3 text-right font-mono text-slate-500 font-bold">
-                              {Number(p.participacion_pct || 0).toFixed(1)}%
-                            </td>
-                          </tr>
-                        ))
+                        filteredSupplierProducts.map((p: any, idx: number) => {
+                          const mgMin = p.margen_minorista_pct
+                          const mgMay = p.margen_mayorista_pct
+
+                          return (
+                            <tr key={p.product_id || idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
+                              <td className="py-2.5 px-3 text-center text-slate-400 font-mono text-[11px]">{idx + 1}</td>
+                              <td className="py-2.5 px-3 font-mono text-slate-700 dark:text-slate-300 font-bold">{p.sku}</td>
+                              <td className="py-2.5 px-3 font-mono text-slate-500 text-[11px]">{p.codigo_barra || "—"}</td>
+                              <td className="py-2.5 px-3">
+                                <span className="font-bold text-slate-900 dark:text-slate-100">{p.producto}</span>
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono text-slate-700 dark:text-slate-300">
+                                {Number(p.unidades_vendidas || 0).toLocaleString("es-PY")}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
+                                {formatPYG(p.costo_unitario || 0)}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900 dark:text-white">
+                                {formatPYG(p.precio_minorista || 0)}
+                              </td>
+                              <td className="py-2.5 px-3 text-center font-mono">
+                                {mgMin !== undefined && mgMin !== null ? (
+                                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${
+                                    mgMin >= 20
+                                      ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+                                      : mgMin >= 10
+                                      ? "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 border-amber-200 dark:border-amber-800"
+                                      : "bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300 border-rose-200 dark:border-rose-800"
+                                  }`}>
+                                    {mgMin.toFixed(1)}%
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400">—</span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono">
+                                {p.precio_mayorista ? (
+                                  <div>
+                                    <span className="font-bold text-indigo-700 dark:text-indigo-300">
+                                      {formatPYG(p.precio_mayorista)}
+                                    </span>
+                                    {p.mayorista_min_qty && (
+                                      <span className="block text-[9px] text-slate-400">
+                                        ≥{p.mayorista_min_qty} un.
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-400 text-[10px] italic">Sin escala</span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 text-center font-mono">
+                                {mgMay !== undefined && mgMay !== null ? (
+                                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${
+                                    mgMay >= 15
+                                      ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+                                      : mgMay >= 8
+                                      ? "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 border-amber-200 dark:border-amber-800"
+                                      : "bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300 border-rose-200 dark:border-rose-800"
+                                  }`}>
+                                    {mgMay.toFixed(1)}%
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400">—</span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono font-black text-emerald-600 dark:text-emerald-400">
+                                {formatPYG(p.total_ventas)}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono text-slate-500 font-bold">
+                                {Number(p.participacion_pct || 0).toFixed(1)}%
+                              </td>
+                            </tr>
+                          )
+                        })
                       )}
                     </tbody>
                   </table>
@@ -1530,9 +1570,9 @@ export default function ReportsPage() {
                         <th className="py-3 px-3">RUC</th>
                         <th className="py-3 px-3 text-right">SKUs</th>
                         <th className="py-3 px-3 text-right">Unidades</th>
-                        <th className="py-3 px-3 text-right">Total Ventas (Gs.)</th>
-                        <th className="py-3 px-3 text-right">Costo Total (Gs.)</th>
-                        <th className="py-3 px-3 text-right">Margen Bruto (Gs.)</th>
+                        <th className="py-3 px-3 text-right">Total Ventas</th>
+                        <th className="py-3 px-3 text-right">Costo Total</th>
+                        <th className="py-3 px-3 text-right">Margen Bruto</th>
                         <th className="py-3 px-3 text-right">Margen %</th>
                         <th className="py-3 px-3 text-right">% Part.</th>
                         <th className="py-3 px-3 text-center">Acción</th>
