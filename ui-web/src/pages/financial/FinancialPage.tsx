@@ -141,6 +141,69 @@ export default function FinancialPage() {
   })
   const [submittingPayment, setSubmittingPayment] = useState(false)
 
+  // Modal para Cargar / Resolver SNC con Nota de Crédito Recibida del Proveedor
+  const [showResolveNcModal, setShowResolveNcModal] = useState(false)
+  const [selectedNcRequestForResolve, setSelectedNcRequestForResolve] = useState<any | null>(null)
+  const [resolvingNc, setResolvingNc] = useState(false)
+  const [resolveNcForm, setResolveNcForm] = useState({
+    nc_recibida_numero: "",
+    nc_recibida_timbrado: "",
+    nc_recibida_monto: 0,
+    nc_recibida_fecha: getTodayAsuncion(),
+    nc_recibida_cdc: "",
+    observaciones: "",
+  })
+
+  const handleOpenResolveNcModal = (snc: any) => {
+    setSelectedNcRequestForResolve(snc)
+    setResolveNcForm({
+      nc_recibida_numero: "",
+      nc_recibida_timbrado: "",
+      nc_recibida_monto: Number(snc.monto_reclamado || 0),
+      nc_recibida_fecha: getTodayAsuncion(),
+      nc_recibida_cdc: "",
+      observaciones: "",
+    })
+    setShowResolveNcModal(true)
+  }
+
+  const handleSaveResolveNc = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedNcRequestForResolve) return
+    if (!resolveNcForm.nc_recibida_numero.trim()) {
+      toast.warning("Número requerido", "Ingrese el número de la Nota de Crédito.")
+      return
+    }
+    if (!resolveNcForm.nc_recibida_timbrado.trim()) {
+      toast.warning("Timbrado requerido", "Ingrese el timbrado de la Nota de Crédito.")
+      return
+    }
+    if (Number(resolveNcForm.nc_recibida_monto) <= 0) {
+      toast.warning("Monto requerido", "El monto de la Nota de Crédito debe ser mayor a 0.")
+      return
+    }
+
+    setResolvingNc(true)
+    try {
+      const res = await api.purchases.resolveSupplierNcRequest(selectedNcRequestForResolve.id, {
+        nc_recibida_numero: resolveNcForm.nc_recibida_numero.trim(),
+        nc_recibida_timbrado: resolveNcForm.nc_recibida_timbrado.trim(),
+        nc_recibida_monto: Number(resolveNcForm.nc_recibida_monto),
+        nc_recibida_fecha: resolveNcForm.nc_recibida_fecha,
+        nc_recibida_cdc: resolveNcForm.nc_recibida_cdc.trim() || undefined,
+        observaciones: resolveNcForm.observaciones.trim() || undefined,
+        user_id: user?.id,
+      })
+      toast.success("Nota de Crédito Aplicada", res.mensaje || "Se actualizó el saldo y se liberó la factura para Tesorería.")
+      setShowResolveNcModal(false)
+      fetchAll()
+    } catch (e: any) {
+      toast.error("Error al aplicar Nota de Crédito", e.message)
+    } finally {
+      setResolvingNc(false)
+    }
+  }
+
   // Payment Run Builder (Lotes de Pago Masivo)
   const [showPaymentRunWizard, setShowPaymentRunWizard] = useState(false)
   const [runStep, setRunStep] = useState<1 | 2 | 3>(1)
@@ -1892,17 +1955,27 @@ export default function FinancialPage() {
                           {pendingSncs.length > 0 && (
                             <div className="mt-3 pt-3 border-t border-amber-500/20 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                               {pendingSncs.map((snc: any) => (
-                                <div key={snc.id} className="bg-amber-900/30 border border-amber-600/30 rounded-lg p-2.5 text-xs space-y-1">
-                                  <div className="flex items-center justify-between">
-                                    <span className="font-mono font-bold text-amber-300">{snc.numero_solicitud || "SNC"}</span>
-                                    <span className="font-mono font-bold text-rose-400">₲ {Number(snc.monto_reclamado || 0).toLocaleString("es-PY")}</span>
+                                <div key={snc.id} className="bg-amber-900/30 border border-amber-600/30 rounded-lg p-3 text-xs space-y-2 flex flex-col justify-between">
+                                  <div className="space-y-1">
+                                    <div className="flex items-center justify-between">
+                                      <span className="font-mono font-bold text-amber-300">{snc.numero_solicitud || "SNC"}</span>
+                                      <span className="font-mono font-bold text-rose-400">₲ {Number(snc.monto_reclamado || 0).toLocaleString("es-PY")}</span>
+                                    </div>
+                                    <p className="text-[11px] text-amber-200/70 truncate" title={snc.observaciones || snc.tipo_motivo}>
+                                      {snc.observaciones || snc.tipo_motivo || "Diferencia de recepción en muelle"}
+                                    </p>
+                                    <div className="text-[10px] text-amber-400/80 font-mono">
+                                      Estado: <span className="uppercase font-semibold">{snc.estado?.replace("_", " ")}</span>
+                                    </div>
                                   </div>
-                                  <p className="text-[11px] text-amber-200/70 truncate" title={snc.observaciones || snc.tipo_motivo}>
-                                    {snc.observaciones || snc.tipo_motivo || "Diferencia de recepción en muelle"}
-                                  </p>
-                                  <div className="text-[10px] text-amber-400/80 font-mono">
-                                    Estado: <span className="uppercase font-semibold">{snc.estado?.replace("_", " ")}</span>
-                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenResolveNcModal(snc)}
+                                    className="w-full mt-1 py-1.5 px-2.5 rounded-lg bg-emerald-600/90 hover:bg-emerald-600 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-sm transition active:scale-[0.98]"
+                                  >
+                                    <FileCheck className="w-3.5 h-3.5" />
+                                    <span>Cargar NC Recibida</span>
+                                  </button>
                                 </div>
                               ))}
                             </div>
@@ -2483,6 +2556,63 @@ export default function FinancialPage() {
                                     </td>
                                   </tr>
                                 )}
+
+                                {isFactura && (() => {
+                                  const invSncs = supplierNcRequests.filter((snc: any) =>
+                                    String(snc.invoice_id) === String(doc.id) &&
+                                    ["pendiente_entrega", "entregada_parcial", "pendiente"].includes(snc.estado)
+                                  )
+                                  if (invSncs.length === 0) return null
+
+                                  return (
+                                    <tr className="bg-rose-50/50 dark:bg-rose-950/20 border-b border-rose-200/50">
+                                      <td colSpan={10} className="py-2.5 px-6 pl-12">
+                                        <div className="space-y-1.5">
+                                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-rose-800 dark:text-rose-300">
+                                            <ShieldAlert className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+                                            <span>SNC Pendiente de Resolver (Discrepancia Física / Muelle):</span>
+                                          </div>
+                                          <div className="space-y-1.5 pl-5">
+                                            {invSncs.map((snc: any) => (
+                                              <div key={snc.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2 rounded-lg bg-rose-100/60 dark:bg-rose-900/30 border border-rose-300/40 text-xs text-slate-800 dark:text-slate-200">
+                                                <div className="space-y-0.5">
+                                                  <div className="flex items-center gap-2">
+                                                    <span className="font-mono font-bold text-rose-700 dark:text-rose-300">
+                                                      {snc.numero_solicitud || "SNC"}
+                                                    </span>
+                                                    <span className="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-rose-200/80 dark:bg-rose-950 text-rose-800 dark:text-rose-300">
+                                                      {snc.estado?.replace("_", " ")}
+                                                    </span>
+                                                  </div>
+                                                  <div className="text-[11px] text-rose-900/80 dark:text-rose-200/80">
+                                                    {snc.observaciones || snc.tipo_motivo || "Diferencia de recepción"}
+                                                  </div>
+                                                </div>
+                                                <div className="flex items-center gap-3 self-end sm:self-auto">
+                                                  <span className="font-mono font-black text-rose-700 dark:text-rose-400">
+                                                    ₲ {Number(snc.monto_reclamado || 0).toLocaleString("es-PY")}
+                                                  </span>
+                                                  <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation()
+                                                      handleOpenResolveNcModal(snc)
+                                                    }}
+                                                    className="py-1 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center gap-1 shadow-sm transition active:scale-[0.98]"
+                                                    title="Registrar la Nota de Crédito física/electrónica recibida del proveedor para levantar la retención"
+                                                  >
+                                                    <FileCheck className="w-3.5 h-3.5" />
+                                                    <span>Cargar NC</span>
+                                                  </button>
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )
+                                })()}
                               </Fragment>
                               )
                             })
@@ -4645,6 +4775,160 @@ export default function FinancialPage() {
             setSelected360SupplierNombre(null)
           }}
         />
+      )}
+
+      {/* ── MODAL: CARGAR NOTA DE CRÉDITO RECIBIDA DEL PROVEEDOR (RESOLVER SNC) ── */}
+      {showResolveNcModal && selectedNcRequestForResolve && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fade-in" onClick={() => !resolvingNc && setShowResolveNcModal(false)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-lg w-full border border-gray-200 dark:border-slate-800 overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between bg-gray-50/70 dark:bg-slate-850">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400">
+                  <FileCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-gray-900 dark:text-white">
+                    Registrar Nota de Crédito Recibida
+                  </h3>
+                  <p className="text-xs text-gray-500 font-mono">
+                    {selectedNcRequestForResolve.numero_solicitud} · {currentSelectedSupplier?.supplier_nombre}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => !resolvingNc && setShowResolveNcModal(false)}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveResolveNc} className="p-5 space-y-4">
+              <div className="p-3.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40 rounded-xl space-y-1 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600 dark:text-gray-400">Motivo de la Discrepancia:</span>
+                  <span className="font-semibold text-amber-800 dark:text-amber-300">{selectedNcRequestForResolve.tipo_motivo || "Rechazo en muelle"}</span>
+                </div>
+                {selectedNcRequestForResolve.observaciones && (
+                  <p className="text-[11px] text-gray-500 italic mt-0.5">"{selectedNcRequestForResolve.observaciones}"</p>
+                )}
+                <div className="flex items-center justify-between pt-1 border-t border-amber-200/50 dark:border-amber-900/40 font-mono font-bold">
+                  <span className="text-gray-700 dark:text-gray-300">Monto Reclamado:</span>
+                  <span className="text-rose-600 dark:text-rose-400">₲ {Number(selectedNcRequestForResolve.monto_reclamado || 0).toLocaleString("es-PY")}</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-gray-600 dark:text-gray-400 block mb-1">
+                    N° Nota de Crédito *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={resolveNcForm.nc_recibida_numero}
+                    onChange={e => setResolveNcForm(prev => ({ ...prev, nc_recibida_numero: e.target.value }))}
+                    placeholder="001-001-0004512"
+                    className="input-field w-full text-xs font-mono font-semibold"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-600 dark:text-gray-400 block mb-1">
+                    Timbrado NC *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={resolveNcForm.nc_recibida_timbrado}
+                    onChange={e => setResolveNcForm(prev => ({ ...prev, nc_recibida_timbrado: e.target.value }))}
+                    placeholder="18545636"
+                    className="input-field w-full text-xs font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-gray-600 dark:text-gray-400 block mb-1">
+                    Monto Real Recibido (₲) *
+                  </label>
+                  <CurrencyInput
+                    value={resolveNcForm.nc_recibida_monto}
+                    onChangeValue={num => setResolveNcForm(prev => ({ ...prev, nc_recibida_monto: num }))}
+                    currency="PYG"
+                    className="input-field w-full text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400"
+                    placeholder="0"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-600 dark:text-gray-400 block mb-1">
+                    Fecha Emisión NC *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={resolveNcForm.nc_recibida_fecha}
+                    onChange={e => setResolveNcForm(prev => ({ ...prev, nc_recibida_fecha: e.target.value }))}
+                    className="input-field w-full text-xs"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-gray-600 dark:text-gray-400 block mb-1">
+                  CDC Electrónico SIFEN (44 dígitos, opcional)
+                </label>
+                <input
+                  type="text"
+                  maxLength={44}
+                  value={resolveNcForm.nc_recibida_cdc}
+                  onChange={e => setResolveNcForm(prev => ({ ...prev, nc_recibida_cdc: e.target.value }))}
+                  placeholder="01801503779001001000451212026090412345678901"
+                  className="input-field w-full text-xs font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-gray-600 dark:text-gray-400 block mb-1">
+                  Observaciones
+                </label>
+                <input
+                  type="text"
+                  value={resolveNcForm.observaciones}
+                  onChange={e => setResolveNcForm(prev => ({ ...prev, observaciones: e.target.value }))}
+                  placeholder="Ej. NC entregada por chofer en caja central"
+                  className="input-field w-full text-xs"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between">
+                <span className="text-[11px] text-gray-400">
+                  Aplica la deducción y libera la factura.
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={resolvingNc}
+                    onClick={() => setShowResolveNcModal(false)}
+                    className="btn-ghost text-xs py-2 px-3 text-gray-600 dark:text-gray-300"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={resolvingNc}
+                    className="btn-primary text-xs py-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-1.5"
+                  >
+                    {resolvingNc ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                    <span>{resolvingNc ? "Aplicando..." : "Aplicar NC y Habilitar"}</span>
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   )
