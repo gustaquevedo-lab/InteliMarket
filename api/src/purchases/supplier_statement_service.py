@@ -272,8 +272,15 @@ async def get_supplier_account_statement(
             "orden_dia": 2,  # NCs en segundo lugar
         })
 
-    # 6.3 Movimientos de Pagos Realizados (Créditos)
+    # 6.3 Movimientos de Pagos Realizados (Créditos monetarios efectivos)
     for pay in payments:
+        metodo_raw = (pay.payment_method or "transferencia").strip().upper()
+        # Si el método de pago es "NOTA DE CREDITO", no es una salida de fondos sino
+        # la aplicación contable de una NC. Como las NCs ya están formalizadas en
+        # la sección 6.2, se omite para evitar duplicar el crédito en el Libro Mayor.
+        if metodo_raw in ("NOTA DE CREDITO", "NOTA_CREDITO", "NC"):
+            continue
+
         f_pay = pay.fecha_pago or (pay.created_at.date() if pay.created_at else today)
         monto_pay = _dec_to_float(pay.monto)
         inv_asoc = invoice_map.get(pay.invoice_id)
@@ -308,6 +315,41 @@ async def get_supplier_account_statement(
             "orden_dia": 3,  # Pagos en tercer lugar
         })
 
+    # 6.4 Movimientos de Solicitudes de NC / Devoluciones pendientes en muelle
+    for snc in snc_pendientes_rows:
+        f_snc = snc.created_at.date() if snc.created_at else today
+        m_rec = _dec_to_float(snc.monto_reclamado)
+        fac_asoc = invoice_map.get(snc.invoice_id)
+        num_fac = fac_asoc.numero_factura if fac_asoc else ""
+
+        concepto_snc = f"Reclamo de mercadería {snc.numero_solicitud}"
+        if snc.tipo_motivo:
+            concepto_snc += f" ({snc.tipo_motivo.replace('_', ' ')})"
+        if num_fac:
+            concepto_snc += f" [Afecta FAC {num_fac}]"
+        if snc.observaciones:
+            concepto_snc += f" - {snc.observaciones}"
+
+        raw_movements.append({
+            "id": f"snc_{snc.id}",
+            "entidad_id": str(snc.id),
+            "fecha": f_snc,
+            "fecha_str": _date_str(f_snc),
+            "fecha_vencimiento_str": "",
+            "tipo": "SOLICITUD_NC",
+            "tipo_badge": "SNC",
+            "tipo_label": "Devolución / Faltante Muelle",
+            "comprobante": snc.numero_solicitud,
+            "timbrado": "",
+            "concepto": concepto_snc,
+            "debito": 0.0,
+            "credito": m_rec,
+            "saldo_documento": m_rec,
+            "estado": "Reclamado (Pendiente NC)",
+            "factura_relacionada": num_fac,
+            "orden_dia": 2,  # En segundo lugar al igual que NC
+        })
+
     # 7. Ordenar cronológicamente (ascendente)
     raw_movements.sort(key=lambda m: (m["fecha"], m["orden_dia"], m["id"]))
 
@@ -337,13 +379,11 @@ async def get_supplier_account_statement(
     final_movements = []
     tot_debito = 0.0
     tot_nc = 0.0
+    tot_snc = 0.0
     tot_pago = 0.0
 
     if solo_pendientes:
-        # En modo "Solo Pendientes", filtramos exclusivamente los documentos con saldo vivo exigible/aplicable:
-        # 1. Facturas comerciales con saldo pendiente > 0 (débito exigible = saldo vivo de la factura)
-        # 2. Notas de crédito con saldo a favor disponible > 0 (crédito aplicable = saldo a favor disponible)
-        # Excluimos pagos históricos ya imputados y documentos totalmente cancelados/liquidados al 100%.
+        # En modo "Solo Pendientes", filtramos exclusivamente los documentos con saldo vivo exigible/aplicable
         pendientes_list = []
         tot_debito_pend = 0.0
         tot_nc_pend = 0.0
@@ -360,7 +400,7 @@ async def get_supplier_account_statement(
                 m_copy["saldo_progresivo"] = saldo_running
                 m_copy["punteado"] = False
                 pendientes_list.append(m_copy)
-            elif m["tipo"] == "NOTA_CREDITO" and m["saldo_documento"] > 0:
+            elif m["tipo"] in ("NOTA_CREDITO", "SOLICITUD_NC") and m["saldo_documento"] > 0:
                 saldo_nc = m["saldo_documento"]
                 saldo_running -= saldo_nc
                 tot_nc_pend += saldo_nc
@@ -381,7 +421,7 @@ async def get_supplier_account_statement(
             for item in pendientes_list:
                 if item["tipo"] == "FACTURA":
                     running += item["debito"]
-                elif item["tipo"] == "NOTA_CREDITO":
+                elif item["tipo"] in ("NOTA_CREDITO", "SOLICITUD_NC"):
                     running -= item["credito"]
                 item["saldo_progresivo"] = running
 
@@ -401,6 +441,8 @@ async def get_supplier_account_statement(
                 tot_debito += d
             elif m["tipo"] == "NOTA_CREDITO":
                 tot_nc += c
+            elif m["tipo"] == "SOLICITUD_NC":
+                tot_snc += c
             elif m["tipo"] == "PAGO":
                 tot_pago += c
 
@@ -417,7 +459,7 @@ async def get_supplier_account_statement(
 
             final_movements.sort(key=_extract_invoice_sort_key_all)
 
-        tot_credito = tot_nc + tot_pago
+        tot_credito = tot_nc + tot_pago + tot_snc
         saldo_deudor_final = saldo_acumulado
     compromiso_total_con_cheques = saldo_deudor_final + cheques_diferidos_transito_monto
 

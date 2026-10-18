@@ -145,6 +145,27 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
             apps_by_invoice.setdefault(app.invoice_id, []).append(app_obj)
             apps_by_cn.setdefault(app.credit_note_id, []).append(app_obj)
 
+    # 2.2.b Reclamos y Solicitudes de NC con Orígenes y Etapas
+    q_nc = select(SupplierNcRequest).where(
+        SupplierNcRequest.company_id == company_id,
+        SupplierNcRequest.supplier_id == supplier_id,
+    ).order_by(SupplierNcRequest.created_at.desc())
+    nc_res = await db.execute(q_nc)
+    nc_requests = nc_res.scalars().all()
+
+    sncs_by_invoice: Dict[uuid.UUID, List[Dict[str, Any]]] = {}
+    for n in nc_requests:
+        if n.invoice_id:
+            sncs_by_invoice.setdefault(n.invoice_id, []).append({
+                "id": str(n.id),
+                "numero_solicitud": n.numero_solicitud or "SNC",
+                "monto_reclamado": _dec_to_float(n.monto_reclamado),
+                "tipo_motivo": n.tipo_motivo or "diferencia",
+                "estado": n.estado or "pendiente",
+                "nc_recibida_numero": n.nc_recibida_numero or "",
+                "observaciones": n.observaciones or "",
+            })
+
     # 2.3 Lotes de Pago programados (PaymentRuns activos)
     p_run_by_invoice: Dict[uuid.UUID, Dict[str, Any]] = {}
     if inv_ids:
@@ -249,11 +270,13 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
         dias_vencido = (today - f_venc).days if f_venc else 0
         es_vencida = dias_vencido > 0 and saldo > 0 and not es_cancelada
 
-        # NCs vinculadas a esta factura y retenciones
+        # NCs vinculadas a esta factura, SNCs y retenciones
         inv_apps = apps_by_invoice.get(inv.id, [])
+        inv_sncs = sncs_by_invoice.get(inv.id, [])
         monto_nc_aplicado = sum(a["monto_aplicado"] for a in inv_apps)
+        monto_snc_reclamado = sum(s["monto_reclamado"] for s in inv_sncs)
         monto_retenido = _dec_to_float(inv.monto_retenido_nc)
-        tiene_nc_vinculada = len(inv_apps) > 0 or bool(inv.requiere_nc) or (monto_retenido > 0)
+        tiene_nc_vinculada = len(inv_apps) > 0 or len(inv_sncs) > 0 or bool(inv.requiere_nc) or (monto_retenido > 0)
         saldo_neto_real = max(0.0, saldo - monto_retenido)
 
         # Lote de pago
@@ -269,7 +292,7 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
             fase_pago = "liquidada"
             fase_pago_label = "Fase 4: Liquidada / Cancelada 100%"
             fase_pago_color = "emerald"
-        elif inv.bloqueada_para_pago or inv.requiere_nc or (monto_retenido > 0):
+        elif inv.bloqueada_para_pago or inv.requiere_nc or (monto_retenido > 0) or (len(inv_sncs) > 0 and saldo > 0):
             fase_pago = "bloqueada_nc"
             fase_pago_label = "Fase 1: Retenida por NC / Reclamo en Trámite"
             fase_pago_color = "purple"
@@ -322,7 +345,9 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
             # Dimensiones extendidas:
             "tiene_nc_vinculada": tiene_nc_vinculada,
             "monto_nc_aplicado": monto_nc_aplicado,
+            "monto_snc_reclamado": monto_snc_reclamado,
             "ncs_vinculadas": inv_apps,
+            "sncs_vinculadas": inv_sncs,
             "saldo_neto_real": saldo_neto_real,
             "en_lote_pago": en_lote_pago,
             "lote_pago_info": lote_info,
@@ -425,13 +450,6 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
         logger.warning(f"Error fetching supermer supplier returns: {e}")
 
     # 5. Reclamos y Solicitudes de NC con Orígenes y Etapas
-    q_nc = select(SupplierNcRequest).where(
-        SupplierNcRequest.company_id == company_id,
-        SupplierNcRequest.supplier_id == supplier_id,
-    ).order_by(SupplierNcRequest.created_at.desc())
-    nc_res = await db.execute(q_nc)
-    nc_requests = nc_res.scalars().all()
-
     reclamos_enriquecidos = []
     obligaciones_pendientes_monto = 0.0
 

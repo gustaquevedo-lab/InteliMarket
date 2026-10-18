@@ -9,6 +9,7 @@ import uuid
 from uuid import UUID
 import math
 import logging
+import re
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -934,18 +935,21 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         fecha_emision = date.today()
         fecha_vencimiento = fecha_emision + timedelta(days=plazo_dias)
 
-        norm_ref = normalize_invoice_number(data.proveedor_ref) if data.proveedor_ref else None
-        invoice_num = norm_ref or (data.proveedor_ref or receipt.numero).strip()
+        has_digits = bool(data.proveedor_ref and re.search(r"\d", data.proveedor_ref))
+        norm_ref = normalize_invoice_number(data.proveedor_ref) if (data.proveedor_ref and has_digits) else None
+        invoice_num = norm_ref or (data.proveedor_ref.strip() if (data.proveedor_ref and has_digits) else f"AUTO-{receipt.numero}")
 
-        # Verificar si ya existe una factura para este proveedor con este comprobante o para esta OC
+        # Verificar si ya existe una factura para este proveedor con este comprobante fiscal o para esta OC
         existing_inv = None
-        if norm_ref or data.proveedor_ref:
-            cands = list({c for c in [norm_ref, data.proveedor_ref, (data.proveedor_ref or "").strip()] if c})
+        if norm_ref or (data.proveedor_ref and has_digits):
+            cands = list({c for c in [norm_ref, (data.proveedor_ref or "").strip()] if c})
             ex_res = await db.execute(
                 select(SupplierInvoice).where(
                     SupplierInvoice.company_id == company_id,
                     SupplierInvoice.supplier_id == supplier_id,
-                    SupplierInvoice.numero_factura.in_(cands)
+                    SupplierInvoice.numero_factura.in_(cands),
+                    SupplierInvoice.estado.not_in(["pagada", "cancelada"]),
+                    (SupplierInvoice.receipt_id == None) | (SupplierInvoice.receipt_id == receipt.id)
                 )
             )
             existing_inv = ex_res.scalars().first()
@@ -957,7 +961,8 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
                     SupplierInvoice.company_id == company_id,
                     SupplierInvoice.supplier_id == supplier_id,
                     SupplierInvoice.purchase_order_id == data.purchase_order_id,
-                    SupplierInvoice.estado != "cancelada",
+                    SupplierInvoice.estado.not_in(["pagada", "cancelada"]),
+                    (SupplierInvoice.receipt_id == None) | (SupplierInvoice.receipt_id == receipt.id)
                 ).order_by(SupplierInvoice.created_at.desc())
             )
             existing_inv = ex_po_res.scalars().first()
@@ -971,11 +976,24 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
                 inv.numero_factura = norm_ref
             await db.flush()
         else:
+            tot_despachado = sum(
+                (Decimal(str(itm.cantidad_recibida or 0)) + Decimal(str(itm.cantidad_rechazada or 0))) * (itm.costo_unitario or Decimal("0"))
+                for itm in data.items
+            ).quantize(Decimal("1"))
+
             diff_redondeo = Decimal("0")
-            factura_total = receipt.total
             if data.total_factura_impreso is not None and data.total_factura_impreso > 0:
-                diff_redondeo = (data.total_factura_impreso - receipt.total).quantize(Decimal("1"))
                 factura_total = data.total_factura_impreso.quantize(Decimal("1"))
+                diff_redondeo = (factura_total - receipt.total).quantize(Decimal("1"))
+            elif tot_despachado > receipt.total:
+                factura_total = tot_despachado
+            else:
+                factura_total = receipt.total
+
+            # El saldo pendiente inicial a pagar es el valor neto recibido en muelle (receipt.total)
+            # La diferencia por rechazo/faltante queda como retención preventiva pendiente de NC
+            monto_retenido_inicial = max(Decimal("0"), factura_total - receipt.total)
+            saldo_a_pagar_inicial = min(factura_total, receipt.total)
 
             iva_10 = (factura_total / Decimal("11")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
@@ -995,7 +1013,9 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
                 iva_10=iva_10,
                 iva_5=Decimal("0"),
                 total=factura_total,
-                saldo_pendiente=factura_total,
+                saldo_pendiente=saldo_a_pagar_inicial,
+                monto_retenido_nc=monto_retenido_inicial,
+                requiere_nc=(monto_retenido_inicial > 0),
                 moneda=inv_moneda,
                 tipo_cambio=inv_tc,
                 total_brl=inv_total_brl,
@@ -1009,6 +1029,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
                     f"Recepción de mercadería {receipt.numero}"
                     + (f" - Ref: {invoice_num}" if data.proveedor_ref else "")
                     + (f" [Ajuste Redondeo Factura: {diff_redondeo:+,} ₲]" if diff_redondeo != 0 else "")
+                    + (f" [Retención Faltante/Rechazo Muelle: {monto_retenido_inicial:,.0f} ₲]" if monto_retenido_inicial > 0 else "")
                     + (f" - Obs: {data.observaciones}" if data.observaciones else "")
                 ),
                 created_by=data.user_id,
