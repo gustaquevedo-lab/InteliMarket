@@ -145,6 +145,7 @@ export default function FinancialPage() {
   const [showResolveNcModal, setShowResolveNcModal] = useState(false)
   const [selectedNcRequestForResolve, setSelectedNcRequestForResolve] = useState<any | null>(null)
   const [resolvingNc, setResolvingNc] = useState(false)
+  const [sncBannerTab, setSncBannerTab] = useState<"pendientes" | "resueltas">("pendientes")
   const [resolveNcForm, setResolveNcForm] = useState({
     nc_recibida_numero: "",
     nc_recibida_timbrado: "",
@@ -1943,20 +1944,25 @@ export default function FinancialPage() {
                       )}
                     </div>
 
-                    {/* Banner Informativo de 3-Way Match y Solicitudes de NC Pendientes (SNC) */}
+                    {/* Banner Informativo de 3-Way Match y Solicitudes de NC (SNC) */}
                     {(() => {
                       const supId = currentSelectedSupplier.supplier_id
                       const pendingSncs = supplierNcRequests.filter((snc: any) =>
                         String(snc.supplier_id) === String(supId) &&
                         ["pendiente_entrega", "entregada_parcial", "pendiente"].includes(snc.estado)
                       )
+                      const resolvedSncs = supplierNcRequests.filter((snc: any) =>
+                        String(snc.supplier_id) === String(supId) &&
+                        snc.estado === "resuelta"
+                      )
                       const blockedInvoices = currentSelectedSupplier.pendingInvoices.filter((inv: any) =>
                         inv.bloqueada_para_pago || inv.estado === "retenida_discrepancia"
                       )
 
-                      if (pendingSncs.length === 0 && blockedInvoices.length === 0) return null
+                      if (pendingSncs.length === 0 && resolvedSncs.length === 0 && blockedInvoices.length === 0) return null
 
                       const totalMontoReclamado = pendingSncs.reduce((acc: number, s: any) => acc + Number(s.monto_reclamado || 0), 0)
+                      const totalMontoResuelto = resolvedSncs.reduce((acc: number, s: any) => acc + Number(s.nc_recibida_monto || s.monto_reclamado || 0), 0)
 
                       return (
                         <div className="mt-4 p-4 rounded-xl bg-amber-950/40 border border-amber-500/50 text-amber-200">
@@ -1965,64 +1971,160 @@ export default function FinancialPage() {
                               <ShieldAlert className="w-5 h-5 text-amber-400 mt-0.5 shrink-0" />
                               <div className="space-y-1">
                                 <h5 className="font-bold text-sm text-amber-300 flex items-center gap-2">
-                                  <span>Control 3-Way Match Activo: Discrepancias Físicas / SNCs Pendientes</span>
+                                  <span>Control 3-Way Match: Solicitudes de NC & Discrepancias Físicas</span>
                                   <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300">
-                                    {pendingSncs.length} SNCs activas · {blockedInvoices.length} facturas retenidas
+                                    {pendingSncs.length} Pendientes · {resolvedSncs.length} Resueltas
                                   </span>
                                 </h5>
                                 <p className="text-xs text-amber-200/80">
-                                  Este proveedor tiene diferencias de recepción física en muelle o reclamos pendientes de formalización fiscal por un total de <strong className="font-mono text-white underline">{formatPYG(totalMontoReclamado)}</strong>. Las facturas observadas están bloqueadas para liquidación hasta recibir la NC correspondiente o aprobar la excepción.
+                                  {pendingSncs.length > 0 ? (
+                                    <>Reclamos pendientes de compensación fiscal por <strong className="font-mono text-white underline">{formatPYG(totalMontoReclamado)}</strong> ({blockedInvoices.length} facturas retenidas).</>
+                                  ) : (
+                                    <>Todas las discrepancias registradas de este proveedor han sido <strong className="text-emerald-400">compensadas formalmente con Notas de Crédito</strong> ({formatPYG(totalMontoResuelto)}).</>
+                                  )}
                                 </p>
                               </div>
                             </div>
+
+                            {/* Selector de Pestaña: Pendientes vs Resueltas */}
+                            <div className="flex items-center gap-1.5 self-start md:self-auto bg-amber-950/80 p-1 rounded-lg border border-amber-600/30">
+                              <button
+                                type="button"
+                                onClick={() => setSncBannerTab("pendientes")}
+                                className={`px-2.5 py-1 rounded text-xs font-bold transition flex items-center gap-1 ${
+                                  sncBannerTab === "pendientes"
+                                    ? "bg-amber-500 text-slate-950 shadow"
+                                    : "text-amber-300 hover:text-white"
+                                }`}
+                              >
+                                <Clock className="w-3 h-3" />
+                                <span>Pendientes ({pendingSncs.length})</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setSncBannerTab("resueltas")}
+                                className={`px-2.5 py-1 rounded text-xs font-bold transition flex items-center gap-1 ${
+                                  sncBannerTab === "resueltas"
+                                    ? "bg-emerald-500 text-slate-950 shadow"
+                                    : "text-emerald-300 hover:text-white"
+                                }`}
+                              >
+                                <CheckCircle className="w-3 h-3" />
+                                <span>Resueltas / Historial ({resolvedSncs.length})</span>
+                              </button>
+                            </div>
                           </div>
 
-                          {pendingSncs.length > 0 && (
-                            <div className="mt-3 pt-3 border-t border-amber-500/20 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                              {pendingSncs.map((snc: any) => {
-                                const linkedInv = invoices.find((i: any) => String(i.id) === String(snc.invoice_id))
-                                const sncFecha = snc.created_at ? formatDate(snc.created_at) : (snc.fecha ? formatDate(snc.fecha) : null)
-                                return (
-                                  <div key={snc.id} className="bg-amber-900/30 border border-amber-600/30 rounded-lg p-3 text-xs space-y-2 flex flex-col justify-between">
-                                    <div className="space-y-1.5">
-                                      <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-1.5">
-                                          <span className="font-mono font-bold text-amber-300">{snc.numero_solicitud || "SNC"}</span>
-                                          {sncFecha && (
-                                            <span className="text-[10px] text-amber-300/70 font-mono">({sncFecha})</span>
+                          {/* LISTADO: SNCs PENDIENTES */}
+                          {sncBannerTab === "pendientes" && (
+                            pendingSncs.length === 0 ? (
+                              <div className="mt-3 p-4 rounded-lg bg-emerald-950/40 border border-emerald-500/30 text-xs text-emerald-300 text-center flex items-center justify-center gap-2">
+                                <CheckCircle className="w-4 h-4 text-emerald-400" />
+                                <span>No hay Solicitudes de NC pendientes de entrega por parte de este proveedor.</span>
+                              </div>
+                            ) : (
+                              <div className="mt-3 pt-3 border-t border-amber-500/20 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                                {pendingSncs.map((snc: any) => {
+                                  const linkedInv = invoices.find((i: any) => String(i.id) === String(snc.invoice_id))
+                                  const sncFecha = snc.created_at ? formatDate(snc.created_at) : (snc.fecha ? formatDate(snc.fecha) : null)
+                                  return (
+                                    <div key={snc.id} className="bg-amber-900/30 border border-amber-600/30 rounded-lg p-3 text-xs space-y-2 flex flex-col justify-between">
+                                      <div className="space-y-1.5">
+                                        <div className="flex items-center justify-between">
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="font-mono font-bold text-amber-300">{snc.numero_solicitud || "SNC"}</span>
+                                            {sncFecha && (
+                                              <span className="text-[10px] text-amber-300/70 font-mono">({sncFecha})</span>
+                                            )}
+                                          </div>
+                                          <span className="font-mono font-bold text-rose-400">₲ {Number(snc.monto_reclamado || 0).toLocaleString("es-PY")}</span>
+                                        </div>
+
+                                        <div className="flex items-center gap-1.5 text-[11px] text-amber-200/90 font-mono bg-amber-950/50 px-2 py-1 rounded border border-amber-600/20">
+                                          <Receipt className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                          <span>Factura:</span>
+                                          <strong className="text-white font-bold">
+                                            {linkedInv?.numero_factura || (snc.invoice_id ? `ID #${String(snc.invoice_id).slice(0, 8)}` : "S/F vinculada")}
+                                          </strong>
+                                        </div>
+
+                                        <p className="text-[11px] text-amber-200/70 truncate" title={snc.observaciones || snc.tipo_motivo}>
+                                          {snc.observaciones || snc.tipo_motivo || "Diferencia de recepción en muelle"}
+                                        </p>
+                                        <div className="text-[10px] text-amber-400/80 font-mono">
+                                          Estado: <span className="uppercase font-semibold">{snc.estado?.replace("_", " ")}</span>
+                                        </div>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenResolveNcModal(snc)}
+                                        className="w-full mt-1 py-1.5 px-2.5 rounded-lg bg-emerald-600/90 hover:bg-emerald-600 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-sm transition active:scale-[0.98]"
+                                      >
+                                        <FileCheck className="w-3.5 h-3.5" />
+                                        <span>Cargar NC Recibida</span>
+                                      </button>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )
+                          )}
+
+                          {/* LISTADO: SNCs RESUELTAS / HISTÓRICO */}
+                          {sncBannerTab === "resueltas" && (
+                            resolvedSncs.length === 0 ? (
+                              <div className="mt-3 p-4 rounded-lg bg-amber-950/40 border border-amber-600/30 text-xs text-amber-300 text-center">
+                                No se registran Solicitudes de NC resueltas para este proveedor.
+                              </div>
+                            ) : (
+                              <div className="mt-3 pt-3 border-t border-emerald-500/20 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                                {resolvedSncs.map((snc: any) => {
+                                  const linkedInv = invoices.find((i: any) => String(i.id) === String(snc.invoice_id))
+                                  const resolvedFecha = snc.resolved_at ? formatDate(snc.resolved_at) : (snc.nc_recibida_fecha ? formatDate(snc.nc_recibida_fecha) : null)
+                                  return (
+                                    <div key={snc.id} className="bg-emerald-950/40 border border-emerald-600/40 rounded-lg p-3 text-xs space-y-2 flex flex-col justify-between">
+                                      <div className="space-y-1.5">
+                                        <div className="flex items-center justify-between">
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="font-mono font-bold text-emerald-300">{snc.numero_solicitud || "SNC"}</span>
+                                            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-emerald-400 bg-emerald-900/60 px-1.5 py-0.5 rounded border border-emerald-600/40">
+                                              <CheckCircle className="w-2.5 h-2.5" /> RESUELTA
+                                            </span>
+                                          </div>
+                                          <span className="font-mono font-bold text-emerald-400">₲ {Number(snc.nc_recibida_monto || snc.monto_reclamado || 0).toLocaleString("es-PY")}</span>
+                                        </div>
+
+                                        <div className="flex items-center gap-1.5 text-[11px] text-gray-300 font-mono bg-slate-900/60 px-2 py-1 rounded border border-gray-700/60">
+                                          <Receipt className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                                          <span>Factura:</span>
+                                          <strong className="text-white font-bold">
+                                            {linkedInv?.numero_factura || (snc.invoice_id ? `ID #${String(snc.invoice_id).slice(0, 8)}` : "S/F vinculada")}
+                                          </strong>
+                                        </div>
+
+                                        <div className="p-2 rounded bg-emerald-900/20 border border-emerald-600/30 text-[11px] text-emerald-200 space-y-0.5">
+                                          <div className="font-bold text-white flex items-center justify-between">
+                                            <span>NC Proveedor N° {snc.nc_recibida_numero || "—"}</span>
+                                            {resolvedFecha && <span className="text-[10px] text-emerald-300/70 font-normal">{resolvedFecha}</span>}
+                                          </div>
+                                          {snc.nc_recibida_timbrado && (
+                                            <div className="text-[10px] text-emerald-300/80 font-mono">
+                                              Timbrado: {snc.nc_recibida_timbrado}
+                                            </div>
                                           )}
                                         </div>
-                                        <span className="font-mono font-bold text-rose-400">₲ {Number(snc.monto_reclamado || 0).toLocaleString("es-PY")}</span>
-                                      </div>
 
-                                      {/* Factura vinculada */}
-                                      <div className="flex items-center gap-1.5 text-[11px] text-amber-200/90 font-mono bg-amber-950/50 px-2 py-1 rounded border border-amber-600/20">
-                                        <Receipt className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                                        <span>Factura:</span>
-                                        <strong className="text-white font-bold">
-                                          {linkedInv?.numero_factura || (snc.invoice_id ? `ID #${String(snc.invoice_id).slice(0, 8)}` : "S/F vinculada")}
-                                        </strong>
-                                      </div>
-
-                                      <p className="text-[11px] text-amber-200/70 truncate" title={snc.observaciones || snc.tipo_motivo}>
-                                        {snc.observaciones || snc.tipo_motivo || "Diferencia de recepción en muelle"}
-                                      </p>
-                                      <div className="text-[10px] text-amber-400/80 font-mono">
-                                        Estado: <span className="uppercase font-semibold">{snc.estado?.replace("_", " ")}</span>
+                                        {snc.observaciones && (
+                                          <p className="text-[10px] text-gray-400 truncate" title={snc.observaciones}>
+                                            {snc.observaciones}
+                                          </p>
+                                        )}
                                       </div>
                                     </div>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleOpenResolveNcModal(snc)}
-                                      className="w-full mt-1 py-1.5 px-2.5 rounded-lg bg-emerald-600/90 hover:bg-emerald-600 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-sm transition active:scale-[0.98]"
-                                    >
-                                      <FileCheck className="w-3.5 h-3.5" />
-                                      <span>Cargar NC Recibida</span>
-                                    </button>
-                                  </div>
-                                )
-                              })}
-                            </div>
+                                  )
+                                })}
+                              </div>
+                            )
                           )}
 
                           {/* ── ASISTENTE DE CALCE INTELIGENTE DE NCs SUELTAS / E-MAIL ── */}
@@ -3392,21 +3494,56 @@ export default function FinancialPage() {
                             {filteredInvoices.map(inv => {
                               const isVencida = inv.estado === "pendiente" && inv.fecha_vencimiento && new Date(inv.fecha_vencimiento) < new Date()
                               const isExpanded = expandedInvoiceId === inv.id
-                              const linkedNCs = creditNotes.filter(cn => 
+
+                              // 1. Unificar Notas de Crédito (backend aplicadas + cotejo de factura origen)
+                              const backendNCs = (inv.notas_credito || []).map((nc: any) => ({
+                                id: nc.id,
+                                numero: nc.numero,
+                                timbrado: nc.timbrado,
+                                fecha: nc.fecha,
+                                motivo: nc.motivo,
+                                monto: nc.monto_aplicado || nc.monto_total || nc.monto,
+                              }))
+                              const stateNCs = creditNotes.filter(cn => 
                                 (cn.numero_factura_origen && inv.numero_factura && cn.numero_factura_origen.trim() === inv.numero_factura.trim()) ||
                                 (cn.supplier_id === inv.supplier_id && cn.numero_factura_origen === inv.numero_factura)
                               )
+                              const seenNcKeys = new Set<string>()
+                              const linkedNCs: any[] = []
+                              for (const nc of [...backendNCs, ...stateNCs]) {
+                                const k = nc.id || `${nc.numero}_${nc.timbrado}`
+                                if (!seenNcKeys.has(k)) {
+                                  seenNcKeys.add(k)
+                                  linkedNCs.push(nc)
+                                }
+                              }
+
+                              // 2. Unificar Solicitudes de NC (SNC) vinculadas a esta factura
+                              const backendSNCs = (inv.solicitudes_nc || [])
+                              const stateSNCs = supplierNcRequests.filter((s: any) => String(s.invoice_id) === String(inv.id))
+                              const seenSncKeys = new Set<string>()
+                              const linkedSNCs: any[] = []
+                              for (const snc of [...backendSNCs, ...stateSNCs]) {
+                                const k = snc.id || snc.numero_solicitud
+                                if (!seenSncKeys.has(k)) {
+                                  seenSncKeys.add(k)
+                                  linkedSNCs.push(snc)
+                                }
+                              }
+
                               const totalNCAplicadas = linkedNCs.reduce((sum, n) => sum + Number(n.monto || 0), 0)
                               const saldoResultante = Math.max(0, Number(inv.total || 0) - totalNCAplicadas)
+                              const hasPendingSnc = linkedSNCs.some(s => ["pendiente_entrega", "entregada_parcial", "pendiente"].includes(s.estado))
+                              const hasResolvedSnc = linkedSNCs.some(s => s.estado === "resuelta")
 
                               return (
-                                <>
-                                  <tr key={inv.id} className={`hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors ${isExpanded ? "bg-slate-800/40" : ""}`}>
+                                <Fragment key={inv.id}>
+                                  <tr className={`hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors ${isExpanded ? "bg-slate-800/40" : ""}`}>
                                     <td className="p-3.5 text-center">
                                       <button
                                         onClick={() => setExpandedInvoiceId(isExpanded ? null : inv.id)}
                                         className="p-1 text-gray-400 hover:text-white rounded hover:bg-slate-700/50 transition"
-                                        title="Ver notas de crédito y detalle"
+                                        title="Ver notas de crédito y solicitudes de NC vinculadas"
                                       >
                                         {isExpanded ? <ChevronDown className="w-4 h-4 text-primary" /> : <ChevronRight className="w-4 h-4" />}
                                       </button>
@@ -3428,11 +3565,23 @@ export default function FinancialPage() {
                                           <Eye className="w-3 h-3" />
                                         </span>
                                       </button>
-                                      {linkedNCs.length > 0 && (
-                                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-purple-600 dark:text-purple-400 mt-0.5">
-                                          <FileText className="w-3 h-3" /> {linkedNCs.length} NC vinculada(s)
-                                        </span>
-                                      )}
+                                      <div className="flex flex-wrap items-center gap-1 mt-0.5">
+                                        {linkedNCs.length > 0 && (
+                                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-purple-600 dark:text-purple-400 bg-purple-950/30 px-1.5 py-0.5 rounded border border-purple-500/30">
+                                            <FileText className="w-3 h-3" /> {linkedNCs.length} NC aplicada(s)
+                                          </span>
+                                        )}
+                                        {hasPendingSnc && (
+                                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-400 bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-500/40">
+                                            <Clock className="w-3 h-3" /> SNC Pendiente
+                                          </span>
+                                        )}
+                                        {hasResolvedSnc && (
+                                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-500/40">
+                                            <CheckCircle className="w-3 h-3" /> SNC Cubierta
+                                          </span>
+                                        )}
+                                      </div>
                                     </td>
                                     <td className="p-3.5 font-mono font-bold text-xs text-gray-900 dark:text-white">
                                       {inv.numero_factura || "—"}
@@ -3477,58 +3626,148 @@ export default function FinancialPage() {
                                     </td>
                                   </tr>
 
-                                  {/* FILA ACORDEÓN: Notas de Crédito vinculadas a esta factura */}
+                                  {/* FILA ACORDEÓN: Notas de Crédito y Solicitudes de NC (SNC) vinculadas */}
                                   {isExpanded && (
                                     <tr className="bg-slate-900/70 border-b border-gray-700/60">
                                       <td colSpan={10} className="p-4 pl-12">
-                                        <div className="rounded-xl border border-indigo-500/20 bg-slate-950/60 p-4 space-y-3">
-                                          <div className="flex items-center justify-between flex-wrap gap-2">
-                                            <div className="flex items-center gap-2">
-                                              <FileText className="w-4 h-4 text-purple-400" />
-                                              <h5 className="text-xs font-bold uppercase tracking-wider text-white">
-                                                Notas de Crédito Imputadas a la Factura N° {inv.numero_factura}
-                                              </h5>
+                                        <div className="rounded-xl border border-indigo-500/20 bg-slate-950/80 p-4 space-y-4">
+                                          {/* SECCIÓN 1: NOTAS DE CRÉDITO FISCALES IMPUTADAS */}
+                                          <div className="space-y-2">
+                                            <div className="flex items-center justify-between flex-wrap gap-2">
+                                              <div className="flex items-center gap-2">
+                                                <FileText className="w-4 h-4 text-purple-400" />
+                                                <h5 className="text-xs font-bold uppercase tracking-wider text-white">
+                                                  Notas de Crédito Fiscales Imputadas a la Factura N° {inv.numero_factura} ({linkedNCs.length})
+                                                </h5>
+                                              </div>
+                                              <div className="text-xs font-mono text-gray-400">
+                                                Saldo original: <b className="text-white">{formatPYG(inv.total)}</b> · Deducciones NC: <b className="text-purple-400">{formatPYG(totalNCAplicadas)}</b> · Saldo Resultante: <b className="text-emerald-400">{formatPYG(saldoResultante)}</b>
+                                              </div>
                                             </div>
-                                            <div className="text-xs font-mono text-gray-400">
-                                              Saldo original: <b className="text-white">{formatPYG(inv.total)}</b> · Deducciones NC: <b className="text-purple-400">{formatPYG(totalNCAplicadas)}</b> · Saldo Resultante: <b className="text-emerald-400">{formatPYG(saldoResultante)}</b>
-                                            </div>
+
+                                            {linkedNCs.length === 0 ? (
+                                              <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-800 text-xs text-gray-400 text-center">
+                                                Sin Notas de Crédito fiscales imputadas a este comprobante.
+                                              </div>
+                                            ) : (
+                                              <table className="w-full text-xs text-left">
+                                                <thead>
+                                                  <tr className="text-gray-400 border-b border-gray-800 font-semibold">
+                                                    <th className="pb-2">N° Nota de Crédito</th>
+                                                    <th className="pb-2">Timbrado</th>
+                                                    <th className="pb-2">Fecha</th>
+                                                    <th className="pb-2">Motivo</th>
+                                                    <th className="pb-2 text-right">Importe NC</th>
+                                                    <th className="pb-2 text-right">Saldo Resultante</th>
+                                                  </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-800/60 font-mono">
+                                                  {linkedNCs.map((nc, idx) => (
+                                                    <tr key={nc.id || idx} className="text-gray-300">
+                                                      <td className="py-2 text-purple-300 font-bold">{nc.numero}</td>
+                                                      <td className="py-2 text-gray-400">{nc.timbrado || "—"}</td>
+                                                      <td className="py-2 text-gray-400">{nc.fecha ? formatDate(nc.fecha) : "—"}</td>
+                                                      <td className="py-2 font-sans text-gray-300">{nc.motivo || "Ajuste / Bonificación"}</td>
+                                                      <td className="py-2 text-right text-purple-400 font-bold">-{formatPYG(nc.monto)}</td>
+                                                      <td className="py-2 text-right text-emerald-400 font-bold">{formatPYG(saldoResultante)}</td>
+                                                    </tr>
+                                                  ))}
+                                                </tbody>
+                                              </table>
+                                            )}
                                           </div>
 
-                                          {linkedNCs.length === 0 ? (
-                                            <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-800 text-xs text-gray-400 text-center">
-                                              Sin Notas de Crédito imputadas a este comprobante.
+                                          {/* SECCIÓN 2: SOLICITUDES DE NOTA DE CRÉDITO (SNC) & DISCREPANCIAS */}
+                                          <div className="space-y-2 pt-3 border-t border-gray-800">
+                                            <div className="flex items-center justify-between flex-wrap gap-2">
+                                              <div className="flex items-center gap-2">
+                                                <ShieldAlert className="w-4 h-4 text-amber-400" />
+                                                <h5 className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                                                  Solicitudes de Nota de Crédito (SNC) & Reclamos en Muelle ({linkedSNCs.length})
+                                                </h5>
+                                              </div>
                                             </div>
-                                          ) : (
-                                            <table className="w-full text-xs text-left">
-                                              <thead>
-                                                <tr className="text-gray-400 border-b border-gray-800 font-semibold">
-                                                  <th className="pb-2">N° Nota de Crédito</th>
-                                                  <th className="pb-2">Timbrado</th>
-                                                  <th className="pb-2">Fecha</th>
-                                                  <th className="pb-2">Motivo</th>
-                                                  <th className="pb-2 text-right">Importe NC</th>
-                                                  <th className="pb-2 text-right">Saldo Resultante</th>
-                                                </tr>
-                                              </thead>
-                                              <tbody className="divide-y divide-gray-800/60 font-mono">
-                                                {linkedNCs.map((nc, idx) => (
-                                                  <tr key={nc.id || idx} className="text-gray-300">
-                                                    <td className="py-2 text-purple-300 font-bold">{nc.numero}</td>
-                                                    <td className="py-2 text-gray-400">{nc.timbrado || "—"}</td>
-                                                    <td className="py-2 text-gray-400">{nc.fecha ? new Date(nc.fecha).toLocaleDateString("es-PY") : "—"}</td>
-                                                    <td className="py-2 font-sans text-gray-300">{nc.motivo || "Ajuste / Bonificación"}</td>
-                                                    <td className="py-2 text-right text-purple-400 font-bold">-{formatPYG(nc.monto)}</td>
-                                                    <td className="py-2 text-right text-emerald-400 font-bold">{formatPYG(saldoResultante)}</td>
+
+                                            {linkedSNCs.length === 0 ? (
+                                              <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-800 text-xs text-gray-400 text-center">
+                                                No se generaron Solicitudes de NC (SNC) por diferencias de recepción para esta factura.
+                                              </div>
+                                            ) : (
+                                              <table className="w-full text-xs text-left">
+                                                <thead>
+                                                  <tr className="text-gray-400 border-b border-gray-800 font-semibold">
+                                                    <th className="pb-2">N° Solicitud</th>
+                                                    <th className="pb-2">Fecha Reclamo</th>
+                                                    <th className="pb-2">Motivo / Discrepancia</th>
+                                                    <th className="pb-2 text-right">Monto Reclamado</th>
+                                                    <th className="pb-2">Estado</th>
+                                                    <th className="pb-2">NC Recibida / Contrapartida</th>
                                                   </tr>
-                                                ))}
-                                              </tbody>
-                                            </table>
-                                          )}
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-800/60 font-mono">
+                                                  {linkedSNCs.map((snc, idx) => {
+                                                    const isRes = snc.estado === "resuelta"
+                                                    const sncDate = snc.created_at ? formatDate(snc.created_at) : (snc.fecha ? formatDate(snc.fecha) : "—")
+                                                    return (
+                                                      <tr key={snc.id || idx} className="text-gray-300">
+                                                        <td className="py-2 text-amber-300 font-bold">{snc.numero_solicitud || "SNC"}</td>
+                                                        <td className="py-2 text-gray-400">{sncDate}</td>
+                                                        <td className="py-2 font-sans text-gray-300 max-w-xs truncate" title={snc.observaciones || snc.tipo_motivo}>
+                                                          {snc.observaciones || snc.tipo_motivo || "Diferencia física en recepción"}
+                                                        </td>
+                                                        <td className="py-2 text-right text-rose-400 font-bold">
+                                                          {formatPYG(snc.monto_reclamado || 0)}
+                                                        </td>
+                                                        <td className="py-2">
+                                                          {isRes ? (
+                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/60 text-emerald-400 border border-emerald-600/40">
+                                                              <CheckCircle className="w-3 h-3 text-emerald-400" /> Resuelta y Compensada
+                                                            </span>
+                                                          ) : (
+                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-950/60 text-amber-300 border border-amber-600/40">
+                                                              <Clock className="w-3 h-3 text-amber-400" /> Pendiente NC Proveedor
+                                                            </span>
+                                                          )}
+                                                        </td>
+                                                        <td className="py-2">
+                                                          {isRes ? (
+                                                            <div className="space-y-0.5">
+                                                              <span className="font-mono text-emerald-300 font-bold">
+                                                                NC N° {snc.nc_recibida_numero || "—"}
+                                                              </span>
+                                                              {snc.nc_recibida_timbrado && (
+                                                                <span className="text-[10px] text-gray-400 block font-mono">
+                                                                  Timb: {snc.nc_recibida_timbrado}
+                                                                </span>
+                                                              )}
+                                                              {snc.nc_recibida_monto && (
+                                                                <span className="text-[10px] text-emerald-400 block font-mono font-bold">
+                                                                  Importe: {formatPYG(snc.nc_recibida_monto)}
+                                                                </span>
+                                                              )}
+                                                            </div>
+                                                          ) : (
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => handleOpenResolveNcModal(snc)}
+                                                              className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] flex items-center gap-1 shadow-sm transition"
+                                                            >
+                                                              <FileCheck className="w-3 h-3" /> Cargar NC Recibida
+                                                            </button>
+                                                          )}
+                                                        </td>
+                                                      </tr>
+                                                    )
+                                                  })}
+                                                </tbody>
+                                              </table>
+                                            )}
+                                          </div>
                                         </div>
                                       </td>
                                     </tr>
                                   )}
-                                </>
+                                </Fragment>
                               )
                             })}
                           </tbody>

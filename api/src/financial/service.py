@@ -190,11 +190,25 @@ async def list_invoices(
                 inv.supplier_nombre = sup_map[inv.supplier_id][0]
                 inv.supplier_ruc = sup_map[inv.supplier_id][1]
 
-    # Notas de crédito anidadas (aplicadas formalmente o vinculadas a la factura de origen)
+    # Enriquecer con Notas de Crédito y Solicitudes de NC (SNC) vinculadas
+    await enrich_invoices_with_nc_and_snc(db, cid, invoices)
+    return invoices
+
+
+async def enrich_invoices_with_nc_and_snc(
+    db: AsyncSession, company_id: uuid.UUID, invoices: list[SupplierInvoice]
+) -> None:
+    """Enriquece una lista de facturas con sus Notas de Crédito aplicadas y sus
+    Solicitudes de Nota de Crédito (SNC) históricas y activas."""
+    if not invoices:
+        return
+
     inv_ids = [i.id for i in invoices if i.id]
     nc_map: dict[uuid.UUID, list[dict]] = {i.id: [] for i in invoices}
+    snc_map: dict[uuid.UUID, list[dict]] = {i.id: [] for i in invoices}
+
     if inv_ids:
-        # 1. Aplicaciones registradas
+        # 1. Aplicaciones registradas formalmente en supplier_credit_note_applications
         app_q = (
             select(
                 SupplierCreditNoteApplication.invoice_id,
@@ -202,6 +216,7 @@ async def list_invoices(
                 SupplierCreditNoteApplication.fecha.label("fecha_aplicacion"),
                 SupplierCreditNote.id.label("nc_id"),
                 SupplierCreditNote.numero.label("nc_numero"),
+                SupplierCreditNote.timbrado.label("nc_timbrado"),
                 SupplierCreditNote.motivo.label("nc_motivo"),
                 SupplierCreditNote.monto.label("nc_monto_total"),
             )
@@ -213,20 +228,21 @@ async def list_invoices(
             nc_map[row.invoice_id].append({
                 "id": str(row.nc_id),
                 "numero": row.nc_numero,
+                "timbrado": row.nc_timbrado,
                 "motivo": row.nc_motivo or "Nota de crédito",
                 "monto_aplicado": float(row.monto_aplicado or 0),
                 "monto_total": float(row.nc_monto_total or 0),
                 "fecha": row.fecha_aplicacion.isoformat() if row.fecha_aplicacion else None,
             })
 
-        # 2. Vinculación directa por número de factura origen del mismo proveedor
-        inv_nums = {i.numero_factura.strip() for i in invoices if i.numero_factura}
+        # 2. Vinculación directa por número de factura origen del mismo proveedor (incluye saldo_disponible 0)
         sup_ids = {i.supplier_id for i in invoices if i.supplier_id}
         if sup_ids:
             nc_orig_q = (
                 select(
                     SupplierCreditNote.id,
                     SupplierCreditNote.numero,
+                    SupplierCreditNote.timbrado,
                     SupplierCreditNote.numero_factura_origen,
                     SupplierCreditNote.motivo,
                     SupplierCreditNote.monto,
@@ -235,10 +251,9 @@ async def list_invoices(
                     SupplierCreditNote.supplier_id,
                 )
                 .where(
-                    SupplierCreditNote.company_id == cid,
+                    SupplierCreditNote.company_id == company_id,
                     SupplierCreditNote.supplier_id.in_(sup_ids),
                     SupplierCreditNote.cancelado == False,
-                    SupplierCreditNote.saldo_disponible > 0,
                 )
             )
             nc_orig_res = await db.execute(nc_orig_q)
@@ -246,20 +261,43 @@ async def list_invoices(
                 for inv in invoices:
                     if inv.supplier_id == nc.supplier_id and _doc_numbers_match(inv.numero_factura, nc.numero_factura_origen):
                         if not any(x["id"] == str(nc.id) for x in nc_map[inv.id]):
-                            m_disp = float(nc.saldo_disponible if nc.saldo_disponible is not None else nc.monto)
                             nc_map[inv.id].append({
                                 "id": str(nc.id),
                                 "numero": nc.numero,
+                                "timbrado": nc.timbrado,
                                 "motivo": nc.motivo or "Nota de crédito",
-                                "monto_aplicado": m_disp,
+                                "monto_aplicado": float(nc.monto or 0),
                                 "monto_total": float(nc.monto or 0),
                                 "fecha": nc.fecha.isoformat() if nc.fecha else None,
                             })
 
+        # 3. Solicitudes de Nota de Crédito (SNC) vinculadas a estas facturas (pendientes y resueltas)
+        from api.src.purchases.models import SupplierNcRequest
+        snc_q = (
+            select(SupplierNcRequest)
+            .where(SupplierNcRequest.invoice_id.in_(inv_ids))
+            .order_by(SupplierNcRequest.created_at.desc())
+        )
+        snc_res = await db.execute(snc_q)
+        for snc in snc_res.scalars().all():
+            snc_map[snc.invoice_id].append({
+                "id": str(snc.id),
+                "numero_solicitud": snc.numero_solicitud,
+                "tipo_motivo": snc.tipo_motivo,
+                "monto_reclamado": float(snc.monto_reclamado or 0),
+                "estado": snc.estado,
+                "observaciones": snc.observaciones,
+                "nc_recibida_numero": snc.nc_recibida_numero,
+                "nc_recibida_timbrado": snc.nc_recibida_timbrado,
+                "nc_recibida_monto": float(snc.nc_recibida_monto or 0) if snc.nc_recibida_monto else None,
+                "nc_recibida_fecha": snc.nc_recibida_fecha.isoformat() if snc.nc_recibida_fecha else None,
+                "created_at": snc.created_at.isoformat() if snc.created_at else None,
+                "resolved_at": snc.resolved_at.isoformat() if snc.resolved_at else None,
+            })
+
     for inv in invoices:
         inv.notas_credito = nc_map.get(inv.id, [])
-
-    return invoices
+        inv.solicitudes_nc = snc_map.get(inv.id, [])
 
 
 async def get_invoice(db: AsyncSession, invoice_id: str) -> SupplierInvoice | None:
@@ -275,8 +313,12 @@ async def get_invoice_with_payments(db: AsyncSession, invoice_id: str) -> Suppli
     )
     invoice = result.scalar_one_or_none()
     if invoice and invoice.supplier_id:
-        sup_result = await db.execute(select(Supplier.razon_social).where(Supplier.id == invoice.supplier_id))
-        invoice.supplier_nombre = sup_result.scalar_one_or_none()
+        sup_result = await db.execute(select(Supplier.razon_social, Supplier.ruc).where(Supplier.id == invoice.supplier_id))
+        row = sup_result.first()
+        if row:
+            invoice.supplier_nombre = row[0]
+            invoice.supplier_ruc = row[1]
+        await enrich_invoices_with_nc_and_snc(db, invoice.company_id, [invoice])
     return invoice
 
 
@@ -3310,8 +3352,11 @@ async def create_supplier_credit_note(db: AsyncSession, company_id: str, data: S
         raise ValueError("El monto de la Nota de Crédito debe ser mayor a 0")
 
     num_clean = data.numero.strip()
-    # Blindaje anti-duplicados: verificar que la NC no exista ya para este proveedor
-    dup_res = await db.execute(
+    timbrado_clean = data.timbrado.strip() if data.timbrado else None
+
+    # Blindaje anti-duplicados: verificar unicidad por (supplier, numero, timbrado)
+    # consistente con el unique index uq_supplier_credit_notes_numero_timbrado
+    dup_q = (
         select(SupplierCreditNote.id)
         .where(
             SupplierCreditNote.company_id == cid,
@@ -3320,15 +3365,22 @@ async def create_supplier_credit_note(db: AsyncSession, company_id: str, data: S
             SupplierCreditNote.cancelado.is_(False),
         )
     )
+    if timbrado_clean:
+        dup_q = dup_q.where(SupplierCreditNote.timbrado == timbrado_clean)
+    dup_res = await db.execute(dup_q)
     if dup_res.scalar_one_or_none():
-        raise ValueError(f"La Nota de Crédito N° {num_clean} ya se encuentra registrada para este proveedor.")
+        raise ValueError(
+            f"La Nota de Crédito N° {num_clean}"
+            + (f" (Timbrado {timbrado_clean})" if timbrado_clean else "")
+            + " ya se encuentra registrada para este proveedor."
+        )
 
     note = SupplierCreditNote(
         company_id=cid,
         supplier_id=sid,
-        numero=data.numero.strip(),
+        numero=num_clean,
         numero_factura_origen=data.numero_factura_origen.strip() if data.numero_factura_origen else None,
-        timbrado=data.timbrado.strip() if data.timbrado else None,
+        timbrado=timbrado_clean,
         fecha=data.fecha,
         fecha_recepcion=data.fecha_recepcion or data.fecha,
         motivo=data.motivo.strip(),

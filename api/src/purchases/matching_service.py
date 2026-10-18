@@ -360,29 +360,60 @@ async def perform_3way_match(
         items_faltantes_po = []
         total_facturado = Decimal(str(invoice.total or 0))
 
+    # 4.5 Cotejo contra Notas de Crédito y SNCs ya resueltas (Regla Sistémica Anti-Rebloqueo)
+    sncs_inv_q = select(SupplierNcRequest).where(SupplierNcRequest.invoice_id == invoice.id)
+    sncs_inv_res = await db.execute(sncs_inv_q)
+    all_inv_sncs = list(sncs_inv_res.scalars().all())
+
+    monto_cubierto_snc = sum(
+        Decimal(str(s.nc_recibida_monto or s.monto_reclamado or 0))
+        for s in all_inv_sncs
+        if s.estado == "resuelta"
+    )
+
+    apps_inv_q = select(func.coalesce(func.sum(SupplierCreditNoteApplication.monto_aplicado), 0)).where(
+        SupplierCreditNoteApplication.invoice_id == invoice.id
+    )
+    apps_inv_res = await db.execute(apps_inv_q)
+    total_apps_monto = Decimal(str(apps_inv_res.scalar() or 0))
+
+    monto_total_compensado = max(monto_cubierto_snc, total_apps_monto)
+    discrepancia_neta_pendiente = max(Decimal("0"), total_discrepancia_monto - monto_total_compensado)
+
     # 5. Determinar estado general del Matching
     nc_request_obj: Optional[SupplierNcRequest] = None
     
-    if total_discrepancia_monto > TOLERANCIA_PRECIO_GS:
+    if total_discrepancia_monto > TOLERANCIA_PRECIO_GS and discrepancia_neta_pendiente <= TOLERANCIA_PRECIO_GS:
+        # Hubo discrepancia pero ya fue 100% satisfecha y compensada formalmente con Nota(s) de Crédito
+        estado_match = "conciliado_con_nc"
+        invoice.bloqueada_para_pago = False
+        invoice.estado = "aprobada" if (invoice.saldo_pendiente or 0) > 0 else "pagada"
+        invoice.monto_retenido_nc = Decimal("0")
+        invoice.requiere_nc = False
+        nc_nums = [s.nc_recibida_numero for s in all_inv_sncs if s.estado == "resuelta" and s.nc_recibida_numero]
+        nc_nums_str = f"N° {', '.join(nc_nums)}" if nc_nums else "aplicada"
+        invoice.motivo_bloqueo = f"Liberada para pago: Discrepancia cubierta por Nota de Crédito {nc_nums_str}."
+        for s in all_inv_sncs:
+            if s.estado in ("pendiente_entrega", "entregada_parcial"):
+                s.estado = "resuelta"
+                nc_request_obj = s
+        if not nc_request_obj and all_inv_sncs:
+            nc_request_obj = all_inv_sncs[0]
+
+    elif discrepancia_neta_pendiente > TOLERANCIA_PRECIO_GS:
         estado_match = "discrepancia_detectada"
         invoice.bloqueada_para_pago = True
         invoice.estado = "retenida_discrepancia"
-        invoice.monto_retenido_nc = total_discrepancia_monto
+        invoice.monto_retenido_nc = discrepancia_neta_pendiente
         invoice.requiere_nc = True
         invoice.motivo_bloqueo = (
-            f"BLOQUEADA PARA PAGO: Discrepancia detectada de {total_discrepancia_monto:,.0f} Gs. con el Pedido/Muelle. "
+            f"BLOQUEADA PARA PAGO: Discrepancia neta de {discrepancia_neta_pendiente:,.0f} Gs. con el Pedido/Muelle. "
             f"Sin entrega de la Nota de Crédito correspondiente, no se liberará el pago."
         )
 
-        # Buscar si ya existe una solicitud de NC para esta factura
-        nc_q = select(SupplierNcRequest).where(
-            SupplierNcRequest.invoice_id == invoice.id,
-            SupplierNcRequest.estado.in_(["pendiente_entrega", "entregada_parcial"])
-        )
-        nc_res = await db.execute(nc_q)
-        nc_request_obj = nc_res.scalar_one_or_none()
-
-        if not nc_request_obj:
+        # Buscar si ya existe una solicitud de NC pendiente
+        active_snc = next((s for s in all_inv_sncs if s.estado in ("pendiente_entrega", "entregada_parcial")), None)
+        if not active_snc:
             count_q = select(func.count(SupplierNcRequest.id)).where(SupplierNcRequest.company_id == invoice.company_id)
             c_res = await db.execute(count_q)
             seq = (c_res.scalar() or 0) + 1
@@ -399,14 +430,15 @@ async def perform_3way_match(
                 purchase_order_id=po.id if po else None,
                 numero_solicitud=num_snc,
                 tipo_motivo="diferencia_pedido_vs_factura" if not receipt else "diferencia_recepcion_vs_factura",
-                monto_reclamado=total_discrepancia_monto,
+                monto_reclamado=discrepancia_neta_pendiente,
                 estado="pendiente_entrega",
                 observaciones=f"Generado automáticamente por Order Matching. Motivos: {detalle_motivos}",
                 created_by=uuid.UUID(user_id) if user_id else None
             )
             db.add(nc_request_obj)
         else:
-            nc_request_obj.monto_reclamado = total_discrepancia_monto
+            active_snc.monto_reclamado = discrepancia_neta_pendiente
+            nc_request_obj = active_snc
     elif po and not receipt:
         # Match con el Pedido, pero pendiente de ingreso físico en muelle
         estado_match = "conforme_pendiente_recepcion"
