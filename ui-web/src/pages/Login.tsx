@@ -581,7 +581,7 @@ export default function Login() {
 
         {/* Footer */}
         <p className="text-center text-xs text-slate-600 mt-6 font-medium">
-          © 2026 IntelliHouse Soluciones · Extra Supermercado Mayorista
+          © 2026 IntelliHouse Soluciones · Casa Gonzalito S.R.L.
         </p>
       </div>
     </div>
