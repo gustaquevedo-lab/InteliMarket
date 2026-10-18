@@ -2220,11 +2220,13 @@ async def get_purchases_vs_sales_report(
 
     # 4. Proyección Estadística y Mismo Período Año Pasado (SPLY)
     # Fechas equivalentes del año pasado
-    from datetime import timedelta
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
     import calendar
 
+    py_tz = ZoneInfo("America/Asuncion")
     # Si no se definieron fechas, asumir mes corriente en America/Asuncion
-    now_py = datetime.now(PY_TZ).date()
+    now_py = datetime.now(py_tz).date()
     effective_desde = fecha_desde or date(now_py.year, now_py.month, 1)
     effective_hasta = fecha_hasta or now_py
 
