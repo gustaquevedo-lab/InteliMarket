@@ -36,7 +36,7 @@ from api.src.purchases.schemas import (
     AssociateReceiptRequest, ApproveMatchingRequest,
     SupplierNcRequestResponse, ResolveSupplierNcRequest,
     SupplierProductItemResponse, ProductInvoiceOptionResponse,
-    SupplierReturnCreateInput, SupplierReturnUpdateInput, SupplierReturnRejectInput, SupplierReturnCompleteInput,
+    SupplierReturnCreateInput, SupplierReturnUpdateInput, SupplierReturnRejectInput, SupplierReturnCompleteInput, SupplierReturnAddNCInput,
     ProductSupplierComparisonResponse, SupplierPriceComparisonItem,
     ConsignmentSettlementCreate, ConsignmentSettlementResponse, ConsignmentSettlementPreview,
 )

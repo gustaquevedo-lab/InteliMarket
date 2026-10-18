@@ -9,6 +9,7 @@ import uuid
 from uuid import UUID
 import math
 import logging
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ from api.src.purchases.models import (
     PurchaseSuggestion, PurchaseBudget,
     PurchaseRfq, PurchaseRfqItem, PurchaseRfqResponse, PurchaseRfqResponseItem,
     SupplierNcRequest,
+    ConsignmentSettlement, ConsignmentSettlementItem,
 )
 from api.src.purchases.schemas import (
     SupplierCreate, SupplierUpdate,
@@ -34,6 +36,7 @@ from api.src.purchases.schemas import (
     ForecastRuleCreate, ForecastRuleUpdate,
     BudgetCreate, BudgetUpdate,
     RfqCreate, RfqResponseSubmit,
+    ConsignmentSettlementCreate,
 )
 from api.src.inventory.models import Stock, StockLot, InventoryMovement
 from api.src.financial.models import SupplierInvoice, SupplierInvoiceItem
@@ -3379,8 +3382,8 @@ async def create_multi_po_from_replenishment(db: AsyncSession, data) -> dict:
 
 async def list_lost_demand(
     db: AsyncSession,
-    company_id: Optional[str] = None,
-    estado: Optional[str] = None,
+    company_id: str | None = None,
+    estado: str | None = None,
 ):
     from .models import CustomerLostDemand
     stmt = select(CustomerLostDemand)

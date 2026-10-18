@@ -1946,34 +1946,68 @@ async def get_cash_position(db: AsyncSession, company_id: str) -> dict:
     }
 
 
-async def get_outstanding_items(db: AsyncSession, company_id: str) -> dict:
+async def get_cheques_en_transito(
+    db: AsyncSession,
+    company_id: uuid.UUID | str,
+    bank_account_id: uuid.UUID | str | None = None,
+    hasta: date | None = None,
+):
+    """Partidas en tránsito canónicas: Cheques emitidos pendientes de cobro cuya fecha de pago/vencimiento
+    ya operó o está dentro del período de corte (no diferidos a meses futuros)."""
+    from api.src.cheques.models import Cheque
+
+    cid = company_id if isinstance(company_id, uuid.UUID) else uuid.UUID(str(company_id))
+    query = select(Cheque).where(
+        Cheque.company_id == cid,
+        Cheque.estado.in_(["pendiente", "entregado"]),
+    )
+    if bank_account_id:
+        bid = bank_account_id if isinstance(bank_account_id, uuid.UUID) else uuid.UUID(str(bank_account_id))
+        query = query.where(Cheque.bank_account_id == bid)
+    if hasta:
+        query = query.where(
+            case(
+                (Cheque.fecha_pago.isnot(None), Cheque.fecha_pago <= hasta),
+                else_=(Cheque.fecha_emision <= hasta),
+            )
+        )
+    chq_res = await db.execute(query.order_by(Cheque.fecha_pago.asc().nulls_last()))
+    return list(chq_res.scalars().all())
+
+
+async def get_outstanding_items(
+    db: AsyncSession,
+    company_id: str,
+    bank_account_id: str | None = None,
+    hasta: date | None = None,
+) -> dict:
     """Pendientes de conciliar visibles en un solo lugar: cheques emitidos
     aun no cobrados por el banco, y depositos de caja registrados en el
     sistema que todavia no aparecen conciliados contra un movimiento
     bancario real."""
-    from api.src.cheques.models import Cheque
-
     cid = uuid.UUID(company_id)
 
-    cheques_result = await db.execute(
-        select(Cheque).where(Cheque.company_id == cid, Cheque.estado.in_(["pendiente", "entregado"])).order_by(Cheque.fecha_pago)
-    )
+    cheques_result = await get_cheques_en_transito(db, cid, bank_account_id, hasta)
     cheques_pendientes = [
         {
             "id": str(c.id), "numero": c.numero, "beneficiario": c.beneficiario,
             "monto": c.monto, "fecha_pago": c.fecha_pago.isoformat() if c.fecha_pago else None,
             "estado": c.estado,
         }
-        for c in cheques_result.scalars().all()
+        for c in cheques_result
     ]
 
-    depositos_result = await db.execute(
-        select(BankTransaction).where(
-            BankTransaction.company_id == cid,
-            BankTransaction.categoria == "deposito_caja",
-            BankTransaction.conciliado == False,
-        ).order_by(BankTransaction.fecha.desc())
+    depositos_q = select(BankTransaction).where(
+        BankTransaction.company_id == cid,
+        BankTransaction.categoria == "deposito_caja",
+        BankTransaction.conciliado == False,
     )
+    if bank_account_id:
+        depositos_q = depositos_q.where(BankTransaction.bank_account_id == uuid.UUID(bank_account_id))
+    if hasta:
+        depositos_q = depositos_q.where(BankTransaction.fecha <= hasta)
+
+    depositos_result = await db.execute(depositos_q.order_by(BankTransaction.fecha.desc()))
     depositos_sin_conciliar = [
         {
             "id": str(t.id), "bank_account_id": str(t.bank_account_id), "fecha": t.fecha.isoformat(),
@@ -2058,23 +2092,8 @@ async def get_reconciliation_report(db: AsyncSession, company_id: str, bank_acco
             "saldo_progresivo": running_balance,
         })
 
-    # Partidas en tránsito: Cheques emitidos de esta cuenta pendientes de cobro cuya fecha de vencimiento/pago
-    # ya operó o está dentro del período de corte (no diferidos a meses futuros)
-    from api.src.cheques.models import Cheque
-    cheques_transito_query = select(Cheque).where(
-        Cheque.company_id == uuid.UUID(company_id),
-        Cheque.bank_account_id == uuid.UUID(bank_account_id),
-        Cheque.estado.in_(["pendiente", "entregado"]),
-    )
-    if hasta:
-        cheques_transito_query = cheques_transito_query.where(
-            case(
-                (Cheque.fecha_pago.isnot(None), Cheque.fecha_pago <= hasta),
-                else_=(Cheque.fecha_emision <= hasta)
-            )
-        )
-    chq_res = await db.execute(cheques_transito_query.order_by(Cheque.fecha_pago.asc().nulls_last()))
-    cheques_en_transito = list(chq_res.scalars().all())
+    # Partidas en tránsito: Cheques emitidos de esta cuenta pendientes de cobro con la función canónica
+    cheques_en_transito = await get_cheques_en_transito(db, company_id, bank_account_id, hasta)
     total_cheques_transito = sum((c.monto for c in cheques_en_transito), Decimal("0"))
 
     # Depósitos en tránsito (créditos/depósitos pendientes de conciliar en el extracto)
@@ -2904,90 +2923,8 @@ async def get_payable_invoices(db: AsyncSession, company_id: str, supplier_id: s
         rc_result = await db.execute(select(PurchaseReceipt.id, PurchaseReceipt.numero).where(PurchaseReceipt.id.in_(rc_ids)))
         rc_map = {row.id: row.numero for row in rc_result.all()}
 
-    # Vincular Notas de Crédito aplicadas o correspondientes por factura
-    inv_ids = [i.id for i in invoices]
-    nc_map: dict[uuid.UUID, list[dict]] = {i.id: [] for i in invoices}
-    if inv_ids:
-        app_q = (
-            select(
-                SupplierCreditNoteApplication.invoice_id,
-                SupplierCreditNoteApplication.monto_aplicado,
-                SupplierCreditNoteApplication.fecha.label("fecha_aplicacion"),
-                SupplierCreditNote.id.label("nc_id"),
-                SupplierCreditNote.numero.label("nc_numero"),
-                SupplierCreditNote.motivo.label("nc_motivo"),
-                SupplierCreditNote.monto.label("nc_monto_total"),
-            )
-            .join(SupplierCreditNote, SupplierCreditNote.id == SupplierCreditNoteApplication.credit_note_id)
-            .where(SupplierCreditNoteApplication.invoice_id.in_(inv_ids))
-        )
-        app_res = await db.execute(app_q)
-        for row in app_res.all():
-            nc_map[row.invoice_id].append({
-                "id": str(row.nc_id),
-                "numero": row.nc_numero,
-                "motivo": row.nc_motivo or "Nota de crédito",
-                "monto_aplicado": float(row.monto_aplicado or 0),
-                "monto_total": float(row.nc_monto_total or 0),
-                "fecha": row.fecha_aplicacion.isoformat() if row.fecha_aplicacion else None,
-            })
-
-        inv_nums = {i.numero_factura.strip() for i in invoices if i.numero_factura}
-        sup_ids = {i.supplier_id for i in invoices if i.supplier_id}
-        if sup_ids:
-            nc_orig_q = (
-                select(
-                    SupplierCreditNote.id,
-                    SupplierCreditNote.numero,
-                    SupplierCreditNote.numero_factura_origen,
-                    SupplierCreditNote.motivo,
-                    SupplierCreditNote.monto,
-                    SupplierCreditNote.saldo_disponible,
-                    SupplierCreditNote.fecha,
-                    SupplierCreditNote.supplier_id,
-                )
-                .where(
-                    SupplierCreditNote.company_id == cid,
-                    SupplierCreditNote.supplier_id.in_(sup_ids),
-                    SupplierCreditNote.cancelado == False,
-                    SupplierCreditNote.saldo_disponible > 0,
-                )
-            )
-            nc_orig_res = await db.execute(nc_orig_q)
-            matched_nc_ids = set()
-            all_ncs = list(nc_orig_res.all())
-            for nc in all_ncs:
-                for inv in invoices:
-                    if inv.supplier_id == nc.supplier_id and _doc_numbers_match(inv.numero_factura, nc.numero_factura_origen):
-                        if not any(x["id"] == str(nc.id) for x in nc_map[inv.id]):
-                            m_disp = float(nc.saldo_disponible if nc.saldo_disponible is not None else nc.monto)
-                            nc_map[inv.id].append({
-                                "id": str(nc.id),
-                                "numero": nc.numero,
-                                "motivo": nc.motivo or "Nota de crédito",
-                                "monto_aplicado": m_disp,
-                                "monto_total": float(nc.monto or 0),
-                                "fecha": nc.fecha.isoformat() if nc.fecha else None,
-                            })
-                            matched_nc_ids.add(nc.id)
-
-            # Asociar NCs con saldo disponible sin factura origen específica (o de SIFEN) a la primera factura con saldo del proveedor
-            for nc in all_ncs:
-                if nc.id not in matched_nc_ids:
-                    for inv in invoices:
-                        if inv.supplier_id == nc.supplier_id:
-                            if not any(x["id"] == str(nc.id) for x in nc_map[inv.id]):
-                                m_disp = float(nc.saldo_disponible if nc.saldo_disponible is not None else nc.monto)
-                                nc_map[inv.id].append({
-                                    "id": str(nc.id),
-                                    "numero": nc.numero,
-                                    "motivo": nc.motivo or "Nota de crédito (saldo a favor)",
-                                    "monto_aplicado": m_disp,
-                                    "monto_total": float(nc.monto or 0),
-                                    "fecha": nc.fecha.isoformat() if nc.fecha else None,
-                                })
-                                matched_nc_ids.add(nc.id)
-                                break
+    # Vincular Notas de Crédito y Solicitudes de NC con la función canónica
+    await enrich_invoices_with_nc_and_snc(db, cid, invoices)
 
     today = _today()
     return [
@@ -3011,7 +2948,8 @@ async def get_payable_invoices(db: AsyncSession, company_id: str, supplier_id: s
             "saldo_pendiente_brl": float(i.saldo_pendiente_brl) if i.saldo_pendiente_brl is not None else None,
             "tipo_comprobante": i.tipo_comprobante or "factura",
             "concepto": i.concepto,
-            "notas_credito": nc_map.get(i.id, []),
+            "notas_credito": getattr(i, "notas_credito", []),
+            "solicitudes_nc": getattr(i, "solicitudes_nc", []),
             "dias_vencido": (today - i.fecha_vencimiento).days if i.fecha_vencimiento < today else 0,
         }
         for i in invoices

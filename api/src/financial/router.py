@@ -280,7 +280,7 @@ async def export_reconciliation_pdf(
     company_id: str = Query(),
     desde: date | None = Query(None),
     hasta: date | None = Query(None),
-    formato: str = Query("landscape", regex="^(landscape|portrait)$"),
+    formato: str = Query("landscape", pattern="^(landscape|portrait)$"),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):

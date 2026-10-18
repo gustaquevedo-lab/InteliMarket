@@ -3,7 +3,7 @@ import {
   X, Check, AlertTriangle, Plus, Trash2, CreditCard,
   Building2, Wallet, FileText, Calendar, CheckCircle2,
   DollarSign, ShieldAlert, ArrowRight, Loader2, ReceiptText, Sparkles,
-  Search, CheckSquare, Square, RefreshCw
+  Search, CheckSquare, Square, RefreshCw, ChevronDown, ChevronUp, FileCheck2
 } from "lucide-react"
 import { api, SupplierPaymentOrder } from "../../api"
 import { formatPYG, formatDate } from "../../utils/format"
@@ -97,6 +97,7 @@ export default function SupplierPaymentOrderModal({
 
   // Notas de Crédito seleccionadas para compensar (estiradas automáticamente a Step 2)
   const [selectedCreditNoteIds, setSelectedCreditNoteIds] = useState<string[]>([])
+  const [showAllocatedInvoices, setShowAllocatedInvoices] = useState(true)
 
   // Auxiliares de tesorería y bancos
   const [bankAccounts, setBankAccounts] = useState<any[]>([])
@@ -134,18 +135,23 @@ export default function SupplierPaymentOrderModal({
       // Si estamos liquidando una orden existente registrada
       const map: Record<string, any> = {}
       existingOrder.allocations.forEach((a: any) => {
+        const numAplicado = Number(a.monto_aplicado) || 0
+        const saldoAnt = Number(a.saldo_anterior) || 0
         map[a.invoice_id] = {
           inv: {
             id: a.invoice_id,
             numero_factura: a.numero_factura || "Factura",
             timbrado: a.timbrado,
-            total: a.saldo_anterior + a.monto_aplicado,
-            saldo_pendiente: a.saldo_anterior,
+            fecha_emision: a.fecha_emision,
+            fecha_vencimiento: a.fecha_vencimiento,
+            total: saldoAnt > 0 ? saldoAnt + numAplicado : numAplicado,
+            saldo_pendiente: saldoAnt > 0 ? saldoAnt : numAplicado,
             supplier_id: supplier.id,
             supplier_nombre: supplier.razon_social,
+            tipo_comprobante: (a.numero_factura || "").startsWith("AUTO-REC-") ? "remito" : "factura",
           },
-          monto_aplicado: a.monto_aplicado,
-          monto_retencion: a.monto_retencion || 0,
+          monto_aplicado: numAplicado,
+          monto_retencion: Number(a.monto_retencion) || 0,
         }
       })
       if (existingOrder.diferencia_cambio) {
@@ -285,6 +291,16 @@ export default function SupplierPaymentOrderModal({
     const neto = Math.max(0, subtotal - retenciones + ajusteRedondeo)
     return { subtotal, retenciones, neto, ajusteRedondeo }
   }, [selectedInvoicesMap, ajusteRedondeo])
+
+  const allocatedInvoicesList = useMemo(() => {
+    return Object.values(selectedInvoicesMap)
+  }, [selectedInvoicesMap])
+
+  const totalNCDisbursements = useMemo(() => {
+    return disbursements
+      .filter(d => d.forma_pago === "nota_credito")
+      .reduce((sum, d) => sum + (Number(d.monto) || 0), 0)
+  }, [disbursements])
 
   // Detección de tickets o remitos provisorios sin factura fiscal (ej. AUTO-REC o remitos)
   const hasUnbilledTickets = useMemo(() => {
@@ -1481,6 +1497,157 @@ export default function SupplierPaymentOrderModal({
           {/* PASO 2: ASIGNACIÓN DE MEDIOS DE PAGO Y DESEMBOLSO */}
           {step === "step2_desembolso" && (
             <div className="space-y-4">
+              {/* COMPOSICIÓN DEL PAGO — FACTURAS A AMORTIZAR */}
+              {allocatedInvoicesList.length > 0 && (
+                <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-sm transition">
+                  <div className="p-3.5 bg-slate-50 dark:bg-slate-850 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/20">
+                        <FileCheck2 className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">
+                            Facturas a Amortizar & Composición ({allocatedInvoicesList.length})
+                          </h4>
+                          <span className="text-[10px] bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 px-2 py-0.5 rounded-full font-mono font-bold">
+                            Total Facturas: {formatPYG(summaryFacturas.subtotal)}
+                          </span>
+                          {summaryFacturas.retenciones > 0 && (
+                            <span className="text-[10px] bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 px-2 py-0.5 rounded-full font-mono font-bold">
+                              Retención: -{formatPYG(summaryFacturas.retenciones)}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Detalle de las facturas comerciales seleccionadas que serán amortizadas por esta Orden de Pago.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setStep("step1_facturas")}
+                        className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white text-[11px] font-bold transition flex items-center gap-1 border border-slate-300 dark:border-slate-700 shadow-2xs cursor-pointer"
+                        title="Modificar facturas o montos amortizados en el Paso 1"
+                      >
+                        <FileText className="w-3 h-3 text-rose-500" />
+                        <span>Modificar Facturas</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowAllocatedInvoices(!showAllocatedInvoices)}
+                        className="p-1.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs transition border border-slate-300 dark:border-slate-700 cursor-pointer"
+                        title={showAllocatedInvoices ? "Ocultar detalle de facturas" : "Ver detalle de facturas"}
+                      >
+                        {showAllocatedInvoices ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {showAllocatedInvoices && (
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800/80">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs text-left">
+                          <thead className="bg-slate-50/70 dark:bg-slate-950/60 text-slate-500 uppercase text-[10px] font-extrabold border-b border-slate-200 dark:border-slate-800">
+                            <tr>
+                              <th className="p-3">Factura N°</th>
+                              <th className="p-3">Timbrado / Vto</th>
+                              <th className="p-3 text-right">Saldo Original</th>
+                              <th className="p-3 text-right">Monto Amortizado</th>
+                              <th className="p-3 text-right">Retención</th>
+                              <th className="p-3 text-right">Neto Factura</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-mono">
+                            {allocatedInvoicesList.map(({ inv, monto_aplicado, monto_retencion }) => {
+                              const numAplicado = Number(monto_aplicado || 0)
+                              const numRetencion = Number(monto_retencion || 0)
+                              const saldoOrig = Number(inv.saldo_pendiente || inv.total || 0)
+                              const netoFactura = Math.max(0, numAplicado - numRetencion)
+
+                              return (
+                                <tr key={inv.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-850/40 transition">
+                                  <td className="p-3">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="font-bold text-slate-900 dark:text-white font-mono">{inv.numero_factura}</span>
+                                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
+                                        inv.tipo_comprobante === "gasto" || inv.tipo_comprobante === "insumo_gasto"
+                                          ? "bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800"
+                                          : "bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 border-blue-300 dark:border-blue-800"
+                                      }`}>
+                                        {inv.tipo_comprobante === "gasto" || inv.tipo_comprobante === "insumo_gasto" ? "INSUMO/GASTO" : "MERCADERÍA"}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="p-3 text-slate-500 font-sans">
+                                    <p className="font-mono text-[11px] text-slate-700 dark:text-slate-300">{inv.timbrado || "S/T"}</p>
+                                    <p className="text-[10px] text-slate-400">
+                                      Vto: {inv.fecha_vencimiento ? formatDate(inv.fecha_vencimiento) : "S/F"}
+                                    </p>
+                                  </td>
+                                  <td className="p-3 text-right text-slate-600 dark:text-slate-400">
+                                    {formatPYG(saldoOrig)}
+                                  </td>
+                                  <td className="p-3 text-right text-emerald-600 dark:text-emerald-400 font-bold">
+                                    {formatPYG(numAplicado)}
+                                  </td>
+                                  <td className="p-3 text-right text-amber-600 dark:text-amber-400">
+                                    {numRetencion > 0 ? `-${formatPYG(numRetencion)}` : "-"}
+                                  </td>
+                                  <td className="p-3 text-right text-slate-900 dark:text-white font-bold">
+                                    {formatPYG(netoFactura)}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* RESUMEN DE COMPOSICIÓN DEL PAGO */}
+                      <div className="p-3.5 bg-slate-50/50 dark:bg-slate-950/50 flex flex-wrap items-center justify-between gap-3 text-xs">
+                        <div className="flex items-center gap-4 flex-wrap">
+                          <div>
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block">Subtotal Amortizado</span>
+                            <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{formatPYG(summaryFacturas.subtotal)}</span>
+                          </div>
+                          {summaryFacturas.retenciones > 0 && (
+                            <div>
+                              <span className="text-[10px] text-amber-600 dark:text-amber-400 uppercase font-bold block">Retenciones Deducidas</span>
+                              <span className="font-mono font-bold text-amber-600 dark:text-amber-400">-{formatPYG(summaryFacturas.retenciones)}</span>
+                            </div>
+                          )}
+                          {summaryFacturas.ajusteRedondeo !== 0 && (
+                            <div>
+                              <span className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block">Ajuste por Redondeo</span>
+                              <span className={`font-mono font-bold ${summaryFacturas.ajusteRedondeo > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                                {summaryFacturas.ajusteRedondeo > 0 ? `+${formatPYG(summaryFacturas.ajusteRedondeo)}` : formatPYG(summaryFacturas.ajusteRedondeo)}
+                              </span>
+                            </div>
+                          )}
+                          {totalNCDisbursements > 0 && (
+                            <div>
+                              <span className="text-[10px] text-purple-600 dark:text-purple-400 uppercase font-bold block">Compensación con NCs</span>
+                              <span className="font-mono font-bold text-purple-600 dark:text-purple-400">-{formatPYG(totalNCDisbursements)}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-3 py-1.5 rounded-xl">
+                          <span className="text-[11px] text-slate-600 dark:text-slate-400 font-bold uppercase">
+                            {totalNCDisbursements > 0 ? "Saldo Neto Bancos / Efectivo:" : "Total Neto a Liquidar:"}
+                          </span>
+                          <span className="font-mono font-black text-rose-600 dark:text-rose-400 text-sm">
+                            {formatPYG(Math.max(0, summaryFacturas.neto - totalNCDisbursements))}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-extrabold text-slate-900 dark:text-white uppercase tracking-wider">

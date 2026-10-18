@@ -19,7 +19,8 @@ from api.src.promotions.schemas import (
     ProductDualPriceResponse, ReactivatePromoInput, RecordVendorCreditNoteInput,
     VendorClaimResponse, ApproveLossPromoInput,
     DailyPerformancePoint, ProductPerformancePoint, CustomerBuyerPoint,
-    PromotionAIInsight, PromotionAnalytics360Response
+    PromotionAIInsight, PromotionAnalytics360Response,
+    AuthorizeFlashGraceInput, AuthorizeFlashGraceResponse,
 )
 from api.src.products.models import Product
 from api.src.purchases.models import Supplier, PurchaseOrder, PurchaseOrderItem
