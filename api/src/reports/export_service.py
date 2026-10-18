@@ -1318,3 +1318,104 @@ def export_sales_by_br_suppliers(
     wb.save(out)
     return out.getvalue()
 
+
+def export_purchases_vs_sales(
+    report_data: dict,
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
+) -> bytes:
+    """Exporta el reporte de Compras vs. Ventas (Open to Buy) a formato Excel."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Compras vs Ventas (OTB)"
+
+    _write_title(ws, "Control Presupuestario: Compras vs. Ventas (Open to Buy)", fecha_desde, fecha_hasta)
+
+    resumen = report_data.get("resumen", {})
+    t_ventas = resumen.get("total_ventas", 0.0)
+    t_compras = resumen.get("total_compras", 0.0)
+    presupuesto = resumen.get("presupuesto_maximo_compras", 0.0)
+    saldo_otb = resumen.get("saldo_otb_disponible", 0.0)
+    ratio_real = resumen.get("ratio_real_pct", 0.0)
+    target_ratio = report_data.get("target_ratio_pct", 70.0)
+
+    # Bloque de KPIs
+    ws.cell(row=4, column=1, value="METRICAS GENERALES DEL PRESUPUESTO").font = BOLD_FONT
+    kpi_headers = ["Total Ventas (Gs.)", "Total Compras (Gs.)", f"Ratio C/V Real (Tope {target_ratio}%)", "Presupuesto Compra (Gs.)", "Saldo Disponible OTB (Gs.)", "Diagnóstico"]
+    for col_idx, h in enumerate(kpi_headers, 1):
+        cell = ws.cell(row=5, column=col_idx, value=h)
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+        cell.alignment = Alignment(horizontal="center")
+
+    diag_text = "EN PRESUPUESTO" if saldo_otb >= 0 else "SOBRECOMPRADO"
+    kpi_vals = [t_ventas, t_compras, f"{ratio_real:.2f}%", presupuesto, saldo_otb, diag_text]
+    for col_idx, val in enumerate(kpi_vals, 1):
+        cell = ws.cell(row=6, column=col_idx, value=val)
+        cell.font = BOLD_FONT
+        cell.border = THIN_BORDER
+        if col_idx in (1, 2, 4, 5):
+            cell.number_format = CURRENCY_FMT
+            cell.alignment = Alignment(horizontal="right")
+        else:
+            cell.alignment = Alignment(horizontal="center")
+
+    # Tabla de Proveedores
+    ws.cell(row=8, column=1, value="DESGLOSE COMPARATIVO POR PROVEEDOR").font = BOLD_FONT
+    headers = ["#", "Proveedor / Razón Social", "RUC", "Ventas Generadas (Gs.)", "Compras Recibidas (Gs.)", "Facturas", "Ratio C/V (%)", "Estado"]
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws.cell(row=9, column=col_idx, value=h)
+        cell.font = HEADER_FONT
+        cell.fill = PatternFill(start_color="334155", end_color="334155", fill_type="solid")
+        cell.alignment = Alignment(horizontal="center")
+
+    provs = report_data.get("proveedores", [])
+    for idx, p in enumerate(provs, 1):
+        row_num = 9 + idx
+        vals = [
+            idx,
+            p.get("proveedor", "—"),
+            p.get("ruc", "—"),
+            p.get("ventas", 0),
+            p.get("compras", 0),
+            p.get("facturas", 0),
+            f"{p.get('ratio_pct', 0):.1f}%",
+            "Normal" if p.get("estado") == "normal" else "Excedido",
+        ]
+        for col_idx, val in enumerate(vals, 1):
+            cell = ws.cell(row=row_num, column=col_idx, value=val)
+            cell.font = DATA_FONT
+            cell.border = THIN_BORDER
+            if col_idx in (4, 5):
+                cell.number_format = CURRENCY_FMT
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx == 6:
+                cell.number_format = '#,##0'
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx in (1, 3, 7, 8):
+                cell.alignment = Alignment(horizontal="center")
+
+    # Fila de Totales
+    if provs:
+        tot_row = 10 + len(provs)
+        ws.cell(row=tot_row, column=2, value="TOTALES GENERALES").font = BOLD_FONT
+        c_v = ws.cell(row=tot_row, column=4, value=t_ventas)
+        c_v.font = BOLD_FONT
+        c_v.number_format = CURRENCY_FMT
+        c_c = ws.cell(row=tot_row, column=5, value=t_compras)
+        c_c.font = BOLD_FONT
+        c_c.number_format = CURRENCY_FMT
+        c_fac = ws.cell(row=tot_row, column=6, value=resumen.get("total_facturas_compras", 0))
+        c_fac.font = BOLD_FONT
+        c_fac.number_format = '#,##0'
+        c_rat = ws.cell(row=tot_row, column=7, value=f"{ratio_real:.1f}%")
+        c_rat.font = BOLD_FONT
+        c_rat.alignment = Alignment(horizontal="center")
+
+    _auto_width(ws)
+
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+

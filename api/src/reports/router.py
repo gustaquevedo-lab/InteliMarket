@@ -121,6 +121,15 @@ async def sales_by_supplier_products(
     return await service.get_sales_by_supplier_products(db, user["company_id"], supplier_id, fecha_desde, fecha_hasta, limit)
 
 
+@router.get("/sales/by-supplier/payments-summary")
+async def sales_by_supplier_payments_summary(
+    supplier_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth)
+):
+    return await service.get_supplier_payments_summary(db, user["company_id"], supplier_id)
+
+
 @router.get("/sales/by-client")
 async def sales_by_client(fecha_desde: date | None = Query(None), fecha_hasta: date | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
     return await service.get_sales_by_client(db, user["company_id"], fecha_desde, fecha_hasta)
@@ -197,6 +206,19 @@ async def inventory_valuation(
     user=Depends(require_auth)
 ):
     return await service.get_inventory_valuation(db, user["company_id"], warehouse_id, supplier_id, fecha_corte)
+
+
+@router.get("/purchases-vs-sales")
+async def purchases_vs_sales(
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    target_ratio_pct: float = Query(70.0, ge=1.0, le=200.0),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth)
+):
+    return await service.get_purchases_vs_sales_report(
+        db, user["company_id"], fecha_desde, fecha_hasta, target_ratio_pct
+    )
 
 
 # ==================== EXPORT ENDPOINTS ====================
@@ -298,6 +320,43 @@ async def export_sales_by_supplier_pdf(
         pdf_bytes = pdf_reports.generate_sales_by_supplier_pdf(company, data, fecha_desde, fecha_hasta, generated_by)
         filename = f"ventas_por_proveedor_{fecha_desde or 'inicio'}_{fecha_hasta or 'hoy'}.pdf"
 
+    return _pdf_response(pdf_bytes, filename)
+
+
+@router.get("/export/purchases-vs-sales.xlsx")
+async def export_purchases_vs_sales_xlsx(
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    target_ratio_pct: float = Query(70.0, ge=1.0, le=200.0),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth)
+):
+    report_data = await service.get_purchases_vs_sales_report(
+        db, user["company_id"], fecha_desde, fecha_hasta, target_ratio_pct
+    )
+    xlsx = export_service.export_purchases_vs_sales(report_data, fecha_desde, fecha_hasta)
+    filename = f"compras_vs_ventas_{fecha_desde or 'inicio'}_{fecha_hasta or 'hoy'}.xlsx"
+    return _excel_response(xlsx, filename)
+
+
+@router.get("/export/purchases-vs-sales.pdf")
+async def export_purchases_vs_sales_pdf(
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    target_ratio_pct: float = Query(70.0, ge=1.0, le=200.0),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth)
+):
+    company_id = user["company_id"]
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Auditoría Interna"
+    report_data = await service.get_purchases_vs_sales_report(
+        db, company_id, fecha_desde, fecha_hasta, target_ratio_pct
+    )
+    pdf_bytes = pdf_reports.generate_purchases_vs_sales_pdf(
+        company, report_data, fecha_desde, fecha_hasta, generated_by
+    )
+    filename = f"compras_vs_ventas_{fecha_desde or 'inicio'}_{fecha_hasta or 'hoy'}.pdf"
     return _pdf_response(pdf_bytes, filename)
 
 

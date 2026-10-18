@@ -945,5 +945,117 @@ def generate_sales_daily_consolidation_pdf(
     return buffer.getvalue()
 
 
+def generate_purchases_vs_sales_pdf(
+    company: dict,
+    report_data: dict,
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
+    generated_by: str = "",
+) -> bytes:
+    """Informe Oficial de Control Presupuestario de Compras vs. Ventas (Open to Buy - OTB).
+    Generado con membrete fiscal para Extra Supermercado (Grupo Santa Teresa E.A.S.).
+    """
+    buffer = io.BytesIO()
+    rango_str = f"Período: {fecha_desde.strftime('%d/%m/%Y') if fecha_desde else 'Inicio'} al {fecha_hasta.strftime('%d/%m/%Y') if fecha_hasta else 'Hoy'}"
+    doc, styles = _base_doc(buffer, "Control Presupuestario: Compras vs. Ventas (OTB)", company, generated_by, landscape=True)
+
+    elements = _company_header(
+        company, styles,
+        "Control Presupuestario: Compras vs. Ventas (Open to Buy)",
+        f"{rango_str} — Ratio Tope de Compra Objetivo: {report_data.get('target_ratio_pct', 70.0)}%",
+        generated_by,
+    )
+
+    resumen = report_data.get("resumen", {})
+    t_ventas = resumen.get("total_ventas", 0.0)
+    t_compras = resumen.get("total_compras", 0.0)
+    presupuesto = resumen.get("presupuesto_maximo_compras", 0.0)
+    saldo_otb = resumen.get("saldo_otb_disponible", 0.0)
+    ratio_real = resumen.get("ratio_real_pct", 0.0)
+    target_ratio = report_data.get("target_ratio_pct", 70.0)
+
+    # 1. Tabla de KPIs Resumen
+    estado_lbl = "🟢 EN PRESUPUESTO (COMPRAS SALUDABLES)" if saldo_otb >= 0 else "🔴 SOBRECOMPRADO (EXCESO PRESUPUESTARIO)"
+    kpi_data = [
+        ["Total Ventas (POS Facturado)", "Total Compras Recibidas", f"Ratio Real C/V (Tope {target_ratio}%)", "Presupuesto OTB Disponible", "Diagnóstico Financiero"],
+        [_fmt_gs(t_ventas), _fmt_gs(t_compras), f"{ratio_real:.2f}%", _fmt_gs(saldo_otb), estado_lbl]
+    ]
+    t_kpi = Table(kpi_data, colWidths=[52 * mm, 52 * mm, 52 * mm, 52 * mm, 62 * mm])
+    t_kpi.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
+        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+        ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
+        ("FONTSIZE", (0, 0), (-1, 0), 8),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("BACKGROUND", (0, 1), (-1, 1), HexColor("#F8FAFC")),
+        ("FONTNAME", (0, 1), (-1, 1), FONT_BOLD),
+        ("FONTSIZE", (0, 1), (-1, 1), 8.5),
+        ("BOX", (0, 0), (-1, -1), 1, PRIMARY_COLOR),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    elements.append(t_kpi)
+    elements.append(Spacer(1, 4 * mm))
+
+    # 2. Desglose por Proveedor
+    provs = report_data.get("proveedores", [])
+    t_rows = [["#", "Proveedor / Razón Social", "RUC", "Ventas Generadas (Gs.)", "Compras Recibidas (Gs.)", "Facturas", "Ratio C/V", "Estado"]]
+    for idx, p in enumerate(provs[:45], 1):
+        est_color = "🟢 Normal" if p.get("estado") == "normal" else "🔴 Excedido"
+        t_rows.append([
+            str(idx),
+            Paragraph(p.get("proveedor", "—")[:35], styles["Small"]),
+            p.get("ruc", "—"),
+            _fmt_gs(p.get("ventas", 0)),
+            _fmt_gs(p.get("compras", 0)),
+            str(p.get("facturas", 0)),
+            f"{p.get('ratio_pct', 0):.1f}%",
+            est_color,
+        ])
+
+    # Totales finales
+    t_rows.append([
+        "TOTAL", "CONSOLIDADO DEL PERÍODO", "",
+        _fmt_gs(t_ventas), _fmt_gs(t_compras),
+        str(resumen.get("total_facturas_compras", 0)),
+        f"{ratio_real:.1f}%",
+        "SALUDABLE" if saldo_otb >= 0 else "EXCESO",
+    ])
+
+    col_widths = [10 * mm, 75 * mm, 25 * mm, 40 * mm, 40 * mm, 20 * mm, 25 * mm, 35 * mm]
+    t_detail = Table(t_rows, colWidths=col_widths, repeatRows=1)
+    t_detail.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
+        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+        ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
+        ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ("ALIGN", (0, 0), (0, -1), "CENTER"),
+        ("ALIGN", (2, 0), (2, -1), "CENTER"),
+        ("ALIGN", (3, 0), (5, -1), "RIGHT"),
+        ("ALIGN", (6, 0), (-1, -1), "CENTER"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [WHITE, GRAY_LIGHT]),
+        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, HexColor("#E2E8F0")),
+        ("BACKGROUND", (0, -1), (-1, -1), HexColor("#E2E8F0")),
+        ("FONTNAME", (0, -1), (-1, -1), FONT_BOLD),
+        ("FONTSIZE", (0, -1), (-1, -1), 7.5),
+        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+    ]))
+    elements.append(t_detail)
+    elements.append(Spacer(1, 3 * mm))
+
+    elements.append(Paragraph(
+        "<b>Regla de Control OTB:</b> El límite presupuestario de compras se calcula sobre la venta efectiva multiplicada por el ratio objetivo. "
+        "Las órdenes de compra que superen dicho cupo comprometen el capital de trabajo de Extra Supermercado.",
+        styles["Small"],
+    ))
+
+    _build(doc, elements)
+    return buffer.getvalue()
+
+
 
 

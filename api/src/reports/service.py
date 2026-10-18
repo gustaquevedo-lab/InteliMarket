@@ -365,6 +365,51 @@ async def get_sales_by_supplier_products(
     return items
 
 
+async def get_supplier_payments_summary(
+    db: AsyncSession,
+    company_id: str,
+    supplier_id: str,
+) -> dict:
+    """Retorna resumen de pagos efectuados a un proveedor:
+    - monto_pagado_mes: pagos registrados en el mes actual calendario en America/Asuncion.
+    - monto_pagado_historico: total histórico acumulado de pagos a este proveedor.
+    """
+    if not supplier_id or supplier_id in ("sin_proveedor", "todos"):
+        return {
+            "supplier_id": supplier_id,
+            "monto_pagado_mes": 0.0,
+            "monto_pagado_historico": 0.0,
+        }
+
+    params = {
+        "company_id": company_id,
+        "supplier_id": supplier_id,
+    }
+
+    query = """
+        SELECT
+            COALESCE(SUM(p.monto), 0) as total_historico,
+            COALESCE(SUM(
+                CASE 
+                    WHEN p.fecha_pago >= DATE_TRUNC('month', (NOW() AT TIME ZONE 'America/Asuncion'))::date
+                    THEN p.monto 
+                    ELSE 0 
+                END
+            ), 0) as total_mes
+        FROM supplier_invoice_payments p
+        JOIN supplier_invoices si ON si.id = p.invoice_id
+        WHERE si.company_id = :company_id
+          AND si.supplier_id = :supplier_id
+          AND COALESCE(p.estado, 'completado') <> 'anulado'
+    """
+    res = (await _exec(db, query, params)).first()
+    return {
+        "supplier_id": str(supplier_id),
+        "monto_pagado_mes": float(res["total_mes"]) if res and res["total_mes"] is not None else 0.0,
+        "monto_pagado_historico": float(res["total_historico"]) if res and res["total_historico"] is not None else 0.0,
+    }
+
+
 async def get_sales_by_client(db: AsyncSession, company_id: str, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
     params = {"company_id": company_id}
     where = "v.estado <> 'cancelado' AND v.company_id = :company_id"
@@ -2075,3 +2120,136 @@ async def get_sales_by_br_suppliers(
     """
     results = (await _exec(db, query, params)).all()
     return [dict(r) for r in results]
+
+
+async def get_purchases_vs_sales_report(
+    db: AsyncSession,
+    company_id: str,
+    fecha_desde: Optional[date] = None,
+    fecha_hasta: Optional[date] = None,
+    target_ratio_pct: float = 70.0,
+) -> dict:
+    """Reporte Retail de Compras vs. Ventas (Open to Buy / Presupuesto de Compras):
+    - Compara las compras facturadas y recibidas en el período con las ventas netas.
+    - Calcula el Ratio Compras / Ventas y el saldo disponible de presupuesto OTB.
+    - Incluye desglose por proveedor y evolución temporal.
+    """
+    # 1. Ventas del período
+    sales_params = {"company_id": company_id}
+    sales_where = "v.estado <> 'cancelado' AND v.company_id = :company_id"
+    sales_where += _build_tz_filter(fecha_desde, fecha_hasta, sales_params, "v.fecha")
+
+    q_sales = f"""
+        SELECT 
+            COALESCE(SUM(v.total), 0) as total_ventas,
+            COUNT(DISTINCT v.id) as tickets_total
+        FROM sales v
+        WHERE {sales_where}
+    """
+    sales_res = (await _exec(db, q_sales, sales_params)).first()
+    total_ventas = float(sales_res["total_ventas"]) if sales_res and sales_res["total_ventas"] else 0.0
+    total_tickets = int(sales_res["tickets_total"]) if sales_res and sales_res["tickets_total"] else 0
+
+    # 2. Compras del período (facturas de proveedor registradas)
+    pur_params = {"company_id": company_id}
+    pur_where = "si.company_id = :company_id AND COALESCE(si.estado, 'pendiente') <> 'anulado'"
+    if fecha_desde:
+        pur_where += " AND si.fecha_emision >= :fecha_desde"
+        pur_params["fecha_desde"] = fecha_desde
+    if fecha_hasta:
+        pur_where += " AND si.fecha_emision <= :fecha_hasta"
+        pur_params["fecha_hasta"] = fecha_hasta
+
+    q_purchases = f"""
+        SELECT 
+            COALESCE(SUM(si.total), 0) as total_compras,
+            COUNT(DISTINCT si.id) as facturas_total
+        FROM supplier_invoices si
+        WHERE {pur_where}
+    """
+    pur_res = (await _exec(db, q_purchases, pur_params)).first()
+    total_compras = float(pur_res["total_compras"]) if pur_res and pur_res["total_compras"] else 0.0
+    total_facturas_compras = int(pur_res["facturas_total"]) if pur_res and pur_res["facturas_total"] else 0
+
+    # 3. Métricas de OTB / Presupuesto
+    ratio_real_pct = round((total_compras / total_ventas * 100), 2) if total_ventas > 0 else 0.0
+    presupuesto_maximo_compras = round(total_ventas * (target_ratio_pct / 100.0), 0)
+    saldo_otb_disponible = round(presupuesto_maximo_compras - total_compras, 0)
+    porcentaje_presupuesto_consumido = round((total_compras / max(presupuesto_maximo_compras, 1.0)) * 100, 1) if presupuesto_maximo_compras > 0 else 0.0
+    esta_sobrecomprado = total_compras > presupuesto_maximo_compras
+
+    # 4. Desglose comparativo por Proveedor
+    q_prov = f"""
+        WITH v_prov AS (
+            SELECT 
+                sup.id as supplier_id,
+                COALESCE(sup.razon_social, sup.nombre_fantasia, 'Sin Proveedor') as proveedor,
+                COALESCE(sup.ruc, '—') as ruc,
+                SUM(vi.total) as ventas_prov
+            FROM sales v
+            JOIN sale_items vi ON vi.sale_id = v.id
+            JOIN products p ON p.id = vi.product_id
+            LEFT JOIN suppliers sup ON sup.id = p.supplier_id
+            WHERE {sales_where}
+            GROUP BY sup.id, sup.razon_social, sup.nombre_fantasia, sup.ruc
+        ),
+        c_prov AS (
+            SELECT 
+                si.supplier_id,
+                COALESCE(sup.razon_social, sup.nombre_fantasia, 'Sin Proveedor') as proveedor,
+                COALESCE(sup.ruc, '—') as ruc,
+                SUM(si.total) as compras_prov,
+                COUNT(si.id) as facturas_prov
+            FROM supplier_invoices si
+            LEFT JOIN suppliers sup ON sup.id = si.supplier_id
+            WHERE {pur_where}
+            GROUP BY si.supplier_id, sup.razon_social, sup.nombre_fantasia, sup.ruc
+        )
+        SELECT 
+            COALESCE(v.supplier_id::text, c.supplier_id::text, 'sin_id') as supplier_id,
+            COALESCE(v.proveedor, c.proveedor) as proveedor,
+            COALESCE(v.ruc, c.ruc) as ruc,
+            COALESCE(v.ventas_prov, 0) as ventas,
+            COALESCE(c.compras_prov, 0) as compras,
+            COALESCE(c.facturas_prov, 0) as facturas
+        FROM v_prov v
+        FULL OUTER JOIN c_prov c ON c.supplier_id = v.supplier_id
+        ORDER BY compras DESC, ventas DESC
+    """
+    # Combinar params
+    combined_params = {**sales_params, **pur_params}
+    prov_rows = (await _exec(db, q_prov, combined_params)).all()
+
+    proveedores = []
+    for r in prov_rows:
+        v_monto = float(r["ventas"] or 0)
+        c_monto = float(r["compras"] or 0)
+        ratio_p = round((c_monto / v_monto * 100), 1) if v_monto > 0 else (100.0 if c_monto > 0 else 0.0)
+        proveedores.append({
+            "supplier_id": str(r["supplier_id"]),
+            "proveedor": r["proveedor"],
+            "ruc": r["ruc"],
+            "ventas": v_monto,
+            "compras": c_monto,
+            "facturas": int(r["facturas"] or 0),
+            "ratio_pct": ratio_p,
+            "estado": "excedido" if ratio_p > target_ratio_pct else "normal",
+        })
+
+    return {
+        "fecha_desde": str(fecha_desde) if fecha_desde else None,
+        "fecha_hasta": str(fecha_hasta) if fecha_hasta else None,
+        "target_ratio_pct": target_ratio_pct,
+        "resumen": {
+            "total_ventas": total_ventas,
+            "total_compras": total_compras,
+            "total_tickets_ventas": total_tickets,
+            "total_facturas_compras": total_facturas_compras,
+            "ratio_real_pct": ratio_real_pct,
+            "presupuesto_maximo_compras": presupuesto_maximo_compras,
+            "saldo_otb_disponible": saldo_otb_disponible,
+            "porcentaje_presupuesto_consumido": porcentaje_presupuesto_consumido,
+            "esta_sobrecomprado": esta_sobrecomprado,
+        },
+        "proveedores": proveedores,
+    }
