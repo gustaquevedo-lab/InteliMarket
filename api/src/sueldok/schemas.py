@@ -3,6 +3,7 @@
 from pydantic import BaseModel, model_validator
 from typing import Optional
 from datetime import datetime
+from decimal import Decimal
 
 
 class SueldOKSyncConfig(BaseModel):
