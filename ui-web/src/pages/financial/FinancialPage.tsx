@@ -1999,6 +1999,130 @@ export default function FinancialPage() {
                               })}
                             </div>
                           )}
+
+                          {/* ── ASISTENTE DE CALCE INTELIGENTE DE NCs SUELTAS / E-MAIL ── */}
+                          {(() => {
+                            // Identificar NCs del proveedor que tienen saldo disponible y no están atadas
+                            const availableNcs = (currentSelectedSupplier.creditNotes || []).filter((nc: any) => {
+                              const s = Number(nc.saldo_disponible !== undefined ? nc.saldo_disponible : nc.monto || 0)
+                              return s > 0 && !nc.cancelado
+                            })
+
+                            if (availableNcs.length === 0 || pendingSncs.length === 0) return null
+
+                            // Buscar coincidencias entre NCs libres y SNCs pendientes
+                            const suggestions: Array<{
+                              nc: any
+                              snc: any
+                              saldoNc: number
+                              montoSnc: number
+                              matchType: "exacto" | "parcial" | "excedente"
+                              diff: number
+                            }> = []
+
+                            availableNcs.forEach((nc: any) => {
+                              const saldoNc = Number(nc.saldo_disponible !== undefined ? nc.saldo_disponible : nc.monto || 0)
+                              pendingSncs.forEach((snc: any) => {
+                                const montoSnc = Number(snc.monto_reclamado || 0)
+                                const diff = Math.abs(saldoNc - montoSnc)
+                                // Coincidencia exacta o parcial relevante
+                                if (diff === 0) {
+                                  suggestions.push({ nc, snc, saldoNc, montoSnc, matchType: "exacto", diff: 0 })
+                                } else if (saldoNc < montoSnc) {
+                                  suggestions.push({ nc, snc, saldoNc, montoSnc, matchType: "parcial", diff: montoSnc - saldoNc })
+                                } else {
+                                  suggestions.push({ nc, snc, saldoNc, montoSnc, matchType: "excedente", diff: saldoNc - montoSnc })
+                                }
+                              })
+                            })
+
+                            if (suggestions.length === 0) return null
+
+                            // Tomar las mejores sugerencias (priorizando exacta)
+                            const sortedSuggestions = suggestions.sort((a, b) => {
+                              if (a.matchType === "exacto" && b.matchType !== "exacto") return -1
+                              if (b.matchType === "exacto" && a.matchType !== "exacto") return 1
+                              return a.diff - b.diff
+                            }).slice(0, 3)
+
+                            return (
+                              <div className="mt-3 pt-3 border-t border-amber-500/30 space-y-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="flex h-2 w-2 relative">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                  </span>
+                                  <h6 className="text-xs font-bold text-amber-200 uppercase tracking-wider flex items-center gap-1.5">
+                                    <span>Sugerencias de Calce Inteligente (NCs Recibidas por E-mail / Sueltas)</span>
+                                  </h6>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                                  {sortedSuggestions.map((sug, idx) => {
+                                    const linkedInv = invoices.find((i: any) => String(i.id) === String(sug.snc.invoice_id))
+                                    return (
+                                      <div
+                                        key={idx}
+                                        className="bg-emerald-950/40 border border-emerald-500/40 rounded-lg p-2.5 text-xs space-y-2 flex flex-col justify-between"
+                                      >
+                                        <div className="space-y-1">
+                                          <div className="flex items-center justify-between">
+                                            <span className="font-mono font-bold text-emerald-300">
+                                              NC N° {sug.nc.numero || "S/N"}
+                                            </span>
+                                            <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded uppercase ${
+                                              sug.matchType === "exacto"
+                                                ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                                                : "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                                            }`}>
+                                              {sug.matchType === "exacto" ? "Coincidencia Exacta" : sug.matchType === "parcial" ? "Cobertura Parcial" : "Excede SNC"}
+                                            </span>
+                                          </div>
+
+                                          <div className="text-[11px] text-gray-300 font-mono">
+                                            Saldo NC: <strong className="text-emerald-400">₲ {sug.saldoNc.toLocaleString("es-PY")}</strong>
+                                            {" ➔ "} Reclamo {sug.snc.numero_solicitud}: <strong className="text-rose-400">₲ {sug.montoSnc.toLocaleString("es-PY")}</strong>
+                                          </div>
+
+                                          {linkedInv && (
+                                            <div className="text-[10px] text-gray-400 truncate">
+                                              Factura Atada: <strong className="text-white">{linkedInv.numero_factura}</strong>
+                                            </div>
+                                          )}
+
+                                          {sug.diff > 0 && sug.matchType === "parcial" && (
+                                            <div className="text-[10px] text-amber-300/90 italic">
+                                              Diferencia restante que quedará pendiente: ₲ {sug.diff.toLocaleString("es-PY")}
+                                            </div>
+                                          )}
+                                        </div>
+
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setSelectedNcRequestForResolve(sug.snc)
+                                            setResolveNcForm({
+                                              nc_recibida_numero: sug.nc.numero || "",
+                                              nc_recibida_timbrado: sug.nc.timbrado || "",
+                                              nc_recibida_monto: Math.min(sug.saldoNc, sug.montoSnc),
+                                              nc_recibida_fecha: sug.nc.fecha ? String(sug.nc.fecha).slice(0, 10) : getTodayAsuncion(),
+                                              nc_recibida_cdc: "",
+                                              observaciones: `Imputación de NC suelta ${sug.nc.numero} recibida por e-mail a la ${sug.snc.numero_solicitud}`,
+                                            })
+                                            setShowResolveNcModal(true)
+                                          }}
+                                          className="w-full mt-1 py-1.5 px-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-sm transition active:scale-[0.98]"
+                                        >
+                                          <Check className="w-3.5 h-3.5" />
+                                          <span>Aplicar a {sug.snc.numero_solicitud}</span>
+                                        </button>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              </div>
+                            )
+                          })()}
                         </div>
                       )
                     })()}
@@ -2536,9 +2660,15 @@ export default function FinancialPage() {
                                       </button>
                                     )}
                                     {isNC && (
-                                      <span className="text-[11px] text-purple-600 dark:text-purple-400 font-semibold">
-                                        Compensar
-                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenApplyModal(doc.raw)}
+                                        className="btn-ghost text-xs py-1 px-2.5 text-purple-600 hover:text-purple-800 dark:text-purple-400 font-semibold inline-flex items-center gap-1 hover:bg-purple-50 dark:hover:bg-purple-950/40 rounded"
+                                        title="Imputar o amortizar este saldo a una factura pendiente del proveedor"
+                                      >
+                                        <Wallet className="w-3.5 h-3.5" />
+                                        <span>Amortizar Factura</span>
+                                      </button>
                                     )}
                                     {isDev && (
                                       <span className="text-[11px] text-amber-600 dark:text-amber-400 font-semibold">
@@ -4358,11 +4488,12 @@ export default function FinancialPage() {
                       )
                     })()}
                   </div>
-                  <input
-                    type="number"
+                  <CurrencyInput
+                    value={Number(applyForm.monto || 0)}
+                    onChangeValue={num => setApplyForm({ ...applyForm, monto: String(num) })}
+                    currency="PYG"
                     className="input-field font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400"
-                    value={applyForm.monto}
-                    onChange={e => setApplyForm({ ...applyForm, monto: e.target.value })}
+                    placeholder="0"
                     required
                   />
                 </div>
