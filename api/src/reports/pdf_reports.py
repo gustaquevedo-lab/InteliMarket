@@ -30,7 +30,7 @@ from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.colors import HexColor, Color
 
 from api.src.integrated_finance.pdf_reports import (
-    _base_doc, _company_header, _fmt_gs, _build, _totals_table,
+    _base_doc, _company_header, _company_landscape_header, _fmt_gs, _build, _totals_table,
     RED, GRAY_LIGHT, PRIMARY_COLOR, WHITE, FONT_BOLD,
 )
 
@@ -443,18 +443,18 @@ def generate_sales_by_supplier_pdf(
     buffer = io.BytesIO()
     periodo_str = f"{fecha_desde.strftime('%d/%m/%Y') if fecha_desde else 'Inicio'} al {fecha_hasta.strftime('%d/%m/%Y') if fecha_hasta else 'Hoy'}"
 
-    # Caso 1: Reporte filtrado por un proveedor específico (con detalle de productos)
+    # Caso 1: Reporte filtrado por un proveedor específico (con detalle de productos, precios y márgenes)
     if supplier_info and product_items is not None:
         prov_nombre = supplier_info.get("proveedor", "Proveedor")
         prov_ruc = supplier_info.get("ruc", "—")
-        doc, styles = _base_doc(buffer, f"Ventas - {prov_nombre}", company, generated_by)
-        elements = _company_header(
-            company, styles, "AUDITORÍA DE VENTAS POR PROVEEDOR",
+        doc, styles = _base_doc_landscape(buffer, f"Ventas - {prov_nombre}", company, generated_by)
+        elements = _company_landscape_header(
+            company, styles, "AUDITORÍA DE VENTAS Y PRECIOS POR PROVEEDOR",
             f"Período evaluado: {periodo_str}",
             generated_by,
         )
 
-        # Recuadro destacado del Proveedor para total claridad y personería
+        # Recuadro destacado del Proveedor horizontal (273 mm útiles)
         prov_box_data = [
             [
                 Paragraph(f"<b>PROVEEDOR:</b> <font color='#047857' size=10><b>{prov_nombre.upper()}</b></font>", styles["Normal"]),
@@ -465,7 +465,7 @@ def generate_sales_by_supplier_pdf(
                 Paragraph(f"<b>Total Artículos Registrados:</b> {len(product_items):,} SKUs", styles["Small"]),
             ]
         ]
-        prov_box = Table(prov_box_data, colWidths=[120 * mm, 66 * mm])
+        prov_box = Table(prov_box_data, colWidths=[185 * mm, 88 * mm])
         prov_box.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F0FDF4")),
             ("BOX", (0, 0), (-1, -1), 1, HexColor("#86EFAC")),
@@ -506,37 +506,71 @@ def generate_sales_by_supplier_pdf(
             ("Total Artículos / SKUs Vendidos", str(len(product_items)), False),
             ("Total Unidades Despachadas", f"{total_unidades:,.0f}", False),
         ]
-        elements.append(_totals_table(resumen_data))
+        # Totals table adaptada a 273mm
+        t_res_data = [[label, valor] for label, valor, _ in resumen_data]
+        t_res = Table(t_res_data, colWidths=[185 * mm, 88 * mm])
+        t_res_style = [
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("ROWBACKGROUNDS", (0, 0), (-1, -1), [WHITE, GRAY_LIGHT]),
+        ]
+        for i, (_, _, es_total) in enumerate(resumen_data):
+            if es_total:
+                t_res_style.append(("FONTNAME", (0, i), (-1, i), FONT_BOLD))
+                t_res_style.append(("LINEABOVE", (0, i), (-1, i), 0.75, HexColor("#0F172A")))
+        t_res.setStyle(TableStyle(t_res_style))
+        elements.append(t_res)
         elements.append(Spacer(1, 4 * mm))
 
-        elements.append(Paragraph(f"<b>2. Detalle Completo de Artículos Vendidos ({len(product_items)} SKUs)</b>", styles["SectionTitle"]))
-        t_data = [["#", "SKU", "Código Barra", "Descripción del Producto", "Unidades", "Venta Total", "Costo", "Margen", "Margen %"]]
+        elements.append(Paragraph(f"<b>2. Detalle Completo de Artículos Vendidos, Precios y Márgenes ({len(product_items)} SKUs)</b>", styles["SectionTitle"]))
+        t_data = [["#", "SKU", "Código Barra", "Descripción del Producto", "Unid.", "Costo Un.", "PVP Minorista", "Mg. Min.", "PV Mayorista", "Mg. May.", "Venta Total"]]
         for idx, it in enumerate(product_items, 1):
+            p_may = it.get("precio_mayorista")
+            p_may_str = _fmt_gs(p_may) if p_may else "—"
+            may_qty = it.get("mayorista_min_qty")
+            if p_may and may_qty:
+                p_may_str += f" (≥{may_qty})"
+
+            mg_min = it.get("margen_minorista_pct")
+            mg_min_str = f"{mg_min:.1f}%" if mg_min is not None else f"{it.get('margen_pct', 0):.1f}%"
+
+            mg_may = it.get("margen_mayorista_pct")
+            mg_may_str = f"{mg_may:.1f}%" if mg_may is not None else "—"
+
             t_data.append([
                 str(idx),
                 str(it.get("sku", "—"))[:12],
                 str(it.get("codigo_barra", "—"))[:14],
-                it.get("producto", "")[:35],
+                Paragraph(it.get("producto", "")[:45], styles["Small"]),
                 f"{it.get('unidades_vendidas', 0):,.0f}",
+                _fmt_gs(it.get("costo_unitario", 0)),
+                _fmt_gs(it.get("precio_minorista", 0)),
+                mg_min_str,
+                p_may_str,
+                mg_may_str,
                 _fmt_gs(it.get("total_ventas", 0)),
-                _fmt_gs(it.get("costo_total", 0)),
-                _fmt_gs(it.get("utilidad_bruta", 0)),
-                f"{it.get('margen_pct', 0):.1f}%",
             ])
 
-        col_widths = [8 * mm, 16 * mm, 24 * mm, 52 * mm, 18 * mm, 26 * mm, 24 * mm, 24 * mm, 14 * mm]
+        # Anchos de columna calibrados a los 273mm útiles de Landscape:
+        # 7 + 16 + 24 + 60 + 14 + 23 + 25 + 17 + 28 + 17 + 27 = 268 mm (deja 5mm de holgura exacta)
+        col_widths = [7 * mm, 16 * mm, 24 * mm, 60 * mm, 15 * mm, 23 * mm, 25 * mm, 17 * mm, 30 * mm, 17 * mm, 29 * mm]
         t = Table(t_data, colWidths=col_widths, repeatRows=1)
         t.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
             ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
             ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
             ("FONTSIZE", (0, 0), (-1, -1), 6.5),
+            ("ALIGN", (0, 0), (2, -1), "CENTER"),
             ("ALIGN", (4, 0), (-1, -1), "RIGHT"),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, GRAY_LIGHT]),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ("LEFTPADDING", (0, 0), (-1, -1), 3),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 2.5),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 2.5),
             ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
             ("INNERGRID", (0, 0), (-1, -1), 0.5, HexColor("#E2E8F0")),
         ]))
@@ -545,7 +579,7 @@ def generate_sales_by_supplier_pdf(
 
         elements.append(Paragraph(
             "<b>Nota:</b> Información generada en base a las ventas efectivas registradas en el POS de Extra Supermercado. "
-            "Horario oficial de Paraguay (America/Asuncion).",
+            "Precios y márgenes sobre costo de reposición. Horario oficial de Paraguay (America/Asuncion).",
             styles["Small"],
         ))
 
@@ -1051,7 +1085,8 @@ def generate_purchases_vs_sales_pdf(
         "SALUDABLE" if saldo_otb >= 0 else "EXCESO",
     ])
 
-    col_widths = [8 * mm, 58 * mm, 20 * mm, 32 * mm, 36 * mm, 35 * mm, 32 * mm, 22 * mm, 25 * mm]
+    # Ancho útil Landscape: 273mm exactos: 8 + 60 + 20 + 33 + 37 + 35 + 33 + 22 + 25 = 273 mm
+    col_widths = [8 * mm, 60 * mm, 20 * mm, 33 * mm, 37 * mm, 35 * mm, 33 * mm, 22 * mm, 25 * mm]
     t_detail = Table(t_rows, colWidths=col_widths, repeatRows=1)
     t_detail.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
