@@ -14,7 +14,8 @@ import {
   Layers, ShieldCheck, Check, Phone, ArrowRight, HelpCircle, Download,
   Upload, Paperclip, ExternalLink, Wallet, ArrowLeft, CheckSquare, Square,
   PackageMinus, Truck, Printer, Users, CheckCheck, FileCheck, CalendarClock,
-  LayoutGrid, ListFilter, CornerDownRight, Handshake, Banknote, X, RotateCcw
+  LayoutGrid, ListFilter, CornerDownRight, Handshake, Banknote, X, RotateCcw,
+  Lock, ShieldAlert
 } from "lucide-react"
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -82,6 +83,7 @@ export default function FinancialPage() {
   const [apApprovals, setApApprovals] = useState<any[]>([])
   const [banks, setBanks] = useState<BankAccount[]>([])
   const [funds, setFunds] = useState<any[]>([])
+  const [supplierNcRequests, setSupplierNcRequests] = useState<any[]>([])
 
   const { user } = useAuth()
   const companyId = (user as any)?.company_id || FALLBACK_COMPANY_ID
@@ -230,6 +232,7 @@ export default function FinancialPage() {
         fundsData,
         smerRetData,
         chqsData,
+        sncReqData,
       ] = await Promise.allSettled([
         api.financial.apDashboard(),
         api.financial.invoices.list(),
@@ -246,6 +249,7 @@ export default function FinancialPage() {
         api.expenses.funds.list().catch(() => []),
         api.supplierReturns.list().catch(() => []),
         api.cheques.list({ limit: 5000 }).catch(() => []),
+        api.purchases.listSupplierNcRequests().catch(() => []),
       ])
 
       if (dashData.status === "fulfilled") setDashboard(dashData.value)
@@ -266,6 +270,7 @@ export default function FinancialPage() {
       if (fundsData.status === "fulfilled") setFunds(fundsData.value || [])
       if (smerRetData.status === "fulfilled") setSupermerReturns(Array.isArray(smerRetData.value) ? smerRetData.value : [])
       if (chqsData.status === "fulfilled") setAllCheques(Array.isArray(chqsData.value) ? chqsData.value : [])
+      if (sncReqData.status === "fulfilled") setSupplierNcRequests(Array.isArray(sncReqData.value) ? sncReqData.value : [])
     } catch {
       toast.error("Error", "No se pudieron sincronizar los datos financieros")
     } finally {
@@ -1015,8 +1020,31 @@ export default function FinancialPage() {
 
   const handleSelectSupplierForDetail = (sup: any) => {
     setSelectedSupplierId(sup.supplier_id)
-    setSelectedOpInvoiceIds(new Set(sup.pendingInvoices.map((i: any) => i.id)))
-    setSelectedOpCreditNoteIds(new Set(sup.creditNotes.map((n: any) => n.id)))
+    // Marcar solo facturas pendientes que no estén bloqueadas para pago
+    setSelectedOpInvoiceIds(new Set(
+      sup.pendingInvoices
+        .filter((i: any) => !i.bloqueada_para_pago && i.estado !== "retenida_discrepancia")
+        .map((i: any) => i.id)
+    ))
+
+    // Marcar solo NCs libres (que no estén asignadas a una factura específica de este proveedor)
+    const assignedNcIds = new Set<string>()
+    const assignedNcNums = new Set<string>()
+    sup.pendingInvoices.forEach((inv: any) => {
+      if (inv.notas_credito && Array.isArray(inv.notas_credito)) {
+        inv.notas_credito.forEach((nc: any) => {
+          if (nc.id) assignedNcIds.add(String(nc.id))
+          if (nc.numero) assignedNcNums.add(String(nc.numero).trim().toLowerCase())
+        })
+      }
+    })
+    const freeNcs = sup.creditNotes.filter((n: any) => {
+      const nId = String(n.id)
+      const nNum = String(n.numero || "").trim().toLowerCase()
+      return !assignedNcIds.has(nId) && (!nNum || !assignedNcNums.has(nNum))
+    })
+    setSelectedOpCreditNoteIds(new Set(freeNcs.map((n: any) => n.id)))
+
     setSelectedOpReturnIds(new Set(sup.devolucionesPendientes.map((r: any) => r.id)))
     setDetailDocFilter("todos")
     setDetailDocSearch("")
@@ -1057,8 +1085,27 @@ export default function FinancialPage() {
       })
     })
 
-    // 2. Notas de Crédito Registradas
+    // Identificar IDs y números de NCs que ya están vinculadas/asignadas a facturas de este proveedor
+    const assignedNcIds = new Set<string>()
+    const assignedNcNumeros = new Set<string>()
+    currentSelectedSupplier.pendingInvoices.forEach(inv => {
+      if (inv.notas_credito && Array.isArray(inv.notas_credito)) {
+        inv.notas_credito.forEach((nc: any) => {
+          if (nc.id) assignedNcIds.add(String(nc.id))
+          if (nc.numero) assignedNcNumeros.add(String(nc.numero).trim().toLowerCase())
+        })
+      }
+    })
+
+    // 2. Notas de Crédito Registradas LIBRES (Excluir las ya asignadas a una factura específica)
     currentSelectedSupplier.creditNotes.forEach(nc => {
+      const ncIdStr = String(nc.id)
+      const ncNumStr = String(nc.numero || "").trim().toLowerCase()
+      // Si la NC ya está deducida en una factura específica, no exponerla como comprobante suelto para evitar duplicación
+      if (assignedNcIds.has(ncIdStr) || (ncNumStr && assignedNcNumeros.has(ncNumStr))) {
+        return
+      }
+
       const saldoNC = Number(nc.saldo_disponible) > 0 ? Number(nc.saldo_disponible) : Number(nc.monto || 0)
       docs.push({
         id: nc.id,
@@ -1069,7 +1116,7 @@ export default function FinancialPage() {
         fechaVencimiento: null,
         montoOriginal: -Number(nc.monto || saldoNC),
         saldoEfectivo: -saldoNC,
-        estado: Number(nc.saldo_disponible) > 0 ? "Saldo Disponible" : "Crédito Registrado",
+        estado: Number(nc.saldo_disponible) > 0 ? "Saldo Disponible (Libre)" : "Crédito Registrado (Libre)",
         isSelected: selectedOpCreditNoteIds.has(nc.id),
         raw: nc,
       })
@@ -1161,10 +1208,11 @@ export default function FinancialPage() {
 
   const handleSelectAllOpInvoices = () => {
     if (!currentSelectedSupplier) return
-    if (selectedOpInvoiceIds.size === currentSelectedSupplier.pendingInvoices.length) {
+    const payableInvoices = currentSelectedSupplier.pendingInvoices.filter(i => !i.bloqueada_para_pago && i.estado !== "retenida_discrepancia")
+    if (selectedOpInvoiceIds.size === payableInvoices.length) {
       setSelectedOpInvoiceIds(new Set())
     } else {
-      setSelectedOpInvoiceIds(new Set(currentSelectedSupplier.pendingInvoices.map(i => i.id)))
+      setSelectedOpInvoiceIds(new Set(payableInvoices.map(i => i.id)))
     }
   }
 
@@ -1177,10 +1225,11 @@ export default function FinancialPage() {
 
   const handleSelectAllOpCreditNotes = () => {
     if (!currentSelectedSupplier) return
-    if (selectedOpCreditNoteIds.size === currentSelectedSupplier.creditNotes.length) {
+    const freeNcDocs = unifiedSupplierDocs.filter(d => d.docType === "nota_credito")
+    if (selectedOpCreditNoteIds.size === freeNcDocs.length) {
       setSelectedOpCreditNoteIds(new Set())
     } else {
-      setSelectedOpCreditNoteIds(new Set(currentSelectedSupplier.creditNotes.map(n => n.id)))
+      setSelectedOpCreditNoteIds(new Set(freeNcDocs.map(d => d.id)))
     }
   }
 
@@ -1806,6 +1855,62 @@ export default function FinancialPage() {
                       )}
                     </div>
 
+                    {/* Banner Informativo de 3-Way Match y Solicitudes de NC Pendientes (SNC) */}
+                    {(() => {
+                      const supId = currentSelectedSupplier.supplier_id
+                      const pendingSncs = supplierNcRequests.filter((snc: any) =>
+                        String(snc.supplier_id) === String(supId) &&
+                        ["pendiente_entrega", "entregada_parcial", "pendiente"].includes(snc.estado)
+                      )
+                      const blockedInvoices = currentSelectedSupplier.pendingInvoices.filter((inv: any) =>
+                        inv.bloqueada_para_pago || inv.estado === "retenida_discrepancia"
+                      )
+
+                      if (pendingSncs.length === 0 && blockedInvoices.length === 0) return null
+
+                      const totalMontoReclamado = pendingSncs.reduce((acc: number, s: any) => acc + Number(s.monto_reclamado || 0), 0)
+
+                      return (
+                        <div className="mt-4 p-4 rounded-xl bg-amber-950/40 border border-amber-500/50 text-amber-200">
+                          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                            <div className="flex items-start gap-3">
+                              <ShieldAlert className="w-5 h-5 text-amber-400 mt-0.5 shrink-0" />
+                              <div className="space-y-1">
+                                <h5 className="font-bold text-sm text-amber-300 flex items-center gap-2">
+                                  <span>Control 3-Way Match Activo: Discrepancias Físicas / SNCs Pendientes</span>
+                                  <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300">
+                                    {pendingSncs.length} SNCs activas · {blockedInvoices.length} facturas retenidas
+                                  </span>
+                                </h5>
+                                <p className="text-xs text-amber-200/80">
+                                  Este proveedor tiene diferencias de recepción física en muelle o reclamos pendientes de formalización fiscal por un total de <strong className="font-mono text-white underline">{formatPYG(totalMontoReclamado)}</strong>. Las facturas observadas están bloqueadas para liquidación hasta recibir la NC correspondiente o aprobar la excepción.
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {pendingSncs.length > 0 && (
+                            <div className="mt-3 pt-3 border-t border-amber-500/20 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                              {pendingSncs.map((snc: any) => (
+                                <div key={snc.id} className="bg-amber-900/30 border border-amber-600/30 rounded-lg p-2.5 text-xs space-y-1">
+                                  <div className="flex items-center justify-between">
+                                    <span className="font-mono font-bold text-amber-300">{snc.numero_solicitud || "SNC"}</span>
+                                    <span className="font-mono font-bold text-rose-400">₲ {Number(snc.monto_reclamado || 0).toLocaleString("es-PY")}</span>
+                                  </div>
+                                  <p className="text-[11px] text-amber-200/70 truncate" title={snc.observaciones || snc.tipo_motivo}>
+                                    {snc.observaciones || snc.tipo_motivo || "Diferencia de recepción en muelle"}
+                                  </p>
+                                  <div className="text-[10px] text-amber-400/80 font-mono">
+                                    Estado: <span className="uppercase font-semibold">{snc.estado?.replace("_", " ")}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })()}
+
                     {/* Resumen Financiero Consolidado del Proveedor (5 Métricas) */}
                     <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3 mt-4 pt-4 border-t border-slate-700/60">
                       {/* 1. Deuda Total Compuesta */}
@@ -1906,64 +2011,80 @@ export default function FinancialPage() {
                           </p>
                         </div>
 
-                        {/* Selector de Tabs de Comprobantes */}
-                        <div className="flex items-center gap-1 p-1 bg-gray-200/70 dark:bg-slate-900 rounded-lg text-xs font-semibold flex-wrap">
-                          <button
-                            type="button"
-                            onClick={() => setDetailDocFilter("todos")}
-                            className={`px-2.5 py-1 rounded-md transition ${
-                              detailDocFilter === "todos"
-                                ? "bg-white dark:bg-indigo-600 text-gray-900 dark:text-white shadow-sm"
-                                : "text-gray-500 hover:text-gray-900 dark:hover:text-white"
-                            }`}
-                          >
-                            Todos ({currentSelectedSupplier.pendingInvoices.length + currentSelectedSupplier.creditNotes.length + currentSelectedSupplier.devolucionesPendientes.length + (currentSelectedSupplier.chequesDiferidos?.length || 0)})
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDetailDocFilter("facturas")}
-                            className={`px-2.5 py-1 rounded-md transition ${
-                              detailDocFilter === "facturas"
-                                ? "bg-white dark:bg-indigo-600 text-gray-900 dark:text-white shadow-sm"
-                                : "text-gray-500 hover:text-gray-900 dark:hover:text-white"
-                            }`}
-                          >
-                            Facturas ({currentSelectedSupplier.pendingInvoices.length})
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDetailDocFilter("cheques")}
-                            className={`px-2.5 py-1 rounded-md transition ${
-                              detailDocFilter === "cheques"
-                                ? "bg-blue-100 dark:bg-blue-600 text-blue-900 dark:text-white shadow-sm"
-                                : "text-gray-500 hover:text-blue-600 dark:hover:text-blue-300"
-                            }`}
-                          >
-                            Cheques Dif. ({currentSelectedSupplier.chequesDiferidos?.length || 0})
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDetailDocFilter("notas_credito")}
-                            className={`px-2.5 py-1 rounded-md transition ${
-                              detailDocFilter === "notas_credito"
-                                ? "bg-purple-100 dark:bg-purple-600 text-purple-900 dark:text-white shadow-sm"
-                                : "text-gray-500 hover:text-purple-600 dark:hover:text-purple-300"
-                            }`}
-                          >
-                            Notas de Crédito ({currentSelectedSupplier.creditNotes.length})
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDetailDocFilter("devoluciones")}
-                            className={`px-2.5 py-1 rounded-md transition ${
-                              detailDocFilter === "devoluciones"
-                                ? "bg-amber-100 dark:bg-amber-600 text-amber-900 dark:text-white shadow-sm"
-                                : "text-gray-500 hover:text-amber-600 dark:hover:text-amber-300"
-                            }`}
-                          >
-                            Devoluciones ({currentSelectedSupplier.devolucionesPendientes.length})
-                          </button>
-                        </div>
+                          {/* Selector de Tabs de Comprobantes */}
+                          {(() => {
+                            const freeNcCount = unifiedSupplierDocs.filter(d => d.docType === "nota_credito").length
+                            const supId = currentSelectedSupplier.supplier_id
+                            const pendingSncs = supplierNcRequests.filter((snc: any) =>
+                              String(snc.supplier_id) === String(supId) &&
+                              ["pendiente_entrega", "entregada_parcial", "pendiente"].includes(snc.estado)
+                            )
+                            return (
+                              <div className="flex items-center gap-1 p-1 bg-gray-200/70 dark:bg-slate-900 rounded-lg text-xs font-semibold flex-wrap">
+                                <button
+                                  type="button"
+                                  onClick={() => setDetailDocFilter("todos")}
+                                  className={`px-2.5 py-1 rounded-md transition ${
+                                    detailDocFilter === "todos"
+                                      ? "bg-white dark:bg-indigo-600 text-gray-900 dark:text-white shadow-sm"
+                                      : "text-gray-500 hover:text-gray-900 dark:hover:text-white"
+                                  }`}
+                                >
+                                  Todos ({currentSelectedSupplier.pendingInvoices.length + freeNcCount + currentSelectedSupplier.devolucionesPendientes.length + (currentSelectedSupplier.chequesDiferidos?.length || 0)})
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDetailDocFilter("facturas")}
+                                  className={`px-2.5 py-1 rounded-md transition ${
+                                    detailDocFilter === "facturas"
+                                      ? "bg-white dark:bg-indigo-600 text-gray-900 dark:text-white shadow-sm"
+                                      : "text-gray-500 hover:text-gray-900 dark:hover:text-white"
+                                  }`}
+                                >
+                                  Facturas ({currentSelectedSupplier.pendingInvoices.length})
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDetailDocFilter("cheques")}
+                                  className={`px-2.5 py-1 rounded-md transition ${
+                                    detailDocFilter === "cheques"
+                                      ? "bg-blue-100 dark:bg-blue-600 text-blue-900 dark:text-white shadow-sm"
+                                      : "text-gray-500 hover:text-blue-600 dark:hover:text-blue-300"
+                                  }`}
+                                >
+                                  Cheques Dif. ({currentSelectedSupplier.chequesDiferidos?.length || 0})
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDetailDocFilter("notas_credito")}
+                                  className={`px-2.5 py-1 rounded-md transition ${
+                                    detailDocFilter === "notas_credito"
+                                      ? "bg-purple-100 dark:bg-purple-600 text-purple-900 dark:text-white shadow-sm"
+                                      : "text-gray-500 hover:text-purple-600 dark:hover:text-purple-300"
+                                  }`}
+                                  title="Notas de crédito libres / no imputadas a una factura específica"
+                                >
+                                  NCs Libres ({freeNcCount})
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDetailDocFilter("devoluciones")}
+                                  className={`px-2.5 py-1 rounded-md transition ${
+                                    detailDocFilter === "devoluciones"
+                                      ? "bg-amber-100 dark:bg-amber-600 text-amber-900 dark:text-white shadow-sm"
+                                      : "text-gray-500 hover:text-amber-600 dark:hover:text-amber-300"
+                                  }`}
+                                >
+                                  Devoluciones ({currentSelectedSupplier.devolucionesPendientes.length})
+                                </button>
+                                {pendingSncs.length > 0 && (
+                                  <span className="px-2 py-1 rounded-md bg-amber-500/20 text-amber-400 font-bold border border-amber-500/40 text-[11px] flex items-center gap-1">
+                                    <ShieldAlert className="w-3.5 h-3.5" /> {pendingSncs.length} SNCs Activas
+                                  </span>
+                                )}
+                              </div>
+                            )
+                          })()}
                       </div>
 
                       {/* Fila 2: Buscador por N° Factura / NC y Botones Marcar / Desmarcar */}
@@ -2098,8 +2219,17 @@ export default function FinancialPage() {
                               const isVencida = isFactura && doc.fechaVencimiento && doc.fechaVencimiento < today
                               const vtoText = (isFactura || isCheque) ? getDaysDiffText(doc.fechaVencimiento) : null
 
+                              const isBloqueada = isFactura && (doc.raw?.bloqueada_para_pago || doc.raw?.estado === "retenida_discrepancia")
+                              const motivoBloqueo = doc.raw?.motivo_bloqueo || "Bloqueada por discrepancia física o precio (3-Way Match)"
+
                               const handleToggle = () => {
-                                if (isFactura) handleToggleOpInvoice(doc.id)
+                                if (isFactura) {
+                                  if (isBloqueada) {
+                                    toast.error("Factura Bloqueada", motivoBloqueo)
+                                    return
+                                  }
+                                  handleToggleOpInvoice(doc.id)
+                                }
                                 if (isNC) handleToggleOpCreditNote(doc.id)
                                 if (isDev) handleToggleOpReturn(doc.id)
                               }
@@ -2107,7 +2237,7 @@ export default function FinancialPage() {
                               return (
                                 <Fragment key={`${doc.docType}-${doc.id}`}>
                                   <tr
-                                    className={`transition-colors cursor-pointer ${
+                                    className={`transition-colors ${isBloqueada ? "opacity-75 bg-amber-50/20 dark:bg-amber-950/10 cursor-not-allowed" : "cursor-pointer"} ${
                                     doc.isSelected
                                       ? isFactura
                                         ? "bg-indigo-50/60 dark:bg-indigo-950/30 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
@@ -2116,6 +2246,8 @@ export default function FinancialPage() {
                                         : "bg-amber-50/60 dark:bg-amber-950/30 hover:bg-amber-50 dark:hover:bg-amber-950/40"
                                       : isCheque
                                       ? "bg-blue-50/30 dark:bg-blue-950/10 hover:bg-blue-50/60 dark:hover:bg-blue-950/30"
+                                      : isBloqueada
+                                      ? ""
                                       : "hover:bg-gray-50 dark:hover:bg-slate-800/40"
                                   }`}
                                   onClick={isCheque ? () => setViewingChequesSupplier(currentSelectedSupplier) : handleToggle}
@@ -2126,6 +2258,12 @@ export default function FinancialPage() {
                                       <div className="flex items-center justify-center" title="Cheque diferido emitido en tránsito (no compensado)">
                                         <span className="p-1 rounded bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400">
                                           <Banknote className="w-4 h-4" />
+                                        </span>
+                                      </div>
+                                    ) : isBloqueada ? (
+                                      <div className="flex items-center justify-center" title={`BLOQUEADA PARA PAGO: ${motivoBloqueo}`}>
+                                        <span className="p-1 rounded bg-amber-100 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400">
+                                          <Lock className="w-4 h-4" />
                                         </span>
                                       </div>
                                     ) : (
@@ -2248,13 +2386,19 @@ export default function FinancialPage() {
                                         En Tránsito
                                       </span>
                                     ) : isFactura ? (
-                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                                        isVencida
-                                          ? "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-200"
-                                          : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200"
-                                      }`}>
-                                        {isVencida ? "Vencida" : "Pendiente"}
-                                      </span>
+                                      isBloqueada ? (
+                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border border-rose-300 dark:border-rose-800 inline-flex items-center gap-1" title={motivoBloqueo}>
+                                          <Lock className="w-3 h-3" /> Retenida 3-Way
+                                        </span>
+                                      ) : (
+                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                          isVencida
+                                            ? "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-200"
+                                            : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200"
+                                        }`}>
+                                          {isVencida ? "Vencida" : "Pendiente"}
+                                        </span>
+                                      )
                                     ) : isNC ? (
                                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 border border-purple-200">
                                         Crédito a Favor
@@ -2269,14 +2413,25 @@ export default function FinancialPage() {
                                   {/* 10. Acción */}
                                   <td className="p-3.5 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
                                     {isFactura && (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleOpenPayModal(doc.raw)}
-                                        className="btn-ghost text-xs py-1 px-2.5 text-indigo-600 hover:text-indigo-800 dark:text-indigo-400"
-                                        title="Pagar individualmente esta factura"
-                                      >
-                                        Pagar
-                                      </button>
+                                      isBloqueada ? (
+                                        <button
+                                          type="button"
+                                          disabled
+                                          className="text-xs py-1 px-2.5 text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-60 inline-flex items-center gap-1"
+                                          title={`No habilitada para pago: ${motivoBloqueo}`}
+                                        >
+                                          <Lock className="w-3 h-3" /> Bloqueada
+                                        </button>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleOpenPayModal(doc.raw)}
+                                          className="btn-ghost text-xs py-1 px-2.5 text-indigo-600 hover:text-indigo-800 dark:text-indigo-400"
+                                          title="Pagar individualmente esta factura"
+                                        >
+                                          Pagar
+                                        </button>
+                                      )
                                     )}
                                     {isCheque && (
                                       <button

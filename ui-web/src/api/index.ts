@@ -1595,7 +1595,7 @@ export interface ExpenseDashboard {
   top_proveedores: { proveedor: string; total: number }[]
   sugerencias: { tipo: string; titulo: string; detalle: string }[]
 }
-export interface SupplierInvoice { id: string; company_id?: string; supplier_id?: string; supplier_nombre?: string; supplier_ruc?: string; numero_factura?: string; timbrado?: string; cdc?: string; fecha_emision?: string; fecha_recepcion?: string; fecha_vencimiento?: string; subtotal?: number; descuento?: number; iva_10?: number; iva_5?: number; total?: number; saldo_pendiente?: number; moneda?: string; tipo_cambio?: number; total_brl?: number; saldo_pendiente_brl?: number; condicion?: string; tipo_comprobante?: string; estado?: string; concepto?: string; notas?: string; created_by?: string; approved_by?: string; purchase_order_id?: string; created_at?: string }
+export interface SupplierInvoice { id: string; company_id?: string; supplier_id?: string; supplier_nombre?: string; supplier_ruc?: string; numero_factura?: string; timbrado?: string; cdc?: string; fecha_emision?: string; fecha_recepcion?: string; fecha_vencimiento?: string; subtotal?: number; descuento?: number; iva_10?: number; iva_5?: number; total?: number; saldo_pendiente?: number; moneda?: string; tipo_cambio?: number; total_brl?: number; saldo_pendiente_brl?: number; condicion?: string; tipo_comprobante?: string; estado?: string; concepto?: string; notas?: string; created_by?: string; approved_by?: string; purchase_order_id?: string; created_at?: string; notas_credito?: any[]; bloqueada_para_pago?: boolean; motivo_bloqueo?: string }
 export interface SupplierInvoicePayment { id: string; invoice_id?: string; payment_method?: string; monto?: number; moneda?: string; fecha_pago?: string; referencia?: string; estado?: string; created_at?: string }
 export interface BankAccount { id: string; company_id?: string; alias?: string | null; banco?: string; tipo?: string; numero_cuenta?: string; moneda?: string; saldo_inicial?: number; saldo_actual?: number; titular?: string; activo?: boolean; saldo_minimo_alerta?: number | null; saldo_verificado_manualmente?: boolean; saldo_verificado_at?: string | null; saldo_verificado_por?: string | null; created_at?: string }
 export interface BankBalanceCorrection { id: string; company_id?: string; bank_account_id: string; origen: string; saldo_actual: number; saldo_propuesto: number; motivo?: string; estado: string; solicitado_por?: string | null; aprobado_supervisor_id?: string | null; aprobado_supervisor_at?: string | null; aprobado_gerente_id?: string | null; aprobado_gerente_at?: string | null; rechazado_por?: string | null; rechazado_motivo?: string | null; created_at?: string }
@@ -3275,8 +3275,39 @@ export const api = {
       downloadAuthenticated("/api/reports/export/sales-detailed-day.pdf", params, `ventas_detalladas_${params.fecha}.pdf`),
     downloadSalesDailyConsolidationXlsx: (params?: { fecha_desde?: string; fecha_hasta?: string; branch_id?: string }) =>
       downloadAuthenticated("/api/reports/export/sales-daily-consolidation.xlsx", params, `consolidado_diario_ventas_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.xlsx`),
-    downloadSalesDailyConsolidationPdf: (params?: { fecha_desde?: string; fecha_hasta?: string; branch_id?: string }) =>
-      downloadAuthenticated("/api/reports/export/sales-daily-consolidation.pdf", params, `consolidado_diario_ventas_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.pdf`),
+    salesBySupplierPaymentsSummary: (params: { supplier_id: string }) =>
+      client.get<{ supplier_id: string; monto_pagado_mes: number; monto_pagado_historico: number }>("/api/reports/sales/by-supplier/payments-summary", params),
+    purchasesVsSales: (params?: { fecha_desde?: string; fecha_hasta?: string; target_ratio_pct?: number }) =>
+      client.get<{
+        fecha_desde: string | null;
+        fecha_hasta: string | null;
+        target_ratio_pct: number;
+        resumen: {
+          total_ventas: number;
+          total_compras: number;
+          total_tickets_ventas: number;
+          total_facturas_compras: number;
+          ratio_real_pct: number;
+          presupuesto_maximo_compras: number;
+          saldo_otb_disponible: number;
+          porcentaje_presupuesto_consumido: number;
+          esta_sobrecomprado: boolean;
+        };
+        proveedores: Array<{
+          supplier_id: string;
+          proveedor: string;
+          ruc: string;
+          ventas: number;
+          compras: number;
+          facturas: number;
+          ratio_pct: number;
+          estado: string;
+        }>;
+      }>("/api/reports/purchases-vs-sales", params),
+    downloadPurchasesVsSalesPdf: (params?: { fecha_desde?: string; fecha_hasta?: string; target_ratio_pct?: number }) =>
+      downloadAuthenticated("/api/reports/export/purchases-vs-sales.pdf", params, `compras_vs_ventas_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.pdf`),
+    downloadPurchasesVsSalesXlsx: (params?: { fecha_desde?: string; fecha_hasta?: string; target_ratio_pct?: number }) =>
+      downloadAuthenticated("/api/reports/export/purchases-vs-sales.xlsx", params, `compras_vs_ventas_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.xlsx`),
     salesByPaymentMethod: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<{ forma_pago: string; cantidad: number; monto: number; porcentaje: number }[]>("/api/reports/sales/by-payment-method", params),
     expensesByCategory: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<{ categoria: string; cantidad: number; monto: number; porcentaje: number }[]>("/api/reports/expenses/by-category", params),
     getDashboardAllKPIs: async (params?: { fecha_desde?: string; fecha_hasta?: string }) => {
