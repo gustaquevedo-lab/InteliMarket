@@ -27,6 +27,7 @@ from datetime import date
 
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.colors import HexColor, Color
 
 from api.src.integrated_finance.pdf_reports import (
     _base_doc, _company_header, _fmt_gs, _build, _totals_table,
