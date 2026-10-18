@@ -1336,6 +1336,12 @@ export default function BancosPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <button
+                      onClick={() => setShowImportBank(true)}
+                      className="btn-outline text-xs flex items-center gap-1.5 border-sky-300 dark:border-sky-800 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-950/40"
+                    >
+                      <Upload className="w-3.5 h-3.5 text-sky-500" /> Importar Extracto
+                    </button>
+                    <button
                       onClick={() => openTransactionModal(selectedBank)}
                       className="btn-primary bg-emerald-600 hover:bg-emerald-700 text-xs flex items-center gap-1.5 shadow-sm"
                     >

@@ -49,6 +49,7 @@ dependencies = [
     "qrcode[pil]>=7.4",
     # PDF receipts
     "reportlab>=4.0",
+    "pdfplumber>=0.11",
 ]
 
 [project.optional-dependencies]
