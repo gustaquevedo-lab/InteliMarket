@@ -70,15 +70,31 @@ def _table_style(align_from: int = 1) -> TableStyle:
     return TableStyle(_table_style_cmds(align_from))
 
 
-def _kpi_row(items: list[tuple[str, str]], col_width_mm: float) -> Table:
-    cells = [[Paragraph(label, KPI_LABEL), Paragraph(value, KPI_VALUE)] for label, value in items]
+def _fmt_gs_nbsp(v) -> str:
+    """Formatea monto en Guaraníes con espacio no rompible (&nbsp;) para que ReportLab
+    nunca parta 'Gs.' del valor numérico."""
+    n = int(round(float(v or 0)))
+    sign = "-" if n < 0 else ""
+    formatted = f"{abs(n):,}".replace(",", ".")
+    return f"{sign}Gs.&nbsp;{formatted}"
+
+
+def _kpi_row(items: list[tuple[str, str]], col_width_mm: float, font_size: float = 16, leading: float = 19) -> Table:
+    val_style = ParagraphStyle(
+        f"KpiVal_{font_size}",
+        parent=KPI_VALUE,
+        fontSize=font_size,
+        leading=leading,
+    )
+    cells = [[Paragraph(label, KPI_LABEL), Paragraph(value, val_style)] for label, value in items]
     t = Table([cells], colWidths=[col_width_mm * mm] * len(items))
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), GRAY_LIGHT),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 8),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-        ("LEFTPADDING", (0, 0), (0, 0), 10),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
         ("LINEAFTER", (0, 0), (-2, 0), 0.5, WHITE),
     ]))
     return t
@@ -114,10 +130,10 @@ def _cuadro_conciliacion_table(account, reporte: dict, col_width_mm: float) -> T
     saldo_libros = reporte.get("saldo_libros", saldo_banco + depositos_transito - cheques_transito)
 
     rows = [
-        [_cell("Saldo Final según Extracto Bancario", bold=True), _num(_fmt_gs(saldo_banco), bold=True)],
-        [_cell("(+) Depósitos en Tránsito (no acreditados)"), _num(_fmt_gs(depositos_transito))],
-        [_cell("(-) Cheques Emitidos en Tránsito (diferidos pendientes de cobro)"), _num(_fmt_gs(cheques_transito), color=RED)],
-        [_cell("(=) SALDO SEGÚN LIBROS CONTABLES", bold=True), _num(_fmt_gs(saldo_libros), bold=True, color=GREEN if saldo_libros >= 0 else RED)],
+        [_cell("Saldo Final según Extracto Bancario", bold=True), _num(_fmt_gs_nbsp(saldo_banco), bold=True)],
+        [_cell("(+) Depósitos / Créditos en Tránsito (no acreditados)"), _num(_fmt_gs_nbsp(depositos_transito))],
+        [_cell("(-) Cheques Emitidos en Tránsito (vencidos pendientes de cobro)"), _num(_fmt_gs_nbsp(cheques_transito), color=RED)],
+        [_cell("(=) SALDO SEGÚN LIBROS CONTABLES", bold=True), _num(_fmt_gs_nbsp(saldo_libros), bold=True, color=GREEN if saldo_libros >= 0 else RED)],
     ]
     t = Table(rows, colWidths=[col_width_mm * 0.68 * mm, col_width_mm * 0.32 * mm])
     t.setStyle(TableStyle([
@@ -254,16 +270,17 @@ def _generate_reconciliation_portrait_pdf(
     KPIs consolidados y detalle EXCLUSIVO de partidas pendientes de conciliar."""
     buffer = io.BytesIO()
     doc, styles = _base_doc(buffer, "Conciliación Bancaria Resumida", company, generated_by)
-    subtitle = f"Resumen Ejecutivo de Conciliación — {account.banco} N° {account.numero_cuenta} — {_periodo_str(fecha_desde, fecha_hasta)}"
+    subtitle = f"{account.banco} N° {account.numero_cuenta} ({account.moneda}) — {_periodo_str(fecha_desde, fecha_hasta)}"
     elements = _company_header(company, styles, "Conciliación Bancaria (Resumen)", subtitle, generated_by)
 
-    # 1. KPIs Clave (Ancho Portrait: 186mm)
+    # 1. KPIs Clave (Ancho Portrait: 186mm -> 4 columnas de 46.5mm)
+    # Usamos tipografía de 11pt y espacios no separables (&nbsp;) para garantizar que nunca haya wrap roto
     kpi = _kpi_row([
-        ("SALDO BANCO", _fmt_gs(reporte.get("saldo_final_banco", account.saldo_actual))),
+        ("SALDO BANCO", _fmt_gs_nbsp(reporte.get("saldo_final_banco", account.saldo_actual))),
         ("PARTIDAS PENDIENTES", str(reporte["cantidad_pendientes"])),
-        ("CHEQUES EN TRÁNSITO", _fmt_gs(reporte.get("total_cheques_transito", Decimal("0")))),
-        ("SALDO EN LIBROS", _fmt_gs(reporte.get("saldo_libros", account.saldo_actual))),
-    ], 46.5)
+        ("CHEQUES EN TRÁNSITO", _fmt_gs_nbsp(reporte.get("total_cheques_transito", Decimal("0")))),
+        ("SALDO EN LIBROS", _fmt_gs_nbsp(reporte.get("saldo_libros", account.saldo_actual))),
+    ], 46.5, font_size=11, leading=13)
     elements.append(kpi)
     elements.append(Spacer(1, 10))
 
@@ -271,7 +288,7 @@ def _generate_reconciliation_portrait_pdf(
     elements.append(Paragraph("<b>Cuadro Formal de Cuadre Contable</b>", styles["Small"]))
     elements.append(Spacer(1, 3))
     elements.append(_cuadro_conciliacion_table(account, reporte, 186))
-    elements.append(Spacer(1, 14))
+    elements.append(Spacer(1, 12))
 
     # 3. Solo Partidas Pendientes de Conciliar en Banco (Extracto)
     movimientos_pendientes = [m for m in reporte.get("movimientos", []) if not m.get("conciliado")]
@@ -283,19 +300,22 @@ def _generate_reconciliation_portrait_pdf(
         data = [header]
         for m in movimientos_pendientes:
             fecha_str = m["fecha"].strftime("%d/%m/%Y") if hasattr(m["fecha"], "strftime") else str(m["fecha"])
+            m_tipo = m.get("tipo")
+            tipo_label = "Débito" if m_tipo == "debito" else "Crédito"
+            color = RED if m_tipo == "debito" else GREEN
             data.append([
                 _cell(fecha_str),
                 _cell(m.get("descripcion") or "—"),
                 _cell(m.get("referencia") or "—"),
-                _cell("Débito" if m.get("tipo") == "debito" else "Crédito"),
-                _num(_fmt_gs(m.get("monto", 0)), bold=True, color=RED if m.get("tipo") == "debito" else GREEN),
+                _cell(tipo_label),
+                _num(_fmt_gs_nbsp(m.get("monto", 0)), bold=True, color=color),
             ])
         data.append([
             _cell("TOTAL PENDIENTE BANCO", bold=True),
             _cell(""),
             _cell(""),
             _cell(""),
-            _num(_fmt_gs(reporte.get("monto_pendiente", 0)), bold=True),
+            _num(_fmt_gs_nbsp(reporte.get("monto_pendiente", 0)), bold=True),
         ])
         t_pend = Table(data, colWidths=[24 * mm, 74 * mm, 34 * mm, 20 * mm, 34 * mm], repeatRows=1)
         t_pend.setStyle(_table_style(4))
@@ -305,8 +325,8 @@ def _generate_reconciliation_portrait_pdf(
 
     # 4. Cheques en Tránsito pendientes
     cheques_transito = reporte.get("cheques_en_transito", [])
-    elements.append(Spacer(1, 14))
-    elements.append(Paragraph(f"<b>Cheques Diferidos en Tránsito ({len(cheques_transito)})</b>", styles["Small"]))
+    elements.append(Spacer(1, 12))
+    elements.append(Paragraph(f"<b>Cheques Vencidos / Al Corte en Tránsito ({len(cheques_transito)})</b>", styles["Small"]))
     elements.append(Spacer(1, 3))
 
     if cheques_transito:
@@ -318,24 +338,24 @@ def _generate_reconciliation_portrait_pdf(
                 _cell(c.numero, bold=True),
                 _cell(c.beneficiario or "—"),
                 _cell(fpag),
-                _num(_fmt_gs(c.monto), bold=True),
+                _num(_fmt_gs_nbsp(c.monto), bold=True),
                 _cell(c.estado.capitalize()),
             ])
         chq_data.append([
             _cell("TOTAL CHEQUES EN TRÁNSITO", bold=True),
             _cell(""),
             _cell(""),
-            _num(_fmt_gs(reporte.get("total_cheques_transito", 0)), bold=True, color=RED),
+            _num(_fmt_gs_nbsp(reporte.get("total_cheques_transito", 0)), bold=True, color=RED),
             _cell(""),
         ])
         chq_table = Table(chq_data, colWidths=[26 * mm, 78 * mm, 26 * mm, 34 * mm, 22 * mm], repeatRows=1)
         chq_table.setStyle(_table_style(3))
         elements.append(chq_table)
     else:
-        elements.append(Paragraph("✓ No existen cheques diferidos pendientes de cobro para esta cuenta.", styles["Small"]))
+        elements.append(Paragraph("✓ No existen cheques diferidos vencidos pendientes de cobro para esta cuenta.", styles["Small"]))
 
     # 5. Firmas de Cierre
-    elements.append(Spacer(1, 24))
+    elements.append(Spacer(1, 20))
     firmas = [
         [_cell("____________________________", bold=True), _cell("____________________________", bold=True)],
         [_cell("Firma Responsable Tesorería"), _cell("Firma Auditoría / Contabilidad")],
