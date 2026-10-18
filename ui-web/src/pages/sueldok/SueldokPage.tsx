@@ -339,32 +339,100 @@ export default function SueldokPage() {
 
   // Finiquitos consolidados (SueldOK + Intelimarket local)
   const allSettlements = useMemo(() => {
-    const remoteList: any[] = (data?.liquidations || []).map((l: any) => ({
-      id: l.id,
-      company_id: selectedCompany.id,
-      employee_id: l.employeeId,
-      employee_nombre: l.nombre,
-      employee_ci: l.ci,
-      employee_cargo: l.cargo,
-      fecha_ingreso: l.fechaIngreso,
-      fecha_egreso: l.fechaSalida,
-      motivo_egreso: l.motivo === "Despido Injustificado" ? "despido_sin_causa" : (l.motivo === "Renuncia Voluntaria" ? "renuncia" : l.motivo),
-      salario_mes_monto: l.proporcionalSalario || l.baseSalary,
-      vacaciones_causadas_monto: l.vacaciones,
-      aguinaldo_proporcional_monto: l.aguinaldo,
-      preaviso_monto: l.preaviso,
-      indemnizacion_legal_monto: l.indemnizacion,
-      descuentos_salariales_monto: l.descuentoComercial,
-      total_liquidacion_neta: l.montoNeto,
-      total_neto: l.montoNeto,
-      payment_order_id: l.payoutReference,
-      payment_order_num: l.payoutReference,
-      estado_pago: l.estado === "paid" || l.payoutConfirmed ? "pagado" : "pendiente",
-      origen: "sueldok",
-    }))
-    const remoteIds = new Set(remoteList.map((r: any) => r.id))
-    const localFiltered = settlements.filter((s: any) => !remoteIds.has(s.id))
-    return [...remoteList, ...localFiltered]
+    // Mapa de registros locales indexados por employee_ci y por employee_id
+    const localByCi = new Map<string, any>()
+    const localByEmpId = new Map<string, any>()
+    const localById = new Map<string, any>()
+
+    for (const s of (settlements || [])) {
+      if (s.employee_ci) localByCi.set(String(s.employee_ci).trim(), s)
+      if (s.employee_id) localByEmpId.set(String(s.employee_id).trim(), s)
+      if (s.id) localById.set(String(s.id).trim(), s)
+    }
+
+    const processedLocalIds = new Set<string>()
+
+    const remoteList: any[] = (data?.liquidations || []).map((l: any) => {
+      const ciStr = l.ci ? String(l.ci).trim() : ""
+      const empIdStr = l.employeeId ? String(l.employeeId).trim() : ""
+      const localMatch = (ciStr && localByCi.get(ciStr)) || (empIdStr && localByEmpId.get(empIdStr)) || localById.get(String(l.id))
+
+      if (localMatch) {
+        processedLocalIds.add(localMatch.id)
+      }
+
+      const motivoRaw = l.motivo || localMatch?.motivo
+      const motivoNorm = motivoRaw === "Despido Injustificado" ? "despido_sin_causa" : (motivoRaw === "Renuncia Voluntaria" ? "renuncia" : motivoRaw)
+
+      return {
+        id: localMatch?.id || l.id,
+        remote_id: l.id,
+        company_id: selectedCompany.id,
+        employee_id: l.employeeId || localMatch?.employee_id,
+        employee_nombre: l.nombre || localMatch?.employee_nombre,
+        employee_ci: l.ci || localMatch?.employee_ci,
+        employee_cargo: l.cargo || localMatch?.employee_cargo,
+        fecha_ingreso: l.fechaIngreso || localMatch?.fecha_ingreso,
+        fecha_egreso: l.fechaSalida || localMatch?.fecha_salida,
+        motivo_egreso: motivoNorm,
+        salario_mes_monto: l.proporcionalSalario || l.baseSalary || localMatch?.salario_base || 0,
+        vacaciones_causadas_monto: l.vacaciones ?? localMatch?.vacaciones_monto ?? 0,
+        aguinaldo_proporcional_monto: l.aguinaldo ?? localMatch?.aguinaldo_proporcional ?? 0,
+        preaviso_monto: l.preaviso ?? localMatch?.preaviso ?? 0,
+        indemnizacion_legal_monto: l.indemnizacion ?? localMatch?.indemnizacion_legal ?? 0,
+        descuentos_salariales_monto: l.descuentoComercial ?? (Number(localMatch?.descuento_extra_club || 0) + Number(localMatch?.descuento_anticipos || 0)),
+        total_liquidacion_neta: l.montoNeto ?? localMatch?.total_liquidacion_neta ?? 0,
+        total_neto: l.montoNeto ?? localMatch?.total_liquidacion_neta ?? 0,
+        payment_order_id: localMatch?.payment_order_id || l.payoutReference,
+        payment_order_num: localMatch?.payment_order_numero || l.payoutReference,
+        payment_order: localMatch?.payment_order_numero ? {
+          numero_orden: localMatch.payment_order_numero,
+          estado: localMatch.estado || "pagado"
+        } : (l.payoutReference ? {
+          numero_orden: l.payoutReference,
+          estado: l.estado === "paid" || l.payoutConfirmed ? "pagado" : "pendiente"
+        } : null),
+        receivable_payment_id: localMatch?.receivable_payment_id,
+        receivable_payment_numero: localMatch?.receivable_payment_numero,
+        estado_pago: localMatch?.estado === "pagado" || l.estado === "paid" || l.payoutConfirmed ? "pagado" : "pendiente",
+        origen: localMatch ? "intelimarket" : "sueldok",
+      }
+    })
+
+    // Finiquitos exclusivamente locales (no presentes en el overview remoto de SueldOK)
+    const localOnly = (settlements || [])
+      .filter((s: any) => !processedLocalIds.has(s.id))
+      .map((s: any) => ({
+        id: s.id,
+        company_id: selectedCompany.id,
+        employee_id: s.employee_id,
+        employee_nombre: s.employee_nombre,
+        employee_ci: s.employee_ci,
+        employee_cargo: s.employee_cargo,
+        fecha_ingreso: s.fecha_ingreso,
+        fecha_egreso: s.fecha_salida,
+        motivo_egreso: s.motivo,
+        salario_mes_monto: s.salario_base || 0,
+        vacaciones_causadas_monto: s.vacaciones_monto || 0,
+        aguinaldo_proporcional_monto: s.aguinaldo_proporcional || 0,
+        preaviso_monto: s.preaviso || 0,
+        indemnizacion_legal_monto: s.indemnizacion_legal || 0,
+        descuentos_salariales_monto: (Number(s.descuento_extra_club || 0) + Number(s.descuento_anticipos || 0)) || s.descuentos_varios || 0,
+        total_liquidacion_neta: s.total_liquidacion_neta || 0,
+        total_neto: s.total_liquidacion_neta || 0,
+        payment_order_id: s.payment_order_id,
+        payment_order_num: s.payment_order_numero,
+        payment_order: s.payment_order_numero ? {
+          numero_orden: s.payment_order_numero,
+          estado: s.estado || "pagado"
+        } : null,
+        receivable_payment_id: s.receivable_payment_id,
+        receivable_payment_numero: s.receivable_payment_numero,
+        estado_pago: s.estado === "pagado" ? "pagado" : "pendiente",
+        origen: "intelimarket",
+      }))
+
+    return [...remoteList, ...localOnly]
   }, [data?.liquidations, settlements, selectedCompany.id])
 
   // Cargar finiquitos registrados
@@ -415,11 +483,35 @@ export default function SueldokPage() {
   const employees = data?.employees || []
   const todayAttendance = data?.todayAttendance || []
 
+  // IDs de préstamos/anticipos ya deducidos en la nómina aprobada del período
+  const payrollDeductedLoanIds = useMemo(() => {
+    const ids = new Set<string>()
+    const items = data?.approvedPayroll?.items || []
+    for (const it of items) {
+      if (Array.isArray(it.loanDeductions)) {
+        for (const ld of it.loanDeductions) {
+          if (ld && ld.loanId) {
+            ids.add(String(ld.loanId).trim())
+          }
+        }
+      }
+    }
+    return ids
+  }, [data?.approvedPayroll?.items])
+
   // Combinar anticipos y deducciones (remotos de SueldOK si existen + locales enriquecidos)
   const advances = useMemo(() => {
     const remote = data?.advances || []
-    return [...localAdvances, ...remote.filter((r: any) => !localAdvances.some((l) => l.id === r.id))]
-  }, [data?.advances, localAdvances])
+    const combined = [...localAdvances, ...remote.filter((r: any) => !localAdvances.some((l) => l.id === r.id))]
+    return combined.map((adv: any) => {
+      const advId = String(adv.id || "").trim()
+      const isDeductedInPayroll = payrollDeductedLoanIds.has(advId)
+      return {
+        ...adv,
+        isDeductedInPayroll,
+      }
+    })
+  }, [data?.advances, localAdvances, payrollDeductedLoanIds])
 
   const deductions = useMemo(() => {
     const remote = data?.deductions || []
@@ -1146,7 +1238,7 @@ export default function SueldokPage() {
             { id: "dashboard", label: "Dashboard Estratégico", icon: Activity },
             { id: "payroll", label: `Nómina & Liquidación (${payrollItems.length})`, icon: Receipt },
             { id: "expediente", label: "Expediente Multi-Fase", icon: ShieldCheck },
-            { id: "settlements", label: `Finiquitos Laborales (${settlements.length})`, icon: Briefcase },
+            { id: "settlements", label: `Finiquitos Laborales (${allSettlements.length})`, icon: Briefcase },
             { id: "advances", label: `Anticipos (${advances.length})`, icon: PiggyBank },
             { id: "deductions", label: `Descuentos & Faltantes (${deductions.length})`, icon: Scissors },
             { id: "asistencia", label: `Marcaciones Dahua (${todayAttendance.length})`, icon: Clock },
@@ -1940,19 +2032,19 @@ export default function SueldokPage() {
             <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Total Liquidaciones</span>
               <p className="text-2xl font-black font-mono text-slate-900 dark:text-white mt-1">
-                {settlements.length}
+                {allSettlements.length}
               </p>
             </div>
             <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Total Desembolsado / Liquidado</span>
               <p className="text-2xl font-black font-mono text-amber-600 dark:text-amber-400 mt-1">
-                {formatPYG(settlements.reduce((acc, s) => acc + Number(s.total_neto || 0), 0))}
+                {formatPYG(allSettlements.reduce((acc, s) => acc + Number(s.total_neto || 0), 0))}
               </p>
             </div>
             <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Órdenes de Pago Generadas</span>
               <p className="text-2xl font-black font-mono text-indigo-600 dark:text-indigo-400 mt-1">
-                {settlements.filter((s) => s.payment_order_id).length} OPs
+                {allSettlements.filter((s) => s.payment_order_id || s.payment_order).length} OPs
               </p>
             </div>
           </div>
@@ -2140,27 +2232,43 @@ export default function SueldokPage() {
                         {formatPYG(adv.monto)}
                       </td>
                       <td className="px-4 py-3.5 text-center">
-                        <span
-                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black uppercase tracking-wider border ${
-                            adv.estado === "approved"
-                              ? "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/30"
-                              : "bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-500/30"
-                          }`}
-                        >
-                          {adv.estado === "approved" ? "Aprobado en Nómina" : "Pendiente"}
-                        </span>
+                        {adv.isDeductedInPayroll ? (
+                          <span
+                            title="Este anticipo/préstamo ya fue descontado en la nómina aprobada del período"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider border bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                          >
+                            <Check className="w-3 h-3" />
+                            <span>Descontado en Nómina</span>
+                          </span>
+                        ) : (
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black uppercase tracking-wider border ${
+                              adv.estado === "approved"
+                                ? "bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-500/30"
+                                : "bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-500/30"
+                            }`}
+                          >
+                            {adv.estado === "approved" ? "Pendiente Desembolso" : "Pendiente Aprobación"}
+                          </span>
+                        )}
                       </td>
                       <td className="px-6 py-3.5 text-right">
-                        {adv.estado === "approved" && (
+                        {adv.isDeductedInPayroll ? (
+                          <span className="text-[11px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-800/80 px-2.5 py-1 rounded-lg">
+                            Liquidado en Haberes
+                          </span>
+                        ) : adv.estado === "approved" ? (
                           <button
                             type="button"
-                            onClick={() => navigate(`/expenses?action=desembolsar_sueldok&sueldok_id=${adv.id}`)}
-                            className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm ml-auto"
+                            onClick={() => navigate(`/gastos?action=desembolsar_sueldok&sueldok_id=${adv.id}`)}
+                            className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm ml-auto cursor-pointer"
                             title="Desembolsar y registrar en Gastos Operativos (Fondo Fijo, Bóveda o Banco)"
                           >
                             <DollarSign className="w-3.5 h-3.5" />
                             <span>Desembolsar en Gastos</span>
                           </button>
+                        ) : (
+                          <span className="text-[11px] text-slate-400 italic">En revisión</span>
                         )}
                       </td>
                     </tr>

@@ -331,6 +331,7 @@ function AppRoutes() {
           ["intellizapp", <WhatsAppPage />],
           ["whatsapp", <WhatsAppPage />],
           ["gastos", <ExpensesPage />],
+          ["expenses", <ExpensesPage />],
           ["financiero", <FinancialPage />],
           ["financiero/cierre-mensual", <MonthlyClosingPage />],
           ["cierre-mensual", <MonthlyClosingPage />],

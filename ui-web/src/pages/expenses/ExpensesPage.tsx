@@ -29,7 +29,9 @@ type Tab = "dashboard" | "fondos" | "rendiciones" | "list" | "arqueos" | "sector
 type ReportSubTab = "sector" | "fondos" | "fiscal" | "rendicion"
 
 export default function ExpensesPage() {
-  const [tab, setTab] = useState<Tab>("dashboard")
+  const [searchParams, setSearchParams] = useSearchParams()
+  const initialAction = searchParams.get("action")
+  const [tab, setTab] = useState<Tab>(initialAction === "desembolsar_sueldok" ? "list" : "dashboard")
   const [loading, setLoading] = useState(true)
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [categories, setCategories] = useState<ExpenseCategory[]>([])
@@ -273,7 +275,6 @@ export default function ExpensesPage() {
   const [loadingStaff, setLoadingStaff] = useState(false)
   const staffSearchRef = useRef<HTMLDivElement>(null)
 
-  const [searchParams, setSearchParams] = useSearchParams()
   const [showSueldokModal, setShowSueldokModal] = useState(false)
 
   // Anticipos formalmente cargados y aprobados en SueldOK
