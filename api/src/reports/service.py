@@ -2128,11 +2128,14 @@ async def get_purchases_vs_sales_report(
     fecha_desde: Optional[date] = None,
     fecha_hasta: Optional[date] = None,
     target_ratio_pct: float = 70.0,
+    tipo_provision: Optional[str] = "mercaderias",
 ) -> dict:
     """Reporte Retail de Compras vs. Ventas (Open to Buy / Presupuesto de Compras):
     - Compara las compras facturadas y recibidas en el período con las ventas netas.
+    - tipo_provision: 'mercaderias' (bienes y mixtos - valor por defecto), 'todos', 'bienes', 'mixto', 'servicios'.
+      Excluye por defecto gastos puros de servicios/insumos (software, honorarios, combustible, etc.).
     - Calcula el Ratio Compras / Ventas y el saldo disponible de presupuesto OTB.
-    - Incluye desglose por proveedor y evolución temporal.
+    - Incluye desglose por proveedor y diagnóstico financiero.
     """
     # 1. Ventas del período
     sales_params = {"company_id": company_id}
@@ -2150,7 +2153,7 @@ async def get_purchases_vs_sales_report(
     total_ventas = float(sales_res["total_ventas"]) if sales_res and sales_res["total_ventas"] else 0.0
     total_tickets = int(sales_res["tickets_total"]) if sales_res and sales_res["tickets_total"] else 0
 
-    # 2. Compras del período (facturas de proveedor registradas)
+    # 2. Compras del período (facturas de proveedor registradas para mercaderías)
     pur_params = {"company_id": company_id}
     pur_where = "si.company_id = :company_id AND COALESCE(si.estado, 'pendiente') <> 'anulado'"
     if fecha_desde:
@@ -2160,11 +2163,19 @@ async def get_purchases_vs_sales_report(
         pur_where += " AND si.fecha_emision <= :fecha_hasta"
         pur_params["fecha_hasta"] = fecha_hasta
 
+    # Filtro de tipo_provision (mercaderías = bienes + mixto)
+    if tipo_provision == "mercaderias":
+        pur_where += " AND COALESCE(sup.tipo_provision, 'bienes') IN ('bienes', 'mixto')"
+    elif tipo_provision in ("bienes", "mixto", "servicios"):
+        pur_where += " AND COALESCE(sup.tipo_provision, 'bienes') = :tipo_provision"
+        pur_params["tipo_provision"] = tipo_provision
+
     q_purchases = f"""
         SELECT 
             COALESCE(SUM(si.total), 0) as total_compras,
             COUNT(DISTINCT si.id) as facturas_total
         FROM supplier_invoices si
+        LEFT JOIN suppliers sup ON sup.id = si.supplier_id
         WHERE {pur_where}
     """
     pur_res = (await _exec(db, q_purchases, pur_params)).first()
@@ -2240,6 +2251,7 @@ async def get_purchases_vs_sales_report(
         "fecha_desde": str(fecha_desde) if fecha_desde else None,
         "fecha_hasta": str(fecha_hasta) if fecha_hasta else None,
         "target_ratio_pct": target_ratio_pct,
+        "tipo_provision": tipo_provision,
         "resumen": {
             "total_ventas": total_ventas,
             "total_compras": total_compras,

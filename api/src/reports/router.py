@@ -213,11 +213,12 @@ async def purchases_vs_sales(
     fecha_desde: date | None = Query(None),
     fecha_hasta: date | None = Query(None),
     target_ratio_pct: float = Query(70.0, ge=1.0, le=200.0),
+    tipo_provision: str = Query("mercaderias", pattern="^(mercaderias|todos|bienes|mixto|servicios)$"),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth)
 ):
     return await service.get_purchases_vs_sales_report(
-        db, user["company_id"], fecha_desde, fecha_hasta, target_ratio_pct
+        db, user["company_id"], fecha_desde, fecha_hasta, target_ratio_pct, tipo_provision
     )
 
 
@@ -328,11 +329,12 @@ async def export_purchases_vs_sales_xlsx(
     fecha_desde: date | None = Query(None),
     fecha_hasta: date | None = Query(None),
     target_ratio_pct: float = Query(70.0, ge=1.0, le=200.0),
+    tipo_provision: str = Query("mercaderias", pattern="^(mercaderias|todos|bienes|mixto|servicios)$"),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth)
 ):
     report_data = await service.get_purchases_vs_sales_report(
-        db, user["company_id"], fecha_desde, fecha_hasta, target_ratio_pct
+        db, user["company_id"], fecha_desde, fecha_hasta, target_ratio_pct, tipo_provision
     )
     xlsx = export_service.export_purchases_vs_sales(report_data, fecha_desde, fecha_hasta)
     filename = f"compras_vs_ventas_{fecha_desde or 'inicio'}_{fecha_hasta or 'hoy'}.xlsx"
@@ -344,6 +346,7 @@ async def export_purchases_vs_sales_pdf(
     fecha_desde: date | None = Query(None),
     fecha_hasta: date | None = Query(None),
     target_ratio_pct: float = Query(70.0, ge=1.0, le=200.0),
+    tipo_provision: str = Query("mercaderias", pattern="^(mercaderias|todos|bienes|mixto|servicios)$"),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth)
 ):
@@ -351,7 +354,7 @@ async def export_purchases_vs_sales_pdf(
     company = await _get_company_info(db, company_id)
     generated_by = user.get("user_nombre") or user.get("user_email") or "Auditoría Interna"
     report_data = await service.get_purchases_vs_sales_report(
-        db, company_id, fecha_desde, fecha_hasta, target_ratio_pct
+        db, company_id, fecha_desde, fecha_hasta, target_ratio_pct, tipo_provision
     )
     pdf_bytes = pdf_reports.generate_purchases_vs_sales_pdf(
         company, report_data, fecha_desde, fecha_hasta, generated_by

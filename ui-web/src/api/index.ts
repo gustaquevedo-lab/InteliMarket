@@ -3279,11 +3279,12 @@ export const api = {
       downloadAuthenticated("/api/reports/export/sales-daily-consolidation.pdf", params, `consolidado_diario_ventas_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.pdf`),
     salesBySupplierPaymentsSummary: (params: { supplier_id: string }) =>
       client.get<{ supplier_id: string; monto_pagado_mes: number; monto_pagado_historico: number }>("/api/reports/sales/by-supplier/payments-summary", params),
-    purchasesVsSales: (params?: { fecha_desde?: string; fecha_hasta?: string; target_ratio_pct?: number }) =>
+    purchasesVsSales: (params?: { fecha_desde?: string; fecha_hasta?: string; target_ratio_pct?: number; tipo_provision?: string }) =>
       client.get<{
         fecha_desde: string | null;
         fecha_hasta: string | null;
         target_ratio_pct: number;
+        tipo_provision: string;
         resumen: {
           total_ventas: number;
           total_compras: number;
@@ -3306,9 +3307,9 @@ export const api = {
           estado: string;
         }>;
       }>("/api/reports/purchases-vs-sales", params),
-    downloadPurchasesVsSalesPdf: (params?: { fecha_desde?: string; fecha_hasta?: string; target_ratio_pct?: number }) =>
+    downloadPurchasesVsSalesPdf: (params?: { fecha_desde?: string; fecha_hasta?: string; target_ratio_pct?: number; tipo_provision?: string }) =>
       downloadAuthenticated("/api/reports/export/purchases-vs-sales.pdf", params, `compras_vs_ventas_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.pdf`),
-    downloadPurchasesVsSalesXlsx: (params?: { fecha_desde?: string; fecha_hasta?: string; target_ratio_pct?: number }) =>
+    downloadPurchasesVsSalesXlsx: (params?: { fecha_desde?: string; fecha_hasta?: string; target_ratio_pct?: number; tipo_provision?: string }) =>
       downloadAuthenticated("/api/reports/export/purchases-vs-sales.xlsx", params, `compras_vs_ventas_${params?.fecha_desde || "inicio"}_${params?.fecha_hasta || "hoy"}.xlsx`),
     salesByPaymentMethod: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<{ forma_pago: string; cantidad: number; monto: number; porcentaje: number }[]>("/api/reports/sales/by-payment-method", params),
     expensesByCategory: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<{ categoria: string; cantidad: number; monto: number; porcentaje: number }[]>("/api/reports/expenses/by-category", params),

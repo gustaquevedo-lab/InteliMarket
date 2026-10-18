@@ -25,6 +25,7 @@ interface ComprasVsVentasTabProps {
 export default function ComprasVsVentasTab({ fechaDesde, fechaHasta }: ComprasVsVentasTabProps) {
   const toast = useToast()
   const [targetRatio, setTargetRatio] = useState<number>(70)
+  const [tipoProvision, setTipoProvision] = useState<string>("mercaderias")
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
@@ -38,6 +39,7 @@ export default function ComprasVsVentasTab({ fechaDesde, fechaHasta }: ComprasVs
         fecha_desde: fechaDesde,
         fecha_hasta: fechaHasta,
         target_ratio_pct: targetRatio,
+        tipo_provision: tipoProvision,
       })
       setData(res)
     } catch (err: any) {
@@ -50,7 +52,7 @@ export default function ComprasVsVentasTab({ fechaDesde, fechaHasta }: ComprasVs
 
   useEffect(() => {
     fetchData()
-  }, [fechaDesde, fechaHasta, targetRatio])
+  }, [fechaDesde, fechaHasta, targetRatio, tipoProvision])
 
   const handleExportPdf = async () => {
     try {
@@ -59,6 +61,7 @@ export default function ComprasVsVentasTab({ fechaDesde, fechaHasta }: ComprasVs
         fecha_desde: fechaDesde,
         fecha_hasta: fechaHasta,
         target_ratio_pct: targetRatio,
+        tipo_provision: tipoProvision,
       })
       toast.success("PDF Descargado", "Informe oficial de Compras vs. Ventas OTB generado.")
     } catch (err: any) {
@@ -75,6 +78,7 @@ export default function ComprasVsVentasTab({ fechaDesde, fechaHasta }: ComprasVs
         fecha_desde: fechaDesde,
         fecha_hasta: fechaHasta,
         target_ratio_pct: targetRatio,
+        tipo_provision: tipoProvision,
       })
       toast.success("Excel Descargado", "Planilla de Compras vs. Ventas generada.")
     } catch (err: any) {
@@ -116,8 +120,25 @@ export default function ComprasVsVentasTab({ fechaDesde, fechaHasta }: ComprasVs
           </p>
         </div>
 
-        {/* Controles de Ratio y Descargas */}
+        {/* Controles de Ratio, Filtro de Provisión y Descargas */}
         <div className="flex items-center gap-3 flex-wrap">
+          {/* Selector de Tipo de Provisión (Mercaderías vs Servicios) */}
+          <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
+            <Building2 className="w-4 h-4 text-emerald-600" />
+            <span className="text-xs font-bold text-slate-600 dark:text-slate-300">Proveedores:</span>
+            <select
+              value={tipoProvision}
+              onChange={(e) => setTipoProvision(e.target.value)}
+              className="text-xs font-bold bg-transparent border-0 text-emerald-700 dark:text-emerald-400 focus:outline-none cursor-pointer"
+            >
+              <option value="mercaderias">📦 Mercaderías para la Venta (Bienes + Mixtos)</option>
+              <option value="todos">🌐 Todos los Proveedores (Incluye Servicios)</option>
+              <option value="bienes">🛍️ Solo Bienes / Reventa</option>
+              <option value="mixto">🔄 Solo Proveedores Mixtos</option>
+              <option value="servicios">💼 Solo Servicios / Gastos</option>
+            </select>
+          </div>
+
           <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
             <Sliders className="w-4 h-4 text-blue-600" />
             <span className="text-xs font-bold text-slate-600 dark:text-slate-300">Tope Compra:</span>

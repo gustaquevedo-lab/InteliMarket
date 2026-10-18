@@ -960,10 +960,18 @@ def generate_purchases_vs_sales_pdf(
     rango_str = f"Período: {fecha_desde.strftime('%d/%m/%Y') if fecha_desde else 'Inicio'} al {fecha_hasta.strftime('%d/%m/%Y') if fecha_hasta else 'Hoy'}"
     doc, styles = _base_doc_landscape(buffer, "Control Presupuestario: Compras vs. Ventas (OTB)", company, generated_by)
 
+    tipo_prov_lbl = {
+        "mercaderias": "Solo Mercaderías para la Venta (Bienes + Mixtos)",
+        "todos": "Todos los Proveedores (Bienes, Mixtos y Servicios)",
+        "bienes": "Solo Proveedores de Bienes",
+        "mixto": "Solo Proveedores Mixtos",
+        "servicios": "Solo Proveedores de Servicios/Insumos",
+    }.get(report_data.get("tipo_provision", "mercaderias"), "Mercaderías para la Venta")
+
     elements = _company_header(
         company, styles,
         "Control Presupuestario: Compras vs. Ventas (Open to Buy)",
-        f"{rango_str} — Ratio Tope de Compra Objetivo: {report_data.get('target_ratio_pct', 70.0)}%",
+        f"{rango_str} — Ratio Tope: {report_data.get('target_ratio_pct', 70.0)}% — Filtro: {tipo_prov_lbl}",
         generated_by,
     )
 
