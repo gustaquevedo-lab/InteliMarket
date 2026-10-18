@@ -79,6 +79,7 @@ class SupplierInvoiceResponse(BaseModel):
     created_by: Optional[UUID] = None
     approved_by: Optional[UUID] = None
     notas_credito: list[dict] = []
+    solicitudes_nc: list[dict] = []
     created_at: datetime
     updated_at: datetime
 
