@@ -607,4 +607,8 @@ class ConsignmentSettlementItem(Base):
     product = relationship("Product", foreign_keys=[product_id])
 
 
+# Registrar modelos relacionados para que los relationships de SQLAlchemy se resuelvan sin importar el orden
+import api.src.products.models  # noqa: F401
+
+
 

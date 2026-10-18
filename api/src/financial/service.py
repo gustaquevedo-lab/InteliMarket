@@ -2954,7 +2954,9 @@ async def get_payable_invoices(db: AsyncSession, company_id: str, supplier_id: s
                 )
             )
             nc_orig_res = await db.execute(nc_orig_q)
-            for nc in nc_orig_res.all():
+            matched_nc_ids = set()
+            all_ncs = list(nc_orig_res.all())
+            for nc in all_ncs:
                 for inv in invoices:
                     if inv.supplier_id == nc.supplier_id and _doc_numbers_match(inv.numero_factura, nc.numero_factura_origen):
                         if not any(x["id"] == str(nc.id) for x in nc_map[inv.id]):
@@ -2967,6 +2969,25 @@ async def get_payable_invoices(db: AsyncSession, company_id: str, supplier_id: s
                                 "monto_total": float(nc.monto or 0),
                                 "fecha": nc.fecha.isoformat() if nc.fecha else None,
                             })
+                            matched_nc_ids.add(nc.id)
+
+            # Asociar NCs con saldo disponible sin factura origen específica (o de SIFEN) a la primera factura con saldo del proveedor
+            for nc in all_ncs:
+                if nc.id not in matched_nc_ids:
+                    for inv in invoices:
+                        if inv.supplier_id == nc.supplier_id:
+                            if not any(x["id"] == str(nc.id) for x in nc_map[inv.id]):
+                                m_disp = float(nc.saldo_disponible if nc.saldo_disponible is not None else nc.monto)
+                                nc_map[inv.id].append({
+                                    "id": str(nc.id),
+                                    "numero": nc.numero,
+                                    "motivo": nc.motivo or "Nota de crédito (saldo a favor)",
+                                    "monto_aplicado": m_disp,
+                                    "monto_total": float(nc.monto or 0),
+                                    "fecha": nc.fecha.isoformat() if nc.fecha else None,
+                                })
+                                matched_nc_ids.add(nc.id)
+                                break
 
     today = _today()
     return [
@@ -3470,6 +3491,39 @@ async def apply_supplier_credit_note(db: AsyncSession, company_id: str, credit_n
         observaciones=data.observaciones,
     )
     db.add(app_record)
+
+    # Sincronización bidireccional con Solicitudes de NC (SNC) pendientes en la factura
+    from api.src.purchases.models import SupplierNcRequest
+    snc_q = select(SupplierNcRequest).where(
+        SupplierNcRequest.invoice_id == inv_id,
+        SupplierNcRequest.estado.in_(["pendiente_entrega", "entregada_parcial", "pendiente"])
+    )
+    snc_res = await db.execute(snc_q)
+    pending_sncs = snc_res.scalars().all()
+    monto_remanente_aplicado = monto_aplicar
+    for snc in pending_sncs:
+        if monto_remanente_aplicado <= Decimal("0"):
+            break
+        snc.nc_recibida_numero = credit_note.numero
+        snc.nc_recibida_timbrado = credit_note.timbrado
+        snc.nc_recibida_monto = min(monto_remanente_aplicado, snc.monto_reclamado or Decimal("0"))
+        snc.nc_recibida_fecha = credit_note.fecha
+        snc.resolved_at = datetime.now(timezone.utc)
+        snc.observaciones = f"{snc.observaciones or ''} | Resuelta por aplicación de NC {credit_note.numero}".strip()
+        if monto_remanente_aplicado >= (snc.monto_reclamado or Decimal("0")):
+            snc.estado = "resuelta"
+            monto_remanente_aplicado -= (snc.monto_reclamado or Decimal("0"))
+        else:
+            snc.estado = "entregada_parcial"
+            monto_remanente_aplicado = Decimal("0")
+
+    # Si todas las SNCs quedaron resueltas, desbloquear factura para pago
+    all_resolved = not any(s.estado in ("pendiente_entrega", "entregada_parcial", "pendiente") for s in pending_sncs)
+    if pending_sncs and all_resolved:
+        invoice.bloqueada_para_pago = False
+        invoice.requiere_nc = False
+        invoice.monto_retenido_nc = Decimal("0")
+        invoice.motivo_bloqueo = f"Liberada para pago: Compensada con NC N° {credit_note.numero}"
 
     await db.commit()
     await db.refresh(credit_note)

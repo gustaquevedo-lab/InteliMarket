@@ -259,6 +259,10 @@ class SupplierCreditNote(Base):
     cancelado = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    __table_args__ = (
+        UniqueConstraint("company_id", "supplier_id", "numero", "timbrado", name="uq_supplier_credit_notes_supplier_num_timb"),
+    )
+
 
 class SupplierCreditNoteApplication(Base):
     """Aplicación de saldo de Nota de Crédito de Proveedor a una Factura AP."""

@@ -206,7 +206,7 @@ export default function SupplierPaymentOrderModal({
         const shouldFetchInvoices = (!availableInvoices || availableInvoices.length === 0) && !!supplier.id
         if (shouldFetchInvoices) {
           setLoadingInvoices(true)
-          promises.push(api.financial.invoices.list({ supplier_id: supplier.id, estado: "pendiente" }))
+          promises.push(api.financial.invoices.list({ supplier_id: supplier.id, estado: "pendiente,aprobada,parcial" }))
         }
 
         const results = await Promise.allSettled(promises)
@@ -245,18 +245,20 @@ export default function SupplierPaymentOrderModal({
           setAvailableCheques(chequesRes.value)
         }
         if (invsRes && invsRes.status === "fulfilled" && Array.isArray(invsRes.value)) {
-          const mappedInvs: InvoiceToPay[] = invsRes.value.map((inv: any) => ({
-            id: inv.id,
-            numero_factura: inv.numero_factura || "Factura",
-            timbrado: inv.timbrado,
-            fecha_emision: inv.fecha_emision,
-            fecha_vencimiento: inv.fecha_vencimiento,
-            total: Number(inv.total || inv.total_pyg || 0),
-            saldo_pendiente: Number(inv.saldo_pendiente ?? inv.saldo ?? inv.total ?? 0),
-            supplier_id: inv.supplier_id || supplier.id,
-            supplier_nombre: inv.supplier_nombre || supplier.razon_social,
-            tipo_comprobante: inv.tipo_comprobante || "factura",
-          }))
+          const mappedInvs: InvoiceToPay[] = invsRes.value
+            .filter((inv: any) => Number(inv.saldo_pendiente ?? inv.saldo ?? inv.total ?? 0) > 0)
+            .map((inv: any) => ({
+              id: inv.id,
+              numero_factura: inv.numero_factura || "Factura",
+              timbrado: inv.timbrado,
+              fecha_emision: inv.fecha_emision,
+              fecha_vencimiento: inv.fecha_vencimiento,
+              total: Number(inv.total || inv.total_pyg || 0),
+              saldo_pendiente: Number(inv.saldo_pendiente ?? inv.saldo ?? inv.total ?? 0),
+              supplier_id: inv.supplier_id || supplier.id,
+              supplier_nombre: inv.supplier_nombre || supplier.razon_social,
+              tipo_comprobante: inv.tipo_comprobante || "factura",
+            }))
           setSupplierInvoices(mappedInvs)
         }
       } catch (err) {
