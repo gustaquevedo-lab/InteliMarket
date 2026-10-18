@@ -12,6 +12,7 @@ from reportlab.lib.units import mm
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_RIGHT
 from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.colors import HexColor
 
 from api.src.integrated_finance.pdf_reports import (
     _base_doc, _company_header, _build, _fmt_gs,
