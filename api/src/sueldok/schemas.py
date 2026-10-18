@@ -276,6 +276,17 @@ class PayrollDossierPhaseOut(BaseModel):
     fecha_vencimiento: Optional[str] = None
     pdf_storage_key: Optional[str] = None
     executed_at: Optional[datetime] = None
+    metadata: Optional[dict] = None
+
+
+class ExecuteIpsPhaseRequest(BaseModel):
+    monto_ajustado: Optional[Decimal] = None
+    motivo_ajuste: Optional[str] = None
+
+
+class AdjustIpsPhaseRequest(BaseModel):
+    monto_ajustado: Decimal
+    motivo_ajuste: Optional[str] = None
 
 
 class PayrollDossierOut(BaseModel):

@@ -20,10 +20,15 @@ import {
   Coins,
   Send,
   HelpCircle,
+  SlidersHorizontal,
+  Save,
+  Edit3,
+  X,
 } from "lucide-react"
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG } from "../../utils/format"
+import CurrencyInput from "../../components/CurrencyInput"
 
 interface Phase {
   id: string
@@ -81,6 +86,12 @@ export default function PayrollDossierView({
 
   // Third party cheque inputs
   const [chequeInputs, setChequeInputs] = useState<Record<string, { num: string; banco: string }>>({})
+
+  // IPS Adjustment states
+  const [ipsAdjustmentOpen, setIpsAdjustmentOpen] = useState<Record<string, boolean>>({})
+  const [ipsCustomAmounts, setIpsCustomAmounts] = useState<Record<string, number>>({})
+  const [ipsMotivos, setIpsMotivos] = useState<Record<string, string>>({})
+  const [savingIpsAdjustment, setSavingIpsAdjustment] = useState<string | null>(null)
 
   const handleSyncFromSueldok = useCallback(async (targetPeriodo = initialPeriodo || "2026-09", force = false) => {
     try {
@@ -184,12 +195,45 @@ export default function PayrollDossierView({
     }
   }
 
+  // Handle IPS Adjustment Save
+  const handleSaveIpsAdjustment = async (phaseId: string) => {
+    if (!selectedDossier) return
+    const customAmount = ipsCustomAmounts[phaseId]
+    if (!customAmount || customAmount <= 0) {
+      toast.error("Monto inválido", "Ingrese un monto mayor a cero para el ajuste de IPS.")
+      return
+    }
+    try {
+      setSavingIpsAdjustment(phaseId)
+      const motivo = ipsMotivos[phaseId] || "Ajuste extraordinario según extracto real de IPS (bajas no procesadas)"
+      const res = await api.sueldok.adjustIpsPhase(selectedDossier.id, phaseId, {
+        monto_ajustado: customAmount,
+        motivo_ajuste: motivo,
+      })
+      toast.success(
+        "Ajuste de IPS Guardado",
+        `Monto ajustado a ${formatPYG(res.monto_ajustado)} (Diferencia: ${formatPYG(res.diferencia)}).`
+      )
+      await reloadSelected(selectedDossier.id)
+    } catch (err: any) {
+      toast.error("Error al guardar ajuste", err.response?.data?.detail)
+    } finally {
+      setSavingIpsAdjustment(null)
+    }
+  }
+
   // Handle IPS Execution
   const handleExecuteIps = async (phaseId: string) => {
     if (!selectedDossier) return
     try {
       setActionLoading("ips")
-      const res = await api.sueldok.executeIpsPhase(selectedDossier.id, phaseId)
+      const customAmount = ipsCustomAmounts[phaseId]
+      const motivo = ipsMotivos[phaseId]
+      const payload = (customAmount && customAmount > 0)
+        ? { monto_ajustado: customAmount, motivo_ajuste: motivo }
+        : undefined
+
+      const res = await api.sueldok.executeIpsPhase(selectedDossier.id, phaseId, payload)
       toast.success(
         "OP Previsional IPS emitida",
         `Orden ${res.payment_order_numero} por ${formatPYG(res.monto)}.`
@@ -612,71 +656,212 @@ export default function PayrollDossierView({
 
             {/* ══ FASE 4: PREVISIÓN IPS ═══════════════════════════ */}
             <div className="p-5 rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm space-y-4">
-              <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-700 pb-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-7 h-7 rounded-full bg-purple-600 text-white font-bold flex items-center justify-center text-xs">
-                    4
-                  </span>
-                  <h3 className="font-bold text-gray-900 dark:text-white">
-                    Fase 4: Previsión Previsional IPS
-                  </h3>
-                </div>
-                <span className="text-xs px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300 font-semibold">
-                  {formatPYG(selectedDossier.total_ips_obrero + selectedDossier.total_ips_patronal)}
-                </span>
-              </div>
+              {ipsPhases.map(phase => {
+                const theoreticalAmount = Number(phase.metadata?.monto_teorico_calculado ?? (selectedDossier.total_ips_obrero + selectedDossier.total_ips_patronal))
+                const isAdjusted = Boolean(phase.metadata?.monto_ajustado)
+                const currentMonto = Number(phase.monto)
+                const isOpen = ipsAdjustmentOpen[phase.id] ?? false
+                const customAmount = ipsCustomAmounts[phase.id] !== undefined ? ipsCustomAmounts[phase.id] : (isAdjusted ? currentMonto : theoreticalAmount)
+                const diff = (customAmount || 0) - theoreticalAmount
 
-              {ipsPhases.map(phase => (
-                <div key={phase.id} className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3 text-xs">
-                    <div className="p-3 rounded-xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-100 dark:border-purple-900/30">
-                      <span className="text-gray-400 block mb-0.5">Aporte Obrero (9%)</span>
-                      <b className="text-purple-700 dark:text-purple-300 text-sm">
-                        {formatPYG(selectedDossier.total_ips_obrero)}
-                      </b>
+                return (
+                  <div key={phase.id} className="space-y-4">
+                    {/* Header */}
+                    <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-700 pb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="w-7 h-7 rounded-full bg-purple-600 text-white font-bold flex items-center justify-center text-xs">
+                          4
+                        </span>
+                        <div>
+                          <h3 className="font-bold text-gray-900 dark:text-white">
+                            Fase 4: Previsión Previsional IPS
+                          </h3>
+                          <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                            Aporte patronal + retención obrera cotizable (9% + 16.5% = 25.5%)
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-xs px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300 font-semibold">
+                          {formatPYG(currentMonto)}
+                        </span>
+                        {isAdjusted && (
+                          <span className="block text-[10px] text-amber-600 dark:text-amber-400 font-bold mt-0.5">
+                            Extracto Ajustado
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="p-3 rounded-xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-100 dark:border-purple-900/30">
-                      <span className="text-gray-400 block mb-0.5">Aporte Patronal (16.5%)</span>
-                      <b className="text-purple-700 dark:text-purple-300 text-sm">
-                        {formatPYG(selectedDossier.total_ips_patronal)}
-                      </b>
-                    </div>
-                  </div>
 
-                  <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700 text-xs flex items-center justify-between">
-                    <div>
-                      <span className="text-gray-500 block">Vencimiento Legal:</span>
-                      <b className="text-gray-900 dark:text-white">
-                        {phase.fecha_vencimiento || "Día 12 del mes subsiguiente"}
-                      </b>
+                    {/* Breakdown */}
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+                      <div className="p-3 rounded-xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-100 dark:border-purple-900/30">
+                        <span className="text-gray-400 block mb-0.5">Aporte Obrero (9%)</span>
+                        <b className="text-purple-700 dark:text-purple-300 text-sm">
+                          {formatPYG(selectedDossier.total_ips_obrero)}
+                        </b>
+                      </div>
+                      <div className="p-3 rounded-xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-100 dark:border-purple-900/30">
+                        <span className="text-gray-400 block mb-0.5">Aporte Patronal (16.5%)</span>
+                        <b className="text-purple-700 dark:text-purple-300 text-sm">
+                          {formatPYG(selectedDossier.total_ips_patronal)}
+                        </b>
+                      </div>
                     </div>
-                    {phase.estado === "ejecutado" ? (
-                      <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-semibold">
-                        <CheckCircle className="w-3.5 h-3.5" /> OP Programada
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 font-semibold">
-                        <Clock className="w-3.5 h-3.5" /> Pendiente Emisión
-                      </span>
+
+                    {/* Active Adjustment Info Badge */}
+                    {isAdjusted && (
+                      <div className="p-3 rounded-xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs space-y-1.5">
+                        <div className="flex items-center justify-between font-bold text-amber-900 dark:text-amber-200">
+                          <span className="flex items-center gap-1.5">
+                            <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                            Ajuste Extraordinario Activo (s/ Extracto IPS)
+                          </span>
+                          <span>
+                            {diff >= 0 ? "+" : ""}{formatPYG(phase.metadata.diferencia_ajuste || diff)}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-amber-800/90 dark:text-amber-300/90">
+                          <b>Motivo:</b> {phase.metadata.motivo_ajuste || "Diferencias por bajas no procesadas a tiempo."}
+                        </p>
+                        <div className="flex items-center gap-3 text-[10px] text-gray-500 pt-0.5 border-t border-amber-200/60 dark:border-amber-800/40">
+                          <span>Teórico nómina: {formatPYG(theoreticalAmount)}</span>
+                          <span>•</span>
+                          <span>Extracto real: {formatPYG(currentMonto)}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Adjustment Box (Toggle) */}
+                    {phase.estado !== "ejecutado" && (
+                      <div className="pt-1">
+                        <div className="flex items-center justify-between mb-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setIpsAdjustmentOpen(prev => ({ ...prev, [phase.id]: !prev[phase.id] }))
+                            }
+                            className="text-xs font-semibold text-purple-700 dark:text-purple-300 hover:text-purple-900 dark:hover:text-purple-200 flex items-center gap-1.5 transition"
+                          >
+                            <SlidersHorizontal className="w-3.5 h-3.5" />
+                            {isOpen ? "Ocultar panel de ajuste" : "Ajuste extraordinario de monto (bajas tardías / desvío extracto)"}
+                          </button>
+                          {isOpen && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setIpsAdjustmentOpen(prev => ({ ...prev, [phase.id]: false }))
+                              }
+                              className="text-gray-400 hover:text-gray-600 text-xs"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+
+                        {isOpen && (
+                          <div className="p-3.5 rounded-xl bg-gray-50 dark:bg-gray-900/60 border border-purple-200 dark:border-purple-900/50 space-y-3">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-[11px] font-bold text-gray-700 dark:text-gray-300 mb-1">
+                                  Monto Real a Liquidar s/ Boleta IPS:
+                                </label>
+                                <CurrencyInput
+                                  value={customAmount}
+                                  onChangeValue={(val) =>
+                                    setIpsCustomAmounts(prev => ({ ...prev, [phase.id]: val }))
+                                  }
+                                  currency="PYG"
+                                  placeholder="Monto según extracto oficial"
+                                  className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-xs font-semibold text-gray-900 dark:text-white"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-[11px] font-bold text-gray-700 dark:text-gray-300 mb-1">
+                                  Motivo de la variación:
+                                </label>
+                                <input
+                                  type="text"
+                                  value={ipsMotivos[phase.id] ?? (phase.metadata?.motivo_ajuste || "")}
+                                  onChange={(e) =>
+                                    setIpsMotivos(prev => ({ ...prev, [phase.id]: e.target.value }))
+                                  }
+                                  placeholder="Ej: Bajas de personal no procesadas a tiempo por la encargada"
+                                  className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-xs text-gray-900 dark:text-white"
+                                />
+                              </div>
+                            </div>
+
+                            {/* Live calculation difference */}
+                            {diff !== 0 && (
+                              <div className="flex items-center justify-between text-xs px-2.5 py-1.5 rounded-lg bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200">
+                                <span>
+                                  Diferencia vs Cálculo Teórico ({formatPYG(theoreticalAmount)}):
+                                </span>
+                                <b className={diff > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}>
+                                  {diff > 0 ? "+" : ""}{formatPYG(diff)} {diff > 0 ? "(Sobrecosto patronal)" : "(Descuento)"}
+                                </b>
+                              </div>
+                            )}
+
+                            <div className="flex justify-end pt-1">
+                              <button
+                                type="button"
+                                onClick={() => handleSaveIpsAdjustment(phase.id)}
+                                disabled={savingIpsAdjustment === phase.id}
+                                className="px-3 py-1.5 rounded-lg bg-purple-700 hover:bg-purple-800 text-white font-medium text-xs flex items-center gap-1.5 transition disabled:opacity-50"
+                              >
+                                {savingIpsAdjustment === phase.id ? (
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <Save className="w-3.5 h-3.5" />
+                                )}
+                                Guardar Ajuste en Expediente
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Vencimiento y Estado */}
+                    <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700 text-xs flex items-center justify-between">
+                      <div>
+                        <span className="text-gray-500 block">Vencimiento Legal:</span>
+                        <b className="text-gray-900 dark:text-white">
+                          {phase.fecha_vencimiento || "Día 12 del mes subsiguiente"}
+                        </b>
+                      </div>
+                      {phase.estado === "ejecutado" ? (
+                        <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-semibold">
+                          <CheckCircle className="w-3.5 h-3.5" /> OP Programada
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 font-semibold">
+                          <Clock className="w-3.5 h-3.5" /> Pendiente Emisión
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Botón de Emisión */}
+                    {phase.estado !== "ejecutado" && (
+                      <button
+                        onClick={() => handleExecuteIps(phase.id)}
+                        disabled={actionLoading === "ips"}
+                        className="w-full py-2.5 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs shadow-sm flex items-center justify-center gap-2 transition disabled:opacity-50"
+                      >
+                        {actionLoading === "ips" ? (
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Send className="w-4 h-4" />
+                        )}
+                        Emitir OP Previsional IPS {isAdjusted || (customAmount && customAmount !== theoreticalAmount) ? `(por ${formatPYG(customAmount || currentMonto)})` : "(25.5% Legal)"}
+                      </button>
                     )}
                   </div>
-
-                  {phase.estado !== "ejecutado" && (
-                    <button
-                      onClick={() => handleExecuteIps(phase.id)}
-                      disabled={actionLoading === "ips"}
-                      className="w-full py-2.5 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs shadow-sm flex items-center justify-center gap-2 transition disabled:opacity-50"
-                    >
-                      {actionLoading === "ips" ? (
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <Send className="w-4 h-4" />
-                      )}
-                      Emitir OP Previsional IPS (25.5% Legal)
-                    </button>
-                  )}
-                </div>
-              ))}
+                )
+              })}
             </div>
 
           </div>

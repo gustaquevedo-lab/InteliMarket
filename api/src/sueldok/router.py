@@ -346,18 +346,52 @@ async def get_third_party_annex_pdf(
 async def execute_dossier_ips_phase(
     dossier_id: str,
     phase_id: str,
+    payload: Optional[schemas.ExecuteIpsPhaseRequest] = None,
     company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     db: AsyncSession = Depends(get_db),
     user: Any = Depends(require_auth)
 ):
     """
     Ejecuta la fase de previsión IPS, emitiendo la Orden de Pago al Instituto
-    de Previsión Social por el 25.5% legal con su fecha de vencimiento fiscal.
+    de Previsión Social por el 25.5% legal (o monto extraordinario ajustado).
     """
     from api.src.sueldok.third_party_reports import execute_ips_phase
     user_id = str(user.get("id")) if isinstance(user, dict) else str(getattr(user, "id", ""))
+    monto_ajustado = payload.monto_ajustado if payload else None
+    motivo_ajuste = payload.motivo_ajuste if payload else None
     try:
-        return await execute_ips_phase(db, company_id, phase_id, user_id)
+        return await execute_ips_phase(
+            db, company_id, phase_id, user_id=user_id,
+            monto_ajustado=monto_ajustado, motivo_ajuste=motivo_ajuste
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/dossiers/{dossier_id}/phases/{phase_id}/adjust-ips")
+@router.put("/dossiers/{dossier_id}/phases/{phase_id}/adjust-ips")
+async def adjust_dossier_ips_phase(
+    dossier_id: str,
+    phase_id: str,
+    payload: schemas.AdjustIpsPhaseRequest,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: Any = Depends(require_auth)
+):
+    """
+    Registra un ajuste extraordinario en la fase de previsión IPS
+    (ej. diferencia por bajas tardías de personal en extracto IPS).
+    """
+    from api.src.sueldok.third_party_reports import adjust_ips_phase
+    user_id = str(user.get("id")) if isinstance(user, dict) else str(getattr(user, "id", ""))
+    try:
+        return await adjust_ips_phase(
+            db, company_id, phase_id,
+            monto_ajustado=payload.monto_ajustado,
+            motivo_ajuste=payload.motivo_ajuste,
+            user_id=user_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 

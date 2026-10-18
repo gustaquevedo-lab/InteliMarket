@@ -347,12 +347,14 @@ async def execute_ips_phase(
     db: AsyncSession,
     company_id: str,
     phase_id: str,
-    user_id: Optional[str] = None
+    user_id: Optional[str] = None,
+    monto_ajustado: Optional[Decimal] = None,
+    motivo_ajuste: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Executes the IPS phase:
     Creates a formal SupplierPaymentOrder for Instituto de Previsión Social
-    with the combined 25.5% (9% obrero + 16.5% patronal).
+    with the combined 25.5% (or extraordinary adjusted amount if provided).
     """
     cid = uuid.UUID(company_id)
     pid = uuid.UUID(phase_id)
@@ -366,9 +368,26 @@ async def execute_ips_phase(
     if not phase:
         raise ValueError(f"Phase {phase_id} not found")
 
-    metadata = phase.phase_metadata or {}
+    metadata = dict(phase.phase_metadata or {})
     total_monto = float(phase.monto or 0)
     periodo = phase.dossier.periodo if phase.dossier else "2026-10"
+
+    # Si se envía un monto ajustado extraordinario
+    if monto_ajustado is not None and monto_ajustado > 0:
+        monto_teorico = metadata.get("monto_teorico_calculado")
+        if monto_teorico is None:
+            monto_teorico = total_monto
+            metadata["monto_teorico_calculado"] = monto_teorico
+        metadata["monto_ajustado"] = float(monto_ajustado)
+        metadata["motivo_ajuste"] = motivo_ajuste or "Ajuste extraordinario según extracto real IPS (bajas no procesadas)"
+        metadata["diferencia_ajuste"] = float(monto_ajustado) - monto_teorico
+        phase.phase_metadata = metadata
+        phase.monto = monto_ajustado
+        total_monto = float(monto_ajustado)
+
+    obs = f"Aporte Previsional IPS Nómina {periodo} - 9% Obrero + 16.5% Patronal (Total: 25.5%). Vencimiento legal: {phase.fecha_vencimiento}"
+    if metadata.get("monto_ajustado"):
+        obs += f" | Ajuste extraordinario s/ extracto: {int(total_monto):,} Gs. (Teórico: {int(metadata.get('monto_teorico_calculado', 0)):,} Gs. - Motivo: {metadata.get('motivo_ajuste')})"
 
     # Create SupplierPaymentOrder for IPS
     op_payload = SupplierPaymentOrderCreate(
@@ -377,7 +396,7 @@ async def execute_ips_phase(
         beneficiario_documento="80000000-0",
         periodo_nomina=periodo,
         monto_neto=Decimal(str(int(total_monto))),
-        observaciones=f"Aporte Previsional IPS Nómina {periodo} - 9% Obrero + 16.5% Patronal (Total: 25.5%). Vencimiento legal: {phase.fecha_vencimiento}",
+        observaciones=obs,
         sueldok_sync_id=str(phase.id)
     )
     op_result = await financial_service.create_supplier_payment_order(
@@ -399,5 +418,64 @@ async def execute_ips_phase(
         "payment_order_numero": op_result.get("numero_orden"),
         "monto": total_monto,
         "beneficiario": "Instituto de Previsión Social (IPS)",
-        "fecha_vencimiento": phase.fecha_vencimiento.isoformat() if phase.fecha_vencimiento else None
+        "fecha_vencimiento": phase.fecha_vencimiento.isoformat() if phase.fecha_vencimiento else None,
+        "metadata": metadata,
     }
+
+
+async def adjust_ips_phase(
+    db: AsyncSession,
+    company_id: str,
+    phase_id: str,
+    monto_ajustado: Decimal,
+    motivo_ajuste: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Guarda un ajuste extraordinario sobre la fase de previsión IPS
+    (ej. cuando la planilla emitida por IPS contiene funcionarios no dados de baja a tiempo).
+    """
+    cid = uuid.UUID(company_id)
+    pid = uuid.UUID(phase_id)
+    uid = uuid.UUID(user_id) if user_id else None
+
+    query = select(PayrollDossierPhase).where(
+        PayrollDossierPhase.id == pid
+    ).options(selectinload(PayrollDossierPhase.dossier))
+    res = await db.execute(query)
+    phase = res.scalars().first()
+    if not phase:
+        raise ValueError(f"Phase {phase_id} not found")
+    if phase.estado == "ejecutado":
+        raise ValueError("No se puede ajustar una fase que ya fue ejecutada con Orden de Pago emitida")
+
+    meta = dict(phase.phase_metadata or {})
+    monto_teorico = meta.get("monto_teorico_calculado")
+    if monto_teorico is None:
+        monto_teorico = float(phase.monto or 0)
+        meta["monto_teorico_calculado"] = monto_teorico
+
+    meta["monto_ajustado"] = float(monto_ajustado)
+    meta["motivo_ajuste"] = motivo_ajuste or "Ajuste extraordinario según extracto real IPS (bajas no procesadas)"
+    meta["diferencia_ajuste"] = float(monto_ajustado) - monto_teorico
+    meta["ajustado_at"] = datetime.now(timezone.utc).isoformat()
+    if user_id:
+        meta["ajustado_por"] = user_id
+
+    phase.phase_metadata = meta
+    phase.monto = monto_ajustado
+    periodo = phase.dossier.periodo if phase.dossier else ""
+    phase.phase_label = f"Aporte IPS {periodo} (Ajuste Extraordinario s/ Extracto Real)"
+
+    await db.commit()
+
+    return {
+        "status": "success",
+        "phase_id": str(phase.id),
+        "monto_teorico": monto_teorico,
+        "monto_ajustado": float(monto_ajustado),
+        "diferencia": float(monto_ajustado) - monto_teorico,
+        "motivo_ajuste": meta["motivo_ajuste"],
+        "metadata": meta,
+    }
+

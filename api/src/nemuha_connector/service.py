@@ -478,21 +478,42 @@ async def sync_accounts_payable(db: AsyncSession, company_id: str, since: date |
                     {"saldo": saldo, "estado": estado, "id": str(existing_id)},
                 )
         else:
-            invoice = SupplierInvoice(
-                company_id=company_id,
-                supplier_id=supplier_id,
-                numero_factura=r["NR_DOCUMENTO"] or f"CP-{r['ID_CONTA_PAGAR']}",
-                fecha_emision=r["DT_EMISSAO"] or r["DT_CADASTRO"],
-                fecha_vencimiento=r["DT_VENCIMENTO"],
-                total=Decimal(str(r["VL_DOCUMENTO"])),
-                saldo_pendiente=saldo,
-                condicion="contado" if r["BO_AVISTA"] else "credito",
-                estado=estado,
-                concepto=r["HISTORICO"],
+            # Segunda línea de defensa: aunque el nemuha_record_map no tenga registro
+            # (ej. re-sync tras pérdida del mapa), verificar por numero_factura + supplier
+            # para evitar duplicados cuando el mismo comprobante ya fue insertado.
+            nr_documento = (r["NR_DOCUMENTO"] or "").strip() or f"CP-{r['ID_CONTA_PAGAR']}"
+            existing_by_numero = await db.execute(
+                select(SupplierInvoice).where(
+                    SupplierInvoice.company_id == company_id,
+                    SupplierInvoice.supplier_id == supplier_id,
+                    SupplierInvoice.numero_factura == nr_documento,
+                )
             )
-            db.add(invoice)
-            await db.flush()
-            await _save_map(db, company_id, "fin_conta_pagar", r["ID_CONTA_PAGAR"], "supplier_invoices", invoice.id)
+            existing_inv_by_numero = existing_by_numero.scalars().first()
+
+            if existing_inv_by_numero:
+                # Ya existe: reparar el mapa y actualizar saldo si corresponde
+                await _save_map(db, company_id, "fin_conta_pagar", r["ID_CONTA_PAGAR"], "supplier_invoices", existing_inv_by_numero.id)
+                await db.execute(
+                    text("UPDATE supplier_invoices SET saldo_pendiente = :saldo, estado = :estado, updated_at = now() WHERE id = :id"),
+                    {"saldo": saldo, "estado": estado, "id": str(existing_inv_by_numero.id)},
+                )
+            else:
+                invoice = SupplierInvoice(
+                    company_id=company_id,
+                    supplier_id=supplier_id,
+                    numero_factura=nr_documento,
+                    fecha_emision=r["DT_EMISSAO"] or r["DT_CADASTRO"],
+                    fecha_vencimiento=r["DT_VENCIMENTO"],
+                    total=Decimal(str(r["VL_DOCUMENTO"])),
+                    saldo_pendiente=saldo,
+                    condicion="contado" if r["BO_AVISTA"] else "credito",
+                    estado=estado,
+                    concepto=r["HISTORICO"],
+                )
+                db.add(invoice)
+                await db.flush()
+                await _save_map(db, company_id, "fin_conta_pagar", r["ID_CONTA_PAGAR"], "supplier_invoices", invoice.id)
         count += 1
 
     return count
