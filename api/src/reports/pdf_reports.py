@@ -957,7 +957,7 @@ def generate_purchases_vs_sales_pdf(
     """
     buffer = io.BytesIO()
     rango_str = f"Período: {fecha_desde.strftime('%d/%m/%Y') if fecha_desde else 'Inicio'} al {fecha_hasta.strftime('%d/%m/%Y') if fecha_hasta else 'Hoy'}"
-    doc, styles = _base_doc(buffer, "Control Presupuestario: Compras vs. Ventas (OTB)", company, generated_by, landscape=True)
+    doc, styles = _base_doc_landscape(buffer, "Control Presupuestario: Compras vs. Ventas (OTB)", company, generated_by)
 
     elements = _company_header(
         company, styles,
