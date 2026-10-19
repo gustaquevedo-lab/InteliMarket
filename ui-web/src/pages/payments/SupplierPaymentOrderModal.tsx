@@ -18,11 +18,13 @@ interface InvoiceToPay {
   fecha_emision?: string
   fecha_vencimiento?: string
   total: number
+  total_pyg?: number
   saldo_pendiente: number
   supplier_id: string
   supplier_nombre?: string
   tipo_comprobante?: string
   notas_credito?: any[]
+  total_nc_aplicadas?: number
 }
 
 interface LegalInvoiceFormItem {
@@ -138,6 +140,12 @@ export default function SupplierPaymentOrderModal({
       existingOrder.allocations.forEach((a: any) => {
         const numAplicado = Number(a.monto_aplicado) || 0
         const saldoAnt = Number(a.saldo_anterior) || 0
+        const sumNc = (a.notas_credito && Array.isArray(a.notas_credito))
+          ? a.notas_credito.reduce((acc: number, nc: any) => acc + (Number(nc.monto_aplicado) || 0), 0)
+          : Number(a.total_nc_aplicadas || 0)
+        const mFacturaOriginal = a.monto_factura_original != null && Number(a.monto_factura_original) > 0
+          ? Number(a.monto_factura_original)
+          : (saldoAnt > 0 ? saldoAnt + sumNc : numAplicado + sumNc)
         map[a.invoice_id] = {
           inv: {
             id: a.invoice_id,
@@ -145,10 +153,10 @@ export default function SupplierPaymentOrderModal({
             timbrado: a.timbrado,
             fecha_emision: a.fecha_emision,
             fecha_vencimiento: a.fecha_vencimiento,
-            total: a.monto_factura_original != null ? Number(a.monto_factura_original) : (saldoAnt > 0 ? saldoAnt + numAplicado : numAplicado),
+            total: mFacturaOriginal,
             saldo_pendiente: saldoAnt > 0 ? saldoAnt : numAplicado,
             notas_credito: a.notas_credito || [],
-            total_nc_aplicadas: a.total_nc_aplicadas || 0,
+            total_nc_aplicadas: sumNc,
             supplier_id: supplier.id,
             supplier_nombre: supplier.razon_social,
             tipo_comprobante: (a.numero_factura || "").startsWith("AUTO-REC-") ? "remito" : "factura",
@@ -299,6 +307,43 @@ export default function SupplierPaymentOrderModal({
     loadAuxData()
     return () => { mounted = false }
   }, [supplier.id, availableInvoices, existingOrder])
+
+  // Si se cargan supplierInvoices o availableInvoices, sincronizar total facial y notas_credito
+  useEffect(() => {
+    const list = (supplierInvoices && supplierInvoices.length > 0) ? supplierInvoices : availableInvoices
+    if (list && list.length > 0) {
+      setSelectedInvoicesMap(prev => {
+        let changed = false
+        const next = { ...prev }
+        Object.keys(next).forEach(invId => {
+          const matched = list.find((si: any) => si.id === invId)
+          if (matched) {
+            const currentInv = next[invId].inv
+            const matchedTotal = Number(matched.total || matched.total_pyg || 0)
+            const matchedNCs = matched.notas_credito || []
+            const matchedTotalNC = Number(matched.total_nc_aplicadas || 0)
+
+            const hasBetterTotal = matchedTotal > (currentInv.total || 0)
+            const hasBetterNCs = (!currentInv.notas_credito || currentInv.notas_credito.length === 0) && matchedNCs.length > 0
+
+            if (hasBetterTotal || hasBetterNCs) {
+              changed = true
+              next[invId] = {
+                ...next[invId],
+                inv: {
+                  ...currentInv,
+                  total: hasBetterTotal ? matchedTotal : currentInv.total,
+                  notas_credito: hasBetterNCs ? matchedNCs : currentInv.notas_credito,
+                  total_nc_aplicadas: hasBetterNCs ? matchedTotalNC : currentInv.total_nc_aplicadas,
+                }
+              }
+            }
+          }
+        })
+        return changed ? next : prev
+      })
+    }
+  }, [supplierInvoices, availableInvoices])
 
   // Totales calculados de facturas
   const summaryFacturas = useMemo(() => {
@@ -1592,7 +1637,7 @@ export default function SupplierPaymentOrderModal({
                             <tr>
                               <th className="p-3">Factura N°</th>
                               <th className="p-3">Timbrado / Vto</th>
-                              <th className="p-3 text-right">Saldo Original</th>
+                              <th className="p-3 text-right">Monto Factura (Impreso)</th>
                               <th className="p-3 text-right">Monto Amortizado</th>
                               <th className="p-3 text-right">Retención</th>
                               <th className="p-3 text-right">Neto Factura</th>
@@ -1602,7 +1647,12 @@ export default function SupplierPaymentOrderModal({
                             {allocatedInvoicesList.map(({ inv, monto_aplicado, monto_retencion }) => {
                               const numAplicado = Number(monto_aplicado || 0)
                               const numRetencion = Number(monto_retencion || 0)
-                              const saldoOrig = Number(inv.saldo_pendiente || inv.total || 0)
+                              const saldoPend = Number(inv.saldo_pendiente || 0)
+                              const totalFac = Number(inv.total || saldoPend || numAplicado)
+                              const totalNCs = (inv.notas_credito && Array.isArray(inv.notas_credito))
+                                ? inv.notas_credito.reduce((acc: number, nc: any) => acc + Number(nc.monto_aplicado || 0), 0)
+                                : Number(inv.total_nc_aplicadas || 0)
+                              const deduccionNC = totalNCs > 0 ? totalNCs : Math.max(0, totalFac - (saldoPend > 0 ? saldoPend : numAplicado))
                               const netoFactura = Math.max(0, numAplicado - numRetencion)
 
                               return (
@@ -1618,6 +1668,20 @@ export default function SupplierPaymentOrderModal({
                                         {inv.tipo_comprobante === "gasto" || inv.tipo_comprobante === "insumo_gasto" ? "INSUMO/GASTO" : "MERCADERÍA"}
                                       </span>
                                     </div>
+                                    {inv.notas_credito && inv.notas_credito.length > 0 ? (
+                                      <div className="space-y-0.5 mt-1 pl-2 border-l-2 border-amber-400">
+                                        {inv.notas_credito.map((nc: any, idx: number) => (
+                                          <div key={idx} className="flex items-center gap-1 text-[10px] font-mono font-bold text-amber-600 dark:text-amber-400">
+                                            <span className="text-amber-500">↳ NC {nc.numero}:</span>
+                                            <span>-{formatPYG(nc.monto_aplicado)}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : deduccionNC > 0 ? (
+                                      <div className="mt-1 pl-2 border-l-2 border-amber-400 text-[10px] font-mono font-bold text-amber-600 dark:text-amber-400">
+                                        ↳ NC Deducida: -{formatPYG(deduccionNC)}
+                                      </div>
+                                    ) : null}
                                   </td>
                                   <td className="p-3 text-slate-500 font-sans">
                                     <p className="font-mono text-[11px] text-slate-700 dark:text-slate-300">{inv.timbrado || "S/T"}</p>
@@ -1625,16 +1689,31 @@ export default function SupplierPaymentOrderModal({
                                       Vto: {inv.fecha_vencimiento ? formatDate(inv.fecha_vencimiento) : "S/F"}
                                     </p>
                                   </td>
-                                  <td className="p-3 text-right text-slate-600 dark:text-slate-400">
-                                    {formatPYG(saldoOrig)}
+                                  <td className="p-3 text-right">
+                                    <span className="block font-bold text-slate-900 dark:text-white font-mono text-xs">
+                                      {formatPYG(totalFac)}
+                                    </span>
+                                    {inv.notas_credito && inv.notas_credito.length > 0 ? (
+                                      <div className="space-y-0.5 mt-0.5 font-mono">
+                                        {inv.notas_credito.map((nc: any, idx: number) => (
+                                          <span key={idx} className="block text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                                            -{formatPYG(nc.monto_aplicado)} (NC)
+                                          </span>
+                                        ))}
+                                      </div>
+                                    ) : deduccionNC > 0 ? (
+                                      <span className="block text-[10px] font-bold text-amber-600 dark:text-amber-400 font-mono">
+                                        -{formatPYG(deduccionNC)} (NC)
+                                      </span>
+                                    ) : null}
                                   </td>
-                                  <td className="p-3 text-right text-emerald-600 dark:text-emerald-400 font-bold">
+                                  <td className="p-3 text-right text-emerald-600 dark:text-emerald-400 font-bold font-mono">
                                     {formatPYG(numAplicado)}
                                   </td>
-                                  <td className="p-3 text-right text-amber-600 dark:text-amber-400">
+                                  <td className="p-3 text-right text-amber-600 dark:text-amber-400 font-mono">
                                     {numRetencion > 0 ? `-${formatPYG(numRetencion)}` : "-"}
                                   </td>
-                                  <td className="p-3 text-right text-slate-900 dark:text-white font-bold">
+                                  <td className="p-3 text-right text-slate-900 dark:text-white font-bold font-mono">
                                     {formatPYG(netoFactura)}
                                   </td>
                                 </tr>
