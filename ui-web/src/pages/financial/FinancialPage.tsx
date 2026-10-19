@@ -999,7 +999,7 @@ export default function FinancialPage() {
       if (!supId) return
 
       const est = String(snc.estado || "").toLowerCase()
-      if (est === "resuelta" || est === "rechazada" || snc.nc_recibida_numero) return
+      if (est === "resuelta" || est === "rechazada" || est === "cancelada" || est === "anulada" || snc.nc_recibida_numero) return
 
       let item = map.get(supId)
       if (!item) {

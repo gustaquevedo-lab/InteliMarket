@@ -1080,6 +1080,8 @@ async def list_supplier_nc_requests(
     q = select(SupplierNcRequest).where(SupplierNcRequest.company_id == uuid.UUID(company_id))
     if estado and estado != "todos":
         q = q.where(SupplierNcRequest.estado == estado)
+    elif not estado:
+        q = q.where(SupplierNcRequest.estado.not_in(["cancelada", "anulada"]))
     if supplier_id:
         q = q.where(SupplierNcRequest.supplier_id == uuid.UUID(supplier_id))
     q = q.order_by(SupplierNcRequest.created_at.desc())
