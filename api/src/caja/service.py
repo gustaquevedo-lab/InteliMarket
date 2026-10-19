@@ -5855,8 +5855,12 @@ async def register_cash_advance(db: AsyncSession, session_id: str, data: dict, r
     # Cargo al cliente: lo cobra el terminal y es de la procesadora. En carga manual manda lo impreso en el voucher.
     if data.get("cargo_cliente_gs") is not None and origen == "manual":
         cargo_cliente = max(Decimal("0"), Decimal(str(data["cargo_cliente_gs"]))).quantize(Decimal("0.01"))
-    else:
+    elif data["opcion"] == 2:
         cargo_cliente = calcular_cargo_cliente_adelanto(monto, cargo_pct, cargo_min)
+    else:
+        # Red de Pagos (opcion 1): el terminal no muestra ni cobra comision al cliente (visto el 19-oct-2026 en un
+        # POS de prueba: pide la tarjeta directo). La regla max(1.000, 1 %) es solo del Adelanto Dinelco.
+        cargo_cliente = Decimal("0.00")
 
     adv = CashAdvance(
         company_id=company_id, session_id=sesion.id,

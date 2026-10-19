@@ -82,7 +82,8 @@ export default function AdelantoEfectivoModal({ open, onClose, cashSessionId, te
   const montoNum = soloDigitos(monto)
   const compraNum = soloDigitos(compra)
   const pideSupervisor = montoNum >= ADELANTO_SUPERVISOR_DESDE_GS
-  const cargoCliente = calcularCargoCliente(montoNum, regla)
+  // La comisión al cliente es solo del Adelanto Dinelco (opción 2); Red de Pagos (opción 1) pide la tarjeta directo.
+  const cargoCliente = opcion === 2 ? calcularCargoCliente(montoNum, regla) : 0
   const totalTarjeta = montoNum + cargoCliente
 
   useEffect(() => {
@@ -250,7 +251,12 @@ export default function AdelantoEfectivoModal({ open, onClose, cashSessionId, te
               <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
                 Máximo Gs. {formatPYG(ADELANTO_MAX_GS)} por adelanto · desde Gs. {formatPYG(ADELANTO_SUPERVISOR_DESDE_GS)} pide autorización de supervisor.
               </p>
-              {montoNum > 0 && (
+              {montoNum > 0 && opcion === 1 && (
+                <div className="mt-2 rounded-xl border border-slate-300/60 bg-slate-50 dark:bg-slate-800/40 p-2.5 text-xs text-slate-600 dark:text-slate-300">
+                  Red de Pagos: el terminal no muestra comisión al cliente. Vos entregás <b>Gs. {formatPYG(montoNum)}</b> y ese mismo monto sale de su tarjeta.
+                </div>
+              )}
+              {montoNum > 0 && opcion === 2 && (
                 <div className="mt-2 rounded-xl border border-sky-300/60 bg-sky-50 dark:bg-sky-950/20 p-2.5 text-xs text-sky-800 dark:text-sky-200">
                   El terminal le cobra al cliente una comisión de <b>Gs. {formatPYG(cargoCliente)}</b>{!reglaLeida && " (estimada)"}: de su tarjeta salen <b>Gs. {formatPYG(totalTarjeta)}</b>.
                   Vos entregás <b>Gs. {formatPYG(montoNum)}</b>. Avisale antes de pasar la tarjeta; esa comisión es de la procesadora.
