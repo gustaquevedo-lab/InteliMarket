@@ -299,13 +299,13 @@ export default function VerificarReciboPage() {
 
           <div className="mt-5 pt-5 border-t border-slate-800/80 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
             <a
-              href="https://wa.me/595983490197?text=Hola,%20vi%20la%20verificaci%C3%B3n%20de%20un%20comprobante%20InteliMarket%20y%20me%20gustar%C3%ADa%20informaci%C3%B3n%20del%20sistema%20ERP%20para%20mi%20empresa"
+              href="https://wa.me/595994516360?text=Hola,%20vi%20la%20verificaci%C3%B3n%20de%20un%20comprobante%20InteliMarket%20y%20me%20gustar%C3%ADa%20informaci%C3%B3n%20del%20sistema%20ERP%20para%20mi%20empresa"
               target="_blank"
               rel="noopener noreferrer"
               className="px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 active:scale-95 cursor-pointer"
             >
               <MessageCircle className="w-4 h-4" />
-              <span>Contactar por WhatsApp (+595 983 490197)</span>
+              <span>Contactar por WhatsApp (+595 994 516360)</span>
             </a>
 
             <a
