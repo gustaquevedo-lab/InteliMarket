@@ -17,6 +17,8 @@ export interface CustomerLostDemand {
   updated_at: string
 }
 
+import { getTodayAsuncion } from "../utils/format"
+
 const rawApiUrl = import.meta.env.VITE_API_URL || ""
 const isLocalhostOrRelative = !rawApiUrl || rawApiUrl.startsWith("/") || rawApiUrl.includes("intelimarket-ia")
 export const API_BASE = isLocalhostOrRelative ? "/api" : rawApiUrl
@@ -3858,7 +3860,7 @@ export const api = {
       if (params?.search) q.set("search", params.search)
       if (params?.order_by) q.set("order_by", params.order_by)
       const qs = q.toString() ? `?${q.toString()}` : ""
-      return downloadAuthenticated(`/v1/price-lists/variations/export/csv${qs}`, {}, `variaciones_precios_${new Date().toISOString().slice(0, 10)}.csv`)
+      return downloadAuthenticated(`/v1/price-lists/variations/export/csv${qs}`, {}, `variaciones_precios_${getTodayAsuncion()}.csv`)
     },
     exportVariationsPdf: (params?: {
       fecha_desde?: string
@@ -3874,7 +3876,7 @@ export const api = {
       if (params?.search) q.set("search", params.search)
       if (params?.order_by) q.set("order_by", params.order_by)
       const qs = q.toString() ? `?${q.toString()}` : ""
-      return downloadAuthenticated(`/v1/price-lists/variations/export/pdf${qs}`, {}, `reporte_variaciones_precios_${new Date().toISOString().slice(0, 10)}.pdf`)
+      return downloadAuthenticated(`/v1/price-lists/variations/export/pdf${qs}`, {}, `reporte_variaciones_precios_${getTodayAsuncion()}.pdf`)
     },
   },
 
@@ -4408,7 +4410,7 @@ export const api = {
     getDisbursements: (id: string) => client.get<any[]>(`/v1/expenses/${id}/disbursements`),
     downloadPdf: (id: string) => downloadAuthenticated(`/v1/expenses/${id}/pdf`, {}, `recibo_gasto_${id.slice(0, 8)}.pdf`),
     downloadReportPdf: (params?: { desde?: string; hasta?: string; estado?: string; fund_id?: string; category_id?: string; branch_id?: string }) =>
-      downloadAuthenticated("/v1/expenses/export/report.pdf", params, `reporte_gastos_${new Date().toISOString().slice(0, 10)}.pdf`),
+      downloadAuthenticated("/v1/expenses/export/report.pdf", params, `reporte_gastos_${getTodayAsuncion()}.pdf`),
     uploadComprobante: (file: File) => {
       const fd = new FormData()
       fd.append("file", file)
@@ -4503,7 +4505,7 @@ export const api = {
       downloadPdf: (orderId: string, numOrden: string) =>
         downloadAuthenticated(`/v1/financial/payment-orders/${orderId}/pdf`, { company_id: COMPANY_ID }, `recibo_orden_pago_${numOrden}.pdf`),
       exportReportPdf: (params?: { supplier_id?: string; estado?: string; forma_pago?: string; fecha_desde?: string; fecha_hasta?: string }) =>
-        downloadAuthenticated("/v1/financial/payment-orders/export/report.pdf", { company_id: COMPANY_ID, ...params }, `reporte_pagos_proveedores_${new Date().toISOString().slice(0, 10)}.pdf`),
+        downloadAuthenticated("/v1/financial/payment-orders/export/report.pdf", { company_id: COMPANY_ID, ...params }, `reporte_pagos_proveedores_${getTodayAsuncion()}.pdf`),
       getChequesDisponibles: () =>
         client.get<any[]>("/v1/financial/payment-orders/cheques-disponibles", { company_id: COMPANY_ID } as any),
       createMultiSupplierBatch: (data: any) =>
@@ -4516,11 +4518,11 @@ export const api = {
         if (params.cheque_id) {
           queryParams.cheque_id = params.cheque_id
         }
-        const defaultFilename = filename || `reporte_lote_pago_${new Date().toISOString().slice(0, 10)}.pdf`
+        const defaultFilename = filename || `reporte_lote_pago_${getTodayAsuncion()}.pdf`
         return downloadAuthenticated("/v1/financial/payment-orders/batch/report.pdf", queryParams, defaultFilename)
       },
       downloadProformaPdf: (data: any, filename?: string) =>
-        downloadAuthenticatedPost(`/v1/financial/payment-orders/proforma/pdf?company_id=${COMPANY_ID}`, data, filename || `proforma_pago_${new Date().toISOString().slice(0, 10)}.pdf`),
+        downloadAuthenticatedPost(`/v1/financial/payment-orders/proforma/pdf?company_id=${COMPANY_ID}`, data, filename || `proforma_pago_${getTodayAsuncion()}.pdf`),
     },
     receptions: {
       unbilled: (params?: { supplier_id?: string }) =>
