@@ -11,7 +11,7 @@ class CashRegister(Base):
     __tablename__ = "cash_registers"
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
-    company_id = Column(UUID(as_uuid=True), nullable=False)
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     branch_id = Column(UUID(as_uuid=True))
     nombre = Column(String(100), nullable=False)
     codigo = Column(String(20), nullable=False, unique=True)
@@ -25,8 +25,8 @@ class CashSession(Base):
     __tablename__ = "cash_sessions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
-    register_id = Column(UUID(as_uuid=True), ForeignKey("cash_registers.id"), nullable=False)
-    user_id = Column(UUID(as_uuid=True), nullable=False)
+    register_id = Column(UUID(as_uuid=True), ForeignKey("cash_registers.id"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     cajero_nombre = Column(String(100))
     monto_apertura = Column(Numeric(15, 0), nullable=False)
     monto_apertura_usd = Column(Numeric(15, 2), default=0)
@@ -35,7 +35,7 @@ class CashSession(Base):
     fecha_apertura = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     fecha_cierre = Column(DateTime(timezone=True))
     monto_cierre = Column(Numeric(15, 0))
-    estado = Column(String(20), nullable=False, default="abierta")
+    estado = Column(String(20), nullable=False, default="abierta", index=True)
     ultimo_cash_drop_at = Column(DateTime(timezone=True))
     observaciones = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -45,7 +45,7 @@ class CashCount(Base):
     __tablename__ = "cash_counts"
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
-    session_id = Column(UUID(as_uuid=True), ForeignKey("cash_sessions.id"), nullable=False)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("cash_sessions.id"), nullable=False, index=True)
     monto_efectivo = Column(Numeric(15, 0), nullable=False)
     monto_tarjeta = Column(Numeric(15, 0), default=0)
     monto_transferencia = Column(Numeric(15, 0), default=0)
@@ -62,7 +62,7 @@ class CashCount(Base):
     diferencia_brl = Column(Numeric(12, 2), default=0)
     requiere_revision = Column(Boolean, default=False)  # diferencia superó diferencia_maxima_tolerada del register
     observaciones = Column(Text)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
 class CashHandoff(Base):
@@ -75,7 +75,7 @@ class CashHandoff(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    session_id = Column(UUID(as_uuid=True), ForeignKey("cash_sessions.id"), nullable=False)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("cash_sessions.id"), nullable=False, index=True)
     cash_count_id = Column(UUID(as_uuid=True), ForeignKey("cash_counts.id"), nullable=False)
     entregado_por = Column(UUID(as_uuid=True), nullable=False)  # cajero
     entregado_por_nombre = Column(String(100))
@@ -83,7 +83,7 @@ class CashHandoff(Base):
     monto_usd = Column(Numeric(12, 2), default=0)
     monto_brl = Column(Numeric(12, 2), default=0)
     requiere_revision = Column(Boolean, default=False)
-    estado = Column(String(20), nullable=False, default="pendiente")  # pendiente | confirmado
+    estado = Column(String(20), nullable=False, default="pendiente", index=True)  # pendiente | confirmado
     recibido_por = Column(UUID(as_uuid=True))  # supervisor
     recibido_por_nombre = Column(String(100))
     # Recuento independiente: lo que el supervisor cuenta al recibir, no lo
@@ -109,7 +109,7 @@ class CashDropRequest(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    session_id = Column(UUID(as_uuid=True), ForeignKey("cash_sessions.id"), nullable=False)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("cash_sessions.id"), nullable=False, index=True)
     register_id = Column(UUID(as_uuid=True))
     solicitado_por = Column(UUID(as_uuid=True), nullable=False)  # cajero
     solicitado_por_nombre = Column(String(100))
@@ -117,7 +117,7 @@ class CashDropRequest(Base):
     monto_usd = Column(Numeric(12, 2), default=0)
     monto_brl = Column(Numeric(12, 2), default=0)
     observaciones = Column(Text)
-    estado = Column(String(20), nullable=False, default="pendiente")  # pendiente | confirmado | rechazado
+    estado = Column(String(20), nullable=False, default="pendiente", index=True)  # pendiente | confirmado | rechazado
     confirmado_por = Column(UUID(as_uuid=True))  # supervisor
     confirmado_por_nombre = Column(String(100))
     # Mismo control de doble conteo que CashHandoff -- lo que el supervisor
@@ -142,7 +142,7 @@ class VaultEntry(Base):
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     branch_id = Column(UUID(as_uuid=True))
     origen = Column(String(20), nullable=False, default="entrega_cajero")  # entrega_cajero | ajuste | otro
-    handoff_id = Column(UUID(as_uuid=True), ForeignKey("cash_handoffs.id"))
+    handoff_id = Column(UUID(as_uuid=True), ForeignKey("cash_handoffs.id"), index=True)
     monto_pyg = Column(Numeric(15, 0), nullable=False, default=0)
     monto_usd = Column(Numeric(12, 2), default=0)
     monto_brl = Column(Numeric(12, 2), default=0)

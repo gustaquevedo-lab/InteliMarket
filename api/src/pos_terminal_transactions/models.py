@@ -48,4 +48,4 @@ class PosTerminalTransaction(Base):
     revisado_por = Column(UUID(as_uuid=True), nullable=True)
     revisado_at = Column(DateTime(timezone=True), nullable=True)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
