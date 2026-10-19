@@ -30,6 +30,7 @@ import { captureMessage } from "../../monitor"
 import { cpfValido, dinelcoApi, dinelcoDisponible } from "../../utils/dinelcoTerminal"
 import { validarCierre, totalConfirmadoPyg, type LineaCobro, type ContextoCierre } from "./validarCierre"
 import { terminalLock } from "./terminalLock"
+import AdelantoEfectivoModal from "./AdelantoEfectivoModal"
 import { useTerminalBusy } from "./useTerminalBusy"
 
 
@@ -560,6 +561,7 @@ export default function POSPage() {
   const [submittingReanudar, setSubmittingReanudar] = useState(false)
 
   const [showCashDropModal, setShowCashDropModal] = useState(false)
+  const [showAdelantoModal, setShowAdelantoModal] = useState(false)
   const [cashDropMonto, setCashDropMonto] = useState<string>("")
   const [cashDropMontoUsd, setCashDropMontoUsd] = useState<string>("")
   const [cashDropMontoBrl, setCashDropMontoBrl] = useState<string>("")
@@ -9676,6 +9678,15 @@ export default function POSPage() {
           </button>
 
           <button
+            onClick={() => setShowAdelantoModal(true)}
+            title="Adelanto de efectivo contra tarjeta (Cobrá tu salario, POS Dinelco)"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-600/10 text-emerald-600 border border-emerald-500/30 hover:bg-emerald-600/20 cursor-pointer shrink-0"
+          >
+            <Banknote className="w-3.5 h-3.5" />
+            <span className="text-[11px] hidden sm:inline">Adelanto</span>
+          </button>
+
+          <button
             onClick={() => { setShowExtraClubBalanceModal(true); setBalanceModalQuery(""); setBalanceModalResults([]); setBalanceModalSelected(null) }}
             title="Consultar saldo de línea de crédito Extra Club"
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-purple-600/10 text-purple-600 border border-purple-500/30 hover:bg-purple-600/20 cursor-pointer shrink-0"
@@ -17659,6 +17670,16 @@ export default function POSPage() {
       )}
 
       {/* ── RETIRO DE EFECTIVO (CASH DROP) ────────────────────────────────────── */}
+      <AdelantoEfectivoModal
+        open={showAdelantoModal}
+        onClose={() => setShowAdelantoModal(false)}
+        cashSessionId={cashSessionId}
+        terminalIp={activePosConfig.dinelcoIp}
+        puntoEmision={puntoEmision}
+        cajeroId={user?.id}
+        supervisores={supervisorStaffOptions}
+      />
+
       {showCashDropModal && (
         <div className="fixed inset-0 z-[130] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border-2 border-orange-500/60 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100">

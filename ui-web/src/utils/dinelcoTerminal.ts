@@ -126,6 +126,13 @@ async function restCall(ip: string, tipo: string, params: any, sessionId: string
       if (!r.body?.codigoAutorizacion) return { ok: false, error: "respuesta_sin_autorizacion", desc: r.body?.mensajeDisplay }
       return aprobada(r.body, "venta_qr_pix")
     }
+    case "adelanto": {
+      // Adelanto de efectivo ("Cobrá tu salario"): opcion 1 = Red de Pagos, 2 = Dinelco; cuotas 0 = un solo pago.
+      const r = await post(ip, "/pos/adelanto", { facturaNro: Date.now(), monto, cuotas: 0, opcion: Number(p.opcion) === 1 ? 1 : 2 }, t)
+      if (!r.ok) return errorHttp(r)
+      if (!r.body?.codigoAutorizacion) return { ok: false, error: "respuesta_sin_autorizacion", desc: r.body?.mensajeDisplay }
+      return aprobada(r.body, "adelanto")
+    }
     default:
       return { ok: false, error: `operacion_no_soportada_rest: ${tipo}` }
   }

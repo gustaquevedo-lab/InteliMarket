@@ -2454,6 +2454,15 @@ export const api = {
         }[]
       }>(`/v1/cash-sessions/${sessionId}/sales`),
     paymentBreakdown: (sessionId: string) => client.get<{ pyg: { forma_pago: string; cantidad: number; monto: number; porcentaje: number }[]; otras_monedas: { forma_pago: string; moneda: string; cantidad: number; monto: number }[] }>(`/v1/cash-sessions/${sessionId}/payment-breakdown`),
+    cashAdvances: {
+      create: (sessionId: string, data: {
+        monto: number; opcion: 1 | 2; origen: "terminal" | "manual"; codigo_autorizacion: string
+        nro_referencia?: string; issuer_id?: string; nombre_tarjeta?: string; pan_ultimos4?: string
+        terminal?: string; terminal_ip?: string; punto_emision?: string; sale_id?: string
+        supervisor_id?: string; observaciones?: string; raw_response?: Record<string, unknown>
+      }) => client.post<{ id: string; monto: number; codigo_autorizacion?: string; comision_gs: number; comision_activa: boolean; supervisor_nombre?: string; created_at?: string }>(`/v1/cash-sessions/${sessionId}/cash-advances`, data),
+      list: (sessionId: string) => client.get<any[]>(`/v1/cash-sessions/${sessionId}/cash-advances`),
+    },
     cashDrop: (sessionId: string, data: { monto: number; monto_usd?: number; monto_brl?: number; observaciones?: string }) => client.post<any>(`/v1/cash-sessions/${sessionId}/cash-drop`, data),
     cashDropRequests: {
       list: (estado?: string) => client.get<any[]>("/v1/cash-drop-requests", { company_id: COMPANY_ID, estado } as any),
@@ -2526,6 +2535,7 @@ export const api = {
         comision_fija_gs?: number
         plazo_acreditacion_dias?: number
         tipo_plazo?: string
+        comision_activa?: boolean
         activo: boolean
       }[]>("/v1/caja/config/bank-mappings"),
       update: (canalKey: string, data: {
@@ -2534,6 +2544,7 @@ export const api = {
         comision_fija_gs?: number
         plazo_acreditacion_dias?: number
         tipo_plazo?: string
+        comision_activa?: boolean
         activo?: boolean
       }) => client.put<any>(`/v1/caja/config/bank-mappings/${canalKey}`, data),
     },

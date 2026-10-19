@@ -59,6 +59,7 @@ interface BankMappingItem {
   comision_fija_gs?: number
   plazo_acreditacion_dias?: number
   tipo_plazo?: string
+  comision_activa?: boolean
   activo: boolean
 }
 
@@ -935,6 +936,7 @@ export default function CajaPage() {
     comisionFijaGs?: number,
     plazoAcreditacionDias?: number,
     tipoPlazo?: string,
+    comisionActiva?: boolean,
   ) => {
     setSavingMappingKey(canalKey)
     try {
@@ -945,6 +947,7 @@ export default function CajaPage() {
         comision_fija_gs: comisionFijaGs,
         plazo_acreditacion_dias: plazoAcreditacionDias,
         tipo_plazo: tipoPlazo,
+        comision_activa: comisionActiva,
       })
       toast.success("Mapeo Bancario Actualizado", `Canal ${canalKey} configurado exitosamente.`)
       fetchBankMappings()
@@ -3121,12 +3124,15 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 const currentPlazo = draft.plazo_acreditacion_dias !== undefined ? draft.plazo_acreditacion_dias : (m.plazo_acreditacion_dias !== undefined ? m.plazo_acreditacion_dias : 1)
                 const currentTipoPlazo = draft.tipo_plazo !== undefined ? draft.tipo_plazo : (m.tipo_plazo || "habiles")
                 const currentActivo = draft.activo !== undefined ? draft.activo : m.activo
+                const currentFija = draft.comision_fija_gs !== undefined ? draft.comision_fija_gs : (m.comision_fija_gs || 0)
+                const currentComisionActiva = draft.comision_activa !== undefined ? draft.comision_activa : !!m.comision_activa
                 const isSaving = savingMappingKey === m.canal_key
 
-                // Cálculo simulado sobre 1.000.000 Gs
+                // Cálculo simulado sobre 1.000.000 Gs. Comisión pasiva = la procesadora retiene (se resta);
+                // comisión activa = la procesadora le PAGA al comercio por el servicio (se suma).
                 const baseSimulacion = 1000000
-                const retencionSimulada = Math.round(baseSimulacion * (currentComision / 100))
-                const netoSimulado = baseSimulacion - retencionSimulada
+                const retencionSimulada = Math.round(baseSimulacion * (currentComision / 100) + currentFija)
+                const netoSimulado = currentComisionActiva ? baseSimulacion + retencionSimulada : baseSimulacion - retencionSimulada
 
                 return (
                   <div
@@ -3301,6 +3307,51 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                           </div>
                         </div>
 
+                        {/* Comisión fija por operación y tipo (pasiva / activa) */}
+                        <div className="grid grid-cols-2 gap-2.5 items-end">
+                          <div>
+                            <label className="input-label text-[10px] font-bold text-slate-600 dark:text-slate-300 block mb-1">
+                              Comisión fija por operación:
+                            </label>
+                            <div className="relative">
+                              <input
+                                type="number"
+                                step="1"
+                                min="0"
+                                value={currentFija}
+                                onChange={(e) => {
+                                  const val = Math.max(0, parseFloat(e.target.value) || 0)
+                                  setEditingMappings(prev => ({
+                                    ...prev,
+                                    [m.canal_key]: { ...prev[m.canal_key], comision_fija_gs: val }
+                                  }))
+                                }}
+                                disabled={isSaving}
+                                className="input-field text-xs font-mono pr-7 bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700"
+                              />
+                              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">₲</span>
+                            </div>
+                          </div>
+                          <label className="flex items-start gap-2 cursor-pointer pb-1" title="Activá esto si la procesadora le PAGA la comisión al comercio por este servicio (ingreso), en vez de retenerla (costo).">
+                            <input
+                              type="checkbox"
+                              checked={currentComisionActiva}
+                              onChange={(e) => {
+                                setEditingMappings(prev => ({
+                                  ...prev,
+                                  [m.canal_key]: { ...prev[m.canal_key], comision_activa: e.target.checked }
+                                }))
+                              }}
+                              disabled={isSaving}
+                              className="mt-0.5 rounded border-slate-600 text-emerald-600 focus:ring-emerald-500"
+                            />
+                            <span className="text-[10px] font-bold leading-tight text-slate-700 dark:text-slate-300">
+                              Comisión activa
+                              <span className="block font-medium text-slate-500 dark:text-slate-400">la procesadora le paga al comercio</span>
+                            </span>
+                          </label>
+                        </div>
+
                         {/* Simulador Dinámico de Acreditación Neta */}
                         <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 space-y-1 text-[10px]">
                           <div className="flex items-center justify-between font-semibold text-slate-600 dark:text-slate-300">
@@ -3310,8 +3361,8 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                             </span>
                           </div>
                           <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-                            <span>Comisión ({currentComision}%):</span>
-                            <span className="font-mono text-rose-500 font-bold">-₲ {formatPYG(retencionSimulada)}</span>
+                            <span>Comisión {currentComisionActiva ? "a favor" : "retenida"} ({currentComision}%{currentFija > 0 ? ` + ₲ ${formatPYG(currentFija)}` : ""}):</span>
+                            <span className={`font-mono font-bold ${currentComisionActiva ? "text-emerald-500" : "text-rose-500"}`}>{currentComisionActiva ? "+" : "-"}₲ {formatPYG(retencionSimulada)}</span>
                           </div>
                           <div className="flex items-center justify-between pt-1 border-t border-slate-200 dark:border-slate-700 font-bold text-slate-900 dark:text-emerald-400">
                             <span>Neto Estimado en Banco:</span>
@@ -3347,9 +3398,10 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                           currentAccountId,
                           currentActivo,
                           currentComision,
-                          0,
+                          currentFija,
                           currentPlazo,
-                          currentTipoPlazo
+                          currentTipoPlazo,
+                          currentComisionActiva
                         )}
                         disabled={isSaving}
                         className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold transition flex items-center gap-1.5 shadow-sm disabled:opacity-50"
