@@ -1442,9 +1442,6 @@ export interface ReceiveRemitResult { orden_id: string; procesados: number; erro
 export interface ApproveSuggestionInput { suggestion_ids: string[] }
 export interface EcommerceSyncLog { id: string; company_id?: string; tipo: string; estado: string; productos_count: number; errores_count: number; resultado?: string | null; created_at?: string }
 export interface EcommerceSyncResult { sync_id: string; tipo: string; productos_procesados: number; errores: string[] }
-export interface MigrationLog { id: string; company_id?: string; tipo: string; origen: string; archivo_nombre?: string | null; estado: string; total_registros: number; importados: number; errores: number; errores_detalle?: string | null; created_at?: string }
-export interface MigrationPreview { columnas: string[]; filas_ejemplo: string[][]; total_filas: number; tipo_detectado: string }
-export interface MigrationImportResult { log_id: string; tipo: string; total: number; importados: number; errores: number; errores_detalle: string[] }
 export interface FiscalConfig { id: string; company_id: string; modo_emision: string; punto_emision: string; timbrado_id?: string; created_at?: string; updated_at?: string }
 export interface TimbradoUsage { id: string; timbrado_id: string; tipo_comprobante: string; numero_utilizado: number; created_at: string }
 export interface NotaCreditoDebito { id: string; company_id: string; sale_id: string; tipo: string; numero_nota: string; motivo: string; total: number; estado: string; cdc?: string; xml_enviado?: string; xml_respuesta?: string; created_at: string }
@@ -4855,22 +4852,6 @@ export const api = {
     getAnalytics: () => client.get<IntelliZappAnalytics>("/v1/intellizapp/analytics"),
     triggerAutomation: (data: { event: string; customer_id: string; customer_phone: string; customer_name?: string; context?: any }) => client.post<{ triggered_rules: number; messages_sent: number }>("/v1/intellizapp/trigger", data),
     chatbotTest: (data: { message: string; conversation_id?: string; reset?: boolean }) => client.post<ChatbotTestResponse>("/v1/intellizapp/chatbot/test", data),
-  },
-  migration: {
-    preview: (file: File) => {
-      const formData = new FormData()
-      formData.append("file", file)
-      return request<MigrationPreview>("/v1/migration/preview", { method: "POST", body: formData })
-    },
-    import: (file: File, tipo: string, column_mapping: Record<string, string>, skip_header = true) => {
-      const formData = new FormData()
-      formData.append("file", file)
-      formData.append("tipo", tipo)
-      formData.append("column_mapping", JSON.stringify(column_mapping))
-      formData.append("skip_header", String(skip_header))
-      return request<MigrationImportResult>("/v1/migration/import", { method: "POST", body: formData })
-    },
-    logs: () => client.get<MigrationLog[]>("/v1/migration/logs"),
   },
   fixedAssets: {
     list: (estado?: string) => client.get<{ id: string; nombre: string; categoria: string | null; fecha_adquisicion: string; valor_adquisicion: number; valor_residual: number; vida_util_meses: number; meses_depreciados: number; depreciacion_acumulada: number; valor_libros: number; estado: string; fecha_baja: string | null; motivo_baja: string | null; created_at: string }[]>("/v1/fixed-assets", estado ? { estado } : undefined),
