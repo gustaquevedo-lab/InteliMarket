@@ -418,7 +418,7 @@ export default function ChequesPage() {
       <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
         {[
           { id: "dashboard", label: "Torre de Control", icon: Sparkles },
-          { id: "cartera", label: "Cheques en Cartera", icon: CreditCard, count: analytics.enCarteraCount },
+          { id: "cartera", label: "Diferidos en Cartera", icon: CreditCard, count: analytics.enCarteraCount },
           { id: "depositados", label: "Cobrados / Compensados", icon: CheckCircle2, count: analytics.cobradosCount },
           { id: "emitidos", label: "Emitidos a Proveedores", icon: Building2, count: analytics.emitidosCount },
           { id: "rechazados", label: "Rechazados / En Mora", icon: AlertTriangle, count: analytics.rechazadosCount },
@@ -519,7 +519,14 @@ export default function ChequesPage() {
                         {c.supplier_id && <p className="text-[10px] text-gray-400">Prov: {supplierMap[c.supplier_id] || "Registrado"}</p>}
                       </td>
                       <td className="p-3.5">
-                        <p className="font-mono text-gray-700 dark:text-gray-300">Pago: {c.fecha_pago ? formatDate(c.fecha_pago) : "Al día"}</p>
+                        <p className="font-mono text-gray-700 dark:text-gray-300 font-bold flex items-center gap-1.5 flex-wrap">
+                          <span>Pago: {c.fecha_pago ? formatDate(c.fecha_pago) : "Al día"}</span>
+                          {c.diferido && (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded font-black tracking-wider uppercase bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                              Diferido
+                            </span>
+                          )}
+                        </p>
                         <p className="text-[10px] text-gray-400">Emisión: {c.fecha_emision ? formatDate(c.fecha_emision) : "—"}</p>
                       </td>
                       <td className="p-3.5 text-right font-mono font-black text-gray-900 dark:text-white text-sm">

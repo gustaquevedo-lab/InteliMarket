@@ -1641,7 +1641,7 @@ export default function BancosPage() {
                                 : "text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30"
                             }`}
                           >
-                            Pendientes / En Cartera ({accountCheques.filter(c => ["pendiente", "entregado", "en_cartera"].includes(c.estado)).length})
+                            Diferidos a Cobrar ({accountCheques.filter(c => ["pendiente", "entregado", "en_cartera"].includes(c.estado)).length})
                           </button>
                           <button
                             onClick={() => setAccountChequeFilter("cobrados")}
