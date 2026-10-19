@@ -505,6 +505,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
         id=data.id or uuid.uuid4(),
         company_id=data.company_id,
         branch_id=data.branch_id,
+        warehouse_id=data.warehouse_id,
         customer_id=data.customer_id,
         emission_point_id=data.emission_point_id,
         numero=numero,
@@ -638,18 +639,17 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
         if check.get("inactive"):
             raise ValueError("La cuenta de crédito del cliente se encuentra inactiva.")
 
-        # ── REGLA GENERAL INMUTABLE E INELUDIBLE: SIN DISPONIBLE NO SE PUEDE FACTURAR A CRÉDITO ──
-        # Si el cliente no tiene saldo disponible suficiente para cubrir la compra,
-        # la venta se rechaza terminantemente. No se permite bajo ningún concepto ni autorización.
+        # Sin disponible: la venta queda esperando doble firma (gerencia + rol autorizado) por este pedido.
+        # Crédito, CxC y stock se aplican al completarse en finalize_approved_credit_sale.
         if not check.get("ok"):
-            disp = check.get("saldo_disponible", Decimal("0"))
-            lim = check.get("limite_credito", Decimal("0"))
-            motivo_mora = f" (en mora por {check.get('dias_mora', 0)} días)" if check.get("en_mora") else ""
-            raise ValueError(
-                f"Línea de crédito insuficiente{motivo_mora}: el cliente dispone de {disp:,.0f} Gs. de {lim:,.0f} Gs. "
-                f"Monto a crédito solicitado: {monto_credito:,.0f} Gs. "
-                f"Regla ineludible: no se puede facturar a crédito sin saldo disponible. Cobre con otro medio de pago."
+            sale.estado = "pendiente_aprobacion"
+            await create_approval_request(
+                db, data.company_id, sale.id, data.customer_id, check["credit_account_id"],
+                monto_credito, check["limite_credito"], check["saldo_disponible"],
             )
+            await db.flush()
+            await db.refresh(sale)
+            return sale
 
         credit_result = await process_purchase(
             db,
@@ -837,7 +837,7 @@ async def finalize_approved_credit_sale(db: AsyncSession, request) -> Sale:
 
     items = await get_sale_items(db, str(sale.id))
     deduct_data = SaleCreate(
-        company_id=sale.company_id, branch_id=sale.branch_id, customer_id=sale.customer_id,
+        company_id=sale.company_id, branch_id=sale.branch_id, warehouse_id=sale.warehouse_id, customer_id=sale.customer_id,
         emission_point_id=sale.emission_point_id, tipo_comprobante=sale.tipo_comprobante,
         condicion=sale.condicion, moneda=sale.moneda, tipo_cambio=sale.tipo_cambio,
         user_id=sale.user_id, items=[

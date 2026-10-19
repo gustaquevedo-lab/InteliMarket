@@ -350,6 +350,11 @@ async def approve_credit_request(db: AsyncSession, request_id: str, user_id: str
     if is_super:
         roles.update({"Supervisor", "Gerente", "Administrador"})
 
+    # Doble firma de dos personas distintas: quien firmó una no puede completar la otra.
+    uid = uuid.UUID(user_id)
+    if uid in (request.aprobado_supervisor_id, request.aprobado_gerente_id):
+        return {"error": "Ya firmaste esta solicitud: la segunda firma tiene que ser de otra persona"}
+
     filled_now = None
     if "Supervisor" in roles and not request.aprobado_supervisor_id:
         request.aprobado_supervisor_id = uuid.UUID(user_id)
