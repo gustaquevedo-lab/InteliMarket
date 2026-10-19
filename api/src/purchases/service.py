@@ -3801,15 +3801,17 @@ async def auto_link_receipts_to_invoices(db: AsyncSession, company_id: str) -> d
     for inv in invoices:
         matched_receipt = None
         for r in receipts:
-            # Cotejar por proveedor y número de factura tolerante
-            if r.supplier_id == inv.supplier_id and r.proveedor_ref:
-                if invoice_numbers_match(r.proveedor_ref, inv.numero_factura):
+            # 1. Si la factura ya tiene Orden de Compra asociada, la recepción DEBE pertenecer a esa misma OC
+            if inv.purchase_order_id:
+                if r.purchase_order_id == inv.purchase_order_id:
                     matched_receipt = r
                     break
-            # O por Orden de Compra idéntica
-            if inv.purchase_order_id and r.purchase_order_id == inv.purchase_order_id:
-                matched_receipt = r
-                break
+            else:
+                # 2. Solo si la factura no tiene OC, cotejar por proveedor y número de factura tolerante
+                if r.supplier_id == inv.supplier_id and r.proveedor_ref:
+                    if invoice_numbers_match(r.proveedor_ref, inv.numero_factura):
+                        matched_receipt = r
+                        break
 
         if matched_receipt:
             inv.receipt_id = matched_receipt.id
