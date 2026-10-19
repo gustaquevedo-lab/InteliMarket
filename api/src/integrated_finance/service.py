@@ -1214,8 +1214,8 @@ async def get_consolidated_dashboard(db: AsyncSession, company_id: str) -> dict:
     )
     ap_aging_q = await db.execute(
         select(
-            ap_aging_case,
-            func.sum(SupplierInvoice.saldo_pendiente),
+            ap_aging_case.label("estado"),
+            func.sum(SupplierInvoice.saldo_pendiente).label("monto"),
         ).where(
             SupplierInvoice.company_id == cid,
             SupplierInvoice.estado.in_(["pendiente", "aprobada", "parcial"]),
