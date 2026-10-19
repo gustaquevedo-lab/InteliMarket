@@ -89,6 +89,8 @@ export default function BancosPage() {
   const [chequeFilterFechaDesde, setChequeFilterFechaDesde] = useState("")
   const [chequeFilterFechaHasta, setChequeFilterFechaHasta] = useState("")
   const [chequeSearch, setChequeSearch] = useState("")
+  const [accountChequeFilter, setAccountChequeFilter] = useState<"todos" | "pendientes" | "cobrados">("todos")
+  const [accountChequeSearch, setAccountChequeSearch] = useState("")
   const [showChequeModal, setShowChequeModal] = useState(false)
   const [chequeHistorial, setChequeHistorial] = useState<{ cheque: any; items: any[] } | null>(null)
   const [chequeForm, setChequeForm] = useState({
@@ -719,6 +721,20 @@ export default function BancosPage() {
     if (!selectedBank) return cheques
     return cheques.filter(c => c.bank_account_id === selectedBank)
   }, [cheques, selectedBank])
+
+  const filteredAccountCheques = useMemo(() => {
+    return accountCheques.filter(c => {
+      if (accountChequeFilter === "pendientes" && !["pendiente", "entregado", "en_cartera"].includes(c.estado)) return false
+      if (accountChequeFilter === "cobrados" && c.estado !== "cobrado" && c.estado !== "depositado") return false
+      if (accountChequeSearch.trim()) {
+        const q = accountChequeSearch.trim().toLowerCase()
+        const matchNum = (c.numero || "").toLowerCase().includes(q)
+        const matchBen = (c.beneficiario || "").toLowerCase().includes(q)
+        if (!matchNum && !matchBen) return false
+      }
+      return true
+    })
+  }, [accountCheques, accountChequeFilter, accountChequeSearch])
 
   return (
     <div className="space-y-6 min-w-0 animate-fade-in-up pb-16">
@@ -1604,9 +1620,58 @@ export default function BancosPage() {
                         </button>
                       </div>
 
-                      {accountCheques.length === 0 ? (
+                      {/* Barra de filtros y búsqueda rápida para cheques de la cuenta */}
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700/80">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <button
+                            onClick={() => setAccountChequeFilter("todos")}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                              accountChequeFilter === "todos"
+                                ? "bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-300 shadow-sm ring-1 ring-slate-200 dark:ring-slate-600"
+                                : "text-slate-600 dark:text-slate-400 hover:bg-white/50"
+                            }`}
+                          >
+                            Todos ({accountCheques.length})
+                          </button>
+                          <button
+                            onClick={() => setAccountChequeFilter("pendientes")}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                              accountChequeFilter === "pendientes"
+                                ? "bg-amber-500 text-white shadow-sm"
+                                : "text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30"
+                            }`}
+                          >
+                            Pendientes / En Cartera ({accountCheques.filter(c => ["pendiente", "entregado", "en_cartera"].includes(c.estado)).length})
+                          </button>
+                          <button
+                            onClick={() => setAccountChequeFilter("cobrados")}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                              accountChequeFilter === "cobrados"
+                                ? "bg-emerald-600 text-white shadow-sm"
+                                : "text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                            }`}
+                          >
+                            Cobrados / Compensados ({accountCheques.filter(c => c.estado === "cobrado" || c.estado === "depositado").length})
+                          </button>
+                        </div>
+
+                        <div className="relative min-w-[220px]">
+                          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                          <input
+                            type="text"
+                            placeholder="Buscar N° cheque o beneficiario..."
+                            value={accountChequeSearch}
+                            onChange={(e) => setAccountChequeSearch(e.target.value)}
+                            className="input text-xs pl-8 pr-3 py-1.5 w-full bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700"
+                          />
+                        </div>
+                      </div>
+
+                      {filteredAccountCheques.length === 0 ? (
                         <div className="card p-8 text-center text-slate-400 text-xs">
-                          No hay cheques asociados a esta cuenta.
+                          {accountCheques.length === 0
+                            ? "No hay cheques asociados a esta cuenta."
+                            : "No se encontraron cheques con los filtros seleccionados."}
                         </div>
                       ) : (
                         <div className="card p-0 overflow-hidden">
@@ -1623,7 +1688,7 @@ export default function BancosPage() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                              {accountCheques.map(c => {
+                              {filteredAccountCheques.map(c => {
                                 const badge = CHEQUE_ESTADO_BADGES[c.estado] || CHEQUE_ESTADO_BADGES.pendiente
                                 return (
                                   <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">

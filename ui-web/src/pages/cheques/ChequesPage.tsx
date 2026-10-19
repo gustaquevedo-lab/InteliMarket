@@ -149,7 +149,7 @@ export default function ChequesPage() {
 
       // Tab matching
       if (tab === "cartera" && !["en_cartera", "pendiente", "entregado"].includes(c.estado)) return false
-      if (tab === "depositados" && c.estado !== "depositado") return false
+      if (tab === "depositados" && c.estado !== "cobrado" && c.estado !== "depositado") return false
       if (tab === "rechazados" && c.estado !== "rechazado") return false
       if (tab === "emitidos" && c.tipo !== "emitido" && c.tipo_cheque !== "emitido" && !c.bank_account_id) return false
 
@@ -419,7 +419,7 @@ export default function ChequesPage() {
         {[
           { id: "dashboard", label: "Torre de Control", icon: Sparkles },
           { id: "cartera", label: "Cheques en Cartera", icon: CreditCard, count: analytics.enCarteraCount },
-          { id: "depositados", label: "Depositados / Clearing", icon: Landmark, count: analytics.depositadosCount },
+          { id: "depositados", label: "Cobrados / Compensados", icon: CheckCircle2, count: analytics.cobradosCount },
           { id: "emitidos", label: "Emitidos a Proveedores", icon: Building2, count: analytics.emitidosCount },
           { id: "rechazados", label: "Rechazados / En Mora", icon: AlertTriangle, count: analytics.rechazadosCount },
         ].map((t) => {
