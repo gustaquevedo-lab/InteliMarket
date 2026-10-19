@@ -65,6 +65,7 @@ export default function AdelantoEfectivoModal({ open, onClose, cashSessionId, te
   const [monto, setMonto] = useState("")
   const [compra, setCompra] = useState("")
   const [opcion, setOpcion] = useState<1 | 2>(2)
+  const [medio, setMedio] = useState<"tarjeta" | "qr">("tarjeta")
   const [supEmail, setSupEmail] = useState("")
   const [supPin, setSupPin] = useState("")
   const [estado, setEstado] = useState<Estado>("form")
@@ -73,12 +74,14 @@ export default function AdelantoEfectivoModal({ open, onClose, cashSessionId, te
   const [guardando, setGuardando] = useState(false)
   const [manual, setManual] = useState(false)
   const [manualAut, setManualAut] = useState("")
-  const [resultado, setResultado] = useState<{ monto: number; autorizacion: string; comision: number; cargo: number; supervisor?: string } | null>(null)
+  const [resultado, setResultado] = useState<{ monto: number; autorizacion: string; comision: number; cargo: number; qr: boolean; supervisor?: string } | null>(null)
   const [supUsado, setSupUsado] = useState<{ id: string; nombre: string } | null>(null)
   const [regla, setRegla] = useState(CARGO_DEFECTO)
   const [reglaLeida, setReglaLeida] = useState(false)
   const [manualCargo, setManualCargo] = useState("")
 
+  const qrDisponible = opcion === 2 // el QR de adelanto solo está probado con Adelanto Dinelco
+  const usaQr = medio === "qr" && qrDisponible
   const montoNum = soloDigitos(monto)
   const compraNum = soloDigitos(compra)
   const pideSupervisor = montoNum >= ADELANTO_SUPERVISOR_DESDE_GS
@@ -98,7 +101,7 @@ export default function AdelantoEfectivoModal({ open, onClose, cashSessionId, te
 
   useEffect(() => {
     if (!open) return
-    setMonto(""); setCompra(""); setOpcion(2); setSupEmail(""); setSupPin(""); setEstado("form"); setError("")
+    setMonto(""); setCompra(""); setOpcion(2); setMedio("tarjeta"); setSupEmail(""); setSupPin(""); setEstado("form"); setError("")
     setVoucherPendiente(null); setManual(false); setManualAut(""); setManualCargo(""); setResultado(null); setSupUsado(null)
   }, [open])
 
@@ -136,11 +139,11 @@ export default function AdelantoEfectivoModal({ open, onClose, cashSessionId, te
         monto: montoNum, opcion, origen, codigo_autorizacion: v.codigo_autorizacion,
         nro_referencia: v.nro_referencia, issuer_id: v.issuer_id, nombre_tarjeta: v.nombre_tarjeta,
         pan_ultimos4: v.pan_ultimos4, terminal: v.terminal, terminal_ip: terminalIp, punto_emision: puntoEmision,
-        supervisor_id: sup?.id, raw_response: v.raw,
+        supervisor_id: sup?.id, raw_response: v.raw, observaciones: usaQr && origen === "terminal" ? "Adelanto pagado por QR" : undefined,
         cargo_cliente_gs: origen === "manual" && manualCargo.trim() !== "" ? soloDigitos(manualCargo) : undefined,
       })
       setVoucherPendiente(null)
-      setResultado({ monto: montoNum, autorizacion: v.codigo_autorizacion, comision: Number(r.comision_gs || 0), cargo: Number(r.cargo_cliente_gs || 0), supervisor: r.supervisor_nombre })
+      setResultado({ monto: montoNum, autorizacion: v.codigo_autorizacion, comision: Number(r.comision_gs || 0), cargo: Number(r.cargo_cliente_gs || 0), qr: usaQr && origen === "terminal", supervisor: r.supervisor_nombre })
       setEstado("aprobado")
       toast.success("Adelanto registrado", `Entregá Gs. ${formatPYG(montoNum)} en efectivo al cliente.`)
     } catch (e: any) {
@@ -170,7 +173,7 @@ export default function AdelantoEfectivoModal({ open, onClose, cashSessionId, te
     if (token === null) { setError("El terminal está ocupado con otro cobro. Esperá a que termine."); return }
     setEstado("esperando")
     try {
-      const res = await imDinelco(dinelcoApi, terminalIp, "adelanto", { monto: montoNum, opcion }, null, ADELANTO_TIMEOUT_MS)
+      const res = await imDinelco(dinelcoApi, terminalIp, usaQr ? "adelanto_qr" : "adelanto", { monto: montoNum, opcion }, null, ADELANTO_TIMEOUT_MS)
       if (!res.ok) {
         setEstado("error")
         if (res.error) {
@@ -233,7 +236,8 @@ export default function AdelantoEfectivoModal({ open, onClose, cashSessionId, te
             <div className="text-xs text-slate-500 dark:text-slate-400 space-y-0.5">
               <div>Autorización {resultado.autorizacion}{resultado.supervisor ? ` · autorizó ${resultado.supervisor}` : ""}</div>
               <div>El voucher lo imprime el terminal: guardalo con el cierre de caja.</div>
-              {resultado.cargo > 0 && <div>Al cliente se le cobró Gs. {formatPYG(resultado.monto + Math.round(resultado.cargo))} en la tarjeta (adelanto + comisión de Gs. {formatPYG(Math.round(resultado.cargo))}, que es de la procesadora).</div>}
+              {resultado.cargo > 0 && !resultado.qr && <div>Al cliente se le cobró Gs. {formatPYG(resultado.monto + Math.round(resultado.cargo))} en la tarjeta (adelanto + comisión de Gs. {formatPYG(Math.round(resultado.cargo))}, que es de la procesadora).</div>}
+              {resultado.cargo > 0 && resultado.qr && <div>Pagado por QR. El terminal informó una comisión de Gs. {formatPYG(Math.round(resultado.cargo))} (de la procesadora): confirmá en el voucher si se cobró.</div>}
               {resultado.comision > 0 && <div>Comisión a favor del comercio: Gs. {formatPYG(Math.round(resultado.comision))}</div>}
             </div>
             <button onClick={onClose} className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black cursor-pointer">Listo</button>
@@ -256,10 +260,16 @@ export default function AdelantoEfectivoModal({ open, onClose, cashSessionId, te
                   Red de Pagos: el terminal no muestra comisión al cliente. Vos entregás <b>Gs. {formatPYG(montoNum)}</b> y ese mismo monto sale de su tarjeta.
                 </div>
               )}
-              {montoNum > 0 && opcion === 2 && (
+              {montoNum > 0 && opcion === 2 && usaQr && (
+                <div className="mt-2 rounded-xl border border-amber-300/60 bg-amber-50 dark:bg-amber-950/20 p-2.5 text-xs text-amber-800 dark:text-amber-200">
+                  Con QR el terminal le muestra al cliente una comisión de <b>Gs. {formatPYG(cargoCliente)}</b>{!reglaLeida && " (estimada)"}, pero el código QR sale por <b>Gs. {formatPYG(montoNum)}</b>.
+                  Avisale la comisión antes de confirmar y revisá en el voucher si quedó cobrada. Vos entregás <b>Gs. {formatPYG(montoNum)}</b>.
+                </div>
+              )}
+              {montoNum > 0 && opcion === 2 && !usaQr && (
                 <div className="mt-2 rounded-xl border border-sky-300/60 bg-sky-50 dark:bg-sky-950/20 p-2.5 text-xs text-sky-800 dark:text-sky-200">
                   El terminal le cobra al cliente una comisión de <b>Gs. {formatPYG(cargoCliente)}</b>{!reglaLeida && " (estimada)"}: de su tarjeta salen <b>Gs. {formatPYG(totalTarjeta)}</b>.
-                  Vos entregás <b>Gs. {formatPYG(montoNum)}</b>. Avisale antes de pasar la tarjeta; esa comisión es de la procesadora.
+                  Vos entregás <b>Gs. {formatPYG(montoNum)}</b>. Avisale antes de cobrar; esa comisión es de la procesadora.
                 </div>
               )}
             </div>
@@ -271,6 +281,19 @@ export default function AdelantoEfectivoModal({ open, onClose, cashSessionId, te
                   {o === 2 ? "Adelanto Dinelco" : "Adelanto Red de Pagos"}
                 </button>
               ))}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              {(["tarjeta", "qr"] as const).map((m) => {
+                const deshabilitado = estado === "esperando" || (m === "qr" && !qrDisponible)
+                return (
+                  <button key={m} type="button" disabled={deshabilitado} onClick={() => setMedio(m)}
+                    title={m === "qr" && !qrDisponible ? "El QR de adelanto está probado solo con Adelanto Dinelco" : undefined}
+                    className={`py-2 rounded-xl border text-xs font-bold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${(m === "qr" ? usaQr : !usaQr) ? "bg-slate-800 text-white border-slate-800 dark:bg-slate-200 dark:text-slate-900" : "border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300"}`}>
+                    {m === "tarjeta" ? "💳 Con tarjeta" : "📱 Con QR"}
+                  </button>
+                )
+              })}
             </div>
 
             <details className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 text-xs">
@@ -316,7 +339,7 @@ export default function AdelantoEfectivoModal({ open, onClose, cashSessionId, te
             {!voucherPendiente && (
               <button onClick={cobrarEnTerminal} disabled={estado === "esperando" || guardando}
                 className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50">
-                {estado === "esperando" ? <><Loader2 className="w-4 h-4 animate-spin" />Esperando al terminal… pasá la tarjeta</> : <>Cobrar adelanto en el terminal</>}
+                {estado === "esperando" ? <><Loader2 className="w-4 h-4 animate-spin" />{usaQr ? "Esperando al terminal… el cliente escanea el QR" : "Esperando al terminal… pasá la tarjeta"}</> : <>{usaQr ? "Cobrar adelanto con QR en el terminal" : "Cobrar adelanto en el terminal"}</>}
               </button>
             )}
 

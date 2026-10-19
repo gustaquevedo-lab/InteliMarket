@@ -133,6 +133,14 @@ async function restCall(ip: string, tipo: string, params: any, sessionId: string
       if (!r.body?.codigoAutorizacion) return { ok: false, error: "respuesta_sin_autorizacion", desc: r.body?.mensajeDisplay }
       return aprobada(r.body, "adelanto")
     }
+    case "adelanto_qr": {
+      // Adelanto de efectivo pagado con QR (el cliente escanea desde su app). Mismo cargo al cliente que con tarjeta
+      // (probado el 19-oct-2026 con opcion 2: 155.000 -> total 156.550; al confirmar genera el QR).
+      const r = await post(ip, "/pos/adelanto/qr", { facturaNro: Date.now(), monto, opcion: Number(p.opcion) === 1 ? 1 : 2 }, t)
+      if (!r.ok) return errorHttp(r)
+      if (!r.body?.codigoAutorizacion) return { ok: false, error: "respuesta_sin_autorizacion", desc: r.body?.mensajeDisplay }
+      return aprobada(r.body, "adelanto_qr")
+    }
     default:
       return { ok: false, error: `operacion_no_soportada_rest: ${tipo}` }
   }
