@@ -1422,6 +1422,7 @@ export default function FinancialPage() {
           total: Number(i.total || i.saldo_pendiente || 0),
           saldo_pendiente: Number(i.saldo_pendiente ?? i.total ?? 0),
           monto_a_pagar: Number(i.saldo_pendiente ?? i.total ?? 0),
+          notas_credito: (i as any).notas_credito || [],
         }))
 
       const ncPayload = [

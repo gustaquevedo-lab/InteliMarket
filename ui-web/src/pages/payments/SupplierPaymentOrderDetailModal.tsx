@@ -190,8 +190,9 @@ export default function SupplierPaymentOrderDetailModal({
               <table className="w-full text-xs text-left">
                 <thead className="bg-slate-50 dark:bg-slate-850 text-slate-500 uppercase text-[10px] font-extrabold border-b border-slate-200 dark:border-slate-800">
                   <tr>
-                    <th className="p-2.5">Factura N°</th>
-                    <th className="p-2.5">Timbrado</th>
+                    <th className="p-2.5">Factura / Timbrado</th>
+                    <th className="p-2.5 text-right">Monto Original</th>
+                    <th className="p-2.5 text-right">NCs Deducidas</th>
                     <th className="p-2.5 text-right">Saldo Anterior</th>
                     <th className="p-2.5 text-right">Retención</th>
                     <th className="p-2.5 text-right">Amortizado</th>
@@ -199,16 +200,44 @@ export default function SupplierPaymentOrderDetailModal({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
-                  {order.allocations?.map((a: any) => (
-                    <tr key={a.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
-                      <td className="p-2.5 font-bold text-slate-900 dark:text-white">{a.numero_factura || "-"}</td>
-                      <td className="p-2.5 text-slate-500">{a.timbrado || "-"}</td>
-                      <td className="p-2.5 text-right text-slate-600 dark:text-slate-400">{formatPYG(a.saldo_anterior)}</td>
-                      <td className="p-2.5 text-right text-slate-600 dark:text-slate-400">{formatPYG(a.monto_retencion)}</td>
-                      <td className="p-2.5 text-right font-black text-rose-600 dark:text-rose-400">{formatPYG(a.monto_aplicado)}</td>
-                      <td className="p-2.5 text-right text-slate-500">{formatPYG(a.saldo_restante)}</td>
-                    </tr>
-                  ))}
+                  {order.allocations?.map((a: any) => {
+                    const mOrig = Number(a.monto_factura_original || (Number(a.saldo_anterior || 0) + Number(a.monto_aplicado || 0)))
+                    const ncsList = Array.isArray(a.notas_credito) ? a.notas_credito : []
+                    const sumNc = ncsList.reduce((acc: number, nc: any) => acc + (Number(nc.monto_aplicado) || 0), 0) || Number(a.total_nc_aplicadas || 0)
+                    const sAnt = Number(a.saldo_anterior || 0)
+                    const ncFinal = sumNc > 0 ? sumNc : (mOrig > sAnt && (mOrig - sAnt) > 10 ? (mOrig - sAnt) : 0)
+
+                    return (
+                      <tr key={a.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                        <td className="p-2.5 font-bold text-slate-900 dark:text-white">
+                          <div>{a.numero_factura || "-"}</div>
+                          <div className="text-[10px] text-slate-400 font-normal">Timb: {a.timbrado || "-"}</div>
+                        </td>
+                        <td className="p-2.5 text-right text-slate-700 dark:text-slate-300 font-bold">{formatPYG(mOrig)}</td>
+                        <td className="p-2.5 text-right">
+                          {ncsList.length > 0 ? (
+                            <div className="space-y-0.5">
+                              {ncsList.map((nc: any, idx: number) => (
+                                <span key={idx} className="inline-block text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-900/60">
+                                  NC {nc.numero}: -{formatPYG(nc.monto_aplicado)}
+                                </span>
+                              ))}
+                            </div>
+                          ) : ncFinal > 0 ? (
+                            <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-900/60">
+                              -{formatPYG(ncFinal)}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 font-sans">—</span>
+                          )}
+                        </td>
+                        <td className="p-2.5 text-right text-slate-600 dark:text-slate-400">{formatPYG(a.saldo_anterior)}</td>
+                        <td className="p-2.5 text-right text-slate-600 dark:text-slate-400">{formatPYG(a.monto_retencion)}</td>
+                        <td className="p-2.5 text-right font-black text-rose-600 dark:text-rose-400">{formatPYG(a.monto_aplicado)}</td>
+                        <td className="p-2.5 text-right text-slate-500">{formatPYG(a.saldo_restante)}</td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>

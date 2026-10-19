@@ -634,6 +634,7 @@ class PaymentProposalItem(BaseModel):
     total: Optional[float] = None
     saldo_pendiente: Optional[float] = None
     monto_a_pagar: float = 0.0
+    notas_credito: Optional[list[Any]] = None
 
     @model_validator(mode="after")
     def unify_totals(self):

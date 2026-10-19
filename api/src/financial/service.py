@@ -4968,19 +4968,53 @@ async def get_supplier_payment_order_detail(
         sup_nombre = getattr(row, "supplier_nombre", None)
         sup_ruc = getattr(row, "supplier_ruc", None)
 
-    # Cargar Allocations enriquecidas
+    # Cargar Allocations enriquecidas con monto original y notas de crédito asociadas
     alloc_q = (
         select(
             SupplierPaymentOrderAllocation,
             SupplierInvoice.numero_factura,
             SupplierInvoice.timbrado,
             SupplierInvoice.fecha_emision,
-            SupplierInvoice.fecha_vencimiento
+            SupplierInvoice.fecha_vencimiento,
+            SupplierInvoice.total.label("monto_factura_original")
         )
         .join(SupplierInvoice, SupplierInvoice.id == SupplierPaymentOrderAllocation.invoice_id)
         .where(SupplierPaymentOrderAllocation.payment_order_id == o.id)
     )
     alloc_rows = (await db.execute(alloc_q)).all()
+
+    inv_ids = []
+    for a in alloc_rows:
+        alloc_obj = getattr(a, "SupplierPaymentOrderAllocation", None) or (a if hasattr(a, "monto_aplicado") else a[0])
+        if getattr(alloc_obj, "invoice_id", None):
+            inv_ids.append(alloc_obj.invoice_id)
+
+    nc_by_inv: dict[uuid.UUID, list[dict]] = {}
+    if inv_ids:
+        nc_app_q = (
+            select(
+                SupplierCreditNoteApplication.invoice_id,
+                SupplierCreditNoteApplication.monto_aplicado,
+                SupplierCreditNote.id.label("nc_id"),
+                SupplierCreditNote.numero.label("nc_numero"),
+                SupplierCreditNote.timbrado.label("nc_timbrado"),
+                SupplierCreditNote.motivo.label("nc_motivo"),
+                SupplierCreditNote.fecha.label("nc_fecha")
+            )
+            .join(SupplierCreditNote, SupplierCreditNote.id == SupplierCreditNoteApplication.credit_note_id)
+            .where(SupplierCreditNoteApplication.invoice_id.in_(inv_ids))
+        )
+        nc_app_res = await db.execute(nc_app_q)
+        for nc_row in nc_app_res.all():
+            nc_by_inv.setdefault(nc_row.invoice_id, []).append({
+                "id": str(nc_row.nc_id),
+                "numero": nc_row.nc_numero,
+                "timbrado": nc_row.nc_timbrado,
+                "motivo": nc_row.nc_motivo or "Nota de crédito",
+                "monto_aplicado": float(nc_row.monto_aplicado or 0),
+                "fecha": nc_row.nc_fecha.isoformat() if nc_row.nc_fecha else None
+            })
+
     allocations_data = []
     for a in alloc_rows:
         alloc_obj = getattr(a, "SupplierPaymentOrderAllocation", None) or (a if hasattr(a, "monto_aplicado") else a[0])
@@ -4988,6 +5022,10 @@ async def get_supplier_payment_order_detail(
         timbrado = getattr(a, "timbrado", None)
         fech_em = getattr(a, "fecha_emision", None)
         fech_vc = getattr(a, "fecha_vencimiento", None)
+        monto_orig = getattr(a, "monto_factura_original", None)
+        inv_ncs = nc_by_inv.get(alloc_obj.invoice_id, [])
+        total_nc = sum(nc["monto_aplicado"] for nc in inv_ncs)
+
         allocations_data.append({
             "id": str(alloc_obj.id),
             "invoice_id": str(alloc_obj.invoice_id),
@@ -4995,6 +5033,9 @@ async def get_supplier_payment_order_detail(
             "timbrado": timbrado,
             "fecha_emision": fech_em.isoformat() if fech_em else None,
             "fecha_vencimiento": fech_vc.isoformat() if fech_vc else None,
+            "monto_factura_original": float(monto_orig) if monto_orig is not None else float(alloc_obj.saldo_anterior + alloc_obj.monto_aplicado),
+            "notas_credito": inv_ncs,
+            "total_nc_aplicadas": total_nc,
             "monto_aplicado": float(alloc_obj.monto_aplicado),
             "monto_retencion": float(alloc_obj.monto_retencion),
             "saldo_anterior": float(alloc_obj.saldo_anterior),

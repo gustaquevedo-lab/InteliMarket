@@ -145,8 +145,10 @@ export default function SupplierPaymentOrderModal({
             timbrado: a.timbrado,
             fecha_emision: a.fecha_emision,
             fecha_vencimiento: a.fecha_vencimiento,
-            total: saldoAnt > 0 ? saldoAnt + numAplicado : numAplicado,
+            total: a.monto_factura_original != null ? Number(a.monto_factura_original) : (saldoAnt > 0 ? saldoAnt + numAplicado : numAplicado),
             saldo_pendiente: saldoAnt > 0 ? saldoAnt : numAplicado,
+            notas_credito: a.notas_credito || [],
+            total_nc_aplicadas: a.total_nc_aplicadas || 0,
             supplier_id: supplier.id,
             supplier_nombre: supplier.razon_social,
             tipo_comprobante: (a.numero_factura || "").startsWith("AUTO-REC-") ? "remito" : "factura",
@@ -956,12 +958,20 @@ export default function SupplierPaymentOrderModal({
                             <p className="text-[10px] text-slate-400">Vto: {formatDate(inv.fecha_vencimiento)}</p>
                           </td>
                           <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-400">
-                            <span className="block">{formatPYG(totalFac)}</span>
-                            {deduccionNC > 0 && (
+                            <span className="block font-bold text-slate-800 dark:text-slate-200">{formatPYG(totalFac)}</span>
+                            {inv.notas_credito && inv.notas_credito.length > 0 ? (
+                              <div className="space-y-0.5 mt-0.5">
+                                {inv.notas_credito.map((nc: any, idx: number) => (
+                                  <span key={idx} className="block text-[9px] font-bold text-amber-600 dark:text-amber-400">
+                                    NC {nc.numero}: -{formatPYG(nc.monto_aplicado)}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : deduccionNC > 0 ? (
                               <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 block" title="Deducción de NCs vinculadas">
                                 -{formatPYG(deduccionNC)} (NC)
                               </span>
-                            )}
+                            ) : null}
                           </td>
                           <td className="p-3 text-right font-mono font-bold text-emerald-700 dark:text-emerald-400">
                             {formatPYG(saldo)}
