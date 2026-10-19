@@ -719,6 +719,26 @@ CREATE INDEX IF NOT EXISTS ix_delivery_notes_company ON delivery_notes (company_
 CREATE INDEX IF NOT EXISTS ix_delivery_notes_customer ON delivery_notes (customer_id);
 """
 
+# Índices medidos (lecturas completas en pg_stat_user_tables, 19-oct-2026). En una base con datos,
+# crearlos antes a mano con CREATE INDEX CONCURRENTLY y el mismo nombre para no bloquear escrituras.
+INDEX_DDL = """
+CREATE INDEX IF NOT EXISTS ix_sales_order_items_order ON sales_order_items (order_id);
+CREATE INDEX IF NOT EXISTS ix_sales_order_items_product ON sales_order_items (product_id);
+CREATE INDEX IF NOT EXISTS ix_purchase_order_items_po ON purchase_order_items (purchase_order_id);
+CREATE INDEX IF NOT EXISTS ix_purchase_order_items_product ON purchase_order_items (product_id);
+CREATE INDEX IF NOT EXISTS ix_stock_product ON stock (product_id);
+CREATE INDEX IF NOT EXISTS ix_sales_own_numero ON sales (company_id, created_at DESC) WHERE numero ~ '^[0-9]{8}-[A-Z0-9]{3}-[0-9]+$';
+CREATE INDEX IF NOT EXISTS ix_supplier_invoices_receipt ON supplier_invoices (receipt_id);
+CREATE INDEX IF NOT EXISTS ix_supplier_invoices_po ON supplier_invoices (purchase_order_id);
+CREATE INDEX IF NOT EXISTS ix_supplier_invoices_company_estado_venc ON supplier_invoices (company_id, estado, fecha_vencimiento);
+CREATE INDEX IF NOT EXISTS ix_purchase_orders_supplier ON purchase_orders (supplier_id);
+CREATE INDEX IF NOT EXISTS ix_purchase_orders_company_fecha ON purchase_orders (company_id, fecha);
+CREATE INDEX IF NOT EXISTS ix_sales_orders_company_fecha ON sales_orders (company_id, fecha);
+CREATE INDEX IF NOT EXISTS ix_sales_orders_sale ON sales_orders (sale_id);
+CREATE INDEX IF NOT EXISTS ix_inventory_movements_ref ON inventory_movements (referencia_id);
+CREATE INDEX IF NOT EXISTS ix_inventory_movements_product_created ON inventory_movements (product_id, created_at);
+"""
+
 ALEMBIC_VERSIONS = [
     ("20260531230000", "adv_storage_locations/picking_lists/cycle_counts/consignment/replenish"),
     ("20261012100000", "geocoords lat/lng/geocoded_at on customers"),
@@ -758,6 +778,8 @@ async def main():
         print("  ✓ SP5 tables")
         await c.execute(PLATFORM_DDL)
         print("  ✓ platform tables")
+        await c.execute(INDEX_DDL)
+        print("  ✓ índices de rendimiento")
 
         # 2b. Create any remaining missing tables defined in SQLAlchemy models
         try:

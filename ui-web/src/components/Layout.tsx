@@ -64,6 +64,7 @@ const navGroups: NavGroup[] = [
       { icon: Map, label: "Mapa en Tiempo Real", path: "/mapa-tiempo-real" },
       { icon: Navigation, label: "Planificador de Rutas", path: "/rutas" },
       { icon: Trophy, label: "Rendimiento Preventistas", path: "/distribuidora/rendimiento-vendedores" },
+      { icon: Smartphone, label: "Inteliforce (Fuerza de Ventas)", path: "/inteliforce" },
       { icon: Truck, label: "Despacho & Carga (Muelle)", path: "/distribuidora/despacho" },
       { icon: Navigation, label: "Mi Viaje Hoy (Cobrador)", path: "/distribuidora/mi-viaje" },
       { icon: DollarSign, label: "Rendiciones de Cobro", path: "/distribuidora/rendiciones" },

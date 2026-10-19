@@ -107,6 +107,7 @@ const TesoreriaPage = lazy(() => import("./pages/distribuidora/TesoreriaPage"))
 const DespachoPage = lazy(() => import("./pages/distribuidora/DespachoPage"))
 const MiViajeHoyPage = lazy(() => import("./pages/distribuidora/MiViajeHoyPage"))
 const SupplierKpisPage = lazy(() => import("./pages/supplier-kpis/SupplierKpisPage"))
+const InteliforcePage = lazy(() => import("./pages/inteliforce/InteliforcePage"))
 const SalesTargetsPage = lazy(() => import("./pages/sales-targets/SalesTargetsPage"))
 const InventoryAdvancedPage = lazy(() => import("./pages/inventory/InventoryAdvancedPage"))
 const IntegratedFinancePage = lazy(() => import("./pages/integrated-finance/IntegratedFinancePage"))
@@ -352,6 +353,7 @@ function AppRoutes() {
           ["distribuidora/despacho", <DespachoPage />],
           ["distribuidora/mi-viaje", <MiViajeHoyPage />],
           ["supplier-kpis", <SupplierKpisPage />],
+          ["inteliforce", <InteliforcePage />],
           ["proveedor-kpis", <SupplierKpisPage />],
           ["sales-targets", <SalesTargetsPage />],
           ["metas-ventas", <SalesTargetsPage />],

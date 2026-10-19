@@ -113,7 +113,8 @@ async def generate_sale_number(db: AsyncSession, company_id: str, branch_id: str
     # shortcut: último+1 sin bloqueo (la UNIQUE de numero evita duplicar, no reintenta), rediseñar con secuencia por punto de emisión.
     result = await db.execute(
         select(Sale)
-        .where(Sale.company_id == company_id, Sale.numero.op("~")(r"^\d{8}-\w{3}-\d+$"))
+        # Patrón literal (no parámetro) e idéntico al del índice parcial ix_sales_own_numero, si no Postgres no lo usa.
+        .where(Sale.company_id == company_id, text("numero ~ '^[0-9]{8}-[A-Z0-9]{3}-[0-9]+$'"))
         .order_by(Sale.created_at.desc())
         .limit(1)
     )
