@@ -12951,7 +12951,7 @@ export default function POSPage() {
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2.5">
                           <div className="flex items-center gap-2">
                             <CreditCard className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-                            <span className="font-black text-xs text-slate-900 dark:text-white">Terminal POS Dinelco (Ingenico AXIUM)</span>
+                            <span className="font-black text-xs text-slate-900 dark:text-white">Terminal POS Dinelco</span>
                           </div>
                           
                           {/* Segmented control de sub-métodos Dinelco */}
@@ -13293,7 +13293,7 @@ export default function POSPage() {
                             <div className="flex items-center gap-2">
                               <QrCode className="w-7 h-7 text-purple-600" />
                               <div className="text-left">
-                                <div className="font-bold text-xs text-slate-900 dark:text-white">Dinelco (Ingenico AXIUM) - {dinelcoSubMethod === "pix" ? "PIX Brasil" : "QR Guaraníes"}</div>
+                                <div className="font-bold text-xs text-slate-900 dark:text-white">Dinelco - {dinelcoSubMethod === "pix" ? "PIX Brasil" : "QR Guaraníes"}</div>
                                 {!(isMultiPayment || extraPaymentLegs.some((l) => l.method === "dinelco")) && (
                                   <div className="text-xs font-posMono tabular-nums font-black text-purple-600 dark:text-purple-400">
                                     {formatPYG(totalPyg)}
