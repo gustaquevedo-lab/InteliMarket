@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, Any
 from datetime import datetime, date
 import uuid
@@ -42,8 +42,7 @@ class BenchmarkConfigResponse(BaseModel):
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BenchmarkRegionCreate(BaseModel):
@@ -70,8 +69,7 @@ class BenchmarkRegionResponse(BaseModel):
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BenchmarkRecordCreate(BaseModel):
@@ -128,8 +126,7 @@ class BenchmarkRecordResponse(BaseModel):
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BenchmarkScoreResponse(BaseModel):
@@ -150,8 +147,7 @@ class BenchmarkScoreResponse(BaseModel):
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RankingItem(BaseModel):

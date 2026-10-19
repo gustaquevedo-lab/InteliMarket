@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, Any
 from datetime import date, datetime
 import uuid
@@ -26,8 +26,7 @@ class ShrinkageRecordResponse(BaseModel):
     anomaly_score: float
     is_anomaly: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ComputeShrinkageRequest(BaseModel):
@@ -52,8 +51,7 @@ class ShrinkageAlertResponse(BaseModel):
     resolved_at: Optional[datetime]
     created_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ResolveAlertRequest(BaseModel):
@@ -73,8 +71,7 @@ class ShrinkageRecommendationResponse(BaseModel):
     is_applied: bool
     applied_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ApplyRecommendationRequest(BaseModel):

@@ -1,7 +1,7 @@
 """Branch schemas"""
 
 from decimal import Decimal
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import datetime
 import uuid
@@ -48,8 +48,7 @@ class BranchResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BranchPriceUpsert(BaseModel):
@@ -68,8 +67,7 @@ class BranchPriceResponse(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BranchTransferItemCreate(BaseModel):
@@ -94,8 +92,7 @@ class BranchTransferItemResponse(BaseModel):
     costo_unitario: Optional[float] = None
     cantidad_recibida: Optional[int] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BranchTransferResponse(BaseModel):
@@ -115,8 +112,7 @@ class BranchTransferResponse(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TransferReceiveItem(BaseModel):

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, Any
 from datetime import date, datetime
 import uuid
@@ -47,8 +47,7 @@ class DailyPnlResponse(BaseModel):
     top_products: Optional[Any]
     status: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ── PnlAdjustment ────────────────────────────────────────────────
@@ -71,8 +70,7 @@ class PnlAdjustmentResponse(BaseModel):
     created_by: Optional[uuid.UUID]
     created_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ── PnlBudget ────────────────────────────────────────────────────
@@ -100,8 +98,7 @@ class PnlBudgetResponse(BaseModel):
     budgeted_shrinkage: float
     budgeted_labor: float
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ── Compute / Dashboard ──────────────────────────────────────────

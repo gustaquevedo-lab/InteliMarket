@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, Any
 from datetime import datetime, date
 import uuid
@@ -45,8 +45,7 @@ class ForecastConfigResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ForecastGenerateRequest(BaseModel):
@@ -75,8 +74,7 @@ class ForecastPredictionResponse(BaseModel):
     override_reason: Optional[str]
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ForecastOverrideCreate(BaseModel):
@@ -101,8 +99,7 @@ class ForecastOverrideResponse(BaseModel):
     created_by: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AnomalyDetectionResponse(BaseModel):
@@ -122,8 +119,7 @@ class AnomalyDetectionResponse(BaseModel):
     reviewed: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AnomalyReviewRequest(BaseModel):
@@ -150,8 +146,7 @@ class PurchaseSuggestionResponse(BaseModel):
     supplier_candidates: Optional[list[dict[str, Any]]] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PurchaseSuggestionUpdate(BaseModel):
@@ -175,8 +170,7 @@ class ForecastAccuracyResponse(BaseModel):
     modelo: Optional[str]
     recorded_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ForecastDashboard(BaseModel):

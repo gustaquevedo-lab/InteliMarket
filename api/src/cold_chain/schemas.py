@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import datetime
 import uuid
@@ -42,8 +42,7 @@ class SensorOut(BaseModel):
     signal_strength: Optional[int]
     created_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ReadingIn(BaseModel):
@@ -66,8 +65,7 @@ class ReadingOut(BaseModel):
     read_at: datetime
     created_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AlertOut(BaseModel):
@@ -85,8 +83,7 @@ class AlertOut(BaseModel):
     whatsapp_notified: bool
     created_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ComplianceLogOut(BaseModel):
@@ -107,8 +104,7 @@ class ComplianceLogOut(BaseModel):
     report_generated: bool
     created_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ColdChainDashboard(BaseModel):
