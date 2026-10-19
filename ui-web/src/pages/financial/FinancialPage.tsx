@@ -477,6 +477,38 @@ export default function FinancialPage() {
     }
   }
 
+  const [archivingNc, setArchivingNc] = useState(false)
+
+  const handleArchiveCreditNotes = async (ncIds: string[], customMotivo?: string) => {
+    if (!ncIds || ncIds.length === 0) return
+    const count = ncIds.length
+    const confirmMsg = count === 1 
+      ? "¿Desea desvincular esta Nota de Crédito de la cartera activa?\n\nSu saldo disponible quedará en 0 y se conservará como histórico, sin volver a restar del saldo pendiente ni generar ruido en pagos."
+      : `¿Desea desvincular ${count} Notas de Crédito seleccionadas de la cartera activa?\n\nSu saldo disponible quedará en 0 y se conservarán como histórico, sin restar del monedero ni de pagos futuros.`
+
+    if (!window.confirm(confirmMsg)) return
+
+    setArchivingNc(true)
+    try {
+      const res = await api.financial.creditNotes.archiveBatch(
+        ncIds,
+        customMotivo || "Liquidado históricamente / Desvinculado de cartera activa"
+      )
+      toast.success("Notas de Crédito Archivadas", res.mensaje || `Se desvincularon ${res.archivadas} NCs exitosamente.`)
+      // Limpiar selección de las NCs archivadas
+      setSelectedOpCreditNoteIds(prev => {
+        const next = new Set(prev)
+        ncIds.forEach(id => next.delete(id))
+        return next
+      })
+      await fetchAll()
+    } catch (err: any) {
+      toast.error("Error al desvincular NCs", err?.message || "No se pudieron archivar las Notas de Crédito.")
+    } finally {
+      setArchivingNc(false)
+    }
+  }
+
   const handleViewApplications = async (nc: any) => {
     setShowApplicationsModal(nc)
     setLoadingApplications(true)
@@ -2512,6 +2544,24 @@ export default function FinancialPage() {
                               <span>Desmarcar Todo ({totalSelectedCount})</span>
                             </button>
                           )}
+
+                          {/* Botón Desvincular / Archivar NCs Seleccionadas */}
+                          {selectedOpCreditNoteIds.size > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => handleArchiveCreditNotes(Array.from(selectedOpCreditNoteIds))}
+                              disabled={archivingNc}
+                              className="btn-ghost text-xs py-1.5 px-3.5 flex items-center gap-1.5 border border-amber-300 dark:border-amber-700/60 bg-amber-500/15 text-amber-800 dark:text-amber-300 hover:bg-amber-500/25 rounded-lg transition font-bold cursor-pointer disabled:opacity-50 shadow-sm"
+                              title="Desvincular las NCs seleccionadas para que queden como histórico y no resten del saldo ni aparezcan activas"
+                            >
+                              {archivingNc ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" />
+                              ) : (
+                                <Ban className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                              )}
+                              <span>Desvincular / Archivar NCs ({selectedOpCreditNoteIds.size})</span>
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -2807,15 +2857,27 @@ export default function FinancialPage() {
                                       </button>
                                     )}
                                     {isNC && (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleOpenApplyModal(doc.raw)}
-                                        className="btn-ghost text-xs py-1 px-2.5 text-purple-600 hover:text-purple-800 dark:text-purple-400 font-semibold inline-flex items-center gap-1 hover:bg-purple-50 dark:hover:bg-purple-950/40 rounded"
-                                        title="Imputar o amortizar este saldo a una factura pendiente del proveedor"
-                                      >
-                                        <Wallet className="w-3.5 h-3.5" />
-                                        <span>Amortizar Factura</span>
-                                      </button>
+                                      <div className="flex items-center justify-end gap-1.5">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleOpenApplyModal(doc.raw)}
+                                          className="btn-ghost text-xs py-1 px-2.5 text-purple-600 hover:text-purple-800 dark:text-purple-400 font-semibold inline-flex items-center gap-1 hover:bg-purple-50 dark:hover:bg-purple-950/40 rounded"
+                                          title="Imputar o amortizar este saldo a una factura pendiente del proveedor"
+                                        >
+                                          <Wallet className="w-3.5 h-3.5" />
+                                          <span>Amortizar Factura</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleArchiveCreditNotes([doc.id])}
+                                          disabled={archivingNc}
+                                          className="btn-ghost text-xs py-1 px-2 text-amber-600 hover:text-amber-800 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded inline-flex items-center gap-1 font-semibold"
+                                          title="Desvincular esta NC de la cartera activa (saldo disponible a 0, queda histórica)"
+                                        >
+                                          <Ban className="w-3.5 h-3.5 text-amber-600" />
+                                          <span>Desvincular</span>
+                                        </button>
+                                      </div>
                                     )}
                                     {isDev && (
                                       <span className="text-[11px] text-amber-600 dark:text-amber-400 font-semibold">
@@ -3898,7 +3960,10 @@ export default function FinancialPage() {
 
                 <div className="h-80">
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={cashFlow}>
+                    <AreaChart data={cashFlow.map((cf: any) => ({
+                      ...cf,
+                      saldo_proyectado: Number(cf.saldo_final_proyectado ?? cf.saldo_proyectado ?? 0),
+                    }))}>
                       <defs>
                         <linearGradient id="colorSaldo" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
@@ -3906,7 +3971,7 @@ export default function FinancialPage() {
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
-                      <XAxis dataKey="fecha" fontSize={10} tickFormatter={f => f.slice(5)} />
+                      <XAxis dataKey="fecha" fontSize={10} tickFormatter={f => f?.slice ? f.slice(5) : f} />
                       <YAxis tickFormatter={v => `${(v / 1_000_000).toFixed(0)}M`} fontSize={10} />
                       <Tooltip formatter={(v: any) => [formatPYG(Number(v)), "Saldo Proyectado"]} />
                       <ReferenceLine y={50_000_000} stroke="#ef4444" strokeDasharray="3 3" label="Umbral de Seguridad (50M)" />

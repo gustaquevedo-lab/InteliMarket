@@ -4592,6 +4592,11 @@ export const api = {
         },
         apply: (creditNoteId: string, data: { invoice_id: string; monto: number; observaciones?: string }) =>
           client.post<any>(`/v1/financial/supplier-credit-notes/${creditNoteId}/apply?company_id=${COMPANY_ID}`, data),
+        archiveBatch: (creditNoteIds: string[], motivo?: string) =>
+          client.post<{ success: boolean; archivadas: number; monto_total: number; mensaje: string }>(
+            `/v1/financial/supplier-credit-notes/archive-batch?company_id=${COMPANY_ID}`,
+            { credit_note_ids: creditNoteIds, motivo }
+          ),
         applications: (creditNoteId?: string) =>
           client.get<any[]>(creditNoteId ? `/v1/financial/supplier-credit-notes/${creditNoteId}/applications` : "/v1/financial/credit-note-applications", { company_id: COMPANY_ID } as any),
       }

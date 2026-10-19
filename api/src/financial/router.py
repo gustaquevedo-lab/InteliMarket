@@ -27,7 +27,7 @@ from api.src.financial.schemas import (
     PaymentRunCreate, PaymentRunResponse, PaymentRunWithItems, PaymentRunItemResponse,
     APPaymentRejectRequest,
     CashFlowAlertConfig,
-    SupplierCreditNoteCreate, SupplierCreditNoteApply,
+    SupplierCreditNoteCreate, SupplierCreditNoteApply, SupplierCreditNoteArchiveBatch,
     SupplierPaymentOrderCreate, SupplierPaymentOrderDisburse, SupplierPaymentOrderUpdate,
     PaymentProposalPdfRequest,
     MultiSupplierPaymentBatchCreate,
@@ -821,6 +821,21 @@ async def apply_supplier_credit_note(
         return await service.apply_supplier_credit_note(db, company_id, credit_note_id, body)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/supplier-credit-notes/archive-batch")
+async def archive_supplier_credit_notes_batch(
+    body: SupplierCreditNoteArchiveBatch,
+    company_id: str = Query(),
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        return await service.archive_supplier_credit_notes_batch(db, company_id, body.credit_note_ids, body.motivo)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error al archivar Notas de Crédito: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/supplier-credit-notes/{credit_note_id}/applications")

@@ -3631,6 +3631,48 @@ async def apply_supplier_credit_note(db: AsyncSession, company_id: str, credit_n
     }
 
 
+async def archive_supplier_credit_notes_batch(
+    db: AsyncSession, company_id: str, credit_note_ids: list[str], motivo: str | None = None
+) -> dict:
+    """Desvincula / Archiva un conjunto de Notas de Crédito de Proveedor dejando su saldo_disponible en 0
+    para que queden registradas como movimiento histórico contable pero no figuren en la cartera activa ni en el monedero.
+    """
+    if not credit_note_ids:
+        return {"success": True, "archivadas": 0, "monto_total": 0, "mensaje": "No se recibieron NCs para archivar."}
+
+    cid = uuid.UUID(company_id)
+    cn_uuids = [uuid.UUID(str(x)) for x in credit_note_ids]
+
+    res = await db.execute(
+        select(SupplierCreditNote).where(
+            SupplierCreditNote.company_id == cid,
+            SupplierCreditNote.id.in_(cn_uuids),
+            SupplierCreditNote.cancelado == False
+        )
+    )
+    notes = res.scalars().all()
+
+    archivadas = 0
+    monto_total_archivado = Decimal("0")
+    motivo_texto = motivo or "Liquidado históricamente / Desvinculado de cartera activa"
+
+    for note in notes:
+        saldo_previo = Decimal(str(note.saldo_disponible if note.saldo_disponible is not None else note.monto))
+        monto_total_archivado += saldo_previo
+        note.saldo_disponible = Decimal("0")
+        note.observaciones = f"{note.observaciones or ''} | [ARCHIVADO HISTORICO] Saldo {saldo_previo:,.0f} Gs desvinculado: {motivo_texto}".strip()
+        archivadas += 1
+
+    await db.commit()
+
+    return {
+        "success": True,
+        "archivadas": archivadas,
+        "monto_total": float(monto_total_archivado),
+        "mensaje": f"Se desvincularon exitosamente {archivadas} Notas de Crédito de la cartera activa."
+    }
+
+
 async def list_credit_note_applications(db: AsyncSession, company_id: str, credit_note_id: str | None = None) -> list[dict]:
     cid = uuid.UUID(company_id)
     query = (

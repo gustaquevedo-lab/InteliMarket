@@ -557,6 +557,11 @@ class SupplierCreditNoteApply(BaseModel):
     observaciones: Optional[str] = None
 
 
+class SupplierCreditNoteArchiveBatch(BaseModel):
+    credit_note_ids: list[str]
+    motivo: Optional[str] = "Liquidado históricamente / Desvinculado de cartera activa"
+
+
 # ── Supplier Payment Orders (OP Multifactura y Multimedio) ─────────────────────────
 
 class PaymentOrderAllocationCreate(BaseModel):
