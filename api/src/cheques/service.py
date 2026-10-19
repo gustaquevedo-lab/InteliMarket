@@ -300,6 +300,7 @@ async def update_estado(
     user_nombre: str | None,
     motivo_rechazo: str | None = None,
     costo_rechazo: Decimal | None = None,
+    bank_account_id: uuid.UUID | str | None = None,
 ) -> Cheque:
     cheque = await get_cheque(db, cheque_id)
     if not cheque:
@@ -317,25 +318,29 @@ async def update_estado(
     if motivo_rechazo:
         cheque.motivo_rechazo = motivo_rechazo
 
-    # Imputar costo bancario de rechazo si aplica
-    if nuevo_estado == "rechazado" and costo_rechazo and costo_rechazo > 0 and cheque.bank_account_id:
+    # Imputar costo bancario de rechazo si aplica (a la cuenta indicada o a la del cheque)
+    target_ba_id = bank_account_id or cheque.bank_account_id
+    if nuevo_estado == "rechazado" and costo_rechazo and costo_rechazo > 0 and target_ba_id:
+        target_bid = uuid.UUID(str(target_ba_id))
         from api.src.financial.models import BankAccount, BankTransaction
-        bank_acc = await db.get(BankAccount, cheque.bank_account_id)
+        bank_acc = await db.get(BankAccount, target_bid)
         if bank_acc:
             bank_acc.saldo_actual = (bank_acc.saldo_actual or 0) - Decimal(str(costo_rechazo))
             tx = BankTransaction(
                 company_id=cheque.company_id,
-                bank_account_id=cheque.bank_account_id,
+                bank_account_id=target_bid,
                 fecha=date.today(),
                 tipo="egreso",
                 monto=costo_rechazo,
-                moneda=cheque.moneda or "PYG",
+                moneda=bank_acc.moneda or cheque.moneda or "PYG",
                 descripcion=f"Comisión / Gasto por cheque rechazado N° {cheque.numero} - Motivo: {motivo_rechazo or 'Sin fondos'}",
                 referencia=f"CHQ-RECHAZO-{cheque.numero}",
                 cheque_id=cheque.id,
                 categoria="comision",
             )
             db.add(tx)
+            if not cheque.bank_account_id:
+                cheque.bank_account_id = target_bid
 
     await db.flush()
 

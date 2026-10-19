@@ -49,6 +49,7 @@ class ChequeEstadoUpdate(BaseModel):
     notas: Optional[str] = None
     motivo_rechazo: Optional[str] = None
     costo_rechazo: Optional[Decimal] = None
+    bank_account_id: Optional[UUID] = None
 
 
 class ChequeUpdate(BaseModel):

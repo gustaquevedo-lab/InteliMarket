@@ -84,6 +84,7 @@ export default function ChequesPage() {
   const [otroMotivo, setOtroMotivo] = useState("")
   const [imputarCosto, setImputarCosto] = useState(false)
   const [costoRechazo, setCostoRechazo] = useState("")
+  const [cuentaRechazoId, setCuentaRechazoId] = useState("")
   const [notasRechazo, setNotasRechazo] = useState("")
   const [rechazando, setRechazando] = useState(false)
 
@@ -276,13 +277,18 @@ export default function ChequesPage() {
       toast.error("Motivo requerido", "Por favor seleccioná o escribí el motivo de rechazo.")
       return
     }
+    const costoNum = imputarCosto ? (Number(costoRechazo) || 0) : 0
+    if (imputarCosto && costoNum > 0 && !cuentaRechazoId) {
+      toast.error("Cuenta bancaria requerida", "Seleccioná la cuenta bancaria de donde se debitó la comisión de rechazo.")
+      return
+    }
     setRechazando(true)
     try {
-      const costoNum = imputarCosto ? (Number(costoRechazo) || 0) : 0
       await api.cheques.updateEstado(chequeARechazar.id, {
         estado: "rechazado",
         motivo_rechazo: motivoFinal,
         costo_rechazo: costoNum > 0 ? costoNum : undefined,
+        bank_account_id: (imputarCosto && costoNum > 0) ? cuentaRechazoId : undefined,
         notas: notasRechazo.trim() || undefined,
       })
       toast.success("Cheque Rechazado", `El cheque N° ${chequeARechazar.numero} fue registrado como rechazado.${costoNum > 0 ? ` Se debitó Gs. ${costoNum.toLocaleString("es-PY")} de comisión bancaria.` : ""}`)
@@ -291,6 +297,7 @@ export default function ChequesPage() {
       setOtroMotivo("")
       setImputarCosto(false)
       setCostoRechazo("")
+      setCuentaRechazoId("")
       setNotasRechazo("")
       loadData()
     } catch (e: any) {
@@ -780,6 +787,7 @@ export default function ChequesPage() {
                                 setOtroMotivo("")
                                 setImputarCosto(false)
                                 setCostoRechazo("")
+                                setCuentaRechazoId(c.bank_account_id || (bankAccounts[0]?.id || ""))
                                 setNotasRechazo("")
                               }}
                               className="btn-secondary text-[10px] px-2 py-1 text-red-600 border-red-200 hover:bg-red-50 dark:hover:bg-red-950/40 font-semibold"
@@ -1477,24 +1485,53 @@ export default function ChequesPage() {
                 </div>
               )}
 
-              {/* Imputación de Costos Bancarios (si tiene cuenta corriente vinculada) */}
-              {chequeARechazar.bank_account_id && (
-                <div className="p-3.5 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 space-y-2.5">
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={imputarCosto}
-                      onChange={e => setImputarCosto(e.target.checked)}
-                      className="rounded border-gray-300 text-purple-600 focus:ring-purple-500 w-4 h-4"
-                    />
-                    <span className="text-xs font-bold text-amber-950 dark:text-amber-200">
-                      Imputar comisión / gasto bancario por rechazo
-                    </span>
-                  </label>
-                  {imputarCosto && (
-                    <div className="pt-1.5 space-y-1">
+              {/* Imputación de Costos Bancarios */}
+              <div className="p-3.5 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 space-y-3">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={imputarCosto}
+                    onChange={e => {
+                      setImputarCosto(e.target.checked)
+                      if (e.target.checked && !cuentaRechazoId) {
+                        setCuentaRechazoId(chequeARechazar.bank_account_id || (bankAccounts[0]?.id || ""))
+                      }
+                    }}
+                    className="rounded border-gray-300 text-purple-600 focus:ring-purple-500 w-4 h-4"
+                  />
+                  <span className="text-xs font-bold text-amber-950 dark:text-amber-200">
+                    Imputar comisión / gasto bancario por rechazo
+                  </span>
+                </label>
+
+                {imputarCosto && (
+                  <div className="pt-1.5 space-y-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-amber-950 dark:text-amber-200 block mb-1">
+                        Cuenta Bancaria a Debitar *
+                      </label>
+                      <select
+                        value={cuentaRechazoId}
+                        onChange={e => setCuentaRechazoId(e.target.value)}
+                        className="input text-xs w-full font-medium"
+                      >
+                        <option value="">— Seleccionar cuenta bancaria —</option>
+                        {bankAccounts.map((ba: any) => (
+                          <option key={ba.id} value={ba.id}>
+                            {ba.alias ? `[${ba.alias}] ` : ""}{ba.banco} — {ba.numero_cuenta} ({ba.moneda}) · Saldo: Gs. {Number(ba.saldo_actual || 0).toLocaleString("es-PY")}
+                          </option>
+                        ))}
+                      </select>
+                      {!chequeARechazar.bank_account_id && (
+                        <p className="text-[10px] text-amber-800 dark:text-amber-300 mt-1">
+                          (Cheque sin cuenta previa: se asociará a esta cuenta y registrará el débito bancario).
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="space-y-1">
                       <label className="text-[11px] font-bold text-amber-950 dark:text-amber-200 block">
-                        Costo / Comisión del Banco (Gs.)
+                        Costo / Comisión del Banco (Gs.) *
                       </label>
                       <CurrencyInput
                         value={costoRechazo}
@@ -1504,12 +1541,12 @@ export default function ChequesPage() {
                         className="input-field text-xs font-mono font-bold"
                       />
                       <p className="text-[10px] text-amber-800 dark:text-amber-300">
-                        Se registrará automáticamente una transacción de egreso (comisión) en la cuenta bancaria del cheque.
+                        Se registrará automáticamente una transacción de egreso (comisión) en la cuenta bancaria seleccionada.
                       </p>
                     </div>
-                  )}
-                </div>
-              )}
+                  </div>
+                )}
+              </div>
 
               {/* Observaciones adicionales */}
               <div>
