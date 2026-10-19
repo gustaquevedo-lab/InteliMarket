@@ -680,7 +680,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
         )
 
     await _deduct_stock_for_sale(db, sale, data)
-    puntos_ganados = await _award_loyalty_points(db, sale, data)
+    puntos_ganados = 0  # sin fidelización en esta vertical
     await _redeem_customer_offers(db, sale, data)
 
     await db.flush()
@@ -775,50 +775,6 @@ async def _deduct_stock_for_sale(db: AsyncSession, sale: Sale, data: SaleCreate)
             db.add(movement)
 
 
-async def _award_loyalty_points(db: AsyncSession, sale: Sale, data: SaleCreate) -> int:
-    if not data.customer_id:
-        return 0
-    from api.src.customers.models import Customer
-    cust = await db.get(Customer, data.customer_id)
-    if not cust or not cust.extra_club_numero or not cust.extra_club_numero.strip():
-        # REGLA ESTRICTA: Solo quien es socio de Extra Club (con número de socio válido) acumula puntos.
-        return 0
-    from api.src.loyalty import service as loyalty_service
-    from api.src.loyalty.schemas import PointsCreate
-    config = await loyalty_service.get_or_create_config(db, str(data.company_id))
-    if config.activo and config.crear_en_venta:
-        divisor = config.puntos_por_guarani if config.puntos_por_guarani > 0 else 1000
-        base_puntos = int(sale.total // divisor)
-        if base_puntos > 0:
-            # Multiplicador dinámico de campaña promocional
-            factor = 1.0
-            campana_desc = ""
-            if getattr(config, "promocion_activa", False):
-                mult_promo = float(getattr(config, "multiplicador_promocional", 1.0) or 1.0)
-                if mult_promo > 1.0:
-                    factor *= mult_promo
-                    p_name = getattr(config, "promocion_nombre", "") or "Promo ExtraClub"
-                    campana_desc = f" [{p_name} x{mult_promo:g}]"
-            
-            puntos = int(base_puntos * factor)
-            if puntos > 0:
-                await loyalty_service.earn_points(
-                    db,
-                    PointsCreate(
-                        company_id=data.company_id,
-                        customer_id=data.customer_id,
-                        tipo="ganado",
-                        puntos=puntos,
-                        referencia_tipo="sale",
-                        referencia_id=str(sale.id),
-                        descripcion=f"Compra {sale.numero} - {puntos} pts (Base: {base_puntos} pts @ Gs. {divisor:,}{campana_desc})",
-                    ),
-                    config=config,
-                )
-                return puntos
-    return 0
-
-
 async def _redeem_customer_offers(db: AsyncSession, sale: Sale, data: SaleCreate) -> None:
     """Marca como usadas las ofertas personalizadas del cliente para los productos adquiridos en la venta."""
     if not data.customer_id:
@@ -894,7 +850,7 @@ async def finalize_approved_credit_sale(db: AsyncSession, request) -> Sale:
         ],
     )
     await _deduct_stock_for_sale(db, sale, deduct_data)
-    puntos_ganados = await _award_loyalty_points(db, sale, deduct_data)
+    puntos_ganados = 0  # sin fidelización en esta vertical
 
     await db.flush()
     await db.refresh(sale)
@@ -1643,23 +1599,6 @@ async def cancel_sale(db: AsyncSession, sale_id: str) -> Sale | None:
             """),
             {"sale_id": str(sale.id)},
         )
-
-    from api.src.loyalty.models import LoyaltyPoints
-    puntos_result = await db.execute(
-        select(func.coalesce(func.sum(LoyaltyPoints.puntos), 0))
-        .where(LoyaltyPoints.referencia_tipo == "sale", LoyaltyPoints.referencia_id == str(sale.id), LoyaltyPoints.tipo == "ganado")
-    )
-    puntos_otorgados = puntos_result.scalar() or 0
-    if puntos_otorgados and sale.customer_id:
-        db.add(LoyaltyPoints(
-            company_id=sale.company_id,
-            customer_id=sale.customer_id,
-            tipo="ajustado",
-            puntos=-int(puntos_otorgados),
-            referencia_tipo="sale",
-            referencia_id=str(sale.id),
-            descripcion=f"Reverso por cancelacion de venta {sale.numero}",
-        ))
 
     items_result = await db.execute(select(SaleItem).where(SaleItem.sale_id == sale.id))
     for item in items_result.scalars().all():
