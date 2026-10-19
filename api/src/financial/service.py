@@ -981,12 +981,15 @@ async def auto_create_invoice_from_receipt(db: AsyncSession, receipt_id: str) ->
         iva_10 = (po.iva_10 or Decimal("0")) * proporcion
         iva_5 = (po.iva_5 or Decimal("0")) * proporcion
 
+    supplier = await db.get(Supplier, po.supplier_id) if po.supplier_id else None
+    plazo = (supplier.plazo_pago_dias if supplier else None) or 30  # 30 días si el proveedor no tiene plazo cargado
+
     invoice = SupplierInvoice(
         company_id=po.company_id,
         supplier_id=po.supplier_id,
         numero_factura=f"AUTO-{receipt.numero}",
         fecha_emision=_today(),
-        fecha_vencimiento=_today() + timedelta(days=30),
+        fecha_vencimiento=_today() + timedelta(days=plazo),
         total=total,
         iva_10=iva_10,
         iva_5=iva_5,
