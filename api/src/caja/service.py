@@ -1693,14 +1693,20 @@ async def list_sessions_with_totals(
         for h in handoffs_res.scalars().all():
             handoffs_map[h.session_id] = h
 
-    # Reconciliación oficial en paralelo para todas las sesiones cerradas o verificadas del listado
+    # Reconciliación oficial: para listados masivos (historial), usamos counts_map (pre-cargado en 1 query batch).
+    # Solo ejecutamos reconciliación profunda si son muy pocas sesiones (<= 3) o si alguna no tiene CashCount asentado.
     recon_map = {}
     if closed_session_ids:
-        recon_tasks = [get_session_reconciliation_data(db, sid) for sid in closed_session_ids]
-        recon_results = await asyncio.gather(*recon_tasks, return_exceptions=True)
-        for sid, r in zip(closed_session_ids, recon_results):
-            if isinstance(r, dict):
-                recon_map[sid] = r
+        sessions_needing_recon = [sid for sid in closed_session_ids if sid not in counts_map]
+        if len(closed_session_ids) <= 3:
+            sessions_needing_recon = closed_session_ids
+
+        if sessions_needing_recon:
+            recon_tasks = [get_session_reconciliation_data(db, sid) for sid in sessions_needing_recon]
+            recon_results = await asyncio.gather(*recon_tasks, return_exceptions=True)
+            for sid, r in zip(sessions_needing_recon, recon_results):
+                if isinstance(r, dict):
+                    recon_map[sid] = r
 
     # Pre-cargar cajas registradoras para evitar N+1 en sesiones abiertas
     open_reg_ids = list({s.register_id for s in sessions if s.estado == "abierta" and s.register_id})
