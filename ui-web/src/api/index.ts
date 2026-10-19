@@ -4108,6 +4108,14 @@ export const api = {
     listDossiers: () => client.get<any[]>(`/v1/sueldok/dossiers`, { company_id: COMPANY_ID }),
     getDossier: (id: string) => client.get<any>(`/v1/sueldok/dossiers/${id}`, { company_id: COMPANY_ID }),
     executeCompensations: (dossierId: string) => client.post<any>(`/v1/sueldok/dossiers/${dossierId}/execute-compensations?company_id=${COMPANY_ID}`),
+    downloadCompensationsPdf: (dossierId: string, filename = "comprobante_compensaciones_nomina.pdf") =>
+      downloadAuthenticated(`/v1/sueldok/dossiers/${dossierId}/compensations-pdf?company_id=${COMPANY_ID}`, {}, filename),
+    executeNetPhase: (dossierId: string, phaseId: string, banco?: string, referencia?: string) => {
+      const q = new URLSearchParams({ company_id: COMPANY_ID })
+      if (banco) q.set("banco", banco)
+      if (referencia) q.set("referencia", referencia)
+      return client.post<any>(`/v1/sueldok/dossiers/${dossierId}/phases/${phaseId}/execute-net?${q.toString()}`)
+    },
     executeThirdPartyPhase: (dossierId: string, phaseId: string, chequeNumero?: string, bancoNombre?: string) => {
       const q = new URLSearchParams({ company_id: COMPANY_ID })
       if (chequeNumero) q.set("cheque_numero", chequeNumero)

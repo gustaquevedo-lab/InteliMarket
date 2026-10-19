@@ -84,6 +84,9 @@ export default function PayrollDossierView({
   const [loading, setLoading] = useState<boolean>(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
 
+  // Net payment inputs (Fase 1)
+  const [netInputs, setNetInputs] = useState<Record<string, { banco: string; referencia: string }>>({})
+
   // Third party cheque inputs
   const [chequeInputs, setChequeInputs] = useState<Record<string, { num: string; banco: string }>>({})
 
@@ -153,7 +156,31 @@ export default function PayrollDossierView({
     }
   }
 
-  // Handle Compensations Execution
+  // Handle Net Phase Execution (Fase 1)
+  const handleExecuteNetPhase = async (phaseId: string) => {
+    if (!selectedDossier) return
+    const input = netInputs[phaseId] || { banco: "", referencia: "" }
+    try {
+      setActionLoading(phaseId)
+      await api.sueldok.executeNetPhase(
+        selectedDossier.id,
+        phaseId,
+        input.banco || undefined,
+        input.referencia || undefined
+      )
+      toast.success(
+        "Lote de Salario Confirmado",
+        "El desembolso fue marcado como pagado exitosamente."
+      )
+      await reloadSelected(selectedDossier.id)
+    } catch (err: any) {
+      toast.error("Error al confirmar pago", err.response?.data?.detail || err.message)
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  // Handle Compensations Execution (Fase 2)
   const handleExecuteCompensations = async () => {
     if (!selectedDossier) return
     try {
@@ -166,6 +193,23 @@ export default function PayrollDossierView({
       await reloadSelected(selectedDossier.id)
     } catch (err: any) {
       toast.error("Error ejecutando compensaciones", err.response?.data?.detail)
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  // Handle Compensations PDF Download (Fase 2)
+  const handleDownloadCompensationsPdf = async () => {
+    if (!selectedDossier) return
+    try {
+      setActionLoading("download-comp")
+      await api.sueldok.downloadCompensationsPdf(
+        selectedDossier.id,
+        `comprobante_compensaciones_${selectedDossier.periodo}.pdf`
+      )
+      toast.success("Comprobante Descargado", "El reporte oficial RC-NOMINA se generó correctamente.")
+    } catch (err: any) {
+      toast.error("Error al descargar comprobante", err.response?.data?.detail || err.message)
     } finally {
       setActionLoading(null)
     }
@@ -442,44 +486,123 @@ export default function PayrollDossierView({
                 {netPhases.length === 0 ? (
                   <p className="text-xs text-gray-500 italic">No hay lotes de desembolso configurados.</p>
                 ) : (
-                  netPhases.map(phase => (
-                    <div
-                      key={phase.id}
-                      className="p-3.5 rounded-xl border border-gray-100 dark:border-gray-700/60 bg-gray-50/50 dark:bg-gray-900/30 flex items-center justify-between"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="p-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300">
-                          {phase.phase_type.includes("banco") ? (
-                            <Landmark className="w-4 h-4 text-indigo-600" />
-                          ) : phase.phase_type.includes("cheque") ? (
-                            <CreditCard className="w-4 h-4 text-emerald-600" />
-                          ) : (
-                            <Coins className="w-4 h-4 text-amber-600" />
-                          )}
-                        </span>
-                        <div>
-                          <div className="text-sm font-semibold text-gray-900 dark:text-white">
-                            {phase.phase_label}
+                  netPhases.map(phase => {
+                    const isBank = phase.phase_type.includes("banco")
+                    const input = netInputs[phase.id] || {
+                      banco: isBank ? "Banco Continental" : "",
+                      referencia: isBank ? `SIPAP-${selectedDossier.periodo}` : "Entrega en sobres piso"
+                    }
+                    const isEjecutado = phase.estado === "ejecutado"
+                    const meta = phase.metadata || {}
+
+                    return (
+                      <div
+                        key={phase.id}
+                        className="p-4 rounded-xl border border-gray-100 dark:border-gray-700/60 bg-gray-50/50 dark:bg-gray-900/30 space-y-3"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <span className="p-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300">
+                              {isBank ? (
+                                <Landmark className="w-4 h-4 text-indigo-600" />
+                              ) : phase.phase_type.includes("cheque") ? (
+                                <CreditCard className="w-4 h-4 text-emerald-600" />
+                              ) : (
+                                <Coins className="w-4 h-4 text-amber-600" />
+                              )}
+                            </span>
+                            <div>
+                              <div className="text-sm font-semibold text-gray-900 dark:text-white">
+                                {phase.phase_label}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                Monto: <span className="font-bold text-gray-900 dark:text-white">{formatPYG(phase.monto)}</span>
+                              </div>
+                            </div>
                           </div>
-                          <div className="text-xs text-gray-500">
-                            Monto: <span className="font-medium text-gray-700 dark:text-gray-300">{formatPYG(phase.monto)}</span>
+
+                          <div>
+                            {isEjecutado ? (
+                              <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 font-semibold">
+                                <CheckCircle className="w-3.5 h-3.5" /> Pagado
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 font-semibold">
+                                <Clock className="w-3.5 h-3.5" /> Pendiente
+                              </span>
+                            )}
                           </div>
                         </div>
-                      </div>
 
-                      <div className="flex items-center gap-2">
-                        {phase.estado === "ejecutado" ? (
-                          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-medium">
-                            <CheckCircle className="w-3.5 h-3.5" /> Pagado
-                          </span>
+                        {/* Formulario y acción de confirmación de desembolso si está pendiente */}
+                        {!isEjecutado ? (
+                          <div className="pt-2 border-t border-gray-100 dark:border-gray-800 space-y-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {isBank ? (
+                                <>
+                                  <input
+                                    type="text"
+                                    placeholder="Banco (ej. Continental)"
+                                    value={input.banco}
+                                    onChange={(e) =>
+                                      setNetInputs(prev => ({
+                                        ...prev,
+                                        [phase.id]: { ...input, banco: e.target.value }
+                                      }))
+                                    }
+                                    className="px-2.5 py-1.5 border rounded-lg bg-white dark:bg-gray-800 text-xs text-gray-900 dark:text-white border-gray-300 dark:border-gray-700"
+                                  />
+                                  <input
+                                    type="text"
+                                    placeholder="N° Transferencia / Referencia"
+                                    value={input.referencia}
+                                    onChange={(e) =>
+                                      setNetInputs(prev => ({
+                                        ...prev,
+                                        [phase.id]: { ...input, referencia: e.target.value }
+                                      }))
+                                    }
+                                    className="px-2.5 py-1.5 border rounded-lg bg-white dark:bg-gray-800 text-xs text-gray-900 dark:text-white border-gray-300 dark:border-gray-700"
+                                  />
+                                </>
+                              ) : (
+                                <input
+                                  type="text"
+                                  placeholder="Detalle de entrega (ej. Sobres cerrados en tesorería)"
+                                  value={input.referencia}
+                                  onChange={(e) =>
+                                    setNetInputs(prev => ({
+                                      ...prev,
+                                      [phase.id]: { ...input, referencia: e.target.value }
+                                    }))
+                                  }
+                                  className="col-span-1 sm:col-span-2 px-2.5 py-1.5 border rounded-lg bg-white dark:bg-gray-800 text-xs text-gray-900 dark:text-white border-gray-300 dark:border-gray-700"
+                                />
+                              )}
+                            </div>
+                            <button
+                              onClick={() => handleExecuteNetPhase(phase.id)}
+                              disabled={actionLoading === phase.id}
+                              className="w-full py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-sm flex items-center justify-center gap-2 transition disabled:opacity-50 cursor-pointer"
+                            >
+                              {actionLoading === phase.id ? (
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <CheckCircle className="w-3.5 h-3.5" />
+                              )}
+                              Confirmar Desembolso ({isBank ? "Transferencia Bancaria" : "Entrega en Efectivo"})
+                            </button>
+                          </div>
                         ) : (
-                          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-medium">
-                            <Clock className="w-3.5 h-3.5" /> Pendiente
-                          </span>
+                          <div className="pt-1 text-[11px] text-gray-500 flex flex-wrap items-center gap-3">
+                            {meta.banco && <span><b>Banco:</b> {meta.banco}</span>}
+                            {meta.referencia_comprobante && <span><b>Ref:</b> {meta.referencia_comprobante}</span>}
+                            {phase.executed_at && <span><b>Fecha:</b> {new Date(phase.executed_at).toLocaleDateString()}</span>}
+                          </div>
                         )}
                       </div>
-                    </div>
-                  ))
+                    )
+                  })
                 )}
               </div>
             </div>
@@ -507,40 +630,59 @@ export default function PayrollDossierView({
                 </span>
               </div>
 
-              {compPhases.map(phase => (
-                <div key={phase.id} className="space-y-3 p-3.5 rounded-xl border border-gray-100 dark:border-gray-700/60 bg-gray-50/50 dark:bg-gray-900/30">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-semibold text-gray-900 dark:text-white">{phase.phase_label}</span>
-                    <span className="font-bold text-emerald-700 dark:text-emerald-400">
-                      {formatPYG(phase.monto)}
-                    </span>
-                  </div>
+              {/* Botón de Descarga Oficial RC-NOMINA */}
+              <button
+                onClick={handleDownloadCompensationsPdf}
+                disabled={actionLoading === "download-comp"}
+                className="w-full py-2.5 px-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-sm"
+              >
+                {actionLoading === "download-comp" ? (
+                  <RefreshCw className="w-4 h-4 animate-spin text-indigo-600" />
+                ) : (
+                  <Download className="w-4 h-4 text-indigo-600" />
+                )}
+                <span>📄 Descargar Comprobante Oficial RC-NOMINA (PDF)</span>
+              </button>
 
-                  {phase.estado === "ejecutado" ? (
-                    <div className="p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400 font-medium">
-                        <CheckCircle className="w-4 h-4" /> Neteo ejecutado correctamente
+              <div className="space-y-3">
+                {compPhases.map(phase => (
+                  <div key={phase.id} className="p-3.5 rounded-xl border border-gray-100 dark:border-gray-700/60 bg-gray-50/50 dark:bg-gray-900/30 space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <div>
+                        <div className="font-semibold text-gray-900 dark:text-white">{phase.phase_label}</div>
+                        <div className="text-[11px] text-gray-500">Monto compensado:</div>
                       </div>
-                      <span className="text-[11px] text-gray-500">
-                        {phase.executed_at ? new Date(phase.executed_at).toLocaleDateString() : ""}
+                      <span className="font-bold text-emerald-700 dark:text-emerald-400 text-sm">
+                        {formatPYG(phase.monto)}
                       </span>
                     </div>
-                  ) : (
-                    <button
-                      onClick={handleExecuteCompensations}
-                      disabled={actionLoading === "compensations"}
-                      className="w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm flex items-center justify-center gap-2 transition disabled:opacity-50 cursor-pointer"
-                    >
-                      {actionLoading === "compensations" ? (
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <ShieldCheck className="w-3.5 h-3.5" />
-                      )}
-                      Ejecutar Compensación (Generar RC-NOMINA)
-                    </button>
-                  )}
-                </div>
-              ))}
+
+                    {phase.estado === "ejecutado" ? (
+                      <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400 font-medium">
+                          <CheckCircle className="w-3.5 h-3.5" /> Neteo ejecutado correctamente
+                        </div>
+                        <span className="text-[10px] text-gray-500">
+                          {phase.executed_at ? new Date(phase.executed_at).toLocaleDateString() : ""}
+                        </span>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={handleExecuteCompensations}
+                        disabled={actionLoading === "compensations"}
+                        className="w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm flex items-center justify-center gap-2 transition disabled:opacity-50 cursor-pointer"
+                      >
+                        {actionLoading === "compensations" ? (
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                        )}
+                        Ejecutar Neteo Interno (Generar RC-NOMINA)
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
 
             {/* ══ FASE 3: CONVENIOS TERCEROS ══════════════════════ */}

@@ -306,6 +306,52 @@ async def execute_dossier_compensations(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/dossiers/{dossier_id}/compensations-pdf")
+async def download_dossier_compensations_pdf(
+    dossier_id: str,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: Any = Depends(require_auth)
+):
+    """
+    Descarga el Comprobante y Planilla Oficial en PDF de las Compensaciones No-Cash
+    (Extra Club y Uniformes) con detalle de recibos oficiales RC-NOMINA.
+    """
+    from api.src.sueldok.compensations_service import get_dossier_compensations_pdf
+    user_name = user.get("username", "") if isinstance(user, dict) else getattr(user, "username", "")
+    try:
+        pdf_bytes = await get_dossier_compensations_pdf(db, company_id, dossier_id, user_name=user_name)
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"inline; filename=comprobante_compensaciones_{dossier_id[:8]}.pdf"}
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/dossiers/{dossier_id}/phases/{phase_id}/execute-net")
+async def execute_dossier_net_phase(
+    dossier_id: str,
+    phase_id: str,
+    banco: Optional[str] = Query(None),
+    referencia: Optional[str] = Query(None),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: Any = Depends(require_auth)
+):
+    """
+    Ejecuta y marca como pagado un lote de salarios netos de Fase 1 (SIPAP o Efectivo).
+    """
+    user_id = str(user.get("id")) if isinstance(user, dict) else str(getattr(user, "id", ""))
+    try:
+        return await service.execute_net_phase(
+            db, company_id, dossier_id, phase_id, banco=banco, referencia=referencia, user_id=user_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 
 @router.post("/dossiers/{dossier_id}/phases/{phase_id}/execute-third-party")
 async def execute_dossier_third_party_phase(

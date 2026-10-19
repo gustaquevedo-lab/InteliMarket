@@ -1219,3 +1219,69 @@ async def sync_payroll_dossier_from_sueldok(
 
     return await create_payroll_dossier(db, company_id, create_payload, user_id)
 
+
+async def execute_net_phase(
+    db: AsyncSession,
+    company_id: str,
+    dossier_id: str,
+    phase_id: str,
+    banco: Optional[str] = None,
+    referencia: Optional[str] = None,
+    user_id: Optional[str] = None
+) -> dict:
+    """
+    Ejecuta y marca como pagado un lote de salarios netos de Fase 1 (SIPAP o Efectivo).
+    Registra referencia de comprobante bancario o confirmación de entrega en sobre.
+    """
+    import uuid
+    from datetime import datetime, timezone
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+    from api.src.sueldok.models import PayrollDossier, PayrollDossierPhase
+
+    cid = company_id if isinstance(company_id, uuid.UUID) else uuid.UUID(str(company_id))
+    did = dossier_id if isinstance(dossier_id, uuid.UUID) else uuid.UUID(str(dossier_id))
+    pid = phase_id if isinstance(phase_id, uuid.UUID) else uuid.UUID(str(phase_id))
+
+    res = await db.execute(
+        select(PayrollDossierPhase).where(
+            PayrollDossierPhase.id == pid,
+            PayrollDossierPhase.dossier_id == did
+        )
+    )
+    phase = res.scalars().first()
+    if not phase:
+        raise ValueError(f"Fase {phase_id} no encontrada en expediente {dossier_id}")
+
+    phase.estado = "ejecutado"
+    phase.executed_at = datetime.now(timezone.utc)
+    phase.executed_by = uuid.UUID(str(user_id)) if user_id else None
+
+    meta = phase.phase_metadata or {}
+    if banco:
+        meta["banco"] = banco
+    if referencia:
+        meta["referencia_comprobante"] = referencia
+    phase.phase_metadata = meta
+
+    # Verificar si el expediente puede pasar a 'en_proceso' o 'cerrado'
+    d_res = await db.execute(
+        select(PayrollDossier)
+        .options(selectinload(PayrollDossier.phases))
+        .where(PayrollDossier.id == did)
+    )
+    dossier = d_res.scalars().first()
+    if dossier and dossier.estado == "borrador":
+        dossier.estado = "en_proceso"
+
+    await db.commit()
+    return {
+        "status": "success",
+        "phase_id": str(phase.id),
+        "estado": phase.estado,
+        "monto": float(phase.monto),
+        "phase_label": phase.phase_label,
+        "executed_at": phase.executed_at.isoformat() if phase.executed_at else None
+    }
+
+
