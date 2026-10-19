@@ -239,6 +239,8 @@ class PaymentMethodBankMappingUpdate(BaseModel):
     plazo_acreditacion_dias: Optional[int] = None
     tipo_plazo: Optional[str] = None
     comision_activa: Optional[bool] = None
+    cargo_cliente_porcentaje: Optional[Decimal] = None
+    cargo_cliente_minimo_gs: Optional[Decimal] = None
     activo: Optional[bool] = True
 
 
@@ -255,6 +257,8 @@ class PaymentMethodBankMappingResponse(BaseModel):
     plazo_acreditacion_dias: Optional[int] = 1
     tipo_plazo: Optional[str] = "habiles"
     comision_activa: bool = False
+    cargo_cliente_porcentaje: float = 0.0
+    cargo_cliente_minimo_gs: float = 0.0
     activo: bool
 
 
@@ -334,6 +338,7 @@ class CashAdvanceCreate(BaseModel):
     punto_emision: Optional[str] = None
     sale_id: Optional[UUID] = None
     supervisor_id: Optional[UUID] = None
+    cargo_cliente_gs: Optional[Decimal] = None   # solo en carga manual: la comision impresa en el voucher
     observaciones: Optional[str] = None
     raw_response: Optional[dict] = None
 
@@ -351,6 +356,7 @@ class CashAdvanceResponse(BaseModel):
     pan_ultimos4: Optional[str] = None
     comision_gs: float = 0
     comision_activa: bool = True
+    cargo_cliente_gs: float = 0
     supervisor_nombre: Optional[str] = None
     estado: str
     observaciones: Optional[str] = None

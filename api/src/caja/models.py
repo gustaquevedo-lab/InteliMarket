@@ -254,6 +254,10 @@ class PaymentMethodBankMapping(Base):
     comision_porcentaje = Column(Numeric(6, 4), default=0.0000)  # ej: 1.50% de comision procesadora
     comision_fija_gs = Column(Numeric(12, 0), default=0)         # costo fijo por transaccion en Gs
     comision_activa = Column(Boolean, nullable=False, default=False, server_default="false")  # True: la procesadora le PAGA la comision al comercio (ingreso), no es una retencion
+    # Cargo que el terminal le cobra al CLIENTE (ej. adelantos de efectivo): es de la procesadora, no del comercio.
+    # = max(cargo_cliente_minimo_gs, monto * cargo_cliente_porcentaje / 100)
+    cargo_cliente_porcentaje = Column(Numeric(6, 4), nullable=False, default=0, server_default="0")
+    cargo_cliente_minimo_gs = Column(Numeric(12, 0), nullable=False, default=0, server_default="0")
     plazo_acreditacion_dias = Column(Integer, default=1)         # ej: 0 (D+0), 1 (D+1), 2 (D+2), 30 (D+30)
     tipo_plazo = Column(String(20), default="habiles")           # habiles o corridos
     activo = Column(Boolean, default=True)
@@ -387,6 +391,7 @@ class CashAdvance(Base):
     comision_activa = Column(Boolean, nullable=False, default=True)
     comision_porcentaje = Column(Numeric(6, 4))
     comision_fija_gs = Column(Numeric(12, 0))
+    cargo_cliente_gs = Column(Numeric(15, 2), nullable=False, default=0, server_default="0")  # comision que cobro el terminal al cliente (de la procesadora)
     sale_id = Column(UUID(as_uuid=True))          # compra de la misma visita (informativo)
     supervisor_id = Column(UUID(as_uuid=True))
     supervisor_nombre = Column(String(100))

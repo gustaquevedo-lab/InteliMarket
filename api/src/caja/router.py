@@ -929,6 +929,8 @@ async def update_bank_mapping(
         plazo_acreditacion_dias=body.plazo_acreditacion_dias,
         tipo_plazo=body.tipo_plazo,
         comision_activa=body.comision_activa,
+        cargo_cliente_porcentaje=body.cargo_cliente_porcentaje,
+        cargo_cliente_minimo_gs=body.cargo_cliente_minimo_gs,
     )
 
 

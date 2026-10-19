@@ -1067,6 +1067,7 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     adelantos = list(adv_res.scalars().all())
     adelantos_gs = sum((Decimal(str(a.monto or 0)) for a in adelantos), Decimal("0"))
     adelantos_comision_gs = sum((Decimal(str(a.comision_gs or 0)) for a in adelantos if a.comision_activa), Decimal("0"))
+    adelantos_cargo_cliente_gs = sum((Decimal(str(a.cargo_cliente_gs or 0)) for a in adelantos), Decimal("0"))
 
     # Reclasificaciones de pagos en Tesorería (ej: venta registrada en POS como Efectivo pero entregada como comprobante SIPAP/Tarjeta, o corregida entre medios no efectivo)
     adj_res = await db.execute(
@@ -1326,6 +1327,7 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         "adelantos_gs": float(adelantos_gs),
         "adelantos_cantidad": len(adelantos),
         "adelantos_comision_gs": float(adelantos_comision_gs),
+        "adelantos_cargo_cliente_gs": float(adelantos_cargo_cliente_gs),
         "esp_pyg": float(esp_pyg),
         "esp_brl": float(esp_brl),
         "esp_usd": float(esp_usd),
@@ -5637,6 +5639,9 @@ async def list_payment_method_bank_mappings(db: AsyncSession, company_id: str) -
                 plazo_acreditacion_dias=dias_def,
                 tipo_plazo="habiles",
                 comision_activa=es_adelanto,
+                # Cargo al cliente medido en el terminal Dinelco el 19-oct-2026: max(Gs. 1.000, 1 %). Es de la procesadora.
+                cargo_cliente_porcentaje=Decimal("1.0000") if es_adelanto else Decimal("0"),
+                cargo_cliente_minimo_gs=Decimal("1000") if es_adelanto else Decimal("0"),
                 activo=True,
             ))
             needs_commit = True
@@ -5664,6 +5669,8 @@ async def list_payment_method_bank_mappings(db: AsyncSession, company_id: str) -
             "plazo_acreditacion_dias": int(mapping.plazo_acreditacion_dias if mapping.plazo_acreditacion_dias is not None else 1),
             "tipo_plazo": mapping.tipo_plazo or "habiles",
             "comision_activa": bool(mapping.comision_activa),
+            "cargo_cliente_porcentaje": float(mapping.cargo_cliente_porcentaje or 0),
+            "cargo_cliente_minimo_gs": float(mapping.cargo_cliente_minimo_gs or 0),
             "activo": mapping.activo,
         })
     return out
@@ -5680,6 +5687,8 @@ async def update_payment_method_bank_mapping(
     plazo_acreditacion_dias: int | None = None,
     tipo_plazo: str | None = None,
     comision_activa: bool | None = None,
+    cargo_cliente_porcentaje: Decimal | None = None,
+    cargo_cliente_minimo_gs: Decimal | None = None,
 ) -> dict:
     """Actualiza la cuenta bancaria, comisiones de procesadora y plazo de liquidación de un medio de pago."""
     cid = uuid.UUID(company_id)
@@ -5719,6 +5728,10 @@ async def update_payment_method_bank_mapping(
             mapping.tipo_plazo = tipo_plazo
         if comision_activa is not None:
             mapping.comision_activa = comision_activa
+        if cargo_cliente_porcentaje is not None:
+            mapping.cargo_cliente_porcentaje = cargo_cliente_porcentaje
+        if cargo_cliente_minimo_gs is not None:
+            mapping.cargo_cliente_minimo_gs = cargo_cliente_minimo_gs
         mapping.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
@@ -5746,6 +5759,8 @@ async def update_payment_method_bank_mapping(
         "plazo_acreditacion_dias": int(mapping.plazo_acreditacion_dias if mapping.plazo_acreditacion_dias is not None else 1),
         "tipo_plazo": mapping.tipo_plazo or "habiles",
         "comision_activa": bool(mapping.comision_activa),
+        "cargo_cliente_porcentaje": float(mapping.cargo_cliente_porcentaje or 0),
+        "cargo_cliente_minimo_gs": float(mapping.cargo_cliente_minimo_gs or 0),
         "activo": mapping.activo,
     }
 
@@ -5755,6 +5770,17 @@ async def update_payment_method_bank_mapping(
 ADELANTO_MAX_GS = Decimal("1500000")             # tope por adelanto (lo fija Dinelco)
 ADELANTO_SUPERVISOR_DESDE_GS = Decimal("500000")  # desde este monto pide autorizacion de supervisor
 ADELANTO_CANAL = "ADELANTO_DINELCO"
+# Cargo al cliente medido en un POS Dinelco el 19-oct-2026: Gs. 1.000 (1.000 y 50.000), Gs. 1.500 (150.000), Gs. 15.000 (1.500.000)
+# = max(Gs. 1.000, 1 %). Son los valores por defecto del canal; se pueden cambiar en Caja > comisiones de procesadoras.
+ADELANTO_CARGO_CLIENTE_PCT_DEFECTO = Decimal("1")
+ADELANTO_CARGO_CLIENTE_MINIMO_DEFECTO = Decimal("1000")
+
+
+def calcular_cargo_cliente_adelanto(monto: Decimal, porcentaje: Decimal, minimo: Decimal) -> Decimal:
+    """Comision que el terminal le cobra al cliente por un adelanto: max(minimo, monto * porcentaje / 100)."""
+    if porcentaje <= 0 and minimo <= 0:
+        return Decimal("0.00")
+    return max(minimo, monto * porcentaje / Decimal("100")).quantize(Decimal("0.01"))
 
 
 async def _es_supervisor(db: AsyncSession, user: User) -> bool:
@@ -5817,13 +5843,20 @@ async def register_cash_advance(db: AsyncSession, session_id: str, data: dict, r
 
     # Comision del canal: foto al momento del adelanto.
     pct, fija, activa = Decimal("0"), Decimal("0"), True
+    cargo_pct, cargo_min = ADELANTO_CARGO_CLIENTE_PCT_DEFECTO, ADELANTO_CARGO_CLIENTE_MINIMO_DEFECTO
     if company_id:
         mres = await db.execute(select(PaymentMethodBankMapping).where(
             PaymentMethodBankMapping.company_id == company_id, PaymentMethodBankMapping.canal_key == ADELANTO_CANAL))
         m = mres.scalar_one_or_none()
         if m:
             pct, fija, activa = Decimal(str(m.comision_porcentaje or 0)), Decimal(str(m.comision_fija_gs or 0)), bool(m.comision_activa)
+            cargo_pct, cargo_min = Decimal(str(m.cargo_cliente_porcentaje or 0)), Decimal(str(m.cargo_cliente_minimo_gs or 0))
     comision = (monto * pct / Decimal("100") + fija).quantize(Decimal("0.01"))
+    # Cargo al cliente: lo cobra el terminal y es de la procesadora. En carga manual manda lo impreso en el voucher.
+    if data.get("cargo_cliente_gs") is not None and origen == "manual":
+        cargo_cliente = max(Decimal("0"), Decimal(str(data["cargo_cliente_gs"]))).quantize(Decimal("0.01"))
+    else:
+        cargo_cliente = calcular_cargo_cliente_adelanto(monto, cargo_pct, cargo_min)
 
     adv = CashAdvance(
         company_id=company_id, session_id=sesion.id,
@@ -5832,6 +5865,7 @@ async def register_cash_advance(db: AsyncSession, session_id: str, data: dict, r
         codigo_autorizacion=autorizacion, nro_referencia=data.get("nro_referencia"), issuer_id=data.get("issuer_id"),
         nombre_tarjeta=data.get("nombre_tarjeta"), pan_ultimos4=data.get("pan_ultimos4"), terminal=data.get("terminal"),
         terminal_ip=data.get("terminal_ip"), comision_gs=comision, comision_activa=activa,
+        cargo_cliente_gs=cargo_cliente,
         comision_porcentaje=pct, comision_fija_gs=fija, sale_id=data.get("sale_id"),
         supervisor_id=supervisor.id if supervisor else None, supervisor_nombre=supervisor.nombre if supervisor else None,
         estado="aprobado", observaciones=data.get("observaciones"), raw_response=data.get("raw_response"),
