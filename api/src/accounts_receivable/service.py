@@ -315,6 +315,7 @@ async def apply_payment_to_receivable(
             WHERE company_id = :company_id AND sale_id = :sale_id AND estado = 'pendiente'
             ORDER BY fecha_vencimiento ASC
             LIMIT 1
+            FOR UPDATE
         """),
         {"company_id": company_id, "sale_id": sale_id},
     )
@@ -618,6 +619,8 @@ async def create_receivable_payment(db: AsyncSession, company_id: str, data, reg
         text("""
             SELECT id, saldo_pendiente, customer_id FROM accounts_receivable
             WHERE id = ANY(:ids) AND company_id = :company_id
+            ORDER BY id
+            FOR UPDATE
         """),
         {"ids": ids, "company_id": company_id},
     )
@@ -954,7 +957,7 @@ async def apply_global_payment(
         query += " AND id = ANY(:ids)"
         params["ids"] = [str(i) for i in data.accounts_receivable_ids]
 
-    query += " ORDER BY fecha_vencimiento ASC NULLS LAST, fecha_emision ASC, created_at ASC"
+    query += " ORDER BY fecha_vencimiento ASC NULLS LAST, fecha_emision ASC, created_at ASC FOR UPDATE"
 
     result = await db.execute(text(query), params)
     docs = result.fetchall()
