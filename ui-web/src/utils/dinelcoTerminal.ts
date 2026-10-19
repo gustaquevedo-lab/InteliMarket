@@ -148,3 +148,17 @@ export const dinelcoApi = {
     return { ok: true }
   },
 }
+
+/** CPF brasileño: 11 dígitos y dígitos verificadores correctos. El terminal rechaza un CPF inválido
+ *  con un "REINTENTE LA TRANSACCION" que no dice nada; esto lo atrapa antes de mandarlo. */
+export function cpfValido(valor: string): boolean {
+  const d = (valor || "").replace(/\D/g, "")
+  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false
+  const dv = (n: number) => {
+    let suma = 0
+    for (let i = 0; i < n; i++) suma += Number(d[i]) * (n + 1 - i)
+    const r = (suma * 10) % 11
+    return r === 10 ? 0 : r
+  }
+  return dv(9) === Number(d[9]) && dv(10) === Number(d[10])
+}

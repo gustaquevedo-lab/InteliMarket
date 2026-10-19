@@ -27,7 +27,7 @@ import { verifySupervisorPinLocal, syncSupervisorPins } from "../../utils/localA
 import QRCode from "qrcode"
 import { imDinelco, imBancard } from "../../monitor/integrations"
 import { captureMessage } from "../../monitor"
-import { dinelcoApi, dinelcoDisponible } from "../../utils/dinelcoTerminal"
+import { cpfValido, dinelcoApi, dinelcoDisponible } from "../../utils/dinelcoTerminal"
 import { validarCierre, totalConfirmadoPyg, type LineaCobro, type ContextoCierre } from "./validarCierre"
 import { terminalLock } from "./terminalLock"
 import { useTerminalBusy } from "./useTerminalBusy"
@@ -2295,8 +2295,8 @@ export default function POSPage() {
       toast.warning("Monto inválido", "Cargá el monto a cobrar por QR antes de continuar.")
       return
     }
-    if (dinelcoQrMode === "pix" && dinelcoPixCpf.replace(/\D/g, "").length !== 11) {
-      toast.warning("CPF inválido", "El CPF del comprador debe tener 11 dígitos para procesar PIX.")
+    if (dinelcoQrMode === "pix" && !cpfValido(dinelcoPixCpf)) {
+      toast.warning("CPF inválido", "Revisá el CPF del comprador: tiene que ser un CPF brasileño válido (11 dígitos) y existente para procesar PIX.")
       return
     }
     const electronAPI = dinelcoApi
@@ -2441,8 +2441,8 @@ export default function POSPage() {
       toast.warning("Monto inválido", "Cargá el monto a cobrar por QR antes de continuar.")
       return
     }
-    if (leg.dinelcoQrMode === "pix" && (leg.pixCpf || "").replace(/\D/g, "").length !== 11) {
-      toast.warning("CPF inválido", "El CPF del comprador debe tener 11 dígitos para procesar PIX.")
+    if (leg.dinelcoQrMode === "pix" && !cpfValido(leg.pixCpf || "")) {
+      toast.warning("CPF inválido", "Revisá el CPF del comprador: tiene que ser un CPF brasileño válido (11 dígitos) y existente para procesar PIX.")
       return
     }
     const electronAPI = dinelcoApi
