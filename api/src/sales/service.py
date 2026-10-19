@@ -9,7 +9,7 @@ from sqlalchemy import select, update, func, cast, Integer, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
-from decimal import Decimal
+from decimal import Decimal, ROUND_CEILING
 import uuid
 import hashlib
 import json
@@ -74,14 +74,19 @@ def get_escpos_logo_bytes(max_width_px: int = 384) -> bytes:
 
 
 
+def _gs(x: Decimal) -> Decimal:
+    """Guaraníes: entero, siempre hacia arriba, en el momento (no máscara de formato)."""
+    return Decimal(str(x)).quantize(Decimal("1"), rounding=ROUND_CEILING)
+
+
 def calculate_taxes(item: dict) -> dict:
-    precio = Decimal(str(item["precio_unitario"]))
+    precio = _gs(item["precio_unitario"])
     cantidad = Decimal(str(item["cantidad"]))
     descuento_pct = Decimal(str(item.get("descuento_pct", 0)))
     iva_tasa = Decimal(str(item.get("iva_tasa", 10)))
 
-    subtotal_bruto = precio * cantidad
-    descuento_monto = subtotal_bruto * (descuento_pct / Decimal("100"))
+    subtotal_bruto = _gs(precio * cantidad)
+    descuento_monto = _gs(subtotal_bruto * (descuento_pct / Decimal("100")))
     # El precio de venta en Paraguay ya viene con el IVA incluido (precio de
     # gondola/vidriera) -- esta funcion trataba precio_unitario como una
     # base SIN IVA y le sumaba el impuesto encima, inflando ~9-10% el total
@@ -89,18 +94,19 @@ def calculate_taxes(item: dict) -> dict:
     # de cobro ya cobraba el monto correcto -- era el total grabado en la
     # base, la liquidacion de IVA y lo que iria a SIFEN lo que quedaba mal).
     # Ahora el IVA se EXTRAE del precio ya incluido, no se agrega de nuevo.
-    total = (subtotal_bruto - descuento_monto).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+    total = subtotal_bruto - descuento_monto
 
     if iva_tasa == Decimal("0"):
         iva_monto = Decimal("0")
         base = total
     else:
-        base = (total / (Decimal("1") + iva_tasa / Decimal("100"))).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+        base = _gs(total / (Decimal("1") + iva_tasa / Decimal("100")))
         iva_monto = total - base
 
     return {
-        "subtotal_bruto": subtotal_bruto.quantize(Decimal("1")),
-        "descuento_monto": descuento_monto.quantize(Decimal("1")),
+        "precio_unitario": precio,
+        "subtotal_bruto": subtotal_bruto,
+        "descuento_monto": descuento_monto,
         "iva_monto": iva_monto,
         "total": total,
         "base": base,
@@ -540,7 +546,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             variant_id=item_data.variant_id,
             descripcion=item_data.descripcion,
             cantidad=item_data.cantidad,
-            precio_unitario=item_data.precio_unitario,
+            precio_unitario=taxes["precio_unitario"],
             descuento_pct=item_data.descuento_pct,
             descuento_monto=taxes["descuento_monto"],
             iva_tasa=item_data.iva_tasa,
@@ -1743,7 +1749,7 @@ async def update_sale(db: AsyncSession, sale_id: str, data: SaleUpdate) -> Sale 
             item = SaleItem(
                 sale_id=sale.id, product_id=item_data.product_id, variant_id=item_data.variant_id,
                 descripcion=item_data.descripcion, cantidad=item_data.cantidad,
-                precio_unitario=item_data.precio_unitario, descuento_pct=item_data.descuento_pct,
+                precio_unitario=taxes["precio_unitario"], descuento_pct=item_data.descuento_pct,
                 descuento_monto=taxes["descuento_monto"], iva_tasa=item_data.iva_tasa,
                 iva_monto=taxes["iva_monto"], total=taxes["total"],
             )

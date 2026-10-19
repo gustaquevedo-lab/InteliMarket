@@ -133,7 +133,7 @@ async def create_order(data: MobileOrderCreate, db: AsyncSession = Depends(get_d
     from api.src.price_lists.models import PriceList, PriceListItem
     from api.src.products.models import Product
     from sqlalchemy import select
-    from decimal import Decimal, ROUND_HALF_UP
+    from decimal import Decimal, ROUND_CEILING
 
     from api.src.inventory.models import Warehouse
 
@@ -164,7 +164,7 @@ async def create_order(data: MobileOrderCreate, db: AsyncSession = Depends(get_d
         iva = Decimal(str(product.iva_tasa if product.iva_tasa is not None else 10))
         items.append(SaleItemInput(
             product_id=item.product_id, cantidad=item.cantidad,
-            precio_unitario=(Decimal(str(precio1[item.product_id])) * (1 + iva / 100)).quantize(Decimal("1"), rounding=ROUND_HALF_UP),
+            precio_unitario=(Decimal(str(precio1[item.product_id])) * (1 + iva / 100)).quantize(Decimal("1"), rounding=ROUND_CEILING),
             descuento_pct=0, iva_tasa=iva,
         ))
 
