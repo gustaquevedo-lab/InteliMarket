@@ -82,7 +82,7 @@ export default function ChequesPage() {
     setLoading(true)
     try {
       const [chqRes, supRes, bnkRes] = await Promise.allSettled([
-        api.cheques.list(),
+        api.cheques.list({ limit: 5000 } as any),
         api.purchases.listSuppliers(),
         api.financial.banks.list(),
       ])
@@ -107,11 +107,11 @@ export default function ChequesPage() {
 
   // KPIs
   const analytics = useMemo(() => {
-    const enCartera = cheques.filter(c => c.estado === "en_cartera")
+    const enCartera = cheques.filter(c => c.estado === "en_cartera" || c.estado === "pendiente" || c.estado === "entregado")
     const depositados = cheques.filter(c => c.estado === "depositado")
     const cobrados = cheques.filter(c => c.estado === "cobrado")
     const rechazados = cheques.filter(c => c.estado === "rechazado")
-    const emitidos = cheques.filter(c => c.tipo === "emitido" || c.bank_account_id)
+    const emitidos = cheques.filter(c => c.tipo === "emitido" || c.tipo_cheque === "emitido" || c.bank_account_id)
 
     const montoCartera = enCartera.reduce((s, c) => s + Number(c.monto || 0), 0)
     const montoCobrado = cobrados.reduce((s, c) => s + Number(c.monto || 0), 0)
@@ -145,13 +145,13 @@ export default function ChequesPage() {
 
       const matchesBanco = filterBanco === "all" || c.banco_emisor === filterBanco
       const matchesEstado = filterEstado === "all" || c.estado === filterEstado
-      const matchesTipo = filterTipo === "all" || (filterTipo === "emitido" ? (c.tipo === "emitido" || c.bank_account_id) : (c.tipo === "recibido" || !c.bank_account_id))
+      const matchesTipo = filterTipo === "all" || (filterTipo === "emitido" ? (c.tipo === "emitido" || c.tipo_cheque === "emitido" || c.bank_account_id) : (c.tipo === "recibido" || (!c.bank_account_id && c.tipo_cheque !== "emitido")))
 
       // Tab matching
-      if (tab === "cartera" && c.estado !== "en_cartera") return false
+      if (tab === "cartera" && !["en_cartera", "pendiente", "entregado"].includes(c.estado)) return false
       if (tab === "depositados" && c.estado !== "depositado") return false
       if (tab === "rechazados" && c.estado !== "rechazado") return false
-      if (tab === "emitidos" && c.tipo !== "emitido" && !c.bank_account_id) return false
+      if (tab === "emitidos" && c.tipo !== "emitido" && c.tipo_cheque !== "emitido" && !c.bank_account_id) return false
 
       return matchesSearch && matchesBanco && matchesEstado && matchesTipo
     }).sort((a, b) => {

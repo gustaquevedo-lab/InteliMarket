@@ -256,6 +256,7 @@ export default function BancosPage() {
       const [dash, list] = await Promise.all([
         api.cheques.dashboard(),
         api.cheques.list({
+          limit: 5000,
           estado: chequeFilterEstado || undefined,
           bank_account_id: chequeFilterBank || undefined,
           fecha_desde: chequeFilterFechaDesde || undefined,
@@ -273,10 +274,8 @@ export default function BancosPage() {
   }
 
   useEffect(() => {
-    if (activeTab === "cheques") {
-      fetchCheques()
-    }
-  }, [activeTab, chequeFilterEstado, chequeFilterBank, chequeFilterFechaDesde, chequeFilterFechaHasta, chequeSearch])
+    fetchCheques()
+  }, [activeTab, accountSubTab, chequeFilterEstado, chequeFilterBank, chequeFilterFechaDesde, chequeFilterFechaHasta, chequeSearch])
 
   const handleCreateBank = async () => {
     try {
