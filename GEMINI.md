@@ -80,3 +80,9 @@
    - **Margen de Seguridad en Esquemas:** Todo campo de clasificación o referencia externa (`referencia_tipo`, `origen`, etc.) debe tener al menos `VARCHAR(60)` a `VARCHAR(100)` para evitar desbordes ante constantes descriptivas.
    - **Aislamiento de Operaciones Contables o Secundarias:** Las operaciones que involucren inserciones contables automáticas o sub-rutinas dentro de un flujo principal deben ejecutarse dentro de savepoints anidados (`async with db.begin_nested():`) para que un eventual error no aborte en cascada la transacción principal de la sesión de base de datos.
 
+13. **INMUTABILIDAD DE COMPROBANTES Y PROHIBICIÓN DE PRE-NETEO (ANTI-DOBLE DESCUENTO DE NC):**
+   - **Prohibición Estricta de Pre-Neteo:** En extractos de cuenta corriente, punteo físico de deuda, órdenes de pago, liquidaciones, PDFs y reportes de proveedores o clientes, queda TERMINANTEMENTE PROHIBIDO sobrescribir o netear el importe nominal o valor facial de una factura (`debito = saldo_pendiente` o `total = total - nc`).
+   - **Trazabilidad Visible Obligatoria:** Toda factura debe conservar su valor facial original en Débito (`total_factura`). Toda Nota de Crédito (aplicada o libre) y todo Pago Parcial DEBEN mostrarse obligatoriamente como filas independientes en la columna Crédito, vinculadas explícitamente a su comprobante (`[Aplicada a FAC ...]`).
+   - **Mecanismo de Saldo Progresivo:** El saldo progresivo o exigible se calcula exclusivamente restando los créditos de los débitos en la cascada de movimientos, jamás mutando el comprobante base. Ocultar la NC o mutar el débito nominal de la factura causa que el usuario al cotejar físicamente contra sus facturas en papel descuente la NC por segunda vez. Esta regla es canónica e inviolable en todo el ERP.
+
+
