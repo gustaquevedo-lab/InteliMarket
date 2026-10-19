@@ -107,6 +107,8 @@ async def update_estado(cheque_id: str, data: ChequeEstadoUpdate, db: AsyncSessi
         cheque = await service.update_estado(
             db, cheque_id, data.estado, data.notas,
             user.get("id") or user.get("sub"), user.get("user_nombre"),
+            motivo_rechazo=data.motivo_rechazo,
+            costo_rechazo=data.costo_rechazo,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))

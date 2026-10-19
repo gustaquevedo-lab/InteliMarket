@@ -78,6 +78,18 @@ export default function ChequesPage() {
   const [motivoAnulacion, setMotivoAnulacion] = useState("")
   const [anulando, setAnulando] = useState(false)
 
+  // Modal Rechazo & Imputación de Costos
+  const [chequeARechazar, setChequeARechazar] = useState<any>(null)
+  const [motivoRechazo, setMotivoRechazo] = useState("Falta de fondos suficientes")
+  const [otroMotivo, setOtroMotivo] = useState("")
+  const [imputarCosto, setImputarCosto] = useState(false)
+  const [costoRechazo, setCostoRechazo] = useState("")
+  const [notasRechazo, setNotasRechazo] = useState("")
+  const [rechazando, setRechazando] = useState(false)
+
+  // Filtro rápido de cronograma de vencimiento diferidos
+  const [filtroVencimiento, setFiltroVencimiento] = useState<string>("all")
+
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
@@ -135,6 +147,58 @@ export default function ChequesPage() {
     }
   }, [cheques])
 
+  // 📅 Cronograma de Compensación de Cheques Diferidos Emitidos
+  const cronogramaDiferidos = useMemo(() => {
+    const todayStr = getTodayAsuncion()
+    const today = new Date(todayStr + "T00:00:00")
+
+    const buckets = {
+      vencidos: { label: "Vencidos (Sin debitar)", count: 0, monto: 0, color: "text-rose-400 bg-rose-950/40 border-rose-800/60" },
+      hoy: { label: "Compensan Hoy", count: 0, monto: 0, color: "text-amber-400 bg-amber-950/40 border-amber-800/60" },
+      proximos7: { label: "Próximos 7 días", count: 0, monto: 0, color: "text-blue-400 bg-blue-950/40 border-blue-800/60" },
+      proximos15: { label: "Próximos 15 días", count: 0, monto: 0, color: "text-indigo-400 bg-indigo-950/40 border-indigo-800/60" },
+      proximos30: { label: "Próximos 30 días", count: 0, monto: 0, color: "text-purple-400 bg-purple-950/40 border-purple-800/60" },
+      mas30: { label: "Más de 30 días", count: 0, monto: 0, color: "text-emerald-400 bg-emerald-950/40 border-emerald-800/60" },
+    }
+
+    cheques.forEach(c => {
+      const esEmitidoActivo = (c.tipo === "emitido" || c.tipo_cheque === "emitido" || c.bank_account_id) &&
+        (c.estado === "entregado" || c.estado === "pendiente")
+      if (!esEmitidoActivo) return
+
+      const monto = Number(c.monto || 0)
+      if (!c.fecha_pago) {
+        buckets.hoy.count++
+        buckets.hoy.monto += monto
+        return
+      }
+      const fechaPago = new Date(c.fecha_pago + "T00:00:00")
+      const diffDays = Math.round((fechaPago.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+
+      if (diffDays < 0) {
+        buckets.vencidos.count++
+        buckets.vencidos.monto += monto
+      } else if (diffDays === 0) {
+        buckets.hoy.count++
+        buckets.hoy.monto += monto
+      } else if (diffDays <= 7) {
+        buckets.proximos7.count++
+        buckets.proximos7.monto += monto
+      } else if (diffDays <= 15) {
+        buckets.proximos15.count++
+        buckets.proximos15.monto += monto
+      } else if (diffDays <= 30) {
+        buckets.proximos30.count++
+        buckets.proximos30.monto += monto
+      } else {
+        buckets.mas30.count++
+        buckets.mas30.monto += monto
+      }
+    })
+
+    return buckets
+  }, [cheques])
+
   const filteredCheques = useMemo(() => {
     return cheques.filter(c => {
       const matchesSearch = !search ||
@@ -153,13 +217,34 @@ export default function ChequesPage() {
       if (tab === "rechazados" && c.estado !== "rechazado") return false
       if (tab === "emitidos" && c.tipo !== "emitido" && c.tipo_cheque !== "emitido" && !c.bank_account_id) return false
 
+      // Filtro interactivo de Cronograma de Vencimientos
+      if (filtroVencimiento !== "all") {
+        const esEmitidoActivo = (c.tipo === "emitido" || c.tipo_cheque === "emitido" || c.bank_account_id) &&
+          (c.estado === "entregado" || c.estado === "pendiente")
+        if (!esEmitidoActivo) return false
+        const todayStr = getTodayAsuncion()
+        const today = new Date(todayStr + "T00:00:00")
+        if (!c.fecha_pago) {
+          if (filtroVencimiento !== "hoy") return false
+        } else {
+          const fechaPago = new Date(c.fecha_pago + "T00:00:00")
+          const diffDays = Math.round((fechaPago.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+          if (filtroVencimiento === "vencidos" && diffDays >= 0) return false
+          if (filtroVencimiento === "hoy" && diffDays !== 0) return false
+          if (filtroVencimiento === "proximos7" && (diffDays <= 0 || diffDays > 7)) return false
+          if (filtroVencimiento === "proximos15" && (diffDays <= 7 || diffDays > 15)) return false
+          if (filtroVencimiento === "proximos30" && (diffDays <= 15 || diffDays > 30)) return false
+          if (filtroVencimiento === "mas30" && diffDays <= 30) return false
+        }
+      }
+
       return matchesSearch && matchesBanco && matchesEstado && matchesTipo
     }).sort((a, b) => {
       const dateA = new Date(a.fecha_emision || a.fecha_pago || a.created_at || 0).getTime()
       const dateB = new Date(b.fecha_emision || b.fecha_pago || b.created_at || 0).getTime()
       return dateB - dateA
     })
-  }, [cheques, search, filterBanco, filterEstado, filterTipo, tab, supplierMap])
+  }, [cheques, search, filterBanco, filterEstado, filterTipo, tab, supplierMap, filtroVencimiento])
 
   const handleUpdateEstado = async (id: string, nuevoEstado: string, notas?: string) => {
     try {
@@ -168,6 +253,50 @@ export default function ChequesPage() {
       loadData()
     } catch (e: any) {
       toast.error("Error al actualizar estado", e.message)
+    }
+  }
+
+  const handleEntregar = async (cheque: any) => {
+    try {
+      await api.cheques.update(cheque.id, {
+        estado: "entregado",
+        fecha_entrega: getTodayAsuncion(),
+      })
+      toast.success("Cheque Entregado al Proveedor", `Cheque N° ${cheque.numero} registrado como entregado con fecha de hoy.`)
+      loadData()
+    } catch (e: any) {
+      toast.error("Error al registrar entrega", e.message)
+    }
+  }
+
+  const handleRechazar = async () => {
+    if (!chequeARechazar) return
+    const motivoFinal = motivoRechazo === "Otro motivo" ? otroMotivo.trim() : motivoRechazo
+    if (!motivoFinal) {
+      toast.error("Motivo requerido", "Por favor seleccioná o escribí el motivo de rechazo.")
+      return
+    }
+    setRechazando(true)
+    try {
+      const costoNum = imputarCosto ? (Number(costoRechazo) || 0) : 0
+      await api.cheques.updateEstado(chequeARechazar.id, {
+        estado: "rechazado",
+        motivo_rechazo: motivoFinal,
+        costo_rechazo: costoNum > 0 ? costoNum : undefined,
+        notas: notasRechazo.trim() || undefined,
+      })
+      toast.success("Cheque Rechazado", `El cheque N° ${chequeARechazar.numero} fue registrado como rechazado.${costoNum > 0 ? ` Se debitó Gs. ${costoNum.toLocaleString("es-PY")} de comisión bancaria.` : ""}`)
+      setChequeARechazar(null)
+      setMotivoRechazo("Falta de fondos suficientes")
+      setOtroMotivo("")
+      setImputarCosto(false)
+      setCostoRechazo("")
+      setNotasRechazo("")
+      loadData()
+    } catch (e: any) {
+      toast.error("Error al rechazar cheque", e.message)
+    } finally {
+      setRechazando(false)
     }
   }
 
@@ -449,6 +578,63 @@ export default function ChequesPage() {
         })}
       </div>
 
+      {/* 📅 CRONOGRAMA DE PREVISIÓN DE COMPENSACIÓN (CHEQUES DIFERIDOS EMITIDOS) */}
+      {(tab === "dashboard" || tab === "emitidos") && (
+        <div className="card p-4 bg-slate-900 border border-slate-800 rounded-2xl space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-purple-400" />
+              <h2 className="text-xs font-black uppercase tracking-wider text-slate-200">
+                Previsión de Compensación · Cheques Diferidos Emitidos
+              </h2>
+              <span className="text-[10px] text-slate-400">
+                (Vencimientos de cheques pendientes y entregados a proveedores)
+              </span>
+            </div>
+            {filtroVencimiento !== "all" && (
+              <button
+                type="button"
+                onClick={() => setFiltroVencimiento("all")}
+                className="text-[10px] font-bold text-purple-400 hover:text-purple-300 underline"
+              >
+                Limpiar filtro de vencimiento (Ver todos)
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+            {[
+              { id: "vencidos", ...cronogramaDiferidos.vencidos },
+              { id: "hoy", ...cronogramaDiferidos.hoy },
+              { id: "proximos7", ...cronogramaDiferidos.proximos7 },
+              { id: "proximos15", ...cronogramaDiferidos.proximos15 },
+              { id: "proximos30", ...cronogramaDiferidos.proximos30 },
+              { id: "mas30", ...cronogramaDiferidos.mas30 },
+            ].map(b => {
+              const active = filtroVencimiento === b.id
+              return (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => setFiltroVencimiento(active ? "all" : b.id)}
+                  className={`p-3 rounded-xl border text-left transition-all ${b.color} ${
+                    active ? "ring-2 ring-white scale-[1.02] shadow-lg" : "hover:brightness-110 opacity-90 hover:opacity-100"
+                  }`}
+                >
+                  <p className="text-[10px] font-black uppercase tracking-wider">{b.label}</p>
+                  <p className="text-sm font-black font-mono mt-1 text-white">
+                    {formatPYG(b.monto)}
+                  </p>
+                  <p className="text-[10px] opacity-80 mt-0.5">
+                    {b.count} {b.count === 1 ? "cheque" : "cheques"}
+                  </p>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* FILTROS Y BUSCADOR */}
       <div className="card p-3 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl flex items-center gap-3 flex-wrap text-xs">
         <div className="relative flex-1 min-w-[220px]">
@@ -504,7 +690,7 @@ export default function ChequesPage() {
               <tbody className="divide-y divide-gray-100 dark:divide-slate-800/60">
                 {filteredCheques.slice(0, 100).map((c: any) => {
                   const cfg = statusConfig[c.estado] || statusConfig.en_cartera
-                  const esEmitido = c.tipo === "emitido" || c.bank_account_id
+                  const esEmitido = c.tipo === "emitido" || c.tipo_cheque === "emitido" || c.bank_account_id
                   return (
                     <tr key={c.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition">
                       <td className="p-3.5">
@@ -541,28 +727,80 @@ export default function ChequesPage() {
                         <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase border ${cfg.bg} ${cfg.text} ${cfg.border}`}>
                           {cfg.label}
                         </span>
+                        {c.motivo_rechazo && c.estado === "rechazado" && (
+                          <p className="text-[10px] text-red-500 font-medium mt-0.5 max-w-[140px] truncate mx-auto" title={c.motivo_rechazo}>
+                            {c.motivo_rechazo}
+                          </p>
+                        )}
                       </td>
                       <td className="p-3.5 text-right">
-                        <div className="flex items-center justify-end gap-1">
+                        <div className="flex items-center justify-end gap-1 flex-wrap">
                           <button onClick={() => handleVerHistorial(c)} className="btn-secondary text-[10px] p-1.5" title="Ver Historial">
                             <History className="w-3.5 h-3.5" />
                           </button>
-                          {c.estado === "en_cartera" && (
+
+                          {/* ACCIONES CHEQUES RECIBIDOS DE CLIENTES */}
+                          {!esEmitido && c.estado === "en_cartera" && (
                             <button onClick={() => handleUpdateEstado(c.id, "depositado")} className="btn-secondary text-[10px] px-2 py-1 text-blue-600 border-blue-200 hover:bg-blue-50">
                               Depositar
                             </button>
                           )}
-                          {c.estado === "depositado" && (
+                          {!esEmitido && (c.estado === "depositado" || c.estado === "en_cartera") && (
                             <button onClick={() => handleUpdateEstado(c.id, "cobrado")} className="btn-primary text-[10px] px-2 py-1 bg-emerald-600 hover:bg-emerald-700">
                               Efectivizar
                             </button>
                           )}
-                          {(c.estado === "depositado" || c.estado === "en_cartera") && (
-                            <button onClick={() => handleUpdateEstado(c.id, "rechazado")} className="btn-secondary text-[10px] px-2 py-1 text-red-600 border-red-200 hover:bg-red-50">
+
+                          {/* ACCIONES CHEQUES EMITIDOS A PROVEEDORES */}
+                          {esEmitido && c.estado === "pendiente" && (
+                            <button
+                              onClick={() => handleEntregar(c)}
+                              className="btn-secondary text-[10px] px-2 py-1 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-700/60 hover:bg-purple-50 dark:hover:bg-purple-950/40 font-bold"
+                              title="Marcar cheque entregado al proveedor"
+                            >
+                              <ArrowUpRight className="w-3 h-3 inline mr-0.5" />Entregar
+                            </button>
+                          )}
+                          {esEmitido && (c.estado === "entregado" || c.estado === "pendiente") && (
+                            <button
+                              onClick={() => handleUpdateEstado(c.id, "cobrado", "Compensado en banco")}
+                              className="btn-primary text-[10px] px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                              title="Marcar cheque como compensado / debitado por el banco"
+                            >
+                              <Check className="w-3 h-3 inline mr-0.5" />Compensó
+                            </button>
+                          )}
+
+                          {/* RECHAZAR (Abre modal de motivos y costos de rechazo) */}
+                          {c.estado !== "cobrado" && c.estado !== "anulado" && c.estado !== "rechazado" && (
+                            <button
+                              onClick={() => {
+                                setChequeARechazar(c)
+                                setMotivoRechazo("Falta de fondos suficientes")
+                                setOtroMotivo("")
+                                setImputarCosto(false)
+                                setCostoRechazo("")
+                                setNotasRechazo("")
+                              }}
+                              className="btn-secondary text-[10px] px-2 py-1 text-red-600 border-red-200 hover:bg-red-50 dark:hover:bg-red-950/40 font-semibold"
+                              title="Registrar rechazo bancario"
+                            >
                               Rechazar
                             </button>
                           )}
-                          {/* Anular: disponible para cheques emitidos en estado pendiente o entregado */}
+
+                          {/* REACTIVAR TRAS RECHAZO */}
+                          {c.estado === "rechazado" && (
+                            <button
+                              onClick={() => handleUpdateEstado(c.id, "pendiente", "Reactivado tras rechazo")}
+                              className="btn-secondary text-[10px] px-2 py-1 text-amber-600 border-amber-300 hover:bg-amber-50"
+                              title="Reintentar / volver a pendiente"
+                            >
+                              Reactivar
+                            </button>
+                          )}
+
+                          {/* ANULAR */}
                           {esEmitido && (c.estado === "pendiente" || c.estado === "entregado") && (
                             <button
                               onClick={() => { setChequeAAnular(c); setMotivoAnulacion("") }}
@@ -1155,6 +1393,159 @@ export default function ChequesPage() {
                   <><Loader2 className="w-4 h-4 animate-spin" /><span>Anulando...</span></>
                 ) : (
                   <><Ban className="w-4 h-4" /><span>Confirmar Anulación</span></>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL RECHAZO DE CHEQUE & COSTOS BANCARIOS */}
+      {chequeARechazar && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setChequeARechazar(null)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-800 flex flex-col max-h-[90vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between bg-red-50/60 dark:bg-red-950/30 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-400">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900 dark:text-white">Registrar Rechazo de Cheque</h3>
+                  <p className="text-[11px] text-gray-500 font-mono">N° {chequeARechazar.numero} · {chequeARechazar.banco_emisor || "Banco Local"}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setChequeARechazar(null)}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 space-y-4 flex-1 overflow-y-auto text-xs">
+              {/* Resumen del cheque */}
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="bg-gray-50 dark:bg-slate-800/60 rounded-xl p-3 border border-gray-100 dark:border-slate-700">
+                  <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Monto del Cheque</p>
+                  <p className="font-black font-mono text-gray-900 dark:text-white mt-0.5">
+                    {formatCurrency(chequeARechazar.monto, chequeARechazar.moneda)}
+                  </p>
+                </div>
+                <div className="bg-gray-50 dark:bg-slate-800/60 rounded-xl p-3 border border-gray-100 dark:border-slate-700">
+                  <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Beneficiario / Proveedor</p>
+                  <p className="font-bold text-gray-800 dark:text-gray-200 mt-0.5 truncate">
+                    {chequeARechazar.beneficiario || supplierMap[chequeARechazar.supplier_id] || "Al Portador"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Selector de Motivo */}
+              <div>
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1.5">
+                  Motivo Formal de Rechazo Bancario <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={motivoRechazo}
+                  onChange={e => setMotivoRechazo(e.target.value)}
+                  className="input text-xs w-full font-medium"
+                >
+                  <option value="Falta de fondos suficientes">Falta de fondos suficientes (Sin fondos / Insuficiencia)</option>
+                  <option value="Defecto formal / firma no conforme">Defecto formal / Firma no conforme / Texto discordante</option>
+                  <option value="Orden de no pago / Denuncia">Orden de no pago / Denuncia de extravío / Disconformidad</option>
+                  <option value="Caducidad del plazo de cobro">Caducidad del plazo de cobro / Cheque vencido</option>
+                  <option value="Cuenta corriente cancelada o suspendida">Cuenta corriente cancelada, bloqueada o suspendida</option>
+                  <option value="Otro motivo">Otro motivo específico...</option>
+                </select>
+              </div>
+
+              {motivoRechazo === "Otro motivo" && (
+                <div>
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                    Especificar Motivo <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={otroMotivo}
+                    onChange={e => setOtroMotivo(e.target.value)}
+                    placeholder="Describí el motivo informado por la entidad bancaria..."
+                    className="input text-xs w-full"
+                  />
+                </div>
+              )}
+
+              {/* Imputación de Costos Bancarios (si tiene cuenta corriente vinculada) */}
+              {chequeARechazar.bank_account_id && (
+                <div className="p-3.5 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 space-y-2.5">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={imputarCosto}
+                      onChange={e => setImputarCosto(e.target.checked)}
+                      className="rounded border-gray-300 text-purple-600 focus:ring-purple-500 w-4 h-4"
+                    />
+                    <span className="text-xs font-bold text-amber-950 dark:text-amber-200">
+                      Imputar comisión / gasto bancario por rechazo
+                    </span>
+                  </label>
+                  {imputarCosto && (
+                    <div className="pt-1.5 space-y-1">
+                      <label className="text-[11px] font-bold text-amber-950 dark:text-amber-200 block">
+                        Costo / Comisión del Banco (Gs.)
+                      </label>
+                      <CurrencyInput
+                        value={costoRechazo}
+                        onChangeValue={(num) => setCostoRechazo(String(num))}
+                        placeholder="Ej: 55.000"
+                        currency="PYG"
+                        className="input-field text-xs font-mono font-bold"
+                      />
+                      <p className="text-[10px] text-amber-800 dark:text-amber-300">
+                        Se registrará automáticamente una transacción de egreso (comisión) en la cuenta bancaria del cheque.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Observaciones adicionales */}
+              <div>
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                  Notas u Observaciones Adicionales
+                </label>
+                <textarea
+                  rows={2}
+                  value={notasRechazo}
+                  onChange={e => setNotasRechazo(e.target.value)}
+                  placeholder="Detalles sobre contacto con el proveedor, plazo de reposición o nuevo cheque..."
+                  className="w-full rounded-xl border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs px-3 py-2 text-gray-800 dark:text-gray-200 placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:ring-red-400/40"
+                />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between bg-gray-50/70 dark:bg-slate-900/50 shrink-0">
+              <button
+                type="button"
+                disabled={rechazando}
+                onClick={() => setChequeARechazar(null)}
+                className="btn-outline text-xs px-4 py-2 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={rechazando || (motivoRechazo === "Otro motivo" && !otroMotivo.trim())}
+                onClick={handleRechazar}
+                className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-black transition disabled:opacity-50 flex items-center gap-2 shadow-sm"
+              >
+                {rechazando ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /><span>Procesando...</span></>
+                ) : (
+                  <><AlertTriangle className="w-4 h-4" /><span>Confirmar Rechazo</span></>
                 )}
               </button>
             </div>

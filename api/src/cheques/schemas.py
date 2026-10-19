@@ -4,15 +4,17 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-ESTADOS_VALIDOS = ["pendiente", "entregado", "cobrado", "rechazado", "anulado"]
+ESTADOS_VALIDOS = ["pendiente", "entregado", "cobrado", "rechazado", "anulado", "en_cartera", "depositado"]
 
 # Transiciones permitidas -- un cheque cobrado o anulado es un hecho consumado,
 # no vuelve atras; rechazado puede reintentarse marcandolo pendiente de nuevo
 # tras renegociar con el proveedor.
 TRANSICIONES_VALIDAS = {
     "pendiente": {"entregado", "cobrado", "rechazado", "anulado"},
-    "entregado": {"cobrado", "rechazado", "anulado"},
+    "entregado": {"cobrado", "rechazado", "anulado", "pendiente"},
     "rechazado": {"pendiente", "anulado"},
+    "en_cartera": {"depositado", "cobrado", "rechazado", "anulado"},
+    "depositado": {"cobrado", "rechazado", "anulado"},
     "cobrado": set(),
     "anulado": set(),
 }
@@ -45,6 +47,8 @@ class ChequeCreate(BaseModel):
 class ChequeEstadoUpdate(BaseModel):
     estado: str
     notas: Optional[str] = None
+    motivo_rechazo: Optional[str] = None
+    costo_rechazo: Optional[Decimal] = None
 
 
 class ChequeUpdate(BaseModel):

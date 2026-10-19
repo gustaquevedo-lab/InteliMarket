@@ -291,7 +291,16 @@ async def marcar_cheques_entregados(
 
 
 
-async def update_estado(db: AsyncSession, cheque_id: str, nuevo_estado: str, notas: str | None, user_id: str | None, user_nombre: str | None) -> Cheque:
+async def update_estado(
+    db: AsyncSession,
+    cheque_id: str,
+    nuevo_estado: str,
+    notas: str | None,
+    user_id: str | None,
+    user_nombre: str | None,
+    motivo_rechazo: str | None = None,
+    costo_rechazo: Decimal | None = None,
+) -> Cheque:
     cheque = await get_cheque(db, cheque_id)
     if not cheque:
         raise ValueError("Cheque no encontrado")
@@ -303,7 +312,38 @@ async def update_estado(db: AsyncSession, cheque_id: str, nuevo_estado: str, not
     cheque.estado = nuevo_estado
     cheque.estado_updated_by = uuid.UUID(user_id) if user_id else None
     cheque.estado_updated_at = datetime.now(timezone.utc)
+    if nuevo_estado == "entregado" and not cheque.fecha_entrega:
+        cheque.fecha_entrega = date.today()
+    if motivo_rechazo:
+        cheque.motivo_rechazo = motivo_rechazo
+
+    # Imputar costo bancario de rechazo si aplica
+    if nuevo_estado == "rechazado" and costo_rechazo and costo_rechazo > 0 and cheque.bank_account_id:
+        from api.src.financial.models import BankAccount, BankTransaction
+        bank_acc = await db.get(BankAccount, cheque.bank_account_id)
+        if bank_acc:
+            bank_acc.saldo_actual = (bank_acc.saldo_actual or 0) - Decimal(str(costo_rechazo))
+            tx = BankTransaction(
+                company_id=cheque.company_id,
+                bank_account_id=cheque.bank_account_id,
+                fecha=date.today(),
+                tipo="egreso",
+                monto=costo_rechazo,
+                moneda=cheque.moneda or "PYG",
+                descripcion=f"Comisión / Gasto por cheque rechazado N° {cheque.numero} - Motivo: {motivo_rechazo or 'Sin fondos'}",
+                referencia=f"CHQ-RECHAZO-{cheque.numero}",
+                cheque_id=cheque.id,
+                categoria="comision",
+            )
+            db.add(tx)
+
     await db.flush()
+
+    hist_notas = notas or ""
+    if motivo_rechazo:
+        hist_notas = f"Motivo: {motivo_rechazo}. {hist_notas}".strip()
+    if costo_rechazo and costo_rechazo > 0:
+        hist_notas = f"{hist_notas} (Costo bancario imputado: ₲ {costo_rechazo:,.0f})".strip()
 
     db.add(ChequeHistorial(
         cheque_id=cheque.id,
@@ -311,7 +351,7 @@ async def update_estado(db: AsyncSession, cheque_id: str, nuevo_estado: str, not
         estado_nuevo=nuevo_estado,
         user_id=uuid.UUID(user_id) if user_id else None,
         user_nombre=user_nombre,
-        notas=notas,
+        notas=hist_notas or None,
     ))
     await db.flush()
     await db.refresh(cheque)
