@@ -2865,7 +2865,7 @@ export const api = {
     getOrderItems: (id: string) => client.get<PurchaseOrderItem[]>(`/v1/purchase-orders/${id}/items`),
     createOrder: (data: Partial<PurchaseOrder>) => client.post<PurchaseOrder>("/v1/purchase-orders", { ...data, company_id: COMPANY_ID }),
     createPO: (data: Partial<PurchaseOrder>) => client.post<PurchaseOrder>("/v1/purchase-orders", { ...data, company_id: COMPANY_ID }),
-    updateOrder: (id: string, data: Partial<PurchaseOrder>) => client.put<PurchaseOrder>(`/v1/purchase-orders/${id}`, data),
+    updateOrder: (id: string, data: Partial<PurchaseOrder>, force: boolean = false) => client.put<PurchaseOrder>(`/v1/purchase-orders/${id}${force ? '?force=true' : ''}`, data),
     confirmOrder: (id: string) => client.post<PurchaseOrder>(`/v1/purchase-orders/${id}/confirm`),
     confirmPO: (id: string) => client.post<PurchaseOrder>(`/v1/purchase-orders/${id}/confirm`),
     sendPO: (id: string) => client.post<PurchaseOrder>(`/v1/purchase-orders/${id}/send`),

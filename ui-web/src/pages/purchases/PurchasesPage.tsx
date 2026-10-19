@@ -283,6 +283,7 @@ export default function PurchasesPage() {
   const [manualPOSupplierId, setManualPOSupplierId] = useState("")
   const [manualPOFechaEntrega, setManualPOFechaEntrega] = useState("")
   const [manualPOPrioridad, setManualPOPrioridad] = useState("normal")
+  const [manualPOEstado, setManualPOEstado] = useState("borrador")
   const [manualPOCondiciones, setManualPOCondiciones] = useState("30 Días")
   const [manualPOCondicionesCustom, setManualPOCondicionesCustom] = useState("")
   const [manualPOMoneda, setManualPOMoneda] = useState<"PYG" | "USD" | "BRL">("PYG")
@@ -1569,6 +1570,7 @@ export default function PurchasesPage() {
           supplier_id: manualPOSupplierId as any,
           fecha_entrega_estimada: manualPOFechaEntrega ? manualPOFechaEntrega as any : undefined,
           prioridad: manualPOPrioridad,
+          estado: manualPOEstado,
           condiciones_pago: manualPOCondiciones,
           observaciones: manualPOObservaciones || undefined,
           update_default_supplier: manualPOUpdateDefaultSupplier,
@@ -1580,7 +1582,7 @@ export default function PurchasesPage() {
             iva_tasa: Number(it.iva_tasa || 10),
             total: Number(it.subtotal),
           })) as any,
-        } as any)
+        } as any, true)
 
         if (manualPOUpdateDefaultSupplier && manualPOSupplierId) {
           for (const it of manualPOItems) {
@@ -5014,7 +5016,7 @@ export default function PurchasesPage() {
                                 <Eye className="w-3.5 h-3.5" />
                               </button>
 
-                              {["borrador", "confirmado", "enviada", "enviado"].includes(po.estado || "") && po.id && (
+                              {po.id && (
                                 <button
                                   onClick={() => handleEditPO(po)}
                                   className="p-1.5 rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400 hover:bg-blue-100 transition-colors"
@@ -8240,7 +8242,7 @@ export default function PurchasesPage() {
             </div>
 
             <form onSubmit={handleSaveManualPO} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
                 <div className="sm:col-span-2">
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
                     Proveedor *
@@ -8270,6 +8272,24 @@ export default function PurchasesPage() {
                     onChange={(e) => setManualPOFechaEntrega(e.target.value)}
                     className="input-field w-full text-xs"
                   />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    Estado de Orden
+                  </label>
+                  <select
+                    value={manualPOEstado}
+                    onChange={(e) => setManualPOEstado(e.target.value)}
+                    className="input-field w-full text-xs font-bold font-mono"
+                  >
+                    <option value="borrador">Borrador</option>
+                    <option value="confirmado">Confirmado</option>
+                    <option value="enviado">Enviado</option>
+                    <option value="parcial">Parcial</option>
+                    <option value="completado">Completado</option>
+                    <option value="cancelado">Cancelado</option>
+                  </select>
                 </div>
 
                 <div>

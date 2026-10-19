@@ -200,6 +200,7 @@ class POUpdate(BaseModel):
     observaciones: Optional[str] = None
     tipo_compra: Optional[str] = None
     prioridad: Optional[str] = None
+    estado: Optional[str] = None
     condiciones_pago: Optional[str] = None
     dias_validez: Optional[int] = None
     shipping_cost: Optional[Decimal] = None

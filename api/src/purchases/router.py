@@ -191,8 +191,13 @@ async def get_purchase_order(po_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.put("/purchase-orders/{po_id}", response_model=POResponse)
-async def update_purchase_order(po_id: str, body: POUpdate, db: AsyncSession = Depends(get_db)):
-    result = await service.update_purchase_order(db, po_id, body)
+async def update_purchase_order(
+    po_id: str,
+    body: POUpdate,
+    force: bool = Query(False, description="Permite modificar la orden incluso si ya fue confirmada o tiene recepciones"),
+    db: AsyncSession = Depends(get_db)
+):
+    result = await service.update_purchase_order(db, po_id, body, force=force)
     if not result:
         raise HTTPException(status_code=404, detail="Orden de compra no encontrada")
     return result
