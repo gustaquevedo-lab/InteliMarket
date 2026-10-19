@@ -342,7 +342,7 @@ def generate_labor_settlement_receipt_pdf(
 
     # 7. QR DE VERIFICACIÓN & BLOQUE DE FIRMAS
     rec_pay_id = settlement.get("receivable_payment_id") or settlement.get("id")
-    qr_url = f"https://intelimarket.intellihouse.lat/verificar-recibo/{rec_pay_id}"
+    qr_url = f"https://intelimarket.superextra.com.py/verificar-recibo/{rec_pay_id}"
     qr_code = qr.QrCodeWidget(qr_url)
     qr_code.barWidth = 14 * mm
     qr_code.barHeight = 14 * mm

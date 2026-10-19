@@ -103,25 +103,25 @@ export default function VerificarReciboPage() {
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold tracking-wide uppercase">
-              <ShieldCheck className="w-4 h-4" />
-              <span>Verificado Oficial</span>
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold tracking-wide uppercase shadow-xs">
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <span>Autenticidad Verificada</span>
             </div>
           </div>
 
           {/* Badge y Monto Principal */}
           <div className="mt-5 text-center sm:text-left flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Recibo de Cobranza Oficial</span>
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Verificación Oficial de Comprobante</span>
               <div className="text-xl font-mono font-black text-indigo-400 mt-0.5">{data.numero_recibo}</div>
               <div className="text-xs text-slate-400 flex items-center justify-center sm:justify-start gap-1.5 mt-1">
                 <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                <span>{data.fecha_hora || data.fecha} (Hora Local PY)</span>
+                <span>Emitido: {data.fecha_hora || data.fecha} (Hora Local Asunción, PY)</span>
               </div>
             </div>
 
-            <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4 text-center sm:text-right">
-              <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider block">Total Cobrado</span>
+            <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4 text-center sm:text-right shadow-xs">
+              <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider block">Total Compensado / Percibido</span>
               <span className="text-2xl font-black font-mono text-emerald-400 tracking-tight">
                 {formatPYG(data.monto_total)}
               </span>
@@ -134,7 +134,7 @@ export default function VerificarReciboPage() {
           <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 space-y-3">
             <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800 pb-2">
               <User className="w-4 h-4 text-indigo-400" />
-              <span>Datos del Cliente</span>
+              <span>Titular / Colaborador</span>
             </div>
             <div className="text-sm font-bold text-white">{cliente.razon_social}</div>
             <div className="text-xs text-slate-400 space-y-1">
@@ -152,7 +152,7 @@ export default function VerificarReciboPage() {
           <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 space-y-3">
             <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800 pb-2">
               <CreditCard className="w-4 h-4 text-indigo-400" />
-              <span>Medios de Pago Percibidos</span>
+              <span>Modalidad de Operación</span>
             </div>
             <div className="text-xs text-slate-400 space-y-2">
               {data.formas_pago_detalle && data.formas_pago_detalle.length > 0 ? (
@@ -178,13 +178,13 @@ export default function VerificarReciboPage() {
                 </div>
               ) : (
                 <div>
-                  <span className="text-slate-400 block text-[11px]">Forma de Pago:</span>
+                  <span className="text-slate-400 block text-[11px]">Forma de Pago / Retención:</span>
                   <span className="text-sm font-bold text-white capitalize">{data.forma_pago.replace("_", " ")}</span>
                 </div>
               )}
               {data.referencia && (!data.formas_pago_detalle || data.formas_pago_detalle.length === 0) && (
                 <div>
-                  <span className="text-slate-400 block text-[11px]">Comprobante / N° Referencia:</span>
+                  <span className="text-slate-400 block text-[11px]">Referencia Interna:</span>
                   <span className="text-xs font-mono text-slate-200 font-semibold">{data.referencia}</span>
                 </div>
               )}
@@ -253,7 +253,7 @@ export default function VerificarReciboPage() {
                     </div>
                   )}
                   <div className="text-left sm:text-right">
-                    <span className="text-[10px] text-slate-400 block">Cobrado</span>
+                    <span className="text-[10px] text-slate-400 block">Monto Extinto</span>
                     <span className="font-mono font-bold text-emerald-400 text-sm">{formatPYG(alloc.monto_aplicado)}</span>
                   </div>
                   <div className="text-right">
@@ -269,11 +269,11 @@ export default function VerificarReciboPage() {
         {/* Footer y Acciones */}
         <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
           <div className="text-[11px] text-slate-400">
-            Comprobante oficial respaldado por el sistema de gestión Extra Supermercado.
+            Comprobante oficial con validez y registro en tiempo real en Extra Supermercado.
           </div>
           <button
             onClick={handleDownloadPdf}
-            className="w-full sm:w-auto px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20"
+            className="w-full sm:w-auto px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20 cursor-pointer"
           >
             <Download className="w-4 h-4" />
             <span>Imprimir / Guardar Copia</span>
@@ -287,40 +287,53 @@ export default function VerificarReciboPage() {
           <div className="space-y-2">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-[11px] font-bold tracking-wide uppercase">
               <Sparkles className="w-3.5 h-3.5" />
-              <span>Potenciado por InteliMarket ERP</span>
+              <span>InteliMarket · Hecho para crecer</span>
             </div>
             <h3 className="text-base sm:text-lg font-black text-white tracking-tight">
               ¿Querés un Sistema ERP & POS de Alto Rendimiento para tu Empresa o Supermercado?
             </h3>
             <p className="text-xs text-slate-300 leading-relaxed max-w-xl">
-              Diseñado exclusivamente para el comercio en Paraguay: Facturación Electrónica SIFEN, cajas offline-first a prueba de cortes, control de inventario en tiempo real, cuentas corrientes automatizadas y liquidación de personal con trazabilidad digital.
+              Diseñado exclusivamente para el comercio en Paraguay: Facturación Electrónica SIFEN, cajas offline-first a prueba de cortes, control de inventario en tiempo real, cuentas corrientes automatizadas y liquidación de personal con trazabilidad digital garantizada.
             </p>
           </div>
 
           <div className="mt-5 pt-5 border-t border-slate-800/80 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
             <a
-              href="https://wa.me/595983490197?text=Hola,%20vi%20la%20verificaci%C3%B3n%20de%20un%20recibo%20InteliMarket%20y%20me%20gustar%C3%ADa%20informaci%C3%B3n%20del%20sistema%20ERP%20para%20mi%20empresa"
+              href="https://wa.me/595983490197?text=Hola,%20vi%20la%20verificaci%C3%B3n%20de%20un%20comprobante%20InteliMarket%20y%20me%20gustar%C3%ADa%20informaci%C3%B3n%20del%20sistema%20ERP%20para%20mi%20empresa"
               target="_blank"
               rel="noopener noreferrer"
-              className="px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 active:scale-95"
+              className="px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 active:scale-95 cursor-pointer"
             >
               <MessageCircle className="w-4 h-4" />
               <span>Contactar por WhatsApp (+595 983 490197)</span>
             </a>
 
             <a
+              href="https://intellihouse.lat"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 border border-slate-700 active:scale-95 cursor-pointer"
+            >
+              <ExternalLink className="w-4 h-4 text-indigo-400" />
+              <span>Visitar intellihouse.lat</span>
+            </a>
+
+            <a
               href="https://intelimarket.intellihouse.lat"
               target="_blank"
               rel="noopener noreferrer"
-              className="px-5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 border border-slate-700 active:scale-95"
+              className="px-4 py-3 bg-indigo-950/40 hover:bg-indigo-900/40 text-indigo-300 hover:text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 border border-indigo-800/50 active:scale-95 cursor-pointer"
             >
-              <ExternalLink className="w-4 h-4 text-indigo-400" />
-              <span>Visitar Sitio Web Oficial</span>
+              <span>Sitio InteliMarket</span>
             </a>
           </div>
 
-          <div className="mt-4 text-[10px] text-slate-400 text-center sm:text-left">
-            IntelliHouse Paraguay · Tecnología de vanguardia para el retail paraguayo.
+          <div className="mt-4 text-[11px] text-slate-400 text-center sm:text-left flex items-center gap-1.5">
+            <span>Desarrollado y respaldado por</span>
+            <a href="https://intellihouse.lat" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline font-bold">
+              IntelliHouse
+            </a>
+            <span>· Tecnología de software para el retail paraguayo.</span>
           </div>
         </div>
 
