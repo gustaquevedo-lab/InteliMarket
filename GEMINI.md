@@ -85,4 +85,12 @@
    - **Trazabilidad Visible Obligatoria:** Toda factura debe conservar su valor facial original en Débito (`total_factura`). Toda Nota de Crédito (aplicada o libre) y todo Pago Parcial DEBEN mostrarse obligatoriamente como filas independientes en la columna Crédito, vinculadas explícitamente a su comprobante (`[Aplicada a FAC ...]`).
    - **Mecanismo de Saldo Progresivo:** El saldo progresivo o exigible se calcula exclusivamente restando los créditos de los débitos en la cascada de movimientos, jamás mutando el comprobante base. Ocultar la NC o mutar el débito nominal de la factura causa que el usuario al cotejar físicamente contra sus facturas en papel descuente la NC por segunda vez. Esta regla es canónica e inviolable en todo el ERP.
 
+14. **ESTÁNDAR CANÓNICO DE MODALES (ANTI-DESBORDE Y BOTONES DE ACCIÓN SIEMPRE VISIBLES):**
+   - **Prohibición Estricta:** Queda terminantemente PROHIBIDO diseñar modales cuyo contenedor crezca indefinidamente sin límite de viewport o donde los botones de confirmación/cancelación queden ocultos fuera de pantalla por falta de scroll.
+   - **Arquitectura Canónica Obligatoria en Todo Modal (`fixed flex items-center justify-center`):**
+     * **Contenedor Modal:** `max-h-[90vh] flex flex-col overflow-hidden rounded-2xl shadow-xl`.
+     * **Cabecera (`shrink-0`):** Título, badge y botón cerrar con `border-b` y sin scroll.
+     * **Cuerpo Central (`flex-1 overflow-y-auto`):** Todo el contenido dinámico, listas, inputs y tablas van en el cuerpo central scrolleable para que se adapte fluidamente a cualquier resolución o cantidad de datos.
+     * **Pie de Acciones (`shrink-0`):** Barra inferior con botones (Guardar, Cancelar, Confirmar) con `border-t`, fondo sólido (`bg-slate-50 dark:bg-slate-900`) y anclada fijamente a la vista.
+
 
