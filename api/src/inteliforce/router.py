@@ -134,9 +134,14 @@ async def create_order(data: MobileOrderCreate, db: AsyncSession = Depends(get_d
     from api.src.products.models import Product
     from sqlalchemy import select
 
-    rep = await _current_rep(db, user)
+    from api.src.inventory.models import Warehouse
 
-    # El precio y el IVA los decide el servidor; lo que manda el celular es solo referencia.
+    rep = await _current_rep(db, user)
+    warehouse = await db.get(Warehouse, rep.warehouse_id) if rep.warehouse_id else None
+    if not warehouse:
+        raise HTTPException(status_code=400, detail=f"El vendedor {rep.nombre} no tiene depósito asignado")
+
+    # Precio e IVA los decide el servidor y los preventistas no dan descuentos: lo del celular es referencia.
     products = {p.id: p for p in (await db.execute(select(Product).where(
         Product.company_id == rep.company_id, Product.id.in_([i.product_id for i in data.items]),
     ))).scalars()}
@@ -149,12 +154,14 @@ async def create_order(data: MobileOrderCreate, db: AsyncSession = Depends(get_d
         items.append(SaleItemInput(
             product_id=item.product_id, cantidad=item.cantidad,
             precio_unitario=price["precio"] if price else (product.precio_venta or 0),
-            descuento_pct=item.descuento_pct, iva_tasa=product.iva_tasa if product.iva_tasa is not None else 10,
+            descuento_pct=0, iva_tasa=product.iva_tasa if product.iva_tasa is not None else 10,
         ))
 
     sale_data = SaleCreate(
         id=uuid_lib.uuid5(uuid_lib.NAMESPACE_URL, f"inteliforce:{rep.company_id}:{data.client_op_id}") if data.client_op_id else None,
         company_id=rep.company_id,
+        warehouse_id=warehouse.id,
+        branch_id=warehouse.branch_id,
         customer_id=data.customer_id,
         tipo_comprobante="factura",
         condicion=data.condicion,

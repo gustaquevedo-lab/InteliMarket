@@ -697,10 +697,14 @@ async def _deduct_stock_for_sale(db: AsyncSession, sale: Sale, data: SaleCreate)
         qty_to_deduct = int(item_data.cantidad)
         warehouse_id = None
 
-        stock_result = await db.execute(
-            select(Stock).where(Stock.product_id == item_data.product_id).limit(1)
-        )
-        stock = stock_result.scalar_one_or_none()
+        stock_q = select(Stock).where(Stock.product_id == item_data.product_id)
+        if data.warehouse_id:
+            stock_q = stock_q.where(Stock.warehouse_id == data.warehouse_id)
+        stock = (await db.execute(stock_q.limit(1))).scalar_one_or_none()
+        if not stock and data.warehouse_id:
+            # Sin fila en el depósito: se crea y queda en negativo para que el faltante se vea.
+            stock = Stock(warehouse_id=data.warehouse_id, product_id=item_data.product_id, cantidad=0, cantidad_reservada=0)
+            db.add(stock)
         if stock:
             stock.cantidad -= qty_to_deduct
             stock.updated_at = datetime.now(timezone.utc)
@@ -710,6 +714,7 @@ async def _deduct_stock_for_sale(db: AsyncSession, sale: Sale, data: SaleCreate)
                 select(StockLot)
                 .where(
                     StockLot.product_id == item_data.product_id,
+                    StockLot.warehouse_id == warehouse_id,
                     StockLot.cantidad_disponible > 0,
                 )
                 .order_by(StockLot.fecha_ingreso.asc())
@@ -1658,8 +1663,18 @@ async def cancel_sale(db: AsyncSession, sale_id: str) -> Sale | None:
 
     items_result = await db.execute(select(SaleItem).where(SaleItem.sale_id == sale.id))
     for item in items_result.scalars().all():
-        stock_result = await db.execute(select(Stock).where(Stock.product_id == item.product_id).limit(1))
-        stock = stock_result.scalar_one_or_none()
+        # Devolver al depósito de donde salió (queda en el kardex de la venta).
+        origin_wh = (await db.execute(
+            select(InventoryMovement.warehouse_id).where(
+                InventoryMovement.referencia_id == sale.id,
+                InventoryMovement.product_id == item.product_id,
+                InventoryMovement.tipo == "salida_venta",
+            ).limit(1)
+        )).scalar()
+        stock_q = select(Stock).where(Stock.product_id == item.product_id)
+        if origin_wh:
+            stock_q = stock_q.where(Stock.warehouse_id == origin_wh)
+        stock = (await db.execute(stock_q.limit(1))).scalar_one_or_none()
         if stock:
             qty = int(item.cantidad)
             stock.cantidad += qty

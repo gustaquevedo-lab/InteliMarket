@@ -28,6 +28,7 @@ class SaleCreate(BaseModel):
     id: Optional[UUID] = None
     company_id: UUID
     branch_id: Optional[UUID] = None
+    warehouse_id: Optional[UUID] = None  # sin valor: comportamiento anterior (primer depósito con stock)
     customer_id: Optional[UUID] = None
     emission_point_id: Optional[UUID] = None
     punto_emision: Optional[str] = None
