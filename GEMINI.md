@@ -93,4 +93,7 @@
      * **Cuerpo Central (`flex-1 overflow-y-auto`):** Todo el contenido dinámico, listas, inputs y tablas van en el cuerpo central scrolleable para que se adapte fluidamente a cualquier resolución o cantidad de datos.
      * **Pie de Acciones (`shrink-0`):** Barra inferior con botones (Guardar, Cancelar, Confirmar) con `border-t`, fondo sólido (`bg-slate-50 dark:bg-slate-900`) y anclada fijamente a la vista.
 
-
+15. **REGLAS CANÓNICAS DE NÓMINA, SUELDOK Y LIQUIDACIONES:**
+   - **Validación Estricta de IPS (Aporte Obrero y Patronal):** El descuento de IPS obrero (9%) y el cálculo patronal (16.5%) SOLO se aplican si el colaborador es cotizante formal verificado por `ipsWorker > 0`. Queda TERMINANTEMENTE PROHIBIDO asumir o imponer deducción de IPS a funcionarios no cotizantes (ej. directores, contratistas o cargos no inscriptos como Dina Mary). En colaboradores sin IPS, el recibo de liquidación debe indicar "Sin Aporte IPS", deducción 0 y el salario neto debe ser idéntico al aprobado en la planilla física.
+   - **Cálculo de Días Trabajados en Liquidaciones Parciales:** En períodos parciales (ingresos o egresos a mitad de mes, o liquidaciones proporcionales, ej. 10 días de Fredy Nuñez = ₲ 1.014.666), el salario base y neto deben responder estrictamente a los días efectivamente trabajados y liquidados en la planilla aprobada, nunca asumiendo 30 días ciegos.
+   - **Formato Monetario PYG sin Salto de Línea:** Toda visualización de guaraníes debe preservar el símbolo `₲` y el valor numérico unidos por espacio indivisible (`\u00A0`), con clases `whitespace-nowrap` en tablas y badges para prevenir desbordes o rupturas visuales de línea.
