@@ -1,9 +1,14 @@
 import React, { useEffect, useState } from "react"
-import { useParams } from "react-router-dom"
-import { CheckCircle2, AlertCircle, Loader2, Download, ShieldCheck, FileText, Calendar, Building2, User, CreditCard } from "lucide-react"
+import { useParams, useSearchParams } from "react-router-dom"
+import {
+  CheckCircle2, AlertCircle, Loader2, Download, ShieldCheck, FileText,
+  Calendar, Building2, User, CreditCard, MessageCircle, ExternalLink, Sparkles
+} from "lucide-react"
 
 export default function VerificarReciboPage() {
-  const { paymentId } = useParams<{ paymentId: string }>()
+  const { paymentId: pathPaymentId } = useParams<{ paymentId: string }>()
+  const [searchParams] = useSearchParams()
+  const paymentId = pathPaymentId || searchParams.get("id") || searchParams.get("payment_id") || searchParams.get("ref")
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -264,7 +269,7 @@ export default function VerificarReciboPage() {
         {/* Footer y Acciones */}
         <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
           <div className="text-[11px] text-slate-400">
-            Comprobante fiscal respaldado por el sistema de gestión Extra Supermercado.
+            Comprobante oficial respaldado por el sistema de gestión Extra Supermercado.
           </div>
           <button
             onClick={handleDownloadPdf}
@@ -273,6 +278,50 @@ export default function VerificarReciboPage() {
             <Download className="w-4 h-4" />
             <span>Imprimir / Guardar Copia</span>
           </button>
+        </div>
+
+        {/* Sección Comercial ERP & Conversión */}
+        <div className="mt-8 bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950/70 border border-indigo-500/30 rounded-3xl p-6 sm:p-7 shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 right-0 -mt-6 -mr-6 w-36 h-36 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
+          
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-[11px] font-bold tracking-wide uppercase">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Potenciado por InteliMarket ERP</span>
+            </div>
+            <h3 className="text-base sm:text-lg font-black text-white tracking-tight">
+              ¿Querés un Sistema ERP & POS de Alto Rendimiento para tu Empresa o Supermercado?
+            </h3>
+            <p className="text-xs text-slate-300 leading-relaxed max-w-xl">
+              Diseñado exclusivamente para el comercio en Paraguay: Facturación Electrónica SIFEN, cajas offline-first a prueba de cortes, control de inventario en tiempo real, cuentas corrientes automatizadas y liquidación de personal con trazabilidad digital.
+            </p>
+          </div>
+
+          <div className="mt-5 pt-5 border-t border-slate-800/80 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            <a
+              href="https://wa.me/595983490197?text=Hola,%20vi%20la%20verificaci%C3%B3n%20de%20un%20recibo%20InteliMarket%20y%20me%20gustar%C3%ADa%20informaci%C3%B3n%20del%20sistema%20ERP%20para%20mi%20empresa"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 active:scale-95"
+            >
+              <MessageCircle className="w-4 h-4" />
+              <span>Contactar por WhatsApp (+595 983 490197)</span>
+            </a>
+
+            <a
+              href="https://intelimarket.intellihouse.lat"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 border border-slate-700 active:scale-95"
+            >
+              <ExternalLink className="w-4 h-4 text-indigo-400" />
+              <span>Visitar Sitio Web Oficial</span>
+            </a>
+          </div>
+
+          <div className="mt-4 text-[10px] text-slate-400 text-center sm:text-left">
+            IntelliHouse Paraguay · Tecnología de vanguardia para el retail paraguayo.
+          </div>
         </div>
 
       </div>

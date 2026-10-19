@@ -266,6 +266,7 @@ function AppRoutes() {
       <Route path="/tienda/dashboard" element={<Suspense fallback={<PageLoader />}><EcommerceOrders /></Suspense>} />
       <Route path="/verificador" element={<Suspense fallback={<PageLoader />}><PriceCheckerKioskPage /></Suspense>} />
       <Route path="/consulta-precios" element={<Suspense fallback={<PageLoader />}><PriceCheckerKioskPage /></Suspense>} />
+      <Route path="/verificar-recibo" element={<Suspense fallback={<PageLoader />}><VerificarReciboPage /></Suspense>} />
       <Route path="/verificar-recibo/:paymentId" element={<Suspense fallback={<PageLoader />}><VerificarReciboPage /></Suspense>} />
       <Route path="/tv/carniceria" element={<Suspense fallback={<PageLoader />}><CarniceriaTvDigitalPage /></Suspense>} />
 

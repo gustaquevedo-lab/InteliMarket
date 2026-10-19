@@ -1638,8 +1638,59 @@ async def get_payment_receipt_data(db: AsyncSession, payment_id: str) -> dict | 
         LEFT JOIN bank_accounts ba ON ba.id = rp.bank_account_id
         WHERE rp.id = :id
     """)
-    r_pay = await db.execute(q_pay, {"id": payment_id})
-    row = r_pay.fetchone()
+
+    is_uuid = False
+    try:
+        uuid.UUID(str(payment_id))
+        is_uuid = True
+    except Exception:
+        is_uuid = False
+
+    row = None
+    if is_uuid:
+        r_pay = await db.execute(q_pay, {"id": payment_id})
+        row = r_pay.fetchone()
+        if not row:
+            # Fallback a labor_settlements por si se pasó el ID de la liquidación laboral
+            q_ls = text("SELECT receivable_payment_id FROM labor_settlements WHERE id = :id")
+            try:
+                r_ls = await db.execute(q_ls, {"id": payment_id})
+                ls_row = r_ls.fetchone()
+                if ls_row and ls_row.receivable_payment_id:
+                    payment_id = str(ls_row.receivable_payment_id)
+                    r_pay = await db.execute(q_pay, {"id": payment_id})
+                    row = r_pay.fetchone()
+            except Exception:
+                pass
+    else:
+        # Buscar por numero_recibo o referencia
+        q_by_num = text("""
+            SELECT
+                rp.id, rp.company_id, rp.customer_id, rp.monto_total, rp.moneda,
+                rp.forma_pago, rp.referencia, rp.fecha, rp.observaciones, rp.created_at,
+                rp.numero_recibo,
+                rp.aplica_retencion, rp.monto_retencion, rp.retencion_numero_comprobante,
+                rp.retencion_fecha, rp.retencion_porcentaje, rp.monto_efectivo_recibido,
+                rp.bank_account_id, rp.fecha_transferencia, rp.monto_transferencia, rp.monto_cheque, rp.referencia_transferencia,
+                rp.monto_pyg, rp.monto_brl, rp.monto_usd, rp.tasa_brl, rp.tasa_usd,
+                rp.cheque_id,
+                ba.banco as banco_nombre, ba.numero_cuenta as banco_cuenta, ba.tipo as banco_tipo,
+                c.razon_social as customer_name, c.nombre_fantasia, c.ruc as customer_ruc,
+                c.telefono as customer_telefono, c.empresa_vinculada_nombre,
+                comp.razon_social as comp_razon_social, comp.ruc as comp_ruc,
+                comp.nombre_fantasia as comp_nombre_fantasia, comp.logo_url as comp_logo_url
+            FROM receivable_payments rp
+            LEFT JOIN customers c ON c.id = rp.customer_id
+            LEFT JOIN companies comp ON comp.id = rp.company_id
+            LEFT JOIN bank_accounts ba ON ba.id = rp.bank_account_id
+            WHERE rp.numero_recibo = :num OR rp.referencia = :num
+            LIMIT 1
+        """)
+        r_pay = await db.execute(q_by_num, {"num": payment_id})
+        row = r_pay.fetchone()
+        if row:
+            payment_id = str(row.id)
+
     if not row:
         return None
 

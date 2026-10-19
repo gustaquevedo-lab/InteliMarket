@@ -341,7 +341,8 @@ def generate_labor_settlement_receipt_pdf(
     elements.append(Spacer(1, 14))
 
     # 7. QR DE VERIFICACIÓN & BLOQUE DE FIRMAS
-    qr_url = f"https://intelimarket.intellihouse.lat/verificar-recibo?tipo=finiquito&ref={num_recibo}&ci={ci_emp}"
+    rec_pay_id = settlement.get("receivable_payment_id") or settlement.get("id")
+    qr_url = f"https://intelimarket.intellihouse.lat/verificar-recibo/{rec_pay_id}"
     qr_code = qr.QrCodeWidget(qr_url)
     qr_code.barWidth = 14 * mm
     qr_code.barHeight = 14 * mm
@@ -352,7 +353,7 @@ def generate_labor_settlement_receipt_pdf(
         f"<font size=6 color='#64748B'><b>VALIDACIÓN DIGITAL</b><br/>"
         f"Comprobante: {num_recibo}<br/>"
         f"Emisión: {now_py}<br/>"
-        f"Extra Supermercado</font>"
+        f"Verificación Oficial Online</font>"
     )
 
     firma_trabajador = (
