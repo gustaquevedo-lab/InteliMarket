@@ -27,6 +27,9 @@ type AutoCandidate = {
 }
 
 type TabType = "posicion" | "movimientos" | "conciliacion" | "cheques" | "auditoria"
+type MainView = "cuenta" | "consolidado"
+type AccountSubTab = "movimientos" | "cheques" | "ajustes"
+
 
 const BANK_CATEGORIA_LABELS: Record<string, { label: string; className: string }> = {
   comision_bancaria: { label: "Comisión bancaria", className: "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300 border border-rose-200 dark:border-rose-800" },
@@ -57,6 +60,9 @@ const CHEQUE_ESTADO_BADGES: Record<string, { label: string; className: string }>
 
 export default function BancosPage() {
   const [activeTab, setActiveTab] = useState<TabType>("posicion")
+  const [mainView, setMainView] = useState<MainView>("cuenta")
+  const [accountSubTab, setAccountSubTab] = useState<AccountSubTab>("movimientos")
+
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [banks, setBanks] = useState<BankAccount[]>([])
@@ -231,6 +237,17 @@ export default function BancosPage() {
     } finally {
       setTxnsLoading(false)
     }
+  }
+
+  const handleSelectAccount = (bankId: string) => {
+    setSelectedBank(bankId)
+    loadBankTxns(bankId)
+    setMainView("cuenta")
+    setAccountSubTab("movimientos")
+    setTxForm(prev => ({ ...prev, bank_account_id: bankId }))
+    setTransferForm(prev => ({ ...prev, origen_account_id: bankId }))
+    setDepositForm(prev => ({ ...prev, bank_account_id: bankId }))
+    setChequeForm(prev => ({ ...prev, bank_account_id: bankId }))
   }
 
   const fetchCheques = async () => {
@@ -686,6 +703,20 @@ export default function BancosPage() {
     return banks.reduce((acc, b) => acc + (b.moneda === "PYG" ? Number(b.saldo_actual || 0) : Number(b.saldo_actual || 0) * 7550), 0)
   }, [banks])
 
+  const currentAccount = useMemo(() => {
+    return banks.find(b => b.id === selectedBank) || banks[0] || null
+  }, [banks, selectedBank])
+
+  const activeAccountStats = useMemo(() => {
+    if (!currentAccount) return null
+    return bankDashboard?.accounts?.find((a: any) => a.id === currentAccount.id) || null
+  }, [currentAccount, bankDashboard])
+
+  const accountCheques = useMemo(() => {
+    if (!selectedBank) return cheques
+    return cheques.filter(c => c.bank_account_id === selectedBank)
+  }, [cheques, selectedBank])
+
   return (
     <div className="space-y-6 min-w-0 animate-fade-in-up pb-16">
       {/* 🌟 LUXURY COMMAND DECK HEADER */}
@@ -878,47 +909,804 @@ export default function BancosPage() {
         </div>
       </div>
 
-      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
-      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
-        {[
-          { key: "posicion", label: "Posición & Cuentas", icon: Landmark, count: banks.length },
-          { key: "movimientos", label: "Extractos & Movimientos", icon: FileSpreadsheet, count: bankTxns.length },
-          { key: "conciliacion", label: "Conciliación Inteligente", icon: Wand2, count: bankDashboard?.pendientes },
-          { key: "cheques", label: "Cartera de Cheques", icon: Receipt, count: chequesDashboard?.cantidad_cartera },
-          { key: "auditoria", label: "Auditoría & Saldos", icon: ShieldCheck, count: alerts.length + corrections.length },
-        ].map((t) => {
-          const Icon = t.icon
-          const active = activeTab === t.key
-          return (
-            <button
-              key={t.key}
-              onClick={() => setActiveTab(t.key as TabType)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
-                active
-                  ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
-              }`}
-            >
-              <Icon className="w-4 h-4" />
-              <span>{t.label}</span>
-              {t.count !== undefined && t.count > 0 && (
-                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
-                  active ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
-                }`}>
-                  {t.count}
-                </span>
-              )}
-            </button>
-          )
-        })}
+      {/* 🧭 NAVEGACIÓN Y SELECTOR DE VISTA: WORKSPACE MAESTRO-DETALLE */}
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-2 rounded-2xl border border-slate-200 dark:border-slate-700/80 shadow-sm">
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setMainView("cuenta")}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
+              mainView === "cuenta"
+                ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+            }`}
+          >
+            <Landmark className="w-4 h-4" />
+            <span>Workspace por Cuenta</span>
+            {currentAccount && (
+              <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-blue-50 text-blue-700 dark:bg-blue-950/70 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                {currentAccount.alias || currentAccount.banco}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setMainView("consolidado")}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
+              mainView === "consolidado"
+                ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+            }`}
+          >
+            <Building2 className="w-4 h-4" />
+            <span>Posición Global & Auditoría</span>
+            {(alerts.length > 0 || corrections.length > 0) && (
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                {alerts.length + corrections.length}
+              </span>
+            )}
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowBankForm(true)}
+            className="btn-outline text-xs flex items-center gap-1.5 py-1.5 px-3"
+          >
+            <Plus className="w-3.5 h-3.5" /> Nueva Cuenta
+          </button>
+        </div>
       </div>
 
       {loading ? (
         <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
       ) : (
         <>
-          {/* TAB 1: POSICIÓN & CUENTAS */}
-          {activeTab === "posicion" && (
+          {/* ============================================================== */}
+          {/* 🏢 VISTA 1: WORKSPACE MAESTRO-DETALLE POR CUENTA               */}
+          {/* ============================================================== */}
+          {mainView === "cuenta" && (
+            <div className="space-y-6">
+              {/* COCKPIT SUPERIOR DE CUENTAS CON NICKNAMES PROMINENTES */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-500">
+                      Cuentas Bancarias ({banks.length})
+                    </h3>
+                    <p className="text-[11px] text-slate-400">Hacé clic en cualquier cuenta para abrir sus extractos y operaciones</p>
+                  </div>
+                  <span className="text-xs font-bold text-slate-500 font-mono">
+                    {formatPYG(totalLiquidezPyg)} consolidado
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
+                  {banks.map(b => {
+                    const isSelected = selectedBank === b.id
+                    const acctStats = bankDashboard?.accounts?.find((a: any) => a.id === b.id)
+                    return (
+                      <div
+                        key={b.id}
+                        onClick={() => handleSelectAccount(b.id)}
+                        className={`group relative p-4 rounded-2xl cursor-pointer transition-all border text-left ${
+                          isSelected
+                            ? "bg-gradient-to-br from-blue-50/90 to-indigo-50/50 dark:from-slate-900 dark:to-blue-950/40 border-blue-500 shadow-md ring-2 ring-blue-500/40"
+                            : "bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-sm"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                              {b.banco} · {b.tipo}
+                            </span>
+                            {/* NICKNAME / ALIAS DESTACADO */}
+                            <div className="text-sm font-black text-slate-900 dark:text-white truncate mt-0.5 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                              {b.alias ? b.alias : b.banco}
+                            </div>
+                            <div className="text-[11px] font-mono text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                              {b.numero_cuenta}
+                            </div>
+                          </div>
+                          <div className="shrink-0 flex flex-col items-end gap-1">
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                              {b.moneda}
+                            </span>
+                            {isSelected && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-blue-600 dark:text-blue-400">
+                                <CheckCircle className="w-3 h-3" /> Activa
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-end justify-between">
+                          <div>
+                            <span className="text-[10px] text-slate-400 font-medium block">Saldo en libros</span>
+                            <span className="text-base font-black font-mono text-slate-900 dark:text-white">
+                              {formatCurrency(b.saldo_actual, b.moneda)}
+                            </span>
+                          </div>
+                          {acctStats && acctStats.pendientes > 0 ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                              {acctStats.pendientes} pendientes
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
+                              <Check className="w-3 h-3 stroke-[3]" /> Al día
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* FORMULARIO DESPLEGABLE: NUEVA CUENTA BANCARIA */}
+              {showBankForm && (
+                <div className="card p-6 border-blue-300 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-950/20 animate-fade-in-up">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <Landmark className="w-4 h-4 text-blue-600" /> Registrar Nueva Cuenta Bancaria
+                    </h4>
+                    <button onClick={() => setShowBankForm(false)} className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Banco / Entidad *</label>
+                      <input
+                        type="text"
+                        placeholder="Ej: Banco Itaú, Continental..."
+                        className="input-field w-full text-xs"
+                        value={bankForm.banco}
+                        onChange={e => setBankForm({ ...bankForm, banco: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Nickname / Alias Comercial *</label>
+                      <input
+                        type="text"
+                        placeholder="Ej: ITAÚ - CAJA PRINCIPAL"
+                        className="input-field w-full text-xs font-bold text-blue-600"
+                        value={bankForm.alias}
+                        onChange={e => setBankForm({ ...bankForm, alias: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Tipo de Cuenta</label>
+                      <select
+                        className="input-field w-full text-xs"
+                        value={bankForm.tipo}
+                        onChange={e => setBankForm({ ...bankForm, tipo: e.target.value })}
+                      >
+                        <option value="corriente">Cuenta Corriente</option>
+                        <option value="ahorro">Caja de Ahorro</option>
+                        <option value="boveda">Bóveda / Custodia</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Número de Cuenta *</label>
+                      <input
+                        type="text"
+                        placeholder="Ej: 123456789"
+                        className="input-field w-full text-xs font-mono"
+                        value={bankForm.numero_cuenta}
+                        onChange={e => setBankForm({ ...bankForm, numero_cuenta: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Moneda</label>
+                      <select
+                        className="input-field w-full text-xs"
+                        value={bankForm.moneda}
+                        onChange={e => setBankForm({ ...bankForm, moneda: e.target.value })}
+                      >
+                        <option value="PYG">PYG (Guaraníes)</option>
+                        <option value="USD">USD (Dólares)</option>
+                        <option value="BRL">BRL (Reales)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Saldo Inicial</label>
+                      <CurrencyInput
+                        currency={bankForm.moneda === "USD" ? "USD" : "PYG"}
+                        value={bankForm.saldo_inicial}
+                        onChangeValue={(num, formatted) => setBankForm({ ...bankForm, saldo_inicial: String(num) })}
+                        placeholder="0"
+                        className="input-field w-full text-xs font-mono font-bold"
+                      />
+                    </div>
+                    <div className="sm:col-span-2 lg:col-span-3">
+                      <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">Titular de la Cuenta</label>
+                      <input
+                        type="text"
+                        placeholder="Ej: GRUPO SANTA TERESA E.A.S."
+                        className="input-field w-full text-xs"
+                        value={bankForm.titular}
+                        onChange={e => setBankForm({ ...bankForm, titular: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2 mt-4">
+                    <button onClick={() => setShowBankForm(false)} className="btn-ghost text-xs">Cancelar</button>
+                    <button onClick={handleCreateBank} className="btn-primary text-xs">Guardar Cuenta</button>
+                  </div>
+                </div>
+              )}
+
+              {/* DETALLE Y ESPACIO DE TRABAJO DE LA CUENTA ACTIVA */}
+              {currentAccount ? (
+                <div className="space-y-5">
+                  {/* HERO CABECERA DE LA CUENTA SELECCIONADA */}
+                  <div className="card p-6 bg-gradient-to-br from-white via-slate-50 to-blue-50/30 dark:from-slate-900 dark:via-slate-900/90 dark:to-blue-950/20 border-slate-200 dark:border-slate-800 shadow-sm">
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+                      {/* Información Principal con Nickname */}
+                      <div className="space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="px-2.5 py-0.5 rounded-lg text-xs font-black uppercase tracking-wider bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                            {currentAccount.alias || currentAccount.banco}
+                          </span>
+                          <span className="text-xs font-bold text-slate-500">
+                            {currentAccount.banco} · {currentAccount.tipo?.toUpperCase()}
+                          </span>
+                          <span className="font-mono text-xs text-slate-400">
+                            N° {currentAccount.numero_cuenta}
+                          </span>
+                        </div>
+
+                        <div className="flex items-baseline gap-3">
+                          <span className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-slate-900 dark:text-white">
+                            {formatCurrency(currentAccount.saldo_actual, currentAccount.moneda)}
+                          </span>
+                          <span className="text-xs font-bold uppercase text-slate-400">
+                            Saldo en libros ({currentAccount.moneda})
+                          </span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500 pt-1">
+                          <span>Titular: <strong className="text-slate-700 dark:text-slate-300">{currentAccount.titular || "GRUPO SANTA TERESA E.A.S."}</strong></span>
+                          <span>·</span>
+                          <span>
+                            Estado Saldo: {currentAccount.saldo_verificado_manualmente ? (
+                              <strong className="text-emerald-600 dark:text-emerald-400">Verificado</strong>
+                            ) : (
+                              <strong className="text-slate-500">Calculado</strong>
+                            )}
+                          </span>
+                          {currentAccount.saldo_minimo_alerta != null && (
+                            <>
+                              <span>·</span>
+                              <span>Umbral Mínimo: <strong className="text-amber-600 font-mono">{formatCurrency(currentAccount.saldo_minimo_alerta, currentAccount.moneda)}</strong></span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* BOTONES DE ACCIÓN RÁPIDA CONTEXTUALES */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setTxMode("directo")
+                            openTransactionModal(currentAccount.id)
+                          }}
+                          className="btn-primary text-xs flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 shadow-sm"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Registrar Movimiento
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setSelectedBank(currentAccount.id)
+                            setShowImportBank(true)
+                          }}
+                          className="btn-outline text-xs flex items-center gap-1.5 border-sky-300 dark:border-sky-800 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-950/40"
+                        >
+                          <Upload className="w-3.5 h-3.5 text-sky-500" /> Importar Extracto
+                        </button>
+
+                        <button
+                          onClick={openAutoReconcile}
+                          className="btn-outline text-xs flex items-center gap-1.5 border-purple-300 dark:border-purple-800 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/40"
+                        >
+                          <Wand2 className="w-3.5 h-3.5 text-purple-500" /> Auto-Conciliar
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setTxMode("transferencia")
+                            openTransactionModal(currentAccount.id)
+                          }}
+                          className="btn-outline text-xs flex items-center gap-1.5"
+                          title="Transferir fondos hacia otra cuenta"
+                        >
+                          <ArrowLeftRight className="w-3.5 h-3.5 text-amber-500" /> Transferir
+                        </button>
+
+                        <button
+                          onClick={() => handleOpenEditBank(currentAccount)}
+                          className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-slate-900 transition"
+                          title="Editar alias y datos de la cuenta"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+
+                        <button
+                          onClick={() => setCorrectionModal({ id: currentAccount.id, saldo_propuesto: String(currentAccount.saldo_actual ?? ""), motivo: "" })}
+                          className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-slate-900 transition"
+                          title="Solicitar corrección de saldo con doble firma"
+                        >
+                          <ShieldAlert className="w-4 h-4 text-amber-500" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* SUB-PESTAÑAS CONTEXTUALES DE LA CUENTA ACTIVA */}
+                  <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800">
+                    <button
+                      onClick={() => setAccountSubTab("movimientos")}
+                      className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition-all ${
+                        accountSubTab === "movimientos"
+                          ? "border-blue-600 text-blue-600 dark:text-blue-400 font-extrabold"
+                          : "border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-white"
+                      }`}
+                    >
+                      <FileSpreadsheet className="w-4 h-4" />
+                      <span>Movimientos & Extracto</span>
+                      <span className="px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                        {bankTxns.length}
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() => setAccountSubTab("cheques")}
+                      className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition-all ${
+                        accountSubTab === "cheques"
+                          ? "border-blue-600 text-blue-600 dark:text-blue-400 font-extrabold"
+                          : "border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-white"
+                      }`}
+                    >
+                      <Receipt className="w-4 h-4" />
+                      <span>Cheques Asociados</span>
+                      <span className="px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                        {accountCheques.length}
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() => setAccountSubTab("ajustes")}
+                      className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition-all ${
+                        accountSubTab === "ajustes"
+                          ? "border-blue-600 text-blue-600 dark:text-blue-400 font-extrabold"
+                          : "border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-white"
+                      }`}
+                    >
+                      <ShieldCheck className="w-4 h-4" />
+                      <span>Ajustes & Doble Firma</span>
+                    </button>
+                  </div>
+
+                  {/* CONTENIDO 1: MOVIMIENTOS & EXTRACTO */}
+                  {accountSubTab === "movimientos" && (
+            <div className="space-y-5">
+              {/* Barra de Filtros */}
+              <div className="card p-4 space-y-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Selector de Banco */}
+                  <div className="w-full sm:w-64">
+                    <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Cuenta Bancaria</label>
+                    <select
+                      className="input-field w-full text-xs"
+                      value={selectedBank}
+                      onChange={e => { setSelectedBank(e.target.value); loadBankTxns(e.target.value); }}
+                    >
+                      {banks.map(b => (
+                        <option key={b.id} value={b.id}>{formatBankLabel(b)}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Filtro por Categoría */}
+                  <div className="w-48">
+                    <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Categoría</label>
+                    <select className="input-field w-full text-xs" value={txFilterCategoria} onChange={e => setTxFilterCategoria(e.target.value)}>
+                      <option value="todas">Todas las categorías</option>
+                      {Object.entries(BANK_CATEGORIA_LABELS).map(([k, v]) => (
+                        <option key={k} value={k}>{v.label}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Filtro por Tipo */}
+                  <div className="w-36">
+                    <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Tipo</label>
+                    <select className="input-field w-full text-xs" value={txFilterTipo} onChange={e => setTxFilterTipo(e.target.value)}>
+                      <option value="todos">Todos</option>
+                      <option value="credito">Ingresos (+)</option>
+                      <option value="debito">Egresos (-)</option>
+                    </select>
+                  </div>
+
+                  {/* Filtro Conciliado */}
+                  <div className="w-40">
+                    <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Estado</label>
+                    <select className="input-field w-full text-xs" value={txFilterConciliado} onChange={e => setTxFilterConciliado(e.target.value)}>
+                      <option value="todos">Todos los estados</option>
+                      <option value="conciliados">Solo Conciliados</option>
+                      <option value="pendientes">Solo Pendientes</option>
+                    </select>
+                  </div>
+
+                  {/* Buscador */}
+                  <div className="flex-1 min-w-[200px]">
+                    <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Buscar</label>
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
+                      <input
+                        type="text"
+                        placeholder="Descripción, concepto o referencia..."
+                        className="input-field pl-9 w-full text-xs"
+                        value={txSearch}
+                        onChange={e => setTxSearch(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Resumen de Extracto de la Cuenta Seleccionada */}
+              {(() => {
+                const currentAccount = banks.find(b => b.id === selectedBank)
+                const totalCred = filteredBankTxns.filter(t => t.tipo === "credito").reduce((acc, t) => acc + Number(t.monto || 0), 0)
+                const totalDeb = filteredBankTxns.filter(t => t.tipo === "debito").reduce((acc, t) => acc + Number(t.monto || 0), 0)
+                const ccy = currentAccount?.moneda || "PYG"
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div className="card p-3.5 bg-gradient-to-br from-blue-50/50 to-indigo-50/30 dark:from-blue-950/20 dark:to-indigo-950/10 border-blue-200/60 dark:border-blue-800/40">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">Cuenta / Titular</div>
+                      <div className="font-extrabold text-sm text-gray-900 dark:text-white truncate mt-0.5">{currentAccount?.alias || currentAccount?.banco || "Cuenta"}</div>
+                      <div className="text-[11px] text-gray-500 font-mono mt-0.5">{currentAccount?.numero_cuenta || "S/N"} · {currentAccount?.tipo?.toUpperCase()}</div>
+                    </div>
+                    <div className="card p-3.5 bg-white dark:bg-slate-900 border-gray-200 dark:border-slate-800">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Saldo en Libros (Actual)</div>
+                      <div className="font-mono font-black text-lg text-primary mt-0.5">{formatCurrency(currentAccount?.saldo_actual, ccy)}</div>
+                      <div className="text-[10px] text-gray-400 mt-0.5">Saldo calibrado del sistema</div>
+                    </div>
+                    <div className="card p-3.5 bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200/60 dark:border-emerald-800/40">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">Total Ingresos (+)</div>
+                      <div className="font-mono font-black text-base text-emerald-600 dark:text-emerald-400 mt-0.5">+{formatCurrency(totalCred, ccy)}</div>
+                      <div className="text-[10px] text-gray-500 mt-0.5">{filteredBankTxns.filter(t => t.tipo === "credito").length} movimientos</div>
+                    </div>
+                    <div className="card p-3.5 bg-red-50/40 dark:bg-red-950/20 border-red-200/60 dark:border-red-800/40">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-red-700 dark:text-red-400">Total Egresos (-)</div>
+                      <div className="font-mono font-black text-base text-red-600 dark:text-red-400 mt-0.5">-{formatCurrency(totalDeb, ccy)}</div>
+                      <div className="text-[10px] text-gray-500 mt-0.5">{filteredBankTxns.filter(t => t.tipo === "debito").length} movimientos</div>
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {/* Tabla de Movimientos */}
+              <div className="card p-0 overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-slate-800/50">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-sm text-gray-900 dark:text-white">
+                      Movimientos Bancarios ({filteredBankTxns.length})
+                    </h3>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setShowImportBank(true)}
+                      className="btn-outline text-xs flex items-center gap-1.5 border-sky-300 dark:border-sky-800 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-950/40"
+                    >
+                      <Upload className="w-3.5 h-3.5 text-sky-500" /> Importar Extracto
+                    </button>
+                    <button
+                      onClick={() => openTransactionModal(selectedBank)}
+                      className="btn-primary bg-emerald-600 hover:bg-emerald-700 text-xs flex items-center gap-1.5 shadow-sm"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Registrar Movimiento
+                    </button>
+                    {/* Menú Selector de PDF (Landscape vs Portrait) */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowPdfMenu(prev => !prev)}
+                        className="btn-outline text-xs flex items-center gap-1.5"
+                      >
+                        <FileDown className="w-3.5 h-3.5 text-red-500" /> PDF Conciliación ▾
+                      </button>
+                      {showPdfMenu && (
+                        <div
+                          className="absolute right-0 mt-1 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl py-1 z-30 animate-in fade-in zoom-in-95 duration-100"
+                          onClick={() => setShowPdfMenu(false)}
+                        >
+                          <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-slate-800">
+                            Elegir formato de reporte
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const hoyStr = getTodayAsuncion()
+                              const [year, month] = hoyStr.split("-")
+                              const desde = `${year}-${month}-01`
+                              api.financial.downloadReconciliationPdf(selectedBank, { desde, hasta: hoyStr, formato: "landscape" })
+                                .catch((e: any) => toast.error("Error", e.message))
+                            }}
+                            className="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-800 flex items-start gap-2.5 transition-colors cursor-pointer"
+                          >
+                            <span className="text-base">📄</span>
+                            <div>
+                              <div className="font-bold text-slate-800 dark:text-slate-100">Extracto Detallado (Horizontal)</div>
+                              <div className="text-[10px] text-slate-400">Cuadro de cuadre, 8 columnas completas y saldo progresivo</div>
+                            </div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const hoyStr = getTodayAsuncion()
+                              const [year, month] = hoyStr.split("-")
+                              const desde = `${year}-${month}-01`
+                              api.financial.downloadReconciliationPdf(selectedBank, { desde, hasta: hoyStr, formato: "portrait" })
+                                .catch((e: any) => toast.error("Error", e.message))
+                            }}
+                            className="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-800 flex items-start gap-2.5 transition-colors cursor-pointer border-t border-slate-100 dark:border-slate-800/60"
+                          >
+                            <span className="text-base">📑</span>
+                            <div>
+                              <div className="font-bold text-slate-800 dark:text-slate-100">Resumen Ejecutivo (Vertical)</div>
+                              <div className="text-[10px] text-slate-400">Cuadro contable, partidas pendientes y firmas en 1 página</div>
+                            </div>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <button onClick={openAutoReconcile} className="btn-primary text-xs flex items-center gap-1.5">
+                      <Wand2 className="w-3.5 h-3.5" /> Auto-Conciliar
+                    </button>
+                  </div>
+                </div>
+
+                {txnsLoading ? (
+                  <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+                ) : filteredBankTxns.length === 0 ? (
+                  <div className="text-center py-12 text-gray-400 text-sm">No se encontraron movimientos con los filtros seleccionados</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="bg-gray-50 dark:bg-slate-800/80 text-[11px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 dark:border-gray-700">
+                          <th className="p-3.5">Fecha</th>
+                          <th className="p-3.5">Tipo</th>
+                          <th className="p-3.5">Categoría</th>
+                          <th className="p-3.5">Monto</th>
+                          <th className="p-3.5">Descripción</th>
+                          <th className="p-3.5">Referencia</th>
+                          <th className="p-3.5 text-center">Conciliado</th>
+                          <th className="p-3.5 text-right">Acción</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-700 text-sm">
+                        {filteredBankTxns.map(t => (
+                          <tr key={t.id} className="hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors">
+                            <td className="p-3.5 whitespace-nowrap text-xs text-gray-600 dark:text-gray-300 font-mono">
+                              {t.fecha ? new Date(t.fecha).toLocaleDateString("es-PY") : "—"}
+                            </td>
+                            <td className="p-3.5 whitespace-nowrap">
+                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                                t.tipo === "credito"
+                                  ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                                  : "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300"
+                              }`}>
+                                {t.tipo === "credito" ? "+ Ingreso" : "- Egreso"}
+                              </span>
+                            </td>
+                            <td className="p-3.5 whitespace-nowrap">
+                              {(() => {
+                                const cat = BANK_CATEGORIA_LABELS[t.categoria as string] || BANK_CATEGORIA_LABELS.otros
+                                return <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${cat.className}`}>{cat.label}</span>
+                              })()}
+                            </td>
+                            <td className="p-3.5 whitespace-nowrap font-mono font-bold text-gray-900 dark:text-white">
+                              {formatGs(t.monto)}
+                            </td>
+                            <td className="p-3.5 max-w-xs truncate text-xs text-gray-600 dark:text-gray-300" title={t.descripcion}>
+                              {t.descripcion || "—"}
+                            </td>
+                            <td className="p-3.5 whitespace-nowrap font-mono text-xs text-gray-400">
+                              {t.referencia || "—"}
+                            </td>
+                            <td className="p-3.5 text-center">
+                              {t.conciliado ? (
+                                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-50 text-emerald-600" title="Movimiento Conciliado">
+                                  <Check className="w-3.5 h-3.5 stroke-[3]" />
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-100 text-gray-400" title="Pendiente de Conciliación">
+                                  <Clock className="w-3.5 h-3.5" />
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-3.5 text-right whitespace-nowrap">
+                              <div className="flex items-center justify-end gap-1.5">
+                                {t.conciliado ? (
+                                  <button
+                                    onClick={() => handleUnreconcile(t.id)}
+                                    className="text-xs text-gray-500 hover:text-red-600 font-medium hover:underline"
+                                  >
+                                    Desconciliar
+                                  </button>
+                                ) : (
+                                  <>
+                                    <button
+                                      onClick={() => openReconcileModal(t.id)}
+                                      className="btn-primary py-1 px-3 text-xs"
+                                    >
+                                      Conciliar
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteTransaction(t.id, t.descripcion || t.referencia || "")}
+                                      className="p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded transition-colors"
+                                      title="Eliminar movimiento y revertir saldo"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+
+                  )}
+
+                  {/* CONTENIDO 2: CHEQUES DE LA CUENTA */}
+                  {accountSubTab === "cheques" && (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="text-sm font-bold text-slate-900 dark:text-white">Cheques de la Cuenta ({accountCheques.length})</h4>
+                          <p className="text-xs text-slate-500">Cheques emitidos o vinculados a {currentAccount.alias || currentAccount.banco}</p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            setChequeForm({
+                              numero: "",
+                              bank_account_id: currentAccount.id,
+                              banco_emisor: currentAccount.banco || "",
+                              beneficiario: "",
+                              supplier_id: "",
+                              monto: "",
+                              moneda: currentAccount.moneda || "PYG",
+                              fecha_emision: getTodayAsuncion(),
+                              fecha_entrega: "",
+                              fecha_pago: getTodayAsuncion(),
+                              diferido: false,
+                              cruzado: true,
+                              no_a_la_orden: false,
+                              concepto: "",
+                            })
+                            setShowChequeModal(true)
+                          }}
+                          className="btn-primary text-xs flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700"
+                        >
+                          <Receipt className="w-3.5 h-3.5" /> Emitir Cheque para esta Cuenta
+                        </button>
+                      </div>
+
+                      {accountCheques.length === 0 ? (
+                        <div className="card p-8 text-center text-slate-400 text-xs">
+                          No hay cheques asociados a esta cuenta.
+                        </div>
+                      ) : (
+                        <div className="card p-0 overflow-hidden">
+                          <table className="w-full text-left text-xs">
+                            <thead>
+                              <tr className="bg-slate-50 dark:bg-slate-800/80 text-[11px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-100 dark:border-slate-700">
+                                <th className="p-3">N° Cheque</th>
+                                <th className="p-3">Tipo</th>
+                                <th className="p-3">Beneficiario / Emisor</th>
+                                <th className="p-3">Monto</th>
+                                <th className="p-3">F. Emisión</th>
+                                <th className="p-3">F. Pago / Venc.</th>
+                                <th className="p-3 text-center">Estado</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                              {accountCheques.map(c => {
+                                const badge = CHEQUE_ESTADO_BADGES[c.estado] || CHEQUE_ESTADO_BADGES.pendiente
+                                return (
+                                  <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
+                                    <td className="p-3 font-mono font-bold text-slate-900 dark:text-white">{c.numero}</td>
+                                    <td className="p-3 font-semibold uppercase text-[10px]">
+                                      {c.tipo === "emitido" ? (
+                                        <span className="text-purple-600">Emitido Propio</span>
+                                      ) : (
+                                        <span className="text-emerald-600">Recibido Tercero</span>
+                                      )}
+                                    </td>
+                                    <td className="p-3">{c.beneficiario || c.emisor || "—"}</td>
+                                    <td className="p-3 font-mono font-bold text-slate-900 dark:text-white">{formatGs(c.monto)}</td>
+                                    <td className="p-3 text-slate-500">{c.fecha_emision ? new Date(c.fecha_emision).toLocaleDateString("es-PY") : "—"}</td>
+                                    <td className="p-3 text-slate-500">{c.fecha_pago ? new Date(c.fecha_pago).toLocaleDateString("es-PY") : "—"}</td>
+                                    <td className="p-3 text-center">
+                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${badge.className}`}>
+                                        {badge.label}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* CONTENIDO 3: AJUSTES Y CORRECCIONES DE ESTA CUENTA */}
+                  {accountSubTab === "ajustes" && (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="text-sm font-bold text-slate-900 dark:text-white">Ajustes & Correcciones de Saldo</h4>
+                          <p className="text-xs text-slate-500">Solicitudes y validaciones para {currentAccount.alias || currentAccount.banco}</p>
+                        </div>
+                        <button
+                          onClick={() => setCorrectionModal({ id: currentAccount.id, saldo_propuesto: String(currentAccount.saldo_actual ?? ""), motivo: "" })}
+                          className="btn-outline text-xs flex items-center gap-1.5"
+                        >
+                          <ShieldAlert className="w-3.5 h-3.5 text-amber-500" /> Solicitar Corrección de Saldo
+                        </button>
+                      </div>
+
+                      {corrections.filter(c => c.bank_account_id === currentAccount.id).length === 0 ? (
+                        <div className="card p-8 text-center text-slate-400 text-xs">
+                          No hay correcciones de saldo pendientes para esta cuenta.
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {corrections.filter(c => c.bank_account_id === currentAccount.id).map(c => (
+                            <div key={c.id} className="card p-4 border-amber-300 dark:border-amber-800 bg-amber-50/30 dark:bg-amber-900/10 flex items-center justify-between gap-4">
+                              <div>
+                                <div className="text-xs font-bold text-slate-900 dark:text-white">
+                                  Propuesto: {formatGs(c.saldo_propuesto)} (Actual: {formatGs(c.saldo_anterior)})
+                                </div>
+                                <div className="text-xs text-slate-500 mt-0.5">Motivo: {c.motivo}</div>
+                                <div className="text-[10px] text-slate-400 mt-1">Solicitado por: {c.solicitado_por || "Usuario"}</div>
+                              </div>
+                              <div className="flex gap-2">
+                                <button onClick={() => handleDecideCorrection(c.id, true)} className="btn-primary text-xs bg-emerald-600 hover:bg-emerald-700">
+                                  Aprobar
+                                </button>
+                                <button onClick={() => handleDecideCorrection(c.id, false)} className="btn-ghost text-xs text-red-600">
+                                  Rechazar
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          )}
+
+          {/* ============================================================== */}
+          {/* 📊 VISTA 2: POSICIÓN GLOBAL, CONCILIACIÓN & AUDITORÍA          */}
+          {/* ============================================================== */}
+          {mainView === "consolidado" && (
+            <div className="space-y-8">
+              {/* POSICIÓN Y CUENTAS */}
             <div className="space-y-6">
               {/* Alertas Urgentes */}
               {alerts.length > 0 && (
@@ -1230,288 +2018,16 @@ export default function BancosPage() {
                 </div>
               )}
             </div>
-          )}
 
-          {/* TAB 2: MOVIMIENTOS & EXTRACTOS */}
-          {activeTab === "movimientos" && (
-            <div className="space-y-5">
-              {/* Barra de Filtros */}
-              <div className="card p-4 space-y-3">
-                <div className="flex flex-wrap items-center gap-3">
-                  {/* Selector de Banco */}
-                  <div className="w-full sm:w-64">
-                    <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Cuenta Bancaria</label>
-                    <select
-                      className="input-field w-full text-xs"
-                      value={selectedBank}
-                      onChange={e => { setSelectedBank(e.target.value); loadBankTxns(e.target.value); }}
-                    >
-                      {banks.map(b => (
-                        <option key={b.id} value={b.id}>{formatBankLabel(b)}</option>
-                      ))}
-                    </select>
-                  </div>
 
-                  {/* Filtro por Categoría */}
-                  <div className="w-48">
-                    <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Categoría</label>
-                    <select className="input-field w-full text-xs" value={txFilterCategoria} onChange={e => setTxFilterCategoria(e.target.value)}>
-                      <option value="todas">Todas las categorías</option>
-                      {Object.entries(BANK_CATEGORIA_LABELS).map(([k, v]) => (
-                        <option key={k} value={k}>{v.label}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Filtro por Tipo */}
-                  <div className="w-36">
-                    <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Tipo</label>
-                    <select className="input-field w-full text-xs" value={txFilterTipo} onChange={e => setTxFilterTipo(e.target.value)}>
-                      <option value="todos">Todos</option>
-                      <option value="credito">Ingresos (+)</option>
-                      <option value="debito">Egresos (-)</option>
-                    </select>
-                  </div>
-
-                  {/* Filtro Conciliado */}
-                  <div className="w-40">
-                    <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Estado</label>
-                    <select className="input-field w-full text-xs" value={txFilterConciliado} onChange={e => setTxFilterConciliado(e.target.value)}>
-                      <option value="todos">Todos los estados</option>
-                      <option value="conciliados">Solo Conciliados</option>
-                      <option value="pendientes">Solo Pendientes</option>
-                    </select>
-                  </div>
-
-                  {/* Buscador */}
-                  <div className="flex-1 min-w-[200px]">
-                    <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Buscar</label>
-                    <div className="relative">
-                      <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
-                      <input
-                        type="text"
-                        placeholder="Descripción, concepto o referencia..."
-                        className="input-field pl-9 w-full text-xs"
-                        value={txSearch}
-                        onChange={e => setTxSearch(e.target.value)}
-                      />
-                    </div>
-                  </div>
+              {/* CONCILIACIÓN INTELIGENTE GLOBAL */}
+              <div className="pt-6 border-t border-slate-200 dark:border-slate-800">
+                <div className="mb-4">
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Wand2 className="w-5 h-5 text-purple-500" /> Conciliación Inteligente Multi-Cuenta
+                  </h3>
+                  <p className="text-xs text-slate-500">Conciliación asistida por reglas heurísticas y comparación de importes</p>
                 </div>
-              </div>
-
-              {/* Resumen de Extracto de la Cuenta Seleccionada */}
-              {(() => {
-                const currentAccount = banks.find(b => b.id === selectedBank)
-                const totalCred = filteredBankTxns.filter(t => t.tipo === "credito").reduce((acc, t) => acc + Number(t.monto || 0), 0)
-                const totalDeb = filteredBankTxns.filter(t => t.tipo === "debito").reduce((acc, t) => acc + Number(t.monto || 0), 0)
-                const ccy = currentAccount?.moneda || "PYG"
-                return (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                    <div className="card p-3.5 bg-gradient-to-br from-blue-50/50 to-indigo-50/30 dark:from-blue-950/20 dark:to-indigo-950/10 border-blue-200/60 dark:border-blue-800/40">
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">Cuenta / Titular</div>
-                      <div className="font-extrabold text-sm text-gray-900 dark:text-white truncate mt-0.5">{currentAccount?.alias || currentAccount?.banco || "Cuenta"}</div>
-                      <div className="text-[11px] text-gray-500 font-mono mt-0.5">{currentAccount?.numero_cuenta || "S/N"} · {currentAccount?.tipo?.toUpperCase()}</div>
-                    </div>
-                    <div className="card p-3.5 bg-white dark:bg-slate-900 border-gray-200 dark:border-slate-800">
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Saldo en Libros (Actual)</div>
-                      <div className="font-mono font-black text-lg text-primary mt-0.5">{formatCurrency(currentAccount?.saldo_actual, ccy)}</div>
-                      <div className="text-[10px] text-gray-400 mt-0.5">Saldo calibrado del sistema</div>
-                    </div>
-                    <div className="card p-3.5 bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200/60 dark:border-emerald-800/40">
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">Total Ingresos (+)</div>
-                      <div className="font-mono font-black text-base text-emerald-600 dark:text-emerald-400 mt-0.5">+{formatCurrency(totalCred, ccy)}</div>
-                      <div className="text-[10px] text-gray-500 mt-0.5">{filteredBankTxns.filter(t => t.tipo === "credito").length} movimientos</div>
-                    </div>
-                    <div className="card p-3.5 bg-red-50/40 dark:bg-red-950/20 border-red-200/60 dark:border-red-800/40">
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-red-700 dark:text-red-400">Total Egresos (-)</div>
-                      <div className="font-mono font-black text-base text-red-600 dark:text-red-400 mt-0.5">-{formatCurrency(totalDeb, ccy)}</div>
-                      <div className="text-[10px] text-gray-500 mt-0.5">{filteredBankTxns.filter(t => t.tipo === "debito").length} movimientos</div>
-                    </div>
-                  </div>
-                )
-              })()}
-
-              {/* Tabla de Movimientos */}
-              <div className="card p-0 overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-slate-800/50">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-bold text-sm text-gray-900 dark:text-white">
-                      Movimientos Bancarios ({filteredBankTxns.length})
-                    </h3>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setShowImportBank(true)}
-                      className="btn-outline text-xs flex items-center gap-1.5 border-sky-300 dark:border-sky-800 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-950/40"
-                    >
-                      <Upload className="w-3.5 h-3.5 text-sky-500" /> Importar Extracto
-                    </button>
-                    <button
-                      onClick={() => openTransactionModal(selectedBank)}
-                      className="btn-primary bg-emerald-600 hover:bg-emerald-700 text-xs flex items-center gap-1.5 shadow-sm"
-                    >
-                      <Plus className="w-3.5 h-3.5" /> Registrar Movimiento
-                    </button>
-                    {/* Menú Selector de PDF (Landscape vs Portrait) */}
-                    <div className="relative">
-                      <button
-                        onClick={() => setShowPdfMenu(prev => !prev)}
-                        className="btn-outline text-xs flex items-center gap-1.5"
-                      >
-                        <FileDown className="w-3.5 h-3.5 text-red-500" /> PDF Conciliación ▾
-                      </button>
-                      {showPdfMenu && (
-                        <div
-                          className="absolute right-0 mt-1 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl py-1 z-30 animate-in fade-in zoom-in-95 duration-100"
-                          onClick={() => setShowPdfMenu(false)}
-                        >
-                          <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-slate-800">
-                            Elegir formato de reporte
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const hoyStr = getTodayAsuncion()
-                              const [year, month] = hoyStr.split("-")
-                              const desde = `${year}-${month}-01`
-                              api.financial.downloadReconciliationPdf(selectedBank, { desde, hasta: hoyStr, formato: "landscape" })
-                                .catch((e: any) => toast.error("Error", e.message))
-                            }}
-                            className="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-800 flex items-start gap-2.5 transition-colors cursor-pointer"
-                          >
-                            <span className="text-base">📄</span>
-                            <div>
-                              <div className="font-bold text-slate-800 dark:text-slate-100">Extracto Detallado (Horizontal)</div>
-                              <div className="text-[10px] text-slate-400">Cuadro de cuadre, 8 columnas completas y saldo progresivo</div>
-                            </div>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const hoyStr = getTodayAsuncion()
-                              const [year, month] = hoyStr.split("-")
-                              const desde = `${year}-${month}-01`
-                              api.financial.downloadReconciliationPdf(selectedBank, { desde, hasta: hoyStr, formato: "portrait" })
-                                .catch((e: any) => toast.error("Error", e.message))
-                            }}
-                            className="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-800 flex items-start gap-2.5 transition-colors cursor-pointer border-t border-slate-100 dark:border-slate-800/60"
-                          >
-                            <span className="text-base">📑</span>
-                            <div>
-                              <div className="font-bold text-slate-800 dark:text-slate-100">Resumen Ejecutivo (Vertical)</div>
-                              <div className="text-[10px] text-slate-400">Cuadro contable, partidas pendientes y firmas en 1 página</div>
-                            </div>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                    <button onClick={openAutoReconcile} className="btn-primary text-xs flex items-center gap-1.5">
-                      <Wand2 className="w-3.5 h-3.5" /> Auto-Conciliar
-                    </button>
-                  </div>
-                </div>
-
-                {txnsLoading ? (
-                  <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
-                ) : filteredBankTxns.length === 0 ? (
-                  <div className="text-center py-12 text-gray-400 text-sm">No se encontraron movimientos con los filtros seleccionados</div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left">
-                      <thead>
-                        <tr className="bg-gray-50 dark:bg-slate-800/80 text-[11px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 dark:border-gray-700">
-                          <th className="p-3.5">Fecha</th>
-                          <th className="p-3.5">Tipo</th>
-                          <th className="p-3.5">Categoría</th>
-                          <th className="p-3.5">Monto</th>
-                          <th className="p-3.5">Descripción</th>
-                          <th className="p-3.5">Referencia</th>
-                          <th className="p-3.5 text-center">Conciliado</th>
-                          <th className="p-3.5 text-right">Acción</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100 dark:divide-gray-700 text-sm">
-                        {filteredBankTxns.map(t => (
-                          <tr key={t.id} className="hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors">
-                            <td className="p-3.5 whitespace-nowrap text-xs text-gray-600 dark:text-gray-300 font-mono">
-                              {t.fecha ? new Date(t.fecha).toLocaleDateString("es-PY") : "—"}
-                            </td>
-                            <td className="p-3.5 whitespace-nowrap">
-                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                                t.tipo === "credito"
-                                  ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
-                                  : "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300"
-                              }`}>
-                                {t.tipo === "credito" ? "+ Ingreso" : "- Egreso"}
-                              </span>
-                            </td>
-                            <td className="p-3.5 whitespace-nowrap">
-                              {(() => {
-                                const cat = BANK_CATEGORIA_LABELS[t.categoria as string] || BANK_CATEGORIA_LABELS.otros
-                                return <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${cat.className}`}>{cat.label}</span>
-                              })()}
-                            </td>
-                            <td className="p-3.5 whitespace-nowrap font-mono font-bold text-gray-900 dark:text-white">
-                              {formatGs(t.monto)}
-                            </td>
-                            <td className="p-3.5 max-w-xs truncate text-xs text-gray-600 dark:text-gray-300" title={t.descripcion}>
-                              {t.descripcion || "—"}
-                            </td>
-                            <td className="p-3.5 whitespace-nowrap font-mono text-xs text-gray-400">
-                              {t.referencia || "—"}
-                            </td>
-                            <td className="p-3.5 text-center">
-                              {t.conciliado ? (
-                                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-50 text-emerald-600" title="Movimiento Conciliado">
-                                  <Check className="w-3.5 h-3.5 stroke-[3]" />
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-100 text-gray-400" title="Pendiente de Conciliación">
-                                  <Clock className="w-3.5 h-3.5" />
-                                </span>
-                              )}
-                            </td>
-                            <td className="p-3.5 text-right whitespace-nowrap">
-                              <div className="flex items-center justify-end gap-1.5">
-                                {t.conciliado ? (
-                                  <button
-                                    onClick={() => handleUnreconcile(t.id)}
-                                    className="text-xs text-gray-500 hover:text-red-600 font-medium hover:underline"
-                                  >
-                                    Desconciliar
-                                  </button>
-                                ) : (
-                                  <>
-                                    <button
-                                      onClick={() => openReconcileModal(t.id)}
-                                      className="btn-primary py-1 px-3 text-xs"
-                                    >
-                                      Conciliar
-                                    </button>
-                                    <button
-                                      onClick={() => handleDeleteTransaction(t.id, t.descripcion || t.referencia || "")}
-                                      className="p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded transition-colors"
-                                      title="Eliminar movimiento y revertir saldo"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  </>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 3: CONCILIACIÓN INTELIGENTE */}
-          {activeTab === "conciliacion" && (
             <div className="space-y-6">
               {/* Header de Conciliación con KPIs */}
               <div className="card p-6 bg-gradient-to-br from-indigo-50 to-blue-50/50 dark:from-slate-800/90 dark:to-slate-900 border border-indigo-100 dark:border-indigo-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1584,10 +2100,17 @@ export default function BancosPage() {
                 )}
               </div>
             </div>
-          )}
 
-          {/* TAB 4: CARTERA DE CHEQUES */}
-          {activeTab === "cheques" && (
+              </div>
+
+              {/* CARTERA DE CHEQUES GLOBAL */}
+              <div className="pt-6 border-t border-slate-200 dark:border-slate-800">
+                <div className="mb-4">
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Receipt className="w-5 h-5 text-purple-500" /> Cartera General de Cheques
+                  </h3>
+                  <p className="text-xs text-slate-500">Cheques emitidos por el supermercado y cheques diferidos de clientes</p>
+                </div>
             <div className="space-y-6">
               {/* Tarjetas KPI de Cheques */}
               {chequesDashboard && (
@@ -1799,10 +2322,17 @@ export default function BancosPage() {
                 )}
               </div>
             </div>
-          )}
 
-          {/* TAB 5: AUDITORÍA & APROBACIONES */}
-          {activeTab === "auditoria" && (
+              </div>
+
+              {/* AUDITORÍA & SALDOS GLOBAL */}
+              <div className="pt-6 border-t border-slate-200 dark:border-slate-800">
+                <div className="mb-4">
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <ShieldCheck className="w-5 h-5 text-blue-500" /> Auditoría & Doble Firma de Saldos
+                  </h3>
+                  <p className="text-xs text-slate-500">Validaciones de saldo bancario y autorizaciones de ajuste con firma cruzada</p>
+                </div>
             <div className="space-y-6">
               {/* Solicitudes de Corrección de Saldo Pendientes */}
               <div className="card p-5">
@@ -1860,10 +2390,12 @@ export default function BancosPage() {
                 )}
               </div>
             </div>
+
+              </div>
+            </div>
           )}
         </>
       )}
-
       {/* MODAL: Conciliar movimiento */}
       {reconcileModal && (
         <div className="modal-overlay" onClick={() => setReconcileModal(null)}>
