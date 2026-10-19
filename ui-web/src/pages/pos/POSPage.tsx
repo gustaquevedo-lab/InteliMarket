@@ -137,6 +137,9 @@ const ESCPOS_DOUBLE_ON = GS + '!' + '\x11'
 const ESCPOS_HEIGHT_ON = GS + '!' + '\x10'
 const ESCPOS_DOUBLE_OFF = GS + '!' + '\x00'
 const ESCPOS_LINE_WIDTH = 48
+// El terminal Dinelco espera el pago del QR hasta ~100 s y recien ahi contesta (aprobada o "RECHAZADA, VUELVA A INTENTAR"):
+// el plazo del POS tiene que ser mayor, si no se corta antes y se pierde un pago hecho justo al final.
+const DINELCO_QR_TIMEOUT_MS = 130000
 
 // Etiqueta del proveedor: negrita y doble alto, entre asteriscos, una sola
 // línea -- clarísimo con cuál integración "en pantalla" se cobró sin agrandar
@@ -2310,8 +2313,8 @@ export default function POSPage() {
       setDinelcoQrError("")
 
       const res = dinelcoQrMode === "pix"
-        ? await imDinelco(electronAPI, ip, "pix", { monto: montoQrDinelco, cpf: dinelcoPixCpf.replace(/\D/g, "") }, null, 90000)
-        : await imDinelco(electronAPI, ip, "qr", { op: "01", monto: montoQrDinelco }, null, 90000)
+        ? await imDinelco(electronAPI, ip, "pix", { monto: montoQrDinelco, cpf: dinelcoPixCpf.replace(/\D/g, "") }, null, DINELCO_QR_TIMEOUT_MS)
+        : await imDinelco(electronAPI, ip, "qr", { op: "01", monto: montoQrDinelco }, null, DINELCO_QR_TIMEOUT_MS)
 
       const tipoOperacion = dinelcoQrMode === "pix" ? "dinelco_pix" : "dinelco_qr"
 
@@ -2451,8 +2454,8 @@ export default function POSPage() {
       updateExtraLeg(leg.id, { txnState: "esperando", txnError: "" })
 
       const res = leg.dinelcoQrMode === "pix"
-        ? await imDinelco(electronAPI, ip, "pix", { monto: montoQrDinelco, cpf: (leg.pixCpf || "").replace(/\D/g, "") }, null, 90000)
-        : await imDinelco(electronAPI, ip, "qr", { op: "01", monto: montoQrDinelco }, null, 90000)
+        ? await imDinelco(electronAPI, ip, "pix", { monto: montoQrDinelco, cpf: (leg.pixCpf || "").replace(/\D/g, "") }, null, DINELCO_QR_TIMEOUT_MS)
+        : await imDinelco(electronAPI, ip, "qr", { op: "01", monto: montoQrDinelco }, null, DINELCO_QR_TIMEOUT_MS)
 
       const tipoOperacion = leg.dinelcoQrMode === "pix" ? "dinelco_pix" : "dinelco_qr"
 

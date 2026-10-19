@@ -112,8 +112,10 @@ async function restCall(ip: string, tipo: string, params: any, sessionId: string
       return aprobada(r.body, "descuento")
     }
     case "qr": {
-      // /pos/venta/qr muestra en el terminal la pantalla de elección (SIP / QR / PIX / QR Arg).
-      const r = await post(ip, "/pos/venta/qr", { facturaNro: Date.now(), monto }, t)
+      // /pos/venta/qr-din va directo al QR Dinelco. El genérico /pos/venta/qr deja en el terminal la
+      // pantalla de elección (SIP / QR / PIX / QR Arg) y nadie la toca: vence a los ~100 s con
+      // "REINTENTE LA TRANSACCION" (probado con un POS de prueba el 19-oct-2026).
+      const r = await post(ip, "/pos/venta/qr-din", { facturaNro: Date.now(), monto }, t)
       if (!r.ok) return errorHttp(r)
       if (!r.body?.codigoAutorizacion) return { ok: false, error: "respuesta_sin_autorizacion", desc: r.body?.mensajeDisplay }
       return aprobada(r.body, "venta_qr")
