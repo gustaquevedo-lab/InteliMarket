@@ -1735,13 +1735,13 @@ export default function FinancialPage() {
 
           <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Lotes Ejecutados</span>
-              <Layers className="w-4 h-4 text-blue-400" />
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Deuda Por Vencer</span>
+              <Calendar className="w-4 h-4 text-blue-400" />
             </div>
             <p className="text-2xl font-black font-mono tracking-tight text-blue-300">
-              {paymentRuns.length}
+              {formatPYG(Math.max(0, totalDeudaAP - montoVencidoAP))}
             </p>
-            <p className="text-[11px] text-slate-400">Órdenes bancarias masivas</p>
+            <p className="text-[11px] text-slate-400">Compromisos al día</p>
           </div>
         </div>
       </div>
@@ -1752,7 +1752,6 @@ export default function FinancialPage() {
           { key: "dashboard", label: "Torre de Control AP", icon: BarChart3 },
           { key: "ap", label: "Cuentas por Pagar (Facturas)", icon: Receipt, count: cantFacturasPendientes },
           { key: "credit_notes", label: "Notas de Crédito Proveedores", icon: FileText, count: creditNotes.length },
-          { key: "pagos", label: "Lotes de Pago (Payment Runs)", icon: Layers, count: paymentRuns.length },
           { key: "cashflow", label: "Flujo de Caja (90 Días)", icon: TrendingUp },
           { key: "presupuestos", label: "Presupuestos por Sector", icon: PiggyBank, count: budgets.length },
         ].map((t) => {

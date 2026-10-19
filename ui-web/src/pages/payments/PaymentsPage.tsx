@@ -758,13 +758,13 @@ export default function PaymentsPage() {
 
           <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Lotes de Pago</span>
-              <Layers className="w-4 h-4 text-indigo-400" />
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Por Vencer</span>
+              <Calendar className="w-4 h-4 text-indigo-400" />
             </div>
-            <p className="text-2xl font-black font-mono tracking-tight text-indigo-300">
-              {paymentRuns.length}
+            <p className="text-xl font-black font-mono tracking-tight text-indigo-300 truncate" title={formatPYG(Math.max(0, analytics.totalDeuda - analytics.vencidasMonto))}>
+              {formatPYG(Math.max(0, analytics.totalDeuda - analytics.vencidasMonto))}
             </p>
-            <p className="text-[11px] text-slate-400">Órdenes masivas</p>
+            <p className="text-[11px] text-slate-400">Compromisos al día</p>
           </div>
         </div>
       </div>
@@ -776,7 +776,6 @@ export default function PaymentsPage() {
           { id: "facturas_pagadas", label: "Facturas Pagadas", icon: CheckCircle2, count: paidInvoicesTotal },
           { id: "ordenes_pago", label: "Órdenes de Pago & Recibos AP", icon: Wallet, count: paymentOrders.length },
           { id: "aging", label: "Matriz Aging por Proveedor", icon: Calendar, count: supplierAging.length },
-          { id: "lotes", label: "Lotes Masivos SIPAP", icon: Layers, count: paymentRuns.length },
         ].map((t) => {
           const Icon = t.icon
           const active = tab === t.id

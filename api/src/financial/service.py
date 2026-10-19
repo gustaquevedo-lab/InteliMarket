@@ -209,80 +209,121 @@ async def enrich_invoices_with_nc_and_snc(
 
     if inv_ids:
         # 1. Aplicaciones registradas formalmente en supplier_credit_note_applications
-        app_q = (
-            select(
-                SupplierCreditNoteApplication.invoice_id,
-                SupplierCreditNoteApplication.monto_aplicado,
-                SupplierCreditNoteApplication.fecha.label("fecha_aplicacion"),
-                SupplierCreditNote.id.label("nc_id"),
-                SupplierCreditNote.numero.label("nc_numero"),
-                SupplierCreditNote.timbrado.label("nc_timbrado"),
-                SupplierCreditNote.motivo.label("nc_motivo"),
-                SupplierCreditNote.monto.label("nc_monto_total"),
+        if len(inv_ids) > 200:
+            app_q = (
+                select(
+                    SupplierCreditNoteApplication.invoice_id,
+                    SupplierCreditNoteApplication.monto_aplicado,
+                    SupplierCreditNoteApplication.fecha.label("fecha_aplicacion"),
+                    SupplierCreditNote.id.label("nc_id"),
+                    SupplierCreditNote.numero.label("nc_numero"),
+                    SupplierCreditNote.timbrado.label("nc_timbrado"),
+                    SupplierCreditNote.motivo.label("nc_motivo"),
+                    SupplierCreditNote.monto.label("nc_monto_total"),
+                )
+                .join(SupplierCreditNote, SupplierCreditNote.id == SupplierCreditNoteApplication.credit_note_id)
+                .where(SupplierCreditNote.company_id == company_id)
             )
-            .join(SupplierCreditNote, SupplierCreditNote.id == SupplierCreditNoteApplication.credit_note_id)
-            .where(SupplierCreditNoteApplication.invoice_id.in_(inv_ids))
-        )
+        else:
+            app_q = (
+                select(
+                    SupplierCreditNoteApplication.invoice_id,
+                    SupplierCreditNoteApplication.monto_aplicado,
+                    SupplierCreditNoteApplication.fecha.label("fecha_aplicacion"),
+                    SupplierCreditNote.id.label("nc_id"),
+                    SupplierCreditNote.numero.label("nc_numero"),
+                    SupplierCreditNote.timbrado.label("nc_timbrado"),
+                    SupplierCreditNote.motivo.label("nc_motivo"),
+                    SupplierCreditNote.monto.label("nc_monto_total"),
+                )
+                .join(SupplierCreditNote, SupplierCreditNote.id == SupplierCreditNoteApplication.credit_note_id)
+                .where(SupplierCreditNoteApplication.invoice_id.in_(inv_ids))
+            )
         app_res = await db.execute(app_q)
         for row in app_res.all():
-            nc_map[row.invoice_id].append({
-                "id": str(row.nc_id),
-                "numero": row.nc_numero,
-                "timbrado": row.nc_timbrado,
-                "motivo": row.nc_motivo or "Nota de crédito",
-                "monto_aplicado": float(row.monto_aplicado or 0),
-                "monto_total": float(row.nc_monto_total or 0),
-                "fecha": row.fecha_aplicacion.isoformat() if row.fecha_aplicacion else None,
-            })
+            if row.invoice_id in nc_map:
+                nc_map[row.invoice_id].append({
+                    "id": str(row.nc_id),
+                    "numero": row.nc_numero,
+                    "timbrado": row.nc_timbrado,
+                    "motivo": row.nc_motivo or "Nota de crédito",
+                    "monto_aplicado": float(row.monto_aplicado or 0),
+                    "monto_total": float(row.nc_monto_total or 0),
+                    "fecha": row.fecha_aplicacion.isoformat() if row.fecha_aplicacion else None,
+                })
 
         # 2. Vinculación directa por número de factura origen del mismo proveedor (incluye saldo_disponible 0)
         sup_ids = {i.supplier_id for i in invoices if i.supplier_id}
         if sup_ids:
-            nc_orig_q = (
-                select(
-                    SupplierCreditNote.id,
-                    SupplierCreditNote.numero,
-                    SupplierCreditNote.timbrado,
-                    SupplierCreditNote.numero_factura_origen,
-                    SupplierCreditNote.motivo,
-                    SupplierCreditNote.monto,
-                    SupplierCreditNote.saldo_disponible,
-                    SupplierCreditNote.fecha,
-                    SupplierCreditNote.supplier_id,
-                )
-                .where(
-                    SupplierCreditNote.company_id == company_id,
-                    SupplierCreditNote.supplier_id.in_(sup_ids),
-                    SupplierCreditNote.cancelado == False,
-                )
+            nc_orig_q = select(
+                SupplierCreditNote.id,
+                SupplierCreditNote.numero,
+                SupplierCreditNote.timbrado,
+                SupplierCreditNote.numero_factura_origen,
+                SupplierCreditNote.motivo,
+                SupplierCreditNote.monto,
+                SupplierCreditNote.saldo_disponible,
+                SupplierCreditNote.fecha,
+                SupplierCreditNote.supplier_id,
+            ).where(
+                SupplierCreditNote.company_id == company_id,
+                SupplierCreditNote.cancelado == False,
             )
+            if len(sup_ids) < 300:
+                nc_orig_q = nc_orig_q.where(SupplierCreditNote.supplier_id.in_(sup_ids))
+
             nc_orig_res = await db.execute(nc_orig_q)
+            
+            # Indexar NCs en O(N) por (supplier_id, doc_normalizado)
+            nc_by_sup_doc: dict[tuple[uuid.UUID, str], list] = {}
             for nc in nc_orig_res.all():
-                for inv in invoices:
-                    if inv.supplier_id == nc.supplier_id and _doc_numbers_match(inv.numero_factura, nc.numero_factura_origen):
-                        if not any(x["id"] == str(nc.id) for x in nc_map[inv.id]):
-                            nc_map[inv.id].append({
-                                "id": str(nc.id),
-                                "numero": nc.numero,
-                                "timbrado": nc.timbrado,
-                                "motivo": nc.motivo or "Nota de crédito",
-                                "monto_aplicado": float(nc.monto or 0),
-                                "monto_total": float(nc.monto or 0),
-                                "fecha": nc.fecha.isoformat() if nc.fecha else None,
-                            })
+                raw = nc.numero_factura_origen
+                if not raw:
+                    continue
+                d = re.sub(r"\D", "", str(raw))
+                key = str(int(d)) if d else str(raw).strip().lower()
+                nc_by_sup_doc.setdefault((nc.supplier_id, key), []).append(nc)
+
+            # Buscar coincidencias en O(1) por factura
+            for inv in invoices:
+                raw_inv = inv.numero_factura
+                if not raw_inv or not inv.supplier_id:
+                    continue
+                d_inv = re.sub(r"\D", "", str(raw_inv))
+                key_inv = str(int(d_inv)) if d_inv else str(raw_inv).strip().lower()
+                matches = nc_by_sup_doc.get((inv.supplier_id, key_inv), [])
+                for nc in matches:
+                    if not any(x["id"] == str(nc.id) for x in nc_map[inv.id]):
+                        nc_map[inv.id].append({
+                            "id": str(nc.id),
+                            "numero": nc.numero,
+                            "timbrado": nc.timbrado,
+                            "motivo": nc.motivo or "Nota de crédito",
+                            "monto_aplicado": float(nc.monto or 0),
+                            "monto_total": float(nc.monto or 0),
+                            "fecha": nc.fecha.isoformat() if nc.fecha else None,
+                        })
 
         # 3. Solicitudes de Nota de Crédito (SNC) vinculadas a estas facturas (pendientes y resueltas)
         from api.src.purchases.models import SupplierNcRequest
-        snc_q = (
-            select(SupplierNcRequest)
-            .where(SupplierNcRequest.invoice_id.in_(inv_ids))
-            .order_by(SupplierNcRequest.created_at.desc())
-        )
+        if len(inv_ids) > 200:
+            snc_q = (
+                select(SupplierNcRequest)
+                .where(SupplierNcRequest.company_id == company_id)
+                .order_by(SupplierNcRequest.created_at.desc())
+            )
+        else:
+            snc_q = (
+                select(SupplierNcRequest)
+                .where(SupplierNcRequest.invoice_id.in_(inv_ids))
+                .order_by(SupplierNcRequest.created_at.desc())
+            )
         snc_res = await db.execute(snc_q)
         for snc in snc_res.scalars().all():
-            snc_map[snc.invoice_id].append({
-                "id": str(snc.id),
-                "numero_solicitud": snc.numero_solicitud,
+            if snc.invoice_id in snc_map:
+                snc_map[snc.invoice_id].append({
+                    "id": str(snc.id),
+                    "numero_solicitud": snc.numero_solicitud,
                 "tipo_motivo": snc.tipo_motivo,
                 "monto_reclamado": float(snc.monto_reclamado or 0),
                 "estado": snc.estado,
@@ -980,19 +1021,28 @@ async def get_ap_dashboard(db: AsyncSession, company_id: str) -> dict:
     cid = uuid.UUID(company_id)
     today = _today()
 
-    query = select(SupplierInvoice).where(SupplierInvoice.company_id == cid)
+    query = select(
+        SupplierInvoice.id,
+        SupplierInvoice.supplier_id,
+        SupplierInvoice.saldo_pendiente,
+        SupplierInvoice.fecha_vencimiento,
+        SupplierInvoice.estado
+    ).where(
+        SupplierInvoice.company_id == cid,
+        SupplierInvoice.estado.in_(("pendiente", "aprobada", "parcial")),
+        SupplierInvoice.saldo_pendiente > 0
+    )
     result = await db.execute(query)
-    invoices = list(result.scalars().all())
+    pendientes = list(result.all())
 
-    pendientes = [i for i in invoices if i.estado in ("pendiente", "aprobada", "parcial")]
-    vencidas = [i for i in pendientes if i.fecha_vencimiento < today]
-    por_vencer = [i for i in pendientes if i.fecha_vencimiento >= today]
+    vencidas = [i for i in pendientes if i.fecha_vencimiento and i.fecha_vencimiento < today]
+    por_vencer = [i for i in pendientes if not i.fecha_vencimiento or i.fecha_vencimiento >= today]
 
     total_pendiente = sum(i.saldo_pendiente or Decimal("0") for i in pendientes)
     total_vencido = sum(i.saldo_pendiente or Decimal("0") for i in vencidas)
     total_por_vencer = sum(i.saldo_pendiente or Decimal("0") for i in por_vencer)
 
-    supplier_ids = set(str(i.supplier_id) for i in pendientes)
+    supplier_ids = set(str(i.supplier_id) for i in pendientes if i.supplier_id)
 
     aging_30 = Decimal("0")
     aging_60 = Decimal("0")
